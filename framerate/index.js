@@ -5,33 +5,33 @@ let game = {
   frames: 0,
 
   init: function() {
-    game.canvas = document.querySelector('canvas')
-    game.context = game.canvas.getContext('2d')
-    game.msPerFrame = 1000 / game.fps
-    game.msPrev = window.performance.now()
+    this.canvas = document.querySelector('canvas')
+    this.context = this.canvas.getContext('2d')
+    this.msPerFrame = 1000 / this.fps
+    this.msPrev = window.performance.now()
     
-    window.requestAnimationFrame(game.gameloop)
+    window.requestAnimationFrame(() => this.gameloop())
 
     setInterval((g) => {
       console.log(g.frames)
-    }, 1000, game)
+    }, 1000, this)
   },
 
   gameloop: function() {
-    window.requestAnimationFrame(game.gameloop)
+    window.requestAnimationFrame(() => this.gameloop())
 
     const msNow = window.performance.now()
     const msPassed = msNow - game.msPrev
 
-    if (msPassed < game.msPerFrame) return
+    if (msPassed < this.msPerFrame) return
 
-    game.draw()
+    this.draw()
 
-    const excessTime = msPassed % game.msPerFrame
-    game.msPrev = msNow - excessTime
+    const excessTime = msPassed % this.msPerFrame
+    this.msPrev = msNow - excessTime
 
-    game.frames++
+    this.frames++
   }
 }
 
-window.onload = game.init
+window.onload = () => game.init()
