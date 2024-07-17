@@ -1,11 +1,11 @@
 let devtools = new function() {
     this.seq = 0;
-    this.pos = 0;
-    this.pos2 = 0;
 
     this.run = function() {
         if (this.seq == 0) {
             framebuffer.clear();
+            this.pos = 0;
+            this.pos2 = 0;
             this.seq = 1;
         }
 
