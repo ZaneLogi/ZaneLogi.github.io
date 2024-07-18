@@ -18,7 +18,7 @@ const screen_introMain = new function() {
         }
 
         switch (this.seq) {
-        case 1: /* dispay hall of fame */
+        case 1: /* display Rick Dangerous title and Core Design copyright */
             framebuffer.clear();
             this.tm = Date.now();
             draw_pic(0, 0, 0x140, 0xc8, pic_splash);
@@ -43,7 +43,7 @@ const screen_introMain = new function() {
             }
             break;
 
-        case 4:  /* display Rick Dangerous title and Core Design copyright */
+        case 4:  /* dispay hall of fame */
             framebuffer.clear();
             this.tm = Date.now();
         
@@ -53,14 +53,18 @@ const screen_introMain = new function() {
             /* hall of fame content */
             draw_setfb(56, 40);
 
-            // TODO
-            /*for (i = 0; i < 8; i++) {
-              sprintf((char *)s, "%06d@@@....@@@%s",
+            for (let i = 0; i < 8; i++) {
+                /*sprintf((char *)s, "%06d@@@....@@@%s",
                   game_hscores[i].score, game_hscores[i].name);
-              s[26] = '\377'; s[27] = '\377'; s[28] = '\376';
-              draw_context.draw_tllst = s;
-              draw_tilesList();
-            }*/
+                  s[26] = '\377'; s[27] = '\377'; s[28] = '\376';*/
+                let s1 = game_hscores[i].score.toString();
+                let s2 = game_hscores[i].name;
+                let s0 = (s1.length < 6) ? "0".repeat(6-s1.length) : "";
+                let s = s0 + s1 + "@@@....@@@" + s2 + "\xFF\xFF\xFE"; 
+              
+                draw_context.draw_tllst = s;
+                draw_tilesList();
+            }
         
             this.seq = 5;
             break;
@@ -76,7 +80,7 @@ const screen_introMain = new function() {
         
           case 6:  /* wait for key released */
             if (!(control.control_status & CONTROL_FIRE)) {
-                if (seen++ == 0)
+                if (this.seen++ == 0)
                     this.seq = 1;
                 else
                     this.seq = 7;

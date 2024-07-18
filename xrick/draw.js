@@ -29,6 +29,7 @@ function draw_setfb(x, y) {
 function draw_tilesList() {
     const ypitch8 = framebuffer.ypitch * 8;
     let t = draw_context.fb;
+    draw_context.draw_tllst_index = 0;
 
     while (draw_tilesSubList() != 0xFE) {  /* draw sub-list */
         t += ypitch8;  /* go down one tile i.e. 8 lines */
