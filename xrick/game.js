@@ -20,14 +20,14 @@ const SCREEN_DONE = 1;
 const SCREEN_EXIT = 2;
 
 const game_hscores = [
-    [ 8000, "SIMES@@@@@" ],
-    [ 7000, "JAYNE@@@@@" ],
-    [ 6000, "DANGERSTU@" ],
-    [ 5000, "KEN@@@@@@@" ],
-    [ 4000, "ROB@N@BOB@" ],
-    [ 3000, "TELLY@@@@@" ],
-    [ 2000, "NOBBY@@@@@" ],
-    [ 1000, "JEZEBEL@@@" ]
+    { score:8000, name:"SIMES@@@@@" },
+    { score:7000, name:"JAYNE@@@@@" },
+    { score:6000, name:"DANGERSTU@" },
+    { score:5000, name:"KEN@@@@@@@" },
+    { score:4000, name:"ROB@N@BOB@" },
+    { score:3000, name:"TELLY@@@@@" },
+    { score:2000, name:"NOBBY@@@@@" },
+    { score:1000, name:"JEZEBEL@@@" }
 ];
 
 const game = new function() {
