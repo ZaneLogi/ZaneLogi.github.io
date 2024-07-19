@@ -3,11 +3,11 @@
 const DEVTOOLS      = 1;
 const XRICK         = 2;
 const INIT_GAME     = 3;
+const INIT_BUFFER   = 4;
 const INTRO_MAIN    = 5;
 const INTRO_MAP     = 6;
 const EXIT          = 23;
-/*    , INIT_BUFFER:4,
-    
+/*
     PAUSE_PRESSED1:7, PAUSE_PRESSED1B:8, PAUSED:9, PAUSE_PRESSED2:10,
     PLAY0:11, PLAY1:12, PLAY2:13, PLAY3:14,
     CHAIN_SUBMAP:15, CHAIN_MAP:16, CHAIN_END:17,
@@ -30,6 +30,23 @@ const game_hscores = [
     { score:1000, name:"JEZEBEL@@@" }
 ];
 
+const game_context = {
+    game_lives: 0,
+    game_bombs: 0,
+    game_bullets: 0,
+    game_score: 0,
+    
+    game_map: 0,
+    game_submap: 0,
+    
+    game_dir: 0,
+    game_chsm: false,
+    
+    game_cheat1: 0,
+    game_cheat2: 0,
+    game_cheat3: 0,
+};
+
 const game = new function() {
 
     this.onload = function() {
@@ -40,6 +57,7 @@ const game = new function() {
         this.frames = 0;
         this.game_period = 75;
         this.game_state = XRICK;
+        this.game_waitevt = false;
 
         window.requestAnimationFrame(() => this.run());
 
@@ -70,6 +88,7 @@ const game = new function() {
         const excessTime = msPassed % this.game_period;
         this.msPrev = msNow - excessTime;
 
+        // TODO: for game_waitevt
         this.frame();
 
         framebuffer.updateCanvas();
@@ -81,7 +100,7 @@ const game = new function() {
         while (true) {
             switch (this.game_state) {
             case DEVTOOLS:
-                switch (devtools.run()) {
+                switch (devtools.do_frame()) {
                 case SCREEN_RUNNING:
                     return;
                 case SCREEN_DONE:
@@ -94,7 +113,7 @@ const game = new function() {
                 break;
 
             case XRICK:
-                switch (screen_xrick.run()) {
+                switch (screen_xrick.do_frame()) {
                 case SCREEN_RUNNING:
                     return;
                 case SCREEN_DONE:
@@ -112,11 +131,25 @@ const game = new function() {
                 break;
 
             case INTRO_MAIN:
-                switch (screen_introMain.run()) {
+                switch (screen_introMain.do_frame()) {
                 case SCREEN_RUNNING:
                     return;
                 case SCREEN_DONE:
                     this.game_state = INTRO_MAP;
+                    break;
+                case SCREEN_EXIT:
+                    this.game_state = EXIT;
+                    return;
+                }
+                break;
+
+            case INTRO_MAP:
+                switch (screen_introMap.do_frame()) {
+                case SCREEN_RUNNING:
+                    return;
+                case SCREEN_DONE:
+                    this.game_waitevt = false;
+                    this.game_state = INIT_BUFFER;
                     break;
                 case SCREEN_EXIT:
                     this.game_state = EXIT;
@@ -138,10 +171,10 @@ const game = new function() {
     
     this.init = function() {
         // TODO
-        this.game_lives = 6;
-        this.game_bombs = 6;
-        this.game_bullets = 6;
-        this.game_score = 0;
+        game_context.game_lives = 6;
+        game_context.game_bombs = 6;
+        game_context.game_bullets = 6;
+        game_context.game_score = 0;
     };
 }
 

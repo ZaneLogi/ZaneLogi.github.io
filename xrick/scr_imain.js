@@ -7,7 +7,7 @@ const screen_introMain = new function() {
     this.period = 0;
     this.tm = 0;
 
-    this.run = function() {
+    this.do_frame = function() {
         if (this.seq == 0) {
             draw_context.draw_tilesBank = 0;
             if (this.first) this.seq = 1;
@@ -63,6 +63,7 @@ const screen_introMain = new function() {
                 let s = s0 + s1 + "@@@....@@@" + s2 + "\xFF\xFF\xFE"; 
               
                 draw_context.draw_tllst = s;
+                draw_context.draw_tllst_index = 0;
                 draw_tilesList();
             }
         

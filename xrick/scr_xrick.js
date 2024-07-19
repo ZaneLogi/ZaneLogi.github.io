@@ -4,7 +4,7 @@ const screen_xrick = new function() {
     this.seq = 0;
     this.wait = 0;
 
-    this.run = function() {
+    this.do_frame = function() {
         if (this.seq == 0) {
             framebuffer.clear();
             draw_img(IMG_SPLASH);

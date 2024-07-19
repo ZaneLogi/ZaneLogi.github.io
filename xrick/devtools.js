@@ -5,7 +5,7 @@ const devtools = new function() {
     this.pos = 0;
     this.pos2 = 0;
 
-    this.run = function() {
+    this.do_frame = function() {
         if (this.seq == 0) {
             framebuffer.clear();
             this.seq = 1;
