@@ -6,13 +6,16 @@ const INIT_GAME     = 3;
 const INIT_BUFFER   = 4;
 const INTRO_MAIN    = 5;
 const INTRO_MAP     = 6;
+const RESTART       = 20;
+const GAMEOVER      = 21;
+const GETNAME       = 22; 
 const EXIT          = 23;
 /*
     PAUSE_PRESSED1:7, PAUSE_PRESSED1B:8, PAUSED:9, PAUSE_PRESSED2:10,
     PLAY0:11, PLAY1:12, PLAY2:13, PLAY3:14,
     CHAIN_SUBMAP:15, CHAIN_MAP:16, CHAIN_END:17,
     SCROLL_UP:18, SCROLL_DOWN:19,
-    RESTART:20, GAMEOVER:21, GETNAME:22, 
+    
 */
 const SCREEN_TIMEOUT = 4000;
 const SCREEN_RUNNING = 0;
@@ -149,11 +152,41 @@ const game = new function() {
                     return;
                 case SCREEN_DONE:
                     this.game_waitevt = false;
-                    this.game_state = INIT_BUFFER;
+                    this.game_state = GAMEOVER;
                     break;
                 case SCREEN_EXIT:
                     this.game_state = EXIT;
                     return;
+                }
+                break;
+
+
+
+
+
+            case GAMEOVER:
+                switch (screen_gameover.do_frame()) {
+                case SCREEN_RUNNING:
+                    return;
+                case SCREEN_DONE:
+                    this.game_state = INIT_GAME;
+                    break;
+                case SCREEN_EXIT:
+                    this.game_state = EXIT;
+                    break;
+                }
+                break;
+
+            case GETNAME:
+                switch (screen_getname.do_frame()) {
+                case SCREEN_RUNNING:
+                    return;
+                case SCREEN_DONE:
+                    this.game_state = INIT_GAME;
+                    return;
+                case SCREEN_EXIT:
+                    this.game_state = EXIT;
+                    break;
                 }
                 break;
 
