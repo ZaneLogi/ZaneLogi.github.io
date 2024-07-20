@@ -9,8 +9,6 @@ let devtools = new function() {
             this.seq = 1;
         }
 
-        console.log("currnet seq = %d", this.seq)
-
         let k = 0;
 
         switch(this.seq) {

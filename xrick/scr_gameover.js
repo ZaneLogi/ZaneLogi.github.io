@@ -25,7 +25,6 @@ screen_gameover.do_frame = function() {
         draw_context.draw_tllst_index = 0;
         draw_setfb(120, 80);
 
-        console.log(draw_context.draw_tllst);
         draw_tilesList();
 
         this.seq = 2;

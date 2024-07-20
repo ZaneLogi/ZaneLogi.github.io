@@ -1,22 +1,29 @@
 "use strict"
 
-const DEVTOOLS      = 1;
-const XRICK         = 2;
-const INIT_GAME     = 3;
-const INIT_BUFFER   = 4;
-const INTRO_MAIN    = 5;
-const INTRO_MAP     = 6;
-const RESTART       = 20;
-const GAMEOVER      = 21;
-const GETNAME       = 22; 
-const EXIT          = 23;
-/*
-    PAUSE_PRESSED1:7, PAUSE_PRESSED1B:8, PAUSED:9, PAUSE_PRESSED2:10,
-    PLAY0:11, PLAY1:12, PLAY2:13, PLAY3:14,
-    CHAIN_SUBMAP:15, CHAIN_MAP:16, CHAIN_END:17,
-    SCROLL_UP:18, SCROLL_DOWN:19,
-    
-*/
+const DEVTOOLS          = 1;
+const XRICK             = 2;
+const INIT_GAME         = 3;
+const INIT_BUFFER       = 4;
+const INTRO_MAIN        = 5;
+const INTRO_MAP         = 6;
+const PAUSE_PRESSED1    = 7;
+const PAUSE_PRESSED1B   = 8;
+const PAUSED            = 9;
+const PAUSE_PRESSED2    = 10;
+const PLAY0             = 11;
+const PLAY1             = 12;
+const PLAY2             = 13;
+const PLAY3             = 14;
+const CHAIN_SUBMAP      = 15;
+const CHAIN_MAP         = 16;
+const CHAIN_END         = 17;
+const SCROLL_UP         = 18;
+const SCROLL_DOWN       = 19;
+const RESTART           = 20;
+const GAMEOVER          = 21;
+const GETNAME           = 22;
+const EXIT              = 23;
+
 const SCREEN_TIMEOUT = 4000;
 const SCREEN_RUNNING = 0;
 const SCREEN_DONE = 1;
@@ -37,14 +44,14 @@ const game_context = {
     game_lives: 0,
     game_bombs: 0,
     game_bullets: 0,
-    game_score: 0,
-    
+    game_score: 9999,
+
     game_map: 0,
     game_submap: 0,
-    
+
     game_dir: 0,
     game_chsm: false,
-    
+
     game_cheat1: 0,
     game_cheat2: 0,
     game_cheat3: 0,
@@ -59,7 +66,7 @@ const game = new function() {
 
         this.frames = 0;
         this.game_period = 75;
-        this.game_state = XRICK;
+        this.game_state = GETNAME;
         this.game_waitevt = false;
 
         window.requestAnimationFrame(() => this.run());
@@ -169,7 +176,7 @@ const game = new function() {
                 case SCREEN_RUNNING:
                     return;
                 case SCREEN_DONE:
-                    this.game_state = INIT_GAME;
+                    this.game_state = GETNAME;
                     break;
                 case SCREEN_EXIT:
                     this.game_state = EXIT;
@@ -192,7 +199,7 @@ const game = new function() {
 
             case EXIT:
                 return;
-                
+
             default: // unknown game state
                 console.log("unknown game state %d", this.game_state);
                 // bail out
@@ -201,13 +208,13 @@ const game = new function() {
             }
         }
     };
-    
+
     this.init = function() {
         // TODO
         game_context.game_lives = 6;
         game_context.game_bombs = 6;
         game_context.game_bullets = 6;
-        game_context.game_score = 0;
+        game_context.game_score = 9990;
     };
 }
 
