@@ -7,6 +7,16 @@ const draw_context = {
     draw_tilesBank: 0,
 };
 
+const DRAW_STATUS_BULLETS_X = 0x68;
+const DRAW_STATUS_BOMBS_X   = 0xA8;
+const DRAW_STATUS_SCORE_X   = 0x20;
+const DRAW_STATUS_LIVES_X   = 0xF0;
+const DRAW_STATUS_Y         = 0;
+
+const TILES_BULLET          = 0x01;
+const TILES_BOMB            = 0x02;
+const TILES_RICK            = 0x03;
+
 /*
  * Set the frame buffer pointer
  *
@@ -138,6 +148,85 @@ function draw_sprite(number, x, y)
             f += colbytes;
         }
         draw_context.fb += ypitch;
+    }
+}
+
+
+
+/*
+ * Draw entire map screen background tiles onto frame buffer.
+ *
+ * ASM 0af5, 0a54
+ */
+function draw_map()
+{
+    draw_context.draw_tilesBank = map_context.map_tilesBank;
+
+    for (let i = 0; i < 0x18; i++) {  /* 0x18 rows */
+        draw_setfb(0x20, 8 + (i * 8));
+        for (let j = 0; j < 0x20; j++)  /* 0x20 tiles per row */
+            draw_tile(map_context.map_map[i + 8][j]);
+  }
+}
+
+/*
+ * Draw status indicators
+ *
+ * ASM 0309
+ */
+function draw_drawStatus()
+{
+    const s = [0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0xfe];
+
+    draw_context.draw_tilesBank = 0;
+
+    for (let i = 5, sv = game_context.game_score; i >= 0; i--) {
+        s[i] = 0x30 + (sv % 10);
+        sv = Math.floor(sv/10);
+    }
+    draw_context.draw_tllst = String.fromCharCode(...s);
+    draw_context.draw_tllst_index = 0;
+
+    draw_setfb(DRAW_STATUS_SCORE_X, DRAW_STATUS_Y);
+    draw_tilesList();
+
+    draw_setfb(DRAW_STATUS_BULLETS_X, DRAW_STATUS_Y);
+    for (let i = 0; i < game_context.game_bullets; i++)
+        draw_tile(TILES_BULLET);
+
+    draw_setfb(DRAW_STATUS_BOMBS_X, DRAW_STATUS_Y);
+    for (let i = 0; i < game_context.game_bombs; i++)
+        draw_tile(TILES_BOMB);
+
+    draw_setfb(DRAW_STATUS_LIVES_X, DRAW_STATUS_Y);
+    for (let i = 0; i < game_context.game_lives; i++)
+        draw_tile(TILES_RICK);
+}
+
+/*
+ * Draw info indicators
+ */
+function draw_infos()
+{
+    draw_context.draw_tilesBank = 0;
+
+    draw_setfb(0x00, DRAW_STATUS_Y);
+    draw_tile(game_context.game_cheat1 ? 'T'.charCodeAt(0) : '@'.charCodeAt(0));
+    draw_setfb(0x08, DRAW_STATUS_Y);
+    draw_tile(game_context.game_cheat2 ? 'N'.charCodeAt(0) : '@'.charCodeAt(0));
+    draw_setfb(0x10, DRAW_STATUS_Y);
+    draw_tile(game_context.game_cheat3 ? 'V'.charCodeAt(0) : '@'.charCodeAt(0));
+}
+
+/*
+ * Clear status indicators
+ */
+function draw_clearStatus()
+{
+    draw_context.draw_tilesBank = 0;
+    draw_setfb(DRAW_STATUS_SCORE_X, DRAW_STATUS_Y);
+    for (let i = 0; i < DRAW_STATUS_LIVES_X/8 + 6 - DRAW_STATUS_SCORE_X/8; i++) {
+        draw_tile('@'.charCodeAt(0));
     }
 }
 

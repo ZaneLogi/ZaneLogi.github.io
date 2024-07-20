@@ -40,6 +40,9 @@ const game_hscores = [
     { score:1000, name:"JEZEBEL@@@" }
 ];
 
+const LEFT = 1;
+const RIGHT = 0;
+
 const game_context = {
     game_lives: 0,
     game_bombs: 0,
@@ -52,9 +55,9 @@ const game_context = {
     game_dir: 0,
     game_chsm: false,
 
-    game_cheat1: 0,
-    game_cheat2: 0,
-    game_cheat3: 0,
+    game_cheat1: false,
+    game_cheat2: false,
+    game_cheat3: false,
 };
 
 const game = new function() {
@@ -66,7 +69,7 @@ const game = new function() {
 
         this.frames = 0;
         this.game_period = 75;
-        this.game_state = GETNAME;
+        this.game_state = INIT_GAME;
         this.game_waitevt = false;
 
         window.requestAnimationFrame(() => this.run());
@@ -159,13 +162,21 @@ const game = new function() {
                     return;
                 case SCREEN_DONE:
                     this.game_waitevt = false;
-                    this.game_state = GAMEOVER;
+                    this.game_state = INIT_BUFFER;
                     break;
                 case SCREEN_EXIT:
                     this.game_state = EXIT;
                     return;
                 }
                 break;
+
+            case INIT_BUFFER:
+                framebuffer.clear();
+                draw_map();                     /* draw the map onto the buffer */
+                draw_drawStatus();              /* draw the status bar onto the buffer */
+                draw_infos();                   /* draw the info bar onto the buffer */
+                this.game_state = PLAY0;
+                return;
 
 
 
@@ -210,11 +221,49 @@ const game = new function() {
     };
 
     this.init = function() {
-        // TODO
+        // E_RICK_STRST(0xff);
+
         game_context.game_lives = 6;
         game_context.game_bombs = 6;
         game_context.game_bullets = 6;
-        game_context.game_score = 9990;
+        game_context.game_score = 0;
+
+        const sysarg_args_map = 0;
+        const sysarg_args_submap = 0;
+
+        game_context.game_map = sysarg_args_map;
+
+        if (sysarg_args_submap == 0) {
+            game_context.game_submap = map_maps[game_context.game_map].submap;
+            map_context.map_frow = map_maps[game_context.game_map].row;
+        }
+        else {
+            /* dirty hack to determine frow */
+            game_context.game_submap = sysarg_args_submap;
+            let i = 0;
+            while (i < MAP_NBR_CONNECT &&
+               (map_connect[i].submap != game_context.game_submap ||
+                map_connect[i].dir != RIGHT))
+              i++;
+            map_connect.map_frow = map_connect[i].rowin - 0x10;
+            //ent_ents[1].y = 0x10 << 3;
+        }
+
+        /*ent_ents[1].x = map_maps[game_map].x;
+        ent_ents[1].y = map_maps[game_map].y;
+        ent_ents[1].w = 0x18;
+        ent_ents[1].h = 0x15;
+        ent_ents[1].n = 0x01;
+        ent_ents[1].sprite = 0x01;
+        ent_ents[1].front = FALSE;
+        ent_ents[ENT_ENTSNUM].n = 0xFF;
+        */
+        map_resetMarks();
+
+        map_init();
+        /*
+        isave();
+        */
     };
 }
 

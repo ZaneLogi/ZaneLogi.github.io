@@ -2,7 +2,7 @@
 
 const screen_getname = {
     seq: 0,
-    name: new Array(10),
+    name: Array(10),
 }
 
 const TILE_POINTER      = 0x3A;
