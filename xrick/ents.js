@@ -188,3 +188,64 @@ function ent_draw() {
         ent_ents[i].prev_s = ent_ents[i].sprite;
     }
 }
+
+
+
+
+
+
+
+
+/*
+ * Table containing entity action function pointers.
+ */
+const ent_actf = [];
+
+const ent_actf_init = function() {
+    ent_actf.push(...[
+        null,        /* 00 - zero means that the slot is free */
+        e_rick_action,   /* 01 - 12CA */
+        e_bullet_action,  /* 02 - 1883 */
+        e_bomb_action,  /* 03 - 18CA */
+        e_them_t1a_action,  /* 04 - 2452 */
+        e_them_t1b_action,  /* 05 - 21CA */
+        e_them_t2_action,  /* 06 - 2718 */
+        e_them_t1a_action,  /* 07 - 2452 */
+        e_them_t1b_action,  /* 08 - 21CA */
+        e_them_t2_action,  /* 09 - 2718 */
+        e_them_t1a_action,  /* 0A - 2452 */
+        e_them_t1b_action,  /* 0B - 21CA */
+        e_them_t2_action,  /* 0C - 2718 */
+        e_them_t1a_action,  /* 0D - 2452 */
+        e_them_t1b_action,  /* 0E - 21CA */
+        e_them_t2_action,  /* 0F - 2718 */
+        e_box_action,  /* 10 - 245A */
+        e_box_action,  /* 11 - 245A */
+        e_bonus_action,  /* 12 - 242C */
+        e_bonus_action,  /* 13 - 242C */
+        e_bonus_action,  /* 14 - 242C */
+        e_bonus_action,  /* 15 - 242C */
+        e_sbonus_start,  /* 16 - 2182 */
+        e_sbonus_stop  /* 17 - 2143 */
+    ]);
+};
+
+/*
+ * Run entities action function
+ *
+ */
+function ent_action() {
+    if (!ent_actf.length) ent_actf_init();
+
+    for (let i = 0; ent_ents[i].n != 0xff; i++) {
+        if (ent_ents[i].n) {
+            let k = ent_ents[i].n & 0x7f;
+            if (k == 0x47)
+	            e_them_z_action(i);
+            else if (k >= 0x18)
+                e_them_t3_action(i);
+            else
+	            ent_actf[k](i);
+        }
+    }
+}
