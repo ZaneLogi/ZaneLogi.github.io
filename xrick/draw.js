@@ -205,7 +205,59 @@ function draw_sprite(number, x, y)
  * NOTE re-using original ST graphics format
  */
 function draw_sprite2(number, x, y, front) {
-    
+    const data = framebuffer.imgData.data;
+    const ypitch = framebuffer.ypitch;
+    const xbytes = framebuffer.xbytes;
+
+    let rect = { x: x, y: y, width: 0x20, height: 0x15 };
+    if (draw_clipms(rect))  /* return if not visible */
+        return;
+
+    let x0 = rect.x;
+    let y0 = rect.y;
+    let w = rect.width;
+    let h = rect.height;
+    let g = 0;
+    draw_setfb(x0 - DRAW_XYMAP_SCRLEFT, y0 - DRAW_XYMAP_SCRTOP + 8);
+
+    for (let r = 0; r < 0x15; r++) {
+        if (r >= h || y + r < y0) continue;
+
+        let i = 0x1f * xbytes;
+        let im = x - (x & 0xfff8);
+        let flg = map_context.map_eflg[
+            map_context.map_map[(y + r) >> 3][(x + 0x1f)>> 3]];
+
+        let LOOP = function(N, C0, C1) {
+            let d = sprites_data[number][g + N];
+            for (let c = C0; c >= C1; c--, i-=xbytes, d >>= 4, im--) {
+                if (im == 0) {
+                    flg = map_context.map_eflg[
+                        map_context.map_map[(y + r) >> 3][(x + c) >> 3]];
+                    im = 8;
+                }
+                if (c >= w || x + c < x0) continue;
+                if (!front && !game_context.game_cheat3 && (flg & MAP_EFLG_FGND))
+                    continue;
+
+                const colorIndex = d & 0x0F;
+                if (colorIndex) {
+                    if (game_context.game_cheat3)
+                        colorIndex |= 0x10;
+                    data.set(palette.colors[colorIndex],
+                        draw_context.fb + i);
+                }
+            }
+        };
+
+        LOOP(3, 0x1f, 0x18);
+        LOOP(2, 0x17, 0x10);
+        LOOP(1, 0x0f, 0x08);
+        LOOP(0, 0x07, 0x00);
+
+        draw_context.fb += ypitch;
+        g += 4;
+      }
 }
 
 /*

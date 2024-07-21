@@ -23,7 +23,28 @@ const MAP_ROW_SCRBOT    = 0x1F;
 const MAP_ROW_HBTOP     = 0x20;
 const MAP_ROW_HBBOT     = 0x27;
 
-const MAP_MARK_NACT = 0x80;
+const MAP_MARK_NACT     = 0x80;
+
+/*
+ * flags for map_eflg[map_map[row][col]]  ("yes" when set)
+ *
+ * MAP_EFLG_VERT: vertical move only (usually on top of _CLIMB).
+ * MAP_EFLG_SOLID: solid block, can't go through.
+ * MAP_EFLG_SPAD: super pad. can't go through, but sends entities to the sky.
+ * MAP_EFLG_WAYUP: solid block, can't go through except when going up.
+ * MAP_EFLG_FGND: foreground (hides entities).
+ * MAP_EFLG_LETHAL: lethal (kill entities).
+ * MAP_EFLG_CLIMB: entities can climb here.
+ * MAP_EFLG_01:
+ */
+const MAP_EFLG_VERT     = 0x80;
+const MAP_EFLG_SOLID    = 0x40;
+const MAP_EFLG_SPAD     = 0x20;
+const MAP_EFLG_WAYUP    = 0x10;
+const MAP_EFLG_FGND     = 0x08;
+const MAP_EFLG_LETHAL   = 0x04;
+const MAP_EFLG_CLIMB    = 0x02;
+const MAP_EFLG_01       = 0x01;
 
 
 /*

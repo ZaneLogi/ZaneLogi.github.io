@@ -170,8 +170,7 @@ function ent_draw() {
          * If entity is active now, draw the sprite. If entity was
          * not active before, add a rectangle for the sprite.
          */
-        // if (ent_ents[i].n && (game_cheat3 || ent_ents[i].sprite))
-        if (ent_ents[i].n && ent_ents[i].sprite)
+        if (ent_ents[i].n && (game_context.game_cheat3 || ent_ents[i].sprite))
             /* If entitiy is active, draw the sprite. */
             draw_sprite2(ent_ents[i].sprite,
                 ent_ents[i].x, ent_ents[i].y,
@@ -179,8 +178,7 @@ function ent_draw() {
     }
 
     /*
-     * rectangles loop : figure out which parts of the screen have been
-     * impacted and need to be refreshed, then save state
+     * save state
      */
     for (let i = 0; ent_ents[i].n != 0xff; i++) {
         /* save state */
