@@ -7,6 +7,12 @@ const draw_context = {
     draw_tilesBank: 0,
 };
 
+/* map coordinates of the screen */
+const DRAW_XYMAP_SCRLEFT    = -0x0020;
+const DRAW_XYMAP_SCRTOP     = 0x0040;
+/* map coordinates of the top of the hidden bottom of the map */
+const DRAW_XYMAP_HBTOP      = 0x0100;
+
 const DRAW_STATUS_BULLETS_X = 0x68;
 const DRAW_STATUS_BOMBS_X   = 0xA8;
 const DRAW_STATUS_SCORE_X   = 0x20;
@@ -24,6 +30,48 @@ const TILES_RICK            = 0x03;
  */
 function draw_setfb(x, y) {
     draw_context.fb = framebuffer.getOffset(x, y);
+}
+
+/*
+ * Clip to map screen
+ *
+ * x, y: position (pixels, map) CHANGED clipped
+ * width, height: dimension CHANGED clipped
+ * return: TRUE if fully clipped, FALSE if still (at least partly) visible
+ */
+function draw_clipms(rect) {
+    if (rect.x < 0) {
+        if (rect.x + rect.width < 0)
+            return true;
+        else {
+            rect.width += rect.x;
+            rect.x = 0;
+        }
+    }
+    else {
+        if (rect.x > 0x0100)
+            return true;
+        else if (rect.x + rect.width > 0x0100) {
+            rect.width = 0x0100 - rect.x;
+        }
+    }
+
+    if (rect.y < DRAW_XYMAP_SCRTOP) {
+        if ((rect.y + rect.height) < DRAW_XYMAP_SCRTOP)
+            return true;
+        else {
+            rect.height += rect.y - DRAW_XYMAP_SCRTOP;
+            rect.y = DRAW_XYMAP_SCRTOP;
+        }
+    }
+    else {
+        if (rect.y >= DRAW_XYMAP_HBTOP)
+            return true;
+        else if (rect.y + rect.height > DRAW_XYMAP_HBTOP)
+            rect.height = DRAW_XYMAP_HBTOP - rect.y;
+    }
+
+    return false;
 }
 
 /*
@@ -151,7 +199,51 @@ function draw_sprite(number, x, y)
     }
 }
 
+/*
+ * Draw a sprite
+ *
+ * NOTE re-using original ST graphics format
+ */
+function draw_sprite2(number, x, y, front) {
+    
+}
 
+/*
+ * Redraw the map behind a sprite
+ * align to tile column and row, and clip
+ *
+ * x, y: sprite position (pixels, map).
+ */
+function draw_spriteBackground(x, y) {
+    /* aligne to column and row, prepare map coordinate, and clip */
+    let xmap = x & 0xFFF8;
+    let ymap = y & 0xFFF8;
+    let cmax = (x - xmap == 0 ? 0x20 : 0x28);  /* width, 4 tl cols, 8 pix each */
+    let rmax = (y & 0x04) ? 0x20 : 0x18;  /* height, 3 or 4 tile rows */
+    let rect = { x:xmap, y:ymap, width:cmax, height:rmax };
+    if (draw_clipms(rect))  /* don't draw if fully clipped */
+        return;
+    xmap = rect.x;
+    ymap = rect.y;
+    cmax = rect.width;
+    rmax = rect.height;
+
+    /* get back to screen */
+    let xs = xmap - DRAW_XYMAP_SCRLEFT;
+    let ys = ymap - DRAW_XYMAP_SCRTOP;
+    xmap >>= 3;
+    ymap >>= 3;
+    cmax >>= 3;
+    rmax >>= 3;
+
+    /* draw */
+    for (let r = 0; r < rmax; r++) {  /* for each row */
+        draw_setfb(xs, 8 + ys + r * 8);
+        for (let c = 0; c < cmax; c++) {  /* for each column */
+            draw_tile(map_context.map_map[ymap + r][xmap + c]);
+        }
+    }
+}
 
 /*
  * Draw entire map screen background tiles onto frame buffer.

@@ -1,15 +1,27 @@
 "use strict"
 
 const map_context = {
-    map_map: Array(0x2C),
-    map_eflg: Array(0x100),
+    map_map: new Array(0x2C),
+    map_eflg: new Array(0x100),
     map_frow:0,
     map_tilesBank:0,
 };
 
 for (let i = 0; i < 0x2C; i++) {
-    map_context.map_map[i] = Array(0x20).fill(0);
+    map_context.map_map[i] = new Array(0x20).fill(0);
 }
+
+/*
+ * map row definitions, for three zones : hidden top, screen, hidden bottom
+ * the three zones compose map_map, which contains the definition of the
+ * current portion of the submap.
+ */
+const MAP_ROW_HTTOP     = 0x00;
+const MAP_ROW_HTBOT     = 0x07;
+const MAP_ROW_SCRTOP    = 0x08;
+const MAP_ROW_SCRBOT    = 0x1F;
+const MAP_ROW_HBTOP     = 0x20;
+const MAP_ROW_HBBOT     = 0x27;
 
 const MAP_MARK_NACT = 0x80;
 
@@ -53,11 +65,11 @@ function map_init() {
 
     map_eflg_expand((map_submaps[game_context.game_submap].page == 1) ? 0x10 : 0x00);
     map_expand();
-    /*
+
     ent_reset();
-    ent_actvis(map_frow + MAP_ROW_SCRTOP, map_frow + MAP_ROW_SCRBOT);
-    ent_actvis(map_frow + MAP_ROW_HTTOP, map_frow + MAP_ROW_HTBOT);
-    ent_actvis(map_frow + MAP_ROW_HBTOP, map_frow + MAP_ROW_HBBOT);*/
+    ent_actvis(map_context.map_frow + MAP_ROW_SCRTOP, map_context.map_frow + MAP_ROW_SCRBOT);
+    ent_actvis(map_context.map_frow + MAP_ROW_HTTOP, map_context.map_frow + MAP_ROW_HTBOT);
+    ent_actvis(map_context.map_frow + MAP_ROW_HBTOP, map_context.map_frow + MAP_ROW_HBBOT);
 }
 
 /*
@@ -139,6 +151,7 @@ function map_chain() {
  *
  */
 function map_resetMarks() {
+    // clear the highest bit to activate all entities
     for (let i = 0; i < MAP_NBR_MARKS; i++)
         map_marks[i].ent &= ~MAP_MARK_NACT;
 }

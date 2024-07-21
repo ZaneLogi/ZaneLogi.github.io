@@ -60,211 +60,295 @@ const game_context = {
     game_cheat3: false,
 };
 
-const game = new function() {
+const game = {
+    frames: 0,
+    game_period: 75,
+    game_state: XRICK,
+    game_waitevt: false,
+    isave_frow: 0,
+};
 
-    this.onload = function() {
-        framebuffer.init(document.querySelector('canvas'));
+game.onload = function() {
+    framebuffer.init(document.querySelector('canvas'));
+    this.msPrev = window.performance.now();
+    window.requestAnimationFrame(() => this.run());
 
-        this.msPrev = window.performance.now();
+    const timer_enabled = false;
+    this.timerId = timer_enabled
+        ? setInterval((g) => { console.log(g.frames) }, 1000, this)
+        : 0;
+};
 
-        this.frames = 0;
-        this.game_period = 75;
-        this.game_state = INIT_GAME;
-        this.game_waitevt = false;
+game.update_game_period = function(period) {
+    this.game_period = period;
+    this.msPrev = window.performance.now();
+};
 
-        window.requestAnimationFrame(() => this.run());
-
-        this.timerId = setInterval((g) => {
-            console.log(g.frames)
-            }, 1000, this);
-    };
-
-    this.set_game_period = function(period) {
-        this.game_period = period;
-        this.msPrev = window.performance.now();
+game.run = function() {
+    if (this.game_state == EXIT) {
+        console.log("game stop!");
+        clearInterval(this.timerId);
+        return;
     }
+    window.requestAnimationFrame(() => this.run());
+    const msNow = window.performance.now();
+    const msPassed = msNow - this.msPrev;
+    if (msPassed < this.game_period) return;
+    const excessTime = msPassed % this.game_period;
+    this.msPrev = msNow - excessTime;
+    // TODO: for game_waitevt
+    this.do_frame();
+    framebuffer.updateCanvas();
+    this.frames++;
+};
 
-    this.run = function() {
-        if (this.game_state == EXIT) {
-            console.log("game stop!");
-            clearInterval(this.timerId);
-            return;
-        }
-
-        window.requestAnimationFrame(() => this.run());
-
-        const msNow = window.performance.now();
-        const msPassed = msNow - this.msPrev;
-
-        if (msPassed < this.game_period) return;
-
-        const excessTime = msPassed % this.game_period;
-        this.msPrev = msNow - excessTime;
-
-        // TODO: for game_waitevt
-        this.frame();
-
-        framebuffer.updateCanvas();
-
-        this.frames++;
-    };
-
-    this.frame = function() {
-        while (true) {
-            switch (this.game_state) {
-            case DEVTOOLS:
-                switch (devtools.do_frame()) {
-                case SCREEN_RUNNING:
-                    return;
-                case SCREEN_DONE:
-                    this.game_state = INIT_GAME;
-                    break;
-                case SCREEN_EXIT:
-                    this.game_state = EXIT;
-                    return;
-                }
-                break;
-
-            case XRICK:
-                switch (screen_xrick.do_frame()) {
-                case SCREEN_RUNNING:
-                    return;
-                case SCREEN_DONE:
-                    this.game_state = DEVTOOLS;
-                    break;
-                case SCREEN_EXIT:
-                    this.game_state = EXIT;
-                    return;
-                }
-                break;
-
-            case INIT_GAME:
-                this.init();
-                this.game_state = INTRO_MAIN;
-                break;
-
-            case INTRO_MAIN:
-                switch (screen_introMain.do_frame()) {
-                case SCREEN_RUNNING:
-                    return;
-                case SCREEN_DONE:
-                    this.game_state = INTRO_MAP;
-                    break;
-                case SCREEN_EXIT:
-                    this.game_state = EXIT;
-                    return;
-                }
-                break;
-
-            case INTRO_MAP:
-                switch (screen_introMap.do_frame()) {
-                case SCREEN_RUNNING:
-                    return;
-                case SCREEN_DONE:
-                    this.game_waitevt = false;
-                    this.game_state = INIT_BUFFER;
-                    break;
-                case SCREEN_EXIT:
-                    this.game_state = EXIT;
-                    return;
-                }
-                break;
-
-            case INIT_BUFFER:
-                framebuffer.clear();
-                draw_map();                     /* draw the map onto the buffer */
-                draw_drawStatus();              /* draw the status bar onto the buffer */
-                draw_infos();                   /* draw the info bar onto the buffer */
-                this.game_state = PLAY0;
+game.do_frame = function() {
+    while (true) {
+        switch (this.game_state) {
+        case DEVTOOLS:
+            switch (devtools.do_frame()) {
+            case SCREEN_RUNNING:
                 return;
-
-
-
-
-
-            case GAMEOVER:
-                switch (screen_gameover.do_frame()) {
-                case SCREEN_RUNNING:
-                    return;
-                case SCREEN_DONE:
-                    this.game_state = GETNAME;
-                    break;
-                case SCREEN_EXIT:
-                    this.game_state = EXIT;
-                    break;
-                }
+            case SCREEN_DONE:
+                this.game_state = INIT_GAME;
                 break;
-
-            case GETNAME:
-                switch (screen_getname.do_frame()) {
-                case SCREEN_RUNNING:
-                    return;
-                case SCREEN_DONE:
-                    this.game_state = INIT_GAME;
-                    return;
-                case SCREEN_EXIT:
-                    this.game_state = EXIT;
-                    break;
-                }
-                break;
-
-            case EXIT:
-                return;
-
-            default: // unknown game state
-                console.log("unknown game state %d", this.game_state);
-                // bail out
+            case SCREEN_EXIT:
                 this.game_state = EXIT;
                 return;
             }
+            break;
+
+        case XRICK:
+            switch (screen_xrick.do_frame()) {
+            case SCREEN_RUNNING:
+                return;
+            case SCREEN_DONE:
+                this.game_state = DEVTOOLS;
+                break;
+            case SCREEN_EXIT:
+                this.game_state = EXIT;
+                return;
+            }
+            break;
+
+        case INIT_GAME:
+            this.init();
+            this.game_state = INTRO_MAIN;
+            break;
+
+       case INTRO_MAIN:
+            switch (screen_introMain.do_frame()) {
+            case SCREEN_RUNNING:
+                return;
+            case SCREEN_DONE:
+                this.game_state = INTRO_MAP;
+                break;
+            case SCREEN_EXIT:
+                this.game_state = EXIT;
+                return;
+            }
+            break;
+
+        case INTRO_MAP:
+            switch (screen_introMap.do_frame()) {
+            case SCREEN_RUNNING:
+                return;
+            case SCREEN_DONE:
+                this.game_waitevt = false;
+                this.game_state = INIT_BUFFER;
+                break;
+           case SCREEN_EXIT:
+                this.game_state = EXIT;
+                return;
+           }
+           break;
+
+        case INIT_BUFFER:
+            framebuffer.clear();
+            draw_map();                     /* draw the map onto the buffer */
+            draw_drawStatus();              /* draw the status bar onto the buffer */
+            draw_infos();                   /* draw the info bar onto the buffer */
+            this.game_state = PLAY0;
+            return;
+
+        case PLAY0:
+            this.play0();
+            break;
+
+        case PLAY1:
+            if (control.control_status & CONTROL_PAUSE) {
+                //syssnd_pause(TRUE, FALSE);
+                this.game_waitevt = true;
+                this.game_state = PAUSE_PRESSED1;
+            }
+            else if (control.control_active == false) {
+                //syssnd_pause(TRUE, FALSE);
+                this.game_waitevt = true;
+                //this.screen_pause(TRUE);
+                this.game_state = PAUSED;
+            }
+            else
+                this.game_state = PLAY2;
+            break;
+
+        case PLAY2:
+            if (E_RICK_STTST(E_RICK_STDEAD)) {  /* rick is dead */
+                if (game_context.game_cheat1 || --game_context.game_lives) {
+                    this.game_state = RESTART;
+                } else {
+                    this.game_state = GAMEOVER;
+                }
+            }
+            else if (game_context.game_chsm)  /* request to chain to next submap */
+                this.game_state = CHAIN_SUBMAP;
+            else
+                this.game_state = PLAY3;
+            break;
+
+        case PLAY3:
+            this.play3();
+            return;
+
+
+
+
+
+        case GAMEOVER:
+            switch (screen_gameover.do_frame()) {
+            case SCREEN_RUNNING:
+                return;
+            case SCREEN_DONE:
+                this.game_state = GETNAME;
+                break;
+            case SCREEN_EXIT:
+                this.game_state = EXIT;
+                break;
+            }
+            break;
+
+        case GETNAME:
+            switch (screen_getname.do_frame()) {
+            case SCREEN_RUNNING:
+                return;
+            case SCREEN_DONE:
+                this.game_state = INIT_GAME;
+                return;
+            case SCREEN_EXIT:
+                this.game_state = EXIT;
+                break;
+            }
+            break;
+
+        case EXIT:
+           return;
+
+        default: // unknown game state
+            console.log("unknown game state %d", this.game_state);
+            // bail out
+            this.game_state = EXIT;
+            return;
         }
-    };
+    }
+};
 
-    this.init = function() {
-        // E_RICK_STRST(0xff);
+game.init = function() {
+    // reset the status of Rick
+    E_RICK_STRST(0xff);
 
-        game_context.game_lives = 6;
-        game_context.game_bombs = 6;
-        game_context.game_bullets = 6;
-        game_context.game_score = 0;
+    // initialize the game information
+    game_context.game_lives = 6;
+    game_context.game_bombs = 6;
+    game_context.game_bullets = 6;
+    game_context.game_score = 0;
 
-        const sysarg_args_map = 0;
-        const sysarg_args_submap = 0;
+    const sysarg_args_map = 0;
+    const sysarg_args_submap = 0;
 
-        game_context.game_map = sysarg_args_map;
+    // initialize
+    //  game_context.game_map
+    //  game_context.game_submap
+    //  map_context.ma_frow
+    game_context.game_map = sysarg_args_map;
 
-        if (sysarg_args_submap == 0) {
-            game_context.game_submap = map_maps[game_context.game_map].submap;
-            map_context.map_frow = map_maps[game_context.game_map].row;
+    if (sysarg_args_submap == 0) {
+        game_context.game_submap = map_maps[game_context.game_map].submap;
+        map_context.map_frow = map_maps[game_context.game_map].row;
+    }
+    else {
+        /* dirty hack to determine frow */
+        game_context.game_submap = sysarg_args_submap;
+        let i = 0;
+        while (i < MAP_NBR_CONNECT &&
+           (map_connect[i].submap != game_context.game_submap ||
+            map_connect[i].dir != RIGHT))
+          i++;
+        map_connect.map_frow = map_connect[i].rowin - 0x10;
+        E_RICK_ENT.y = 0x10 << 3;
+    }
+
+    // initialize the entity Rick
+    E_RICK_ENT.x = map_maps[game_context.game_map].x;
+    E_RICK_ENT.y = map_maps[game_context.game_map].y;
+    E_RICK_ENT.w = 0x18;
+    E_RICK_ENT.h = 0x15;
+    E_RICK_ENT.n = 0x01;
+    E_RICK_ENT.sprite = 0x01;
+    E_RICK_ENT.front = false;
+    ent_ents[ENT_ENTSNUM].n = 0xFF;
+
+    // re-activates all entities
+    map_resetMarks();
+
+    // prepare the map
+    map_init();
+    this.isave();
+};
+
+game.isave = function() {
+    e_rick_save();
+    this.isave_frow = map_context.map_frow;
+};
+
+game.irestore = function() {
+    e_rick_restore();
+    map_context.map_frow = this.isave_frow;
+};
+
+game.play0 = function() {
+    if (control.control_status & CONTROL_END) {  /* request to end the game */
+        this.game_state = GAMEOVER;
+        return;
+    }
+
+    if (control.control_last == CONTROL_EXIT) {  /* request to exit the game */
+        this.game_state = EXIT;
+        return;
+    }
+
+    ent_action();      /* run entities */
+    e_them_context.e_them_rndseed++;
+
+    this.game_state = PLAY1;
+};
+
+game.play3 = function() {
+    draw_clearStatus();  /* clear the status bar */
+    ent_draw();          /* draw all entities onto the buffer */
+    /* sound */
+    draw_drawStatus();   /* draw the status bar onto the buffer*/
+
+    if (!E_RICK_STTST(E_RICK_STZOMBIE)) {  /* need to scroll ? */
+        if (E_RICK_ENT.y >= 0xCC) {
+            this.game_state = SCROLL_UP;
+            return;
         }
-        else {
-            /* dirty hack to determine frow */
-            game_context.game_submap = sysarg_args_submap;
-            let i = 0;
-            while (i < MAP_NBR_CONNECT &&
-               (map_connect[i].submap != game_context.game_submap ||
-                map_connect[i].dir != RIGHT))
-              i++;
-            map_connect.map_frow = map_connect[i].rowin - 0x10;
-            //ent_ents[1].y = 0x10 << 3;
+        if (E_RICK_ENT.y <= 0x60) {
+            this.game_state = SCROLL_DOWN;
+            return;
         }
+    }
 
-        /*ent_ents[1].x = map_maps[game_map].x;
-        ent_ents[1].y = map_maps[game_map].y;
-        ent_ents[1].w = 0x18;
-        ent_ents[1].h = 0x15;
-        ent_ents[1].n = 0x01;
-        ent_ents[1].sprite = 0x01;
-        ent_ents[1].front = FALSE;
-        ent_ents[ENT_ENTSNUM].n = 0xFF;
-        */
-        map_resetMarks();
-
-        map_init();
-        /*
-        isave();
-        */
-    };
-}
+    this.game_state = PLAY0;
+};
 
 window.onload = () => game.onload();

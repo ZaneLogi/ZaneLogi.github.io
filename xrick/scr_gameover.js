@@ -1,9 +1,9 @@
 "use strict"
 
-const screen_gameover = new function() {
-    this.seq = 0;
-    this.period = 0
-    this.tm = 0;
+const screen_gameover = {
+    seq: 0,
+    period: 0,
+    tm: 0,
 };
 
 screen_gameover.do_frame = function() {
@@ -11,7 +11,7 @@ screen_gameover.do_frame = function() {
         draw_context.draw_tilesBank = 0;
         this.seq = 1;
         this.period = game.game_period; /* save period, */
-        game.set_game_period(50);     /* and use our own */
+        game.update_game_period(50);     /* and use our own */
 
         //game_setmusic("sounds/gameover.wav", 1);
     }
@@ -49,7 +49,7 @@ screen_gameover.do_frame = function() {
     if (this.seq == 4) {  /* we're done */
         framebuffer.clear();
         this.seq = 0;
-        game.set_game_period(this.game_period);
+        game.update_game_period(this.game_period);
         return SCREEN_DONE;
     }
 

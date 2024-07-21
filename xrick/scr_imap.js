@@ -1,7 +1,7 @@
 "use strict"
 
-const screen_introMap = new function() {
-    this.seq = 0;
+const screen_introMap = {
+    seq: 0,
 };
 
 screen_introMap.do_frame = function() {
@@ -46,6 +46,7 @@ screen_introMap.do_frame = function() {
         this.drawlr();
         this.seq = 1;
         break;
+
     case 4:  /* wait for key release */
         if (!(control.control_status & CONTROL_FIRE))
             this.seq = 5;
@@ -55,10 +56,10 @@ screen_introMap.do_frame = function() {
     if (control.control_status & CONTROL_FIRE) {  /* end as soon as key pressed */
         this.seq = 4;
     }
-    
+
     if (control.control_status & CONTROL_EXIT)  /* check for exit request */
         return SCREEN_EXIT;
-    
+
     if (this.seq == 5) {  /* end as soon as key pressed */
         framebuffer.clear();
         this.seq = 0;
@@ -162,5 +163,3 @@ screen_introMap.drawlr = function() {
 screen_introMap.drawsprite = function() {
     draw_sprite(this.spnum, 128 + ((this.spx << 1) & 0x1C), 24 + (this.spy << 1));
 };
-
-

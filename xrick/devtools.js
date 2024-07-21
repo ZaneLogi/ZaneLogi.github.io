@@ -157,7 +157,7 @@ const devtools = new function() {
                     let block = map_blocks[block_index];
                     // a block consists of 16 tiles (4 x 4)
                     for (let i = 0; i < 4; i++) { // tile row
-                        for (j = 0; j < 4; j++) { // tile col
+                        for (let j = 0; j < 4; j++) { // tile col
                             draw_setfb(page_xoff + j * 8 + l * block_spacing, page_yoff + i * 8 + k * block_spacing);
                             draw_tile(block[i * 4 + j]);
                         }

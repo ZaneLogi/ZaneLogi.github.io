@@ -1,10 +1,16 @@
 "use strict"
 
 const e_rick_context = {
+    /*
+     * public vars
+    */
     e_rick_stop_x: 0,
     e_rick_stop_y: 0,
     e_rick_state: 0,
 
+    /*
+     * local vars
+     */
     scrawl: 0,
     trigger: false,
     offsx: 0,
@@ -15,6 +21,9 @@ const e_rick_context = {
     save_x: 0,
     save_y: 0,
 };
+
+const E_RICK_NO = 1;
+const E_RICK_ENT = ent_ents[E_RICK_NO];
 
 const E_RICK_STSTOP     = 0x01;
 const E_RICK_STSHOOT    = 0x02;
@@ -29,3 +38,40 @@ function E_RICK_STRST(X) { e_rick_context.e_rick_state &= ~X; }
 function E_RICK_STTST(X) { return e_rick_context.e_rick_state & X; }
 
 
+
+
+
+
+
+
+
+
+
+
+
+/*
+ * Save status
+ *
+ * ASM part of 0x0BBB
+ */
+function e_rick_save() {
+	e_rick_context.save_x = E_RICK_ENT.x;
+	e_rick_context.save_y = E_RICK_ENT.y;
+	e_rick_context.save_crawl = E_RICK_STTST(E_RICK_STCRAWL);
+}
+
+
+/*
+ * Restore status
+ *
+ * ASM part of 0x0BDC
+ */
+function e_rick_restore() {
+	E_RICK_ENT.x = e_rick_context.save_x;
+	E_RICK_ENT.y = e_rick_context.save_y;
+	E_RICK_ENT.front = false;
+	if (e_rick_context.save_crawl)
+		E_RICK_STSET(E_RICK_STCRAWL);
+	else
+		E_RICK_STRST(E_RICK_STCRAWL);
+}
