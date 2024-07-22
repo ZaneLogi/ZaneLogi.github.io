@@ -62,7 +62,7 @@ const game_context = {
 
 const game = {
     frames: 0,
-    game_period: 20,
+    game_period: 20, // default: 75
     game_state: INIT_GAME,
     game_waitevt: false,
     isave_frow: 0,
@@ -85,6 +85,7 @@ game.onload = function() {
 game.update_game_period = function(period) {
     this.game_period = period;
     this.msPrev = window.performance.now();
+    this.frames = 0;
 };
 
 game.run = function() {
@@ -206,10 +207,12 @@ game.do_frame = function() {
 		    return;
 
         case PLAY0:
+            // handle the actions of entities
             this.play0();
             break;
 
         case PLAY1:
+            // handle the screen PAUSE
             if (control.control_status & CONTROL_PAUSE) {
                 //syssnd_pause(TRUE, FALSE);
                 this.game_waitevt = true;
@@ -220,6 +223,7 @@ game.do_frame = function() {
             break;
 
         case PLAY2:
+            // handle the dead of Rick and the map chaining
             if (E_RICK_STTST(E_RICK_STDEAD)) {  /* rick is dead */
                 if (game_context.game_cheat1 || --game_context.game_lives) {
                     this.game_state = RESTART;
@@ -234,6 +238,8 @@ game.do_frame = function() {
             break;
 
         case PLAY3:
+            // handle to draw the screen including entitis, status
+            // check the map scrolling up or down
             this.play3();
             return;
 

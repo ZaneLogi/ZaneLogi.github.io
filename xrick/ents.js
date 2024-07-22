@@ -2,6 +2,13 @@
 
 const ENT_ENTSNUM           = 0x0c;
 
+/*
+ * flags for ent_ents[e].n  ("yes" when set)
+ *
+ * ENT_LETHAL: is entity lethal?
+ */
+const ENT_LETHAL            = 0x80;
+
 const ENT_FLG_ONCE          = 0x01;
 const ENT_FLG_STOPRICK      = 0x02;
 const ENT_FLG_LETHALR       = 0x04;
@@ -81,8 +88,8 @@ function ent_creat1(e)
     for (e[0] = 0x04; e[0] < 0x09; e[0]++)
         if (ent_ents[e[0]].n == 0) {  /* if slot available, use it */
             ent_ents[e[0]].c1 = 0;
-        return true;
-    }
+            return true;
+        }
 
     return false;
 }
@@ -128,18 +135,152 @@ function ent_creat2(e, m)
  * lrow: last visible row of the map -- absolute map coordinate
  */
 function ent_actvis(frow, lrow) {
+    const game_submap = game_context.game_submap;
+    const map_frow = map_context.map_frow;
+    let e = 0;
 
+    /*
+	* go through the list and find the first mark that
+	* is visible, i.e. which has a row greater than the
+	* first row (marks being ordered by row number).
+	*/
+    let  m = 0;
+	for (m = map_submaps[game_submap].mark;
+		map_marks[m].row != 0xff && map_marks[m].row < frow;
+		m++);
+
+	if (map_marks[m].row == 0xff)  /* none found */
+		return;
+
+    /*
+	* go through the list and process all marks that are
+	* visible, i.e. which have a row lower than the last
+	* row (marks still being ordered by row number).
+	*/
+	for (;
+		map_marks[m].row != 0xff && map_marks[m].row < lrow;
+		m++) {
+
+		/* ignore marks that are not active */
+		if (map_marks[m].ent & MAP_MARK_NACT)
+			continue;
+
+        /*
+		 * allocate a slot to the new entity
+		 *
+		 * slot type
+		 *  0   available for e_them (lethal to other e_them, and stops entities
+		 *      i.e. entities can't move over them. E.g. moving blocks. But they
+		 *      can move over entities and kill them!).
+		 *  1   xrick
+		 *  2   bullet
+		 *  3   bomb
+		 * 4-8  available for e_them, e_box, e_bonus or e_sbonus (lethal to
+		 *      other e_them, identified by their number being >= 0x10)
+		 * 9-C  available for e_them, e_box, e_bonus or e_sbonus (not lethal to
+		 *      other e_them, identified by their number being < 0x10)
+		 *
+		 * the type of an entity is determined by its .n as detailed below.
+		 *
+		 * 1               xrick
+		 * 2               bullet
+		 * 3               bomb
+		 * 4, 7, a, d      e_them, type 1a
+		 * 5, 8, b, e      e_them, type 1b
+		 * 6, 9, c, f      e_them, type 2
+		 * 10, 11          box
+		 * 12, 13, 14, 15  bonus
+		 * 16, 17          speed bonus
+		 * >17             e_them, type 3
+		 * 47              zombie
+		 */
+        if (!(map_marks[m].flags & ENT_FLG_STOPRICK)) {
+			if (map_marks[m].ent >= 0x10) {
+				/* boxes, bonuses and type 3 e_them go to slot 4-8 */
+				/* (c1 set to 0 -> all type 3 e_them are sleeping) */
+                let r = [0];
+				if (!ent_creat1(r)) continue;
+                e = r[0];
+			}
+			else {
+				/* type 1 and 2 e_them go to slot 9-c */
+				/* (c1 set to 2) */
+                let r = [0]
+				if (!ent_creat2(r, m)) continue;
+                e = r[0];
+			}
+		}
+		else {
+			/* entities stopping rick (e.g. blocks) go to slot 0 */
+			if (ent_ents[0].n) continue;
+			e = 0;
+			ent_ents[0].c1 = 0;
+		}
+
+        /*
+         * initialize the entity
+         */
+        ent_ents[e].mark = m;
+        ent_ents[e].flags = map_marks[m].flags;
+        ent_ents[e].n = map_marks[m].ent;
+
+        /*
+         * if entity is to be already running (i.e. not asleep and waiting
+         * for some trigger to move), then use LETHALR i.e. restart flag, right
+         * from the beginning
+         */
+        if (ent_ents[e].flags & ENT_FLG_LETHALR)
+            ent_ents[e].n |= ENT_LETHAL;
+  
+        ent_ents[e].x = map_marks[m].xy & 0xf8;
+
+        let y = (map_marks[m].xy & 0x07) + (map_marks[m].row & 0xf8) - map_frow;
+        y <<= 3;
+        if (!(ent_ents[e].flags & ENT_FLG_STOPRICK))
+            y += 3;
+        ent_ents[e].y = y;
+
+        ent_ents[e].xsave = ent_ents[e].x;
+        ent_ents[e].ysave = ent_ents[e].y;
+
+        /*ent_ents[e].w0C = 0;*/  /* in ASM code but never used */
+
+        ent_ents[e].w = ent_entdata[map_marks[m].ent].w;
+        ent_ents[e].h = ent_entdata[map_marks[m].ent].h;
+        ent_ents[e].sprbase = ent_entdata[map_marks[m].ent].spr;
+        ent_ents[e].sprite = ent_entdata[map_marks[m].ent].spr;
+        ent_ents[e].step_no_i = ent_entdata[map_marks[m].ent].sni;
+        ent_ents[e].trigsnd = ent_entdata[map_marks[m].ent].snd;
+
+        /*
+         * FIXME what is this? when all trigger flags are up, then
+         * use .sni for sprbase. Why? What is the point? (This is
+         * for type 1 and 2 e_them, ...)
+         *
+         * This also means that as long as sprite has not been
+         * recalculated, a wrong value is used. This is normal, see
+         * what happens to the falling guy on the right on submap 3:
+         * it changes when hitting the ground.
+         */
+        const ENT_FLG_TRIGGERS = (ENT_FLG_TRIGBOMB|ENT_FLG_TRIGBULLET|ENT_FLG_TRIGSTOP|ENT_FLG_TRIGRICK);
+        if ((ent_ents[e].flags & ENT_FLG_TRIGGERS) == ENT_FLG_TRIGGERS && e >= 0x09)
+            ent_ents[e].sprbase = (ent_entdata[map_marks[m].ent].sni & 0x00ff);
+
+        ent_ents[e].trig_x = map_marks[m].lt & 0xf8;
+        ent_ents[e].latency = (map_marks[m].lt & 0x07) << 5;  /* <<5 eq *32 */
+
+        ent_ents[e].trig_y = 3 + 8 * ((map_marks[m].row & 0xf8) - map_frow + (map_marks[m].lt & 0x07));
+
+        ent_ents[e].c2 = 0;
+        ent_ents[e].offsy = 0;
+        ent_ents[e].ylow = 0;
+
+        ent_ents[e].front = false;
+
+        console.log("create an entity at the slot %d in the 'map_marks' index %d", e, m);
+        console.log(ent_ents[e]);
+    }
 }
-
-
-function ent_action() {
-    
-}
-
-
-
-
-
 
 /*
  * Draw all entities onto the frame buffer.
@@ -242,9 +383,10 @@ function ent_action() {
     for (let i = 0; ent_ents[i].n != 0xff; i++) {
         if (ent_ents[i].n) {
             let k = ent_ents[i].n & 0x7f;
+            console.log("action %d, %d", i, k);
             if (k == 0x47)
 	            e_them_z_action(i);
-            else if (k >= 0x18)
+            else if (k >= 0x18) // 24
                 e_them_t3_action(i);
             else
 	            ent_actf[k](i);

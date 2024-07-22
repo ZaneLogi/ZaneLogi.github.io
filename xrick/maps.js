@@ -121,7 +121,7 @@ function map_chain() {
     let c = map_submaps[game_context.game_submap].connect;
     let t = 3;
 
-    console.log("xrick/maps: chain submap=%#04x frow=%#04x .connect=%#04x %s",
+    console.log("xrick/maps: chain submap=%d frow=%d .connect=%d %s",
         game_context.game_submap, map_context.map_frow, c,
         (game_context.game_dir == LEFT ? "-> left" : "-> right"));
 
@@ -140,9 +140,9 @@ function map_chain() {
     }
 
     /* got it */
-    console.log("xrick/maps: chain frow=%#04x y=%#06x",
+    console.log("xrick/maps: chain frow=%d y=%d",
 	    map_context.map_frow, ent_ents[1].y);
-    console.log("xrick/maps: chain connect=%#04x rowout=%#04x - ",
+    console.log("xrick/maps: chain connect=%d rowout=%d - ",
 	    c, map_connect[c].rowout);
 
     if (map_connect[c].submap == 0xff) {
@@ -152,13 +152,13 @@ function map_chain() {
     }
     else  {
         /* next submap */
-        console.log("chain to submap=%#04x rowin=%#04x",
+        console.log("chain to submap=%d rowin=%d",
             map_connect[c].submap, map_connect[c].rowin);
 
         map_context.map_frow = map_context.map_frow - map_connect[c].rowout + map_connect[c].rowin;
         game_context.game_submap = map_connect[c].submap;
 
-        console.log("xrick/maps: chain frow=%#04x",
+        console.log("xrick/maps: chain frow=%d",
             map_context.map_frow);
  
         return true;
