@@ -14,8 +14,8 @@ const e_rick_context = {
     scrawl: 0,
     trigger: false,
     offsx: 0,
-    ylow: 0,
-    offsy: 0,
+    ylow: 0,  // fixed-point number, scaling factor 2 ^ 8
+    offsy: 0, // fixed-point number, scaling factor 2 ^ 8
     seq: 0,
     save_crawl: 0,
     save_x: 0,
@@ -100,7 +100,7 @@ function e_rick_z_action() {
 	let i = (E_RICK_ENT.y << 8) + e_rick_context.offsy + e_rick_context.ylow;
 	E_RICK_ENT.y = i >> 8;
 	e_rick_context.offsy += 0x80;
-	e_rick_context.ylow = i;
+	e_rick_context.ylow = i & 0xff;
 
 	/* dead when out of screen */
 	if (E_RICK_ENT.y < 0 || E_RICK_ENT.y > 0x0140)
@@ -130,7 +130,7 @@ function e_rick_action2() {
 	*/
     const not_climbing = function() {
 	    E_RICK_STRST(E_RICK_STJUMP);
-	    /* calc y */
+	    /* calc y, fixed-point number, scaling factor 2 ^ 8 */
 	    i = (E_RICK_ENT.y << 8) + e_rick_context.offsy + e_rick_context.ylow;
 	    y = i >> 8;
 	    /* test environment */
@@ -160,15 +160,16 @@ function e_rick_action2() {
 	    }
 	    /* save */
 	    E_RICK_ENT.y = y;
-	    e_rick_context.ylow = i;
+	    e_rick_context.ylow = i & 0xff; // y fraction
 	    /* climb? */
 	    if ((env1[0] & MAP_EFLG_CLIMB) &&
 			(control.control_status & (CONTROL_UP|CONTROL_DOWN))) {
-		    e_rick_context.offsy = 0x0100;
+		    e_rick_context.offsy = 0x0100; // set speed = 1 pixel down
 		    E_RICK_STSET(E_RICK_STCLIMB);
 		    return true;
 	    }
-	    /* fall */
+
+	    /* fall, add the speed 0.5 pixels down, not over 8 pixels */
 	    e_rick_context.offsy += 0x0080;
 	    if (e_rick_context.offsy > 0x0800) {
 		    e_rick_context.offsy = 0x0800;
@@ -227,15 +228,15 @@ function e_rick_action2() {
         if (e_rick_context.offsy < 0) {
             /* not climbing + trying to go _up_ not possible -> hit the roof */
             E_RICK_STSET(E_RICK_STJUMP);  /* fall back to the ground */
-            E_RICK_ENT.y &= 0xF8;
-            e_rick_context.offsy = 0;
+            E_RICK_ENT.y &= 0xF8; // 8 pixels aligned
+            e_rick_context.offsy = 0; // set speed = 0
             e_rick_context.ylow = 0;
             return horiz();
         }
         /* else: not climbing + trying to go _down_ not possible -> standing */
         /* align to ground */
-        E_RICK_ENT.y &= 0xF8;
-        E_RICK_ENT.y |= 0x03;
+        E_RICK_ENT.y &= 0xF8; // 8 pixels aligned
+        E_RICK_ENT.y |= 0x03; // 21 pixels high, (24-21=3) aligned to ground
         e_rick_context.ylow = 0;
 
         /* standing on a super pad? */
@@ -247,7 +248,7 @@ function e_rick_action2() {
             return horiz();
         }
 
-        e_rick_context.offsy = 0x0100;  /* reset*/
+        e_rick_context.offsy = 0x0100;  /* reset to the speed 1 pixel down for gravity*/
 
         /* standing. firing ? */
         if (e_rick_context.scrawl || !(control.control_status & CONTROL_FIRE))
@@ -327,7 +328,7 @@ function e_rick_action2() {
                 E_RICK_STSET(E_RICK_STCLIMB);
                 return true;
             }
-            e_rick_context.offsy = -0x0580;  /* jump */
+            e_rick_context.offsy = -0x0580;  /* jump, speed = -5.5 pixels */
             e_rick_context.ylow = 0;
             // syssnd_play(WAV_JUMP, 1);
             return horiz();
@@ -425,6 +426,18 @@ function e_rick_action2() {
             e_rick_context.offsy = -0x0300;
         }
     };
+
+	// flow:
+	// +-- climing
+	// |
+	// +-- not climbing
+	//     +-- vertical move
+	//     |   +-- horizontal move
+	//     +-- not vertical move
+	//         +-- hroizontal move
+	//         +-- firing
+	//         +-- not firing
+	//             +-- horizontal move
 
     /* climbing? */
 	if (E_RICK_STTST(E_RICK_STCLIMB))

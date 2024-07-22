@@ -63,7 +63,7 @@ const game_context = {
 const game = {
     frames: 0,
     game_period: 75,
-    game_state: XRICK,
+    game_state: INIT_GAME,
     game_waitevt: false,
     isave_frow: 0,
 };
@@ -133,7 +133,7 @@ game.do_frame = function() {
 
         case INIT_GAME:
             this.init();
-            this.game_state = INTRO_MAIN;
+            this.game_state = INIT_BUFFER;
             break;
 
        case INTRO_MAIN:
