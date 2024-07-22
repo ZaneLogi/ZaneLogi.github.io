@@ -62,7 +62,7 @@ const game_context = {
 
 const game = {
     frames: 0,
-    game_period: 75,
+    game_period: 20,
     game_state: INIT_GAME,
     game_waitevt: false,
     isave_frow: 0,
@@ -208,6 +208,27 @@ game.do_frame = function() {
         case PLAY3:
             this.play3();
             return;
+
+
+        case SCROLL_UP:
+            switch (scroll_up()) {
+            case SCROLL_RUNNING:
+                return;
+            case SCROLL_DONE:
+                this.game_state = PLAY0;
+                break;
+            }
+            break;
+          
+        case SCROLL_DOWN:
+            switch (scroll_down()) {
+            case SCROLL_RUNNING:
+                return;
+            case SCROLL_DONE:
+                this.game_state = PLAY0;
+                break;
+            }
+            break;
 
 
 
