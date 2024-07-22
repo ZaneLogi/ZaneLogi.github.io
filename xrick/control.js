@@ -9,10 +9,9 @@ const CONTROL_END   = 0x40
 const CONTROL_EXIT  = 0x20
 const CONTROL_FIRE  = 0x10
 
-const control = new function() {
-    this.control_status = 0;
-    this.control_last = 0;
-    this.control_active = true;
+const control = {
+    control_status: 0,
+    control_last: 0,
 }
 
 control.onkeydown = function(e) {

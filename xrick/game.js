@@ -174,6 +174,37 @@ game.do_frame = function() {
             this.game_state = PLAY0;
             return;
 
+        case PAUSE_PRESSED1:
+            // show the screen pause text
+            screen_pause(true);
+            this.game_state = PAUSE_PRESSED1B;
+            break;
+
+        case PAUSE_PRESSED1B:
+            // wait the release of the key PAUSE
+            if (control.control_status & CONTROL_PAUSE)
+                return;
+            this.game_state = PAUSED;
+            break;
+
+        case PAUSED:
+            // wait the press of the key PAUSE to resume the game
+            if (control.control_status & CONTROL_PAUSE)
+                this.game_state = PAUSE_PRESSED2;
+            if (control.control_status & CONTROL_EXIT)
+                this.game_state = EXIT;
+            return;
+
+        case PAUSE_PRESSED2:
+            // wait the release of the key PAUSE to resume the game
+			if (!(control.control_status & CONTROL_PAUSE)) {
+				this.game_waitevt = false;
+				screen_pause(false);
+				//syssnd_pause(FALSE, FALSE);
+				this.game_state = PLAY2;
+			}
+		    return;
+
         case PLAY0:
             this.play0();
             break;
@@ -183,12 +214,6 @@ game.do_frame = function() {
                 //syssnd_pause(TRUE, FALSE);
                 this.game_waitevt = true;
                 this.game_state = PAUSE_PRESSED1;
-            }
-            else if (control.control_active == false) {
-                //syssnd_pause(TRUE, FALSE);
-                this.game_waitevt = true;
-                //this.screen_pause(TRUE);
-                this.game_state = PAUSED;
             }
             else
                 this.game_state = PLAY2;
