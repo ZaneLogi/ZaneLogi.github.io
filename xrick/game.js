@@ -66,6 +66,9 @@ const game = {
     game_state: INIT_GAME,
     game_waitevt: false,
     isave_frow: 0,
+
+    sysarg_args_map: 0,
+    sysarg_args_submap: 0,
 };
 
 game.onload = function() {
@@ -209,6 +212,55 @@ game.do_frame = function() {
             this.play3();
             return;
 
+        case CHAIN_SUBMAP:
+            if (map_chain())
+                this.game_state = CHAIN_END;
+            else {
+                game_context.game_bullets = 0x06;
+                game_context.game_bombs = 0x06;
+                game_context.game_map++; // next map
+          
+                if (game_context.game_map == 0x04) {
+                    /* reached end of game */
+                    /* FIXME @292?*/
+                }
+          
+                this.game_state = CHAIN_MAP;
+            }
+            break;
+        
+        case CHAIN_MAP:
+            switch (screen_introMap()) {
+            case SCREEN_RUNNING:
+                return;
+            case SCREEN_DONE:
+                if (game_context.game_map >= 0x04) {  /* reached end of game */
+                    this.sysarg_args_map = 0;
+                    this.sysarg_args_submap = 0;
+                    this.game_state = GAMEOVER;
+                }
+                else {  /* initialize game */
+                    E_RICK_ENT.x = map_maps[game_context.game_map].x;
+                    E_RICK_ENT.y = map_maps[game_context.game_map].y;
+                    map_context.map_frow = map_maps[game_context.game_map].row;
+                    game_context.game_submap = map_maps[game_context.game_map].submap;
+                    this.game_state = CHAIN_END;
+                }
+                break;
+            case SCREEN_EXIT:
+                this.game_state = EXIT;
+                return;
+            }
+            break;
+
+        case CHAIN_END:
+            map_init();                     /* initialize the map */
+            this.isave();                   /* save data in case of a restart */
+            ent_clprev();                   /* cleanup entities */
+            draw_map();                     /* draw the map onto the buffer */
+            draw_drawStatus();              /* draw the status bar onto the buffer */
+            this.game_state = PLAY3;
+            return;
 
         case SCROLL_UP:
             switch (scroll_up()) {
@@ -282,22 +334,22 @@ game.init = function() {
     game_context.game_bullets = 6;
     game_context.game_score = 0;
 
-    const sysarg_args_map = 0;
-    const sysarg_args_submap = 0;
+    this.sysarg_args_map = 0;
+    this.sysarg_args_submap = 0;
 
     // initialize
     //  game_context.game_map
     //  game_context.game_submap
     //  map_context.ma_frow
-    game_context.game_map = sysarg_args_map;
+    game_context.game_map = this.sysarg_args_map;
 
-    if (sysarg_args_submap == 0) {
+    if (this.sysarg_args_submap == 0) {
         game_context.game_submap = map_maps[game_context.game_map].submap;
         map_context.map_frow = map_maps[game_context.game_map].row;
     }
     else {
         /* dirty hack to determine frow */
-        game_context.game_submap = sysarg_args_submap;
+        game_context.game_submap = this.sysarg_args_submap;
         let i = 0;
         while (i < MAP_NBR_CONNECT &&
            (map_connect[i].submap != game_context.game_submap ||

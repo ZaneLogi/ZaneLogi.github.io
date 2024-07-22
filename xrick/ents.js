@@ -189,12 +189,14 @@ function ent_draw() {
     }
 }
 
-
-
-
-
-
-
+/*
+ * Clear entities previous state
+ *
+ */
+function ent_clprev() {
+    for (let i = 0; ent_ents[i].n != 0xff; i++)
+        ent_ents[i].prev_n = 0;
+}
 
 /*
  * Table containing entity action function pointers.

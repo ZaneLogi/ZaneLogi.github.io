@@ -463,7 +463,7 @@ function e_rick_action(e) {
 	 * set sprite
 	 */
 	if (E_RICK_STTST(E_RICK_STSTOP)) {
-		E_RICK_ENT.sprite = (game_dir ? 0x17 : 0x0B);
+		E_RICK_ENT.sprite = (game_context.game_dir ? 0x17 : 0x0B);
 
 		if (!e_rick_context.stopped) {
 			//syssnd_play(WAV_STICK, 1);
@@ -475,14 +475,14 @@ function e_rick_action(e) {
 	e_rick_context.stopped = false;
 
 	if (E_RICK_STTST(E_RICK_STSHOOT)) {
-		E_RICK_ENT.sprite = (game_dir ? 0x16 : 0x0A);
+		E_RICK_ENT.sprite = (game_context.game_dir ? 0x16 : 0x0A);
 		return;
 	}
 
 	if (E_RICK_STTST(E_RICK_STCLIMB)) {
 		E_RICK_ENT.sprite = (((E_RICK_ENT.x ^ E_RICK_ENT.y) & 0x04) ? 0x18 : 0x0c);
 
-		e_rick_context.seq = (e_rick_c.seq + 1) & 0x03;
+		e_rick_context.seq = (e_rick_context.seq + 1) & 0x03;
 		//if (e_rick_context.seq == 0) syssnd_play(WAV_WALK, 1);
 
 		return;
