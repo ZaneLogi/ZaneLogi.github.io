@@ -383,7 +383,6 @@ function ent_action() {
     for (let i = 0; ent_ents[i].n != 0xff; i++) {
         if (ent_ents[i].n) {
             let k = ent_ents[i].n & 0x7f;
-            console.log("action %d, %d", i, k);
             if (k == 0x47)
 	            e_them_z_action(i);
             else if (k >= 0x18) // 24
