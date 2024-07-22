@@ -282,9 +282,10 @@ game.do_frame = function() {
             }
             break;
 
-
-
-
+        case RESTART:
+            this.restart();
+            this.game_state = PLAY0;
+            return;
 
         case GAMEOVER:
             switch (screen_gameover.do_frame()) {
@@ -422,6 +423,22 @@ game.play3 = function() {
     }
 
     this.game_state = PLAY0;
+};
+
+game.restart = function() {
+    E_RICK_STRST(E_RICK_STDEAD|E_RICK_STZOMBIE);
+
+    game_context.game_bullets = 6;
+    game_context.game_bombs = 6;
+  
+    E_RICK_ENT.n = 1;
+  
+    this.irestore();
+    map_init();
+    this.isave();
+    ent_clprev();
+    draw_map();
+    draw_drawStatus();
 };
 
 window.onload = () => game.onload();
