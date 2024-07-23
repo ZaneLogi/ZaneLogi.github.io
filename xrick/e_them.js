@@ -189,13 +189,13 @@ function e_them_t3_action2(e) {
             if (ent_ents[e].flags & ENT_FLG_TRIGSTOP) {  /* reacts to rick "stop" */
                 /* wake up if triggered by rick "stop" */
                 if (E_RICK_STTST(E_RICK_STSTOP) &&
-                    u_trigbox(e, e_rick_stop_x, e_rick_stop_y))
+                    u_trigbox(e, e_rick_context.e_rick_stop_x, e_rick_context.e_rick_stop_y))
                     return wakeup();
             }
 
             if (ent_ents[e].flags & ENT_FLG_TRIGBULLET) {  /* reacts to bullets */
                 /* wake up if triggered by bullet */
-                if (E_BULLET_ENT.n && u_trigbox(e, e_bullet_xc, e_bullet_yc)) {
+                if (E_BULLET_ENT.n && u_trigbox(e, e_bullet_context.e_bullet_xc, e_bullet_context.e_bullet_yc)) {
                     E_BULLET_ENT.n = 0;
                     return wakeup();
                 }
@@ -203,7 +203,7 @@ function e_them_t3_action2(e) {
         
             if (ent_ents[e].flags & ENT_FLG_TRIGBOMB) {  /* reacts to bombs */
                 /* wake up if triggered by bomb */
-                if (e_bomb_context.e_bomb_lethal && u_trigbox(e, e_bomb_xc, e_bomb_yc))
+                if (e_bomb_context.e_bomb_lethal && u_trigbox(e, e_bomb_context.e_bomb_xc, e_bomb_context.e_bomb_yc))
                     return wakeup();
             }
 
