@@ -55,9 +55,9 @@ const game_context = {
     game_dir: 0,
     game_chsm: false,
 
-    game_cheat1: false,
-    game_cheat2: false,
-    game_cheat3: false,
+    game_cheat1: false, // infinite lives, bullets, bombs
+    game_cheat2: false, // invincible
+    game_cheat3: false, // draw entities with their rectangles
 };
 
 const game = {
@@ -69,6 +69,10 @@ const game = {
 
     sysarg_args_map: 0,
     sysarg_args_submap: 0,
+
+    cheat1_pressed: false,
+    cheat2_pressed: false,
+    cheat3_pressed: false,
 };
 
 game.onload = function() {
@@ -102,9 +106,50 @@ game.run = function() {
     this.msPrev = msNow - excessTime;
     // TODO: for game_waitevt
     this.do_frame();
+
+    this.handle_cheat1();
+    this.handle_cheat2();
+    this.handle_cheat3();
+
     framebuffer.updateCanvas();
     this.frames++;
 };
+
+game.handle_cheat1 = function() {
+    if (this.cheat1_pressed) {
+        if (!(control.control_status & CONTROL_CHEAT1))
+            this.cheat1_pressed = false;
+    }
+    else if (control.control_status & CONTROL_CHEAT1) {
+        this.cheat1_pressed = true;
+        game_context.game_cheat1 = !game_context.game_cheat1;
+        draw_infos();
+    }
+}
+
+game.handle_cheat2 = function() {
+    if (this.cheat2_pressed) {
+        if (!(control.control_status & CONTROL_CHEAT2))
+            this.cheat2_pressed = false;
+    }
+    else if (control.control_status & CONTROL_CHEAT2) {
+        this.cheat2_pressed = true;
+        game_context.game_cheat2 = !game_context.game_cheat2;
+        draw_infos();
+    }
+}
+
+game.handle_cheat3 = function() {
+    if (this.cheat3_pressed) {
+        if (!(control.control_status & CONTROL_CHEAT3))
+            this.cheat3_pressed = false;
+    }
+    else if (control.control_status & CONTROL_CHEAT3) {
+        this.cheat3_pressed = true;
+        game_context.game_cheat3 = !game_context.game_cheat3;
+        draw_infos();
+    }
+}
 
 game.do_frame = function() {
     while (true) {
@@ -261,7 +306,7 @@ game.do_frame = function() {
             break;
         
         case CHAIN_MAP:
-            switch (screen_introMap()) {
+            switch (screen_introMap.do_frame()) {
             case SCREEN_RUNNING:
                 return;
             case SCREEN_DONE:

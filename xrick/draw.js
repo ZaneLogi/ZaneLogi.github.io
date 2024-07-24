@@ -220,6 +220,8 @@ function draw_sprite2(number, x, y, front) {
     let g = 0;
     draw_setfb(x0 - DRAW_XYMAP_SCRLEFT, y0 - DRAW_XYMAP_SCRTOP + 8);
 
+    let tmp = new Uint8ClampedArray(4); 
+
     for (let r = 0; r < 0x15; r++) {
         if (r >= h || y + r < y0) continue;
 
@@ -241,12 +243,13 @@ function draw_sprite2(number, x, y, front) {
                     continue;
 
                 const colorIndex = d & 0x0F;
-                if (colorIndex) {
-                    if (game_context.game_cheat3)
-                        colorIndex |= 0x10;
-                    data.set(palette.colors[colorIndex],
-                        draw_context.fb + i);
-                }
+                if (colorIndex) data.set(palette.colors[colorIndex], draw_context.fb + i);
+
+                if (game_context.game_cheat3) {
+                    // top / bottom / left / right lines
+                    if (r == 0 || r == 0x14 || c == 0x1f || c == 0x00)
+                        data.set([0xff, 0x00, 0x00, 0xff], draw_context.fb + i);
+                 }
             }
         };
 

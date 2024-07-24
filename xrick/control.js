@@ -9,6 +9,10 @@ const CONTROL_END   = 0x40
 const CONTROL_EXIT  = 0x20
 const CONTROL_FIRE  = 0x10
 
+const CONTROL_CHEAT1 = 0x100
+const CONTROL_CHEAT2 = 0x200
+const CONTROL_CHEAT3 = 0x400
+
 const control = {
     control_status: 0,
     control_last: 0,
@@ -48,6 +52,15 @@ control.onkeydown = function(e) {
         this.SETBIT(CONTROL_EXIT);
         this.control_last = CONTROL_EXIT;
         break;
+    case 49: // '1'
+        this.SETBIT(CONTROL_CHEAT1);
+        break;
+    case 50: // '2'
+        this.SETBIT(CONTROL_CHEAT2);
+        break;
+    case 51: // '3'
+        this.SETBIT(CONTROL_CHEAT3);
+        break;
     }
 }
 
@@ -84,6 +97,15 @@ control.onkeyup = function(e) {
     case 27: // ESC key
         this.CLRBIT(CONTROL_EXIT);
         this.control_last = CONTROL_EXIT;
+        break;
+    case 49: // '1'
+        this.CLRBIT(CONTROL_CHEAT1);
+        break;
+    case 50: // '2'
+        this.CLRBIT(CONTROL_CHEAT2);
+        break;
+    case 51: // '3'
+        this.CLRBIT(CONTROL_CHEAT3);
         break;
     }
 }
