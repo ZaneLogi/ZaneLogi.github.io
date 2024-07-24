@@ -1,21 +1,234 @@
 "use strict"
 
 const e_them_context = {
-    e_them_rndseed: 0,
+    e_them_rndseed: 0,  // U32
+
+    e_them_rndnbr: 0, // U16
 };
 
+const TYPE_1A = 0x00;
+const TYPE_1B = 0xff;
+
+/*
+ * Check if entity boxtests with a lethal e_them i.e. something lethal
+ * in slot 0 and 4 to 8.
+ *
+ * ASM 122E
+ *
+ * e: entity slot number.
+ * ret: TRUE/boxtests, FALSE/not
+ */
+function u_themtest(e) {
+    if ((ent_ents[0].n & ENT_LETHAL) && u_boxtest(e, 0))
+        return true;
+
+    for (let i = 4; i < 9; i++)
+        if ((ent_ents[i].n & ENT_LETHAL) && u_boxtest(e, i))
+            return true;
+
+    return false;
+}
+
+/*
+ * Go zombie
+ *
+ * ASM 237B
+ */
+function e_them_gozombie(e) {
+    const set_offsx = function(v) { ent_ents[e].c1 = v; };
+
+    ent_ents[e].n = 0x47;  /* zombie entity */
+    ent_ents[e].front = true;
+    ent_ents[e].offsy = -0x0400;
+
+    //syssnd_play(WAV_DIE, 1);
+
+    game_context.game_score += 50;
+    if (ent_ents[e].flags & ENT_FLG_ONCE) {
+        /* make sure entity won't be activated again */
+        map_marks[ent_ents[e].mark].ent |= MAP_MARK_NACT;
+    }
+
+    set_offsx(ent_ents[e].x >= 0x80 ? -0x02 : 0x02);
+}
+
+/*
+ * Action sub-function for e_them _t1a and _t1b
+ *
+ * Those two types move horizontally, and fall if they have to.
+ * Type 1a moves horizontally over a given distance and then
+ * u-turns and repeats; type 1b is more subtle as it does u-turns
+ * in order to move horizontally towards rick.
+ *
+ * ASM 2242
+ */
+function e_them_t1_action2(e, type)
+{
+    const get_offsx = function() { return ent_ents[e].c1; };
+    const set_offsx = function(v) { ent_ents[e].c1 = v; };
+    const get_step_count = function() { return ent_ents[e].c2; };
+    const set_step_count = function(v) { ent_ents[e].c2 = v; };
+    const add_step_count = function(v) { ent_ents[e].c2 += v; };
+
+    let env0 = [0], env1 = [0];
+
+    /* by default, try vertical move. calculate new y */
+    let i = (ent_ents[e].y << 8) + ent_ents[e].offsy + ent_ents[e].ylow;
+    let y = i >> 8;
+
+    /* deactivate if outside vertical boundaries */
+    /* no need to test zero since e_them _t1a/b don't go up */
+    /* FIXME what if they got scrolled out ? */
+    if (y > 0x140) {
+        ent_ents[e].n = 0;
+        return;
+    }
+
+    /* test environment */
+    u_envtest(ent_ents[e].x, y, false, env0, env1);
+
+    if (!(env1[0] & (MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP))) {
+        /* vertical move possible: falling */
+        if (env1[0] & MAP_EFLG_LETHAL) {
+            /* lethal entities kill e_them */
+            e_them_gozombie(e);
+            return;
+        }
+        /* save, cleanup and return */
+        ent_ents[e].y = y;
+        ent_ents[e].ylow = i & 0xff;
+        ent_ents[e].offsy += 0x0080;
+        if (ent_ents[e].offsy > 0x0800)
+            ent_ents[e].offsy = 0x0800;
+        return;
+    }
+
+    /* vertical move not possible. calculate new sprite */
+    ent_ents[e].sprite = ent_ents[e].sprbase
+        + ent_sprseq[(ent_ents[e].x & 0x1c) >> 3]
+        + (get_offsx() < 0 ? 0x03 : 0x00);
+
+    /* reset offsy */
+    ent_ents[e].offsy = 0x0080;
+
+    /* align to ground */
+    ent_ents[e].y &= 0xfff8;
+    ent_ents[e].y |= 0x0003;
+
+    /* latency: if not zero then decrease and return */
+    if (ent_ents[e].latency > 0) {
+        ent_ents[e].latency--;
+        return;
+    }
+
+    /* horizontal move. calculate new x */
+    if (get_offsx() == 0)  /* not supposed to move -> don't */
+        return;
+
+    let x = ent_ents[e].x + get_offsx();
+    if (ent_ents[e].x < 0 || ent_ents[e].x > 0xe8) {
+        /*  U-turn and return if reaching horizontal boundaries */
+        set_step_count(0);
+        set_offsx(-get_offsx());
+        return;
+    }
+
+    /* test environment */
+    u_envtest(x, ent_ents[e].y, false, env0, env1);
+
+    if (env1[0] & (MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP)) {
+        /* horizontal move not possible: u-turn and return */
+        set_step_count(0);
+        set_offsx(-get_offsx());
+        return;
+    }
+
+    /* horizontal move possible */
+    if (env1[0] & MAP_EFLG_LETHAL) {
+        /* lethal entities kill e_them */
+        e_them_gozombie(e);
+        return;
+    }
+
+    /* save */
+    ent_ents[e].x = x;
+
+    /* depending on type, */
+    if (type == TYPE_1B) {
+        /* set direction to move horizontally towards rick */
+        if ((ent_ents[e].x & 0x1e) != 0x10)  /* prevents too frequent u-turns */
+            return;
+        set_offsx((ent_ents[e].x < E_RICK_ENT.x) ? 0x02 : -0x02);
+        return;
+    }
+    else {
+        /* set direction according to step counter */
+        add_step_count(1);
+        /* FIXME why trig_x (b16) ?? */
+        if ((ent_ents[e].trig_x >> 1) > get_step_count())
+            return;
+    }
+
+    /* type is 1A and step counter reached its limit: u-turn */
+    set_step_count(0);
+    set_offsx(-get_offsx());
+}
+
+/*
+ * ASM 21CF
+ */
+function e_them_t1_action(e, type) {
+    e_them_t1_action2(e, type);
+
+    /* lethal entities kill them */
+    if (u_themtest(e)) {
+        e_them_gozombie(e);
+        return;
+    }
+
+    /* bullet kills them */
+    if (E_BULLET_ENT.n &&
+        u_fboxtest(e, E_BULLET_ENT.x + (e_bullet_context.e_bullet_offsx < 0 ? 0 : 0x18),
+		E_BULLET_ENT.y)) {
+        E_BULLET_ENT.n = 0;
+        e_them_gozombie(e);
+        return;
+    }
+
+    /* bomb kills them */
+    if (e_bomb_context.e_bomb_lethal && e_bomb_hit(e)) {
+        e_them_gozombie(e);
+        return;
+    }
+
+    /* rick stops them */
+    if (E_RICK_STTST(E_RICK_STSTOP) &&
+        u_fboxtest(e, e_rick_context.e_rick_stop_x, e_rick_context.e_rick_stop_y))
+    ent_ents[e].latency = 0x14;
+
+    /* they kill rick */
+    if (e_rick_boxtest(e))
+        e_rick_gozombie();
+}
 
 
+/*
+ * Action function for e_them _t1a type (stays within boundaries)
+ *
+ * ASM 2452
+ */
+function e_them_t1a_action(e) {
+    e_them_t1_action(e, TYPE_1A);
+}
 
-
-
-
-
-
-
-
-
-
+/*
+ * Action function for e_them _t1b type (runs for rick)
+ *
+ * ASM 21CA
+ */
+function e_them_t1b_action(e) {
+    e_them_t1_action(e, TYPE_1B);
+}
 
 /*
  * Action function for e_them _z (zombie) type
@@ -23,42 +236,45 @@ const e_them_context = {
  * ASM 23B8
  */
 function e_them_z_action(e) {
+    const get_offsx = function() { return ent_ents[e].c1; };
 
+    /* calc new sprite */
+    ent_ents[e].sprite = ent_ents[e].sprbase
+        + ((ent_ents[e].x & 0x04) ? 0x07 : 0x06);
+
+    /* calc new y */
+    let i = (ent_ents[e].y << 8) + ent_ents[e].offsy + ent_ents[e].ylow;
+
+    /* deactivate if out of vertical boundaries */
+    if (ent_ents[e].y < 0 || ent_ents[e].y > 0x0140) {
+        ent_ents[e].n = 0;
+        return;
+    }
+
+    /* save */
+    ent_ents[e].offsy += 0x0080;
+    ent_ents[e].ylow = i & 0xff;
+    ent_ents[e].y = i >> 8;
+
+    /* calc new x */
+    ent_ents[e].x += get_offsx();
+
+    /* must stay within horizontal boundaries */
+    if (ent_ents[e].x < 0)
+        ent_ents[e].x = 0;
+    if (ent_ents[e].x > 0xe8)
+        ent_ents[e].x = 0xe8;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-function e_them_t1a_action(e) {
-
-}
-
-function e_them_t1b_action(e) {
-
+/*
+ * Action sub-function for e_them _t2.
+ *
+ * Must document what it does.
+ *
+ * ASM 2792
+ */
+function e_them_t2_action2(e)
+{
 }
 
 function e_them_t2_action(e) {
