@@ -43,6 +43,11 @@ const game_hscores = [
 const LEFT = 1;
 const RIGHT = 0;
 
+const GAME_PERIOD = 75;
+
+const GAME_BOMBS_INIT = 6;
+const GAME_BULLETS_INIT = 6;
+
 const game_context = {
     game_lives: 0,
     game_bombs: 0,
