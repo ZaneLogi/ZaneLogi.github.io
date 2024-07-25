@@ -2,6 +2,19 @@
 
 const SEQ_INIT = 0x0A;
 
+const get_box_cnt = function(e) {
+	return ent_ents[e].c1;
+}
+
+const set_box_cnt = function(e, v) {
+	ent_ents[e].c1 = v;
+}
+
+const add_box_cnt = function(e, v) {
+	ent_ents[e].c1 += v;
+	return ent_ents[e].c1;
+}
+
 function e_box_action(e) {
     const sp = [0x24, 0x25, 0x26, 0x27, 0x28];  /* explosion sprites sequence */
 
@@ -10,8 +23,8 @@ function e_box_action(e) {
 		 * box is lethal i.e. exploding
 		 * play sprites sequence then stop
 		 */
-		ent_ents[e].sprite = sp[ent_ents[e].cnt >> 1];
-		if (--ent_ents[e].cnt == 0) {
+		ent_ents[e].sprite = sp[get_box_cnt(e) >> 1];
+		if (add_box_cnt(e, -1) == 0) {
 			ent_ents[e].n = 0;
 			map_marks[ent_ents[e].mark].ent |= MAP_MARK_NACT;
 		}
@@ -51,7 +64,7 @@ function e_box_action(e) {
  * Explode when
  */
 function explode(e) {
-	ent_ents[e].cnt = SEQ_INIT;
+	set_box_cnt(e, SEQ_INIT);
 	ent_ents[e].n |= ENT_LETHAL;
 
 	//syssnd_play(WAV_EXPLODE, 1);
