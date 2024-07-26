@@ -275,10 +275,212 @@ function e_them_z_action(e) {
  */
 function e_them_t2_action2(e)
 {
+    const get_flgclmb = function() { return ent_ents[e].c1; };
+    const set_flgclmb = function(v) { ent_ents[e].c1 = v; };
+    const get_offsx = function() { return ent_ents[e].c2; };
+    const set_offsx = function(v) { ent_ents[e].c2 = v; };
+
+    let i;
+    let x, y, yd;
+    let env0 = [0], env1 = [0];
+
+    /* latency: if not zero then decrease */
+    if (ent_ents[e].latency > 0) ent_ents[e].latency--;
+
+    const climbing_not = function() {
+        /* NOT CLIMBING */
+        set_flgclmb(false);  /* not climbing */
+
+        /* calc new y (falling) and test environment */
+        i = (ent_ents[e].y << 8) + ent_ents[e].offsy + ent_ents[e].ylow;
+        y = i >> 8;
+        u_envtest(ent_ents[e].x, y, false, env0, env1);
+        if (!(env1[0] & (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP))) {
+            /*sys_printf("e_them_t2 y move OK\n");*/
+            /* can go there */
+            if (env1[0] & MAP_EFLG_LETHAL) {
+	            e_them_gozombie(e);
+	            return;
+            }
+            if (y > 0x0140) {  /* deactivate if outside */
+                ent_ents[e].n = 0;
+                return;
+            }
+            if (!(env1[0] & MAP_EFLG_VERT)) {
+                /* save */
+                ent_ents[e].y = y;
+                ent_ents[e].ylow = i & 0xff;
+                ent_ents[e].offsy += 0x0080;
+                if (ent_ents[e].offsy > 0x0800)
+                    ent_ents[e].offsy = 0x0800;
+                
+                return;
+            }
+            if (((ent_ents[e].x & 0x07) == 0x04) && (y < E_RICK_ENT.y)) {
+                /*sys_printf("e_them_t2 climbing00\n");*/
+                set_flgclmb(true);  /* climbing */
+                return;
+            }
+        }
+        /*sys_printf("e_them_t2 ymove nok or ...\n");*/
+        /* can't go there, or ... */
+        ent_ents[e].y = (ent_ents[e].y & 0xf8) | 0x03;  /* align to ground */
+        ent_ents[e].offsy = 0x0100;
+        if (ent_ents[e].latency != 0x00)
+            return;
+        if ((env1[0] & MAP_EFLG_CLIMB) &&
+	        ((ent_ents[e].x & 0x0e) == 0x04) &&
+	        (ent_ents[e].y > E_RICK_ENT.y)) {
+            /*sys_printf("e_them_t2 climbing01\n");*/
+            set_flgclmb(true);  /* climbing */
+            return;
+        }
+
+        /* calc new sprite */
+        ent_ents[e].sprite = ent_ents[e].sprbase +
+            ent_sprseq[(ent_ents[e].offsx < 0 ? 4 : 0) +
+            ((ent_ents[e].x & 0x0e) >> 3)];
+        /*sys_printf("e_them_t2 sprite %02x\n", ent_ents[e].sprite);*/
+
+        /* */
+        if (get_offsx() == 0)
+            set_offsx(2);
+        x = ent_ents[e].x + get_offsx();
+        /*sys_printf("e_them_t2 xmove x=%02x\n", x);*/
+        if (x < 0xe8) {
+            u_envtest(x, ent_ents[e].y, false, env0, env1);
+            if (!(env1[0] & (MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP))) {
+                ent_ents[e].x = x;
+                if ((x & 0x1e) != 0x08)
+                    return;
+
+                /*
+	             * Black Magic (tm)
+	             *
+	             * this is obviously some sort of randomizer to define a direction
+	             * for the entity. it is an exact copy of what the assembler code
+	             * does but I can't explain.
+	             */
+                const sl = e_them_context.e_them_rndseed & 0xffff;
+                const sh = (e_them_context.e_them_rndseed >> 16) & 0xffff;
+                const bx = e_them_context.e_them_rndnbr + sh + sl + 0x0d;
+	            const cx = sh;
+                const cl = cx & 0xff;
+                const ch = (cx >> 8) & 0xff;
+                let bl = bx & 0xff;
+                let bh = (bx >> 8) & 0xff;
+	            bl ^= ch;
+	            bl ^= cl;
+	            bl ^= bh;
+	            e_them_context.e_them_rndnbr = bl | (bh << 8);
+
+	            set_offsx((bl & 0x01) ? -0x02 : 0x02);
+
+	            /* back to normal */
+	            return;
+            }
+        }
+
+        /* U-turn */
+        /*sys_printf("e_them_t2 u-turn\n");*/
+        if (get_offsx() == 0)
+            set_offsx(2);
+        else
+            set_offsx(-get_offsx());
+    };
+
+    /* climbing? */
+    if (get_flgclmb() != true) return climbing_not();
+
+    /* CLIMBING */
+    /* latency: if not zero then return */
+    if (ent_ents[e].latency > 0) return;
+
+    /* calc new sprite */
+    ent_ents[e].sprite = ent_ents[e].sprbase + 0x08 +
+        (((ent_ents[e].x ^ ent_ents[e].y) & 0x04) ? 1 : 0);
+
+    const ymove = function() {
+        /* calc new y and test environment */
+        yd = ent_ents[e].y < E_RICK_ENT.y ? 0x02 : -0x02;
+        y = ent_ents[e].y + yd;
+        if (y < 0 || y > 0x0140) {
+            ent_ents[e].n = 0;
+            return;
+        }
+        u_envtest(ent_ents[e].x, y, false, env0, env1);
+        if (env1[0] & (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP)) {
+            if (yd < 0)
+	            return xmove();  /* can't go up */
+            else
+	            return climbing_not();  /* can't go down */
+        }
+        /* can move */
+        ent_ents[e].y = y;
+        if (env1[0] & (MAP_EFLG_VERT|MAP_EFLG_CLIMB))  /* still climbing */
+            return;
+
+        return climbing_not();
+    };
+
+    const xmove = function() {
+        /* calc new x and test environment */
+        set_offsx((ent_ents[e].x < E_RICK_ENT.x) ? 0x02 : -0x02);
+        x = ent_ents[e].x + get_offsx();
+        u_envtest(x, ent_ents[e].y, false, env0, env1);
+        if (env1[0] & (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP))
+            return;
+        if (env1[0] & MAP_EFLG_LETHAL) {
+            e_them_gozombie(e);
+            return;
+        }
+        ent_ents[e].x = x;
+        if (env1[0] & (MAP_EFLG_VERT|MAP_EFLG_CLIMB))  /* still climbing */
+            return;
+        
+        return climbing_not();  /* not climbing anymore */
+    }
+
+    /* reached rick's level? */
+    if ((ent_ents[e].y & 0xfe) != (E_RICK_ENT.y & 0xfe)) return ymove();
+
+    return xmove();
 }
 
 function e_them_t2_action(e) {
+    e_them_t2_action2(e);
 
+    /* they kill rick */
+    if (e_rick_boxtest(e))
+        e_rick_gozombie();
+
+    /* lethal entities kill them */
+    if (u_themtest(e)) {
+        e_them_gozombie(e);
+        return;
+    }
+
+    /* bullet kills them */
+    if (E_BULLET_ENT.n &&
+        u_fboxtest(e, E_BULLET_ENT.x
+            + (e_bullet_context.e_bullet_offsx < 0 ? 0x00 : 0x18),
+		    E_BULLET_ENT.y)) {
+        E_BULLET_ENT.n = 0;
+        e_them_gozombie(e);
+        return;
+    }
+
+    /* bomb kills them */
+    if (e_bomb_context.e_bomb_lethal && e_bomb_hit(e)) {
+        e_them_gozombie(e);
+        return;
+    }
+
+    /* rick stops them */
+    if (E_RICK_STTST(E_RICK_STSTOP) &&
+        u_fboxtest(e, e_rick_context.e_rick_stop_x,
+            e_rick_context.e_rick_stop_y))
+        ent_ents[e].latency = 0x14;
 }
 
 

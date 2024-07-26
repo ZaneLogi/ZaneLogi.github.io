@@ -48,7 +48,8 @@ function e_box_action(e) {
 			/* rick's stick: explode */
 			explode(e);
 		}
-		else if (E_BULLET_ENT.n && u_fboxtest(e, e_bullet_xc, e_bullet_yc)) {
+		else if (E_BULLET_ENT.n
+			&& u_fboxtest(e, e_bullet_context.e_bullet_xc, e_bullet_context.e_bullet_yc)) {
 			/* bullet: explode (and stop bullet) */
 			E_BULLET_ENT.n = 0;
 			explode(e);
