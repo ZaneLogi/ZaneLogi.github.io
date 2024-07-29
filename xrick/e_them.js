@@ -338,7 +338,7 @@ function e_them_t2_action2(e)
 
         /* calc new sprite */
         ent_ents[e].sprite = ent_ents[e].sprbase +
-            ent_sprseq[(ent_ents[e].offsx < 0 ? 4 : 0) +
+            ent_sprseq[(get_offsx() < 0 ? 4 : 0) +
             ((ent_ents[e].x & 0x0e) >> 3)];
         /*sys_printf("e_them_t2 sprite %02x\n", ent_ents[e].sprite);*/
 
@@ -368,11 +368,11 @@ function e_them_t2_action2(e)
                 const cl = cx & 0xff;
                 const ch = (cx >> 8) & 0xff;
                 let bl = bx & 0xff;
-                let bh = (bx >> 8) & 0xff;
+                const bh = (bx >> 8) & 0xff;
 	            bl ^= ch;
 	            bl ^= cl;
 	            bl ^= bh;
-	            e_them_context.e_them_rndnbr = bl | (bh << 8);
+	            e_them_context.e_them_rndnbr = (bl & 0xff) | (bh << 8);
 
 	            set_offsx((bl & 0x01) ? -0x02 : 0x02);
 
