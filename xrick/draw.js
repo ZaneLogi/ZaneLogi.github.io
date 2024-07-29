@@ -4,6 +4,7 @@ const draw_context = {
     draw_tllst: "\xFE",
     draw_tllst_index: 0,
     fb: 0,
+    fb8: 0,
     draw_tilesBank: 0,
 };
 
@@ -30,6 +31,7 @@ const TILES_RICK            = 0x03;
  */
 function draw_setfb(x, y) {
     draw_context.fb = framebuffer.getOffset(x, y);
+    draw_context.fb8 = framebuffer.u8buf_offsets[y] + x;
 }
 
 /*
@@ -88,9 +90,15 @@ function draw_tilesList() {
     const ypitch8 = framebuffer.ypitch * 8;
     let t = draw_context.fb;
 
+    const yp8 = framebuffer.width * 8;
+    let t8 = draw_context.fb8;
+
     while (draw_tilesSubList() != 0xFE) {  /* draw sub-list */
         t += ypitch8;  /* go down one tile i.e. 8 lines */
         draw_context.fb = t;
+
+        t8 += yp8;
+        draw_context.fb8 = t8;
     }
 }
 
@@ -146,6 +154,10 @@ function draw_tile(tileNumber) {
     const xtileBytes = 8 * xbytes;
     const xoff_start = xtileBytes - xbytes;
 
+    const data8 = framebuffer.u8buf;
+    let f8 = draw_context.fb8;
+    const yp8 = framebuffer.width;
+
     for (let i = 0; i < 8; i++) { /* for all 8 pixel lines */
         let x = tile[i];
         /*
@@ -153,14 +165,21 @@ function draw_tile(tileNumber) {
          * per pixel to frame buffer 32 bits per pixels
          */
         let xoff = xoff_start;
+        let xoff8 = 7;
         for (let k = 8; k--; x >>= 4) {
-            data.set(palette.colors[x & 0x0f], f + xoff);
+            const c = x & 0x0f;
+            data.set(palette.colors[c], f + xoff);
             xoff -= xbytes;
+
+            data8[f8 + xoff8] = c;
+            xoff8--;
         }
         f += ypitch;  /* next line */
+        f8 += yp8;
     }
 
     draw_context.fb += 8 * xbytes;
+    draw_context.fb8 += 8;
 }
 
 /*
@@ -180,22 +199,32 @@ function draw_sprite(number, x, y)
     const colbytes = 8 * xbytes;
     const xoff_start = colbytes - xbytes;
 
+    const data8 = framebuffer.u8buf;
+    const yp8 = framebuffer.width;
+
     draw_setfb(x, y);
     let g = 0;
     for (let i = 0; i < 0x15; i++) { /* rows */
         let f = draw_context.fb;
+        let f8 = draw_context.fb8;
         for (let j = 0; j < 4; j++) { /* cols */
             let d = sprite[g++];
             let xoff = xoff_start;
+            let xoff8 = 7;
             for (let k = 8; k--; d >>= 4) {
-	            if (d & 0x0F) {
-                    data.set(palette.colors[d & 0x0f], f + xoff);
+                const color = d & 0x0F;
+	            if (color) {
+                    data.set(palette.colors[color], f + xoff);
+                    data8[f8 + xoff8] = color;
                 }
                 xoff -= xbytes;
+                xoff8--;
             }
             f += colbytes;
+            f8 += 8;
         }
         draw_context.fb += ypitch;
+        draw_context.fb8 += yp8;
     }
 }
 
@@ -209,6 +238,9 @@ function draw_sprite2(number, x, y, front) {
     const ypitch = framebuffer.ypitch;
     const xbytes = framebuffer.xbytes;
 
+    const data8 = framebuffer.u8buf;
+    const yp8 = framebuffer.width;
+
     let rect = { x: x, y: y, width: 0x20, height: 0x15 };
     if (draw_clipms(rect))  /* return if not visible */
         return;
@@ -220,19 +252,18 @@ function draw_sprite2(number, x, y, front) {
     let g = 0;
     draw_setfb(x0 - DRAW_XYMAP_SCRLEFT, y0 - DRAW_XYMAP_SCRTOP + 8);
 
-    let tmp = new Uint8ClampedArray(4); 
-
     for (let r = 0; r < 0x15; r++) {
         if (r >= h || y + r < y0) continue;
 
         let i = 0x1f * xbytes;
+        let i8 = 31;
         let im = x - (x & 0xfff8);
         let flg = map_context.map_eflg[
             map_context.map_map[(y + r) >> 3][(x + 0x1f)>> 3]];
 
         let LOOP = function(N, C0, C1) {
             let d = sprites_data[number][g + N];
-            for (let c = C0; c >= C1; c--, i-=xbytes, d >>= 4, im--) {
+            for (let c = C0; c >= C1; c--, i-=xbytes, i8--, d >>= 4, im--) {
                 if (im == 0) {
                     flg = map_context.map_eflg[
                         map_context.map_map[(y + r) >> 3][(x + c) >> 3]];
@@ -243,13 +274,14 @@ function draw_sprite2(number, x, y, front) {
                     continue;
 
                 const colorIndex = d & 0x0F;
-                if (colorIndex) data.set(palette.colors[colorIndex], draw_context.fb + i);
-
+                if (colorIndex) {
+                    data.set(palette.colors[colorIndex], draw_context.fb + i);
+                    data8[draw_context.fb8+i8] = colorIndex;
+                }
                 if (game_context.game_cheat3) {
-                    // top / bottom / left / right lines
-                    if (r == 0 || r == 0x14 || c == 0x1f || c == 0x00)
-                        data.set([0xff, 0x00, 0x00, 0xff], draw_context.fb + i);
-                 }
+                    const new_color = data8[draw_context.fb8+i8] | 0x10;
+                    data.set(palette.colors[new_color], draw_context.fb + i);
+                }
             }
         };
 
@@ -259,8 +291,9 @@ function draw_sprite2(number, x, y, front) {
         LOOP(0, 0x07, 0x00);
 
         draw_context.fb += ypitch;
+        draw_context.fb8 += yp8;
         g += 4;
-      }
+    }
 }
 
 /*
@@ -407,7 +440,7 @@ function draw_pic(x, y, w, h, pic) {
  * Draw a bitmap
  */
 function draw_img(img) {
-    // NOTE: assume the image size is the same as the framebuffer size 
+    // NOTE: assume the image size is the same as the framebuffer size
     const w = img.width;
     const h = img.height;
     const colors = img.colors;

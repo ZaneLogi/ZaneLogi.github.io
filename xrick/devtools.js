@@ -19,14 +19,14 @@ const devtools = new function() {
             draw_context.draw_tilesBank = 0;
             draw_setfb(4, 4);
             draw_tilesListImm(`TILES@BANK@${this.pos}\xFE`);
-        
+
             for (let i = 0; i < 0x10; i++) {
                 draw_setfb(80 + i * 0x0a, 14);
                 draw_tile((i<10?0x30:'A'.charCodeAt()-10) + i);
                 draw_setfb(64, 30 + i * 0x0a);
                 draw_tile((i<10?0x30:'A'.charCodeAt()-10) + i);
             }
-        
+
             draw_context.draw_tilesBank = this.pos;
             for (let i = 0; i < 0x10; i++) {
                 for (let j = 0; j < 0x10; j++) {
@@ -36,6 +36,7 @@ const devtools = new function() {
             }
 
             this.seq = 10;
+            //framebuffer.dump(`tiles_bank_${this.pos}`);
             break;
 
         case 10:  /* wait for key pressed */
@@ -99,6 +100,7 @@ const devtools = new function() {
                 }
             }
             this.seq = 30;
+            //framebuffer.dump(`sprites_${this.pos}`);
             break;
 
         case 30:  /* wait for key pressed */
@@ -186,14 +188,14 @@ const devtools = new function() {
                 this.seq = 40;
             }
             break;
-            
+
         case 43:
             if (!(control.control_status & CONTROL_DOWN)) {
                 if (this.pos > 0) this.pos -= 8 * 4;
                 this.seq = 40;
             }
             break;
-            
+
         case 44:
             if (!(control.control_status & CONTROL_LEFT)) {
                 this.pos = 0;

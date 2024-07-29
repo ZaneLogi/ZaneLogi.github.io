@@ -67,8 +67,8 @@ const game_context = {
 
 const game = {
     frames: 0,
-    game_period: 20, // default: 75
-    game_state: INIT_GAME,
+    game_period: 40, //GAME_PERIOD,
+    game_state: DEVTOOLS,
     game_waitevt: false,
     isave_frow: 0,
 
@@ -164,7 +164,7 @@ game.do_frame = function() {
             case SCREEN_RUNNING:
                 return;
             case SCREEN_DONE:
-                this.game_state = INIT_GAME;
+                this.game_state = XRICK;
                 break;
             case SCREEN_EXIT:
                 this.game_state = EXIT;
@@ -177,7 +177,7 @@ game.do_frame = function() {
             case SCREEN_RUNNING:
                 return;
             case SCREEN_DONE:
-                this.game_state = DEVTOOLS;
+                this.game_state = INIT_GAME;
                 break;
             case SCREEN_EXIT:
                 this.game_state = EXIT;
@@ -187,7 +187,7 @@ game.do_frame = function() {
 
         case INIT_GAME:
             this.init();
-            this.game_state = INIT_BUFFER;
+            this.game_state = INTRO_MAIN;
             break;
 
        case INTRO_MAIN:
@@ -300,16 +300,16 @@ game.do_frame = function() {
                 game_context.game_bullets = 0x06;
                 game_context.game_bombs = 0x06;
                 game_context.game_map++; // next map
-          
+
                 if (game_context.game_map == 0x04) {
                     /* reached end of game */
                     /* FIXME @292?*/
                 }
-          
+
                 this.game_state = CHAIN_MAP;
             }
             break;
-        
+
         case CHAIN_MAP:
             switch (screen_introMap.do_frame()) {
             case SCREEN_RUNNING:
@@ -352,7 +352,7 @@ game.do_frame = function() {
                 break;
             }
             break;
-          
+
         case SCROLL_DOWN:
             switch (scroll_down()) {
             case SCROLL_RUNNING:
@@ -511,9 +511,9 @@ game.restart = function() {
 
     game_context.game_bullets = 6;
     game_context.game_bombs = 6;
-  
+
     E_RICK_ENT.n = 1;
-  
+
     this.irestore();
     map_init();
     this.isave();
