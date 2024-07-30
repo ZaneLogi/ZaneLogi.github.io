@@ -1,0 +1,63 @@
+- map_map is 32 x 44 tiles, 8 x 11 blocks
+    - top 8 rows and bottom 8 rows are hidden, ie top 2 blocks and bottom 2 blocks are hidden
+        - MAP_ROW_HTTOP     = 0
+        - MAP_ROW_HTBOT     = 7
+        - MAP_ROW_SCRTOP    = 8
+        - MAP_ROW_SCRBOT    = 31
+        - MAP_ROW_HBTOP     = 32
+        - MAP_ROW_HBBOT     = 39
+        - the rows 40 - 43 are unused
+    - the visible block high is 6 blocks
+    - the visible areas is from the 8th row to the 31th row, the total is 24 rows (24*8=192 pixels high)
+- map_expand
+    - expand a block to 4 x 4 tiles
+    - a map is 8 x 11 blocks
+    - refer to map_map, only 10 blocks row are used
+    - map width = 8(blocks) x 4(tiles/block) x 8(pixels/tile) = 256 pixels wide
+    - the first block number of a submap => map_submaps[game_submap].bnum
+    - the first block number to expand => first_bnum + map_frow / 4 * 8
+- draw_map
+    - draw 24 tiles row x 32 tiles column (6 high x 8 wide blocks)
+    - start at the screen coordinate (32, 8), 256 pixels width x 192 pixels high
+    - start at the tils of map_map[][] at the (0, 8)
+- draw_clipms
+    - clip the rectange of the sprite
+    - x range from 0 to 256 (256 pixels)
+    - y range from 64 to 256 (192 pixels)
+- draw_sprite2
+    - map coordinate to screen coordinate, (0, 0) => (32, -64+8)
+    - sprite: 21 pixels high x 32 pixels wide
+    - clip the rectange with the map coordinate (0, 64) - (256, 256)
+    - transparent color index is 0
+    - when cheat3 is enabled, draw translucent rectangle
+    - the map tiles with MAP_EFLG_FGND hide entities
+- map scrolling
+    - scroll_up(): when Rick goes down with y >= 204, scroll the map 8 tiles row up
+    - scroll_down(): when Rick goes up with y <= 96, scroll the map 8 tiles row down
+    - when scrolling, the positions of the entites are adjusted
+    - when scrolling, the map first row is updated. (for map_expand, ent_activis)
+    - when scrolling done, reload the map by ent_actvis(), map_expand()
+- map chaining
+    - if Rick's x coordinate >= 232 or < 0, go to next submap
+    - map_chain()
+    - the connection information is located at 'map_connect'
+    - the connection index is 'map_submaps[game_context.game_submap].connect'
+    - search the next submap by checking the same direction (1: left, 0: right) and the tile gap is less than 3
+      between Rick's y tile and the row out tile
+    - if map_connect[c].submap == 0xff, this map is ended, need to go to next map
+    - otherwise, chain to next submap, map first row is updated (map_context.map_frow - map_connect[c].rowout + map_connect[c].rowin)
+- map_maps
+    - have information of the start of Rick's position, map first row of the first submap, the submap index, tune
+- map_submaps
+    - have information of the tile bank page, the first block number, the first connection index and the first entity mark
+    - refer to map_expand for the first block number
+    - refer to map chaining for the first connection index
+- map_connect
+    - have information of the connection to the next submap
+    - refer to map chaining
+- ent_actvis
+    - map_marks have the information of the entities in the map_submaps
+    - the first mark of the submap is located at 'map_submaps[game_submap].mark'
+    - entities are activated when they are in the selected range
+
+
