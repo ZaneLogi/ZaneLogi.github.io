@@ -1,7 +1,7 @@
 // refer to https://blog.hubspot.com/website/css-loading-animation
+// refer to https://www.w3schools.com/jsref/prop_style_display.asp
 
 document.addEventListener("DOMContentLoaded", () => {
-    const loader = document.getElementById("loader");
     const progressElement = document.getElementById("progress");
 
     // Simulate backend loading progress
@@ -14,9 +14,8 @@ document.addEventListener("DOMContentLoaded", () => {
             progress = 100;
             clearInterval(interval);
 
-            //loader.style.visibility = "hidden";
-            //loader.style.height = 0;
-            loader.remove();
+            // hide the loader
+            document.getElementById("loader").style.display = "none";
         }
         // Update progress bar width
         progressElement.style.width = progress + "%";
