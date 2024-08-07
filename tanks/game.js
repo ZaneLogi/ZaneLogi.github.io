@@ -13,6 +13,7 @@ const game = {
     game_state: STATE.SHOW_MENU,
     resource_count: 0,
     hi_score: 20000,
+    nr_of_players: 1,
 };
 
 function loadImage(url) {
