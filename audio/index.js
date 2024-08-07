@@ -34,7 +34,8 @@ function playBuffer() {
 
 async function loadAudio() {
     try {
-        const response = await fetch("sounds/tune0.wav");
+        //const response = await fetch("sounds/tune0.wav");
+        const response = await fetch("sounds/gamestart.ogg");
         audioCtx.decodeAudioData(await response.arrayBuffer(), (buf) => {
             // executes when buffer has been decoded
             buffer = buf;
