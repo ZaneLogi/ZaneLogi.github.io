@@ -17,6 +17,8 @@ screen_showmenu.doFrame = function () {
 
         game.canvasContext.fillStyle = "rgb(0, 0, 0)";
         game.canvasContext.fillRect(0, 0, game.canvas.width, game.canvas.height);
+
+        game.stage = 1; // set the start stage
     }
 
     switch (this.seq) {
@@ -52,6 +54,9 @@ screen_showmenu.doFrame = function () {
                 game.canvasContext.drawImage(this.offscreenCanvas, 0, 0);
                 this.seq = 24;
             }
+            else if (control.CHKBIT(CONTROL_FIRE)) {
+                this.seq = 25;
+            }
             break;
         case 23:
             if (!control.CHKBIT(CONTROL_UP)) {
@@ -63,11 +68,19 @@ screen_showmenu.doFrame = function () {
                 this.seq = 22;
             }
             break;
+        case 25:
+            if (!control.CHKBIT(CONTROL_FIRE)) {
+                this.seq = 26;
+            }
+            break;
     }
 
-
-
-    return SCREEN_RUNNING;
+    if (this.seq == 26) {
+        this.seq = 0;
+        return SCREEN_DONE;
+    }
+    else
+        return SCREEN_RUNNING;
 }
 
 screen_showmenu.drawIntroScreen = function (ctx) {

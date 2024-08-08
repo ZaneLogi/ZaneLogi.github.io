@@ -2,6 +2,7 @@
 
 const STATE = {
     SHOW_MENU: 1,
+    NEXT_LEVEL: 2,
     EXIT: 999,
 };
 
@@ -14,6 +15,7 @@ const game = {
     resource_count: 0,
     hi_score: 20000,
     nr_of_players: 1,
+    stage: 1,
 };
 
 function loadImage(url) {
@@ -40,6 +42,10 @@ function createOffscreenCanvas(width, height) {
 }
 
 game.init = function () {
+    this.load_resources();
+}
+
+game.load_resources = function () {
     this.canvas = document.querySelector('canvas');
     this.canvasContext = this.canvas.getContext('2d');
 
@@ -78,6 +84,11 @@ game.init = function () {
                 ctx.drawImage(this.sprite_sheet, 0, 0, 13 * 2, 13 * 2, 0, 0, 13 * 2, 13 * 2);
             }
 
+            Player.initSprites(this.sprite_sheet);
+            Enemy.initSprites(this.sprite_sheet);
+            Level.initSprites(this.sprite_sheet);
+            Castle.initSprites(this.sprite_sheet);
+
             this.loadResourceCompletion(1);
         }).catch(error => {
             console.log(error);
@@ -100,6 +111,9 @@ game.loadResourceCompletion = function (progress) {
         return;
 
     console.log("all resources are loaded.");
+
+    this.castle = new Castle();
+
     runloop.start();
 };
 
@@ -191,7 +205,7 @@ game.writeInBricks = function (ctx, text, x, y) {
         }
         x += letter_w + 16; // increase x to the next letter
     }
-}
+};
 
 game.doFrame = function () {
     while (true) {
@@ -201,11 +215,31 @@ game.doFrame = function () {
                     case SCREEN_RUNNING:
                         return;
                     case SCREEN_DONE:
+                        this.game_state = STATE.NEXT_LEVEL;
                         break;
                     case SCREEN_EXIT:
                         this.game_state = STATE.EXIT;
                         return;
                 }
+                return;
+
+            case STATE.NEXT_LEVEL:
+                this.canvasContext.fillStyle = "rgb(0, 0, 0)";
+                this.canvasContext.fillRect(0, 0, game.canvas.width, game.canvas.height);
+
+                // load level
+                this.stage += 1;
+                this.timefreeze = false;
+
+                this.castle.rebuild();
+                this.level = new Level(this.stage);
+
+                this.reloadPlayers();
+
+                this.game_state = STATE.EXIT;
+
+                this.draw(this.canvasContext);
+
                 return;
 
 
@@ -220,3 +254,43 @@ game.doFrame = function () {
         }
     }
 };
+
+game.reloadPlayers = function () {
+
+};
+
+game.draw = function (ctx) {
+    ctx.fillStyle = "rgb(0, 0, 0)";
+    ctx.fillRect(0, 0, 416, 416);
+
+    this.level.draw(ctx, [Level.TILE.BRICK, Level.TILE.STEEL, Level.TILE.FROZE, Level.TILE.WATER]);
+
+    this.castle.draw(ctx);
+
+    // enemy.draw
+
+    // label.draw
+
+    // player.draw
+
+    // bullet.draw
+
+    // bonus.draw
+
+    this.level.draw(ctx, [Level.TILE.GRASS]);
+
+    // game_over.draw
+
+    this.drawSideBar(ctx);
+}
+
+game.drawSideBar = function (ctx) {
+    ctx.fillStyle = "rgb(100, 100, 100)";
+    ctx.fillRect(416, 0, 64, 416);
+
+    // draw enemy lives
+
+    // players' lives
+
+};
+
