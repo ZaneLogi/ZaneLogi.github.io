@@ -81,7 +81,7 @@ class Tank {
             ? direction
             : random_choice([Tank.DIR.RIGHT, Tank.DIR.DOWN, Tank.DIR.LEFT]);
 
-        this.state = Tank.STATE.SPAWING;
+        this.state = Tank.STATE.SPAWNING;
 
         // spawning animation
         this.timer_no_spawn = gtimer.add(100, () => this.toggleSpawnImage());
@@ -134,7 +134,7 @@ class Tank {
             case Tank.STATE.EXPLODING:
                 this.explosion.draw(ctx);
                 break;
-            case Tank.STATE.SPAWING:
+            case Tank.STATE.SPAWNING:
                 ctx.drawImage(this.spawn_image, this.rect.x, this.rect.y);
                 break;
         }

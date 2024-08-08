@@ -114,10 +114,19 @@ class Player extends Tank {
                 break;
         }
 
-        const player_rect = {x: new_position[0], y: new_position[1], w:26, h:26};
-        // collide test
+        const player_rect = { x: new_position[0], y: new_position[1], w: 26, h: 26 };
 
-        // collide another player
+        // collisions with tiles
+        if (game.level.intersectObstacles(player_rect))
+            return;
+
+        // collisions with other players
+        for (const player of game.players) {
+            if (player != this &&
+                player.state == Tank.STATE.ALIVE &&
+                intersectRect(player_rect, player.rect))
+                return;
+        }
 
         // collide enemies
 

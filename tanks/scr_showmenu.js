@@ -17,8 +17,6 @@ screen_showmenu.doFrame = function () {
 
         game.canvasContext.fillStyle = "rgb(0, 0, 0)";
         game.canvasContext.fillRect(0, 0, game.canvas.width, game.canvas.height);
-
-        game.stage = 1; // set the start stage
     }
 
     switch (this.seq) {

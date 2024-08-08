@@ -133,4 +133,26 @@ class Level {
         }*/
     }
 
+    intersectObstacles(rect) {
+        if (intersectRect(rect, game.castle.rect))
+            return true;
+
+        const intersectRects = function(rects) {
+            for (const test of rects) {
+                if (intersectRect(rect, test))
+                    return true;
+            }
+            return false;
+        }
+
+        if (intersectRects(this.mapr[Level.TILE.BRICK]))
+            return true;
+        if (intersectRects(this.mapr[Level.TILE.STEEL]))
+            return true;
+        if (intersectRects(this.mapr[Level.TILE.WATER]))
+            return true;
+
+        return false;
+    }
+
 }

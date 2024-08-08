@@ -97,6 +97,19 @@ function nearest(num, base) {
     return Math.round(num / base) * base;
 }
 
+function intersectRect(src, dst) {
+    if (src.x >= dst.x + dst.w)
+        return false;
+    if (src.x + src.w <= dst.x)
+        return false;
+    if (src.y >= dst.y + dst.h)
+        return false;
+    if (src.y + src.h <= dst.y)
+        return false;
+
+    return true;
+}
+
 game.init = function () {
     this.load_resources();
 }
@@ -273,6 +286,8 @@ game.doFrame = function () {
                         return;
                     case SCREEN_DONE:
                         this.game_state = STATE.NEXT_LEVEL;
+                        this.stage = 1; // set the start stage
+                        this.players = []; // clear players
                         break;
                     case SCREEN_EXIT:
                         this.game_state = STATE.EXIT;
