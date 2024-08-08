@@ -1,6 +1,6 @@
 "use strict"
 
-class Enemy {
+class Enemy extends Tank {
     static initSprites(spriteSheet) {
         const W = 13 * 2;
         const H = 15 * 2;

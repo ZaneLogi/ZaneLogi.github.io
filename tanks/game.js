@@ -1,8 +1,47 @@
 "use strict"
+const gtimer = {
+    timers: {},
+    serial_no: 0,
+
+    reset: function() {
+        this.timers = {};
+        this.serial_no = 0;
+    },
+
+    add: function (interval, f, repeat = -1) {
+        this.timers[++this.serial_no] = {
+            interval: interval,
+            callback: f,
+            repeat: repeat,
+            times: 0,
+            time: 0
+        }
+        return this.serial_no;
+    },
+
+    destroy: function (serial_no) {
+        delete this.timers[serial_no];
+    },
+
+    update: function (time_passed) {
+        for (const [no, timer] of Object.entries(this.timers)) {
+            timer.time += time_passed;
+            if (timer.time > timer.interval) {
+                timer.time -= timer.interval;
+                timer.times++;
+                timer.callback();
+                if (timer.repeat > -1 && timer.times == timer.repeat)
+                    delete this.timers[no];
+            }
+        }
+    },
+
+};
 
 const STATE = {
     SHOW_MENU: 1,
     NEXT_LEVEL: 2,
+    PLAY: 3,
     EXIT: 999,
 };
 
@@ -16,6 +55,7 @@ const game = {
     hi_score: 20000,
     nr_of_players: 1,
     stage: 1,
+    players: [],
 };
 
 function loadImage(url) {
@@ -39,6 +79,22 @@ function createOffscreenCanvas(width, height) {
     canvas.width = width;
     canvas.height = height;
     return canvas;
+}
+
+function random_choice(array) {
+    return array[Math.floor(Math.random() * array.length)];
+}
+
+function random_shuffle(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        let j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+}
+
+function nearest(num, base) {
+    // Round number to nearest divisible
+    return Mat.round(num / base) * base;
 }
 
 game.init = function () {
@@ -88,6 +144,7 @@ game.load_resources = function () {
             Enemy.initSprites(this.sprite_sheet);
             Level.initSprites(this.sprite_sheet);
             Castle.initSprites(this.sprite_sheet);
+            Tank.initSprites(this.sprite_sheet);
 
             this.loadResourceCompletion(1);
         }).catch(error => {
@@ -227,19 +284,35 @@ game.doFrame = function () {
                 this.canvasContext.fillStyle = "rgb(0, 0, 0)";
                 this.canvasContext.fillRect(0, 0, game.canvas.width, game.canvas.height);
 
+                this.bullets = [];
+                this.enemies = [];
+                this.bonuses = [];
+                this.castle.rebuild();
+                gtimer.reset();
+
                 // load level
                 this.stage += 1;
                 this.timefreeze = false;
 
-                this.castle.rebuild();
                 this.level = new Level(this.stage);
 
                 this.reloadPlayers();
 
-                this.game_state = STATE.EXIT;
+                this.game_state = STATE.PLAY;
 
                 this.draw(this.canvasContext);
 
+                return;
+
+            case STATE.PLAY:
+                // update players
+                // update enemies
+                // update bullets
+                // update bonus
+                // updat label
+
+                gtimer.update(runloop.frame_period);
+                this.draw(this.canvasContext);
                 return;
 
 
@@ -255,8 +328,47 @@ game.doFrame = function () {
     }
 };
 
-game.reloadPlayers = function () {
+game.shieldPlayer = function(player, shield = true, duration = null) {
+    // add / remove shield
+    // duration: in ms. if null, do not remove shield automatically
+    player.shielded = shield;
+    if (shield)
+        player.timer_no_shield = gtimer.add(100, () => player.toggleShieldImage())
+    else
+        gtimer.destroy(player.timer_no_shield);
 
+    if (shield && duration != null)
+        gtimer.add(duration, () => this.shieldPlayer(player, false), 1);
+}
+
+game.respawnPlayer = function (player, clear_scores = false) {
+    player.reset();
+
+    if (clear_scores) {
+        player.trophies = { bonus: 0, enemy0: 0, enemy1: 0, enemy2: 0, enemy3: 0, };
+    }
+
+    this.shieldPlayer(player, true, 4000);
+}
+
+game.reloadPlayers = function () {
+    if (this.players.length == 0) {
+        // first player
+        let x = 8 * Level.TILE_SIZE + Math.floor((Level.TILE_SIZE * 2 - 26) / 2);
+        let y = 24 * Level.TILE_SIZE + Math.floor((Level.TILE_SIZE * 2 - 26) / 2);
+        this.players[0] = new Player(this.level, { x: x, y: y }, Tank.DIR.UP, Player.PLAYER1);
+
+        // second player
+        if (this.nr_of_players == 2) {
+            x = 16 * Level.TILE_SIZE + Math.floor((Level.TILE_SIZE * 2 - 26) / 2);
+            this.players[1] = new Player(this.level, { x: x, y: y }, Tank.DIR.UP, Player.PLAYER2);
+        }
+    }
+
+    for (const player of this.players) {
+        player.level = this.level;
+        this.respawnPlayer(player, true);
+    }
 };
 
 game.draw = function (ctx) {
@@ -271,7 +383,9 @@ game.draw = function (ctx) {
 
     // label.draw
 
-    // player.draw
+    for (const player of this.players) {
+        player.draw(ctx);
+    }
 
     // bullet.draw
 
