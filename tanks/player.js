@@ -77,7 +77,56 @@ class Player extends Tank {
     }
 
 
+    move(direction) {
+        if (this.state == Tank.STATE.EXPLODING) {
+            if (!this.explosion.active) {
+                this.state = Tank.STATE.DEAD;
+                delete this.explosion;
+            }
+        }
 
+        if (this.state != Tank.STATE.ALIVE)
+            return;
+
+        if (this.direction != direction)
+            this.rotate(direction);
+
+        if (this.paralised)
+            return;
+
+        let new_position;
+        switch (direction) {
+            case Tank.DIR.UP:
+                new_position = [this.rect.x, this.rect.y - this.speed];
+                if (new_position[1] < 0) return;
+                break;
+            case Tank.DIR.RIGHT:
+                new_position = [this.rect.x + this.speed, this.rect.y];
+                if (new_position[0] > (416 - 26)) return;
+                break;
+            case Tank.DIR.DOWN:
+                new_position = [this.rect.x, this.rect.y + this.speed];
+                if (new_position[1] > (416 - 26)) return;
+                break;
+            case Tank.DIR.LEFT:
+                new_position = [this.rect.x - this.speed, this.rect.y];
+                if (new_position[0] < 0) return;
+                break;
+        }
+
+        const player_rect = {x: new_position[0], y: new_position[1], w:26, h:26};
+        // collide test
+
+        // collide another player
+
+        // collide enemies
+
+        // collide bonuses
+
+        // if no collision, move player
+        this.rect.x = new_position[0];
+        this.rect.y = new_position[1];
+    }
 
     reset() {
         this.rotate(this.start_direction, false);

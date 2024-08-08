@@ -94,7 +94,7 @@ function random_shuffle(array) {
 
 function nearest(num, base) {
     // Round number to nearest divisible
-    return Mat.round(num / base) * base;
+    return Math.round(num / base) * base;
 }
 
 game.init = function () {
@@ -306,6 +306,15 @@ game.doFrame = function () {
 
             case STATE.PLAY:
                 // update players
+                if (control.CHKBIT(CONTROL_UP))
+                    this.players[0].move(Tank.DIR.UP);
+                else if (control.CHKBIT(CONTROL_DOWN))
+                    this.players[0].move(Tank.DIR.DOWN);
+                else if (control.CHKBIT(CONTROL_LEFT))
+                    this.players[0].move(Tank.DIR.LEFT);
+                else if (control.CHKBIT(CONTROL_RIGHT))
+                    this.players[0].move(Tank.DIR.RIGHT)
+
                 // update enemies
                 // update bullets
                 // update bonus
