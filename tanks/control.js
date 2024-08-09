@@ -112,7 +112,7 @@ control.onkeyup = function(e) {
 
 control.SETBIT = function(b) {this.control_status |= (b);}
 control.CLRBIT = function(b) {this.control_status &= ~(b);}
-control.CHKBIT = function(b) {return this.control_status & b;}
+control.CHKBIT = function(b) {return (this.control_status & b) == b;}
 
 window.addEventListener("keydown", (e) => control.onkeydown(e));
 window.addEventListener("keyup", (e) => control.onkeyup(e));

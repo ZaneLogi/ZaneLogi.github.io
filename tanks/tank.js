@@ -149,8 +149,31 @@ class Tank {
         }
     }
 
-    fire() {
+    fire(forced = false) {
+        // Shoot a bullet
+        // forced: If false, check whether tank has exceeded his bullet quota.
+        //         Default: false
+        // return boolean true if bullet was fired, false otherwise
+        if (this.state != Tank.STATE.ALIVE) {
+            gtimer.destroy(this.timer_no_fire);
+            return false;
+        }
 
+        if (this.paused)
+            return false;
+
+        if (!forced) {
+            let active_bullets = 0;
+            for (const bullet of game.bullets) {
+				if (bullet.owner_class == this && bullet.state == Bullet.STATE.ACTIVE)
+                    active_bullets++;
+            }
+			if (active_bullets >= this.max_active_bullets)
+                return false;
+        }
+
+        new Bullet(this.level, this);
+        return true;
     }
 
     rotate(direction, fix_position = true) {
@@ -177,11 +200,12 @@ class Tank {
     }
 
     update() {
-
-    }
-
-    nearest() {
-
+        if (this.state == Tank.STATE.EXPLODING) {
+            if (!this.explosion.active) {
+                this.state = Tank.STATE.DEAD;
+                delete this.explosion;
+            }
+        }
     }
 
     bulletImpact() {

@@ -5,21 +5,14 @@ class Level {
     static TILE_SIZE = 16;
 
     static initSprites(spriteSheet) {
-        const createImage = function (x, y) {
-            const image = createOffscreenCanvas(16, 16);
-            const ctx = image.getContext('2d');
-            ctx.drawImage(spriteSheet, x, y, 16, 16, 0, 0, 16, 16);
-            return image;
-        };
-
         this.tile_empty = createOffscreenCanvas(16, 16);
-        this.tile_brick1 = createImage(48 * 2, 64 * 2);
-        this.tile_brick2 = createImage(56 * 2, 64 * 2);
-        this.tile_water1 = createImage(64 * 2, 64 * 2);
-        this.tile_water2 = createImage(72 * 2, 64 * 2);
-        this.tile_steel = createImage(48 * 2, 72 * 2);
-        this.tile_grass = createImage(56 * 2, 72 * 2);
-        this.tile_froze = createImage(64 * 2, 72 * 2);
+        this.tile_brick1 = createSprite(spriteSheet, 48 * 2, 64 * 2, 16, 16);
+        this.tile_brick2 = createSprite(spriteSheet, 56 * 2, 64 * 2, 16, 16);
+        this.tile_water1 = createSprite(spriteSheet, 64 * 2, 64 * 2, 16, 16);
+        this.tile_water2 = createSprite(spriteSheet, 72 * 2, 64 * 2, 16, 16);
+        this.tile_steel = createSprite(spriteSheet, 48 * 2, 72 * 2, 16, 16);
+        this.tile_grass = createSprite(spriteSheet, 56 * 2, 72 * 2, 16, 16);
+        this.tile_froze = createSprite(spriteSheet, 64 * 2, 72 * 2, 16, 16);
 
         this.tile_images = [
             this.tile_empty,
@@ -137,7 +130,7 @@ class Level {
         if (intersectRect(rect, game.castle.rect))
             return true;
 
-        const intersectRects = function(rects) {
+        const intersectRects = function (rects) {
             for (const test of rects) {
                 if (intersectRect(rect, test))
                     return true;

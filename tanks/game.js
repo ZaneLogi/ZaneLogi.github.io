@@ -3,7 +3,7 @@ const gtimer = {
     timers: {},
     serial_no: 0,
 
-    reset: function() {
+    reset: function () {
         this.timers = {};
         this.serial_no = 0;
     },
@@ -81,6 +81,39 @@ function createOffscreenCanvas(width, height) {
     return canvas;
 }
 
+const createSprite = function (sprite_sheet, x, y, w, h, force_square = false) {
+    if (force_square) {
+        let s = (w >= h ? w : h);
+        const image = createOffscreenCanvas(s, s);
+        const ctx = image.getContext('2d');
+        const dstX = Math.floor((s - w) / 2);
+        const dstY = Math.floor((s - h) / 2);
+        // position the source to the center of the destination
+        ctx.drawImage(sprite_sheet, x, y, w, h, dstX, dstY, w, h);
+        return image;
+    }
+    else {
+        const image = createOffscreenCanvas(w, h);
+        const ctx = image.getContext('2d');
+        ctx.drawImage(sprite_sheet, x, y, w, h, 0, 0, w, h);
+        return image;
+    }
+};
+
+const rotateSprite = function (sprite, angle) {
+    const w = sprite.width;
+    const h = sprite.height;
+    const rot_sprite = createOffscreenCanvas(w, h);
+    const ctx = rot_sprite.getContext('2d');
+    ctx.save();
+    ctx.translate(w / 2, h / 2);
+    ctx.rotate(angle);
+    ctx.translate(-w / 2, -h / 2);
+    ctx.drawImage(sprite, 0, 0);
+    ctx.restore();
+    return rot_sprite;
+}
+
 function random_choice(array) {
     return array[Math.floor(Math.random() * array.length)];
 }
@@ -128,19 +161,9 @@ game.load_resources = function () {
                 ctx.drawImage(image, 0, 0, 96, 112, 0, 0, 192, 224);
             }
             {
-                this.enemy_life_image = createOffscreenCanvas(7 * 2, 7 * 2);
-                const ctx = this.enemy_life_image.getContext('2d');
-                ctx.drawImage(this.sprite_sheet, 81 * 2, 57 * 2, 7 * 2, 7 * 2);
-            }
-            {
-                this.player_life_image = createOffscreenCanvas(7 * 2, 8 * 2);
-                const ctx = this.player_life_image.getContext('2d');
-                ctx.drawImage(this.sprite_sheet, 89 * 2, 56 * 2, 7 * 2, 8 * 2);
-            }
-            {
-                this.flag_image = createOffscreenCanvas(16 * 2, 15 * 2);
-                const ctx = this.flag_image.getContext('2d');
-                ctx.drawImage(this.sprite_sheet, 64 * 2, 49 * 2, 16 * 2, 15 * 2);
+                this.enemy_life_image = createSprite(this.sprite_sheet, 81 * 2, 57 * 2, 7 * 2, 7 * 2);
+                this.player_life_image = createSprite(this.sprite_sheet, 89 * 2, 56 * 2, 7 * 2, 8 * 2);
+                this.flag_image = createSprite(this.sprite_sheet, 64 * 2, 49 * 2, 16 * 2, 15 * 2);
             }
             {
                 // this is used in intro screen
@@ -158,6 +181,8 @@ game.load_resources = function () {
             Level.initSprites(this.sprite_sheet);
             Castle.initSprites(this.sprite_sheet);
             Tank.initSprites(this.sprite_sheet);
+            Bullet.initSprites(this.sprite_sheet);
+            Explosion.initSprites(this.sprite_sheet);
 
             this.loadResourceCompletion(1);
         }).catch(error => {
@@ -321,21 +346,61 @@ game.doFrame = function () {
 
             case STATE.PLAY:
                 // update players
-                if (control.CHKBIT(CONTROL_UP))
-                    this.players[0].move(Tank.DIR.UP);
-                else if (control.CHKBIT(CONTROL_DOWN))
-                    this.players[0].move(Tank.DIR.DOWN);
-                else if (control.CHKBIT(CONTROL_LEFT))
-                    this.players[0].move(Tank.DIR.LEFT);
-                else if (control.CHKBIT(CONTROL_RIGHT))
-                    this.players[0].move(Tank.DIR.RIGHT)
+                // keep moving in the same direction first
+                let moved = false;
+                switch (this.players[0].direction) {
+                    case Tank.DIR.UP:
+                        if (control.CHKBIT(CONTROL_UP) && !control.CHKBIT(CONTROL_DOWN))
+                            this.players[0].move(Tank.DIR.UP), moved =true;
+                        break;
+                    case Tank.DIR.DOWN:
+                        if (control.CHKBIT(CONTROL_DOWN) && !control.CHKBIT(CONTROL_UP))
+                            this.players[0].move(Tank.DIR.DOWN), moved = true;
+                        break;
+                    case Tank.DIR.LEFT:
+                        if (control.CHKBIT(CONTROL_LEFT) && !control.CHKBIT(CONTROL_RIGHT))
+                            this.players[0].move(Tank.DIR.LEFT), moved = true;
+                        break;
+                    case Tank.DIR.RIGHT:
+                        if (!moved && control.CHKBIT(CONTROL_RIGHT))
+                            this.players[0].move(Tank.DIR.RIGHT), moved =true;
+                        break;
+                }
+                // move to other directions?
+                if (!moved && control.CHKBIT(CONTROL_UP) && !control.CHKBIT(CONTROL_DOWN))
+                    this.players[0].move(Tank.DIR.UP), moved = true;
+                if (!moved && control.CHKBIT(CONTROL_DOWN) && !control.CHKBIT(CONTROL_UP))
+                    this.players[0].move(Tank.DIR.DOWN), moved = true;
+                if (!moved && control.CHKBIT(CONTROL_LEFT) && !control.CHKBIT(CONTROL_RIGHT))
+                    this.players[0].move(Tank.DIR.LEFT), moved = true;
+                if (!moved && control.CHKBIT(CONTROL_RIGHT) && !control.CHKBIT(CONTROL_LEFT))
+                    this.players[0].move(Tank.DIR.RIGHT), moved = true;
+
+                if (control.CHKBIT(CONTROL_FIRE))
+                    this.players[0].fire();
+
+                this.players[0].update();
 
                 // update enemies
-                // update bullets
-                // update bonus
-                // updat label
 
+                // update bullets
+                this.bullets = this.bullets.filter(bullet => {
+                    if (bullet.state == Bullet.STATE.REMOVED)
+                        return false;
+                    else {
+                        bullet.update();
+                        return true;
+                    }
+                });
+
+                // update bonus
+
+                // update label
+
+                // update timers
                 gtimer.update(runloop.frame_period);
+
+                // draw everything
                 this.draw(this.canvasContext);
                 return;
 
@@ -352,7 +417,7 @@ game.doFrame = function () {
     }
 };
 
-game.shieldPlayer = function(player, shield = true, duration = null) {
+game.shieldPlayer = function (player, shield = true, duration = null) {
     // add / remove shield
     // duration: in ms. if null, do not remove shield automatically
     player.shielded = shield;
@@ -411,7 +476,9 @@ game.draw = function (ctx) {
         player.draw(ctx);
     }
 
-    // bullet.draw
+    for (const bullet of this.bullets) {
+        bullet.draw(ctx);
+    }
 
     // bonus.draw
 

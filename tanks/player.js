@@ -11,37 +11,10 @@ class Player extends Tank {
 
         const createSprites = function (x, y) {
             const sprites = {};
-            sprites.image_up = createOffscreenCanvas(W, H);
-            ctx = sprites.image_up.getContext('2d');
-            ctx.drawImage(spriteSheet, x, y, W, H, 0, 0, W, H);
-
-            sprites.image_right = createOffscreenCanvas(W, H);
-            ctx = sprites.image_right.getContext('2d');
-            ctx.save();
-            ctx.translate(W / 2, H / 2);
-            ctx.rotate(Math.PI / 2);
-            ctx.translate(-W / 2, -H / 2);
-            ctx.drawImage(sprites.image_up, 0, 0, W, H, 0, 0, W, H);
-            ctx.restore();
-
-            sprites.image_down = createOffscreenCanvas(W, H);
-            ctx = sprites.image_down.getContext('2d');
-            ctx.save();
-            ctx.translate(W / 2, H / 2);
-            ctx.rotate(Math.PI);
-            ctx.translate(-W / 2, -H / 2);
-            ctx.drawImage(sprites.image_up, 0, 0, W, H, 0, 0, W, H);
-            ctx.restore();
-
-            sprites.image_left = createOffscreenCanvas(W, H);
-            ctx = sprites.image_left.getContext('2d');
-            ctx.save();
-            ctx.translate(W / 2, H / 2);
-            ctx.rotate(-Math.PI / 2);
-            ctx.translate(-W / 2, -H / 2);
-            ctx.drawImage(sprites.image_up, 0, 0, W, H, 0, 0, W, H);
-            ctx.restore();
-
+            sprites.image_up = createSprite(spriteSheet, x, y, W, H);
+            sprites.image_right = rotateSprite(sprites.image_up, Math.PI / 2);
+            sprites.image_down = rotateSprite(sprites.image_up, Math.PI);
+            sprites.image_left = rotateSprite(sprites.image_up, -Math.PI / 2);
             return sprites;
         };
 
