@@ -40,27 +40,38 @@ class Level {
         if (level_nr <= 35)
             enemies_l = Level.levels_enemies[level_nr - 1];
         else
-            enemies_l = Level.levels_enemies[34]
+            enemies_l = Level.levels_enemies[34];
 
-        // TODO:
-        //    self.level.enemies_left = [0]*enemies_l[0] + [1]*enemies_l[1] + [2]*enemies_l[2] + [3]*enemies_l[3]
-        //    random.shuffle(self.level.enemies_left)
+        this.enemies_left = [
+            ...new Array(enemies_l[0]).fill(0),
+            ...new Array(enemies_l[1]).fill(1),
+            ...new Array(enemies_l[2]).fill(2),
+            ...new Array(enemies_l[3]).fill(3),
+        ];
+
+        random_shuffle(this.enemies_left);
+
+        // TODO
+        //if play_sounds:
+        //    sounds["start"].play()
+        //    gtimer.add(4330, lambda :sounds["bg"].play(-1), 1)
 
         level_nr = level_nr ? level_nr % 35 : 1;
         if (level_nr == 0)
             level_nr = 35;
 
-
-
-
-
         this.loadLevel(level_nr);
 
-        // tiles' rects on map, tanks cannot move over
-        this.obstacle_rects = []
+        gtimer.add(400, () => this.toggleWaves());
+    }
 
-        // update these tiles
-        this.updateObstacleRects()
+    toggleWaves() {
+        // Toggle water image
+        const water_image = Level.tile_images[Level.TILE.WATER];
+        if (water_image == Level.tile_water1)
+            Level.tile_images[Level.TILE.WATER] = Level.tile_water2;
+        else
+            Level.tile_images[Level.TILE.WATER] = Level.tile_water1;
     }
 
     loadLevel(level_nr) {
@@ -109,21 +120,6 @@ class Level {
                 ctx.drawImage(image, tile.x, tile.y);
             }
         }
-    }
-
-    updateObstacleRects() {
-        // Set this.obstacle_rects to all tiles' rects that players can destroy
-        // with bullets
-
-        // TODO: self.obstacle_rects = [castle.rect]
-
-        const obstacles = [Level.TILE.BRICK, Level.TILE.STEEL, Level.TILE.WATER];
-
-        //TODO
-        /*for (const tile of this.mapr) {
-            if (obstacles.includes(tile.type))
-                this.obstacle_rects.push(tile);
-        }*/
     }
 
     intersectObstacles(rect) {

@@ -311,7 +311,7 @@ game.doFrame = function () {
                         return;
                     case SCREEN_DONE:
                         this.game_state = STATE.NEXT_LEVEL;
-                        this.stage = 1; // set the start stage
+                        this.stage = 4; // set the start stage
                         this.players = []; // clear players
                         break;
                     case SCREEN_EXIT:
