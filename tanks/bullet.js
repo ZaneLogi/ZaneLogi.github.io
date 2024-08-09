@@ -27,7 +27,7 @@ class Bullet {
         this.owner_class = shooter;
 
         // if superpower level is at least 1
-		if (shooter.superpowers > 0)
+        if (shooter.superpowers > 0)
             this.speed = 8;
 
         // if superpower level is at least 3
@@ -121,9 +121,55 @@ class Bullet {
                 break;
         }
 
-        let has_collided = false;
+        // check for collisions with walls. one bullet can destroy several (1 or 2)
+        // tiles but explosion remains 1
+        if (this.level.hitTiles(this)) {
+            this.explode();
+            return;
+        }
 
+        // check for collisions with other bullets
+        for (const bullet of game.bullets) {
+            if (this.state == Bullet.STATE.ACTIVE &&
+                bullet.state == Bullet.STATE.ACTIVE &&
+                bullet.owner != this.owner &&
+                bullet != this &&
+                intersectRect(this.rect, bullet.rect)) {
+                // destroy each other
+                this.destroy();
+                bullet.destroy();
+                return;
+            }
+        }
 
+        // check for collisions with players
+        for (const player of game.players) {
+            if (player.state == Tank.STATE.ALIVE &&
+                intersectRect(this.rect, player.rect)) {
+                if (player.bulletImpact()) {
+                    this.destroy();
+                    return;
+                }
+            }
+        }
+
+        // check for collisions with enemies
+        for (const enemy of game.enemies) {
+            if (enemy.state == Tank.STATE.ALIVE &&
+                intersectRect(this.rect, enemy.rect)) {
+                if (enemy.bulletImpact()) {
+                    this.destroy();
+                    return;
+                }
+            }
+        }
+
+        // check for collision with castle
+        if (game.castle.active && intersectRect(this.rect, game.castle.rect)) {
+            game.castle.destroy();
+            this.destroy();
+            return;
+        }
     }
 
     explode() {

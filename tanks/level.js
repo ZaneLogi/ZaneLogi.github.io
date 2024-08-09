@@ -148,4 +148,28 @@ class Level {
         return false;
     }
 
+    hitTiles(bullet) {
+        const srcRect = bullet.rect;
+        const play_sound = (bullet.owner == Tank.SIDE.PLAYER);
+        let collided = false;
+
+        this.mapr[Level.TILE.BRICK] = this.mapr[Level.TILE.BRICK].filter(dstRect => {
+            if (intersectRect(srcRect, dstRect)) {
+                collided = true;
+                return false;
+            }
+            return true;
+        });
+
+        this.mapr[Level.TILE.STEEL] = this.mapr[Level.TILE.STEEL].filter(dstRect => {
+            if (intersectRect(srcRect, dstRect)) {
+                collided = true;
+                return bullet.power != 2;
+            }
+            return true;
+        });
+
+        return collided;
+    }
+
 }
