@@ -50,18 +50,18 @@ function E_RICK_STTST(X) { return e_rick_context.e_rick_state & X; }
  * ret: TRUE/intersect, FALSE/not.
  */
 function e_rick_boxtest(e) {
-	/*
-	 * rick: x+0x05 to x+0x11, y+[0x08 if rick's crawling] to y+0x14
-	 * entity: x to x+w, y to y+h
-	 */
+    /*
+     * rick: x+0x05 to x+0x11, y+[0x08 if rick's crawling] to y+0x14
+     * entity: x to x+w, y to y+h
+     */
 
-	if (E_RICK_ENT.x + 0x11 < ent_ents[e].x ||
-		E_RICK_ENT.x + 0x05 > ent_ents[e].x + ent_ents[e].w ||
-		E_RICK_ENT.y + 0x14 < ent_ents[e].y ||
-		E_RICK_ENT.y + (E_RICK_STTST(E_RICK_STCRAWL) ? 0x08 : 0x00) > ent_ents[e].y + ent_ents[e].h - 1)
-		return false;
-	else
-		return true;
+    if (E_RICK_ENT.x + 0x11 < ent_ents[e].x ||
+        E_RICK_ENT.x + 0x05 > ent_ents[e].x + ent_ents[e].w ||
+        E_RICK_ENT.y + 0x14 < ent_ents[e].y ||
+        E_RICK_ENT.y + (E_RICK_STTST(E_RICK_STCRAWL) ? 0x08 : 0x00) > ent_ents[e].y + ent_ents[e].h - 1)
+        return false;
+    else
+        return true;
 }
 
 /*
@@ -72,16 +72,16 @@ function e_rick_boxtest(e) {
 function e_rick_gozombie() {
     if (game_context.game_cheat2) return;
 
-	/* already zombie? */
-	if (E_RICK_STTST(E_RICK_STZOMBIE)) return;
+    /* already zombie? */
+    if (E_RICK_STTST(E_RICK_STZOMBIE)) return;
 
     // syssnd_play(WAV_DIE, 1);
 
-	E_RICK_STSET(E_RICK_STZOMBIE);
-	e_rick_context.offsy = -0x0400;
-	e_rick_context.offsx = (E_RICK_ENT.x > 0x80 ? -3 : +3);
-	e_rick_context.ylow = 0;
-	E_RICK_ENT.front = true;
+    E_RICK_STSET(E_RICK_STZOMBIE);
+    e_rick_context.offsy = -0x0400;
+    e_rick_context.offsx = (E_RICK_ENT.x > 0x80 ? -3 : +3);
+    e_rick_context.ylow = 0;
+    E_RICK_ENT.front = true;
 }
 
 /*
@@ -90,21 +90,21 @@ function e_rick_gozombie() {
  * ASM 17DC
  */
 function e_rick_z_action() {
-	/* sprite */
-	E_RICK_ENT.sprite = (E_RICK_ENT.x & 0x04) ? 0x1A : 0x19;
+    /* sprite */
+    E_RICK_ENT.sprite = (E_RICK_ENT.x & 0x04) ? 0x1A : 0x19;
 
-	/* x */
-	E_RICK_ENT.x += e_rick_context.offsx;
+    /* x */
+    E_RICK_ENT.x += e_rick_context.offsx;
 
-	/* y */
-	let i = (E_RICK_ENT.y << 8) + e_rick_context.offsy + e_rick_context.ylow;
-	E_RICK_ENT.y = i >> 8;
-	e_rick_context.offsy += 0x80;
-	e_rick_context.ylow = i & 0xff;
+    /* y */
+    let i = (E_RICK_ENT.y << 8) + e_rick_context.offsy + e_rick_context.ylow;
+    E_RICK_ENT.y = i >> 8;
+    e_rick_context.offsy += 0x80;
+    e_rick_context.ylow = i & 0xff;
 
-	/* dead when out of screen */
-	if (E_RICK_ENT.y < 0 || E_RICK_ENT.y > 0x0140)
-		E_RICK_STSET(E_RICK_STDEAD);
+    /* dead when out of screen */
+    if (E_RICK_ENT.y < 0 || E_RICK_ENT.y > 0x0140)
+        E_RICK_STSET(E_RICK_STDEAD);
 }
 
 /*
@@ -114,111 +114,111 @@ function e_rick_z_action() {
  */
 function e_rick_action2() {
     let env0 = [0], env1 = [0];
-	let x = 0, y =0;
-	let i = 0;
+    let x = 0, y =0;
+    let i = 0;
 
-	E_RICK_STRST(E_RICK_STSTOP|E_RICK_STSHOOT);
+    E_RICK_STRST(E_RICK_STSTOP|E_RICK_STSHOOT);
 
-	/* if zombie, run dedicated function and return */
-	if (E_RICK_STTST(E_RICK_STZOMBIE)) {
-		e_rick_z_action();
-		return;
-	}
+    /* if zombie, run dedicated function and return */
+    if (E_RICK_STTST(E_RICK_STZOMBIE)) {
+        e_rick_z_action();
+        return;
+    }
 
-	/*
-	* NOT CLIMBING
-	*/
+    /*
+    * NOT CLIMBING
+    */
     const not_climbing = function() {
-	    E_RICK_STRST(E_RICK_STJUMP);
-	    /* calc y, fixed-point number, scaling factor 2 ^ 8 */
-	    i = (E_RICK_ENT.y << 8) + e_rick_context.offsy + e_rick_context.ylow;
-	    y = i >> 8;
-	    /* test environment */
-	    u_envtest(E_RICK_ENT.x, y, E_RICK_STTST(E_RICK_STCRAWL), env0, env1);
-	    /* stand up, if possible */
-	    if (E_RICK_STTST(E_RICK_STCRAWL) && !env0[0])
-		    E_RICK_STRST(E_RICK_STCRAWL);
+        E_RICK_STRST(E_RICK_STJUMP);
+        /* calc y, fixed-point number, scaling factor 2 ^ 8 */
+        i = (E_RICK_ENT.y << 8) + e_rick_context.offsy + e_rick_context.ylow;
+        y = i >> 8;
+        /* test environment */
+        u_envtest(E_RICK_ENT.x, y, E_RICK_STTST(E_RICK_STCRAWL), env0, env1);
+        /* stand up, if possible */
+        if (E_RICK_STTST(E_RICK_STCRAWL) && !env0[0])
+            E_RICK_STRST(E_RICK_STCRAWL);
 
         /* can move vertically? */
-	    if (env1[0] & (e_rick_context.offsy < 0 ?
-            	MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD :
-				MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP))
-		    return vert_not();
+        if (env1[0] & (e_rick_context.offsy < 0 ?
+                MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD :
+                MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP))
+            return vert_not();
 
         return vertical_move();
     };
 
-	/*
-	* VERTICAL MOVE
-	*/
+    /*
+    * VERTICAL MOVE
+    */
     const vertical_move = function() {
-	    E_RICK_STSET(E_RICK_STJUMP);
-	    /* killed? */
-	    if (env1[0] & MAP_EFLG_LETHAL) {
-		    e_rick_gozombie();
-		    return true;
-	    }
-	    /* save */
-	    E_RICK_ENT.y = y;
-	    e_rick_context.ylow = i & 0xff; // y fraction
-	    /* climb? */
-	    if ((env1[0] & MAP_EFLG_CLIMB) &&
-			(control.control_status & (CONTROL_UP|CONTROL_DOWN))) {
-		    e_rick_context.offsy = 0x0100; // set speed = 1 pixel down
-		    E_RICK_STSET(E_RICK_STCLIMB);
-		    return true;
-	    }
+        E_RICK_STSET(E_RICK_STJUMP);
+        /* killed? */
+        if (env1[0] & MAP_EFLG_LETHAL) {
+            e_rick_gozombie();
+            return true;
+        }
+        /* save */
+        E_RICK_ENT.y = y;
+        e_rick_context.ylow = i & 0xff; // y fraction
+        /* climb? */
+        if ((env1[0] & MAP_EFLG_CLIMB) &&
+            (control.control_status & (CONTROL_UP|CONTROL_DOWN))) {
+            e_rick_context.offsy = 0x0100; // set speed = 1 pixel down
+            E_RICK_STSET(E_RICK_STCLIMB);
+            return true;
+        }
 
-	    /* fall, add the speed 0.5 pixels down, not over 8 pixels */
-	    e_rick_context.offsy += 0x0080;
-	    if (e_rick_context.offsy > 0x0800) {
-		    e_rick_context.offsy = 0x0800;
-		    e_rick_context.ylow = 0;
-	    }
+        /* fall, add the speed 0.5 pixels down, not over 8 pixels */
+        e_rick_context.offsy += 0x0080;
+        if (e_rick_context.offsy > 0x0800) {
+            e_rick_context.offsy = 0x0800;
+            e_rick_context.ylow = 0;
+        }
 
         return horiz();
     };
 
-	/*
-	* HORIZONTAL MOVE
-	*/
+    /*
+    * HORIZONTAL MOVE
+    */
     const horiz = function() {
         /* should move? */
-	    if (!(control.control_status & (CONTROL_LEFT|CONTROL_RIGHT))) {
-		    e_rick_context.seq = 2; /* no: reset seq and return */
-		    return true;
-	    }
-	    if (control.control_status & CONTROL_LEFT) {
+        if (!(control.control_status & (CONTROL_LEFT|CONTROL_RIGHT))) {
+            e_rick_context.seq = 2; /* no: reset seq and return */
+            return true;
+        }
+        if (control.control_status & CONTROL_LEFT) {
             /* move left */
-		    x = E_RICK_ENT.x - 2;
-		    game_context.game_dir = LEFT;
-		    if (x < 0) {  /* prev submap */
-			    game_context.game_chsm = true;
-			    E_RICK_ENT.x = 0xe2;
-			    return true;
-		    }
-	    } else {
+            x = E_RICK_ENT.x - 2;
+            game_context.game_dir = LEFT;
+            if (x < 0) {  /* prev submap */
+                game_context.game_chsm = true;
+                E_RICK_ENT.x = 0xe2;
+                return true;
+            }
+        } else {
             /* move right */
-		    x = E_RICK_ENT.x + 2;
-		    game_context.game_dir = RIGHT;
-		    if (x >= 0xe8) {  /* next submap */
-			    game_context.game_chsm = true;
-			    E_RICK_ENT.x = 0x04;
-			    return true;
-		    }
-	    }
+            x = E_RICK_ENT.x + 2;
+            game_context.game_dir = RIGHT;
+            if (x >= 0xe8) {  /* next submap */
+                game_context.game_chsm = true;
+                E_RICK_ENT.x = 0x04;
+                return true;
+            }
+        }
 
-	    /* still within this map: test environment */
-	    u_envtest(x, E_RICK_ENT.y, E_RICK_STTST(E_RICK_STCRAWL), env0, env1);
+        /* still within this map: test environment */
+        u_envtest(x, E_RICK_ENT.y, E_RICK_STTST(E_RICK_STCRAWL), env0, env1);
 
-	    /* save x-position if it is possible to move */
-	    if (!(env1[0] & (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP))) {
-		    E_RICK_ENT.x = x;
-		    if (env1[0] & MAP_EFLG_LETHAL) e_rick_gozombie();
-	    }
+        /* save x-position if it is possible to move */
+        if (!(env1[0] & (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP))) {
+            E_RICK_ENT.x = x;
+            if (env1[0] & MAP_EFLG_LETHAL) e_rick_gozombie();
+        }
 
-	    /* end */
-	    return true;
+        /* end */
+        return true;
     };
 
     /*
@@ -261,19 +261,19 @@ function e_rick_action2() {
      * FIRING
      */
     const firing = function() {
-	    if (control.control_status & (CONTROL_LEFT|CONTROL_RIGHT)) {
+        if (control.control_status & (CONTROL_LEFT|CONTROL_RIGHT)) {
             /* stop */
-		    if (control.control_status & CONTROL_RIGHT) {
+            if (control.control_status & CONTROL_RIGHT) {
                 game_context.game_dir = RIGHT;
-			    e_rick_context.e_rick_stop_x = E_RICK_ENT.x + 0x17;
-		    } else {
+                e_rick_context.e_rick_stop_x = E_RICK_ENT.x + 0x17;
+            } else {
                 game_context.game_dir = LEFT;
                 e_rick_context.e_rick_stop_x = E_RICK_ENT.x;
-		    }
-		    e_rick_context.e_rick_stop_y = E_RICK_ENT.y + 0x000E;
-		    E_RICK_STSET(E_RICK_STSTOP);
-		    return true;
-	    }
+            }
+            e_rick_context.e_rick_stop_y = E_RICK_ENT.y + 0x000E;
+            E_RICK_STSET(E_RICK_STSTOP);
+            return true;
+        }
 
         if (control.control_status == (CONTROL_FIRE|CONTROL_UP)) {
             /* bullet */
@@ -336,8 +336,8 @@ function e_rick_action2() {
         if (control.control_status & CONTROL_DOWN) {
             /* crawl or climb */
             if ((env1[0] & MAP_EFLG_VERT) &&  /* can go down */
-	            !(control.control_status & (CONTROL_LEFT|CONTROL_RIGHT)) &&  /* + not moving horizontaly */
-	            (E_RICK_ENT.x & 0x1f) < 0x0a) {  /* + aligned -> climb */
+                !(control.control_status & (CONTROL_LEFT|CONTROL_RIGHT)) &&  /* + not moving horizontaly */
+                (E_RICK_ENT.x & 0x1f) < 0x0a) {  /* + aligned -> climb */
                 E_RICK_ENT.x &= 0xf0;
                 E_RICK_ENT.x |= 0x04;
                 E_RICK_STSET(E_RICK_STCLIMB);
@@ -351,97 +351,97 @@ function e_rick_action2() {
         return horiz();
     };
 
-	/*
-	* CLIMBING
-	*/
-	const climbing = function() {
-		/* should move? */
-		if (!(control.control_status & (CONTROL_UP|CONTROL_DOWN|CONTROL_LEFT|CONTROL_RIGHT))) {
-			e_rick_context.seq = 0; /* no: reset seq and return */
-			return true;
-		}
+    /*
+    * CLIMBING
+    */
+    const climbing = function() {
+        /* should move? */
+        if (!(control.control_status & (CONTROL_UP|CONTROL_DOWN|CONTROL_LEFT|CONTROL_RIGHT))) {
+            e_rick_context.seq = 0; /* no: reset seq and return */
+            return true;
+        }
 
-		if (control.control_status & (CONTROL_UP|CONTROL_DOWN)) {
-			/* up-down: calc new y and test environment */
-			y = E_RICK_ENT.y + ((control.control_status & CONTROL_UP) ? -0x02 : 0x02);
-			u_envtest(E_RICK_ENT.x, y, E_RICK_STTST(E_RICK_STCRAWL), env0, env1);
-			if (env1[0] & (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP) &&
-					!(control.control_status & CONTROL_UP)) {
-				/* FIXME what? */
-				E_RICK_STRST(E_RICK_STCLIMB);
-				return true;
-			}
-			if (!(env1[0] & (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP)) ||
-					(env1[0] & MAP_EFLG_WAYUP)) {
-				/* ok to move, save */
-				E_RICK_ENT.y = y;
-				if (env1[0] & MAP_EFLG_LETHAL) {
-					e_rick_gozombie();
-					return true;
-				}
-				if (!(env1[0] & (MAP_EFLG_VERT|MAP_EFLG_CLIMB))) {
-					/* reached end of climb zone */
-					e_rick_context.offsy = (control.control_status & CONTROL_UP) ? -0x0300 : 0x0100;
+        if (control.control_status & (CONTROL_UP|CONTROL_DOWN)) {
+            /* up-down: calc new y and test environment */
+            y = E_RICK_ENT.y + ((control.control_status & CONTROL_UP) ? -0x02 : 0x02);
+            u_envtest(E_RICK_ENT.x, y, E_RICK_STTST(E_RICK_STCRAWL), env0, env1);
+            if (env1[0] & (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP) &&
+                    !(control.control_status & CONTROL_UP)) {
+                /* FIXME what? */
+                E_RICK_STRST(E_RICK_STCLIMB);
+                return true;
+            }
+            if (!(env1[0] & (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP)) ||
+                    (env1[0] & MAP_EFLG_WAYUP)) {
+                /* ok to move, save */
+                E_RICK_ENT.y = y;
+                if (env1[0] & MAP_EFLG_LETHAL) {
+                    e_rick_gozombie();
+                    return true;
+                }
+                if (!(env1[0] & (MAP_EFLG_VERT|MAP_EFLG_CLIMB))) {
+                    /* reached end of climb zone */
+                    e_rick_context.offsy = (control.control_status & CONTROL_UP) ? -0x0300 : 0x0100;
 
-					//if (control.control_status & CONTROL_UP)
-					//	syssnd_play(WAV_JUMP, 1);
+                    //if (control.control_status & CONTROL_UP)
+                    //    syssnd_play(WAV_JUMP, 1);
 
-					E_RICK_STRST(E_RICK_STCLIMB);
-					return true;
-				}
-			}
-		}
+                    E_RICK_STRST(E_RICK_STCLIMB);
+                    return true;
+                }
+            }
+        }
 
         if (control.control_status & (CONTROL_LEFT|CONTROL_RIGHT)) {
             /* left-right: calc new x and test environment */
             if (control.control_status & CONTROL_LEFT) {
                 x = E_RICK_ENT.x - 0x02;
-            if (x < 0) {  /* (i.e. negative) prev submap */
-	            game_context.game_chsm = true;
-	            /*6dbd = 0x00;*/
-	            E_RICK_ENT.x = 0xe2;
-	            return true;
+                if (x < 0) {  /* (i.e. negative) prev submap */
+                    game_context.game_chsm = true;
+                    /*6dbd = 0x00;*/
+                    E_RICK_ENT.x = 0xe2;
+                    return true;
+                }
             }
-        }
-        else {
-            x = E_RICK_ENT.x + 0x02;
-            if (x >= 0xe8) {  /* next submap */
-	            game_context.game_chsm = true;
-	            /*6dbd = 0x01;*/
-	            E_RICK_ENT.x = 0x04;
-	            return true;
+            else {
+                x = E_RICK_ENT.x + 0x02;
+                if (x >= 0xe8) {  /* next submap */
+                    game_context.game_chsm = true;
+                    /*6dbd = 0x01;*/
+                    E_RICK_ENT.x = 0x04;
+                    return true;
+                }
             }
-        }
-        u_envtest(x, E_RICK_ENT.y, E_RICK_STTST(E_RICK_STCRAWL), env0, env1);
-        if (env1[0] & (MAP_EFLG_SOLID|MAP_EFLG_SPAD)) return;
-        E_RICK_ENT.x = x;
-        if (env1[0] & MAP_EFLG_LETHAL) {
-            e_rick_gozombie();
-            return true;
-        }
+            u_envtest(x, E_RICK_ENT.y, E_RICK_STTST(E_RICK_STCRAWL), env0, env1);
+            if (env1[0] & (MAP_EFLG_SOLID|MAP_EFLG_SPAD)) return;
+            E_RICK_ENT.x = x;
+            if (env1[0] & MAP_EFLG_LETHAL) {
+                e_rick_gozombie();
+                return true;
+            }
 
-        if (env1[0] & (MAP_EFLG_VERT|MAP_EFLG_CLIMB)) return;
-        E_RICK_STRST(E_RICK_STCLIMB);
-        if (control.control_status & CONTROL_UP)
-            e_rick_context.offsy = -0x0300;
+            if (env1[0] & (MAP_EFLG_VERT|MAP_EFLG_CLIMB)) return;
+            E_RICK_STRST(E_RICK_STCLIMB);
+            if (control.control_status & CONTROL_UP)
+                e_rick_context.offsy = -0x0300;
         }
     };
 
-	// flow:
-	// +-- climing
-	// |
-	// +-- not climbing
-	//     +-- vertical move
-	//     |   +-- horizontal move
-	//     +-- not vertical move
-	//         +-- hroizontal move
-	//         +-- firing
-	//         +-- not firing
-	//             +-- horizontal move
+    // flow:
+    // +-- climing
+    // |
+    // +-- not climbing
+    //     +-- vertical move
+    //     |   +-- horizontal move
+    //     +-- not vertical move
+    //         +-- hroizontal move
+    //         +-- firing
+    //         +-- not firing
+    //             +-- horizontal move
 
     /* climbing? */
-	if (E_RICK_STTST(E_RICK_STCLIMB))
-		climbing();
+    if (E_RICK_STTST(E_RICK_STCLIMB))
+        climbing();
     else
         not_climbing();
 }
@@ -456,60 +456,60 @@ function e_rick_action(e) {
 
     e_rick_context.scrawl = E_RICK_STTST(E_RICK_STCRAWL);
 
-	if (E_RICK_STTST(E_RICK_STZOMBIE))
-		return;
+    if (E_RICK_STTST(E_RICK_STZOMBIE))
+        return;
 
-	/*
-	 * set sprite
-	 */
-	if (E_RICK_STTST(E_RICK_STSTOP)) {
-		E_RICK_ENT.sprite = (game_context.game_dir ? 0x17 : 0x0B);
+    /*
+     * set sprite
+     */
+    if (E_RICK_STTST(E_RICK_STSTOP)) {
+        E_RICK_ENT.sprite = (game_context.game_dir ? 0x17 : 0x0B);
 
-		if (!e_rick_context.stopped) {
-			//syssnd_play(WAV_STICK, 1);
-			e_rick_context.stopped = true;
-		}
-		return;
-	}
+        if (!e_rick_context.stopped) {
+            //syssnd_play(WAV_STICK, 1);
+            e_rick_context.stopped = true;
+        }
+        return;
+    }
 
-	e_rick_context.stopped = false;
+    e_rick_context.stopped = false;
 
-	if (E_RICK_STTST(E_RICK_STSHOOT)) {
-		E_RICK_ENT.sprite = (game_context.game_dir ? 0x16 : 0x0A);
-		return;
-	}
+    if (E_RICK_STTST(E_RICK_STSHOOT)) {
+        E_RICK_ENT.sprite = (game_context.game_dir ? 0x16 : 0x0A);
+        return;
+    }
 
-	if (E_RICK_STTST(E_RICK_STCLIMB)) {
-		E_RICK_ENT.sprite = (((E_RICK_ENT.x ^ E_RICK_ENT.y) & 0x04) ? 0x18 : 0x0c);
+    if (E_RICK_STTST(E_RICK_STCLIMB)) {
+        E_RICK_ENT.sprite = (((E_RICK_ENT.x ^ E_RICK_ENT.y) & 0x04) ? 0x18 : 0x0c);
 
-		e_rick_context.seq = (e_rick_context.seq + 1) & 0x03;
-		//if (e_rick_context.seq == 0) syssnd_play(WAV_WALK, 1);
+        e_rick_context.seq = (e_rick_context.seq + 1) & 0x03;
+        //if (e_rick_context.seq == 0) syssnd_play(WAV_WALK, 1);
 
-		return;
-	}
+        return;
+    }
 
-	if (E_RICK_STTST(E_RICK_STCRAWL)) {
-		E_RICK_ENT.sprite = (game_context.game_dir ? 0x13 : 0x07);
-		if (E_RICK_ENT.x & 0x04) E_RICK_ENT.sprite++;
+    if (E_RICK_STTST(E_RICK_STCRAWL)) {
+        E_RICK_ENT.sprite = (game_context.game_dir ? 0x13 : 0x07);
+        if (E_RICK_ENT.x & 0x04) E_RICK_ENT.sprite++;
 
-		e_rick_context.seq = (e_rick_context.seq + 1) & 0x03;
-		//if (e_rick_context.seq == 0) syssnd_play(WAV_CRAWL, 1);
+        e_rick_context.seq = (e_rick_context.seq + 1) & 0x03;
+        //if (e_rick_context.seq == 0) syssnd_play(WAV_CRAWL, 1);
 
-		return;
-	}
+        return;
+    }
 
-	if (E_RICK_STTST(E_RICK_STJUMP)) {
-		E_RICK_ENT.sprite = (game_context.game_dir ? 0x15 : 0x06);
-		return;
-	}
+    if (E_RICK_STTST(E_RICK_STJUMP)) {
+        E_RICK_ENT.sprite = (game_context.game_dir ? 0x15 : 0x06);
+        return;
+    }
 
-	e_rick_context.seq++;
+    e_rick_context.seq++;
 
-	if (e_rick_context.seq >= 0x14) {
-		//syssnd_play(WAV_WALK, 1);
+    if (e_rick_context.seq >= 0x14) {
+        //syssnd_play(WAV_WALK, 1);
 
-		e_rick_context.seq = 0x04;
-	}
+        e_rick_context.seq = 0x04;
+    }
     else {
         //if (e_rick_context.seq == 0x0C)
             //syssnd_play(WAV_WALK, 1);
@@ -525,9 +525,9 @@ function e_rick_action(e) {
  * ASM part of 0x0BBB
  */
 function e_rick_save() {
-	e_rick_context.save_x = E_RICK_ENT.x;
-	e_rick_context.save_y = E_RICK_ENT.y;
-	e_rick_context.save_crawl = E_RICK_STTST(E_RICK_STCRAWL);
+    e_rick_context.save_x = E_RICK_ENT.x;
+    e_rick_context.save_y = E_RICK_ENT.y;
+    e_rick_context.save_crawl = E_RICK_STTST(E_RICK_STCRAWL);
 }
 
 /*
@@ -536,11 +536,11 @@ function e_rick_save() {
  * ASM part of 0x0BDC
  */
 function e_rick_restore() {
-	E_RICK_ENT.x = e_rick_context.save_x;
-	E_RICK_ENT.y = e_rick_context.save_y;
-	E_RICK_ENT.front = false;
-	if (e_rick_context.save_crawl)
-		E_RICK_STSET(E_RICK_STCRAWL);
-	else
-		E_RICK_STRST(E_RICK_STCRAWL);
+    E_RICK_ENT.x = e_rick_context.save_x;
+    E_RICK_ENT.y = e_rick_context.save_y;
+    E_RICK_ENT.front = false;
+    if (e_rick_context.save_crawl)
+        E_RICK_STSET(E_RICK_STCRAWL);
+    else
+        E_RICK_STRST(E_RICK_STCRAWL);
 }

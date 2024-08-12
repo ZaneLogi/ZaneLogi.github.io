@@ -81,49 +81,49 @@ function u_envtest(x, y, crawl, rc0, rc1)
     if (xx & 0x07) {  /* tiles columns alignment */
         if (crawl) {
             rc0[0] |= (map_eflg[map_map[y][x]] &
-	            (MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP));
+                (MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP));
             rc0[0] |= (map_eflg[map_map[y][x + 1]] &
-	            (MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP));
+                (MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP));
             rc0[0] |= (map_eflg[map_map[y][x + 2]] &
-	            (MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP));
+                (MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP));
             y++;
         }
         do {
             rc1[0] |= (map_eflg[map_map[y][x]] &
-	            (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_FGND|
-		        MAP_EFLG_LETHAL|MAP_EFLG_01));
+                (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_FGND|
+                MAP_EFLG_LETHAL|MAP_EFLG_01));
             rc1[0] |= (map_eflg[map_map[y][x + 1]] &
-	            (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_FGND|
-		        MAP_EFLG_LETHAL|MAP_EFLG_CLIMB|MAP_EFLG_01));
+                (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_FGND|
+                MAP_EFLG_LETHAL|MAP_EFLG_CLIMB|MAP_EFLG_01));
             rc1[0] |= (map_eflg[map_map[y][x + 2]] &
-	            (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_FGND|
-		        MAP_EFLG_LETHAL|MAP_EFLG_01));
+                (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_FGND|
+                MAP_EFLG_LETHAL|MAP_EFLG_01));
             y++;
         } while (--i > 0);
 
         rc1[0] |= (map_eflg[map_map[y][x]] &
-	        (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP|MAP_EFLG_FGND|
-	        MAP_EFLG_LETHAL|MAP_EFLG_01));
+            (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP|MAP_EFLG_FGND|
+            MAP_EFLG_LETHAL|MAP_EFLG_01));
         rc1[0] |= (map_eflg[map_map[y][x + 1]]);
         rc1[0] |= (map_eflg[map_map[y][x + 2]] &
-	        (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP|MAP_EFLG_FGND|
-	        MAP_EFLG_LETHAL|MAP_EFLG_01));
+            (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP|MAP_EFLG_FGND|
+            MAP_EFLG_LETHAL|MAP_EFLG_01));
     }
     else {
         if (crawl) {
             rc0[0] |= (map_eflg[map_map[y][x]] &
-	            (MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP));
+                (MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP));
             rc0[0] |= (map_eflg[map_map[y][x + 1]] &
-	            (MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP));
+                (MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP));
             y++;
         }
         do {
             rc1[0] |= (map_eflg[map_map[y][x]] &
-	            (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_FGND|
-		        MAP_EFLG_LETHAL|MAP_EFLG_CLIMB|MAP_EFLG_01));
+                (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_FGND|
+                MAP_EFLG_LETHAL|MAP_EFLG_CLIMB|MAP_EFLG_01));
             rc1[0] |= (map_eflg[map_map[y][x + 1]] &
-	            (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_FGND|
-		        MAP_EFLG_LETHAL|MAP_EFLG_CLIMB|MAP_EFLG_01));
+                (MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_FGND|
+                MAP_EFLG_LETHAL|MAP_EFLG_CLIMB|MAP_EFLG_01));
             y++;
         } while (--i > 0);
 

@@ -1,0 +1,70 @@
+- u_fboxtest
+    - Full box test
+    - [in]
+        - e: entity index
+        - x, y: coordinates to test
+    - [out]
+        - true: (x,y) is within e's space, otherwise false
+
+- u_boxtest
+    - Box test (then whole e2 is checked agains the center of e1)
+    - [in]
+        - e1, e2: entity index
+    - [out]
+        - true: intersect, otherwise false
+    - the test range
+        - entity 1: x+0x05 to x+0x011, y to y+0x14
+        - entity 2: x to x+ .w, y to y+ .h
+
+- u_envtest
+    - Compute the environment flag
+    - [in]
+        - x, y: coordinates where to compute the environment flag
+        - crawl: is rick crawling?
+    - [out]
+        - rc0: anything CHANGED to the environment flag for crawling
+        - rc1: anything CHANGED to the environment flag
+    - entity: width 24, height 21
+    - tile: width 8, height 8
+    - the usage of rc0 is to indicate the environment flag if possible from crawl to stand
+    - the usage of rc1 is to indicate the environment flag for the whole space of the entity
+    - x is added 4 for testing
+        - the test range of x is from 4 to 20 if tiles columns aligned to 8
+        - the test range of x is from 4 to 28 if tiles columns not aligned to 8
+        - the number of tile column for check is 2 or 3 based on the tiles columns alignment
+            - when x & 0x7 is not zero, need to test one more tile column
+        - the number of tile row for check
+            - for rc0, always 1
+            - for rc1, the number of tile row for check starts from 1,
+                - if not crawling, add 1,
+                - if y & 0x7 is 4, 5, 6, or 7, add 1
+    - x is not aligned to 8
+        - for rc0, when crawling, check one tile row for rc0, otherwise rc0 = 0
+            - flags for check: MAP_EFLG_VERT|MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP
+        - for rc1
+            - flags not bottom:
+                - for x0: MAP_EFLG_SOLID|MAP_EFLG_SPAD|               MAP_EFLG_FGND|MAP_EFLG_LETHAL|               MAP_EFLG_01
+                - for x1: MAP_EFLG_SOLID|MAP_EFLG_SPAD|               MAP_EFLG_FGND|MAP_EFLG_LETHAL|MAP_EFLG_CLIMB|MAP_EFLG_01
+                - for x2: MAP_EFLG_SOLID|MAP_EFLG_SPAD|               MAP_EFLG_FGND|MAP_EFLG_LETHAL|               MAP_EFLG_01
+            - flags for bottom:
+                - for x0: MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP|MAP_EFLG_FGND|MAP_EFLG_LETHAL|               MAP_EFLG_01
+                - for x1: all flags
+                - for x2: MAP_EFLG_SOLID|MAP_EFLG_SPAD|MAP_EFLG_WAYUP|MAP_EFLG_FGND|MAP_EFLG_LETHAL|               MAP_EFLG_01
+    - x is aligned to 8
+        - for rc0, when crawling, check one tile row for rc0, otherwise rc0 = 0
+            - flags for check: same as (x is not aligned to 8)
+        - for rc1
+            - flags not bottom:
+                - for x0, x1: same as the one for x1 at (x is not aligned to 8)
+            - flags for bottom:
+                - for x0, x1: same as the one for x1 at (x is not aligned to 8)
+    - MAP_EFLG_CLIMB indicates entities can climb
+        - this flag is checked at the center columns and the bottom row of the entity for rc1
+    - MAP_EFLG_VERT indicates entities can move vertically
+        - this flag is checked for rc0 and the bottom row of the entity for rc1
+    - MAP_EFLG_WAYUP: solid block, can't go through except when going up
+        - this flag is checked for rc0 and the bottom row of the entity for rc1
+    - if entity 0 exists, check if colliding with it when it's not lethal
+
+- u_trigbox
+    - Check if x,y is within e trigger box.
