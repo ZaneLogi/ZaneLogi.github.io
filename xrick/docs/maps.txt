@@ -46,6 +46,8 @@
       between Rick's y tile and the row out tile
     - if map_connect[c].submap == 0xff, this map is ended, need to go to next map
     - otherwise, chain to next submap, map first row is updated (map_context.map_frow - map_connect[c].rowout + map_connect[c].rowin)
+        - tile row offset (should be negative) = (map_context.map_frow - map_connect[c].rowout)
+        - shift to next submap first row => + map_connect[c].rowin
 - map_maps
     - have information of the start of Rick's position, map first row of the first submap, the submap index, tune
 - map_submaps
@@ -59,5 +61,17 @@
     - map_marks have the information of the entities in the map_submaps
     - the first mark of the submap is located at 'map_submaps[game_submap].mark'
     - entities are activated when they are in the selected range
+
+
+
+- map 0, the start at (8, 139), first row(fr): 8, submap: 0
+    - submap: 0
+        - block number: from 0 to 120 (78h) blocks
+            - i.e. from 0 to 15 (0fh) block rows, for 8 blocks per row
+            - total tile rows = 16 * 4 = 64 tiles high
+        - map connection starts from 0
+            - 1st connect: left, row_out 24(18h), no submaps
+            - 2nd connect: right, row_out 56(38h), to submap 1, row_in 24(18h)
+        - first mark(fm): 0
 
 

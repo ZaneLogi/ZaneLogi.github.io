@@ -425,6 +425,16 @@ game.init = function() {
     //  map_context.ma_frow
     game_context.game_map = this.sysarg_args_map;
 
+    // initialize the entity Rick
+    E_RICK_ENT.x = map_maps[game_context.game_map].x;
+    E_RICK_ENT.y = map_maps[game_context.game_map].y;
+    E_RICK_ENT.w = 0x18;
+    E_RICK_ENT.h = 0x15;
+    E_RICK_ENT.n = 0x01;
+    E_RICK_ENT.sprite = 0x01;
+    E_RICK_ENT.front = false;
+    ent_ents[ENT_ENTSNUM].n = 0xFF;
+
     if (this.sysarg_args_submap == 0) {
         game_context.game_submap = map_maps[game_context.game_map].submap;
         map_context.map_frow = map_maps[game_context.game_map].row;
@@ -437,19 +447,9 @@ game.init = function() {
            (map_connect[i].submap != game_context.game_submap ||
             map_connect[i].dir != RIGHT))
           i++;
-        map_connect.map_frow = map_connect[i].rowin - 0x10;
+        map_context.map_frow = map_connect[i].rowin - 0x10;
         E_RICK_ENT.y = 0x10 << 3;
     }
-
-    // initialize the entity Rick
-    E_RICK_ENT.x = map_maps[game_context.game_map].x;
-    E_RICK_ENT.y = map_maps[game_context.game_map].y;
-    E_RICK_ENT.w = 0x18;
-    E_RICK_ENT.h = 0x15;
-    E_RICK_ENT.n = 0x01;
-    E_RICK_ENT.sprite = 0x01;
-    E_RICK_ENT.front = false;
-    ent_ents[ENT_ENTSNUM].n = 0xFF;
 
     // re-activates all entities
     map_resetMarks();
