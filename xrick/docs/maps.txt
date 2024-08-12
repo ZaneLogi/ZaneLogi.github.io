@@ -61,6 +61,12 @@
     - map_marks have the information of the entities in the map_submaps
     - the first mark of the submap is located at 'map_submaps[game_submap].mark'
     - entities are activated when they are in the selected range
+- map_eflg_expand
+    - two groups, 0 - 15, 16 - 31
+    - compressed data
+    - [count, data], [count, data], ...
+    - each group contains 256 flags for tile 0 - 255
+    - the usage is referred to u_envtest
 
 
 
