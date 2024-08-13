@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Audio</title>
+        <script type="text/javascript">
+            const context = {play:false, audio:null};
+            function playAudio() {
+                if (context.audio == null) {
+                    context.audio = document.getElementById("audio-element");
+                }
+
+                if (context.play) {
+                    context.audio.pause();
+                    context.audio.currentTime = 0;
+                    context.play = false;
+                }
+                else {
+                    context.audio.play();
+                    context.play = true;
+                }
+            }
+        </script>
+    </head>
+    <body>
+        <p>Press the button to play music.</p>
+        <button onclick="playAudio();">Play</button>
+        <audio id="audio-element" src="sounds/tune0.wav"
+            controls="true" style="width:512px"></audio>
+    </body>
+</html>

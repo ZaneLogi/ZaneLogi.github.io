@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Audio</title>
+        <script type="text/javascript">
+            function playAudio() {
+                const audio = document.createElement("audio");
+                audio.src = "sounds/tune0.wav";
+                audio.play();
+            }
+        </script>
+    </head>
+    <body>
+        <p>Press the button to play music.</p>
+        <button onclick="playAudio();">Play</button>
+    </body>
+</html>
