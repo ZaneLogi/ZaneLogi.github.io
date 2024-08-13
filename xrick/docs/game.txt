@@ -1,0 +1,63 @@
+- game state
+
+DEVTOOLS
+|
+XRICK
+|
+INIT_GAME <------------------------------------------------------------+
+|                                                                      |
+INTRO_MAIN                                                             |
+|                                                                      |
+INTRO_MAP                                                              |
+|                                                                      |
+INIT_BUFFER                                                            |
+|                                                                      |
+PLAY0 <------------------------------------------------------------<+<=|=--+
+|                                                                   ^  |   ^
+PLAY1 - PAUSE_PRESSED1 - PAUSE_PRESSED1B - PAUSED - PAUSE_PRESSED2  |  |   |
+|                                                    |              |  |   |
+PLAY2 <----------------------------------------------+              |  |   |
+|  |                                                                |  |   |
+|  +> RESTART ------------------------------------------------------+  |   |
+|  |                                                                   |   |
+|  +> GAMEOVER - GETNAME ----------------------------------------------+   |
+|  |  ^                                                                    |
+|  |  +---------------+                                                    |
+|  |                  |                                                    |
+|  +> CHAIN_SUBMAP -> CHAIN_MAP                                            |
+|              |      |                                                    |
+|              |      v                                                    |
+|              +----> CHAIN_END                                            |
+|                     |                                                    |
+PLAY3 <---------------+                                                    ^
+| +> SCROLL_UP >---------------------------------------------------------->+
+| +> SCROLL_DOWN >-------------------------------------------------------->+
+|                                                                          |
++------------------------------------------------------------------------->+
+
+
+PLAY0:
+- handle entity action
+  - call ent_action(), run entities
+- e_them_context.e_them_rndseed++ for the random number
+
+PLAY1:
+- handle the screen PAUSE
+
+PLAY2:
+- handle the dead of Rick and the map chaining
+
+PLAY3:
+- handle to draw the screen including entitis, status
+  - call ent_draw()
+- check the map scrolling up or down
+
+map_init() is called
+    - INIT_GAME
+    - RESTART
+    - CHAIN_END
+
+draw_map() is called
+    - INIT_BUFFER
+    - RESTART
+    - CHAIN_END
