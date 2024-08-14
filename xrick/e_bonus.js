@@ -9,7 +9,7 @@ function e_bonus_action(e) {
         if (e_rick_boxtest(e)) {
             game_context.game_score += 500;
 
-            //syssnd_play(WAV_BONUS, 1);
+            game.playsound(game.WAV_BONUS, 1);
 
             map_marks[ent_ents[e].mark].ent |= MAP_MARK_NACT;
             set_seq(1);

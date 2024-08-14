@@ -63,6 +63,9 @@ const game_context = {
     game_cheat1: false, // infinite lives, bullets, bombs
     game_cheat2: false, // invincible
     game_cheat3: false, // draw entities with their rectangles
+
+    sound_muted: true, // muted in the beginning
+    sound_volume: 1, // 0: silent, 1: highest volume
 };
 
 const game = {
@@ -80,9 +83,6 @@ const game = {
     cheat3_pressed: false,
 
     toggle_mute_pressed: false,
-
-    sound_muted: true, // muted in the beginning
-    sound_volume: 1, // 0: silent, 1: highest volume
 };
 
 game.onload = function() {
@@ -175,6 +175,7 @@ game.handle_toggle_mute = function() {
     else if (control.control_status & CONTROL_TOGGLE_MUTE) {
         this.toggle_mute_pressed = true;
         this.toggle_mute();
+        draw_infos();
     }
 }
 
@@ -280,13 +281,13 @@ game.do_frame = function() {
 
         case PAUSE_PRESSED2:
             // wait the release of the key PAUSE to resume the game
-			if (!(control.control_status & CONTROL_PAUSE)) {
-				this.game_waitevt = false;
-				screen_pause(false);
-				//syssnd_pause(FALSE, FALSE);
-				this.game_state = PLAY2;
-			}
-		    return;
+            if (!(control.control_status & CONTROL_PAUSE)) {
+                this.game_waitevt = false;
+                screen_pause(false);
+                //syssnd_pause(FALSE, FALSE);
+                this.game_state = PLAY2;
+            }
+            return;
 
         case PLAY0:
             // handle the actions of entities
@@ -555,7 +556,44 @@ game.restart = function() {
 };
 
 game.load_audio_data = function() {
+    this.WAV_SBONUS2 = new Audio("sounds/sbonus2.wav");
+    this.WAV_BULLET = new Audio("sounds/bullet.wav");
+    this.WAV_BOMBSHHT = new Audio("sounds/bombshht.wav");
+    this.WAV_EXPLODE = new Audio("sounds/explode.wav");
+    this.WAV_STICK = new Audio("sounds/stick.wav");
+    this.WAV_WALK = new Audio("sounds/walk.wav");
+    this.WAV_CRAWL = new Audio("sounds/crawl.wav");
+    this.WAV_JUMP = new Audio("sounds/jump.wav");
+    this.WAV_PAD = new Audio("sounds/pad.wav");
+    this.WAV_BOX = new Audio("sounds/box.wav");
+    this.WAV_BONUS = new Audio("sounds/bonus.wav");
+    this.WAV_SBONUS1 = new Audio("sounds/sbonus1.wav");
+    this.WAV_DIE = new Audio("sounds/die.wav");
+    this.WAV_ENTITY = [];
+    this.WAV_ENTITY[0] = new Audio("sounds/ent0.wav");
+    this.WAV_ENTITY[1] = new Audio("sounds/ent1.wav");
+    this.WAV_ENTITY[2] = new Audio("sounds/ent2.wav");
+    this.WAV_ENTITY[3] = new Audio("sounds/ent3.wav");
+    this.WAV_ENTITY[4] = new Audio("sounds/ent4.wav");
+    this.WAV_ENTITY[5] = new Audio("sounds/ent5.wav");
+    this.WAV_ENTITY[6] = new Audio("sounds/ent6.wav");
+    this.WAV_ENTITY[7] = new Audio("sounds/ent7.wav");
+    this.WAV_ENTITY[8] = new Audio("sounds/ent8.wav");
 
+    this.sounds = [
+        this.WAV_SBONUS2, this.WAV_BULLET, this.WAV_BOMBSHHT, this.WAV_EXPLODE,
+        this.WAV_STICK, this.WAV_WALK, this.WAV_CRAWL, this.WAV_JUMP, this.WAV_PAD,
+        this.WAV_BOX, this.WAV_BONUS, this.WAV_SBONUS1, this.WAV_DIE,
+        ...this.WAV_ENTITY
+    ];
+}
+
+game.playsound = function(snd, loop) {
+    snd.pause();
+    snd.currentTime = 0;
+    snd.muted = game_context.sound_muted;
+    snd.volume = game_context.sound_volume;
+    snd.play();
 }
 
 game.setmusic = function(name, loop) {
@@ -572,8 +610,8 @@ game.setmusic = function(name, loop) {
                 this.music_snd.play();
             }
         });
-    this.music_snd.muted = this.sound_muted;
-    this.music_snd.volume = this.sound_volume;
+    this.music_snd.muted = game_context.sound_muted;
+    this.music_snd.volume = game_context.sound_volume;
     this.music_snd.src = name;
 }
 
@@ -586,23 +624,31 @@ game.stopmusic = function() {
 }
 
 game.toggle_mute = function() {
-    this.sound_muted = !this.sound_muted;
+    game_context.sound_muted = !game_context.sound_muted;
     if (this.music_snd)
-        this.music_snd.muted = this.sound_muted;
+        this.music_snd.muted = game_context.sound_muted;
+
+    for (const snd of this.sounds) {
+        snd.muted = game_context.sound_muted;
+    }
 }
 
 game.set_volume = function(delta) {
-    let value = this.sound_volume + delta;
+    let value = game_context.sound_volume + delta;
     if (value < 0) value = 0;
     else if (value > 1) value = 1;
 
-    if (value == this.sound_volume)
+    if (value == game_context.sound_volume)
         return;
     
-    this.sound_volume = value;
+    game_context.sound_volume = value;
 
     if (this.music_snd)
-        this.music_snd.volume = this.sound_volume;
+        this.music_snd.volume = game_context.sound_volume;
+
+    for (const snd of this.sounds) {
+        snd.volume = game_context.sound_volume;
+    }
 } 
 
 window.onload = () => game.onload();

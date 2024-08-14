@@ -20,15 +20,15 @@ const E_BOMB_TICKER = 0x2D;
  */
 function e_bomb_hit(e)
 {
-	if (ent_ents[e].x > (E_BOMB_ENT.x >= 0xE0 ? 0xFF : E_BOMB_ENT.x + 0x20))
+    if (ent_ents[e].x > (E_BOMB_ENT.x >= 0xE0 ? 0xFF : E_BOMB_ENT.x + 0x20))
         return false;
-	if (ent_ents[e].x + ent_ents[e].w < (E_BOMB_ENT.x > 0x04 ? E_BOMB_ENT.x - 0x04 : 0))
-		return false;
-	if (ent_ents[e].y > (E_BOMB_ENT.y + 0x1D))
-		return false;
-	if (ent_ents[e].y + ent_ents[e].h < (E_BOMB_ENT.y > 0x0004 ? E_BOMB_ENT.y - 0x0004 : 0))
-		return false;
-	return true;
+    if (ent_ents[e].x + ent_ents[e].w < (E_BOMB_ENT.x > 0x04 ? E_BOMB_ENT.x - 0x04 : 0))
+        return false;
+    if (ent_ents[e].y > (E_BOMB_ENT.y + 0x1D))
+        return false;
+    if (ent_ents[e].y + ent_ents[e].h < (E_BOMB_ENT.y > 0x0004 ? E_BOMB_ENT.y - 0x0004 : 0))
+        return false;
+    return true;
 }
 
 /*
@@ -69,8 +69,8 @@ function e_bomb_action(e) {
         /*
          * ticking
          */
-        //if ((e_bomb_ticker & 0x03) == 0x02)
-        //    syssnd_play(WAV_BOMBSHHT, 1);
+        if ((e_bomb_context.e_bomb_ticker & 0x03) == 0x02)
+            game.playsound(game.WAV_BOMBSHHT, 1);
 
         /* ST bomb sprites sequence is longer */
         if (e_bomb_context.e_bomb_ticker < 40)
@@ -82,7 +82,7 @@ function e_bomb_action(e) {
         /*
          * explode
          */
-        // syssnd_play(WAV_EXPLODE, 1);
+        game.playsound(game.WAV_EXPLODE, 1);
 
         /* See above: fixing alignment */
         E_BOMB_ENT.x -= 4;

@@ -396,6 +396,8 @@ function draw_infos()
     draw_tile(game_context.game_cheat2 ? 'N'.charCodeAt(0) : '@'.charCodeAt(0));
     draw_setfb(0x10, DRAW_STATUS_Y);
     draw_tile(game_context.game_cheat3 ? 'V'.charCodeAt(0) : '@'.charCodeAt(0));
+    draw_setfb(0x18, DRAW_STATUS_Y);
+    draw_tile(!game_context.sound_muted ? 'S'.charCodeAt(0) : '@'.charCodeAt(0));
 }
 
 /*

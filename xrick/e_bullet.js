@@ -25,7 +25,7 @@ function e_bullet_init(x, y) {
         E_BULLET_ENT.sprite = 0x20;
     }
 
-    // syssnd_play(WAV_BULLET, 1);
+    game.playsound(game.WAV_BULLET, 1);
 }
 
 /*

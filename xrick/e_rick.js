@@ -75,7 +75,7 @@ function e_rick_gozombie() {
     /* already zombie? */
     if (E_RICK_STTST(E_RICK_STZOMBIE)) return;
 
-    // syssnd_play(WAV_DIE, 1);
+    game.playsound(game.WAV_DIE, 1);
 
     E_RICK_STSET(E_RICK_STZOMBIE);
     e_rick_context.offsy = -0x0400;
@@ -243,7 +243,7 @@ function e_rick_action2() {
         if ((env1[0] & MAP_EFLG_SPAD) && e_rick_context.offsy >= 0X0200) {
             e_rick_context.offsy =
                 (control.control_status & CONTROL_UP) ? 0xf800 : 0x00fe - offsy;
-            //syssnd_play(WAV_PAD, 1);
+            game.playsound(game.WAV_PAD, 1);
 
             return horiz();
         }
@@ -330,7 +330,7 @@ function e_rick_action2() {
             }
             e_rick_context.offsy = -0x0580;  /* jump, speed = -5.5 pixels */
             e_rick_context.ylow = 0;
-            // syssnd_play(WAV_JUMP, 1);
+            game.playsound(game.WAV_JUMP, 1);
             return horiz();
         }
         if (control.control_status & CONTROL_DOWN) {
@@ -383,8 +383,8 @@ function e_rick_action2() {
                     /* reached end of climb zone */
                     e_rick_context.offsy = (control.control_status & CONTROL_UP) ? -0x0300 : 0x0100;
 
-                    //if (control.control_status & CONTROL_UP)
-                    //    syssnd_play(WAV_JUMP, 1);
+                    if (control.control_status & CONTROL_UP)
+                        game.playsound(game.WAV_JUMP, 1);
 
                     E_RICK_STRST(E_RICK_STCLIMB);
                     return true;
@@ -466,7 +466,7 @@ function e_rick_action(e) {
         E_RICK_ENT.sprite = (game_context.game_dir ? 0x17 : 0x0B);
 
         if (!e_rick_context.stopped) {
-            //syssnd_play(WAV_STICK, 1);
+            game.playsound(game.WAV_STICK, 1);
             e_rick_context.stopped = true;
         }
         return;
@@ -483,7 +483,7 @@ function e_rick_action(e) {
         E_RICK_ENT.sprite = (((E_RICK_ENT.x ^ E_RICK_ENT.y) & 0x04) ? 0x18 : 0x0c);
 
         e_rick_context.seq = (e_rick_context.seq + 1) & 0x03;
-        //if (e_rick_context.seq == 0) syssnd_play(WAV_WALK, 1);
+        if (e_rick_context.seq == 0) game.playsound(game.WAV_WALK, 1);
 
         return;
     }
@@ -493,7 +493,7 @@ function e_rick_action(e) {
         if (E_RICK_ENT.x & 0x04) E_RICK_ENT.sprite++;
 
         e_rick_context.seq = (e_rick_context.seq + 1) & 0x03;
-        //if (e_rick_context.seq == 0) syssnd_play(WAV_CRAWL, 1);
+        if (e_rick_context.seq == 0) game.playsound(game.WAV_CRAWL, 1);
 
         return;
     }
@@ -506,13 +506,13 @@ function e_rick_action(e) {
     e_rick_context.seq++;
 
     if (e_rick_context.seq >= 0x14) {
-        //syssnd_play(WAV_WALK, 1);
+        game.playsound(game.WAV_WALK, 1);
 
         e_rick_context.seq = 0x04;
     }
     else {
-        //if (e_rick_context.seq == 0x0C)
-            //syssnd_play(WAV_WALK, 1);
+        if (e_rick_context.seq == 0x0C)
+            game.playsound(game.WAV_WALK, 1);
     }
 
     E_RICK_ENT.sprite =
