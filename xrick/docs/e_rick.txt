@@ -1,0 +1,74 @@
+- e_rick_action2
+    - reset the flags, no stick & no shoot (these will be set if keys pressed)
+    - go zombie action if zombie
+    - run the flow below
+
+Code flow:
++-- climing
+|
++-- not climbing
+    +-- vertical move
+    |   +-- horizontal move
+    |
+    +-- not vertical move
+        +-- hroizontal move
+        +-- firing
+        +-- not firing
+            +-- horizontal move
+
+Action flow:
+.check the climb flag
+ if climbing, go to CLIMBING
+ else go to NOT CLIMBING
+
++-- CLIMBING
+    .check up & down
+        .y speed up -2, down +2
+        .check going down possible
+        .check lethal
+        .check reaching end of climb zone
+    .check left & right
+        .x speed left -2, right +2
+        .check going to next submap
+        .check lethal
+    .END OF ACTION
+
++-- NOT CLIMBING
+    .reset the flag jump, no jump
+    .check y movement
+     if verticalling move possible, go to VERTICAL MOVE
+     else go to VERTICAL MOVE 
+
++-- VERTICAL MOVE
+    .set the flag jump
+    .check lethal
+    .check climbing possible
+    .increase the falling acceleration 0.5 pixels down, not over 8 pixels
+    .go to HORIZONTAL MOVE
+
++-- NOT VERTICAL MOVE
+    .check not climbing + trying to go _up_ not possible -> hit the roof
+    .check not climbing + trying to go _down_ not possible -> standing align to ground
+    .check standing on a super pad
+        .if yes and y speed >= 2 pixels, go to HORIZONTAL MOVE
+    .reset to the speed 1 pixel down for gravity
+    .if fire (key fire pressed), go to FIRING
+     else go to NOT FIRING
+
++-- FIRING
+    .check stop stick
+    .check shooting
+    .check bombing
+    .END OF ACTION
+
++-- NOT FIRING
+    .check jump or climb (key up pressed)
+    .check crawl or climb (key down pressed)
+    .go to HORIZONTAL MOVE
+
++-- HORIZONTAL MOVE
+    .check x movement
+    .check lethal
+    .END OF ACTION
+
+
