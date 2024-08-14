@@ -15,7 +15,7 @@ screen_introMain.do_frame = function() {
         else            this.seq = 4;
         this.period = game.game_period;
         game.update_game_period(50);
-        // game_setmusic("sounds/tune5.wav", -1);
+        game.setmusic("sounds/tune5.wav", -1);
     }
 
     switch (this.seq) {

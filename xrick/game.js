@@ -78,9 +78,16 @@ const game = {
     cheat1_pressed: false,
     cheat2_pressed: false,
     cheat3_pressed: false,
+
+    toggle_mute_pressed: false,
+
+    sound_muted: true, // muted in the beginning
+    sound_volume: 1, // 0: silent, 1: highest volume
 };
 
 game.onload = function() {
+    this.load_audio_data();
+
     framebuffer.init(document.querySelector('canvas'));
     this.msPrev = window.performance.now();
     window.requestAnimationFrame(() => this.run());
@@ -115,6 +122,10 @@ game.run = function() {
     this.handle_cheat1();
     this.handle_cheat2();
     this.handle_cheat3();
+
+    this.handle_toggle_mute();
+    this.handle_volume_down();
+    this.handle_volume_up();
 
     framebuffer.updateCanvas();
     this.frames++;
@@ -154,6 +165,27 @@ game.handle_cheat3 = function() {
         game_context.game_cheat3 = !game_context.game_cheat3;
         draw_infos();
     }
+}
+
+game.handle_toggle_mute = function() {
+    if (this.toggle_mute_pressed) {
+        if (!(control.control_status & CONTROL_TOGGLE_MUTE))
+            this.toggle_mute_pressed = false;
+    }
+    else if (control.control_status & CONTROL_TOGGLE_MUTE) {
+        this.toggle_mute_pressed = true;
+        this.toggle_mute();
+    }
+}
+
+game.handle_volume_down = function() {
+    if (control.control_status & CONTROL_VOLUME_DOWN)
+        this.set_volume(-0.1);
+}
+
+game.handle_volume_up = function() {
+    if (control.control_status & CONTROL_VOLUME_UP)
+        this.set_volume(0.1);
 }
 
 game.do_frame = function() {
@@ -521,5 +553,56 @@ game.restart = function() {
     draw_map();
     draw_drawStatus();
 };
+
+game.load_audio_data = function() {
+
+}
+
+game.setmusic = function(name, loop) {
+    if (this.music_snd) {
+        this.stopmusic();
+    }
+
+    this.music_snd = new Audio();
+    this.music_snd.addEventListener("canplay", () => this.music_snd.play());
+    this.music_snd.addEventListener("ended",
+        () => {
+            if (loop < 0 || --loop > 0) {
+                this.music_snd.currentTime = 0;
+                this.music_snd.play();
+            }
+        });
+    this.music_snd.muted = this.sound_muted;
+    this.music_snd.volume = this.sound_volume;
+    this.music_snd.src = name;
+}
+
+game.stopmusic = function() {
+    // stop this.music_snd
+    if (this.music_snd) {
+        this.music_snd.pause();
+        this.music_snd = null;
+    }
+}
+
+game.toggle_mute = function() {
+    this.sound_muted = !this.sound_muted;
+    if (this.music_snd)
+        this.music_snd.muted = this.sound_muted;
+}
+
+game.set_volume = function(delta) {
+    let value = this.sound_volume + delta;
+    if (value < 0) value = 0;
+    else if (value > 1) value = 1;
+
+    if (value == this.sound_volume)
+        return;
+    
+    this.sound_volume = value;
+
+    if (this.music_snd)
+        this.music_snd.volume = this.sound_volume;
+} 
 
 window.onload = () => game.onload();

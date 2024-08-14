@@ -24,7 +24,7 @@ screen_introMap.do_frame = function() {
         this.drawlr();
         this.drawsprite();
 
-        //game_setmusic(map_maps[game_map].tune, 1);
+        game.setmusic(map_maps[game_context.game_map].tune, 1);
 
         this.seq = 1;
         break;

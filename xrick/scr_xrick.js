@@ -15,8 +15,7 @@ screen_xrick.do_frame = function() {
     switch (this.seq) {
         case 1: // wait
             if (this.wait++ > 0x2) {
-                // TODO:
-                //game_setmusic("sounds/bullet.wav", 1);
+                game.setmusic("sounds/bullet.wav", 1);
                 this.seq = 2;
                 this.wait = 0;
             }

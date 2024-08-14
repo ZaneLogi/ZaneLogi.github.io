@@ -13,7 +13,7 @@ screen_gameover.do_frame = function() {
         this.period = game.game_period; /* save period, */
         game.update_game_period(50);     /* and use our own */
 
-        //game_setmusic("sounds/gameover.wav", 1);
+        game.setmusic("sounds/gameover.wav", 1);
     }
 
     switch (this.seq) {

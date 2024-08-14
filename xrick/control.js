@@ -13,6 +13,10 @@ const CONTROL_CHEAT1 = 0x100
 const CONTROL_CHEAT2 = 0x200
 const CONTROL_CHEAT3 = 0x400
 
+const CONTROL_TOGGLE_MUTE = 0x0800
+const CONTROL_VOLUME_DOWN = 0x1000
+const CONTROL_VOLUME_UP   = 0x2000
+
 const control = {
     control_status: 0,
     control_last: 0,
@@ -61,6 +65,15 @@ control.onkeydown = function(e) {
     case 51: // '3'
         this.SETBIT(CONTROL_CHEAT3);
         break;
+    case 52: // '4'
+        this.SETBIT(CONTROL_TOGGLE_MUTE);
+        break;
+    case 53: // '5'
+        this.SETBIT(CONTROL_VOLUME_DOWN);
+        break;
+    case 54: // '6'
+        this.SETBIT(CONTROL_VOLUME_UP);
+        break;
     }
 }
 
@@ -106,6 +119,15 @@ control.onkeyup = function(e) {
         break;
     case 51: // '3'
         this.CLRBIT(CONTROL_CHEAT3);
+        break;
+    case 52: // '4'
+        this.CLRBIT(CONTROL_TOGGLE_MUTE);
+        break;
+    case 53: // '5'
+        this.CLRBIT(CONTROL_VOLUME_DOWN);
+        break;
+    case 54: // '6'
+        this.CLRBIT(CONTROL_VOLUME_UP);
         break;
     }
 }
