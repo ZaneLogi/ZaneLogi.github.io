@@ -297,8 +297,7 @@ function ent_draw() {
      * background loop : erase all entities that were visible
      */
     for (let i = 0; ent_ents[i].n != 0xff; i++) {
-        // if (ent_ents[i].prev_n && (ch3 || ent_ents[i].prev_s))
-        if (ent_ents[i].prev_n && ent_ents[i].prev_s)
+        if (ent_ents[i].prev_n && (ent_draw.ch3 || ent_ents[i].prev_s))
             /* if entity was active, then erase it (redraw the map) */
             draw_spriteBackground(ent_ents[i].prev_x, ent_ents[i].prev_y);
     }
@@ -328,7 +327,11 @@ function ent_draw() {
         ent_ents[i].prev_n = ent_ents[i].n;
         ent_ents[i].prev_s = ent_ents[i].sprite;
     }
+
+    ent_draw.ch3 = game_context.game_cheat3; // save the current cheat 3 for next frame drawing
 }
+
+ent_draw.ch3 = false; // previous game cheat 3
 
 /*
  * Clear entities previous state
@@ -344,8 +347,10 @@ function ent_clprev() {
  */
 const ent_actf = [];
 
+// as the action functions would not be defined before here,
+// having the init function when calling ent_action()
 const ent_actf_init = function() {
-    ent_actf.push(...[
+    ent_actf.push(
         null,        /* 00 - zero means that the slot is free */
         e_rick_action,   /* 01 - 12CA */
         e_bullet_action,  /* 02 - 1883 */
@@ -370,7 +375,7 @@ const ent_actf_init = function() {
         e_bonus_action,  /* 15 - 242C */
         e_sbonus_start,  /* 16 - 2182 */
         e_sbonus_stop  /* 17 - 2143 */
-    ]);
+    );
 };
 
 /*

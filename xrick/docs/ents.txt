@@ -1,0 +1,29 @@
+- class Entity
+    .the definition of the Entity
+    .n is used as the action function index
+        .if 0, means the slot is free
+        .if not 0, means ent_actf[e.n] will be called in ent_action()
+
+- ent_ents
+    .fixed size array, size = 13
+    .index 0 is used as a temporary entity for testing
+    .index 1 is for Rick
+    .index 2 is for bullet
+    .index 3 is for bomb
+    .check ent_actvis() for other indices
+    .ent_ents[ENT_ENTSNUM].n = 0xFF is set at game.init()
+     it treats as the end of the entities using in ent_action()
+
+- ent_draw
+    .redraw the background for the previous position
+    .draw the active entities
+    .save the current information to the previous information
+
+- ent_actvis
+    .read the comments in the code
+
+- ent_action
+    .run action functions for all active entities (e.n is not 0)
+    .e.n == 0x47 => e_them_z_action()
+    .e.n >= 0x18 => e_them_t3_action()
+    .otherwise, call ent_actf[k](i)
