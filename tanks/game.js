@@ -114,13 +114,17 @@ const rotateSprite = function (sprite, angle) {
     return rot_sprite;
 }
 
+function get_random_int(max) {
+    return Math.floor(Math.random() * max);
+}
+
 function random_choice(array) {
-    return array[Math.floor(Math.random() * array.length)];
+    return array[get_random_int(array.length)];
 }
 
 function random_shuffle(array) {
     for (let i = array.length - 1; i > 0; i--) {
-        let j = Math.floor(Math.random() * (i + 1));
+        let j = get_random_int(i + 1);
         [array[i], array[j]] = [array[j], array[i]];
     }
 }
