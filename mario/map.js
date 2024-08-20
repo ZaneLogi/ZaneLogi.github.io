@@ -20,7 +20,10 @@ map.init = function () {
 }
 
 map.loadGameData = function () {
+    this.blocks = new Array(183);
 
+    this.blocks[0] = new Block(0, new Sprite(["transp"], [0], false), false, true, false, false);
+    this.blocks[1] = new Block(1, new Sprite(["gnd_red_1"], [0], false), true, false, true, true);
 };
 
 map.loadLVL = function () {
@@ -76,13 +79,20 @@ map.drawMap = function (ctx) {
     // the y map origin is at canvas.height + 16 and increasing when going up
     for (let i = this.getStartBlock(), iEnd = this.getEndBlock(); i < iEnd && i < this.iMapWidth; i++) {
         for (let j = this.iMapHeight - 1; j >= 0; j--) {
-            if (this.lMap[i][j].blockID != 0) {
+            const blockID = this.lMap[i][j].blockID;
+            if (blockID != 0) {
                 ctx.fillStyle = "rgb(255, 0, 255)";
                 ctx.fillRect(
                     32 * i + this.fXPos,
                     game.canvas.height - 32 * j - 16 - this.lMap[i][j].updateYPos(),
                     16, 16
                 );
+
+                this.blocks[blockID].draw(
+                    ctx,
+                    32 * i + this.fXPos,
+                    game.canvas.height - 32 * j - 16 - this.lMap[i][j].updateYPos()
+                )
             }
         }
     }
