@@ -18,7 +18,7 @@ class Block {
     }
 
     draw(ctx, x, y) {
-
+        this.#sprite.image.draw(ctx, x, y);
     }
 
     get blockID() {

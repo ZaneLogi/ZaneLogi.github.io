@@ -21,4 +21,8 @@ class Sprite {
 
         this.#timePassed = 0;
     }
+
+    get image() {
+        return this.#images[this.#currentFrame];
+    }
 }

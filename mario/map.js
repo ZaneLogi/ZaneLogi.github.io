@@ -81,13 +81,13 @@ map.drawMap = function (ctx) {
         for (let j = this.iMapHeight - 1; j >= 0; j--) {
             const blockID = this.lMap[i][j].blockID;
             if (blockID != 0) {
+                /* for test purpose
                 ctx.fillStyle = "rgb(255, 0, 255)";
                 ctx.fillRect(
                     32 * i + this.fXPos,
                     game.canvas.height - 32 * j - 16 - this.lMap[i][j].updateYPos(),
                     16, 16
-                );
-
+                );*/
                 this.blocks[blockID].draw(
                     ctx,
                     32 * i + this.fXPos,

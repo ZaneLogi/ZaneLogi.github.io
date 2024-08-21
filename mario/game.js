@@ -10,13 +10,16 @@ game.init = function() {
     this.canvas_ctx = this.canvas.getContext('2d');
 
     this.loadResources();
-
-    map.init();
 };
 
 game.loadResources = function() {
-    runloop.start(() => this.doFrame(), 16);
+    res_loader.start(() => this.loadResourceCompletion());
 };
+
+game.loadResourceCompletion = function() {
+    map.init();
+    runloop.start(() => this.doFrame(), 16);
+}
 
 game.doFrame = function() {
     map.setBackgroundColor(this.canvas_ctx);
