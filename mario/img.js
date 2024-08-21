@@ -5,6 +5,7 @@ class IMG {
 
     constructor(res_id) {
         this.#image = resource["res/images/" + res_id];
+        console.assert(this.#image, "No resource " + res_id);
     }
 
     draw(ctx, x, y, rotate) {
