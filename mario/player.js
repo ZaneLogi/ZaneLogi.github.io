@@ -1,6 +1,13 @@
 "use strict"
 
 class Player {
+    static #MAX_MOVE = 4;
+
+    static #SMALL_W = 24;
+    static #SMALL_H = 32;
+	static #BIG_W = 32;
+    static #BIG_H = 64;
+
     #xpos;
     #ypos;
     #numOfLives;
@@ -12,11 +19,15 @@ class Player {
     #inLevelAnimation;
     #inLevelAnimationType;
 
-    #moveDirection;
-    #currentMaxMove;
+    #moveAnimationTime;
+    #timePassed;
     #moveSpeed;
     #move;
+
+    #moveDirection;
+    #currentMaxMove;
     #changeMoveDirection;
+    #newMoveDirection;
     #squat;
 
     #jumpState;
@@ -35,8 +46,8 @@ class Player {
         this.#inLevelAnimation = false;
         this.#inLevelAnimationType = false;
 
-        this.#moveDirection = true; // left: false, right: true
-        this.#currentMaxMove = 4;
+        this.#moveDirection = RIGHT; // left: false, right: true
+        this.#currentMaxMove = Player.#MAX_MOVE;
         this.#moveSpeed = 0;
         this.#move = false;
         this.#changeMoveDirection = false;
@@ -80,19 +91,231 @@ class Player {
 
     movePlayer() {
         if (this.#move && !this.#changeMoveDirection && (!this.#squat || this.#powerLVL == 0)) {
-
+            // moving, not change direction, not squat or is the small size
+            if (this.#moveSpeed > this.#currentMaxMove) {
+                // don't allow moveSpeed greater than currentMaxMove
+                // decrease moveSpeed
+                --this.#moveSpeed;
+            }
+            else if (this.#moveSpeed < this.#currentMaxMove &&
+                game.ticks() - (100 + 35 * this.#moveSpeed) >= this.#timePassed) {
+                // speed up mario,
+                // when moveSpeed == 1, increase moveSpeed after 100 + 35 * 1 = 135 ms
+                // when moveSpeed == 2, increase moveSpeed after 100 + 35 * 2 = 170 ms
+                // when moveSpeed == 3, increase moveSpeed after 100 + 35 * 3 = 205 ms
+                // until the move speed == currentMaxMove
+                ++this.#moveSpeed;
+                this.#timePassed = game.ticks();
+            }
+            else if (this.#moveSpeed == 0) {
+                // it's moving, set moveSpeed = 1
+                this.#moveSpeed = 1;
+            }
         } else {
+            // not moving or change direction or squat (only when powerLVL > 0)
+            if (this.#moveSpeed != 0 &&
+                game.ticks() - (50 + 15 * (this.#currentMaxMove - this.#moveSpeed)
+                    * (this.#squat && this.#powerLVL > 0 ? 6 : 1)) > this.#timePassed) {
+                // slow down mario based on the squat state and the power level
+                // if squat and powerLVL > 0, the moveSpeed decreases slower
+                // when currentMaxMove - moveSpeed == 0, decrease moveSpeed after 50 ms
+                // when currentMaxMove - moveSpeed == 1, decrease moveSpeed after 50 + 15 * 1 * 1 = 65 ms
+                //    if squat and not the small size => decrease moveSpeed after 50 + 15 * 1 * 6 = 140 ms
+                // when currentMaxMove - moveSpeed == 2, decrease moveSpeed after 50 + 15 * 2 * 1 = 80 ms
+                //    if squat and not the small size => decrease moveSpeed after 50 + 15 * 2 * 6 = 230 ms
+                // ...until moveSpeed == 0 
+                --this.#moveSpeed;
+                this.#timePassed = game.ticks();
+                if (this.#jumpState == 0 && !map.underWater)
+                    this.setSpriteID(6);
+            }
 
+            // for change direction request, it can fulfill when moveSpeed reaches 1
+            if (this.#changeMoveDirection && this.#moveSpeed <= 1) {
+                this.#moveDirection = this.#newMoveDirection;
+                this.#changeMoveDirection = false;
+                this.move = true;
+            }
         }
 
         if (this.#moveSpeed > 0) {
+            this.#moveDirection == RIGHT
+                ? this.updateXPos(this.#moveSpeed)
+                : this.updateXPos(-this.#moveSpeed);
 
+            // ----- SPRITE ANIMATION
+            if (map.underWater) {
+                this.swimingAnimation();
+            } else if (!this.#changeMoveDirection && this.#jumpState == 0 && this.#move) {
+                this.moveAnimation();
+            }
+            // ----- SPRITE ANIMATION
         } else if (this.#jumpState == 0) {
 
         } else {
 
         }
 
+    }
+
+    startMove() {
+        this.#moveAnimationTime = game.ticks();
+        this.#timePassed = game.ticks();
+        this.#moveSpeed = 1;
+        this.#move = true;
+        if (map.underWater) {
+            this.setSpriteID(8);
+        }
+    }
+
+    resetMove() {
+        --this.#moveSpeed;
+        this.move = false;
+    }
+
+    stopMove() {
+        this.#moveSpeed = 0;
+        this.#move = false;
+        this.#changeMoveDirection = false;
+        this.#squat = false;
+        this.setSpriteID(1);
+    }
+
+    startRun() {
+        this.#currentMaxMove = Player.#MAX_MOVE + (map.underWater ? 0 : 2);
+
+        this.createFireBall();
+    }
+
+    resetRun() {
+        this.#currentMaxMove = Player.#MAX_MOVE;
+    }
+
+    createFireBall() {
+        // TODO
+    }
+
+    jump() {
+
+    }
+
+    startJump() {
+
+    }
+
+    resetJump() {
+
+    }
+
+    powerUpAnimation() {
+
+    }
+
+    moveAnimation() {
+        if (game.ticks() - 65 + this.#moveSpeed * 4 > this.#moveAnimationTime) {
+            this.#moveAnimationTime = game.ticks();
+            if (this.#spriteID >= 4 + 11 * this.#powerLVL) {
+                this.setSpriteID(2);
+            }
+            else {
+                ++this.#spriteID;
+            }
+        }
+    }
+
+    swimingAnimation() {
+        if (game.ticks() - 105 > this.#moveAnimationTime) {
+            this.#moveAnimationTime = game.ticks();
+            if (this.#spriteID % 11 == 8) {
+                this.setSpriteID(9);
+            } else {
+                this.setSpriteID(8);
+            }
+        }
+
+    }
+
+    updateXPos(dx) {
+        //checkCollisionBot(dx, 0);
+        //checkCollisionCenter(dx, 0);
+
+        if (dx > 0) {
+
+        } else if (dx < 0) {
+
+        }
+    }
+
+    updateYPos(dy) {
+
+    }
+
+    setSpriteID(id) {
+        this.#spriteID = id + 11 * this.#powerLVL;
+    }
+
+    getSpriteID() {
+        return this.#spriteID; // TODO
+    }
+
+    getHitBoxX() {
+        return this.#powerLVL == 0 ? Player.#SMALL_W : Player.#BIG_W;
+    }
+
+    getHitBoxY() {
+        return this.#powerLVL == 0 ? Player.#SMALL_H : this.#squat ? 44 : Player.#BIG_H;
+    }
+
+    getMove() {
+        return this.#move;
+    }
+
+    getMoveDirection() {
+        return this.#moveDirection;
+    }
+
+    setMoveDirection(moveDirection) {
+        this.#moveDirection = moveDirection;
+    }
+
+    getChangeMoveDirection() {
+        return this.#changeMoveDirection;
+    }
+
+    setChangeMoveDirection() {
+        this.#changeMoveDirection = true;
+        this.#newMoveDirection = !this.#moveDirection;
+    }
+
+    getMoveSpeed() {
+        return this.#moveSpeed;
+    }
+
+    setMoveSpeed(moveSpeed) {
+        this.#moveSpeed = moveSpeed;
+    }
+
+    getSquat() {
+        return this.#squat;
+    }
+
+    setSquat(squat) {
+        if (squat && this.#squat != squat) {
+            // can squat only when powerLVL > 0
+            if (this.#powerLVL > 0) {
+                this.#ypos += 20;
+            }
+            this.#squat = squat;
+        } else if (this.#squat != squat && !map.underWater) {
+            if (this.#powerLVL > 0) {
+                this.#ypos -= 20;
+            }
+            this.#squat = squat;
+        }
+    }
+
+    draw(ctx) {
+        this.#sprites[this.#spriteID].image.draw(ctx, Math.floor(this.#xpos), Math.floor(this.#ypos), false);
     }
 
     loadSprites() {

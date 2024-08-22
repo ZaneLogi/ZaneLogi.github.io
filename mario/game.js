@@ -1,13 +1,20 @@
 "use strict"
 
+const LEFT = false;
+const RIGHT = true;
+
 const game = {
     canvas: null,
     canvas_ctx: null,
+    window_width: 0,
+    window_height: 0,
 };
 
 game.init = function() {
     this.canvas = document.querySelector('canvas');
     this.canvas_ctx = this.canvas.getContext('2d');
+    this.window_width = this.canvas.width;
+    this.window_height = this.canvas.height;
 
     this.loadResources();
 };
@@ -26,3 +33,6 @@ game.doFrame = function() {
     map.draw(this.canvas_ctx);
 };
 
+game.ticks = function() {
+    return window.performance.now();
+}

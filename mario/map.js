@@ -197,12 +197,28 @@ map.getStartBlock = function () {
     // so fXPos is negative
     const fXPos = this.fXPos;
     return Math.floor((-fXPos - (-fXPos % 32)) / 32);
-}
+};
 
 map.getEndBlock = function () {
     const fXPos = this.fXPos;
     return Math.floor((-fXPos - (-fXPos % 32) + game.canvas.width) / 32) + 2;
-}
+};
+
+map.getBlockID = function (x, y) {
+    return {
+        x: this.getBlockIDX(x),
+        y: this.getBlockIDY(y),
+    }
+};
+
+map.getBlockIDX = function (x) {
+    return Math.floor(x < 0 ? 0 : x / 32);
+};
+
+map.getBlockIDY = function (y) {
+    return Math.floor(y > game.window_height - 16 ? 0 : (game.window_height - 16 - y + 32) / 32);
+};
+
 
 map.setBackgroundColor = function (ctx) {
     switch (this.iLevelType) {
@@ -223,8 +239,6 @@ map.draw = function (ctx) {
     // draw map level
     this.drawMapLevel(ctx);
 
-    this.fXPos -= 4;
-
     // draw platforms
 
     // draw minions
@@ -242,6 +256,7 @@ map.draw = function (ctx) {
     // draw bubbles
 
     // draw player
+    this.player.draw(ctx);
 
     // draw events
 
