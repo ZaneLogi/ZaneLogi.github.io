@@ -32,7 +32,15 @@ class Player {
 
     #jumpState;
     #startJumpSpeed;
+    #currentJumpSpeed;
+    #jumpDistance;
+    #currentJumpDistance;
+
     #currentFallingSpeed;
+    #nextFallFrameID;
+    #springJump;
+
+    #nextBubbleTime;
 
     constructor(xpos, ypos) {
         this.#xpos = xpos;
@@ -55,7 +63,15 @@ class Player {
 
         this.#jumpState = 0;
         this.#startJumpSpeed = 7.65;
+        this.#currentJumpSpeed = 0;
+        this.#jumpDistance = 0;
+        this.#currentJumpDistance = 0;
+
         this.#currentFallingSpeed = 2.7;
+        this.#nextFallFrameID = 0;
+        this.#springJump = false;
+
+        this.#nextBubbleTime = 0;
 
         this.loadSprites();
     }
@@ -166,6 +182,53 @@ class Player {
         }
     }
 
+    updateXPos(dx) {
+        this.checkCollisionBot(dx, 0);
+        //checkCollisionCenter(dx, 0);
+
+        if (dx > 0) {
+            if (this.#xpos >= 416 && map.canMoveMap) {
+                // the player is too right, move the map left
+                map.moveMap(-dx);
+            }
+            else {
+                // move the play right
+                this.#xpos += dx;
+            }
+        } else if (dx < 0) {
+            if (this.#xpos <= 192 && map.canMoveMap) {
+                // the player is too left, move the map right
+                if (!map.moveMap(-dx)) {
+                    this.#xpos += dx;
+                    if (this.#xpos < 0)
+                        this.#xpos = 0;
+                }
+            }
+            else {
+                // move the playe left
+                this.#xpos += dx;
+            }
+        }
+    }
+
+    updateYPos(dy) {
+        if (dy > 0) {
+
+        } else if (dy < 0) {
+
+        }
+
+        if (Math.floor(this.#ypos) % 2 == 1) {
+            this.#ypos += 1;
+        }
+
+        /* TODO
+        if (!map.getInEvent() && this.#ypos - this.getHitBoxY() > game.window_height) {
+            CCore:: getMap() -> playerDeath(false, true);
+            fYPos = -80;
+        }*/
+    }
+
     startMove() {
         this.#moveAnimationTime = game.ticks();
         this.#timePassed = game.ticks();
@@ -204,15 +267,48 @@ class Player {
     }
 
     jump() {
-
+        if (map.underWater) {
+            this.startJump(1);
+            this.#nextBubbleTime -= 65;
+        } else if (this.#jumpState == 0) {
+            this.startJump(4);
+        }
     }
 
-    startJump() {
+    startJump(h) {
+        this.#currentJumpSpeed = this.#startJumpSpeed;
+        this.#jumpDistance = 32 * h + 24;
+        this.#currentJumpDistance = 0;
 
+        if (!map.underWater) {
+            this.spriteID = 5;
+        } else {
+            if (this.#jumpState == 0) {
+                this.#moveAnimationTime = game.ticks();
+                this.spriteID = 8;
+                this.swimingAnimation();
+            }
+            //TODO:CCFG:: getMusic() -> PlayChunk(CCFG:: getMusic() -> cSWIM);
+        }
+
+        if (h > 1) {
+            if (this.#powerLVL == 0) {
+                //TODO:CCFG:: getMusic() -> PlayChunk(CCFG:: getMusic() -> cJUMP);
+            } else {
+                //TODO:CCFG:: getMusic() -> PlayChunk(CCFG:: getMusic() -> cJUMPBIG);
+            }
+        }
+
+        this.#jumpState = 1;
     }
 
     resetJump() {
-
+        this.#jumpState = 0;
+        this.#jumpDistance = 0;
+        this.#currentJumpDistance = 0;
+        this.#currentFallingSpeed = 2.7;
+        this.#nextFallFrameID = 0;
+        this.#springJump = false;
     }
 
     powerUpAnimation() {
@@ -243,53 +339,12 @@ class Player {
 
     }
 
-    updateXPos(dx) {
-        //checkCollisionBot(dx, 0);
-        //checkCollisionCenter(dx, 0);
-
-        if (dx > 0) {
-            if (this.#xpos >= 416 && map.canMoveMap) {
-                // the player is too right, move the map left
-                map.moveMap(-dx);
-            }
-            else {
-                // move the play right
-                this.#xpos += dx;
-            }
-        } else if (dx < 0) {
-            if (this.#xpos <= 192 && map.canMoveMap) {
-                // the player is too left, move the map right
-                if (!map.moveMap(-dx)) {
-                    this.#xpos += dx;
-                    if (this.#xpos < 0)
-                        this.#xpos = 0;
-                }
-            }
-            else {
-                // move the playe left
-                this.#xpos += dx;
-            }
-        }
-    }
-
-    updateYPos(dy) {
-
-    }
-
     set spriteID(id) {
         this.#spriteID = id + 11 * this.#powerLVL;
     }
 
     get spriteID() {
         return this.#spriteID; // TODO
-    }
-
-    getHitBoxX() {
-        return this.#powerLVL == 0 ? Player.#SMALL_W : Player.#BIG_W;
-    }
-
-    getHitBoxY() {
-        return this.#powerLVL == 0 ? Player.#SMALL_H : this.#squat ? 44 : Player.#BIG_H;
     }
 
     get move() {
@@ -337,6 +392,104 @@ class Player {
                 this.#ypos -= 20;
             }
             this.#squat = squat;
+        }
+    }
+
+    getHitBoxX() {
+        return this.#powerLVL == 0 ? Player.#SMALL_W : Player.#BIG_W;
+    }
+
+    getHitBoxY() {
+        return this.#powerLVL == 0 ? Player.#SMALL_H : this.#squat ? 44 : Player.#BIG_H;
+    }
+
+    getBlockLB(x, y) {
+        x = Math.floor(x);
+        y = Math.floor(y);
+        return map.getBlockID(x + 1, y + this.getHitBoxY() + 2);
+    }
+
+    getBlockRB(x, y) {
+        x = Math.floor(x);
+        y = Math.floor(y);
+        return map.getBlockID(x + this.getHitBoxX() - 1, y + this.getHitBoxY() + 2);
+    }
+
+    getBlockLC(x, y) {
+        x = Math.floor(x);
+        y = Math.floor(y);
+        return map.getBlockID(x - 1, y + this.getHitBoxY() / 2);
+    }
+
+    getBlockRC(x, y) {
+        x = Math.floor(x);
+        y = Math.floor(y);
+        return map.getBlockID(x + this.getHitBoxX() + 1, y + this.getHitBoxY() / 2);
+    }
+
+    getBlockLT(x, y) {
+        x = Math.floor(x);
+        y = Math.floor(y);
+        return map.getBlockID(x + 1, y);
+    }
+
+    getBlockRT(x, y) {
+        x = Math.floor(x);
+        y = Math.floor(y);
+        return map.getBlockID(x + this.getHitBoxX() - 1, y);
+    }
+
+    checkCollisionBot(x, y) {
+        let vLT = this.getBlockLB(this.#xpos - map.xpos + x, this.#ypos + y);
+
+        if (map.blocks[map.getMapBlock(vLT.x, vLT.y).blockID].use) {
+            //TODO: CCore::getMap()->blockUse(vLT->getX(), vLT->getY(), CCore::getMap()->getMapBlock(vLT->getX(), vLT->getY())->getBlockID(), 1);
+        }
+
+        vLT = this.getBlockRB(this.#xpos - map.xpos + x, this.#ypos + y);
+
+        if (map.blocks[map.getMapBlock(vLT.x, vLT.y).blockID].use) {
+            //TODO: CCore::getMap()->blockUse(vLT->getX(), vLT->getY(), CCore::getMap()->getMapBlock(vLT->getX(), vLT->getY())->getBlockID(), 1);
+        }
+    }
+
+    checkCollisionCenter(x, y) {
+        if (this.#powerLVL == 0) {
+            let vLT = this.getBlockLC(this.#xpos - map.xpos + x, this.#ypos + y);
+
+            if (map.blocks[map.getMapBlock(vLT.x, vLT.y).blockID].use) {
+                //TODO: CCore::getMap()->blockUse(vLT->getX(), vLT->getY(), CCore::getMap()->getMapBlock(vLT->getX(), vLT->getY())->getBlockID(), 2);
+            }
+
+            vLT = this.getBlockRC(this.#xpos - map.xpos + x, this.#ypos + y);
+
+            if (map.blocks[map.getMapBlock(vLT.x, vLT.y).blockID].use) {
+                //CCore:: getMap() -> blockUse(vLT -> getX(), vLT -> getY(), CCore:: getMap() -> getMapBlock(vLT -> getX(), vLT -> getY()) -> getBlockID(), 2);
+            }
+        } else {
+            let vLT = this.getBlockLC(this.#xpos - map.xpos + x, this.#ypos + y + 16);
+
+            if (map.blocks[map.getMapBlock(vLT.x, vLT.y).blockID].use) {
+                //CCore:: getMap() -> blockUse(vLT -> getX(), vLT -> getY(), CCore:: getMap() -> getMapBlock(vLT -> getX(), vLT -> getY()) -> getBlockID(), 2);
+            }
+
+            vLT = this.getBlockRC(this.#xpos - map.xpos + x, this.#ypos + y + 16);
+
+            if (map.blocks[map.getMapBlock(vLT.x, vLT.y).blockID].use) {
+                //CCore:: getMap() -> blockUse(vLT -> getX(), vLT -> getY(), CCore:: getMap() -> getMapBlock(vLT -> getX(), vLT -> getY()) -> getBlockID(), 2);
+            }
+
+            vLT = this.getBlockLC(this.#xpos - map.xpos + x, this.#ypos + y - 16);
+
+            if (map.blocks[map.getMapBlock(vLT.x, vLT.y).blockID].use) {
+                //CCore:: getMap() -> blockUse(vLT -> getX(), vLT -> getY(), CCore:: getMap() -> getMapBlock(vLT -> getX(), vLT -> getY()) -> getBlockID(), 2);
+            }
+
+            vLT = this.getBlockRC(this.#xpos - map.xpos + x, this.#ypos + y - 16);
+
+            if (map.blocks[map.getMapBlock(vLT.x, vLT.y).blockID].use) {
+                //CCore:: getMap() -> blockUse(vLT -> getX(), vLT -> getY(), CCore:: getMap() -> getMapBlock(vLT -> getX(), vLT -> getY()) -> getBlockID(), 2);
+            }
         }
     }
 

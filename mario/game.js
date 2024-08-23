@@ -15,6 +15,7 @@ const game = {
     firstDir: LEFT,
     keyDPressed: false,
     keyAPressed: false,
+    keySpace: false,
 };
 
 game.init = function () {
@@ -73,6 +74,12 @@ game.processEvents = function () {
                         this.firstDir = LEFT;
                     }
                 }
+                else if (e.code == "Space") {
+                    if (!this.keySpace) {
+                        this.keySpace = true;
+                        map.player.jump();
+                    }
+                }
                 break;
             case KEY_UP:
                 if (e.code == "KeyD") {
@@ -86,6 +93,9 @@ game.processEvents = function () {
                     if (this.firstDir == LEFT) {
                         this.firstDir = RIGHT;
                     }
+                }
+                else if (e.code == "Space") {
+                    this.keySpace = false;
                 }
                 break;
         }

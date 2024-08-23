@@ -221,6 +221,10 @@ map.getBlockIDY = function (y) {
     return Math.floor(y > game.window_height - 16 ? 0 : (game.window_height - 16 - y + 32) / 32);
 };
 
+map.getMapBlock = function (x, y) {
+    return map.lMap[x][y];
+}
+
 
 map.setBackgroundColor = function (ctx) {
     switch (this.iLevelType) {
@@ -314,7 +318,7 @@ map.clearMap = function () {
     this.iMapHeight = 0;
 
     // TODO
-}
+};
 
 map.createMap = function () {
     // TODO mionion list
@@ -328,7 +332,7 @@ map.createMap = function () {
 
     this.underWater = false;
     this.bTP = false;
-}
+};
 
 map.moveMap = function (dx, dy) {
     if (this.xpos + dx > 0) {
@@ -341,4 +345,34 @@ map.moveMap = function (dx, dy) {
         this.xpos += dx;
         return true;
     }
+};
+
+map.checkCollision = function (pos, checkVisible) {
+    // check the collision flag of the block at the pos
+    const block = this.blocks[this.lMap[pos.x][pos.y].blockID];
+    return block.collision && (checkVisible ? block.visible : true);
+};
+
+map.checkCollisionLB = function (x, y, hitBoxY, checkVisible) {
+    return this.checkCollision(this.getBlockID(x, y + hitBoxY), checkVisible);
+};
+
+map.checkCollisionLT = function (x, y, checkVisible) {
+    return this.checkCollision(this.getBlockID(x, y), checkVisible);
+};
+
+map.checkCollisionLC = function (x, y, hitBoxY, checkVisible) {
+    return this.checkCollision(this.getBlockID(x, y + hitBoxY), checkVisible);
+};
+
+map.checkCollisionRC = function (x, y, hitBoxX, hitBoxY, checkVisible) {
+    return this.checkCollision(this.getBlockID(x + hitBoxX, y + hitBoxY), checkVisible);
+};
+
+map.checkCollisionRB = function (x, y, hitBoxX, hitBoxY, checkVisible) {
+    return this.checkCollision(this.getBlockID(x + hitBoxX, y + hitBoxY), checkVisible);
+}
+
+map.checkCollisionRT = function (x, y, hitBoxX, checkVisible) {
+    return this.checkCollision(this.getBlockID(x + hitBoxX, y), checkVisible);
 }
