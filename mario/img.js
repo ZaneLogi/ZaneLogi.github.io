@@ -8,13 +8,13 @@ class IMG {
         console.assert(this.#image, "No resource " + res_id);
     }
 
-    draw(ctx, x, y, rotate) {
-        rotate = rotate || false;
+    draw(ctx, x, y, mirror) {
+        mirror = mirror || false;
 
-        if (!rotate) {
+        if (!mirror) {
             ctx.drawImage(this.#image, x, y);
         } else {
-            this.drawFlipV(ctx, x, y);
+            this.drawFlipH(ctx, x, y);
         }
 
     }

@@ -5,7 +5,7 @@ class Player {
 
     static #SMALL_W = 24;
     static #SMALL_H = 32;
-	static #BIG_W = 32;
+    static #BIG_W = 32;
     static #BIG_H = 64;
 
     #xpos;
@@ -112,7 +112,7 @@ class Player {
                 this.#moveSpeed = 1;
             }
         } else {
-            // not moving or change direction or squat (only when powerLVL > 0)
+            // (not moving) or (change direction) or (squat (only when powerLVL > 0))
             if (this.#moveSpeed != 0 &&
                 game.ticks() - (50 + 15 * (this.#currentMaxMove - this.#moveSpeed)
                     * (this.#squat && this.#powerLVL > 0 ? 6 : 1)) > this.#timePassed) {
@@ -127,14 +127,15 @@ class Player {
                 --this.#moveSpeed;
                 this.#timePassed = game.ticks();
                 if (this.#jumpState == 0 && !map.underWater)
-                    this.setSpriteID(6);
+                    // when slowing down, show the mario brake image (id=6)
+                    this.spriteID = 6;
             }
 
             // for change direction request, it can fulfill when moveSpeed reaches 1
             if (this.#changeMoveDirection && this.#moveSpeed <= 1) {
                 this.#moveDirection = this.#newMoveDirection;
                 this.#changeMoveDirection = false;
-                this.move = true;
+                this.#move = true;
             }
         }
 
@@ -147,15 +148,22 @@ class Player {
             if (map.underWater) {
                 this.swimingAnimation();
             } else if (!this.#changeMoveDirection && this.#jumpState == 0 && this.#move) {
+                // when slowing down, it always shows the brake image (id=6)
+                // slowing down means stop moving or on the way to change move direction
                 this.moveAnimation();
             }
             // ----- SPRITE ANIMATION
         } else if (this.#jumpState == 0) {
-
+            // no move speed, not jump
+            this.spriteID = 1;
+            this.updateXPos(0);
         } else {
-
+            this.updateXPos(0);
         }
 
+        if (this.squat && !map.underWater && this.#powerLVL > 0) {
+            this.spriteID = 7;
+        }
     }
 
     startMove() {
@@ -164,13 +172,13 @@ class Player {
         this.#moveSpeed = 1;
         this.#move = true;
         if (map.underWater) {
-            this.setSpriteID(8);
+            this.spriteID = 8;
         }
     }
 
     resetMove() {
         --this.#moveSpeed;
-        this.move = false;
+        this.#move = false;
     }
 
     stopMove() {
@@ -178,7 +186,7 @@ class Player {
         this.#move = false;
         this.#changeMoveDirection = false;
         this.#squat = false;
-        this.setSpriteID(1);
+        this.spriteID = 1;
     }
 
     startRun() {
@@ -215,7 +223,7 @@ class Player {
         if (game.ticks() - 65 + this.#moveSpeed * 4 > this.#moveAnimationTime) {
             this.#moveAnimationTime = game.ticks();
             if (this.#spriteID >= 4 + 11 * this.#powerLVL) {
-                this.setSpriteID(2);
+                this.spriteID = 2;
             }
             else {
                 ++this.#spriteID;
@@ -227,9 +235,9 @@ class Player {
         if (game.ticks() - 105 > this.#moveAnimationTime) {
             this.#moveAnimationTime = game.ticks();
             if (this.#spriteID % 11 == 8) {
-                this.setSpriteID(9);
+                this.spriteID = 9;
             } else {
-                this.setSpriteID(8);
+                this.spriteID = 8;
             }
         }
 
@@ -240,9 +248,27 @@ class Player {
         //checkCollisionCenter(dx, 0);
 
         if (dx > 0) {
-
+            if (this.#xpos >= 416 && map.canMoveMap) {
+                // the player is too right, move the map left
+                map.moveMap(-dx);
+            }
+            else {
+                // move the play right
+                this.#xpos += dx;
+            }
         } else if (dx < 0) {
-
+            if (this.#xpos <= 192 && map.canMoveMap) {
+                // the player is too left, move the map right
+                if (!map.moveMap(-dx)) {
+                    this.#xpos += dx;
+                    if (this.#xpos < 0)
+                        this.#xpos = 0;
+                }
+            }
+            else {
+                // move the playe left
+                this.#xpos += dx;
+            }
         }
     }
 
@@ -250,11 +276,11 @@ class Player {
 
     }
 
-    setSpriteID(id) {
+    set spriteID(id) {
         this.#spriteID = id + 11 * this.#powerLVL;
     }
 
-    getSpriteID() {
+    get spriteID() {
         return this.#spriteID; // TODO
     }
 
@@ -266,15 +292,15 @@ class Player {
         return this.#powerLVL == 0 ? Player.#SMALL_H : this.#squat ? 44 : Player.#BIG_H;
     }
 
-    getMove() {
+    get move() {
         return this.#move;
     }
 
-    getMoveDirection() {
+    get moveDirection() {
         return this.#moveDirection;
     }
 
-    setMoveDirection(moveDirection) {
+    set moveDirection(moveDirection) {
         this.#moveDirection = moveDirection;
     }
 
@@ -287,19 +313,19 @@ class Player {
         this.#newMoveDirection = !this.#moveDirection;
     }
 
-    getMoveSpeed() {
+    get moveSpeed() {
         return this.#moveSpeed;
     }
 
-    setMoveSpeed(moveSpeed) {
+    set moveSpeed(moveSpeed) {
         this.#moveSpeed = moveSpeed;
     }
 
-    getSquat() {
+    get squat() {
         return this.#squat;
     }
 
-    setSquat(squat) {
+    set squat(squat) {
         if (squat && this.#squat != squat) {
             // can squat only when powerLVL > 0
             if (this.#powerLVL > 0) {
@@ -315,7 +341,8 @@ class Player {
     }
 
     draw(ctx) {
-        this.#sprites[this.#spriteID].image.draw(ctx, Math.floor(this.#xpos), Math.floor(this.#ypos), false);
+        this.#sprites[this.#spriteID].image.draw(ctx,
+            Math.floor(this.#xpos), Math.floor(this.#ypos), !this.#moveDirection);
     }
 
     loadSprites() {

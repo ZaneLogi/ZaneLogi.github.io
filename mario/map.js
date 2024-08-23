@@ -1,8 +1,8 @@
 "use strict"
 
 const map = {
-    fXPos: 0, // x position in the screen coordinate
-    fYPos: 0, // y position in the screen coordinate
+    xpos: 0, // x position in the screen coordinate
+    ypos: 0, // y position in the screen coordinate
 
     iMapWidth: 0,
     iMapHeight: 0,
@@ -12,6 +12,8 @@ const map = {
     currentLevelID: 0,
     iLevelType: 0,
     underWater: false,
+
+    canMoveMap: true,
 };
 
 map.init = function () {
@@ -194,14 +196,14 @@ map.loadLVL = function () {
 
 map.getStartBlock = function () {
     // when the player moves right, the map moves left.
-    // so fXPos is negative
-    const fXPos = this.fXPos;
-    return Math.floor((-fXPos - (-fXPos % 32)) / 32);
+    // so xpos is negative
+    const xpos = this.xpos;
+    return Math.floor((-xpos - (-xpos % 32)) / 32);
 };
 
 map.getEndBlock = function () {
-    const fXPos = this.fXPos;
-    return Math.floor((-fXPos - (-fXPos % 32) + game.canvas.width) / 32) + 2;
+    const xpos = this.xpos;
+    return Math.floor((-xpos - (-xpos % 32) + game.canvas.width) / 32) + 2;
 };
 
 map.getBlockID = function (x, y) {
@@ -234,6 +236,11 @@ map.setBackgroundColor = function (ctx) {
     }
     ctx.fillRect(0, 0, game.canvas.width, game.canvas.height);
 };
+
+map.update = function () {
+    map.player.update();
+}
+
 
 map.draw = function (ctx) {
     // draw map level
@@ -273,13 +280,13 @@ map.drawMapLevel = function (ctx) {
                 /* for test purpose
                 ctx.fillStyle = "rgb(255, 0, 255)";
                 ctx.fillRect(
-                    32 * i + this.fXPos,
+                    32 * i + this.xpos,
                     game.canvas.height - 32 * j - 16 - this.lMap[i][j].updateYPos(),
                     16, 16
                 );*/
                 this.blocks[blockID].draw(
                     ctx,
-                    32 * i + this.fXPos,
+                    32 * i + this.xpos,
                     game.canvas.height - 32 * j - 16 - this.lMap[i][j].updateYPos()
                 )
             }
@@ -321,4 +328,17 @@ map.createMap = function () {
 
     this.underWater = false;
     this.bTP = false;
+}
+
+map.moveMap = function (dx, dy) {
+    if (this.xpos + dx > 0) {
+        // the max allowed value of xpos is 0
+        // when it is out of bound, set it to 0
+        this.xpos = 0;
+        return false;
+    }
+    else {
+        this.xpos += dx;
+        return true;
+    }
 }
