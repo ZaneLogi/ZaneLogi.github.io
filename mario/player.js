@@ -40,6 +40,8 @@ class Player {
     #nextFallFrameID;
     #springJump;
 
+    #onPlatformID;
+
     #nextBubbleTime;
 
     constructor(xpos, ypos) {
@@ -71,6 +73,8 @@ class Player {
         this.#nextFallFrameID = 0;
         this.#springJump = false;
 
+        this.#onPlatformID = -1;
+
         this.#nextBubbleTime = 0;
 
         this.loadSprites();
@@ -86,9 +90,63 @@ class Player {
             // not under water
             if (this.#jumpState == 1) {
                 // jumping
+                this.updateYPos(-Math.floor(this.#currentJumpSpeed));
+                this.#currentJumpDistance += Math.floor(this.#currentJumpSpeed);
 
+                this.#currentJumpSpeed *= (this.#currentJumpDistance / this.#jumpDistance > 0.75 ? 0.972 : 0.986);
+
+                if (this.#currentJumpSpeed < 2.5) {
+                    this.#currentJumpSpeed = 2.5;
+                }
+
+                if (!game.keySpacee && this.#currentJumpDistance > 64 && !this.#springJump) {
+                    this.#jumpDistance = 16;
+                    this.#currentJumpDistance = 0;
+                    this.#currentJumpSpeed = 2.5;
+                }
+
+                if (this.#jumpDistance <= this.#currentJumpDistance) {
+                    this.#jumpState = 2;
+                }
             } else {
-                // not jump
+                if (this.#onPlatformID == -1) {
+                    // check if collide a platform
+                    //...this.#onPlatformID = ...
+                    if (this.#onPlatformID >= 0) {
+
+                    }
+                }
+                else {
+                    // still on the platform
+                    // this.#onPlatformID = ...
+                }
+
+                if (this.#onPlatformID >= 0) {
+                    //TODO
+                }
+                else if (!map.checkCollisionLB(this.#xpos - map.xpos + 2, this.#ypos + 2, this.getHitBoxY(), true)
+                    && !map.checkCollisionRB(this.#xpos - map.xpos - 2, this.#ypos + 2, this.getHitBoxX(), this.getHitBoxY(), true)) {
+
+                    if (this.#nextFallFrameID > 0) {
+                        --this.#nextFallFrameID;
+                    } else {
+                        this.#currentFallingSpeed *= 1.05;
+
+                        if (this.#currentFallingSpeed > this.#startJumpSpeed) {
+                            this.#currentFallingSpeed = this.#startJumpSpeed;
+                        }
+
+                        this.updateYPos(Math.floor(this.#currentFallingSpeed));
+                    }
+
+                    this.#jumpState = 2;
+
+                    this.spriteID = 5;
+                } else if (this.#jumpState == 2) {
+                    this.resetJump();
+                } else {
+                    this.checkCollisionBot(0, 0);
+                }
 
             }
         } else {
@@ -213,9 +271,42 @@ class Player {
 
     updateYPos(dy) {
         if (dy > 0) {
+            const LEFT = map.checkCollisionLB(this.#xpos - map.xpos + 2, this.#ypos + dy, this.getHitBoxY(), true);
+            const RIGHT = map.checkCollisionRB(this.#xpos - map.xpos - 2, this.#ypos + dy, this.getHitBoxX(), this.getHitBoxY(), true);
+
+            if (!LEFT && !RIGHT) {
+                this.#ypos += dy;
+            } else {
+                if (this.#jumpState == 2) {
+                    this.#jumpState = 0;
+                }
+                this.updateYPos(dy - 1);
+            }
 
         } else if (dy < 0) {
+            const LEFT = map.checkCollisionLT(this.#xpos - map.xpos + 2, this.#ypos + dy, false);
+            const RIGHT = map.checkCollisionRT(this.#xpos - map.xpos - 2, this.#ypos + dy, this.getHitBoxX(), false);
 
+            //if (CCore:: getMap() -> checkCollisionWithPlatform((int)fXPos, (int)fYPos, 0, 0) >= 0 || CCore:: getMap() -> checkCollisionWithPlatform((int)fXPos, (int)fYPos, getHitBoxX(), 0) >= 0) {
+            //    jumpState = 2;
+            //}
+            if (!LEFT && !RIGHT) {
+                this.#ypos += dy;
+            } else {
+                if (this.#jumpState == 1) {
+                    if (!LEFT && RIGHT) {
+
+                    } else if (LEFT && !RIGHT) {
+
+                    } else {
+
+                    }
+                } else {
+
+                }
+
+                this.updateYPos(dy + 1);
+            }
         }
 
         if (Math.floor(this.#ypos) % 2 == 1) {
