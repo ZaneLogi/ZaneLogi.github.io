@@ -26,14 +26,16 @@ game.init = function () {
         }
     }
 
-    this.spriteColorMap = this.parse_colormap(color_data, 0, paletteSprite_data);
+    this.colors = this.parse_colors(color_data);
+
+    this.palettes = this.parse_palettes(this.colors, paletteSprite_data);
 
     const spriteList = this.parse_spritemap([sprite1_data, sprite2_data]);
-    
+
     for (let sprIdx = 0; sprIdx < 16; sprIdx++) {
         const drawY = sprIdx * 32;
-        for (let i = 0; i < 8; i++) {    
-            this.draw_sprite(i * 32, drawY, spriteList[sprIdx * 8 + i], this.spriteColorMap, 8);
+        for (let i = 0; i < 8; i++) {
+            this.draw_sprite(i * 32, drawY, spriteList[sprIdx * 8 + i], this.palettes[9]);
         }
     }
 
@@ -49,19 +51,31 @@ game.init = function () {
     runloop.start(() => this.doFrame(), 200);
 };
 
-game.parse_colormap = function(colors, offset, paletteIndices) {
-    const palette = [];
-
-    for (let i = 0; i < paletteIndices.length; i++) {
-        const c = colors[paletteIndices[i] + offset];
+game.parse_colors = function(colorData) {
+    const colors = []
+    for (const c of colorData) {
         // bbgggrrr
-        const b = Math.floor(255 * ((c>>6) & 0x3) / 3);
+        const b = Math.floor(255 * ((c>>5) & 0x6) / 7);
         const g = Math.floor(255 * ((c>>3) & 0x7) / 7);
         const r = Math.floor(255 * ((c>>0) & 0x7) / 7);
-        palette.push(`rgb(${r} ${g} ${b})`)
+        colors.push(`rgb(${r} ${g} ${b})`);
+    }
+    return colors;
+}
+
+game.parse_palettes = function(colors, colorIndices) {
+    const palettes = [];
+
+    for (let i = 0; i < colorIndices.length; i += 4) {
+        const pal = [];
+        pal.push(colors[colorIndices[i]]);
+        pal.push(colors[colorIndices[i+1]]);
+        pal.push(colors[colorIndices[i+2]]);
+        pal.push(colors[colorIndices[i+3]]);
+        palettes.push(pal);
     }
 
-    return palette;
+    return palettes;
 }
 
 game.parse_spritemap = function(spriteData) {
@@ -101,7 +115,7 @@ game.decode_sprite = function(spriteBytes, offset) {
     return sprite;
 };
 
-game.draw_sprite = function(canvasX, canvasY, sprite, pal, palOffset, mirrorX, mirrorY) {
+game.draw_sprite = function(canvasX, canvasY, sprite, palette, mirrorX, mirrorY) {
     const pw = 2, ph = 2;
 
     if (!mirrorX) {
@@ -110,7 +124,7 @@ game.draw_sprite = function(canvasX, canvasY, sprite, pal, palOffset, mirrorX, m
             for (let y = 0; y < 16; y++) {
                 let screenX = canvasX;
                 for (let x = 0; x < 16; x++) {
-                    this.canvas_ctx.fillStyle = pal[sprite[y][x]+palOffset];
+                    this.canvas_ctx.fillStyle = palette[sprite[y][x]];
                     this.canvas_ctx.fillRect(screenX, screenY, pw, ph);
                     screenX += pw;
                 }
@@ -122,7 +136,7 @@ game.draw_sprite = function(canvasX, canvasY, sprite, pal, palOffset, mirrorX, m
             for (let y = 0; y < 16; y++) {
                 let screenX = canvasX;
                 for (let x = 0; x < 16; x++) {
-                    this.canvas_ctx.fillStyle = pal[sprite[y][x]+palOffset];
+                    this.canvas_ctx.fillStyle = palette[sprite[y][x]];
                     this.canvas_ctx.fillRect(screenX, screenY, pw, ph);
                     screenX += pw;
                 }
@@ -136,7 +150,7 @@ game.draw_sprite = function(canvasX, canvasY, sprite, pal, palOffset, mirrorX, m
             for (let y = 0; y < 16; y++) {
                 let screenX = canvasX + 15 * pw;
                 for (let x = 0; x < 16; x++) {
-                    this.canvas_ctx.fillStyle = pal[sprite[y][x]+palOffset];
+                    this.canvas_ctx.fillStyle = palette[sprite[y][x]];
                     this.canvas_ctx.fillRect(screenX, screenY, pw, ph);
                     screenX -= pw;
                 }
@@ -148,7 +162,7 @@ game.draw_sprite = function(canvasX, canvasY, sprite, pal, palOffset, mirrorX, m
             for (let y = 0; y < 16; y++) {
                 let screenX = canvasX + 15 * pw;
                 for (let x = 0; x < 16; x++) {
-                    this.canvas_ctx.fillStyle = pal[sprite[y][x]+palOffset];
+                    this.canvas_ctx.fillStyle = palette[sprite[y][x]];
                     this.canvas_ctx.fillRect(screenX, screenY, pw, ph);
                     screenX -= pw;
                 }
@@ -178,7 +192,7 @@ game.doFrame = function () {
     }
 
     for (let i = 0; i < 16; i++) {
-        this.draw_sprite(ANIM_X, ANIM_Y + i * 32, this.spriteList[spriteIndex + i * 8], this.spriteColorMap, 8, mirrorX, mirrorY);
+        this.draw_sprite(ANIM_X, ANIM_Y + i * 32, this.spriteList[spriteIndex + i * 8], this.palettes[2], mirrorX, mirrorY);
     }
 
     this.currentSprite = (this.currentSprite + 1) % this.seqence.length;
