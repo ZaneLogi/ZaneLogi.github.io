@@ -26,21 +26,16 @@ game.init = function () {
         }
     }
 
-    this.colors = this.parse_colors(color_data);
-
-    this.palettes = this.parse_palettes(this.colors, paletteSprite_data);
-
-    const spriteList = this.parse_spritemap([sprite1_data, sprite2_data]);
+    resource.init();
 
     for (let sprIdx = 0; sprIdx < 16; sprIdx++) {
         const drawY = sprIdx * 32;
         for (let i = 0; i < 8; i++) {
-            this.draw_sprite(i * 32, drawY, spriteList[sprIdx * 8 + i], this.palettes[9]);
+            this.draw_sprite(i * 32, drawY, resource.spriteList[sprIdx * 8 + i], resource.palettes[9]);
         }
     }
 
     this.currentSprite = 0;
-    this.spriteList = spriteList;
     this.seqence = [
         0, 1, 2, 3, 4, 5,
         6, 5, 4, 3, 2, 1,
@@ -48,71 +43,24 @@ game.init = function () {
         6, 5, 4, 3, 2, 1,
     ];
 
+    this.path = new BezierPath()
+    const curve = new BezierCurve({x:400, y:-10}, {x:400, y:-20}, {x:400, y: 30}, {x:400, y:20});
+    this.path.addCurve(curve, 1);
+
+    this.path.addCurve(new BezierCurve({x:400, y:20}, {x:400, y:100}, {x:75, y:325}, {x:75, y:425}), 25);
+    this.path.addCurve(new BezierCurve({x:75, y:425}, {x:75, y:650}, {x:350, y:650}, {x:350, y:425}), 25);
+    const path = this.path.doSampling();
+
+    this.canvas_ctx.strokeStyle = 'green';
+    this.canvas_ctx.lineWidth = 2;
+    this.canvas_ctx.beginPath();
+    this.canvas_ctx.moveTo(path[0].x, path[0].y);
+    for (let i = 1; i < path.length; i++) {
+        this.canvas_ctx.lineTo(path[i].x, path[i].y);
+    }
+    this.canvas_ctx.stroke();
+
     runloop.start(() => this.doFrame(), 200);
-};
-
-game.parse_colors = function(colorData) {
-    const colors = []
-    for (const c of colorData) {
-        // bbgggrrr
-        const b = Math.floor(255 * ((c>>5) & 0x6) / 7);
-        const g = Math.floor(255 * ((c>>3) & 0x7) / 7);
-        const r = Math.floor(255 * ((c>>0) & 0x7) / 7);
-        colors.push(`rgb(${r} ${g} ${b})`);
-    }
-    return colors;
-}
-
-game.parse_palettes = function(colors, colorIndices) {
-    const palettes = [];
-
-    for (let i = 0; i < colorIndices.length; i += 4) {
-        const pal = [];
-        pal.push(colors[colorIndices[i]]);
-        pal.push(colors[colorIndices[i+1]]);
-        pal.push(colors[colorIndices[i+2]]);
-        pal.push(colors[colorIndices[i+3]]);
-        palettes.push(pal);
-    }
-
-    return palettes;
-}
-
-game.parse_spritemap = function(spriteData) {
-    const sprites = [];
-
-    for (const data of spriteData) {
-        if (data.length != 4096) {
-            throw new Error("Missing spritemap data");
-        }
-
-        for (let i = 0; i < 64; i++) {
-            const spr = this.decode_sprite(data, i * 64)
-            sprites.push(spr);
-        }
-    }
-
-    return sprites;
-};
-
-game.decode_sprite = function(spriteBytes, offset) {
-    const sprite = [];
-
-    for (let y = 0; y < 16; y++) {
-        const row = [];
-        for (let x = 0; x < 16; x++) {
-            const idx = ((y & 8) << 1) + (((x & 8) ^ 8) << 2) + (7 - (x & 7)) + 2 * (y & 4);
-            const byte = spriteBytes[idx + offset];
-
-            const bit0 = (byte & (0x08 >> (y & 3))) ? 1 : 0;
-            const bit1 = (byte & (0x80 >> (y & 3))) ? 2 : 0;
-
-            row.push(bit0 + bit1);
-        }
-        sprite.push(row);
-    }
-
-    return sprite;
 };
 
 game.draw_sprite = function(canvasX, canvasY, sprite, palette, mirrorX, mirrorY) {
@@ -192,7 +140,7 @@ game.doFrame = function () {
     }
 
     for (let i = 0; i < 16; i++) {
-        this.draw_sprite(ANIM_X, ANIM_Y + i * 32, this.spriteList[spriteIndex + i * 8], this.palettes[2], mirrorX, mirrorY);
+        this.draw_sprite(ANIM_X, ANIM_Y + i * 32, resource.spriteList[spriteIndex + i * 8], resource.palettes[2], mirrorX, mirrorY);
     }
 
     this.currentSprite = (this.currentSprite + 1) % this.seqence.length;
