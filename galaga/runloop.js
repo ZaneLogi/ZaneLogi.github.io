@@ -3,13 +3,13 @@
 const runloop = {
     frame_period: 50, // 20 frames per second
     frame_count: 0,
-};
+}
 
 runloop.changeFramePeriod = function (period) {
     this.frame_period = period;
     this.msPrev = window.performance.now();
     this.frame_count = 0;
-};
+}
 
 runloop.start = function (doFrame, framePeriod) {
     this.msPrev = window.performance.now();

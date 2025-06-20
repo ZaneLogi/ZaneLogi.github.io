@@ -1,7 +1,7 @@
 "use strict"
 
 const resource = {
-};
+}
 
 resource.init = function() {
     this.initPalettes();

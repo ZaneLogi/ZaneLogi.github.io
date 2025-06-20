@@ -73,12 +73,13 @@ class BezierPath {
 
     doSampling() {
         const path = [];
-        
         for (const datum of this.data) {
+            path.push(datum.curve.p0); // append the start point
             const step = 1.0 / datum.samples;
-            for (let t = 0; t <= 1.0; t += step ) {
-                path.push(datum.curve.calculateCurvePoint(t))
+            for (let t = step; t < 1; t += step ) {
+                path.push(datum.curve.calculateCurvePoint(t));
             }
+            path.push(datum.curve.p3); // append the end point
         }
 
         return path;
