@@ -5,7 +5,8 @@ const resource = {
 
 resource.init = function() {
     this.initPalettes();
-    this.initSprites();
+    this.initImageList();
+    this.initSpriteList();
 }
 
 resource.initPalettes = function() {
@@ -15,23 +16,32 @@ resource.initPalettes = function() {
         const b = Math.floor(255 * ((c>>5) & 0x6) / 7);
         const g = Math.floor(255 * ((c>>3) & 0x7) / 7);
         const r = Math.floor(255 * ((c>>0) & 0x7) / 7);
-        this.colors.push(`rgb(${r} ${g} ${b})`);
+        this.colors.push([r, g, b, 255]);
     }
 
+    this.colors[15][3] = 0; // make it a transparent color
+
     this.palettes = [];
+    this.colorPalettes = [];
 
     for (let i = 0; i < paletteSprite_data.length; i += 4) {
         const pal = [];
-        pal.push(this.colors[paletteSprite_data[i]]);
-        pal.push(this.colors[paletteSprite_data[i+1]]);
-        pal.push(this.colors[paletteSprite_data[i+2]]);
-        pal.push(this.colors[paletteSprite_data[i+3]]);
+        for (let j = 0; j < 4; j++) {
+            const [r, g, b, a] = this.colors[paletteSprite_data[i+j]];
+            pal.push(`rgb(${r}, ${g}, ${b}`);
+        }
         this.palettes.push(pal);
+
+        const colorPal = [];
+        for (let j = 0; j < 4; j++) {
+            colorPal.push(this.colors[paletteSprite_data[i+j]]);
+        }
+        this.colorPalettes.push(colorPal);
     }
 }
 
-resource.initSprites = function() {
-    this.spriteList = this.parse_spritemap([sprite1_data, sprite2_data]);
+resource.initImageList = function() {
+    this.imageList = this.parse_spritemap([sprite1_data, sprite2_data]);
 }
 
 resource.parse_spritemap = function(spriteData) {
@@ -69,4 +79,49 @@ resource.decode_sprite = function(spriteBytes, offset) {
     }
 
     return sprite;
+}
+
+resource.createOffscreenCanvas = function (width, height) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    return canvas;
+};
+
+resource.createImage = function (width, height, pixelData, palette) {
+    const offscreenCanvas = this.createOffscreenCanvas(width, height);
+    const canvas_ctx = offscreenCanvas.getContext('2d');
+
+    const imageData = canvas_ctx.createImageData(width, height);
+    const data = imageData.data;
+
+    let offset = 0;
+
+    for (let y = 0; y < 16; y++) {
+        for (let x = 0; x < 16; x++) {
+            data.set(palette[pixelData[y][x]], offset);
+            offset += 4;
+        }
+    }
+
+    canvas_ctx.putImageData(imageData, 0, 0);
+
+    return offscreenCanvas;
+}
+
+resource.createSprite = function(width, height, spriteData, palette) {
+    const sprite = [];
+
+    for (const pixelData of spriteData) {
+        sprite.push(this.createImage(width, height, pixelData, palette))
+    }
+
+    return sprite;
+}
+
+resource.initSpriteList = function() {
+    this.spaceShip = this.createSprite(16, 16, this.imageList.slice(0,8), this.colorPalettes[9]);
+    this.bossSprite = this.createSprite(16, 16, this.imageList.slice(8, 16), this.colorPalettes[0]);
+    this.butterflySprite = this.createSprite(16, 16, this.imageList.slice(16, 24), this.colorPalettes[2]);
+    this.waspSprite = this.createSprite(16, 16, this.imageList.slice(24, 32), this.colorPalettes[3])
 }

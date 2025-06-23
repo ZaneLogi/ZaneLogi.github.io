@@ -19,6 +19,12 @@ class Vector2 {
         return new Vector2(this.x / len, this.y / len);
     }
 
+    static distance(a, b) {
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        return Math.hypot(dx, dy);
+    }
+
     static lerp(start, end, ratio) {
         if (ratio <= 0) {
             return new Vector2(start.x, start.y);
