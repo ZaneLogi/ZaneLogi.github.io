@@ -1,49 +1,46 @@
 
+"use strict"
 
-function parsePalette(paletteData) {
-    const palette = [];
+function decodeRomHwColors(data) {
+    const hwColors = [];
 
-    for (let i = 0; i < paletteData.length; i++) {
-        const c = paletteData[i];
-
+    for (const c of data) {
         // Format: bbgggrrr
         const b = Math.floor(255 * ((c >> 6) & 0x03) / 3);
         const g = Math.floor(255 * ((c >> 3) & 0x07) / 7);
         const r = Math.floor(255 * (c & 0x07) / 7);
 
-        palette.push([r, g, b, 255]);
+        hwColors.push([r, g, b, 255]);
     }
 
-    return palette;
+    return hwColors;
 }
 
-function parseColormap(colormapData) {
-    if (colormapData.length !== 256) {
+function decodeRomPalette(data, hwColors) {
+    if (data.length !== 256) {
         throw new Error("Missing colormap data");
     }
 
-    const colormap = [];
-
-    for (let i = 0; i < 64; i += 4) {
-        const c = [
-            colormapData[i],
-            colormapData[i + 1],
-            colormapData[i + 2],
-            colormapData[i + 3]
-        ];
+    const palettes = [];
+    for (let i = 0; i < 256; i += 4) {
+        const c = data.slice(i, i + 4);
 
         // Check if color indices are within 0-15
         if (c.some(v => v < 0 || v > 15)) {
-            throw new Error(`Color index out of range at group ${i%4}: ${c}`);
+            throw new Error(`Color index out of range at group ${i>>2}: ${c}`);
         }
 
-        output.push(c);
+        const colorBlock = c.map((index) => Array.from(hwColors[index]));
+        // first color in each color block is transparent
+        colorBlock[0][3] = 0;
+
+        palettes.push(colorBlock);
     }
 
-    return colormap;
+    return palettes;
 }
 
-function parseSprite(data, pacmanFmt) {
+function decodeSprite(data, pacmanFmt) {
     // sprites are 16x16 pixels
     const sprite = [];
 
@@ -71,7 +68,21 @@ function parseSprite(data, pacmanFmt) {
     return sprite;
 }
 
-function parseChr(data) {
+function decodeRomSprite(data) {
+    if (data.length != 4096) {
+        throw new Error("Missing spritemap data");
+    }
+
+    const sprites = [];
+    for (let i = 0, offset = 0; i < 64; i++, offset += 64) {
+        const spriteData = data.slice(offset, offset + 64);
+        sprites.push(decodeSprite(spriteData, true));
+    }
+
+    return sprites;
+}
+
+function decodeTile(data) {
     // characters are 8x8 pixels
     const char = [];
 
@@ -93,14 +104,14 @@ function parseChr(data) {
     return char; // 8x8 二維像素陣列，每個值為 0~3
 }
 
-function parseCharmap(charmapData) {
-    const chars = [];
+function decodeRomTile(data) {
+    const tiles = [];
 
     // Galaga / Pacman: 2bpp, 256 characters
     for (let i = 0; i < 256; i++) {
-        const slice = charmapData.slice(i * 16, (i + 1) * 16);
-        chars.push(parseChr(slice));
+        const slice = data.slice(i * 16, (i + 1) * 16);
+        tiles.push(decodeTile(slice));
     }
 
-    return chars;
+    return tiles;
 }
