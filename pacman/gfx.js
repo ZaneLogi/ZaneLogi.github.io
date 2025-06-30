@@ -6,6 +6,10 @@ const SPRITE_WIDTH = 16;
 const SPRITE_HEIGHT = 16;
 const DISPLAY_TILES_X = 28;
 const DISPLAY_TILES_Y = 36;
+const DISPLAY_PIXELS_X = DISPLAY_TILES_X * TILE_WIDTH;
+const DISPLAY_PIXELS_Y = DISPLAY_TILES_Y * TILE_HEIGHT;
+
+const NUM_SPRITES = 8;
 
 const TILE_SPACE          = 0x40;
 const TILE_DOT            = 0x10;
@@ -50,6 +54,8 @@ const gfx = {
     video_ram: Array.from(Array(DISPLAY_TILES_Y), () => new Array(DISPLAY_TILES_X)), // tile codes
     color_ram: Array.from(Array(DISPLAY_TILES_Y), () => new Array(DISPLAY_TILES_X)), // color codes
 
+    sprite: Array.from(Array(NUM_SPRITES), () => ({enabled:false})),
+
     hwColors: undefined, // the decoded hardware colors
     palettes: undefined, // the decoded color palettes
     tiles: undefined, // the decoded tile data
@@ -57,6 +63,7 @@ const gfx = {
 }
 
 gfx.init = function() {
+    this.spr_clear();
     this.decodeRomData();
 }
 
@@ -69,6 +76,13 @@ gfx.decodeRomData = function() {
     this.tiles = decodeRomTile(tile_data);
     // total 64 sprites
     this.sprites = decodeRomSprite(sprite_data);
+}
+
+// disable and clear all sprites
+gfx.spr_clear = function() {
+    for (const spr of this.sprite) {
+        spr.enabled = false;
+    }
 }
 
 // clear tile and color buffer
@@ -217,6 +231,11 @@ gfx.draw_playfield = function(canvas_ctx) {
     }
 }
 
+gfx.draw_sprite = function(canvas_ctx, spr) {
+    const image = imageCache.getSpriteImage(spr.tile, spr.color);
+    canvas_ctx.drawImage(image, spr.pos.x, spr.pos.y);
+}
+
 
 const imageCache = {};
 
@@ -251,7 +270,7 @@ imageCache.getTileImage = function(tileCode, colorCode) {
     }
 
     imageCtx.putImageData(imageData, 0, 0);
-    
+
     this[key] = image;
     return image;
 }
@@ -259,7 +278,7 @@ imageCache.getTileImage = function(tileCode, colorCode) {
 imageCache.getSpriteImage = function(spriteCode, colorCode) {
     const key = `*${spriteCode}-${colorCode}`;
     if (this[key]) {
-        console.log(`Cache hit for sprite ${spriteCode} with color ${colorCode}`);
+        //console.log(`Cache hit for sprite ${spriteCode} with color ${colorCode}`);
         return this[key];
     }
 
@@ -280,7 +299,7 @@ imageCache.getSpriteImage = function(spriteCode, colorCode) {
     }
 
     imageCtx.putImageData(imageData, 0, 0);
-    
+
     this[key] = image;
     return image;
 }

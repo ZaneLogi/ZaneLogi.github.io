@@ -88,6 +88,7 @@ game.init = function () {
 
     this.initMap();
 
+    Actor.game = this;
     Trigger.game = this;
     this.ticks = 0;
     this.gameStarted = new Trigger();
@@ -176,10 +177,21 @@ game.game_init = function () {
 
 // setup state at start of a game round
 game.game_round_init = function() {
+    gfx.spr_clear();
+
     // clear the "PLAYER ONE" text
     gfx.vid_color_text({x:9, y:14}, 0x10, "          ");
 
     this.freeze = FREEZETYPE_READY;
+
+    gfx.vid_color_text({x:11, y:20}, 0x9, "READY!");
+
+    // Pacman starts running to the left
+    this.pacman.init();
+    const SPRITE_PACMAN = 0;
+    const sprite = gfx.sprite[SPRITE_PACMAN];
+    sprite.enabled= true;
+    sprite.color = COLOR_PACMAN;
 }
 
 // update dynamic background tiles
@@ -211,14 +223,31 @@ game.game_update_tiles = function() {
 
 // this function takes care of updating all sprite images during gameplay
 game.game_update_sprites = function() {
+    const pacman = this.pacman;
+    const spr = gfx.sprite[0];
+
+    if (spr.enabled) {
+        spr.pos = pacman.actor_to_sprite_pos();
+        pacman.spr_anim_pacman();
+    }
 }
 
 // the central Pacman and ghost behaviour function, called once per game tick
 game.game_update_actors = function() {
+    if (this.pacman.should_move()) {
+        // move Pacman with cornering allowed
+        const allow_cornering = true;
+
+        // move into the selected direction
+        if (this.pacman.can_move(allow_cornering)) {
+            this.pacman.move(allow_cornering);
+            this.pacman.anim_tick++;
+        }
+    }
 }
 
 game.game_tick = function () {
-    const prelude_ticks_per_sec = 60;
+    const prelude_ticks_per_sec = 10;
 
     // initialize game state once
     if (this.gameStarted.now()) {
@@ -230,7 +259,7 @@ game.game_tick = function () {
     if (this.gameReadyStarted.now()) {
         this.game_round_init();
         // after 2 seconds start the interactive game loop
-        this.gameRoundStarted.startAfter(2*60+10);
+        this.gameRoundStarted.startAfter(2*10+10);
     }
 
     if (this.gameRoundStarted.now()) {
@@ -252,6 +281,11 @@ game.game_tick = function () {
 
 game.gfx_draw = function() {
     gfx.draw_playfield(this.canvas_ctx);
+
+    const spr = gfx.sprite[0];
+    if (spr.enabled) {
+        gfx.draw_sprite(this.canvas_ctx, spr);
+    }
 }
 
 game.updateGhosts = function () {
