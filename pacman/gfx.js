@@ -56,6 +56,10 @@ const gfx = {
     sprites: undefined, // the decoded sprite data
 }
 
+gfx.init = function() {
+    this.decodeRomData();
+}
+
 gfx.decodeRomData = function() {
     // total 32 HW colors
     this.hwColors = decodeRomHwColors(hwcolors_data);
@@ -199,6 +203,18 @@ gfx.init_playfield = function() {
     // ghost house gate colors
     this.vid_color({x:13, y:15}, 0x18);
     this.vid_color({x:14, y:15}, 0x18);
+}
+
+gfx.draw_playfield = function(canvas_ctx) {
+    for (let ty = 0, ypos = 0; ty < DISPLAY_TILES_Y; ty++, ypos += 8) {
+        for (let tx = 0, xpos = 0; tx < DISPLAY_TILES_X; tx++, xpos += 8) {
+            const tile_code = gfx.video_ram[ty][tx];
+            const color_code = gfx.color_ram[ty][tx];
+
+            const image = imageCache.getTileImage(tile_code, color_code);
+            canvas_ctx.drawImage(image, xpos, ypos);
+        }
+    }
 }
 
 

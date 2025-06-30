@@ -2,10 +2,15 @@
 
 const SCREEN_WIDTH = 224;
 const SCREEN_HEIGHT = 288;
-const TILE_WIDTH = 8;
-const TILE_HEIGHT = 8;
+
 const SCREEN_TILE_WIDTH = 28;
 const SCREEN_TILE_HEIGHT = 36;
+
+const FREEZETYPE_PRELUDE   = (1<<0);  // game prelude is active (with the game start tune playing)
+const FREEZETYPE_READY     = (1<<1);  // READY! phase is active (at start of a new game round)
+const FREEZETYPE_EAT_GHOST = (1<<2);  // Pacman has eaten a ghost
+const FREEZETYPE_DEAD      = (1<<3);  // Pacman was eaten by a ghost
+const FREEZETYPE_WON       = (1<<4);  // game round was won by eating all dots
 
 const screen_map =
 [
@@ -67,6 +72,7 @@ const game = {
     keyDPressed: false,
     keyAPressed: false,
     keySpace: false,
+    ticks: 0,
 };
 
 game.init = function () {
@@ -79,6 +85,14 @@ game.init = function () {
     window.addEventListener("keyup", (e) => this.onkeyup(e));
 
     this.initMap();
+
+    Trigger.game = this;
+    this.ticks = 0;
+    this.gameStarted = new Trigger();
+    this.gameReadyStarted = new Trigger();
+    this.gameRoundStarted = new Trigger();
+    this.gameStarted.start();
+    gfx.init();
 
     runloop.start(() => this.doFrame(), 1000/60); // 60 FPS
 }
@@ -130,11 +144,112 @@ game.initMap = function () {
 }
 
 game.doFrame = function () {
-    this.processEvents();
+    /*this.processEvents();
 
     this.player.update();
     this.updateGhosts();
-    this.renderScreen();
+    this.renderScreen();*/
+
+    this.ticks++;
+    this.game_tick();
+}
+
+// disable all game loop timers
+game.game_disable_timers = function () {
+}
+
+// one-time init at start of game state
+game.game_init = function () {
+    this.game_disable_timers();
+
+    this.freeze = FREEZETYPE_PRELUDE;
+
+    // draw the playfield and PLAYER ONE READY! message
+    gfx.vid_clear(TILE_SPACE, COLOR_DOT);
+    gfx.vid_color_text({x:9, y:0}, COLOR_DEFAULT, "HIGH SCORE");
+    gfx.init_playfield();
+    gfx.vid_color_text({x:9, y:14}, 0x5, "PLAYER ONE");
+    gfx.vid_color_text({x:11, y:20}, 0x9, "READY!");
+}
+
+// setup state at start of a game round
+game.game_round_init = function() {
+    // clear the "PLAYER ONE" text
+    gfx.vid_color_text({x:9, y:14}, 0x10, "          ");
+
+    this.freeze = FREEZETYPE_READY;
+}
+
+// update dynamic background tiles
+game.game_update_tiles = function() {
+    // print score and hiscore
+
+    // update the energizer pill colors (blinking/non-blinking)
+    const pill_pos = [{x:1, y:6}, {x:26, y:6}, {x:1, y:26}, {x:26, y:26}];
+    for (const pos of pill_pos) {
+        if (this.freeze) {
+            gfx.vid_color(pos, COLOR_DOT);
+        }
+        else {
+            gfx.vid_color(pos, (this.ticks & 0x8) ? 0x10:0);
+        }
+    }
+
+    // clear the fruit-eaten score after Pacman has eaten a bonus fruit
+
+
+    // remaining lives at bottom left screen
+
+
+    // bonus fruit list in bottom-right corner
+
+
+    // if game round was won, render the entire playfield as blinking blue/white
+}
+
+// this function takes care of updating all sprite images during gameplay
+game.game_update_sprites = function() {
+}
+
+// the central Pacman and ghost behaviour function, called once per game tick
+game.game_update_actors = function() {
+}
+
+game.game_tick = function () {
+    const prelude_ticks_per_sec = 60;
+
+    // initialize game state once
+    if (this.gameStarted.now()) {
+        this.gameReadyStarted.startAfter(2*prelude_ticks_per_sec);
+        this.game_init();
+    }
+
+    // initialize new round (each time Pacman looses a life), make actors visible, remove "PLAYER ONE", start a new life
+    if (this.gameReadyStarted.now()) {
+        this.game_round_init();
+        // after 2 seconds start the interactive game loop
+        this.gameRoundStarted.startAfter(2*60+10);
+    }
+
+    if (this.gameRoundStarted.now()) {
+        this.freeze &= ~FREEZETYPE_READY;
+        // clear the 'READY!' message
+        gfx.vid_color_text({x:11, y:20}, 0x10, "      ");
+    }
+
+    // the actually important part: update Pacman and ghosts, update dynamic
+    // background tiles, and update the sprite images
+    if (!this.freeze) {
+        this.game_update_actors();
+    }
+    this.game_update_tiles();
+    this.game_update_sprites();
+
+    this.gfx_draw();
+}
+
+game.gfx_draw = function() {
+    gfx.draw_playfield(this.canvas_ctx);
 }
 
 game.updateGhosts = function () {
