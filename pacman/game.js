@@ -80,7 +80,7 @@ game.init = function () {
 
     this.initMap();
 
-    runloop.start(() => this.doFrame(), 20);
+    runloop.start(() => this.doFrame(), 1000/60); // 60 FPS
 }
 
 game.initMap = function () {

@@ -31,9 +31,6 @@ function decodeRomPalette(data, hwColors) {
         }
 
         const colorBlock = c.map((index) => Array.from(hwColors[index]));
-        // first color in each color block is transparent
-        colorBlock[0][3] = 0;
-
         palettes.push(colorBlock);
     }
 

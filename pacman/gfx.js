@@ -1,8 +1,5 @@
 "use strict"
 
-const canvas = document.querySelector('canvas');
-const canvas_ctx = canvas.getContext('2d');
-
 const TILE_WIDTH = 8;
 const TILE_HEIGHT = 8;
 const SPRITE_WIDTH = 16;
@@ -52,6 +49,22 @@ const gfx = {
     // the 36x28 tile framebuffer
     video_ram: Array.from(Array(DISPLAY_TILES_Y), () => new Array(DISPLAY_TILES_X)), // tile codes
     color_ram: Array.from(Array(DISPLAY_TILES_Y), () => new Array(DISPLAY_TILES_X)), // color codes
+
+    hwColors: undefined, // the decoded hardware colors
+    palettes: undefined, // the decoded color palettes
+    tiles: undefined, // the decoded tile data
+    sprites: undefined, // the decoded sprite data
+}
+
+gfx.decodeRomData = function() {
+    // total 32 HW colors
+    this.hwColors = decodeRomHwColors(hwcolors_data);
+    // total 64 color palettes
+    this.palettes = decodeRomPalette(palette_data, this.hwColors);
+    // total 256 tiles
+    this.tiles = decodeRomTile(tile_data);
+    // total 64 sprites
+    this.sprites = decodeRomSprite(sprite_data);
 }
 
 // clear tile and color buffer
@@ -129,7 +142,6 @@ gfx.vid_color_text = function(tile_pos, color_code, text) {
     }
 }
 
-
 // initialize the playfield tiles
 gfx.init_playfield = function() {
     this.vid_color_playfield(COLOR_DOT);
@@ -190,108 +202,69 @@ gfx.init_playfield = function() {
 }
 
 
+const imageCache = {};
 
-
-
-
-
-
-
-function renderScreen() {
-    const hwColors = decodeRomHwColors(hwcolors_data);
-    // total 32 HW colors
-
-    let x = 0;
-    for (const color of hwColors) {
-        canvas_ctx.fillStyle = `rgb(${color[0]} ${color[1]} ${color[2]})`;
-        canvas_ctx.fillRect(x, 0, 8, 8);
-        x += 8;
-    }
-
-    const palettes = decodeRomPalette(palette_data, hwColors);
-    // number of palettes = 64
-    // 4 colors in a palette
-    for (let index = 0; index < 64; index++) {
-        const ypos = 16 + Math.floor(index/4) * 8;
-        let xpos = (index % 4) * 32;
-
-        const colorBlock = palettes[index];
-        colorBlock.map((color) => {
-            canvas_ctx.fillStyle = `rgb(${color[0]} ${color[1]} ${color[2]})`;
-            canvas_ctx.fillRect(xpos, ypos, 8, 8);
-            xpos += 8;
-        });
-    }
-
-    const tiles = decodeRomTile(tile_data);
-    for (let i = 0; i < 256; i++) {
-        let xpos = (i%16) * 8 + 128 + 8;
-        let ypos = Math.floor(i/16) * 8 + 16;
-        const tile = tiles[i];
-        for (let y = 0; y < 8; y++) {
-            for (let x = 0; x < 8; x ++) {
-                const colorIndex = tile[y][x];
-                const color = palettes[9][colorIndex];
-                canvas_ctx.fillStyle = `rgb(${color[0]} ${color[1]} ${color[2]})`;
-                canvas_ctx.fillRect(xpos + x, ypos + y, 1, 1);
-            }
-        }
-    }
-
-    const sprites = decodeRomSprite(sprite_data);
-
-    const drawSprite = function(spr, pal, xpos, ypos) {
-        for (let y = 0; y < 16; y++) {
-            for (let x = 0; x < 16; x++) {
-                const colorIndex = spr[y][x];
-                const color = pal[colorIndex];
-                canvas_ctx.fillStyle = `rgb(${color[0]} ${color[1]} ${color[2]})`;
-                canvas_ctx.fillRect(xpos + x, ypos + y, 1, 1);
-            }
-        }
-    }
-
-    for (let index = 44, xpos = 0; index <= 48; index++, xpos += 16) {
-        const spritePacman = sprites[index];
-        const colorPacman = palettes[COLOR_PACMAN];
-        drawSprite(spritePacman, colorPacman, xpos, 128+16+8);
-    }
-
-    for (let index = 52, xpos = 0; index <= 63; index++, xpos += 16 ) {
-        const spritePacman = sprites[index];
-        const colorPacman = palettes[COLOR_PACMAN];
-        drawSprite(spritePacman, colorPacman, xpos, 128+16+8+16);
-    }
-
-    for (let index = 32, xpos = 0; index <= 39; index++, xpos += 16 ) {
-        const spriteGhost = sprites[index];
-        const colorGhost = palettes[COLOR_BLINKY];
-        drawSprite(spriteGhost, colorGhost, xpos, 128+16+8+32);
-    }
-
-    gfx.vid_clear(TILE_SPACE, COLOR_DOT);
-    gfx.vid_color_text({x:9, y:0}, COLOR_DEFAULT, "HIGH SCORE");
-    gfx.init_playfield();
-    gfx.vid_color_text({x:9, y:14}, 0x5, "PLAYER ONE");
-    gfx.vid_color_text({x:11, y:20}, 0x9, "READY!");
-
-    for (let ty = 0, ypos = 0; ty < DISPLAY_TILES_Y; ty++, ypos += 8) {
-        for (let tx = 0, xpos = 128 + 8 + 128 + 8; tx < DISPLAY_TILES_X; tx++, xpos += 8) {
-            const tile_code = gfx.video_ram[ty][tx];
-            const color_code = gfx.color_ram[ty][tx];
-            const tile = tiles[tile_code];
-            const colorBlock = palettes[color_code];
-
-            for (let y = 0; y < 8; y++) {
-                for (let x = 0; x < 8; x ++) {
-                    const colorIndex = tile[y][x];
-                    const color = colorBlock[colorIndex];
-                    canvas_ctx.fillStyle = `rgb(${color[0]} ${color[1]} ${color[2]})`;
-                    canvas_ctx.fillRect(xpos + x, ypos + y, 1, 1);
-                }
-            }
-        }
-    }
+imageCache.createOffscreenCanvas = function(width, height) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    return canvas;
 }
 
-window.addEventListener("load", () => renderScreen());
+imageCache.getTileImage = function(tileCode, colorCode) {
+    const key = `#${tileCode}-${colorCode}`;
+    if (this[key]) {
+        //console.log(`Cache hit for tile ${tileCode} with color ${colorCode}`);
+        return this[key];
+    }
+
+    const image = this.createOffscreenCanvas(TILE_WIDTH, TILE_HEIGHT);
+    const imageCtx = image.getContext('2d');
+    const imageData = imageCtx.createImageData(TILE_WIDTH, TILE_HEIGHT);
+
+    const tileData = gfx.tiles[tileCode];
+    const palette = gfx.palettes[colorCode];
+
+    for (let y = 0, yoffset = 0; y < TILE_HEIGHT; y++, yoffset += 32) {
+        const rowData = tileData[y];
+        for (let x = 0, xoffset = yoffset; x < TILE_WIDTH; x++, xoffset += 4) {
+            const colorIndex = rowData[x];
+            const color = palette[colorIndex];
+            imageData.data.set(color, xoffset);
+        }
+    }
+
+    imageCtx.putImageData(imageData, 0, 0);
+    
+    this[key] = image;
+    return image;
+}
+
+imageCache.getSpriteImage = function(spriteCode, colorCode) {
+    const key = `*${spriteCode}-${colorCode}`;
+    if (this[key]) {
+        console.log(`Cache hit for sprite ${spriteCode} with color ${colorCode}`);
+        return this[key];
+    }
+
+    const image = this.createOffscreenCanvas(SPRITE_WIDTH, SPRITE_HEIGHT);
+    const imageCtx = image.getContext('2d');
+    const imageData = imageCtx.createImageData(SPRITE_WIDTH, SPRITE_HEIGHT);
+
+    const spriteData = gfx.sprites[spriteCode];
+    const palette = gfx.palettes[colorCode];
+
+    for (let y = 0, yoffset = 0; y < SPRITE_HEIGHT; y++, yoffset += 64) {
+        const rowData = spriteData[y];
+        for (let x = 0, xoffset = yoffset; x < SPRITE_WIDTH; x++, xoffset += 4) {
+            const colorIndex = rowData[x];
+            const color = palette[colorIndex];
+            imageData.data.set(color, xoffset);
+        }
+    }
+
+    imageCtx.putImageData(imageData, 0, 0);
+    
+    this[key] = image;
+    return image;
+}
