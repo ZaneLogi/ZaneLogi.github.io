@@ -72,7 +72,9 @@ const game = {
     keyDPressed: false,
     keyAPressed: false,
     keySpace: false,
+    
     ticks: 0,
+    pacman: new Pacman(),
 };
 
 game.init = function () {
