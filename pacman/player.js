@@ -19,21 +19,22 @@ class Player extends Entity {
     }
 
     update() {
-        /*const c = screen_map[this.ypos][this.xpos];
-        if (c === 'o' || c === 'O') {
+        const c = screen_map[this.ypos][this.xpos];
+        const dot = game_map[this.ypos][this.xpos];
+        if (dot > 0) {
             game_map[this.ypos][this.xpos] = 0;
-            if (game->nextGhostDotCounter != nullptr)
-                game->nextGhostDotCounter->dotCounter++;
+            if (game.nextGhostDotCounter != null)
+                game.nextGhostDotCounter.dotCounter++;
 
-            game->notEatDotsTimer = SDL_GetTicks();
+            game.notEatDotsTimer = game.ticks();
 
-            if (c == 'O') {
-                game->ghostBlinky.setFrightened();
-                game->ghostPinky.setFrightened();
-                game->ghostInky.setFrightened();
-                game->ghostClyde.setFrightened();
+            if (dot == 2) {
+                game.ghostBlinky.setFrightened();
+                game.ghostPinky.setFrightened();
+                game.ghostInky.setFrightened();
+                game.ghostClyde.setFrightened();
             }
-        }*/
+        }
 
         if (this.currentDirection != this.nextDirection) {
             switch (this.nextDirection) {

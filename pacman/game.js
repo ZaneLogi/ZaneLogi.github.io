@@ -84,7 +84,7 @@ game.init = function () {
 }
 
 game.initMap = function () {
-    let currentDots = 0;
+    this.currentDots = 0;
 
     for (let y = 0; y < SCREEN_TILE_HEIGHT; y++) {
         for (let x = 0; x < SCREEN_TILE_WIDTH; x++) {
@@ -97,11 +97,15 @@ game.initMap = function () {
                 game_map[y][x] = 0x80; // blocked
                 break;
             case 'o':
+                game_map[y][x] = 0x01; // small dot
+                this.currentDots++;
+                break;
             case 'O':
-                currentDots++;
-                // pass through
+                game_map[y][x] = 0x02; // big dot
+                this.currentDots++;
+                break;
             default:
-                game_map[y][x] = 0x00; // movable
+                game_map[y][x] = 0x00; // empty
                 break;
             }
         }
@@ -109,25 +113,50 @@ game.initMap = function () {
 
     this.player = new Player();
     this.ghostBlinky = new GhostBlinky();
+    this.ghostPinky = new GhostPinky();
+    this.ghostInky = new GhostInky();
+    this.ghostClyde = new GhostClyde();
 
     this.player.reset();
     this.ghostBlinky.reset();
-}
+    this.ghostPinky.reset();
+    this.ghostInky.reset();
+    this.ghostClyde.reset();
 
-let done = false;
+    this.nextGhostDotCounter = this.ghostPinky;
+    this.notEatDotsTimer = this.ticks();
+
+    this.gameover = false;
+}
 
 game.doFrame = function () {
     this.processEvents();
 
-    if (!done) {
-        this.player.update();
-        this.updateGhosts();
-        this.renderScreen();
-    }
+    this.player.update();
+    this.updateGhosts();
+    this.renderScreen();
 }
 
 game.updateGhosts = function () {
     this.ghostBlinky.update();
+    this.ghostPinky.update();
+    this.ghostInky.update();
+    this.ghostClyde.update();
+
+    if (this.nextGhostDotCounter !== null) {
+        const now = this.ticks();
+        const mustGoOut = (now - this.notEatDotsTimer >= 4000); // 4 seconds
+        this.nextGhostDotCounter.checkDotLimit(mustGoOut);
+        if (mustGoOut) {
+            this.notEatDotsTimer = now;
+        }
+    }
+
+    if (this.player.testCollision(this.ghostBlinky) || this.player.testCollision(this.ghostPinky) ||
+        this.player.testCollision(this.ghostInky) || this.player.testCollision(this.ghostClyde))
+    {
+        this.gameover = true;
+    }
 }
 
 game.renderScreen = function () {
@@ -137,6 +166,7 @@ game.renderScreen = function () {
         for (let sx = 0,x = 0; sx < SCREEN_WIDTH; sx += TILE_WIDTH, x++) {
             rc.x = sx, rc.y = sy;
             const c  = screen_map[y][x];
+            const dot = game_map[y][x];
             switch (c) {
             case '+':
             case '-':
@@ -152,15 +182,19 @@ game.renderScreen = function () {
                 this.canvas_ctx.fillStyle = "#000000";
                 this.canvas_ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
 
-                this.canvas_ctx.fillStyle = "#ffffff";
-                this.canvas_ctx.fillRect(rc.x + 3, rc.y + 3, rc.w - 6, rc.h - 6);
+                if (dot > 0) {
+                    this.canvas_ctx.fillStyle = "#ffffff";
+                    this.canvas_ctx.fillRect(rc.x + 3, rc.y + 3, rc.w - 6, rc.h - 6);
+                }
                 break;
             case 'O':
                 this.canvas_ctx.fillStyle = "#000000";
                 this.canvas_ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
 
-                this.canvas_ctx.fillStyle = "#ffffff";
-                this.canvas_ctx.fillRect(rc.x + 2, rc.y + 2, rc.w - 4, rc.h - 4);
+                if (dot > 0) {
+                    this.canvas_ctx.fillStyle = "#ffffff";
+                    this.canvas_ctx.fillRect(rc.x + 2, rc.y + 2, rc.w - 4, rc.h - 4);
+                }
                 break;
             default:
                 this.canvas_ctx.fillStyle = "#000000";
@@ -171,6 +205,9 @@ game.renderScreen = function () {
     }
 
     this.ghostBlinky.draw(this.canvas_ctx);
+    this.ghostPinky.draw(this.canvas_ctx);
+    this.ghostInky.draw(this.canvas_ctx);
+    this.ghostClyde.draw(this.canvas_ctx);
     this.player.draw(this.canvas_ctx);
 }
 

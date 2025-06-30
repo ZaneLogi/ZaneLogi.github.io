@@ -15,26 +15,24 @@ class GhostBlinky extends Ghost {
         this.xoffset = 0;
         this.yoffset = 0;
 
+        this.dotCounter = 0;
+        this.dotLimit = 0;
+
         this.behaviorIndex = 0;
         this.behavior = Ghost.BehaviorList[this.behaviorIndex].behavior;
+        this.duration = Ghost.BehaviorList[this.behaviorIndex].duration;
 
         this.setTarget(25, 0);
+        this.setDirection(Entity.DIRECTION.LEFT);
 
         this.lastTime = game.ticks();
     }
+    
+    checkDotLimit(mustGoOut) {
+    }
 
     update() {
-        const now = game.ticks();
-        if (now - this.lastTime > Ghost.BehaviorList[this.behaviorIndex].duration
-            && this.xoffset === 0 && this.yoffset === 0)
-        {
-            if (Ghost.BehaviorList[this.behaviorIndex].duration > 0) {
-                this.behaviorIndex++;
-                this.behavior = Ghost.BehaviorList[this.behaviorIndex].behavior;
-            }
-            
-            this.lastTime = now;
-        }
+        this.updateBehavior();
 
         switch (this.behavior) {
         case Ghost.BEHAVIOR.CHASE:
@@ -44,9 +42,11 @@ class GhostBlinky extends Ghost {
             using Pac-Man's current tile as his target.
             */
             this.setTarget(game.player.xpos, game.player.ypos);
+            this.color = "#FF0000";
             break;
         case Ghost.BEHAVIOR.SCATTER:
             this.setTarget(25, 0);
+            this.color = "#FF0000";
             break;
         case Ghost.BEHAVIOR.FRIGHTENED:
             this.setTarget(25, 0);
