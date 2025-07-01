@@ -1,91 +1,28 @@
 "use strict"
 
-const SCREEN_WIDTH = 224;
-const SCREEN_HEIGHT = 288;
-
-const SCREEN_TILE_WIDTH = 28;
-const SCREEN_TILE_HEIGHT = 36;
-
-const FREEZETYPE_PRELUDE   = (1<<0);  // game prelude is active (with the game start tune playing)
-const FREEZETYPE_READY     = (1<<1);  // READY! phase is active (at start of a new game round)
-const FREEZETYPE_EAT_GHOST = (1<<2);  // Pacman has eaten a ghost
-const FREEZETYPE_DEAD      = (1<<3);  // Pacman was eaten by a ghost
-const FREEZETYPE_WON       = (1<<4);  // game round was won by eating all dots
-
-const screen_map =
-[
-//             1         2
-//   0123456789012345678901234567
-    "                            ",
-    "                            ",
-    "                            ",
-    "+------------++------------+", // 3
-    "|oooooooooooo||oooooooooooo|",
-    "|o+--+o+---+o||o+---+o+--+o|",
-    "|O|  |o|   |o||o|   |o|  |O|",
-    "|o+--+o+---+o++o+---+o+--+o|", // 7
-    "|oooooooooooooooooooooooooo|",
-    "|o+--+o++o+------+o++o+--+o|",
-    "|o+--+o||o+--++--+o||o+--+o|",
-    "|oooooo||oooo||oooo||oooooo|", // 11
-    "+----+o|+--+ || +--+|o+----+",
-    "     |o|+--+ ++ +--+|o|     ",
-    "     |o||          ||o|     ",
-    "     |o|| +--==--+ ||o|     ", // 15
-    "-----+o++ |      | ++o+-----",
-    "      o   |      |   o      ",
-    "-----+o++ |      | ++o+-----",
-    "     |o|| +------+ ||o|     ", // 19
-    "     |o||          ||o|     ",
-    "     |o|| +------+ ||o|     ",
-    "+----+o++ +--++--+ ++o+----+",
-    "|oooooooooooo||oooooooooooo|", // 23
-    "|o+--+o+---+o||o+---+o+--+o|",
-    "|o+-+|o+---+o++o+---+o|+-+o|",
-    "|Ooo||ooooooo  ooooooo||ooO|",
-    "+-+o||o++o+------+o++o||o+-+", // 27
-    "+-+o++o||o+--++--+o||o++o+-+",
-    "|oooooo||oooo||oooo||oooooo|",
-    "|o+----++--+o||o+--++----+o|",
-    "|o+--------+o++o+--------+o|", // 31
-    "|oooooooooooooooooooooooooo|",
-    "+--------------------------+",
-    "                            ",
-    "                            "
-];
-
-const game_map = Array.from({ length: SCREEN_TILE_HEIGHT }, () => new Array(SCREEN_TILE_WIDTH).fill(0));
-
-const LEFT = false;
-const RIGHT = true;
-
-const KEY_DOWN = 0;
-const KEY_UP = 1;
-
-const FRUIT = {
-    NONE: 0,
-    CHERRIES: 1,
-    STRAWBERRY: 2,
-    PEACH: 3,
-    APPLE: 4,
-    GRAPES: 5,
-    GALAXIAN: 6,
-    BELL: 7,
-    KEY: 8,
-    NUM_FRUITS: 9
+const FREEZETYPE = {
+    PRELUDE:   (1<<0),  // game prelude is active (with the game start tune playing)
+    READY:     (1<<1),  // READY! phase is active (at start of a new game round)
+    EAT_GHOST: (1<<2),  // Pacman has eaten a ghost
+    DEAD:      (1<<3),  // Pacman was eaten by a ghost
+    WON:       (1<<4),  // game round was won by eating all dots
 };
 
+const SPRITE = {
+    PACMAN: 0,
+    BLINKY: 1,
+    PINKY: 2,
+    INKY: 3,
+    CLYDE: 4,
+    FRUIT: 5,
+    MAX: 6
+};
 
 const game = {
     canvas: null,
     canvas_ctx: null,
     window_width: 0,
     window_height: 0,
-    key_events: [],
-    firstDir: LEFT,
-    keyDPressed: false,
-    keyAPressed: false,
-    keySpace: false,
 
     trig_started: new Trigger(),
     trig_ready_started: new Trigger(),
@@ -102,10 +39,14 @@ const game = {
     trig_fruit_active: new Trigger(),
 
     hiscore: 0,
+    freeze: 0,
+    round: 0,
     score: 0,
+
+    pacman: new Pacman(),
+    active_fruit: FRUIT.NONE,
     
     ticks: 0,
-    pacman: new Pacman(),
 };
 
 game.init = function () {
@@ -115,71 +56,18 @@ game.init = function () {
     this.window_height = this.canvas.height;
 
     sys_evt.init();
-
-    this.initMap();
+    gfx.init();
 
     Actor.game = this;
     Trigger.game = this;
 
     this.ticks = 0;
     this.trig_started.start();
-    gfx.init();
 
     runloop.start(() => this.doFrame(), 1000/60); // 60 FPS
 }
 
-game.initMap = function () {
-    this.currentDots = 0;
-
-    for (let y = 0; y < SCREEN_TILE_HEIGHT; y++) {
-        for (let x = 0; x < SCREEN_TILE_WIDTH; x++) {
-            const c = screen_map[y][x];
-            switch (c) {
-            case '+':
-            case '-':
-            case '|':
-            case '=':
-                game_map[y][x] = 0x80; // blocked
-                break;
-            case 'o':
-                game_map[y][x] = 0x01; // small dot
-                this.currentDots++;
-                break;
-            case 'O':
-                game_map[y][x] = 0x02; // big dot
-                this.currentDots++;
-                break;
-            default:
-                game_map[y][x] = 0x00; // empty
-                break;
-            }
-        }
-    }
-
-    this.player = new Player();
-    this.ghostBlinky = new GhostBlinky();
-    this.ghostPinky = new GhostPinky();
-    this.ghostInky = new GhostInky();
-    this.ghostClyde = new GhostClyde();
-
-    this.player.reset();
-    this.ghostBlinky.reset();
-    this.ghostPinky.reset();
-    this.ghostInky.reset();
-    this.ghostClyde.reset();
-
-    this.nextGhostDotCounter = this.ghostPinky;
-    this.notEatDotsTimer = this.ticks();
-
-    this.gameover = false;
-}
-
 game.doFrame = function () {
-    /*
-    this.player.update();
-    this.updateGhosts();
-    this.renderScreen();*/
-
     this.ticks++;
     this.processEvents();
     this.game_tick();
@@ -203,7 +91,8 @@ game.game_init = function () {
     // input_enable();
     this.game_disable_timers();
 
-    this.freeze = FREEZETYPE_PRELUDE;
+    this.round = 0;
+    this.freeze = FREEZETYPE.PRELUDE;
     this.num_lives = NUM_LIVES;
     this.global_dot_counter_active = false;
     this.global_dot_counter = 0;
@@ -213,7 +102,7 @@ game.game_init = function () {
     // draw the playfield and PLAYER ONE READY! message
     gfx.vid_clear(TILE_SPACE, COLOR_DOT);
     gfx.vid_color_text({x:9, y:0}, COLOR_DEFAULT, "HIGH SCORE");
-    gfx.init_playfield();
+    gfx.game_init_playfield();
     gfx.vid_color_text({x:9, y:14}, 0x5, "PLAYER ONE");
     gfx.vid_color_text({x:11, y:20}, 0x9, "READY!");
 }
@@ -225,9 +114,31 @@ game.game_round_init = function() {
     // clear the "PLAYER ONE" text
     gfx.vid_color_text({x:9, y:14}, 0x10, "          ");
 
+    /* if a new round was started because Pacman has "won" (eaten all dots),
+        redraw the playfield and reset the global dot counter
+    */
+    if (this.num_dots_eaten == NUM_DOTS) {
+        this.round++;
+        this.num_dots_eaten = 0;
+        gfx.game_init_playfield();
+        this.global_dot_counter_active = false;
+    }
+    else {
+        /* if the previous round was lost, use the global dot counter
+           to detect when ghosts should leave the ghost house instead
+           of the per-ghost dot counter
+        */
+        if (this.num_lives != NUM_LIVES) {
+            this.global_dot_counter_active = true;
+            this.game.global_dot_counter = 0;
+        }
+        this.num_lives--;
+    }
+    console.assert(this.num_lives >= 0);
+
     this.active_fruit = FRUIT.NONE;
     this.xorshift = 0x12345678;   // random-number-generator seed
-    this.freeze = FREEZETYPE_READY;
+    this.freeze = FREEZETYPE.READY;
     this.num_ghosts_eaten = 0;
     this.game_disable_timers();
 
@@ -239,11 +150,6 @@ game.game_round_init = function() {
 
     // Pacman starts running to the left
     this.pacman.init();
-    const SPRITE_PACMAN = 0;
-    const sprite = gfx.sprite[SPRITE_PACMAN];
-    sprite.enabled= true;
-    sprite.color = COLOR_PACMAN;
-    this.input_dir = DIR.LEFT;
 
     // Blinky starts outside the ghost house, looking to the left, and in scatter mode
 
@@ -274,15 +180,39 @@ game.game_update_tiles = function() {
     }
 
     // clear the fruit-eaten score after Pacman has eaten a bonus fruit
-
+    if (this.trig_fruit_eaten.after_once(2*60)) {
+        gfx.vid_fruit_score(FRUIT.NONE);
+    }
 
     // remaining lives at bottom left screen
-
+    for (let i = 0; i < NUM_LIVES; i++) {
+        const color = (i < this.num_lives) ? COLOR_PACMAN : 0;
+        gfx.vid_draw_tile_quad(i2(2+2*i,34), color, TILE_LIFE);
+    }
 
     // bonus fruit list in bottom-right corner
-
+    {
+        let x = 24;
+        for (let i = this.round - NUM_STATUS_FRUITS + 1; i <= this.round; i++) {
+            if (i >= 0) {
+                const fruit = levelspec(i).bonus_fruit;
+                const tile_code = fruit_tiles_colors[fruit][0];
+                const color_code = fruit_tiles_colors[fruit][2];
+                gfx.vid_draw_tile_quad(i2(x,34), color_code, tile_code);
+                x -= 2;
+            }
+        }
+    }
 
     // if game round was won, render the entire playfield as blinking blue/white
+    if (this.trig_round_won.after(1*60)) {
+        if (this.trig_round_won.since() & 0x10) {
+            gfx.vid_color_playfield(COLOR_DOT);
+        }
+        else {
+            gfx.vid_color_playfield(COLOR_WHITE_BORDER);
+        }
+    }
 }
 
 // this function takes care of updating all sprite images during gameplay
@@ -293,6 +223,20 @@ game.game_update_sprites = function() {
     if (spr.enabled) {
         spr.pos = pacman.actor_to_sprite_pos();
         pacman.spr_anim_pacman();
+    }
+
+
+    // hide or display the currently active bonus fruit
+    if (this.active_fruit == FRUIT.NONE) {
+        const spr = gfx.sprite[SPRITE.FRUIT];
+        spr.enabled = false;
+    }
+    else {
+        const spr = gfx.sprite[SPRITE.FRUIT];
+        spr.enabled = true;
+        spr.pos = i2(13 * TILE_WIDTH, 19 * TILE_HEIGHT + Math.floor(TILE_HEIGHT/2));
+        spr.tile = fruit_tiles_colors[this.active_fruit][1];
+        spr.color = fruit_tiles_colors[this.active_fruit][2];
     }
 }
 
@@ -366,11 +310,12 @@ game.game_update_actors = function() {
 
 game.game_tick = function () {
     const prelude_ticks_per_sec = 10;
-    const ready_start_ticks_per_sec = 10;
+    const ready_start_ticks_per_sec = 30;
 
     // initialize game state once
     if (this.trig_started.now()) {
         this.trig_ready_started.start_after(2*prelude_ticks_per_sec);
+        //snd_start(0, &snd_prelude);
         this.game_init();
     }
 
@@ -382,10 +327,36 @@ game.game_tick = function () {
     }
 
     if (this.trig_round_started.now()) {
-        this.freeze &= ~FREEZETYPE_READY;
+        this.freeze &= ~FREEZETYPE.READY;
         // clear the 'READY!' message
         gfx.vid_color_text({x:11, y:20}, 0x10, "      ");
+        //snd_start(1, &snd_weeooh);
     }
+
+    // activate/deactivate bonus fruit
+    if (this.trig_fruit_active.now()) {
+        this.active_fruit = levelspec(this.round).bonus_fruit;
+    }
+    else if (this.trig_fruit_active.after_once(FRUITACTIVE_TICKS)) {
+        this.active_fruit = FRUIT.NONE;
+    }
+
+    // stop frightened sound and start weeooh sound
+    //if (after_once(state.game.pill_eaten, levelspec(state.game.round).fright_ticks)) {
+    //    snd_start(1, &snd_weeooh);
+    //}
+
+    // if game is frozen because Pacman ate a ghost, unfreeze after a while
+    //if (state.game.freeze & FREEZETYPE_EAT_GHOST) {
+    //    if (after_once(state.game.ghost_eaten, GHOST_EATEN_FREEZE_TICKS)) {
+    //        state.game.freeze &= ~FREEZETYPE_EAT_GHOST;
+    //    }
+    //}
+
+    // play pacman-death sound
+    //if (after_once(state.game.pacman_eaten, PACMAN_EATEN_TICKS)) {
+    //    snd_start(2, &snd_dead);
+    //}
 
     // the actually important part: update Pacman and ghosts, update dynamic
     // background tiles, and update the sprite images
@@ -400,7 +371,7 @@ game.game_tick = function () {
 
     // check for end-round condition
     if (this.trig_round_won.now()) {
-        this.freeze |= FREEZETYPE_WON;
+        this.freeze |= FREEZETYPE.WON;
         this.trig_ready_started.start_after(ROUNDWON_TICKS);
     }
 
@@ -418,88 +389,12 @@ game.game_tick = function () {
 game.gfx_draw = function() {
     gfx.draw_playfield(this.canvas_ctx);
 
-    const spr = gfx.sprite[0];
-    if (spr.enabled) {
-        gfx.draw_sprite(this.canvas_ctx, spr);
-    }
-}
-
-game.updateGhosts = function () {
-    this.ghostBlinky.update();
-    this.ghostPinky.update();
-    this.ghostInky.update();
-    this.ghostClyde.update();
-
-    if (this.nextGhostDotCounter !== null) {
-        const now = this.ticks();
-        const mustGoOut = (now - this.notEatDotsTimer >= 4000); // 4 seconds
-        this.nextGhostDotCounter.checkDotLimit(mustGoOut);
-        if (mustGoOut) {
-            this.notEatDotsTimer = now;
+    for (let i = 0; i < SPRITE.MAX; i++) {
+        const spr = gfx.sprite[i];
+        if (spr.enabled) {
+            gfx.draw_sprite(this.canvas_ctx, spr);
         }
     }
-
-    if (this.player.testCollision(this.ghostBlinky) || this.player.testCollision(this.ghostPinky) ||
-        this.player.testCollision(this.ghostInky) || this.player.testCollision(this.ghostClyde))
-    {
-        this.gameover = true;
-    }
-}
-
-game.renderScreen = function () {
-    const rc = { x: 0, y: 0, w: TILE_WIDTH, h: TILE_HEIGHT };
-
-    for (let sy = 0, y = 0; sy < SCREEN_HEIGHT; sy += TILE_HEIGHT, y++) {
-        for (let sx = 0,x = 0; sx < SCREEN_WIDTH; sx += TILE_WIDTH, x++) {
-            rc.x = sx, rc.y = sy;
-            const c  = screen_map[y][x];
-            const dot = game_map[y][x];
-            switch (c) {
-            case '+':
-            case '-':
-            case '|':
-                this.canvas_ctx.fillStyle = "#007fff";
-                this.canvas_ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
-                break;
-            case '=':
-                this.canvas_ctx.fillStyle = "#ff0000";
-                this.canvas_ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
-                break;
-            case 'o':
-                this.canvas_ctx.fillStyle = "#000000";
-                this.canvas_ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
-
-                if (dot > 0) {
-                    this.canvas_ctx.fillStyle = "#ffffff";
-                    this.canvas_ctx.fillRect(rc.x + 3, rc.y + 3, rc.w - 6, rc.h - 6);
-                }
-                break;
-            case 'O':
-                this.canvas_ctx.fillStyle = "#000000";
-                this.canvas_ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
-
-                if (dot > 0) {
-                    this.canvas_ctx.fillStyle = "#ffffff";
-                    this.canvas_ctx.fillRect(rc.x + 2, rc.y + 2, rc.w - 4, rc.h - 4);
-                }
-                break;
-            default:
-                this.canvas_ctx.fillStyle = "#000000";
-                this.canvas_ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
-                break;
-            }
-        }
-    }
-
-    this.ghostBlinky.draw(this.canvas_ctx);
-    this.ghostPinky.draw(this.canvas_ctx);
-    this.ghostInky.draw(this.canvas_ctx);
-    this.ghostClyde.draw(this.canvas_ctx);
-    this.player.draw(this.canvas_ctx);
-}
-
-game.ticks = function () {
-    return window.performance.now();
 }
 
 game.processEvents = function () {

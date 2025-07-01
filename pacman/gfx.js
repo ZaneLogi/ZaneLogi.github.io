@@ -40,6 +40,21 @@ const TILE_GALAXIAN       = 0xA8; // 0xA8..0xAB
 const TILE_KEY            = 0xAC; // 0xAC..0xAF
 const TILE_DOOR           = 0xCF; // the ghost-house door
 
+const SPRITETILE_INVISIBLE    = 30;
+const SPRITETILE_SCORE_200    = 40;
+const SPRITETILE_SCORE_400    = 41;
+const SPRITETILE_SCORE_800    = 42;
+const SPRITETILE_SCORE_1600   = 43;
+const SPRITETILE_CHERRIES     = 0;
+const SPRITETILE_STRAWBERRY   = 1;
+const SPRITETILE_PEACH        = 2;
+const SPRITETILE_BELL         = 3;
+const SPRITETILE_APPLE        = 4;
+const SPRITETILE_GRAPES       = 5;
+const SPRITETILE_GALAXIAN     = 6;
+const SPRITETILE_KEY          = 7;
+const SPRITETILE_PACMAN_CLOSED_MOUTH = 48;
+
 const COLOR_BLANK         = 0x00;
 const COLOR_DEFAULT       = 0x0F;
 const COLOR_DOT           = 0x10;
@@ -215,8 +230,33 @@ gfx.vid_color_score = function(tile_pos, color_code, score) {
     }
 }
 
+/* draw a colored tile-quad arranged as:
+    |t+1|t+0|
+    |t+3|t+2|
+
+   This is (for instance) used to render the current "lives" and fruit
+   symbols at the lower border.
+*/
+gfx.vid_draw_tile_quad = function(tile_pos, color_code, tile_code) {
+    for (let yy = 0; yy < 2; yy++) {
+        for (let xx = 0; xx < 2; xx++) {
+            const t = tile_code + yy * 2 + (1 - xx);
+            this.vid_color_tile(i2(xx + tile_pos.x, yy + tile_pos.y), color_code, t);
+        }
+    }
+}
+
+// draw the fruit bonus score tiles (when Pacman has eaten the bonus fruit)
+gfx.vid_fruit_score = function(fruit_type) {
+    console.assert((fruit_type >= 0) && (fruit_type < FRUIT.NUM_FRUITS));
+    const color_code = (fruit_type == FRUIT.NONE) ? COLOR_DOT : COLOR_FRUIT_SCORE;
+    for (let i = 0; i < 4; i++) {
+        this.vid_color_tile(i2(12+i, 20), color_code, fruit_score_tiles[fruit_type][i]);
+    }
+}
+
 // initialize the playfield tiles
-gfx.init_playfield = function() {
+gfx.game_init_playfield = function() {
     this.vid_color_playfield(COLOR_DOT);
     // decode the playfield from an ASCII map into tiles codes
     const tiles =

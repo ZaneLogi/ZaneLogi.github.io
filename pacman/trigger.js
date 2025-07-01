@@ -1,7 +1,7 @@
 "use strict"
 
 class Trigger {
-    static #DISABLED_TICKS = -1;
+    static #DISABLED_TICKS = 0xFFFFFFFF;
     static game = undefined;
 
     // return a disabled time trigger
@@ -58,7 +58,7 @@ class Trigger {
     }
 
     // check if a time trigger was triggered exactly N ticks ago
-    afterOnce(ticks) {
+    after_once(ticks) {
         return this.since() == ticks;
     }
 

@@ -152,6 +152,12 @@ class Pacman extends Actor {
     init() {
         this.dir = DIR.LEFT; // start direction
         this.pos = i2(14*8, 26*8+4); // start positioin
+
+        const SPRITE_PACMAN = 0;
+        const sprite = gfx.sprite[SPRITE_PACMAN];
+        sprite.enabled= true;
+        sprite.color = COLOR_PACMAN;
+        Actor.game.input_dir = DIR.LEFT;
     }
 
     update() {
@@ -191,8 +197,19 @@ class Pacman extends Actor {
             }
             // check if Pacman eats the bonus fruit
             if (Actor.game.active_fruit != FRUIT.NONE) {
+                const test_pos = pixel_to_tile_pos(add_i2(this.pos, i2(Math.floor(TILE_WIDTH/2), 0)));
+                if (equal_i2(test_pos, i2(14, 20))) {
+                    Actor.game.trig_fruit_eaten.start();
+                    const score = levelspec(Actor.game.round).bonus_score;
+                    Actor.game.score += score;
+                    gfx.vid_fruit_score(Actor.game.active_fruit);
+                    Actor.game.active_fruit = FRUIT.NONE;
+                    //snd_start(2, &snd_eatfruit);
+                }
             }
             // check if Pacman collides with any ghost
+
+            
         }
     }
 
