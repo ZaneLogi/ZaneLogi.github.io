@@ -21,7 +21,7 @@ class Trigger {
     }
 
     // set time trigger to a future tick
-    startAfter(ticks) {
+    start_after(ticks) {
         this.#tick = Trigger.game.ticks + ticks;
     }
 

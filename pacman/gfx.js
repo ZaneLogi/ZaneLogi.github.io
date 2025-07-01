@@ -11,6 +11,20 @@ const DISPLAY_PIXELS_Y = DISPLAY_TILES_Y * TILE_HEIGHT;
 
 const NUM_SPRITES = 8;
 
+const NUM_LIVES            = 3;
+const NUM_STATUS_FRUITS    = 7;    // max number of displayed fruits at bottom right
+const NUM_DOTS             = 244;  // 240 small dots + 4 pills
+const NUM_PILLS            = 4;    // number of energizer pills on playfield
+const ANTEPORTAS_X         = 14*TILE_WIDTH;  // pixel position of the ghost house enter/leave point
+const ANTEPORTAS_Y         = 14*TILE_HEIGHT + Math.floor(TILE_HEIGHT/2);
+
+const GHOST_EATEN_FREEZE_TICKS = 60; // number of ticks the game freezes after Pacman eats a ghost
+const PACMAN_EATEN_TICKS   = 60;     // number of ticks to freeze game when Pacman is eaten
+const PACMAN_DEATH_TICKS   = 150;    // number of ticks to show the Pacman death sequence before starting new round
+const GAMEOVER_TICKS       = 3*60;   // number of ticks the game over message is shown
+const ROUNDWON_TICKS       = 4*60;   // number of ticks to wait after a round was won
+const FRUITACTIVE_TICKS    = 10*60;  // number of ticks a bonus fruit is shown
+
 const TILE_SPACE          = 0x40;
 const TILE_DOT            = 0x10;
 const TILE_PILL           = 0x14;
@@ -146,6 +160,12 @@ gfx.vid_color_char = function(tile_pos, color_code, chr) {
     this.color_ram[tile_pos.y][tile_pos.x] = color_code;
 }
 
+// put char into tile buffer
+gfx.vid_char = function(tile_pos, chr) {
+    console.assert(this.valid_tile_pos(tile_pos));
+    this.video_ram[tile_pos.y][tile_pos.x] = this.conv_char(chr);
+}
+
 // put colored text into the tile+color buffers
 gfx.vid_color_text = function(tile_pos, color_code, text) {
     console.assert(this.valid_tile_pos(tile_pos));
@@ -156,6 +176,41 @@ gfx.vid_color_text = function(tile_pos, color_code, text) {
         }
         else {
             break;
+        }
+    }
+}
+
+// put text into the tile buffer
+gfx.vid_text = function(tile_pos, text) {
+    console.assert(this.valid_tile_pos(tile_pos));
+    for (const chr of text) {
+        if (tile_pos.x < DISPLAY_TILES_X) {
+            this.vid_char(tile_pos, chr);
+            tile_pos.x++;
+        }
+        else {
+            break;
+        }
+    }
+}
+
+/* print colored score number into tile+color buffers from right to left(!),
+    scores are /10, the last printed number is always 0,
+    a zero-score will print as '00' (this is the same as on
+    the Pacman arcade machine)
+*/
+gfx.vid_color_score = function(tile_pos, color_code, score) {
+    this.vid_color_char(tile_pos, color_code, '0');
+    tile_pos.x--;
+    for (let digit = 0; digit < 8; digit++) {
+        const chr = String.fromCharCode((score % 10) + '0'.charCodeAt(0));
+        if (this.valid_tile_pos(tile_pos)) {
+            this.vid_color_char(tile_pos, color_code, chr);
+            tile_pos.x--;
+            score = Math.floor(score / 10);
+            if (0 == score) {
+                break;
+            }
         }
     }
 }
@@ -233,7 +288,30 @@ gfx.draw_playfield = function(canvas_ctx) {
 
 gfx.draw_sprite = function(canvas_ctx, spr) {
     const image = imageCache.getSpriteImage(spr.tile, spr.color);
-    canvas_ctx.drawImage(image, spr.pos.x, spr.pos.y);
+
+    let sx = 1, sy = 1;
+    let tx = 0, ty = 0;
+    let px = spr.pos.x, py = spr.pos.y;
+
+    if (spr.flipx) {
+        // flip image horizontally
+        sx = -1;
+        tx = -SPRITE_WIDTH;
+        px = -px;
+    }
+
+    if (spr.flipy) {
+        // flip image vertically
+        sy = -1,
+        ty = -SPRITE_HEIGHT;
+        py = -py;
+    }
+
+    canvas_ctx.save();
+    canvas_ctx.scale(sx, sy);
+    canvas_ctx.translate(tx, ty);
+    canvas_ctx.drawImage(image, px, py);
+    canvas_ctx.restore();
 }
 
 
