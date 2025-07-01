@@ -407,6 +407,12 @@ imageCache.getSpriteImage = function(spriteCode, colorCode) {
     const spriteData = gfx.sprites[spriteCode];
     const palette = gfx.palettes[colorCode];
 
+    if (spriteData == undefined)
+    {
+        console.log(spriteCode, colorCode);
+        throw new Error("x")
+    }
+
     for (let y = 0, yoffset = 0; y < SPRITE_HEIGHT; y++, yoffset += 64) {
         const rowData = spriteData[y];
         for (let x = 0, xoffset = yoffset; x < SPRITE_WIDTH; x++, xoffset += 4) {

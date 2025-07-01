@@ -44,6 +44,7 @@ const game = {
     score: 0,
 
     pacman: new Pacman(),
+    blinky: new GhostBlinky(),
     active_fruit: FRUIT.NONE,
     
     ticks: 0,
@@ -152,6 +153,7 @@ game.game_round_init = function() {
     this.pacman.init();
 
     // Blinky starts outside the ghost house, looking to the left, and in scatter mode
+    this.blinky.init();
 
     // Pinky starts in the middle slot of the ghost house, moving down
 
@@ -218,13 +220,18 @@ game.game_update_tiles = function() {
 // this function takes care of updating all sprite images during gameplay
 game.game_update_sprites = function() {
     const pacman = this.pacman;
-    const spr = gfx.sprite[0];
+    let spr = gfx.sprite[0];
 
     if (spr.enabled) {
         spr.pos = pacman.actor_to_sprite_pos();
         pacman.spr_anim_pacman();
     }
 
+    spr = gfx.sprite[1];
+    if (spr.enabled) {
+        spr.pos = this.blinky.actor_to_sprite_pos();
+        this.blinky.spr_anim_ghost();
+    }
 
     // hide or display the currently active bonus fruit
     if (this.active_fruit == FRUIT.NONE) {
@@ -306,6 +313,7 @@ game.game_update_actors = function() {
         return;
 
     this.pacman.update();
+    this.blinky.update();
 }
 
 game.game_tick = function () {
