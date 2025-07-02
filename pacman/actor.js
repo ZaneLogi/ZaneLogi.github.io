@@ -193,7 +193,7 @@ class Pacman extends Actor {
         const sprite = this.pacman_sprite();
         sprite.enabled= true;
         sprite.color = COLOR_PACMAN;
-        Actor.game.input_dir = DIR.LEFT;
+        input.input_dir = DIR.LEFT;
     }
 
     update() {
@@ -201,7 +201,7 @@ class Pacman extends Actor {
             return;
 
         // move Pacman with cornering allowed
-        const wanted_dir = Actor.game.input_dir;
+        const wanted_dir = input.input_dir;
         const allow_cornering = true;
         // look ahead to check if the wanted direction is blocked
         if (this.can_move(wanted_dir, allow_cornering)) {
@@ -250,7 +250,7 @@ class Pacman extends Actor {
             const ghost_tile_pos = pixel_to_tile_pos(ghost.pos);
             if (!equal_i2(tile_pos, ghost_tile_pos))
                 continue;
-                
+
             if (ghost.state == GHOSTSTATE.FRIGHTENED) {
                 // Pacman eats a frightened ghost
                 ghost.state = GHOSTSTATE.EYES;

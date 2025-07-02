@@ -13,6 +13,21 @@ const FREEZETYPE = {
     WON:       (1<<4),  // game round was won by eating all dots
 };
 
+const input = {
+    enabled: false,
+    has_input: false,
+    input_dir: DIR.LEFT,
+}
+
+input.enable = function() {
+    this.enabled = true;
+    this.has_input = false;
+    this.input_dir = DIR.LEFT;
+}
+input.disable = function() {
+    this.enabled = false;
+    this.has_input = false;
+}
 
 const game = {
     canvas: null,
@@ -44,7 +59,7 @@ const game = {
     inky: new GhostInky(),
     clyde: new GhostClyde(),
     active_fruit: FRUIT.NONE,
-    
+
     ticks: 0,
     god_mode: false,
 };
@@ -97,7 +112,7 @@ game.intro_tick = function() {
         //snd_clear();
         gfx.spr_clear();
         //start(&state.gfx.fadein);
-        //input_enable();
+        input.enable();
         gfx.vid_clear(TILE_SPACE, COLOR_DEFAULT);
         gfx.vid_text(i2(3,0),  "1UP   HIGH SCORE   2UP");
         gfx.vid_color_score(i2(6,1), COLOR_DEFAULT, 0);
@@ -108,10 +123,58 @@ game.intro_tick = function() {
         gfx.vid_text(i2(3,35), "CREDIT  0");
     }
 
+    // draw the animated 'ghost image.. name.. nickname' lines
+    let delay = 30;
+    const names = [ "-SHADOW", "-SPEEDY", "-BASHFUL", "-POKEY" ];
+    const nicknames = [ "BLINKY", "PINKY", "INKY", "CLYDE" ];
+    for (let i = 0; i < 4; i++) {
+        const color = 2*i + 1;
+        const y = 3*i + 6;
+        // 2*3 ghost image created from tiles (no sprite!)
+        delay += 30;
+        if (this.trig_intro_started.after_once(delay)) {
+            gfx.vid_color_tile(i2(4,y+0), color, TILE_GHOST+0); gfx.vid_color_tile(i2(5,y+0), color, TILE_GHOST+1);
+            gfx.vid_color_tile(i2(4,y+1), color, TILE_GHOST+2); gfx.vid_color_tile(i2(5,y+1), color, TILE_GHOST+3);
+            gfx.vid_color_tile(i2(4,y+2), color, TILE_GHOST+4); gfx.vid_color_tile(i2(5,y+2), color, TILE_GHOST+5);
+        }
+        // after 1 second, the name of the ghost
+        delay += 60;
+        if (this.trig_intro_started.after_once(delay)) {
+            gfx.vid_color_text(i2(7,y+1), color, names[i]);
+        }
+        // after 0.5 seconds, the nickname of the ghost
+        delay += 30;
+        if (this.trig_intro_started.after_once(delay)) {
+            gfx.vid_color_text(i2(17,y+1), color, nicknames[i]);
+        }
+    }
 
+    // . 10 PTS
+    // O 50 PTS
+    delay += 60;
+    if (this.trig_intro_started.after_once(delay)) {
+        gfx.vid_color_tile(i2(10,24), COLOR_DOT, TILE_DOT);
+        gfx.vid_text(i2(12,24), "10 \x5D\x5E\x5F");
+        gfx.vid_color_tile(i2(10,26), COLOR_DOT, TILE_PILL);
+        gfx.vid_text(i2(12,26), "50 \x5D\x5E\x5F");
+    }
+
+    // blinking "press any key" text
+    delay += 60;
+    if (this.trig_intro_started.after(delay)) {
+        if (this.trig_intro_started.since() & 0x20) {
+            gfx.vid_color_text(i2(3,31), 3, "                       ");
+        }
+        else {
+            gfx.vid_color_text(i2(3,31), 3, "PRESS ANY KEY TO START!");
+        }
+    }
+
+    // FIXME: animated chase sequence
 
     // if a key is pressed, advance to game state
-    if (this.has_key_pressed) {
+    if (input.has_input) {
+        input.disable();
         //start(&state.gfx.fadeout);
         //start_after(&state.game.started, FADE_TICKS);
         this.trig_game_started.start();
@@ -129,7 +192,7 @@ game.game_disable_timers = function () {
 
 // one-time init at start of game state
 game.game_init = function () {
-    // input_enable();
+    input.enable();
     this.game_disable_timers();
 
     this.round = 0;
@@ -180,7 +243,6 @@ game.game_round_init = function() {
     console.assert(this.num_lives >= 0);
 
     this.active_fruit = FRUIT.NONE;
-    this.xorshift = 0x12345678;   // random-number-generator seed
     this.freeze = FREEZETYPE.READY;
     this.num_ghosts_eaten = 0;
     this.game_disable_timers();
@@ -349,7 +411,7 @@ game.game_update_actors = function() {
 }
 
 game.game_tick = function () {
-    const prelude_ticks_per_sec = 10;
+    const prelude_ticks_per_sec = 45;
     const ready_start_ticks_per_sec = 30;
 
     // initialize game state once
@@ -420,40 +482,42 @@ game.game_tick = function () {
     if (this.trig_game_over.now()) {
         // display game over string
         gfx.vid_color_text(i2(9,20), 0x01, "GAME  OVER");
-        //input_disable();
+        input.disable();
         //start_after(&state.gfx.fadeout, GAMEOVER_TICKS);
         //start_after(&state.intro.started, GAMEOVER_TICKS+FADE_TICKS);
 
         // TODO: need to handle fading
-        this.trig_game_started.start_after(GAMEOVER_TICKS+FADE_TICKS);
+        this.trig_intro_started.start_after(GAMEOVER_TICKS+FADE_TICKS);
     }
 }
 
 game.processEvents = function () {
-    for (const e of sys_evt.events) {
-        switch(e.type) {
-            case sys_evt.KEY_DOWN:
-            {
-                const code = e.context.code;
-                if (code == "KeyA") {
-                    this.input_dir = DIR.LEFT;
-                }
-                else if (code == "KeyD") {
-                    this.input_dir = DIR.RIGHT;
-                }
-                else if (code == "KeyW") {
-                    this.input_dir = DIR.UP;
-                }
-                else if (code == "KeyS") {
-                    this.input_dir = DIR.DOWN;
-                }
+    if (input.enabled) {
+        for (const e of sys_evt.events) {
+            switch(e.type) {
+                case sys_evt.KEY_DOWN:
+                {
+                    const code = e.context.code;
+                    if (code == "KeyA") {
+                        input.input_dir = DIR.LEFT;
+                    }
+                    else if (code == "KeyD") {
+                        input.input_dir = DIR.RIGHT;
+                    }
+                    else if (code == "KeyW") {
+                        input.input_dir = DIR.UP;
+                    }
+                    else if (code == "KeyS") {
+                        input.input_dir = DIR.DOWN;
+                    }
 
-                this.has_key_pressed = true;
-                break;
-            }
-            case sys_evt.KEY_UP:
-            {
-                break;
+                    input.has_input = true;
+                    break;
+                }
+                case sys_evt.KEY_UP:
+                {
+                    break;
+                }
             }
         }
     }
