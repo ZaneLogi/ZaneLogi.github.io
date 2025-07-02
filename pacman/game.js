@@ -8,15 +8,6 @@ const FREEZETYPE = {
     WON:       (1<<4),  // game round was won by eating all dots
 };
 
-const SPRITE = {
-    PACMAN: 0,
-    BLINKY: 1,
-    PINKY: 2,
-    INKY: 3,
-    CLYDE: 4,
-    FRUIT: 5,
-    MAX: 6
-};
 
 const game = {
     canvas: null,
@@ -30,10 +21,6 @@ const game = {
 
     trig_round_won: new Trigger(),
     trig_game_over: new Trigger(),
-    trig_dot_eaten: new Trigger(),
-    trig_pill_eaten: new Trigger(),
-    trig_ghost_eaten: new Trigger(),
-    trig_pacman_eaten: new Trigger(),
     trig_fruit_eaten: new Trigger(),
     trig_force_leave_house: new Trigger(),
     trig_fruit_active: new Trigger(),
@@ -45,9 +32,13 @@ const game = {
 
     pacman: new Pacman(),
     blinky: new GhostBlinky(),
+    pinky: new GhostPinky(),
+    inky: new GhostInky(),
+    clyde: new GhostClyde(),
     active_fruit: FRUIT.NONE,
     
     ticks: 0,
+    god_mode: false,
 };
 
 game.init = function () {
@@ -78,10 +69,6 @@ game.doFrame = function () {
 game.game_disable_timers = function () {
     this.trig_round_won.disable();
     this.trig_game_over.disable();
-    this.trig_dot_eaten.disable();
-    this.trig_pill_eaten.disable();
-    this.trig_ghost_eaten.disable();
-    this.trig_pacman_eaten.disable();
     this.trig_fruit_eaten.disable();
     this.trig_force_leave_house.disable();
     this.trig_fruit_active.disable();
@@ -106,6 +93,8 @@ game.game_init = function () {
     gfx.game_init_playfield();
     gfx.vid_color_text({x:9, y:14}, 0x5, "PLAYER ONE");
     gfx.vid_color_text({x:11, y:20}, 0x9, "READY!");
+
+    this.ghosts = [this.blinky, this.pinky, this.inky, this.clyde];
 }
 
 // setup state at start of a game round
@@ -131,7 +120,7 @@ game.game_round_init = function() {
         */
         if (this.num_lives != NUM_LIVES) {
             this.global_dot_counter_active = true;
-            this.game.global_dot_counter = 0;
+            this.global_dot_counter = 0;
         }
         this.num_lives--;
     }
@@ -152,14 +141,9 @@ game.game_round_init = function() {
     // Pacman starts running to the left
     this.pacman.init();
 
-    // Blinky starts outside the ghost house, looking to the left, and in scatter mode
-    this.blinky.init();
-
-    // Pinky starts in the middle slot of the ghost house, moving down
-
-    // Inky starts in the left slot of the ghost house moving up
-
-    // Clyde starts in the right slot of the ghost house, moving up
+    for (const ghost of this.ghosts) {
+        ghost.init();
+    }
 }
 
 // update dynamic background tiles
@@ -219,18 +203,10 @@ game.game_update_tiles = function() {
 
 // this function takes care of updating all sprite images during gameplay
 game.game_update_sprites = function() {
-    const pacman = this.pacman;
-    let spr = gfx.sprite[0];
+    this.pacman.update_sprite();
 
-    if (spr.enabled) {
-        spr.pos = pacman.actor_to_sprite_pos();
-        pacman.spr_anim_pacman();
-    }
-
-    spr = gfx.sprite[1];
-    if (spr.enabled) {
-        spr.pos = this.blinky.actor_to_sprite_pos();
-        this.blinky.spr_anim_ghost();
+    for (const ghost of this.ghosts) {
+        ghost.update_sprite();
     }
 
     // hide or display the currently active bonus fruit
@@ -274,12 +250,12 @@ game.game_update_ghosthouse_dot_counters = function() {
     else {
         // otherwise each ghost has his own personal dot counter to decide
         // when to leave the ghost house
-        /*for (int i = 0; i < NUM_GHOSTS; i++) {
-            if (state.game.ghost[i].dot_counter < state.game.ghost[i].dot_limit) {
-                state.game.ghost[i].dot_counter++;
+        for (const ghost of this.ghosts) {
+            if (ghost.dot_counter < ghost.dot_limit) {
+                ghost.dot_counter++;
                 break;
             }
-        }*/
+        }
     }
 }
 
@@ -313,7 +289,10 @@ game.game_update_actors = function() {
         return;
 
     this.pacman.update();
-    this.blinky.update();
+
+    for (const ghost of this.ghosts) {
+        ghost.update();
+    }
 }
 
 game.game_tick = function () {
@@ -350,18 +329,20 @@ game.game_tick = function () {
     }
 
     // stop frightened sound and start weeooh sound
+    // TODO: pill_eaten was moved to class Pacman
     //if (after_once(state.game.pill_eaten, levelspec(state.game.round).fright_ticks)) {
     //    snd_start(1, &snd_weeooh);
     //}
 
     // if game is frozen because Pacman ate a ghost, unfreeze after a while
-    //if (state.game.freeze & FREEZETYPE_EAT_GHOST) {
-    //    if (after_once(state.game.ghost_eaten, GHOST_EATEN_FREEZE_TICKS)) {
-    //        state.game.freeze &= ~FREEZETYPE_EAT_GHOST;
-    //    }
-    //}
+    if (this.freeze & FREEZETYPE.EAT_GHOST) {
+        if (this.pacman.trig_ghost_eaten.after_once(GHOST_EATEN_FREEZE_TICKS)) {
+            this.freeze &= ~FREEZETYPE.EAT_GHOST;
+        }
+    }
 
     // play pacman-death sound
+    // TODO: pacman_eaten was moved to class Pacman
     //if (after_once(state.game.pacman_eaten, PACMAN_EATEN_TICKS)) {
     //    snd_start(2, &snd_dead);
     //}
@@ -385,24 +366,16 @@ game.game_tick = function () {
 
     if (this.trig_game_over.now()) {
         // display game over string
-        vid_color_text(i2(9,20), 0x01, "GAME  OVER");
+        gfx.vid_color_text(i2(9,20), 0x01, "GAME  OVER");
         //input_disable();
         //start_after(&state.gfx.fadeout, GAMEOVER_TICKS);
         //start_after(&state.intro.started, GAMEOVER_TICKS+FADE_TICKS);
+
+        // TODO: need to handle fading
+        this.trig_started.start_after(GAMEOVER_TICKS+FADE_TICKS);
     }
 
-    this.gfx_draw();
-}
-
-game.gfx_draw = function() {
-    gfx.draw_playfield(this.canvas_ctx);
-
-    for (let i = 0; i < SPRITE.MAX; i++) {
-        const spr = gfx.sprite[i];
-        if (spr.enabled) {
-            gfx.draw_sprite(this.canvas_ctx, spr);
-        }
-    }
+    gfx.draw(this.canvas_ctx);
 }
 
 game.processEvents = function () {

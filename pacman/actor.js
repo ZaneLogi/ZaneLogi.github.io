@@ -15,6 +15,16 @@ function reverse_dir(dir) {
 }
 
 
+const SPRITE = {
+    PACMAN: 0,
+    BLINKY: 1,
+    PINKY: 2,
+    INKY: 3,
+    CLYDE: 4,
+    FRUIT: 5,
+    MAX: 6
+};
+
 
 // compute the distance of a pixel coordinate to the next tile midpoint
 function dist_to_tile_mid(pos) {
@@ -50,26 +60,19 @@ function clamped_tile_pos(tile_pos) {
     return res;
 }
 
-// return tile code at tile position
-function tile_code_at(tile_pos) {
-    console.assert((tile_pos.x >= 0) && (tile_pos.x < DISPLAY_TILES_X));
-    console.assert((tile_pos.y >= 0) && (tile_pos.y < DISPLAY_TILES_Y));
-    return gfx.video_ram[tile_pos.y][tile_pos.x];
-}
-
 // check if a tile position contains a blocking tile (walls and ghost house door)
 function is_blocking_tile(tile_pos) {
-    return tile_code_at(tile_pos) >= 0xC0;
+    return gfx.tile_code_at(tile_pos) >= 0xC0;
 }
 
 // check if a tile position contains a dot tile
 function is_dot(tile_pos) {
-    return tile_code_at(tile_pos) == TILE_DOT;
+    return gfx.tile_code_at(tile_pos) == TILE_DOT;
 }
 
 // check if a tile position contains a pill tile
 function is_pill(tile_pos) {
-    return tile_code_at(tile_pos) == TILE_PILL;
+    return gfx.tile_code_at(tile_pos) == TILE_PILL;
 }
 
 // check if a tile position is in the teleport tunnel
@@ -166,80 +169,123 @@ class Actor {
 class Pacman extends Actor {
     constructor() {
         super();
+
+        this.trig_dot_eaten;
+        this.trig_pill_eaten;
+        this.trig_pacman_eaten;
+        this.trig_ghost_eaten;
+    }
+
+    pacman_sprite() {
+        return gfx.sprite[SPRITE.PACMAN];
     }
 
     init() {
         this.dir = DIR.LEFT; // start direction
         this.pos = i2(14*8, 26*8+4); // start positioin
 
+        this.trig_dot_eaten = new Trigger();
+        this.trig_pill_eaten = new Trigger();
+        this.trig_pacman_eaten = new Trigger();
+        this.trig_ghost_eaten = new Trigger();
+
         const SPRITE_PACMAN = 0;
-        const sprite = gfx.sprite[SPRITE_PACMAN];
+        const sprite = this.pacman_sprite();
         sprite.enabled= true;
         sprite.color = COLOR_PACMAN;
         Actor.game.input_dir = DIR.LEFT;
     }
 
     update() {
-        if (this.should_move()) {            
-            // move Pacman with cornering allowed
-            const wanted_dir = Actor.game.input_dir;
-            const allow_cornering = true;
-            // look ahead to check if the wanted direction is blocked
-            if (this.can_move(wanted_dir, allow_cornering)) {
-                this.dir = wanted_dir;
+        if (!this.should_move())
+            return;
+
+        // move Pacman with cornering allowed
+        const wanted_dir = Actor.game.input_dir;
+        const allow_cornering = true;
+        // look ahead to check if the wanted direction is blocked
+        if (this.can_move(wanted_dir, allow_cornering)) {
+            this.dir = wanted_dir;
+        }
+        // move into the selected direction
+        if (this.can_move(this.dir, allow_cornering)) {
+            this.move(allow_cornering);
+            this.anim_tick++;
+        }
+        // eat dot or energizer pill?
+        const tile_pos = pixel_to_tile_pos(this.pos);
+        if (is_dot(tile_pos)) {
+            gfx.vid_tile(tile_pos, TILE_SPACE);
+            this.trig_dot_eaten.start();
+            Actor.game.score += 1;
+            Actor.game.trig_force_leave_house.start();
+            Actor.game.game_update_dots_eaten();
+            Actor.game.game_update_ghosthouse_dot_counters();
+        }
+        if (is_pill(tile_pos)) {
+            gfx.vid_tile(tile_pos, TILE_SPACE);
+            this.trig_pill_eaten.start();
+            Actor.game.score += 5;
+            Actor.game.game_update_dots_eaten();
+            Actor.game.num_ghosts_eaten = 0;
+            for (const ghost of Actor.game.ghosts) {
+                ghost.trig_frightened.start()
             }
-            // move into the selected direction
-            if (this.can_move(this.dir, allow_cornering)) {
-                this.move(allow_cornering);
-                this.anim_tick++;
+            //snd_start(1, &snd_frightened);
+        }
+        // check if Pacman eats the bonus fruit
+        if (Actor.game.active_fruit != FRUIT.NONE) {
+            const test_pos = pixel_to_tile_pos(add_i2(this.pos, i2(Math.floor(TILE_WIDTH/2), 0)));
+            if (equal_i2(test_pos, i2(14, 20))) {
+                Actor.game.trig_fruit_eaten.start();
+                const score = levelspec(Actor.game.round).bonus_score;
+                Actor.game.score += score;
+                gfx.vid_fruit_score(Actor.game.active_fruit);
+                Actor.game.active_fruit = FRUIT.NONE;
+                //snd_start(2, &snd_eatfruit);
             }
-            // eat dot or energizer pill?
-            const tile_pos = pixel_to_tile_pos(this.pos);
-            if (is_dot(tile_pos)) {
-                gfx.vid_tile(tile_pos, TILE_SPACE);
-                Actor.game.score += 1;
-                Actor.game.trig_dot_eaten.start();
-                Actor.game.trig_force_leave_house.start();
-                Actor.game.game_update_dots_eaten();
-                Actor.game.game_update_ghosthouse_dot_counters();
+        }
+        // check if Pacman collides with any ghost
+        for (const ghost of Actor.game.ghosts) {
+            const ghost_tile_pos = pixel_to_tile_pos(ghost.pos);
+            if (!equal_i2(tile_pos, ghost_tile_pos))
+                continue;
+                
+            if (ghost.state == GHOSTSTATE.FRIGHTENED) {
+                // Pacman eats a frightened ghost
+                ghost.state = GHOSTSTATE.EYES;
+                ghost.trig_eaten.start();
+                this.trig_ghost_eaten.start();
+                Actor.game.num_ghosts_eaten++;
+                // increase score by 20, 40, 80, 160
+                Actor.game.score += 10 * (1<<Actor.game.num_ghosts_eaten);
+                Actor.game.freeze |= FREEZETYPE.EAT_GHOST;
+                //snd_start(2, &snd_eatghost);
             }
-            if (is_pill(tile_pos)) {
-                gfx.vid_tile(tile_pos, TILE_SPACE);
-                Actor.game.score += 5;
-                Actor.game.game_update_dots_eaten();
-                Actor.game.trig_pill_eaten.start();
-                Actor.game.num_ghosts_eaten = 0;
-                //for (int i = 0; i < NUM_GHOSTS; i++) {
-                //    start(&state.game.ghost[i].frightened);
-                //}
-                //snd_start(1, &snd_frightened);
-            }
-            // check if Pacman eats the bonus fruit
-            if (Actor.game.active_fruit != FRUIT.NONE) {
-                const test_pos = pixel_to_tile_pos(add_i2(this.pos, i2(Math.floor(TILE_WIDTH/2), 0)));
-                if (equal_i2(test_pos, i2(14, 20))) {
-                    Actor.game.trig_fruit_eaten.start();
-                    const score = levelspec(Actor.game.round).bonus_score;
-                    Actor.game.score += score;
-                    gfx.vid_fruit_score(Actor.game.active_fruit);
-                    Actor.game.active_fruit = FRUIT.NONE;
-                    //snd_start(2, &snd_eatfruit);
+            else if (!Actor.game.god_mode && ((ghost.state == GHOSTSTATE.CHASE) || (ghost.state == GHOSTSTATE.SCATTER))) {
+                // otherwise, ghost eats Pacman, Pacman loses a life
+                //snd_clear();
+                this.trig_pacman_eaten.start();
+                Actor.game.freeze |= FREEZETYPE.DEAD;
+                // if Pacman has any lives left start a new round, otherwise start the game-over sequence
+                if (Actor.game.num_lives > 0) {
+                    Actor.game.trig_ready_started.start_after(PACMAN_EATEN_TICKS+PACMAN_DEATH_TICKS);
+                }
+                else {
+                    Actor.game.trig_game_over.start_after(PACMAN_EATEN_TICKS+PACMAN_DEATH_TICKS);
                 }
             }
-            // check if Pacman collides with any ghost
-
-            
         }
     }
 
     // return true if Pacman should move in this tick, when eating dots, Pacman
     // is slightly slower than ghosts, otherwise slightly faster
     should_move() {
-        if (Actor.game.trig_dot_eaten.now()) {
+        if (this.trig_dot_eaten.now()) {
             // eating a dot causes Pacman to stop for 1 tick
             return false;
         }
-        else if (Actor.game.trig_pill_eaten.since() < 3) {
+        else if (this.trig_pill_eaten.since() < 3) {
             // eating an energizer pill causes Pacman to stop for 3 ticks
             return false;
         }
@@ -255,12 +301,50 @@ class Pacman extends Actor {
             [44, 46, 48, 46], // horizontal (needs flipx)
             [45, 47, 48, 47]  // vertical (needs flipy)
         ];
-        const spr = gfx.sprite[0];
+        const spr = this.pacman_sprite();
         const phase = Math.floor(this.anim_tick / 2) & 3; // 2 ticks per frame, 4 frame cycling
         spr.tile  = tiles[this.dir & 1][phase];
         spr.color = COLOR_PACMAN;
         spr.flipx = (this.dir == DIR.LEFT);
         spr.flipy = (this.dir == DIR.UP);
+    }
+
+    // set sprite to Pacman's death sequence
+    spr_anim_pacman_death(tick) {
+        // the death animation tile sequence starts at sprite tile number 52 and ends at 63
+        const spr = this.pacman_sprite();
+        let tile = 52 + Math.floor(tick / 8);
+        if (tile > 63) {
+            tile = 63;
+        }
+        spr.tile = tile;
+        spr.flipx = spr.flipy = false;
+    }
+
+    update_sprite() {
+        const sprite = this.pacman_sprite();
+        if (!sprite.enabled)
+            return;
+
+        sprite.pos = this.actor_to_sprite_pos();
+        if (Actor.game.freeze & FREEZETYPE.EAT_GHOST) {
+            // hide Pacman shortly after he's eaten a ghost (via an invisible Sprite tile)
+            sprite.tile = SPRITETILE_INVISIBLE;
+        }
+        else if (Actor.game.freeze & (FREEZETYPE.PRELUDE|FREEZETYPE.READY)) {
+            // special case game frozen at start of round, show Pacman with 'closed mouth'
+            sprite.tile = SPRITETILE_PACMAN_CLOSED_MOUTH;
+        }
+        else if (Actor.game.freeze & FREEZETYPE.DEAD) {
+            // play the Pacman-death-animation after a short pause
+            if (this.trig_pacman_eaten.after(PACMAN_EATEN_TICKS)) {
+                this.spr_anim_pacman_death(this.trig_pacman_eaten.since() - PACMAN_EATEN_TICKS);
+            }
+        }
+        else {
+            // regular Pacman animation
+            this.spr_anim_pacman();
+        }
     }
 }
 
@@ -334,22 +418,6 @@ class Ghost extends Actor {
         this.dot_limit;
     }
 
-    // set sprite to animated ghost
-    spr_anim_ghost(ghost_type) {
-        const tiles = [
-            [ 32, 33 ], // right
-            [ 34, 35 ], // down
-            [ 36, 37 ], // left
-            [ 38, 39 ], // up
-        ];
-        const spr = gfx.sprite[ghost_type+1];
-        const phase = Math.floor(this.anim_tick / 8) & 1;
-        spr.tile = tiles[this.dir][phase];
-        spr.color = COLOR_BLINKY + 2 * ghost_type;
-        spr.flipx = false;
-        spr.flipy = false;
-    }
-
     update() {
         // handle ghost-state transitions
         this.update_ghost_state();
@@ -382,7 +450,7 @@ class Ghost extends Actor {
             case GHOSTSTATE.ENTERHOUSE:
                 // Ghosts that enter the ghost house during the gameplay loop immediately
                 // leave the house again after reaching their target position inside the house.
-                if (nearequal_i2(this.pos, ghost_house_target_pos[this.type], 1)) {
+                if (nearequal_i2(this.pos, this.house_target(), 1)) {
                     new_state = GHOSTSTATE.LEAVEHOUSE;
                 }
                 break;
@@ -406,7 +474,7 @@ class Ghost extends Actor {
                         new_state = GHOSTSTATE.LEAVEHOUSE;
                     }
                     else if ((this.type == GHOSTTYPE.CLYDE) && (Actor.game.global_dot_counter == 32)) {
-                        new_state = GHOSTSTATE_LEAVEHOUSE;
+                        new_state = GHOSTSTATE.LEAVEHOUSE;
                         // NOTE that global dot counter is deactivated if (and only if) Clyde
                         // is in the house and the dot counter reaches 32
                         Actor.game.global_dot_counter_active = false;
@@ -440,7 +508,7 @@ class Ghost extends Actor {
                     this.next_dir = this.dir = DIR.LEFT;
                     break;
                 case GHOSTSTATE.ENTERHOUSE:
-                    // a ghost that was eaten is immune to frighten until Pacman eats enother pill
+                    // a ghost that was eaten is immune to frighten until Pacman eats another pill
                     this.trig_frightened.disable();
                     break;
                 case GHOSTSTATE.FRIGHTENED:
@@ -456,6 +524,43 @@ class Ghost extends Actor {
             }
             this.state = new_state;
         }
+    }
+
+    update_ghost_target() {
+        let pos = this.target_pos;
+        switch (this.state) {
+            case GHOSTSTATE.SCATTER:
+                // when in scatter mode, each ghost heads to its own scatter
+                // target position in the playfield corners
+                pos = this.scatter_target();
+                break;
+            case GHOSTSTATE.CHASE:
+                // when in chase mode, each ghost has its own particular
+                // chase behaviour (see the Pacman Dossier for details)
+                pos = this.chase_target();
+                break;
+            case GHOSTSTATE.FRIGHTENED:
+                // in frightened state just select a random target position
+                // this has the effect that ghosts in frightened state
+                // move in a random direction at each intersection
+                pos = this.firghtened_target();
+                break;
+            case GHOSTSTATE.EYES:
+                // move towards the ghost house door
+                pos = this.eye_target();
+                break;
+            default:
+                break;
+        }
+        this.target_pos = pos;
+    }
+
+    firghtened_target() {
+        return i2(xorshift32() % DISPLAY_TILES_X, xorshift32() % DISPLAY_TILES_Y);
+    }
+
+    eye_target() {
+        return i2(13, 14);
     }
 
     ghost_speed() {
@@ -507,10 +612,10 @@ class Ghost extends Actor {
             else {
                 const mid_y = 17*TILE_HEIGHT + Math.floor(TILE_HEIGHT/2);
                 if (pos.y > mid_y) {
-                    this.next_dir = DIR_UP;
+                    this.next_dir = DIR.UP;
                 }
                 else if (pos.y < mid_y) {
-                    this.next_dir = DIR_DOWN;
+                    this.next_dir = DIR.DOWN;
                 }
                 else {
                     this.next_dir = (pos.x > ANTEPORTAS_X) ? DIR.LEFT : DIR.RIGHT;
@@ -521,15 +626,15 @@ class Ghost extends Actor {
         }
         // navigate towards the ghost house target pos
         else if (this.state == GHOSTSTATE.ENTERHOUSE) {
-            const pos = this.actor.pos;
+            const pos = this.pos;
             const tile_pos = pixel_to_tile_pos(pos);
-            const tgt_pos = ghost_house_target_pos[this.type];
+            const tgt_pos = this.house_target();
             if (tile_pos.y == 14) {
                 if (pos.x != ANTEPORTAS_X) {
-                    this.next_dir = (pos.x < ANTEPORTAS_X) ? DIR_RIGHT:DIR_LEFT;
+                    this.next_dir = (pos.x < ANTEPORTAS_X) ? DIR.RIGHT:DIR.LEFT;
                 }
                 else {
-                    this.next_dir = DIR_DOWN;
+                    this.next_dir = DIR.DOWN;
                 }
             }
             else if (pos.y == tgt_pos.y) {
@@ -572,6 +677,105 @@ class Ghost extends Actor {
             return false;
         }
     }
+
+    // set sprite to animated ghost
+    spr_anim_ghost(dir) {
+        const tiles = [
+            [ 32, 33 ], // right
+            [ 34, 35 ], // down
+            [ 36, 37 ], // left
+            [ 38, 39 ], // up
+        ];
+        const spr = this.ghost_sprite();
+        const phase = Math.floor(this.anim_tick / 8) & 1;
+        spr.tile = tiles[dir][phase];
+        spr.color = COLOR_BLINKY + 2 * this.type;
+        spr.flipx = false;
+        spr.flipy = false;
+    }
+
+    // set sprite to frightened ghost
+    spr_anim_ghost_frightened() {
+        const tick = this.trig_frightened.since();
+        const tiles = [ 28, 29 ];
+        const spr = this.ghost_sprite();
+        const phase = Math.floor(tick / 4) & 1;
+        spr.tile = tiles[phase];
+        if (tick > (levelspec(Actor.game.round).fright_ticks - 60)) {
+            // towards end of frightening period, start blinking
+            spr.color = (tick & 0x10) ? COLOR_FRIGHTENED : COLOR_FRIGHTENED_BLINKING;
+        }
+        else {
+            this.color = COLOR_FRIGHTENED;
+        }
+        this.flipx = false;
+        this.flipy = false;
+    }
+
+    /* set sprite to ghost eyes, these are the normal ghost sprite
+    images but with a different color code which makes
+    only the eyes visible
+    */
+    spr_anim_ghost_eyes(dir) {
+        const tiles = [ 32, 34, 36, 38 ];
+        const spr = this.ghost_sprite();
+        spr.tile = tiles[dir];
+        spr.color = COLOR_EYES;
+        spr.flipx = false;
+        spr.flipy = false;
+    }
+
+    update_sprite() {
+        const sprite = this.ghost_sprite();
+        if (!sprite.enabled)
+            return;
+
+        sprite.pos = this.actor_to_sprite_pos();
+        // if Pacman has just died, hide ghosts
+        if (Actor.game.freeze & FREEZETYPE.DEAD) {
+            if (Actor.game.pacman.trig_pacman_eaten.after(PACMAN_EATEN_TICKS)) {
+                sprite.tile = SPRITETILE_INVISIBLE;
+            }
+        }
+        // if Pacman has won the round, hide ghosts
+        else if (Actor.game.freeze & FREEZETYPE.WON) {
+            sprite.tile = SPRITETILE_INVISIBLE;
+        }
+        else {
+            switch (this.state) {
+                case GHOSTSTATE.EYES:
+                    if (this.trig_eaten.before(GHOST_EATEN_FREEZE_TICKS)) {
+                        // if the ghost was *just* eaten by Pacman, the ghost's sprite
+                        // is replaced with a score number for a short time
+                        // (200 for the first ghost, followed by 400, 800 and 1600)
+                        sprite.tile = SPRITETILE_SCORE_200 + Actor.game.num_ghosts_eaten - 1;
+                        sprite.color = COLOR_GHOST_SCORE;
+                    }
+                    else {
+                        // afterwards, the ghost's eyes are shown, heading back to the ghost house
+                        this.spr_anim_ghost_eyes(this.next_dir);
+                    }
+                    break;
+                case GHOSTSTATE.ENTERHOUSE:
+                    // ...still show the ghost eyes while entering the ghost house
+                    this.spr_anim_ghost_eyes(this.dir);
+                    break;
+                case GHOSTSTATE.FRIGHTENED:
+                    // when inside the ghost house, show the normal ghost images
+                    // (FIXME: ghost's inside the ghost house also show the
+                    // frightened appearance when Pacman has eaten an energizer pill)
+                    this.spr_anim_ghost_frightened();
+                    break;
+                default:
+                    // show the regular ghost sprite image, the ghost's
+                    // 'next_dir' is used to visualize the direction the ghost
+                    // is heading to, this has the effect that ghosts already look
+                    // into the direction they will move into one tile ahead
+                    this.spr_anim_ghost(this.next_dir);
+                    break;
+            }
+        }
+    }
 }
 
 
@@ -581,58 +785,185 @@ class GhostBlinky extends Ghost {
         super();
     }
 
+    ghost_sprite() {
+        return gfx.sprite[SPRITE.BLINKY];
+    }
+
+    // Blinky starts outside the ghost house, looking to the left, and in scatter mode
     init() {
         this.dir = DIR.LEFT;
         this.pos = ghost_starting_pos[GHOSTTYPE.BLINKY];
         this.type = GHOSTTYPE.BLINKY;
-        this.next_dir = DIR.LEFT;
+        this.next_dir = this.dir;
         this.state = GHOSTSTATE.SCATTER;
         this.trig_frightened = new Trigger();
         this.trig_eaten = new Trigger();
         this.dot_counter = 0;
         this.dot_limit = 0;
 
-        const SPRITE_BLINKY = 1;
-        const sprite = gfx.sprite[SPRITE_BLINKY];
+        const sprite = this.ghost_sprite();
         sprite.enabled= true;
         sprite.color = COLOR_BLINKY;
     }
 
-    spr_anim_ghost() {
-        super.spr_anim_ghost(GHOSTTYPE.BLINKY);
+    scatter_target() {
+        return ghost_scatter_targets[GHOSTTYPE.BLINKY];
     }
 
-    update_ghost_target() {
-        let pos = this.target_pos;
-        switch (this.state) {
-            case GHOSTSTATE.SCATTER:
-                // when in scatter mode, each ghost heads to its own scatter
-                // target position in the playfield corners
-                pos = ghost_scatter_targets[GHOSTTYPE.BLINKY];
-                break;
-            case GHOSTSTATE.CHASE:
-                // when in chase mode, each ghost has its own particular
-                // chase behaviour (see the Pacman Dossier for details)
-                {
-                    const pm = Actor.game.pacman;
-                    const pm_pos = pixel_to_tile_pos(pm.pos);
-                    const pm_dir = DIR_VEC[pm.dir];
-                    pos = pm_pos;
-                }
-                break;
-            case GHOSTSTATE_FRIGHTENED:
-                // in frightened state just select a random target position
-                // this has the effect that ghosts in frightened state
-                // move in a random direction at each intersection
-                pos = i2(xorshift32() % DISPLAY_TILES_X, xorshift32() % DISPLAY_TILES_Y);
-                break;
-            case GHOSTSTATE_EYES:
-                // move towards the ghost house door
-                pos = i2(13, 14);
-                break;
-            default:
-                break;
+    chase_target() {
+        // Blinky directly chases Pacman
+        const pm = Actor.game.pacman;
+        const pm_pos = pixel_to_tile_pos(pm.pos);
+        return pm_pos;
+    }
+
+    house_target() {
+        return ghost_house_target_pos[GHOSTTYPE.BLINKY];
+    }
+}
+
+
+
+class GhostPinky extends Ghost {
+    constructor() {
+        super();
+    }
+
+    ghost_sprite() {
+        return gfx.sprite[SPRITE.PINKY];
+    }
+
+    // Pinky starts in the middle slot of the ghost house, moving down
+    init() {
+        this.dir = DIR.DOWN;
+        this.pos = ghost_starting_pos[GHOSTTYPE.PINKY];
+        this.type = GHOSTTYPE.PINKY;
+        this.next_dir = this.dir;
+        this.state = GHOSTSTATE.HOUSE;
+        this.trig_frightened = new Trigger();
+        this.trig_eaten = new Trigger();
+        this.dot_counter = 0;
+        this.dot_limit = 0;
+
+        const sprite = this.ghost_sprite();
+        sprite.enabled= true;
+        sprite.color = COLOR_PINKY;
+    }
+
+    scatter_target() {
+        return ghost_scatter_targets[GHOSTTYPE.PINKY];
+    }
+
+    chase_target() {
+        // Pinky target is 4 tiles ahead of Pacman
+        // FIXME: does not reproduce 'diagonal overflow'
+        const pm = Actor.game.pacman;
+        const pm_pos = pixel_to_tile_pos(pm.pos);
+        const pm_dir = DIR_VEC[pm.dir];
+        return add_i2(pm_pos, mul_i2(pm_dir, 4));
+    }
+
+    house_target() {
+        return ghost_house_target_pos[GHOSTTYPE.PINKY];
+    }
+}
+
+
+
+class GhostInky extends Ghost {
+    constructor() {
+        super();
+    }
+
+    ghost_sprite() {
+        return gfx.sprite[SPRITE.INKY];
+    }
+
+    // Inky starts in the left slot of the ghost house moving up
+    init() {
+        this.dir = DIR.UP;
+        this.pos = ghost_starting_pos[GHOSTTYPE.INKY];
+        this.type = GHOSTTYPE.INKY;
+        this.next_dir = this.dir;
+        this.state = GHOSTSTATE.HOUSE;
+        this.trig_frightened = new Trigger();
+        this.trig_eaten = new Trigger();
+        this.dot_counter = 0;
+        this.dot_limit = 30; // FIXME: needs to be adjusted by current round!
+
+        const sprite = this.ghost_sprite();
+        sprite.enabled= true;
+        sprite.color = COLOR_INKY;
+    }
+
+    scatter_target() {
+        return ghost_scatter_targets[GHOSTTYPE.INKY];
+    }
+
+    chase_target() {
+        // Inky targets an extrapolated pos along a line two tiles
+        // ahead of Pacman through Blinky
+        // target = blinky_pos + ((pm_pos + pm_dir * 2) - blinky_pos) * 2
+        const pm = Actor.game.pacman;
+        const pm_pos = pixel_to_tile_pos(pm.pos);
+        const pm_dir = DIR_VEC[pm.dir];
+        const blinky_pos = pixel_to_tile_pos(Actor.game.blinky.pos);
+        const p = add_i2(pm_pos, mul_i2(pm_dir, 2));
+        const d = sub_i2(p, blinky_pos);
+        return add_i2(blinky_pos, mul_i2(d, 2));
+    }
+
+    house_target() {
+        return ghost_house_target_pos[GHOSTTYPE.INKY];
+    }
+}
+
+
+
+class GhostClyde extends Ghost {
+    constructor() {
+        super();
+    }
+
+    ghost_sprite() {
+        return gfx.sprite[SPRITE.CLYDE];
+    }
+
+    // Clyde starts in the right slot of the ghost house, moving up
+    init() {
+        this.dir = DIR.UP;
+        this.pos = ghost_starting_pos[GHOSTTYPE.CLYDE];
+        this.type = GHOSTTYPE.CLYDE;
+        this.next_dir = this.dir;
+        this.state = GHOSTSTATE.HOUSE;
+        this.trig_frightened = new Trigger();
+        this.trig_eaten = new Trigger();
+        this.dot_counter = 0;
+        this.dot_limit = 60; // FIXME: needs to be adjusted by current round!
+
+        const sprite = this.ghost_sprite();
+        sprite.enabled= true;
+        sprite.color = COLOR_CLYDE;
+    }
+
+    scatter_target() {
+        return ghost_scatter_targets[GHOSTTYPE.CLYDE];
+    }
+
+    chase_target() {
+        // if Clyde is far away from Pacman, he chases Pacman,
+        // but if close he moves towards the scatter target
+        const pm = Actor.game.pacman;
+        const pm_pos = pixel_to_tile_pos(pm.pos);
+        if (squared_distance_i2(pixel_to_tile_pos(this.pos), pm_pos) > 64) {
+            return pm_pos;
         }
-        this.target_pos = pos;
+        else {
+            return ghost_scatter_targets[GHOSTTYPE.CLYDE];
+        }
+    }
+
+    house_target() {
+        return ghost_house_target_pos[GHOSTTYPE.CLYDE];
     }
 }

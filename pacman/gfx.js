@@ -11,6 +11,8 @@ const DISPLAY_PIXELS_Y = DISPLAY_TILES_Y * TILE_HEIGHT;
 
 const NUM_SPRITES = 8;
 
+const FADE_TICKS           = 30;   // duration of fade-in/out
+
 const NUM_LIVES            = 3;
 const NUM_STATUS_FRUITS    = 7;    // max number of displayed fruits at bottom right
 const NUM_DOTS             = 244;  // 240 small dots + 4 pills
@@ -105,6 +107,13 @@ gfx.decodeRomData = function() {
     this.tiles = decodeRomTile(tile_data);
     // total 64 sprites
     this.sprites = decodeRomSprite(sprite_data);
+}
+
+// return tile code at tile position
+gfx.tile_code_at = function(tile_pos) {
+    console.assert((tile_pos.x >= 0) && (tile_pos.x < DISPLAY_TILES_X));
+    console.assert((tile_pos.y >= 0) && (tile_pos.y < DISPLAY_TILES_Y));
+    return this.video_ram[tile_pos.y][tile_pos.x];
 }
 
 // disable and clear all sprites
@@ -354,6 +363,16 @@ gfx.draw_sprite = function(canvas_ctx, spr) {
     canvas_ctx.restore();
 }
 
+gfx.draw = function(canvas_ctx) {
+    this.draw_playfield(canvas_ctx);
+
+    for (const spr of this.sprite) {
+        if (spr.enabled) {
+            this.draw_sprite(canvas_ctx, spr);
+        }
+    }
+}
+
 
 const imageCache = {};
 
@@ -377,6 +396,9 @@ imageCache.getTileImage = function(tileCode, colorCode) {
 
     const tileData = gfx.tiles[tileCode];
     const palette = gfx.palettes[colorCode];
+
+    // tile is not transparent
+    palette[0][3] = 255;
 
     for (let y = 0, yoffset = 0; y < TILE_HEIGHT; y++, yoffset += 32) {
         const rowData = tileData[y];
@@ -406,6 +428,9 @@ imageCache.getSpriteImage = function(spriteCode, colorCode) {
 
     const spriteData = gfx.sprites[spriteCode];
     const palette = gfx.palettes[colorCode];
+
+    // sprite is transparent
+    palette[0][3] = 0;
 
     if (spriteData == undefined)
     {

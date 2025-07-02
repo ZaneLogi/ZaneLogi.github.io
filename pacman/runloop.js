@@ -3,6 +3,7 @@
 const runloop = {
     frame_period: 50, // 20 frames per second
     frame_count: 0,
+    catch_error: false,
 }
 
 runloop.changeFramePeriod = function (period) {
@@ -24,6 +25,10 @@ runloop.start = function (doFrame, framePeriod) {
 }
 
 runloop.run = function (doFrame) {
+    if (this.catch_error) {
+        return;
+    }
+    
     window.requestAnimationFrame(() => this.run(doFrame));
 
     const msNow = window.performance.now();
@@ -35,7 +40,14 @@ runloop.run = function (doFrame) {
     const excessTime = msPassed % this.frame_period;
     this.msPrev = msNow - excessTime;
 
-    doFrame();
+    try {
+        doFrame();
+    }
+    catch (error) {
+        console.error(error);
+        this.catch_error = true;
+        return;
+    }
 
     this.frame_count++;
 }
