@@ -111,7 +111,7 @@ game.intro_tick = function() {
     if (this.trig_intro_started.now()) {
         //snd_clear();
         gfx.spr_clear();
-        //start(&state.gfx.fadein);
+        gfx.trig_gfx_fadein.start();
         input.enable();
         gfx.vid_clear(TILE_SPACE, COLOR_DEFAULT);
         gfx.vid_text(i2(3,0),  "1UP   HIGH SCORE   2UP");
@@ -175,9 +175,8 @@ game.intro_tick = function() {
     // if a key is pressed, advance to game state
     if (input.has_input) {
         input.disable();
-        //start(&state.gfx.fadeout);
-        //start_after(&state.game.started, FADE_TICKS);
-        this.trig_game_started.start();
+        gfx.trig_gfx_fadeout.start();
+        this.trig_game_started.start_after(FADE_TICKS);
     }
 }
 
@@ -416,6 +415,7 @@ game.game_tick = function () {
 
     // initialize game state once
     if (this.trig_game_started.now()) {
+        gfx.trig_gfx_fadein.start();
         this.trig_ready_started.start_after(2*prelude_ticks_per_sec);
         //snd_start(0, &snd_prelude);
         this.game_init();
@@ -483,10 +483,7 @@ game.game_tick = function () {
         // display game over string
         gfx.vid_color_text(i2(9,20), 0x01, "GAME  OVER");
         input.disable();
-        //start_after(&state.gfx.fadeout, GAMEOVER_TICKS);
-        //start_after(&state.intro.started, GAMEOVER_TICKS+FADE_TICKS);
-
-        // TODO: need to handle fading
+        gfx.trig_gfx_fadeout.start_after(GAMEOVER_TICKS);
         this.trig_intro_started.start_after(GAMEOVER_TICKS+FADE_TICKS);
     }
 }

@@ -91,6 +91,9 @@ const gfx = {
     palettes: undefined, // the decoded color palettes
     tiles: undefined, // the decoded tile data
     sprites: undefined, // the decoded sprite data
+
+    trig_gfx_fadein: new Trigger(),
+    trig_gfx_fadeout: new Trigger(),
 }
 
 gfx.init = function() {
@@ -363,7 +366,27 @@ gfx.draw_sprite = function(canvas_ctx, spr) {
     canvas_ctx.restore();
 }
 
+gfx.fade = function(canvas_ctx) {
+    if (this.trig_gfx_fadein.between(0, FADE_TICKS)) {
+        const t = this.trig_gfx_fadein.since() / FADE_TICKS;
+        canvas_ctx.globalAlpha = t;
+    }
+    if (this.trig_gfx_fadein.after_once(FADE_TICKS)) {
+        canvas_ctx.globalAlpha = 1;
+    }
+
+    if (this.trig_gfx_fadeout.between(0, FADE_TICKS)) {
+        const t = this.trig_gfx_fadeout.since() / FADE_TICKS;
+        canvas_ctx.globalAlpha = 1 - t;
+    }
+    if (this.trig_gfx_fadeout.after_once(FADE_TICKS)) {
+        canvas_ctx.globalAlpha = 0;
+    }
+}
+
 gfx.draw = function(canvas_ctx) {
+    this.fade(canvas_ctx);
+
     this.draw_playfield(canvas_ctx);
 
     for (const spr of this.sprite) {
