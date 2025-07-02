@@ -1,5 +1,10 @@
 "use strict"
 
+const GAMESTATE = {
+    INTRO: 0,
+    GAME: 1,
+};
+
 const FREEZETYPE = {
     PRELUDE:   (1<<0),  // game prelude is active (with the game start tune playing)
     READY:     (1<<1),  // READY! phase is active (at start of a new game round)
@@ -14,8 +19,11 @@ const game = {
     canvas_ctx: null,
     window_width: 0,
     window_height: 0,
+    gamestate: 0,
 
-    trig_started: new Trigger(),
+    trig_intro_started: new Trigger(),
+
+    trig_game_started: new Trigger(),
     trig_ready_started: new Trigger(),
     trig_round_started: new Trigger(),
 
@@ -54,7 +62,7 @@ game.init = function () {
     Trigger.game = this;
 
     this.ticks = 0;
-    this.trig_started.start();
+    this.trig_intro_started.start();
 
     runloop.start(() => this.doFrame(), 1000/60); // 60 FPS
 }
@@ -62,7 +70,52 @@ game.init = function () {
 game.doFrame = function () {
     this.ticks++;
     this.processEvents();
-    this.game_tick();
+
+    if (this.trig_intro_started.now()) {
+        this.gamestate = GAMESTATE.INTRO;
+    }
+    if (this.trig_game_started.now()) {
+        this.gamestate = GAMESTATE.GAME;
+    }
+
+    // call the top-level game state update function
+    switch (this.gamestate) {
+        case GAMESTATE.INTRO:
+            this.intro_tick();
+            break;
+        case GAMESTATE.GAME:
+            this.game_tick();
+            break;
+    }
+
+    gfx.draw(this.canvas_ctx);
+}
+
+game.intro_tick = function() {
+    // on intro-state enter, enable input and draw any initial text
+    if (this.trig_intro_started.now()) {
+        //snd_clear();
+        gfx.spr_clear();
+        //start(&state.gfx.fadein);
+        //input_enable();
+        gfx.vid_clear(TILE_SPACE, COLOR_DEFAULT);
+        gfx.vid_text(i2(3,0),  "1UP   HIGH SCORE   2UP");
+        gfx.vid_color_score(i2(6,1), COLOR_DEFAULT, 0);
+        if (this.hiscore > 0) {
+            gfx.vid_color_score(i2(16,1), COLOR_DEFAULT, this.hiscore);
+        }
+        gfx.vid_text(i2(7,5),  "CHARACTER / NICKNAME");
+        gfx.vid_text(i2(3,35), "CREDIT  0");
+    }
+
+
+
+    // if a key is pressed, advance to game state
+    if (this.has_key_pressed) {
+        //start(&state.gfx.fadeout);
+        //start_after(&state.game.started, FADE_TICKS);
+        this.trig_game_started.start();
+    }
 }
 
 // disable all game loop timers
@@ -300,7 +353,7 @@ game.game_tick = function () {
     const ready_start_ticks_per_sec = 30;
 
     // initialize game state once
-    if (this.trig_started.now()) {
+    if (this.trig_game_started.now()) {
         this.trig_ready_started.start_after(2*prelude_ticks_per_sec);
         //snd_start(0, &snd_prelude);
         this.game_init();
@@ -372,10 +425,8 @@ game.game_tick = function () {
         //start_after(&state.intro.started, GAMEOVER_TICKS+FADE_TICKS);
 
         // TODO: need to handle fading
-        this.trig_started.start_after(GAMEOVER_TICKS+FADE_TICKS);
+        this.trig_game_started.start_after(GAMEOVER_TICKS+FADE_TICKS);
     }
-
-    gfx.draw(this.canvas_ctx);
 }
 
 game.processEvents = function () {
@@ -396,6 +447,8 @@ game.processEvents = function () {
                 else if (code == "KeyS") {
                     this.input_dir = DIR.DOWN;
                 }
+
+                this.has_key_pressed = true;
                 break;
             }
             case sys_evt.KEY_UP:
