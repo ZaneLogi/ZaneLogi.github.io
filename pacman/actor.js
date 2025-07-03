@@ -170,10 +170,10 @@ class Pacman extends Actor {
     constructor() {
         super();
 
-        this.trig_dot_eaten;
-        this.trig_pill_eaten;
-        this.trig_pacman_eaten;
-        this.trig_ghost_eaten;
+        this.trig_dot_eaten = new Trigger();
+        this.trig_pill_eaten = new Trigger();
+        this.trig_pacman_eaten = new Trigger();
+        this.trig_ghost_eaten = new Trigger();
     }
 
     pacman_sprite() {
@@ -184,12 +184,11 @@ class Pacman extends Actor {
         this.dir = DIR.LEFT; // start direction
         this.pos = i2(14*8, 26*8+4); // start positioin
 
-        this.trig_dot_eaten = new Trigger();
-        this.trig_pill_eaten = new Trigger();
-        this.trig_pacman_eaten = new Trigger();
-        this.trig_ghost_eaten = new Trigger();
+        this.trig_dot_eaten.disable();
+        this.trig_pill_eaten.disable();
+        this.trig_pacman_eaten.disable();
+        this.trig_ghost_eaten.disable();
 
-        const SPRITE_PACMAN = 0;
         const sprite = this.pacman_sprite();
         sprite.enabled= true;
         sprite.color = COLOR_PACMAN;
@@ -234,14 +233,14 @@ class Pacman extends Actor {
             //snd_start(1, &snd_frightened);
         }
         // check if Pacman eats the bonus fruit
-        if (Actor.game.active_fruit != FRUIT.NONE) {
+        if (Actor.game.fruit.active_fruit != FRUIT.NONE) {
             const test_pos = pixel_to_tile_pos(add_i2(this.pos, i2(Math.floor(TILE_WIDTH/2), 0)));
-            if (equal_i2(test_pos, i2(14, 20))) {
-                Actor.game.trig_fruit_eaten.start();
+            if (equal_i2(test_pos, Actor.game.fruit.pos)) {
+                Actor.game.fruit.trig_fruit_eaten.start();
                 const score = levelspec(Actor.game.round).bonus_score;
                 Actor.game.score += score;
-                gfx.vid_fruit_score(Actor.game.active_fruit);
-                Actor.game.active_fruit = FRUIT.NONE;
+                gfx.vid_fruit_score(Actor.game.fruit.active_fruit);
+                Actor.game.fruit.active_fruit = FRUIT.NONE;
                 //snd_start(2, &snd_eatfruit);
             }
         }
@@ -412,10 +411,15 @@ class Ghost extends Actor {
         this.next_dir;
         this.target_pos;
         this.state;
-        this.trig_frightened;
-        this.trig_eaten;
+        this.trig_frightened = new Trigger();
+        this.trig_eaten = new Trigger();
         this.dot_counter;
         this.dot_limit;
+    }
+
+    init() {
+        this.trig_frightened.disable();
+        this.trig_eaten.disable();
     }
 
     update() {
@@ -467,20 +471,9 @@ class Ghost extends Actor {
                 }
                 else if (Actor.game.global_dot_counter_active) {
                     // if Pacman has lost a life this round, the global dot counter is used
-                    if ((this.type == GHOSTTYPE.PINKY) && (Actor.game.global_dot_counter == 7)) {
-                        new_state = GHOSTSTATE.LEAVEHOUSE;
-                    }
-                    else if ((this.type == GHOSTTYPE.INKY) && (Actor.game.global_dot_counter == 17)) {
-                        new_state = GHOSTSTATE.LEAVEHOUSE;
-                    }
-                    else if ((this.type == GHOSTTYPE.CLYDE) && (Actor.game.global_dot_counter == 32)) {
-                        new_state = GHOSTSTATE.LEAVEHOUSE;
-                        // NOTE that global dot counter is deactivated if (and only if) Clyde
-                        // is in the house and the dot counter reaches 32
-                        Actor.game.global_dot_counter_active = false;
-                    }
+                    new_state = this.check_global_dot_counter();
                 }
-                else if (this.dot_counter == this.dot_limit) {
+                else if (this.dot_counter >= this.dot_limit) {
                     // in the normal case, check the ghost's personal dot counter
                     new_state = GHOSTSTATE.LEAVEHOUSE;
                 }
@@ -689,7 +682,7 @@ class Ghost extends Actor {
         const spr = this.ghost_sprite();
         const phase = Math.floor(this.anim_tick / 8) & 1;
         spr.tile = tiles[dir][phase];
-        spr.color = COLOR_BLINKY + 2 * this.type;
+        spr.color = this.ghost_color();
         spr.flipx = false;
         spr.flipy = false;
     }
@@ -789,15 +782,19 @@ class GhostBlinky extends Ghost {
         return gfx.sprite[SPRITE.BLINKY];
     }
 
+    ghost_color() {
+        return COLOR_BLINKY;
+    }
+
     // Blinky starts outside the ghost house, looking to the left, and in scatter mode
     init() {
+        super.init();
+
         this.dir = DIR.LEFT;
         this.pos = ghost_starting_pos[GHOSTTYPE.BLINKY];
         this.type = GHOSTTYPE.BLINKY;
         this.next_dir = this.dir;
         this.state = GHOSTSTATE.SCATTER;
-        this.trig_frightened = new Trigger();
-        this.trig_eaten = new Trigger();
         this.dot_counter = 0;
         this.dot_limit = 0;
 
@@ -820,6 +817,10 @@ class GhostBlinky extends Ghost {
     house_target() {
         return ghost_house_target_pos[GHOSTTYPE.BLINKY];
     }
+
+    check_global_dot_counter() {
+        return this.state;
+    }
 }
 
 
@@ -833,15 +834,19 @@ class GhostPinky extends Ghost {
         return gfx.sprite[SPRITE.PINKY];
     }
 
+    ghost_color() {
+        return COLOR_PINKY;
+    }
+
     // Pinky starts in the middle slot of the ghost house, moving down
     init() {
+        super.init();
+
         this.dir = DIR.DOWN;
         this.pos = ghost_starting_pos[GHOSTTYPE.PINKY];
         this.type = GHOSTTYPE.PINKY;
         this.next_dir = this.dir;
         this.state = GHOSTSTATE.HOUSE;
-        this.trig_frightened = new Trigger();
-        this.trig_eaten = new Trigger();
         this.dot_counter = 0;
         this.dot_limit = 0;
 
@@ -866,6 +871,13 @@ class GhostPinky extends Ghost {
     house_target() {
         return ghost_house_target_pos[GHOSTTYPE.PINKY];
     }
+
+    check_global_dot_counter() {
+        if (Actor.game.global_dot_counter == 7) {
+            return GHOSTSTATE.LEAVEHOUSE;
+        }
+        return this.state;
+    }
 }
 
 
@@ -879,15 +891,19 @@ class GhostInky extends Ghost {
         return gfx.sprite[SPRITE.INKY];
     }
 
+    ghost_color() {
+        return COLOR_INKY;
+    }
+
     // Inky starts in the left slot of the ghost house moving up
     init() {
+        super.init();
+
         this.dir = DIR.UP;
         this.pos = ghost_starting_pos[GHOSTTYPE.INKY];
         this.type = GHOSTTYPE.INKY;
         this.next_dir = this.dir;
         this.state = GHOSTSTATE.HOUSE;
-        this.trig_frightened = new Trigger();
-        this.trig_eaten = new Trigger();
         this.dot_counter = 0;
         this.dot_limit = 30; // FIXME: needs to be adjusted by current round!
 
@@ -916,6 +932,13 @@ class GhostInky extends Ghost {
     house_target() {
         return ghost_house_target_pos[GHOSTTYPE.INKY];
     }
+
+    check_global_dot_counter() {
+        if (Actor.game.global_dot_counter == 17) {
+            return GHOSTSTATE.LEAVEHOUSE;
+        }
+        return this.state;
+    }
 }
 
 
@@ -929,15 +952,19 @@ class GhostClyde extends Ghost {
         return gfx.sprite[SPRITE.CLYDE];
     }
 
+    ghost_color() {
+        return COLOR_CLYDE;
+    }
+
     // Clyde starts in the right slot of the ghost house, moving up
     init() {
+        super.init();
+
         this.dir = DIR.UP;
         this.pos = ghost_starting_pos[GHOSTTYPE.CLYDE];
         this.type = GHOSTTYPE.CLYDE;
         this.next_dir = this.dir;
         this.state = GHOSTSTATE.HOUSE;
-        this.trig_frightened = new Trigger();
-        this.trig_eaten = new Trigger();
         this.dot_counter = 0;
         this.dot_limit = 60; // FIXME: needs to be adjusted by current round!
 
@@ -965,5 +992,15 @@ class GhostClyde extends Ghost {
 
     house_target() {
         return ghost_house_target_pos[GHOSTTYPE.CLYDE];
+    }
+
+    check_global_dot_counter() {
+        if (Actor.game.global_dot_counter == 32) {
+            // NOTE that global dot counter is deactivated if (and only if) Clyde
+            // is in the house and the dot counter reaches 32
+            Actor.game.global_dot_counter_active = false;
+            return GHOSTSTATE.LEAVEHOUSE;
+        }
+        return this.state;
     }
 }

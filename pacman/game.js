@@ -44,9 +44,7 @@ const game = {
 
     trig_round_won: new Trigger(),
     trig_game_over: new Trigger(),
-    trig_fruit_eaten: new Trigger(),
     trig_force_leave_house: new Trigger(),
-    trig_fruit_active: new Trigger(),
 
     hiscore: 0,
     freeze: 0,
@@ -58,7 +56,7 @@ const game = {
     pinky: new GhostPinky(),
     inky: new GhostInky(),
     clyde: new GhostClyde(),
-    active_fruit: FRUIT.NONE,
+    fruit: new Fruit(),
 
     ticks: 0,
     god_mode: false,
@@ -184,9 +182,7 @@ game.intro_tick = function() {
 game.game_disable_timers = function () {
     this.trig_round_won.disable();
     this.trig_game_over.disable();
-    this.trig_fruit_eaten.disable();
     this.trig_force_leave_house.disable();
-    this.trig_fruit_active.disable();
 }
 
 // one-time init at start of game state
@@ -241,7 +237,6 @@ game.game_round_init = function() {
     }
     console.assert(this.num_lives >= 0);
 
-    this.active_fruit = FRUIT.NONE;
     this.freeze = FREEZETYPE.READY;
     this.num_ghosts_eaten = 0;
     this.game_disable_timers();
@@ -258,6 +253,8 @@ game.game_round_init = function() {
     for (const ghost of this.ghosts) {
         ghost.init();
     }
+
+    this.fruit.init();
 }
 
 // update dynamic background tiles
@@ -280,7 +277,7 @@ game.game_update_tiles = function() {
     }
 
     // clear the fruit-eaten score after Pacman has eaten a bonus fruit
-    if (this.trig_fruit_eaten.after_once(2*60)) {
+    if (this.fruit.trig_fruit_eaten.after_once(2*60)) {
         gfx.vid_fruit_score(FRUIT.NONE);
     }
 
@@ -323,18 +320,7 @@ game.game_update_sprites = function() {
         ghost.update_sprite();
     }
 
-    // hide or display the currently active bonus fruit
-    if (this.active_fruit == FRUIT.NONE) {
-        const spr = gfx.sprite[SPRITE.FRUIT];
-        spr.enabled = false;
-    }
-    else {
-        const spr = gfx.sprite[SPRITE.FRUIT];
-        spr.enabled = true;
-        spr.pos = i2(13 * TILE_WIDTH, 19 * TILE_HEIGHT + Math.floor(TILE_HEIGHT/2));
-        spr.tile = fruit_tiles_colors[this.active_fruit][1];
-        spr.color = fruit_tiles_colors[this.active_fruit][2];
-    }
+    this.fruit.update_sprite();
 }
 
 /* Update the dot counters used to decide whether ghosts must leave the house.
@@ -385,7 +371,7 @@ game.game_update_dots_eaten = function() {
     }
     else if ((this.num_dots_eaten == 70) || (this.num_dots_eaten == 170)) {
         // at 70 and 170 dots, show the bonus fruit
-        this.trig_fruit_active.start();
+        this.fruit.trig_fruit_active.start();
     }
 
     // play alternating crunch sound effect when a dot has been eaten
@@ -436,12 +422,7 @@ game.game_tick = function () {
     }
 
     // activate/deactivate bonus fruit
-    if (this.trig_fruit_active.now()) {
-        this.active_fruit = levelspec(this.round).bonus_fruit;
-    }
-    else if (this.trig_fruit_active.after_once(FRUITACTIVE_TICKS)) {
-        this.active_fruit = FRUIT.NONE;
-    }
+    this.fruit.update();
 
     // stop frightened sound and start weeooh sound
     // TODO: pill_eaten was moved to class Pacman

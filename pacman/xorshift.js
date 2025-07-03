@@ -1,8 +1,8 @@
 "use strict"
 
 // xorshift random number generator
-const xorshift32 = function() {
-    var xorshift = 0x12345678;   // random-number-generator seed
+const xorshift32 = function(seed) {
+    var xorshift = seed;   // random-number-generator seed
 
     return function() {
         let x = xorshift;
@@ -11,4 +11,4 @@ const xorshift32 = function() {
         x ^= x << 5;
         return (xorshift = x);
     }
-}();
+}(0x12345678);

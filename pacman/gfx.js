@@ -438,8 +438,8 @@ imageCache.getTileImage = function(tileCode, colorCode) {
     return image;
 }
 
-imageCache.getSpriteImage = function(spriteCode, colorCode) {
-    const key = `*${spriteCode}-${colorCode}`;
+imageCache.getSpriteImage = function(spriteCode, colorCode, transparent = true) {
+    const key = `*${spriteCode}-${colorCode}-${transparent}`;
     if (this[key]) {
         //console.log(`Cache hit for sprite ${spriteCode} with color ${colorCode}`);
         return this[key];
@@ -452,13 +452,10 @@ imageCache.getSpriteImage = function(spriteCode, colorCode) {
     const spriteData = gfx.sprites[spriteCode];
     const palette = gfx.palettes[colorCode];
 
-    // sprite is transparent
-    palette[0][3] = 0;
-
-    if (spriteData == undefined)
-    {
-        console.log(spriteCode, colorCode);
-        throw new Error("x")
+    if (transparent) {
+        // set the first color in the palette to be transparent
+        // this is used for sprites that have a transparent background
+        palette[0][3] = 0;
     }
 
     for (let y = 0, yoffset = 0; y < SPRITE_HEIGHT; y++, yoffset += 64) {

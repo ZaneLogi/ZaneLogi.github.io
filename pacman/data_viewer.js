@@ -42,42 +42,46 @@ function renderScreen() {
         }
     }
 
-    const drawSprite = function(spr, pal, xpos, ypos) {
-        for (let y = 0; y < 16; y++) {
-            for (let x = 0; x < 16; x++) {
-                const colorIndex = spr[y][x];
-                const color = pal[colorIndex];
-                canvas_ctx.fillStyle = `rgb(${color[0]} ${color[1]} ${color[2]})`;
-                canvas_ctx.fillRect(xpos + x, ypos + y, 1, 1);
-            }
-        }
-    }
-
-    const sprites = gfx.sprites;
+    let ypos = 128 + 16 + 8;
 
     for (let index = 44, xpos = 0; index <= 48; index++, xpos += 16) {
-        //const spritePacman = sprites[index];
-        //const colorPacman = gfx.palettes[COLOR_PACMAN];
-        //drawSprite(spritePacman, colorPacman, xpos, 128+16+8);
-        const spritePacman = imageCache.getSpriteImage(index, COLOR_PACMAN);
-        canvas_ctx.drawImage(spritePacman, xpos, 128+16+8);
+        const spritePacman = imageCache.getSpriteImage(index, COLOR_PACMAN, false);
+        canvas_ctx.drawImage(spritePacman, xpos, ypos);
     }
 
+    ypos += 16;
     for (let index = 52, xpos = 0; index <= 63; index++, xpos += 16 ) {
-        const spritePacman = sprites[index];
-        const colorPacman = gfx.palettes[COLOR_PACMAN];
-        drawSprite(spritePacman, colorPacman, xpos, 128+16+8+16);
+        const spritePacman = imageCache.getSpriteImage(index, COLOR_PACMAN, false);
+        canvas_ctx.drawImage(spritePacman, xpos, ypos);
     }
 
+    ypos += 16;
     for (let index = 32, xpos = 0; index <= 39; index++, xpos += 16 ) {
-        const spriteGhost = sprites[index];
-        const colorGhost = gfx.palettes[COLOR_BLINKY];
-        drawSprite(spriteGhost, colorGhost, xpos, 128+16+8+32);
+        const spriteGhost = imageCache.getSpriteImage(index, COLOR_BLINKY, false);
+        canvas_ctx.drawImage(spriteGhost, xpos, ypos);
+    }
+
+    const fruits = [
+        [SPRITETILE_CHERRIES, COLOR_CHERRIES],
+        [SPRITETILE_STRAWBERRY, COLOR_STRAWBERRY],
+        [SPRITETILE_PEACH,      COLOR_PEACH],
+        [SPRITETILE_APPLE,      COLOR_APPLE],
+        [SPRITETILE_GRAPES,     COLOR_GRAPES],
+        [SPRITETILE_GALAXIAN,   COLOR_GALAXIAN],
+        [SPRITETILE_BELL,       COLOR_BELL],
+        [SPRITETILE_KEY,        COLOR_KEY]
+    ];
+
+    ypos += 16;
+    for (let index = 0, xpos = 0; index < fruits.length; index++, xpos += 16) {
+        const [spriteCode, colorCode] = fruits[index];
+        const spriteFruit = imageCache.getSpriteImage(spriteCode, colorCode, false);
+        canvas_ctx.drawImage(spriteFruit, xpos, ypos);
     }
 
     gfx.vid_clear(TILE_SPACE, COLOR_DOT);
     gfx.vid_color_text({x:9, y:0}, COLOR_DEFAULT, "HIGH SCORE");
-    gfx.init_playfield();
+    gfx.game_init_playfield();
     gfx.vid_color_text({x:9, y:14}, 0x5, "PLAYER ONE");
     gfx.vid_color_text({x:11, y:20}, 0x9, "READY!");
 
