@@ -230,7 +230,7 @@ class Pacman extends Actor {
             for (const ghost of Actor.game.ghosts) {
                 ghost.trig_frightened.start()
             }
-            //snd_start(1, &snd_frightened);
+            audio.snd_start(1, 'frightened');
         }
         // check if Pacman eats the bonus fruit
         if (Actor.game.fruit.active_fruit != FRUIT.NONE) {
@@ -241,7 +241,7 @@ class Pacman extends Actor {
                 Actor.game.score += score;
                 gfx.vid_fruit_score(Actor.game.fruit.active_fruit);
                 Actor.game.fruit.active_fruit = FRUIT.NONE;
-                //snd_start(2, &snd_eatfruit);
+                audio.snd_start(2, 'eatfruit');
             }
         }
         // check if Pacman collides with any ghost
@@ -259,11 +259,11 @@ class Pacman extends Actor {
                 // increase score by 20, 40, 80, 160
                 Actor.game.score += 10 * (1<<Actor.game.num_ghosts_eaten);
                 Actor.game.freeze |= FREEZETYPE.EAT_GHOST;
-                //snd_start(2, &snd_eatghost);
+                audio.snd_start(2, 'eatghost');
             }
             else if (!Actor.game.god_mode && ((ghost.state == GHOSTSTATE.CHASE) || (ghost.state == GHOSTSTATE.SCATTER))) {
                 // otherwise, ghost eats Pacman, Pacman loses a life
-                //snd_clear();
+                audio.snd_clear();
                 this.trig_pacman_eaten.start();
                 Actor.game.freeze |= FREEZETYPE.DEAD;
                 // if Pacman has any lives left start a new round, otherwise start the game-over sequence

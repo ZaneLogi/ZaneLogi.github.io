@@ -84,6 +84,8 @@ game.doFrame = function () {
     this.ticks++;
     this.processEvents();
 
+    audio.game_tick();
+
     if (this.trig_intro_started.now()) {
         this.gamestate = GAMESTATE.INTRO;
     }
@@ -107,7 +109,7 @@ game.doFrame = function () {
 game.intro_tick = function() {
     // on intro-state enter, enable input and draw any initial text
     if (this.trig_intro_started.now()) {
-        //snd_clear();
+        audio.snd_clear();
         gfx.spr_clear();
         gfx.trig_gfx_fadein.start();
         input.enable();
@@ -367,7 +369,7 @@ game.game_update_dots_eaten = function() {
     if (this.num_dots_eaten == NUM_DOTS) {
         // all dots eaten, round won
         this.trig_round_won.start();
-        //snd_clear();
+        audio.snd_clear();
     }
     else if ((this.num_dots_eaten == 70) || (this.num_dots_eaten == 170)) {
         // at 70 and 170 dots, show the bonus fruit
@@ -376,10 +378,10 @@ game.game_update_dots_eaten = function() {
 
     // play alternating crunch sound effect when a dot has been eaten
     if (this.num_dots_eaten & 1) {
-        //snd_start(2, &snd_eatdot1);
+        audio.snd_start(2, 'eatdot1');
     }
     else {
-        //snd_start(2, &snd_eatdot2);
+        audio.snd_start(2, 'eatdot2');
     }
 }
 
@@ -403,7 +405,7 @@ game.game_tick = function () {
     if (this.trig_game_started.now()) {
         gfx.trig_gfx_fadein.start();
         this.trig_ready_started.start_after(2*prelude_ticks_per_sec);
-        //snd_start(0, &snd_prelude);
+        audio.snd_start(0, 'prelude');
         this.game_init();
     }
 
@@ -418,17 +420,16 @@ game.game_tick = function () {
         this.freeze &= ~FREEZETYPE.READY;
         // clear the 'READY!' message
         gfx.vid_color_text({x:11, y:20}, 0x10, "      ");
-        //snd_start(1, &snd_weeooh);
+        audio.snd_start(1, 'weeooh');
     }
 
     // activate/deactivate bonus fruit
     this.fruit.update();
 
     // stop frightened sound and start weeooh sound
-    // TODO: pill_eaten was moved to class Pacman
-    //if (after_once(state.game.pill_eaten, levelspec(state.game.round).fright_ticks)) {
-    //    snd_start(1, &snd_weeooh);
-    //}
+    if (this.pacman.trig_pill_eaten.after_once(levelspec(this.round).fright_ticks)) {
+        audio.snd_start(1, 'weeooh');
+    }
 
     // if game is frozen because Pacman ate a ghost, unfreeze after a while
     if (this.freeze & FREEZETYPE.EAT_GHOST) {
@@ -438,10 +439,9 @@ game.game_tick = function () {
     }
 
     // play pacman-death sound
-    // TODO: pacman_eaten was moved to class Pacman
-    //if (after_once(state.game.pacman_eaten, PACMAN_EATEN_TICKS)) {
-    //    snd_start(2, &snd_dead);
-    //}
+    if (this.pacman.trig_pacman_eaten.after_once(PACMAN_EATEN_TICKS)) {
+        audio.snd_start(2, 'dead');
+    }
 
     // the actually important part: update Pacman and ghosts, update dynamic
     // background tiles, and update the sprite images
