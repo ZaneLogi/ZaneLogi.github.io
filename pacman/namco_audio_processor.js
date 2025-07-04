@@ -58,6 +58,7 @@ class NamcoAudioProcessor extends AudioWorkletProcessor {
         this.port.onmessage = this.onmessage.bind(this);
 
         this.frame_count = 0; // number calls of process
+        this.sound_enabled = true;
     }
 
     onmessage(e) {
@@ -148,6 +149,10 @@ class NamcoAudioProcessor extends AudioWorkletProcessor {
         else if (msg.type === 'stop_sound') {
             this.snd_clear();
             //console.log(`Sound stopped`);
+        }
+        else if (msg.type === 'toggle_sound') {
+            this.sound_enabled = !this.sound_enabled;
+            console.log(`sound enabled: ${this.sound_enabled}`);
         }
     }
 
@@ -273,7 +278,7 @@ class NamcoAudioProcessor extends AudioWorkletProcessor {
 
         this.voice_tick_accum = 0; // voice tick accumulator for 96 kHz ticks
         this.sample_accum = 0; // sample accumulator for per-frame sample generation
-        
+
         this.sample_buffer = new Float32Array(NUM_SAMPLES);
         this.num_samples = 0; // current number of samples in the sample buffer
     }
@@ -466,8 +471,15 @@ class NamcoAudioProcessor extends AudioWorkletProcessor {
 
                 console.assert(this.num_samples <= NUM_SAMPLES, "Sample buffer overflow");
 
-                for (let j = 0; j < sample_count; j++) {
-                    output[i + j] = this.sample_buffer[j]; // copy samples to output
+                if (this.sound_enabled) {
+                    for (let j = 0; j < sample_count; j++) {
+                        output[i + j] = this.sample_buffer[j]; // copy samples to output
+                    }
+                }
+                else {
+                    for (let j = 0; j < sample_count; j++) {
+                        output[i + j] = 0;
+                    }
                 }
 
                 this.num_samples = 0; // reset sample buffer for the next run

@@ -177,6 +177,7 @@ game.intro_tick = function() {
         input.disable();
         gfx.trig_gfx_fadeout.start();
         this.trig_game_started.start_after(FADE_TICKS);
+        audio_init();
     }
 }
 
@@ -398,8 +399,8 @@ game.game_update_actors = function() {
 }
 
 game.game_tick = function () {
-    const prelude_ticks_per_sec = 45;
-    const ready_start_ticks_per_sec = 30;
+    const prelude_ticks_per_sec = 60;
+    const ready_start_ticks_per_sec = 60;
 
     // initialize game state once
     if (this.trig_game_started.now()) {
