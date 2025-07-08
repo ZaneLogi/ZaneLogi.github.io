@@ -499,6 +499,8 @@ const init_data = {
     ref_alien_dx: 2,    // Reference alien delta X
     ref_alien_y: 0x78,  // Reference alien Y coordinate
     ref_alien_x: 0x38,  // Reference alien X coordinate
+    alien_cursor_y: 0x78,
+    alien_cursor_x: 0x38,
     rack_dir: 0,        // 0 = right, 1 = left
     rack_down_delta: -8,
 };
