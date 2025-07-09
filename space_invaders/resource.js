@@ -4,6 +4,9 @@ const resource = {};
 
 resource.init = function() {
     this.playerImage = this.loadSprite(sprites_data.player, 16, 8);
+    this.playerShotImage = this.loadSprite(sprites_data.player_shot, 1, 8);
+    this.shotExplodingImage = this.loadSprite(sprites_data.shot_exploding, 8, 8);
+
     this.shieldImage = this.loadSprite(sprites_data.shield, 22, 16);
 
     this.alienImages = [
@@ -74,9 +77,9 @@ resource.bytesTo2DArray = function(columnBytes, heightBytes = 1, width = 8) {
         const bitIndexInByte = 7 - (row % 8); // MSB is top
 
         for (let col = 0; col < width; col++) {
-        const byte = columnBytes[col * heightBytes + byteIndexInColumn];
-        const bit = (byte >> bitIndexInByte) & 1;
-        rowPixels.push(bit);
+            const byte = columnBytes[col * heightBytes + byteIndexInColumn];
+            const bit = (byte >> bitIndexInByte) & 1;
+            rowPixels.push(bit);
         }
 
         result.push(rowPixels);

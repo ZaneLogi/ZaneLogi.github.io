@@ -503,4 +503,20 @@ const init_data = {
     alien_cursor_x: 0x38,
     rack_dir: 0,        // 0 = right, 1 = left
     rack_down_delta: -8,
+
+    obj0_timer_msb: 0x00,
+    obj0_timer_lsb: 0x80,
+    obj0_timer_extra: 0x00,
+    player_y: 0x20,
+    player_x: 0x30,
+
+    obj1_timer_msb: 0x00,
+    obj1_timer_lsb: 0x00,
+    obj1_timer_extra: 0x00,
+    player_shot_status: 0x00,
+    blow_up_timer: 0x10,
+    obj1_y: 0x28,
+    obj1_x: 0x30,
+    shot_delta: 4,
+    fire_bounce: false,
 };
