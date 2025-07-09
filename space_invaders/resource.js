@@ -24,6 +24,8 @@ resource.init = function() {
         ]
     ];
 
+    this.alienExplodingImage = this.loadSprite(sprites_data.alien_exploding, 16, 8);
+
     this.saucerImages = [
         this.loadSprite(sprites_data.saucer, 24, 8),
         this.loadSprite(sprites_data.saucer_exploding, 24, 8)

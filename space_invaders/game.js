@@ -26,9 +26,21 @@ game.init = function () {
 game.doFrame = function () {
     this.processEvents();
 
-    this.drawAlien();
+    if (!this.alien_is_exploding) {
+        this.drawAlien();
+    }
+    else {
+        this.exp_alien_timer--;
+        if (this.exp_alien_timer == 0) {
+            this.eraseRect(this.exp_alien_x, this.exp_alien_y, 16, 8);
+            this.gameObjs[1].player_shot_status = 4; // the alien has exploded
+            this.alien_is_exploding = false;
+        }
+    }
     this.runGameObjs();
-    this.nextCursorAlien();
+    if (!this.alien_is_exploding) {
+        this.nextCursorAlien();
+    }
 }
 
 game.initGame = function() {
@@ -142,6 +154,8 @@ game.drawAlien = function() {
         const y = this.level_data.alien_cursor_y;
         const image = resource.alienImages[alienType][alienFrame];
 
+        // as the alien images have blank linkes at the left and right sides,
+        // no need to erase the old one if moving horizontally
         this.drawSprite(x, y, image);
 
         // erase the old one if moving vertically
@@ -155,6 +169,10 @@ game.drawAlien = function() {
 }
 
 game.nextCursorAlien = function() {
+    // move the alien cursor index to the next one.
+    // if it runs over the last one,
+    // it will move the reference alien first then go back to the first one.
+    // if the cursor alien is not alive, move to the next until it is alive. 
     for (let i = 0; i < 55; i++) {
         if (this.level_data.alien_cur_index >= 54) {
             this.level_data.alien_cur_index = 0;
@@ -180,6 +198,7 @@ game.moveRefAlien = function() {
 
     const LEFT_BOUND = 41, RIGHT_BOUND = 245;
 
+    // find the left-most and right-most side of the alien rack.
     let leftSide = 999, rightSide = -999;
     for (let i = 0; i < 55; ) {
         let x = this.level_data.ref_alien_x;
@@ -195,6 +214,8 @@ game.moveRefAlien = function() {
         }
     }
 
+    // if reaches the boundary in the either side,
+    // change the direction and move 8 pixels down
     if (leftSide < LEFT_BOUND || rightSide >= RIGHT_BOUND) {
         this.level_data.ref_alien_dx = -this.level_data.ref_alien_dx;
         this.level_data.ref_alien_y -= 8;
@@ -204,11 +225,15 @@ game.moveRefAlien = function() {
         this.level_data.ref_alien_dy = 0;
     }
 
+    // toggle the alien frame
     this.level_data.alien_frame = 1 - this.level_data.alien_frame;
+    // move in the x direction
     this.level_data.ref_alien_x += this.level_data.ref_alien_dx;
 }
 
 game.setAlienCoords = function() {
+    // based on the position of the reference alien,
+    // calculate the screen position of the cursor alien with its row
     const alienIndex = this.level_data.alien_cur_index;
     const row = Math.floor(alienIndex/11);
     const col = alienIndex % 11;
@@ -250,17 +275,28 @@ game.drawShotExploding = function(obj) {
     this.drawSprite(x, y, image);
 }
 
+game.drawAlienExploding = function() {
+    const x = this.exp_alien_x;
+    const y = this.exp_alien_y;
+    const image = resource.alienExplodingImage;
+    this.drawSprite(x, y, image);
+}
+
 game.handlePlayerShip = function(obj) {
     this.movePlayerShip(obj);
     this.drawPlayerShip(obj);
 }
 
 game.checkShotHit = function(obj) {
-    // find the row
-    const y = this.level_data.ref_alien_y + this.level_data.ref_alien_dy;
-    const row = Math.floor((obj.shot_y - (y + 8)) / 16);
+    const shot_y = obj.shot_y - 4; // the solid potion in the shot image
+
+    // find the row based on the bottom line of the reference alien
+    let bottom_y = this.level_data.ref_alien_y + this.level_data.ref_alien_dy - 15;
+    const row = Math.floor((shot_y - bottom_y) / 16);
     if (row < 0 || row > 4)
         return false;
+
+    bottom_y += row * 16;
 
     // find the column
     let x = this.level_data.ref_alien_x;
@@ -290,19 +326,44 @@ game.checkShotHit = function(obj) {
 
     // precise check
     const type = Math.floor(row/4); // 0 or 1
+    // the aliens at the row 0, 1, 2, 3 have 2 blank lines at the both sides
+    // the aliens at the row 4 have 3 blank lines at the both sides.
     if (dist_x <= 2 + type || dist_x > 14 - type)
         return false;
 
-    if (index > this.level_data.alien_cur_index) {
-        if (this.level_data.ref_alien_dy > 0) {
-
+    let dist_y = 0;
+    let target_y = 0;
+    // the aliens are moving down
+    if (this.level_data.ref_alien_dy > 0) {
+        // the aliens after the cursor one are not moving down yet.
+        if (index > this.level_data.alien_cur_index) {
+            // on the top part of the 16 x 16 area
+            dist_y = shot_y - (bottom_y + 8);
+            target_y = bottom_y + 15;
+        }
+        else {
+            // on the bottom part of the 16 x 16 area
+            dist_y = shot_y - bottom_y;
+            target_y = bottom_y + 7
         }
     }
+    else {
+        // on the top part of the 16 x 16 area
+        dist_y = shot_y - (bottom_y + 8);
+        target_y = bottom_y + 15;
+    }
 
-    console.log(`hit ${index}: ${target_x}, ${y}`);
+    if (dist_y < -4 || dist_y > 4)
+        return false;
+
+    console.log(`hit ${index}: ${target_x}, ${bottom_y}`);
 
     this.level_data.aliens[index] = 0;
-    this.eraseRect(target_x, y + row * 16, 16, 16);
+    this.eraseRect(target_x, bottom_y + 15, 16, 16);
+
+    this.exp_alien_y = target_y;
+    this.exp_alien_x = target_x;
+    this.exp_alien_timer = 0x10;
 
     return true;
 }
@@ -349,9 +410,13 @@ game.handlePlayerShot = function(obj) {
             obj.player_shot_status = 3; // mark player shot hit something other than alien
         }
         else if (this.checkShotHit(obj)) {
-            obj.player_shot_status = 3;
+            obj.player_shot_status = 5;
+            this.alien_is_exploding = true;
+            this.drawAlienExploding();
         }
-        this.drawPlayerShot(obj);
+        else {
+            this.drawPlayerShot(obj);
+        }
         this.eraseRect(obj.shot_x, prev_y - 4, 1, 4);
     }
     else if (obj.player_shot_status == 3) {
@@ -372,6 +437,9 @@ game.handlePlayerShot = function(obj) {
     }
     else if (obj.player_shot_status == 5) {
 
+    }
+    else if (obj.player_shot_status == 4) {
+        obj.player_shot_status = 0;
     }
 }
 
