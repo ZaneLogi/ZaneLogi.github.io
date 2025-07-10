@@ -490,8 +490,12 @@ const splash_screen_animation = [
     },
 ];
 
+const shot_reload_rate = [0x30, 0x10, 0x0B, 0x08, 0x07];
+const alien_reload_score_table = [0x02, 0x10, 0x20, 0x30];
+
 const init_data = {
     alien_is_exploding: false,
+    exp_alien_timer: 0x10, // alien explosion timer
     alien_row: 0,       // Row number of current alien (cursor)
     alien_frame: 0,     // Animation frame number (0 or 1) for current alien (cursor)
     alien_cur_index: 0, // Alien cursor index (from 0 to 54)
@@ -504,19 +508,78 @@ const init_data = {
     rack_dir: 0,        // 0 = right, 1 = left
     rack_down_delta: -8,
 
-    obj0_timer_msb: 0x00,
-    obj0_timer_lsb: 0x80,
-    obj0_timer_extra: 0x00,
+    num_aliens: 55,
+
+    player_ok: 1, // 1 means OK, 0 means not
+    enable_alien_fire: false, // true means alien can fire, false means not
+    alien_fire_delay: 0x30,
+};
+
+const init_player_ship_data = {
+    timer_msb: 0x00,
+    timer_lsb: 0x80,
+    timer_extra: 0x00,
+    player_alive: 0xff, // Player is alive (FF=alive). Toggles between 0 and 1 for blow-up images.
+    exp_animate_timer: 5,
+    exp_animate_cnt: 0x0c,
     player_y: 0x20,
     player_x: 0x30,
+};
 
-    obj1_timer_msb: 0x00,
-    obj1_timer_lsb: 0x00,
-    obj1_timer_extra: 0x00,
+const init_player_shot_data = {
+    timer_msb: 0x00,
+    timer_lsb: 0x00,
+    timer_extra: 0x00,
     player_shot_status: 0x00,
     blow_up_timer: 0x10,
-    obj1_y: 0x28,
-    obj1_x: 0x30,
+    shot_start_y: 0x28,
     shot_delta: 4,
     fire_bounce: false,
 };
+
+const init_rolling_shot_data = {
+    timer_msb: 0x00,
+    timer_lsb: 0x00,
+    timer_extra: 0x00,
+    shot_status: 0,
+    shot_step_cnt: 0,
+    shot_track: 0, // A 0 means this shot tracks the player
+    shot_column_offset: 0,
+    shot_blow_cnt: 4,
+    shot_y: 0,
+    shot_x: 0,
+};
+
+const init_plunger_shot_data = {
+    timer_msb: 0x00,
+    timer_lsb: 0x00,
+    timer_extra: 0x00,
+    shot_status: 0,
+    shot_step_cnt: 0,
+    shot_track: 1, // A 1 means this shot does not track the player
+    shot_column_offset: 0,
+    shot_blow_cnt: 4,
+    shot_y: 0,
+    shot_x: 0,
+};
+
+const init_squiggly_shot_data = {
+    timer_msb: 0x00,
+    timer_lsb: 0x00,
+    timer_extra: 0x00,
+    shot_status: 0,
+    shot_step_cnt: 0,
+    shot_track: 1, // A 1 means this shot does not track the player
+    shot_column_offset: 6,
+    shot_blow_cnt: 4,
+    shot_y: 0,
+    shot_x: 0,
+};
+
+// The "plunger" shot uses index 00-0F (inclusive)
+// The "squiggly" shot uses index 06-14 (inclusive)
+// The "rolling" shot targets the player
+const column_fire_table = [
+    0x01, 0x07, 0x01, 0x01, 0x01, 0x04, 0x0B, 0x01, 0x06, 0x03, 0x01, 0x01, 0x0B, 0x09, 0x02, 0x08,
+    0x02, 0x0B, 0x04, 0x07, 0x0A
+];

@@ -3,41 +3,71 @@
 const resource = {};
 
 resource.init = function() {
-    this.playerImage = this.loadSprite(sprites_data.player, 16, 8);
-    this.playerShotImage = this.loadSprite(sprites_data.player_shot, 1, 8);
-    this.shotExplodingImage = this.loadSprite(sprites_data.shot_exploding, 8, 8);
+    const green = [0x00, 0xff, 0x00, 0xff];
+    const white = [0xff, 0xff, 0xff, 0xff];
+    this.playerImage = this.loadSprite(sprites_data.player, 16, 8, green);
+    this.playerBlowupImages = [
+        this.loadSprite(sprites_data.player_blowup1, 16, 8, green),
+        this.loadSprite(sprites_data.player_blowup2, 16, 8, green),
+    ];
 
-    this.shieldImage = this.loadSprite(sprites_data.shield, 22, 16);
+    this.playerShotImage = this.loadSprite(sprites_data.player_shot, 1, 8, white, true);
+    this.shotExplodingImage = this.loadSprite(sprites_data.shot_exploding, 8, 8, white);
+
+    this.shieldImage = this.loadSprite(sprites_data.shield, 22, 16, green);
 
     this.alienImages = [
         [
-            this.loadSprite(sprites_data.alien_a0, 16, 8),
-            this.loadSprite(sprites_data.alien_a1, 16, 8)
+            this.loadSprite(sprites_data.alien_a0, 16, 8, white),
+            this.loadSprite(sprites_data.alien_a1, 16, 8, white)
         ],
         [
-            this.loadSprite(sprites_data.alien_b0, 16, 8),
-            this.loadSprite(sprites_data.alien_b1, 16, 8)
+            this.loadSprite(sprites_data.alien_b0, 16, 8, white),
+            this.loadSprite(sprites_data.alien_b1, 16, 8, white)
         ],
         [
-            this.loadSprite(sprites_data.alien_c0, 16, 8),
-            this.loadSprite(sprites_data.alien_c1, 16, 8)
+            this.loadSprite(sprites_data.alien_c0, 16, 8, white),
+            this.loadSprite(sprites_data.alien_c1, 16, 8, white)
         ]
     ];
 
-    this.alienExplodingImage = this.loadSprite(sprites_data.alien_exploding, 16, 8);
+    this.alienExplodingImage = this.loadSprite(sprites_data.alien_exploding, 16, 8, white);
+
+    this.alienShotImages = [
+        [
+            this.loadSprite(sprites_data.roll_shot[0], 3, 8, white),
+            this.loadSprite(sprites_data.roll_shot[1], 3, 8, white),
+            this.loadSprite(sprites_data.roll_shot[2], 3, 8, white),
+            this.loadSprite(sprites_data.roll_shot[3], 3, 8, white),
+        ],
+        [
+            this.loadSprite(sprites_data.pluger_shot[0], 3, 8, white),
+            this.loadSprite(sprites_data.pluger_shot[1], 3, 8, white),
+            this.loadSprite(sprites_data.pluger_shot[2], 3, 8, white),
+            this.loadSprite(sprites_data.pluger_shot[3], 3, 8, white),
+        ],
+        [
+            this.loadSprite(sprites_data.squigly_shot[0], 3, 8, white),
+            this.loadSprite(sprites_data.squigly_shot[1], 3, 8, white),
+            this.loadSprite(sprites_data.squigly_shot[2], 3, 8, white),
+            this.loadSprite(sprites_data.squigly_shot[3], 3, 8, white),
+        ]
+    ];
+
+    this.alienShotExplodingImage = this.loadSprite(sprites_data.alien_shot_explding, 6, 8, white);
 
     this.saucerImages = [
-        this.loadSprite(sprites_data.saucer, 24, 8),
-        this.loadSprite(sprites_data.saucer_exploding, 24, 8)
+        this.loadSprite(sprites_data.saucer, 24, 8, white),
+        this.loadSprite(sprites_data.saucer_exploding, 24, 8, white)
     ];
 
     this.chrImages = [];
     for (const chData of sprites_data.characters) {
-        this.chrImages.push(this.loadSprite(chData, 8, 8));
+        this.chrImages.push(this.loadSprite(chData, 8, 8, white));
     }
 }
 
-resource.loadSprite = function(spriteData, width, height, log = false) {
+resource.loadSprite = function(spriteData, width, height, color, transparent = false, log = false) {
     const heightBytes = Math.floor((height+7)/8);
     const widthBytes = width;
     console.assert(spriteData.length == heightBytes * widthBytes);
@@ -50,10 +80,12 @@ resource.loadSprite = function(spriteData, width, height, log = false) {
     const imageData = source_ctx.getImageData(0, 0, source.width, source.height);
     const data = imageData.data;
 
+    const blank = [0x00, 0x00, 0x00, (transparent ? 0x00 : 0xff)];
+
     let offset = 0;
     for (const row of pixels) {
         for (const bit of row) {
-            data.set((bit ? [0x00, 0xff, 0x00, 0xff] : [0x00, 0x00, 0x00, 0xff]), offset);
+            data.set((bit ? color : blank), offset);
             offset += 4;
         }
     }

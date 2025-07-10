@@ -9,7 +9,11 @@ const game = {
 
 game.init = function () {
     this.canvas = document.querySelector('canvas');
-    this.canvas_ctx = this.canvas.getContext('2d');
+    // https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently
+    // CanvasSettings objects with will read frequently equal to true tell the user agent that
+    // the webpage is likely to perform many readback operations
+    // and that it is advantageous to use a software canvas.
+    this.canvas_ctx = this.canvas.getContext('2d', {willReadFrequently: true});
     this.window_width = this.canvas.width;
     this.window_height = this.canvas.height;
 
@@ -29,45 +33,46 @@ game.doFrame = function () {
     if (!this.alien_is_exploding) {
         this.drawAlien();
     }
-    else {
-        this.exp_alien_timer--;
-        if (this.exp_alien_timer == 0) {
-            this.eraseRect(this.exp_alien_x, this.exp_alien_y, 16, 8);
-            this.gameObjs[1].player_shot_status = 4; // the alien has exploded
-            this.alien_is_exploding = false;
-        }
-    }
+
     this.runGameObjs();
-    if (!this.alien_is_exploding) {
+
+    if (this.level_data.num_aliens == 0) {
+        // all aliens gone, end of turn
+    }
+    else if (!this.alien_is_exploding) {
         this.nextCursorAlien();
     }
+
+    this.adjustShotReloadRate();
 }
 
 game.initGame = function() {
     this.level_data = Object.assign({}, init_data);
     this.level_data.aliens = new Array(55).fill(1);
+    this.aShotReloadRate = 8;
 
     this.gameObjs = [
-        {
-            timer_msb: init_data.obj0_timer_msb,
-            timer_lsb: init_data.obj0_timer_lsb,
-            timer_extra: init_data.obj0_timer_extra,
-            player_y: init_data.player_y,
-            player_x: init_data.player_x,
-            cb: (obj) => this.handlePlayerShip(obj),
-        },
-        {
-            timer_msb: init_data.obj1_timer_msb,
-            timer_lsb: init_data.obj1_timer_lsb,
-            timer_extra: init_data.obj1_timer_extra,
-            player_shot_status: init_data.player_shot_status,
-            shot_start_y: init_data.obj1_y,
-            shot_delta: init_data.shot_delta,
-            blow_up_timer: init_data.blow_up_timer,
-            fire_bounce: init_data.fire_bounce,
-            cb: (obj) => this.handlePlayerShot(obj),
-        }
+        // Game object 0: Move/draw the player
+        Object.assign({}, init_player_ship_data),
+        // Game object 1: Move/draw the player shot
+        Object.assign({}, init_player_shot_data),
+        // Game object 2: Alien rolling-shot (targets player specifically)
+        Object.assign({}, init_rolling_shot_data),
+        // Game object 3: Alien plunger-shot
+        Object.assign({}, init_plunger_shot_data),
+        // Game object 4: Flying Saucer OR squiggly shot
+        Object.assign({}, init_squiggly_shot_data),
     ];
+
+    this.gameObjs[0].cb = (obj) => this.handlePlayerShip(obj);
+    this.gameObjs[1].cb = (obj) => this.handlePlayerShot(obj);
+    this.gameObjs[2].cb = (obj) => this.handleRollingShot(obj);
+    this.gameObjs[3].cb = (obj) => this.handlePlungerShot(obj);
+    this.gameObjs[4].cb = (obj) => this.handleSquigglyShot(obj);
+
+    this.gameObjs[2].images = resource.alienShotImages[0];
+    this.gameObjs[3].images = resource.alienShotImages[1];
+    this.gameObjs[4].images = resource.alienShotImages[2];
 
     this.drawShield();
     this.drawBottomLine();
@@ -99,6 +104,19 @@ game.runGameObjs = function() {
             obj.cb(obj);
         }
     }
+}
+
+game.adjustShotReloadRate = function() {
+    let score = 0; // todo
+    score = (score >> 8); // high byte
+    for (let i = 0; i < alien_reload_score_table.length; i++) {
+        if (score <= alien_reload_score_table[i]) {
+            this.aShotReloadRate = shot_reload_rate[i];
+            return;
+        }
+    }
+
+    this.aShotReloadRate = shot_reload_rate[alien_reload_score_table.length];
 }
 
 game.convertCoords = function(pt) {
@@ -142,7 +160,21 @@ game.drawShield = function() {
 
 game.drawBottomLine = function() {
     this.canvas_ctx.fillStyle = "#00ff00";
-    this.canvas_ctx.fillRect(0, this.window_height - 1 - 16, this.window_width, 1);
+    this.canvas_ctx.fillRect(0, this.window_height - 1 - 17, this.window_width, 1);
+}
+
+game.drawPlayerShip = function(obj) {
+    const playerX = obj.player_x;
+    const playerY = obj.player_y;
+    const playerImage = resource.playerImage;
+    this.drawSprite(playerX, playerY, playerImage);
+}
+
+game.drawPlayerBlowup = function(obj) {
+    const x = obj.player_x;
+    const y = obj.player_y;
+    const image = resource.playerBlowupImages[obj.player_alive];
+    this.drawSprite(x, y, image);
 }
 
 game.drawAlien = function() {
@@ -166,6 +198,40 @@ game.drawAlien = function() {
                 16, 8);
         }
     }
+}
+
+game.drawPlayerShot = function(obj) {
+    const x = obj.shot_x;
+    const y = obj.shot_y;
+    const image = resource.playerShotImage;
+    this.drawSprite(x, y, image);
+}
+
+game.drawShotExploding = function(obj) {
+    const x = obj.shot_x;
+    const y = obj.shot_y;
+    const image = resource.shotExplodingImage;
+    this.drawSprite(x, y, image);
+}
+
+game.drawAlienExploding = function() {
+    const x = this.exp_alien_x;
+    const y = this.exp_alien_y;
+    const image = resource.alienExplodingImage;
+    this.drawSprite(x, y, image);
+}
+
+game.drawAlienShot = function(obj) {
+    const pt = this.convertCoords({x: obj.shot_x, y: obj.shot_y});
+    const imageIndex = obj.shot_step_cnt % 4;
+    this.canvas_ctx.drawImage(obj.images[imageIndex], pt.x, pt.y);
+}
+
+game.drawAlienShotExploding = function(obj) {
+    const x = obj.shot_x;
+    const y = obj.shot_y;
+    const image = resource.alienShotExplodingImage;
+    this.drawSprite(x, y, image);
 }
 
 game.nextCursorAlien = function() {
@@ -245,13 +311,6 @@ game.setAlienCoords = function() {
     this.level_data.alien_cursor_y = y;
 }
 
-game.drawPlayerShip = function(obj) {
-    const playerX = obj.player_x;
-    const playerY = obj.player_y;
-    const playerImage = resource.playerImage;
-    this.drawSprite(playerX, playerY, playerImage);
-}
-
 game.movePlayerShip = function(obj) {
     if (input.left_pressed && obj.player_x > 0x30) {
         obj.player_x--;
@@ -261,30 +320,40 @@ game.movePlayerShip = function(obj) {
     }
 }
 
-game.drawPlayerShot = function(obj) {
-    const x = obj.shot_x;
-    const y = obj.shot_y;
-    const image = resource.playerShotImage;
-    this.drawSprite(x, y, image);
-}
-
-game.drawShotExploding = function(obj) {
-    const x = obj.shot_x;
-    const y = obj.shot_y;
-    const image = resource.shotExplodingImage;
-    this.drawSprite(x, y, image);
-}
-
-game.drawAlienExploding = function() {
-    const x = this.exp_alien_x;
-    const y = this.exp_alien_y;
-    const image = resource.alienExplodingImage;
-    this.drawSprite(x, y, image);
-}
-
 game.handlePlayerShip = function(obj) {
-    this.movePlayerShip(obj);
-    this.drawPlayerShip(obj);
+    if (obj.player_alive != 0xff) {
+        // the player ship is blowing up
+        obj.exp_animate_timer--; // Decrement the blow-up delay
+        if (obj.exp_animate_timer != 0)
+            return;
+        this.level_data.player_ok = 0;
+        this.level_data.enable_alien_fire = false; // disable alien shots
+        this.level_data.alien_fire_delay = 0x30; // reset the delay
+        obj.exp_animate_timer = 5;
+        obj.exp_animate_cnt--;
+        if (obj.exp_animate_cnt != 0) {
+            obj.player_alive = (obj.player_alive + 1 ) & 0x01; // toggle (0, 1, 0, 1 ...)
+            this.drawPlayerBlowup(obj);
+        }
+        else {
+            // Blow up finished
+            this.eraseRect(obj.player_x, obj.player_y, 16, 8);
+
+            // reset
+            Object.assign(obj, init_player_ship_data);
+        }
+    }
+    else {
+        this.level_data.player_ok = 1;
+        if (this.level_data.alien_fire_delay > 0) {
+            this.level_data.alien_fire_delay--;
+        }
+        else {
+            this.level_data.enable_alien_fire = true;
+        }
+        this.movePlayerShip(obj);
+        this.drawPlayerShip(obj);
+    }
 }
 
 game.checkShotHit = function(obj) {
@@ -302,7 +371,6 @@ game.checkShotHit = function(obj) {
     let x = this.level_data.ref_alien_x;
     let index = row * 11;
     let found = false;
-    let dist_x = 0;
     let target_x = 0;
     for (let col = 0; col < 11; col++, index++, x += 16) {
         if (this.level_data.aliens[index] == 0)
@@ -315,7 +383,6 @@ game.checkShotHit = function(obj) {
 
         if (x1 <= obj.shot_x && obj.shot_x < x1 + 16) {
             found = true;
-            dist_x = obj.shot_x - x1;
             target_x = x1;
             break;
         }
@@ -324,46 +391,29 @@ game.checkShotHit = function(obj) {
     if (!found)
         return false;
 
-    // precise check
-    const type = Math.floor(row/4); // 0 or 1
-    // the aliens at the row 0, 1, 2, 3 have 2 blank lines at the both sides
-    // the aliens at the row 4 have 3 blank lines at the both sides.
-    if (dist_x <= 2 + type || dist_x > 14 - type)
-        return false;
-
-    let dist_y = 0;
     let target_y = 0;
     // the aliens are moving down
     if (this.level_data.ref_alien_dy > 0) {
         // the aliens after the cursor one are not moving down yet.
         if (index > this.level_data.alien_cur_index) {
             // on the top part of the 16 x 16 area
-            dist_y = shot_y - (bottom_y + 8);
             target_y = bottom_y + 15;
         }
         else {
             // on the bottom part of the 16 x 16 area
-            dist_y = shot_y - bottom_y;
             target_y = bottom_y + 7
         }
     }
     else {
         // on the top part of the 16 x 16 area
-        dist_y = shot_y - (bottom_y + 8);
         target_y = bottom_y + 15;
     }
 
-    if (dist_y < -4 || dist_y > 4)
-        return false;
-
-    console.log(`hit ${index}: ${target_x}, ${bottom_y}`);
-
     this.level_data.aliens[index] = 0;
-    this.eraseRect(target_x, bottom_y + 15, 16, 16);
+    this.eraseRect(target_x, target_y, 16, 8);
 
     this.exp_alien_y = target_y;
     this.exp_alien_x = target_x;
-    this.exp_alien_timer = 0x10;
 
     return true;
 }
@@ -409,20 +459,43 @@ game.handlePlayerShot = function(obj) {
             // Player shot leaving playfield
             obj.player_shot_status = 3; // mark player shot hit something other than alien
         }
-        else if (this.checkShotHit(obj)) {
-            obj.player_shot_status = 5;
-            this.alien_is_exploding = true;
-            this.drawAlienExploding();
-        }
         else {
-            this.drawPlayerShot(obj);
+            // before drawing the new shot, check if there is something
+            const pt = this.convertCoords({x: obj.shot_x, y: obj.shot_y});
+            const imageData = this.canvas_ctx.getImageData(pt.x, pt.y + 4, 1, 4); // see the comment of the canvas context creation
+            const data = imageData.data;
+            let collision = false;
+            for (let i = 0; i < 16; i += 4) {
+                // 4 pixels, if not transparent, check (r,g,b)
+                if (data[i+3] != 0 && (data[i] != 0 || data[i+1] != 0 || data[i+2] != 0)) {
+                    collision = true;
+                    break;
+                }
+            }
+
+            if (collision) {
+                if (this.checkShotHit(obj)) {
+                    // an alien is hit
+                    obj.player_shot_status = 5;
+                    this.alien_is_exploding = true;
+                    this.exp_alien_timer = init_data.exp_alien_timer; // set timer value (0x10)
+                    this.drawAlienExploding();
+                }
+                else {
+                    // hit something other than aliens
+                    obj.player_shot_status = 3; // mark player shot hit something other than alien
+                }
+            }
+            else {
+                this.drawPlayerShot(obj);
+            }
         }
+
+        // remove the old shot image
         this.eraseRect(obj.shot_x, prev_y - 4, 1, 4);
     }
     else if (obj.player_shot_status == 3) {
         if (--obj.blow_up_timer == 0x0f) {
-            // erase the shot first
-
             obj.shot_y -= 2;
             obj.shot_x -= 3;
 
@@ -431,16 +504,181 @@ game.handlePlayerShot = function(obj) {
         else if (obj.blow_up_timer == 0) {
             // end of blow up
             obj.player_shot_status = 0;
-            obj.blow_up_timer = init_data.blow_up_timer;
+            obj.blow_up_timer = init_player_shot_data.blow_up_timer; // reset the blow up timer value (0x10)
             this.eraseRect(obj.shot_x, obj.shot_y, 8, 8);
         }
     }
     else if (obj.player_shot_status == 5) {
-
+        this.exp_alien_timer--;
+        if (this.exp_alien_timer == 0) {
+            this.eraseRect(this.exp_alien_x, this.exp_alien_y, 16, 8);
+            obj.player_shot_status = 4; // the alien has exploded
+        }
     }
     else if (obj.player_shot_status == 4) {
         obj.player_shot_status = 0;
+        this.level_data.num_aliens--;
+        this.alien_is_exploding = false;
     }
+}
+
+game.getAlienCoords = function(alienIndex) {
+    const row = Math.floor(alienIndex/11);
+    const col = alienIndex % 11;
+    let x = this.level_data.ref_alien_x + col * 16;
+    let y = this.level_data.ref_alien_y + row * 16;
+
+    if (alienIndex > this.level_data.alien_cur_index) {
+        x -= this.level_data.ref_alien_dx;
+        y += this.level_data.ref_alien_dy;
+    }
+
+    return {x: x, y: y};
+}
+
+game.handleAlienShot = function(obj, other1StepCnt, other2StepCnt) {
+    // Bit 0 set if shot is blowing up, bit 7 set if active
+    if ((obj.shot_status & 0x80) == 0) {
+        // not active
+        if (!this.level_data.enable_alien_fire) {
+            return;
+        }
+
+        obj.shot_step_cnt = 0;
+
+        // Make sure it isn't too soon to fire another shot
+        if (other1StepCnt != 0 && this.aShotReloadRate > other1StepCnt) {
+            return; // Too soon to fire again
+        }
+
+        if (other2StepCnt != 0 && this.aShotReloadRate > other2StepCnt) {
+            return; // Too soon to fire again
+        }
+
+        let column;
+        if (obj.shot_track == 1) {
+            // A 1 means this shot does not track the player
+            column = column_fire_table[obj.shot_column_offset];
+        }
+        else {
+            // A 0 means this shot tracks the player
+            // Start a shot right over the player
+            const targetX = this.gameObjs[0].player_x + 8;
+            column = Math.floor((targetX - this.level_data.ref_alien_x) / 16);
+            if (column < 0) column = 0;
+            else if (column > 10) column = 10;
+        }
+
+        let found = -1;
+        for (let row = 0, off = 0; row < 5; row++, off += 11) {
+            if (this.level_data.aliens[off+column] != 0) {
+                found = off + column;
+                break;
+            }
+        }
+
+         if (found < 0) {
+            return; // No alien is alive in target column ... out
+        }
+
+        const pt = this.getAlienCoords(found);
+        obj.shot_y = pt.y - 10;
+        obj.shot_x = pt.x + 7;
+        obj.shot_status |= 0x80;
+        obj.shot_step_cnt = 1; // Give this shot 1 step (it just started)
+        return;
+    }
+    else if (obj.shot_status & 0x01) {
+        // do shot-is-blowing-up sequence
+        --obj.shot_blow_cnt;
+        if (obj.shot_blow_cnt == 3) {
+            // erase the shot
+            this.eraseRect(obj.shot_x, obj.shot_y, 3, 8);
+
+            obj.shot_y -= 2;
+            obj.shot_x -= 2;
+
+            this.drawAlienShotExploding(obj);
+        }
+        else if (obj.shot_blow_cnt == 0) {
+            this.eraseRect(obj.shot_x, obj.shot_y, 6, 8);
+        }
+        else {
+            return; // just wait
+        }
+    }
+    else {
+        // Move the alien shot
+        obj.shot_step_cnt++;
+
+        // erase the old one
+        this.eraseRect(obj.shot_x, obj.shot_y, 3, 8);
+
+        obj.shot_y -= 1;
+
+        if (obj.shot_y < 21) {
+            obj.shot_status |= 0x01; // end it
+        }
+
+        const pt = this.convertCoords({x: obj.shot_x, y: obj.shot_y});
+        const imageData = this.canvas_ctx.getImageData(pt.x, pt.y + 7, 3, 1);
+        const data = imageData.data;
+        let collision = false;
+        for (let i = 0; i < 12; i += 4) {
+            // 3 pixels, if not transparent, check (r,g,b)
+            if (data[i+3] != 0 && (data[i] != 0 || data[i+1] != 0 || data[i+2] != 0)) {
+                collision = true;
+                break;
+            }
+        }
+
+        if (collision) {
+            if (0x1e < obj.shot_y && obj.shot_y < 0x27) {
+                this.gameObjs[0].player_alive = 0;
+            }
+            obj.shot_status |= 0x01; // end it
+        }
+
+        this.drawAlienShot(obj);
+    }
+}
+
+game.handleRollingShot = function(obj) {
+    if (obj.shot_column_offset-- == 0)
+        return; // run the shot next time
+
+    this.handleAlienShot(obj, this.gameObjs[3].shot_step_cnt, this.gameObjs[4].shot_step_cnt);
+    // Test if shot has cycled through blowing up
+    if (obj.shot_blow_cnt == 0) {
+        // The rolling-shot has blown up. Reset the data structure.
+        Object.assign(obj, init_rolling_shot_data);
+    }
+}
+
+game.handlePlungerShot = function(obj) {
+    if (this.num_aliens <= 1) // One alien left? Skip plunger shot?
+        return;
+
+    // todo: shotSync
+
+    this.handleAlienShot(obj, this.gameObjs[2].shot_step_cnt, this.gameObjs[4].shot_step_cnt);
+    // Test if shot has cycled through blowing up
+    if (obj.shot_blow_cnt == 0) {
+        let column_offset = obj.shot_column_offset;
+
+        // The rolling-shot has blown up. Reset the data structure.
+        Object.assign(obj, init_plunger_shot_data);
+
+        column_offset++;
+        if (column_offset == 0x10) {
+            column_offset = init_plunger_shot_data.shot_column_offset;
+        }
+        obj.shot_column_offset = column_offset;
+    }
+}
+
+game.handleSquigglyShot = function(obj) {
+
 }
 
 const input = {
