@@ -17,18 +17,31 @@ resource.init = function() {
     this.shieldImage = this.loadSprite(sprites_data.shield, 22, 16, green);
 
     this.alienImages = [
+        // big
         [
             this.loadSprite(sprites_data.alien_a0, 16, 8, white),
             this.loadSprite(sprites_data.alien_a1, 16, 8, white)
         ],
+        // medium
         [
             this.loadSprite(sprites_data.alien_b0, 16, 8, white),
             this.loadSprite(sprites_data.alien_b1, 16, 8, white)
         ],
+        // small
         [
             this.loadSprite(sprites_data.alien_c0, 16, 8, white),
             this.loadSprite(sprites_data.alien_c1, 16, 8, white)
-        ]
+        ],
+        // Small alien pushing Y back onto screen
+        [
+            this.loadSprite(sprites_data.alien_carry0, 16, 8, white),
+            this.loadSprite(sprites_data.alien_carry1, 16, 8, white)
+        ],
+        // Alien sprite type C pulling upside down Y
+        [
+            this.loadSprite(sprites_data.alien_cya, 16, 8, white),
+            this.loadSprite(sprites_data.alien_cyb, 16, 8, white),
+        ],
     ];
 
     this.alienExplodingImage = this.loadSprite(sprites_data.alien_exploding, 16, 8, white);
@@ -65,6 +78,9 @@ resource.init = function() {
     for (const chData of sprites_data.characters) {
         this.chrImages.push(this.loadSprite(chData, 8, 8, white));
     }
+    // insert empty characters
+    this.chrImages.splice(0x2A, 0, ...new Array(0x38 - 0x2A).fill(0));
+    this.chrImages.splice(0x39, 0, ...new Array(0x3F - 0x39).fill(0));
 }
 
 resource.loadSprite = function(spriteData, width, height, color, transparent = false, log = false) {

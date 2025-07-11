@@ -1,26 +1,22 @@
 "use strict"
 
 const game = {
-    canvas: null,
-    canvas_ctx: null,
-    window_width: 0,
-    window_height: 0,
 };
 
 game.init = function () {
-    this.canvas = document.querySelector('canvas');
-    // https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently
-    // CanvasSettings objects with will read frequently equal to true tell the user agent that
-    // the webpage is likely to perform many readback operations
-    // and that it is advantageous to use a software canvas.
-    this.canvas_ctx = this.canvas.getContext('2d', {willReadFrequently: true});
-    this.window_width = this.canvas.width;
-    this.window_height = this.canvas.height;
-
     sys_evt.init();
+    gfx.init();
     resource.init();
 
-    this.initGame();
+    const skipIntro = false;
+    if (skipIntro) {
+        this.currentTick = () => this.gameTick();
+        this.initGame();
+    }
+    else {
+        this.currentTick = () => this.introTick();
+        this.initIntro();
+    }
 
     input.enable();
 
@@ -29,27 +25,55 @@ game.init = function () {
 
 game.doFrame = function () {
     this.processEvents();
+    this.currentTick();
+}
 
-    if (!this.alien_is_exploding) {
-        this.drawAlien();
+
+function convert(value) {
+    value -= 0x2000;
+    const x = Math.floor(value / 0x20);
+    const y = (value % 0x20) * 8;
+    console.log(`x:${x}, y:${y}`); 
+}
+
+convert(0x3311);
+
+game.initIntro = function() {
+    input.disable();
+    gfx.drawStatus();
+    this.splashAnimate = 1; // TODO: 0 for animation during splash and 1 for not.
+    this.taskIndex = 0;
+    this.task = taskList[this.taskIndex].type;
+    this.task.init(taskList[this.taskIndex].context);
+    input.enable();
+}
+
+game.introTick = function() {
+    if (input.has_input) {
+        gfx.clearPlayField();
+        this.currentTick = () => this.gameTick();
+        this.initGame();
+        return;
     }
 
-    this.runGameObjs();
+    if (this.task && !this.task.tick()) {
+        this.taskIndex++;
+        if (this.taskIndex >= taskList.length) {
+            this.taskIndex = 0;
+            this.splashAnimate = 1 - this.splashAnimate;
+        }
 
-    if (this.level_data.num_aliens == 0) {
-        // all aliens gone, end of turn
+        this.task = taskList[this.taskIndex].type;
+        this.task.init(taskList[this.taskIndex].context);
     }
-    else if (!this.alien_is_exploding) {
-        this.nextCursorAlien();
-    }
-
-    this.adjustShotReloadRate();
 }
 
 game.initGame = function() {
+    input.disable();
     this.level_data = Object.assign({}, init_data);
     this.level_data.aliens = new Array(55).fill(1);
     this.aShotReloadRate = 8;
+    this.invaded = false;
 
     this.gameObjs = [
         // Game object 0: Move/draw the player
@@ -74,8 +98,28 @@ game.initGame = function() {
     this.gameObjs[3].images = resource.alienShotImages[1];
     this.gameObjs[4].images = resource.alienShotImages[2];
 
-    this.drawShield();
-    this.drawBottomLine();
+    gfx.drawShield();
+    gfx.drawBottomLine();
+    input.enable();
+}
+
+game.gameTick = function() {
+    if (!this.alien_is_exploding) {
+        gfx.drawAlien();
+    }
+
+    this.runGameObjs();
+
+    if (this.level_data.num_aliens == 0 || this.invaded) {
+        // TODO: all aliens gone, end of turn
+        this.currentTick = () => this.introTick();
+        this.initIntro();
+    }
+    else if (!this.alien_is_exploding) {
+        this.nextCursorAlien();
+    }
+
+    this.adjustShotReloadRate();
 }
 
 game.runGameObjs = function() {
@@ -119,121 +163,6 @@ game.adjustShotReloadRate = function() {
     this.aShotReloadRate = shot_reload_rate[alien_reload_score_table.length];
 }
 
-game.convertCoords = function(pt) {
-    // in the original game, the origin(0, 0) is at the point(32, 255) of the canvas
-    // the x direction is left to right, the y direction is bottom to top
-    // so need to translate the game coordinates to the screen coordinates
-    const x = pt.x;
-    const y = pt.y;
-
-    // Convert to canvas coordinates
-    pt.x = x - 32;
-    pt.y = this.window_height - 1 - y;
-
-    return pt;
-}
-
-game.eraseRect = function(x, y, w, h) {
-    const pt = this.convertCoords({x: x, y: y});
-    this.canvas_ctx.fillStyle = "#000000";
-    this.canvas_ctx.fillRect(pt.x, pt.y, w, h);
-}
-
-game.drawSprite = function(x , y, image) {
-    const pt = this.convertCoords({x: x, y: y});
-    this.canvas_ctx.drawImage(image, pt.x, pt.y);
-}
-
-game.drawShield = function() {
-    const shieldX = 64;
-    const shieldY = 56;
-    const shieldW = 22;
-    const distBetweenShields = 23;
-
-    for (let i = 0, x = shieldX; i < 4; i++) {
-        const pt = this.convertCoords({x: x, y: shieldY});
-
-        this.canvas_ctx.drawImage(resource.shieldImage, pt.x, pt.y);
-        x += distBetweenShields + shieldW;
-    }
-}
-
-game.drawBottomLine = function() {
-    this.canvas_ctx.fillStyle = "#00ff00";
-    this.canvas_ctx.fillRect(0, this.window_height - 1 - 17, this.window_width, 1);
-}
-
-game.drawPlayerShip = function(obj) {
-    const playerX = obj.player_x;
-    const playerY = obj.player_y;
-    const playerImage = resource.playerImage;
-    this.drawSprite(playerX, playerY, playerImage);
-}
-
-game.drawPlayerBlowup = function(obj) {
-    const x = obj.player_x;
-    const y = obj.player_y;
-    const image = resource.playerBlowupImages[obj.player_alive];
-    this.drawSprite(x, y, image);
-}
-
-game.drawAlien = function() {
-    const alienCurIndex = this.level_data.alien_cur_index;
-    if (this.level_data.aliens[alienCurIndex] != 0) {
-        const alienType = Math.floor(this.level_data.alien_row/2);
-        const alienFrame = this.level_data.alien_frame;
-        const x = this.level_data.alien_cursor_x;
-        const y = this.level_data.alien_cursor_y;
-        const image = resource.alienImages[alienType][alienFrame];
-
-        // as the alien images have blank linkes at the left and right sides,
-        // no need to erase the old one if moving horizontally
-        this.drawSprite(x, y, image);
-
-        // erase the old one if moving vertically
-        if (this.level_data.ref_alien_dy > 0) {
-            this.eraseRect(
-                x - this.level_data.ref_alien_dx,
-                y + this.level_data.ref_alien_dy,
-                16, 8);
-        }
-    }
-}
-
-game.drawPlayerShot = function(obj) {
-    const x = obj.shot_x;
-    const y = obj.shot_y;
-    const image = resource.playerShotImage;
-    this.drawSprite(x, y, image);
-}
-
-game.drawShotExploding = function(obj) {
-    const x = obj.shot_x;
-    const y = obj.shot_y;
-    const image = resource.shotExplodingImage;
-    this.drawSprite(x, y, image);
-}
-
-game.drawAlienExploding = function() {
-    const x = this.exp_alien_x;
-    const y = this.exp_alien_y;
-    const image = resource.alienExplodingImage;
-    this.drawSprite(x, y, image);
-}
-
-game.drawAlienShot = function(obj) {
-    const pt = this.convertCoords({x: obj.shot_x, y: obj.shot_y});
-    const imageIndex = obj.shot_step_cnt % 4;
-    this.canvas_ctx.drawImage(obj.images[imageIndex], pt.x, pt.y);
-}
-
-game.drawAlienShotExploding = function(obj) {
-    const x = obj.shot_x;
-    const y = obj.shot_y;
-    const image = resource.alienShotExplodingImage;
-    this.drawSprite(x, y, image);
-}
-
 game.nextCursorAlien = function() {
     // move the alien cursor index to the next one.
     // if it runs over the last one,
@@ -250,6 +179,10 @@ game.nextCursorAlien = function() {
 
         if (this.level_data.aliens[this.level_data.alien_cur_index] != 0) {
             this.setAlienCoords();
+            if (this.level_data.alien_cursor_y <= 40) {
+                // reach the end of the screen? kill the player
+                this.invaded = true;
+            }
             break;
         }
     }
@@ -333,11 +266,11 @@ game.handlePlayerShip = function(obj) {
         obj.exp_animate_cnt--;
         if (obj.exp_animate_cnt != 0) {
             obj.player_alive = (obj.player_alive + 1 ) & 0x01; // toggle (0, 1, 0, 1 ...)
-            this.drawPlayerBlowup(obj);
+            gfx.drawPlayerBlowup(obj);
         }
         else {
             // Blow up finished
-            this.eraseRect(obj.player_x, obj.player_y, 16, 8);
+            gfx.eraseRect(obj.player_x, obj.player_y, 16, 8);
 
             // reset
             Object.assign(obj, init_player_ship_data);
@@ -352,7 +285,7 @@ game.handlePlayerShip = function(obj) {
             this.level_data.enable_alien_fire = true;
         }
         this.movePlayerShip(obj);
-        this.drawPlayerShip(obj);
+        gfx.drawPlayerShip(obj);
     }
 }
 
@@ -410,7 +343,7 @@ game.checkShotHit = function(obj) {
     }
 
     this.level_data.aliens[index] = 0;
-    this.eraseRect(target_x, target_y, 16, 8);
+    gfx.eraseRect(target_x, target_y, 16, 8);
 
     this.exp_alien_y = target_y;
     this.exp_alien_x = target_x;
@@ -448,7 +381,7 @@ game.handlePlayerShot = function(obj) {
         obj.player_shot_status = 2;
         obj.shot_x = playerObj.player_x + 8;
         obj.shot_y = obj.shot_start_y;
-        this.drawPlayerShot(obj);
+        gfx.drawPlayerShot(obj);
     }
     else if (obj.player_shot_status == 2) {
         // Move player shot
@@ -457,12 +390,13 @@ game.handlePlayerShot = function(obj) {
 
         if (obj.shot_y > 0xd8) {
             // Player shot leaving playfield
+            obj.shot_y = 0xd8;
             obj.player_shot_status = 3; // mark player shot hit something other than alien
         }
         else {
             // before drawing the new shot, check if there is something
-            const pt = this.convertCoords({x: obj.shot_x, y: obj.shot_y});
-            const imageData = this.canvas_ctx.getImageData(pt.x, pt.y + 4, 1, 4); // see the comment of the canvas context creation
+            const pt = gfx.convertCoords({x: obj.shot_x, y: obj.shot_y});
+            const imageData = gfx.canvas_ctx.getImageData(pt.x, pt.y + 4, 1, 4); // see the comment of the canvas context creation
             const data = imageData.data;
             let collision = false;
             for (let i = 0; i < 16; i += 4) {
@@ -479,7 +413,7 @@ game.handlePlayerShot = function(obj) {
                     obj.player_shot_status = 5;
                     this.alien_is_exploding = true;
                     this.exp_alien_timer = init_data.exp_alien_timer; // set timer value (0x10)
-                    this.drawAlienExploding();
+                    gfx.drawAlienExploding();
                 }
                 else {
                     // hit something other than aliens
@@ -487,31 +421,31 @@ game.handlePlayerShot = function(obj) {
                 }
             }
             else {
-                this.drawPlayerShot(obj);
+                gfx.drawPlayerShot(obj);
             }
         }
 
         // remove the old shot image
-        this.eraseRect(obj.shot_x, prev_y - 4, 1, 4);
+        gfx.eraseRect(obj.shot_x, prev_y - 4, 1, 4);
     }
     else if (obj.player_shot_status == 3) {
         if (--obj.blow_up_timer == 0x0f) {
             obj.shot_y -= 2;
             obj.shot_x -= 3;
 
-            this.drawShotExploding(obj);
+            gfx.drawShotExploding(obj);
         }
         else if (obj.blow_up_timer == 0) {
             // end of blow up
             obj.player_shot_status = 0;
             obj.blow_up_timer = init_player_shot_data.blow_up_timer; // reset the blow up timer value (0x10)
-            this.eraseRect(obj.shot_x, obj.shot_y, 8, 8);
+            gfx.eraseRect(obj.shot_x, obj.shot_y, 8, 8);
         }
     }
     else if (obj.player_shot_status == 5) {
         this.exp_alien_timer--;
         if (this.exp_alien_timer == 0) {
-            this.eraseRect(this.exp_alien_x, this.exp_alien_y, 16, 8);
+            gfx.eraseRect(this.exp_alien_x, this.exp_alien_y, 16, 8);
             obj.player_shot_status = 4; // the alien has exploded
         }
     }
@@ -593,15 +527,15 @@ game.handleAlienShot = function(obj, other1StepCnt, other2StepCnt) {
         --obj.shot_blow_cnt;
         if (obj.shot_blow_cnt == 3) {
             // erase the shot
-            this.eraseRect(obj.shot_x, obj.shot_y, 3, 8);
+            gfx.eraseRect(obj.shot_x, obj.shot_y, 3, 8);
 
             obj.shot_y -= 2;
             obj.shot_x -= 2;
 
-            this.drawAlienShotExploding(obj);
+            gfx.drawAlienShotExploding(obj);
         }
         else if (obj.shot_blow_cnt == 0) {
-            this.eraseRect(obj.shot_x, obj.shot_y, 6, 8);
+            gfx.eraseRect(obj.shot_x, obj.shot_y, 6, 8);
         }
         else {
             return; // just wait
@@ -612,7 +546,7 @@ game.handleAlienShot = function(obj, other1StepCnt, other2StepCnt) {
         obj.shot_step_cnt++;
 
         // erase the old one
-        this.eraseRect(obj.shot_x, obj.shot_y, 3, 8);
+        gfx.eraseRect(obj.shot_x, obj.shot_y, 3, 8);
 
         obj.shot_y -= 1;
 
@@ -620,8 +554,8 @@ game.handleAlienShot = function(obj, other1StepCnt, other2StepCnt) {
             obj.shot_status |= 0x01; // end it
         }
 
-        const pt = this.convertCoords({x: obj.shot_x, y: obj.shot_y});
-        const imageData = this.canvas_ctx.getImageData(pt.x, pt.y + 7, 3, 1);
+        const pt = gfx.convertCoords({x: obj.shot_x, y: obj.shot_y});
+        const imageData = gfx.canvas_ctx.getImageData(pt.x, pt.y + 7, 3, 1);
         const data = imageData.data;
         let collision = false;
         for (let i = 0; i < 12; i += 4) {
@@ -639,7 +573,7 @@ game.handleAlienShot = function(obj, other1StepCnt, other2StepCnt) {
             obj.shot_status |= 0x01; // end it
         }
 
-        this.drawAlienShot(obj);
+        gfx.drawAlienShot(obj);
     }
 }
 
