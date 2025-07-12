@@ -35,8 +35,8 @@ function convert(value) {
     const y = (value % 0x20) * 8;
     console.log(`x:${x}, y:${y}`); 
 }
-
-convert(0x3311);
+// for testing
+false ? convert(0x3311) : 0;
 
 game.initIntro = function() {
     input.disable();
@@ -98,12 +98,18 @@ game.initGame = function() {
     this.gameObjs[3].images = resource.alienShotImages[1];
     this.gameObjs[4].images = resource.alienShotImages[2];
 
+    this.gameObjs[2].name = "rolling shot";
+    this.gameObjs[3].name = "plugger shot";
+    this.gameObjs[4].name = "squiggly shot";
+
     gfx.drawShield();
     gfx.drawBottomLine();
     input.enable();
 }
 
 game.gameTick = function() {
+    this.shotAsync = this.gameObjs[2].timer_extra;
+
     if (!this.alien_is_exploding) {
         gfx.drawAlien();
     }
@@ -470,6 +476,8 @@ game.getAlienCoords = function(alienIndex) {
     return {x: x, y: y};
 }
 
+const TRACE_ALIEN_SHOT = false ? (msg) => console.log(msg) : (msg) => 0; 
+
 game.handleAlienShot = function(obj, other1StepCnt, other2StepCnt) {
     // Bit 0 set if shot is blowing up, bit 7 set if active
     if ((obj.shot_status & 0x80) == 0) {
@@ -512,6 +520,7 @@ game.handleAlienShot = function(obj, other1StepCnt, other2StepCnt) {
         }
 
          if (found < 0) {
+            TRACE_ALIEN_SHOT(`no alien at the comumn ${column}`);
             return; // No alien is alive in target column ... out
         }
 
@@ -520,6 +529,7 @@ game.handleAlienShot = function(obj, other1StepCnt, other2StepCnt) {
         obj.shot_x = pt.x + 7;
         obj.shot_status |= 0x80;
         obj.shot_step_cnt = 1; // Give this shot 1 step (it just started)
+        TRACE_ALIEN_SHOT(`shooting ${obj.name}`)
         return;
     }
     else if (obj.shot_status & 0x01) {
@@ -552,6 +562,7 @@ game.handleAlienShot = function(obj, other1StepCnt, other2StepCnt) {
 
         if (obj.shot_y < 21) {
             obj.shot_status |= 0x01; // end it
+            TRACE_ALIEN_SHOT(`${obj.name} exploding as out of the field`);
         }
 
         const pt = gfx.convertCoords({x: obj.shot_x, y: obj.shot_y});
@@ -571,6 +582,7 @@ game.handleAlienShot = function(obj, other1StepCnt, other2StepCnt) {
                 this.gameObjs[0].player_alive = 0;
             }
             obj.shot_status |= 0x01; // end it
+            TRACE_ALIEN_SHOT(`${obj.name} exploding as it hits something`);
         }
 
         gfx.drawAlienShot(obj);
@@ -578,10 +590,22 @@ game.handleAlienShot = function(obj, other1StepCnt, other2StepCnt) {
 }
 
 game.handleRollingShot = function(obj) {
+    // the timer means 'shotSync' which is from gameObjs[2].timer_extra.
+    // when the timer is 0 this object, the rolling-shot, runs.
+    // when the timer is 1 the plunger-shot (object 3) runs.
+    // when the timer is 2 the squiggly-shot/saucer (object 4 ) runs.
+
+    // the 'shotSync' is 0, 1 or 2.
+
+    // restore delay from the initial data
+    obj.timer_extra = init_rolling_shot_data.timer_extra;
+
+    // shot_column_offset is back to 0 when the shot blows up
     if (obj.shot_column_offset-- == 0)
         return; // run the shot next time
 
     this.handleAlienShot(obj, this.gameObjs[3].shot_step_cnt, this.gameObjs[4].shot_step_cnt);
+
     // Test if shot has cycled through blowing up
     if (obj.shot_blow_cnt == 0) {
         // The rolling-shot has blown up. Reset the data structure.
@@ -593,26 +617,50 @@ game.handlePlungerShot = function(obj) {
     if (this.num_aliens <= 1) // One alien left? Skip plunger shot?
         return;
 
-    // todo: shotSync
+    // Sync flag 'shotAsyc' (copied from game-obj-2's timer value)
+    // 0: rolling shot
+    // 1: pluger shot
+    // 2: squiggly shot
+    if (this.shotAsync != 0x01)
+        return;
 
     this.handleAlienShot(obj, this.gameObjs[2].shot_step_cnt, this.gameObjs[4].shot_step_cnt);
+
+    obj.shot_column_offset++;
+    if (obj.shot_column_offset >= 0x10) {
+        obj.shot_column_offset = init_plunger_shot_data.shot_column_offset;
+    }
+
     // Test if shot has cycled through blowing up
     if (obj.shot_blow_cnt == 0) {
-        let column_offset = obj.shot_column_offset;
-
+        const shot_column_offset = obj.shot_column_offset;
         // The rolling-shot has blown up. Reset the data structure.
         Object.assign(obj, init_plunger_shot_data);
-
-        column_offset++;
-        if (column_offset == 0x10) {
-            column_offset = init_plunger_shot_data.shot_column_offset;
-        }
-        obj.shot_column_offset = column_offset;
+        obj.shot_column_offset = shot_column_offset;
     }
 }
 
 game.handleSquigglyShot = function(obj) {
+    if (this.shotAsync != 0x02)
+        return;
 
+    // todo: check Time-till-saucer flag
+    // if no saucer, process squiggly shot
+
+    this.handleAlienShot(obj, this.gameObjs[2].shot_step_cnt, this.gameObjs[3].shot_step_cnt);
+
+    obj.shot_column_offset++;
+    if (obj.shot_column_offset >= 0x15) {
+        obj.shot_column_offset = init_plunger_shot_data.shot_column_offset;
+    }
+
+    // Test if shot has cycled through blowing up
+    if (obj.shot_blow_cnt == 0) {
+        const shot_column_offset = obj.shot_column_offset;
+        // The rolling-shot has blown up. Reset the data structure.
+        Object.assign(obj, init_plunger_shot_data);
+        obj.shot_column_offset = shot_column_offset;
+    }
 }
 
 const input = {
