@@ -1,5 +1,24 @@
 "use strict"
 
+
+function convertVideoRamToCoords(value) {
+    value -= 0x2000;
+    const x = Math.floor(value / 0x20);
+    const y = (value % 0x20) * 8;
+    console.log(`x:${x}, y:${y}`); 
+}
+// for testing
+true ? convertVideoRamToCoords(0x3501) : 0;
+
+function convertPixelsToCoords(value) {
+    const pn_x = value >> 8;
+    const pn_y = value & 0xff;
+    console.log(`x:${pn_x}, y:${pn_y}`);
+}
+// for testing
+true ? convertPixelsToCoords(0xe1d0) : 0;
+
+
 const game = {
 };
 
@@ -7,6 +26,11 @@ game.init = function () {
     sys_evt.init();
     gfx.init();
     resource.init();
+
+    this.hi_score = 0;
+    this.p1_score = 0;
+    this.p2_score = 0;
+    this.coins = 0;
 
     const skipIntro = false;
     if (skipIntro) {
@@ -28,16 +52,6 @@ game.doFrame = function () {
     this.currentTick();
 }
 
-
-function convert(value) {
-    value -= 0x2000;
-    const x = Math.floor(value / 0x20);
-    const y = (value % 0x20) * 8;
-    console.log(`x:${x}, y:${y}`); 
-}
-// for testing
-false ? convert(0x3311) : 0;
-
 game.initIntro = function() {
     input.disable();
     gfx.drawStatus();
@@ -50,7 +64,6 @@ game.initIntro = function() {
 
 game.introTick = function() {
     if (input.has_input) {
-        gfx.clearPlayField();
         this.currentTick = () => this.gameTick();
         this.initGame();
         return;
@@ -74,6 +87,17 @@ game.initGame = function() {
     this.level_data.aliens = new Array(55).fill(1);
     this.aShotReloadRate = 8;
     this.invaded = false;
+
+    this.p1_extra_ships = 1;
+    this.p2_extra_ships = 1;
+
+    this.p1_num_ships = 3;
+    this.p2_num_ships = 3;
+
+    this.p1_score = 0;
+    this.p2_score = 0;
+    this.adjust_score = false;
+    this.score_delta = 0;
 
     this.gameObjs = [
         // Game object 0: Move/draw the player
@@ -102,8 +126,14 @@ game.initGame = function() {
     this.gameObjs[3].name = "plugger shot";
     this.gameObjs[4].name = "squiggly shot";
 
+    this.saucer = Object.assign({}, init_saucer_data);
+
+    gfx.drawP1Score();
+    gfx.drawP2Score();
+    gfx.clearPlayField();
     gfx.drawShield();
     gfx.drawBottomLine();
+    gfx.drawPlayerNumShips();
     input.enable();
 }
 
@@ -115,9 +145,12 @@ game.gameTick = function() {
     }
 
     this.runGameObjs();
+    this.timeToSaucer();
 
-    if (this.level_data.num_aliens == 0 || this.invaded) {
+    if (this.level_data.num_aliens == 0 ||
+        (this.invaded && this.gameObjs[0].player_alive == 0xff)) {
         // TODO: all aliens gone, end of turn
+        // or invaded and player ship has been exploded
         this.currentTick = () => this.introTick();
         this.initIntro();
     }
@@ -126,6 +159,8 @@ game.gameTick = function() {
     }
 
     this.adjustShotReloadRate();
+    this.adjustShotSpeed();
+    this.adjustScore();
 }
 
 game.runGameObjs = function() {
@@ -156,9 +191,19 @@ game.runGameObjs = function() {
     }
 }
 
+game.timeToSaucer = function() {
+    // Don't process saucer timer unless aliens are closer to bottom
+    if (this.level_data.ref_alien_y >= 0x78) {
+        return;
+    }
+
+    if (this.saucer.till_saucer-- == 0) {
+        this.saucer.start = true;
+    }
+}
+
 game.adjustShotReloadRate = function() {
-    let score = 0; // todo
-    score = (score >> 8); // high byte
+    const score = (this.p1_score >> 8); // high byte
     for (let i = 0; i < alien_reload_score_table.length; i++) {
         if (score <= alien_reload_score_table[i]) {
             this.aShotReloadRate = shot_reload_rate[i];
@@ -167,6 +212,23 @@ game.adjustShotReloadRate = function() {
     }
 
     this.aShotReloadRate = shot_reload_rate[alien_reload_score_table.length];
+}
+
+game.adjustShotSpeed = function() {
+    if (this.level_data.num_aliens > 8)
+        return;
+
+    this.level_data.alien_shot_delta = -5;
+}
+
+game.adjustScore = function() {
+    if (!this.adjust_score)
+        return;
+
+    this.p1_score += this.score_delta
+    this.adjust_score = false;
+
+    gfx.drawP1Score();
 }
 
 game.nextCursorAlien = function() {
@@ -185,9 +247,10 @@ game.nextCursorAlien = function() {
 
         if (this.level_data.aliens[this.level_data.alien_cur_index] != 0) {
             this.setAlienCoords();
-            if (this.level_data.alien_cursor_y <= 40) {
+            if (this.level_data.alien_cursor_y <= 0x20) {
                 // reach the end of the screen? kill the player
                 this.invaded = true;
+                this.gameObjs[0].player_alive = 0;
             }
             break;
         }
@@ -296,13 +359,14 @@ game.handlePlayerShip = function(obj) {
 }
 
 game.checkShotHit = function(obj) {
+    // return -1 no hit, or the row which alien is hit
     const shot_y = obj.shot_y - 4; // the solid potion in the shot image
 
     // find the row based on the bottom line of the reference alien
     let bottom_y = this.level_data.ref_alien_y + this.level_data.ref_alien_dy - 15;
     const row = Math.floor((shot_y - bottom_y) / 16);
     if (row < 0 || row > 4)
-        return false;
+        return -1;
 
     bottom_y += row * 16;
 
@@ -328,7 +392,7 @@ game.checkShotHit = function(obj) {
     }
 
     if (!found)
-        return false;
+        return -1;
 
     let target_y = 0;
     // the aliens are moving down
@@ -354,7 +418,7 @@ game.checkShotHit = function(obj) {
     this.exp_alien_y = target_y;
     this.exp_alien_x = target_x;
 
-    return true;
+    return row;
 }
 
 game.handlePlayerShot = function(obj) {
@@ -414,16 +478,27 @@ game.handlePlayerShot = function(obj) {
             }
 
             if (collision) {
-                if (this.checkShotHit(obj)) {
-                    // an alien is hit
-                    obj.player_shot_status = 5;
-                    this.alien_is_exploding = true;
-                    this.exp_alien_timer = init_data.exp_alien_timer; // set timer value (0x10)
-                    gfx.drawAlienExploding();
+                if (obj.shot_y >= 206) {
+                    // Compare to 206, Yr is within 50 from top? Yes, saucer must be hit
+                    this.saucer.hit = true;
+                    obj.player_shot_status = 0;
                 }
                 else {
-                    // hit something other than aliens
-                    obj.player_shot_status = 3; // mark player shot hit something other than alien
+                    const row_hit = this.checkShotHit(obj);
+                    if (row_hit >= 0) {
+                        // an alien is hit
+                        obj.player_shot_status = 5;
+                        this.alien_is_exploding = true;
+                        this.exp_alien_timer = init_data.exp_alien_timer; // set timer value (0x10)
+                        gfx.drawAlienExploding();
+
+                        this.adjust_score = true;
+                        this.score_delta = alien_scores[Math.floor(row_hit/2)];
+                    }
+                    else {
+                        // hit something other than aliens
+                        obj.player_shot_status = 3; // mark player shot hit something other than alien
+                    }
                 }
             }
             else {
@@ -439,13 +514,30 @@ game.handlePlayerShot = function(obj) {
             obj.shot_y -= 2;
             obj.shot_x -= 3;
 
-            gfx.drawShotExploding(obj);
+            gfx.drawShotExploding(obj, true);
         }
         else if (obj.blow_up_timer == 0) {
             // end of blow up
             obj.player_shot_status = 0;
             obj.blow_up_timer = init_player_shot_data.blow_up_timer; // reset the blow up timer value (0x10)
-            gfx.eraseRect(obj.shot_x, obj.shot_y, 8, 8);
+            gfx.drawShotExploding(obj, false);
+
+            if (++this.saucer.score_table_offset >= saucer_score_table.length) {
+                this.saucer.score_table_offset = 0;
+            }
+
+            this.saucer.shot_count++;
+            //Setup saucer direction for next trip
+            if (!this.saucer.active) {
+                if (this.saucer.shot_count & 0x01) {
+                    this.saucer.coord_x = 0xe0;
+                    this.saucer.delta_x = -2;
+                }
+                else {
+                    this.saucer.coord_x = 0x29;
+                    this.saucer.delta_x = 2;
+                }
+            }
         }
     }
     else if (obj.player_shot_status == 5) {
@@ -497,10 +589,16 @@ game.handleAlienShot = function(obj, other1StepCnt, other2StepCnt) {
             return; // Too soon to fire again
         }
 
+        // debug
+        // if (obj.name === "squiggly shot") {
+        //    const here = true;
+        //}
+
         let column;
         if (obj.shot_track == 1) {
             // A 1 means this shot does not track the player
-            column = column_fire_table[obj.shot_column_offset];
+            // the value of column is 1-based
+            column = column_fire_table[obj.shot_column_offset] - 1;
         }
         else {
             // A 0 means this shot tracks the player
@@ -529,7 +627,9 @@ game.handleAlienShot = function(obj, other1StepCnt, other2StepCnt) {
         obj.shot_x = pt.x + 7;
         obj.shot_status |= 0x80;
         obj.shot_step_cnt = 1; // Give this shot 1 step (it just started)
-        TRACE_ALIEN_SHOT(`shooting ${obj.name}`)
+        TRACE_ALIEN_SHOT(`shooting ${obj.name}, y:${obj.shot_y}, x:${obj.shot_x}`)
+
+        gfx.drawAlienShot(obj);
         return;
     }
     else if (obj.shot_status & 0x01) {
@@ -542,10 +642,10 @@ game.handleAlienShot = function(obj, other1StepCnt, other2StepCnt) {
             obj.shot_y -= 2;
             obj.shot_x -= 2;
 
-            gfx.drawAlienShotExploding(obj);
+            gfx.drawAlienShotExploding(obj, true);
         }
         else if (obj.shot_blow_cnt == 0) {
-            gfx.eraseRect(obj.shot_x, obj.shot_y, 6, 8);
+            gfx.drawAlienShotExploding(obj, false);
         }
         else {
             return; // just wait
@@ -558,7 +658,7 @@ game.handleAlienShot = function(obj, other1StepCnt, other2StepCnt) {
         // erase the old one
         gfx.eraseRect(obj.shot_x, obj.shot_y, 3, 8);
 
-        obj.shot_y -= 1;
+        obj.shot_y += this.level_data.alien_shot_delta;
 
         if (obj.shot_y < 21) {
             obj.shot_status |= 0x01; // end it
@@ -614,7 +714,7 @@ game.handleRollingShot = function(obj) {
 }
 
 game.handlePlungerShot = function(obj) {
-    if (this.num_aliens <= 1) // One alien left? Skip plunger shot?
+    if (this.level_data.num_aliens <= 1) // One alien left? Skip plunger shot?
         return;
 
     // Sync flag 'shotAsyc' (copied from game-obj-2's timer value)
@@ -641,24 +741,92 @@ game.handlePlungerShot = function(obj) {
 }
 
 game.handleSquigglyShot = function(obj) {
+    // This task is shared by the squiggly-shot and the flying saucer.
+    // The saucer waits until the squiggly-shot is over before it begins.
     if (this.shotAsync != 0x02)
         return;
 
-    // todo: check Time-till-saucer flag
-    // if no saucer, process squiggly shot
+    let processSquigglyShot = true;
 
+    // check Time-till-saucer flag
+    if (this.saucer.start && obj.shot_step_cnt == 0) {
+        // the saucer is started and no squiggly shot running
+        if (!this.saucer.active) { // the saucer is not yet initiated
+            if (this.level_data.num_aliens >= 8) {
+                // initiate the saucer only when the count of aliens greater than 7
+                this.saucer.active = true;
+                gfx.drawSaucer(0);
+            }
+        }
+
+        if (this.saucer.active) {
+            // disable squiggly shot handling
+            processSquigglyShot = false;
+
+            if (!this.saucer.hit) {
+                // move the saucer
+                this.saucer.coord_x += this.saucer.delta_x;
+                gfx.drawSaucer(0);
+
+                if (this.saucer.coord_x <= 40 || this.saucer.coord_x >= 225) {
+                    // clear
+                    gfx.eraseRect(this.saucer.coord_x, this.saucer.coord_y, 24, 8);
+
+                    // reinitialize saucer data
+                    Object.assign(this.saucer, init_saucer_data);
+                }
+            }
+            else {
+                // the saucer is hit, exploding sequence
+                this.saucer.hit_timer--;
+                if (this.saucer.hit_timer == 0x1f) {
+                    gfx.drawSaucer(1); // draw exploding
+                }
+                else if (this.saucer.hit_timer == 0x18) {
+                    // show the score besides the saucer and add it
+                    const score = saucer_score_table[this.saucer.score_table_offset];
+                    let str = 0;
+                    for (let i = 0; i < 4; i++) {
+                        if (saucer_scores[i] == score) {
+                            str = saucer_score_string[i];
+                            break;
+                        }
+                    }
+                    console.assert(str != 0);
+                    const d0 = score & 0x0f;
+                    const d1 = (score >> 4) & 0x0f;
+                    this.adjust_score = true;
+                    this.score_delta = (d0 + d1 * 10) * 10;
+                    gfx.drawString(this.saucer.coord_x, this.saucer.coord_y, str);
+                }
+                else if (this.saucer.hit_timer == 0) {
+                    // clear
+                    gfx.eraseRect(this.saucer.coord_x, this.saucer.coord_y, 24, 8);
+
+                    // reinitialize saucer data
+                    Object.assign(this.saucer, init_saucer_data);
+                }
+            }
+        } // saucer active?
+    } // saucer start?
+
+    if (!processSquigglyShot)
+        // the saucer is running
+        return;
+
+    // if no saucer, process squiggly shot
     this.handleAlienShot(obj, this.gameObjs[2].shot_step_cnt, this.gameObjs[3].shot_step_cnt);
 
     obj.shot_column_offset++;
     if (obj.shot_column_offset >= 0x15) {
-        obj.shot_column_offset = init_plunger_shot_data.shot_column_offset;
+        obj.shot_column_offset = init_squiggly_shot_data.shot_column_offset;
     }
 
     // Test if shot has cycled through blowing up
     if (obj.shot_blow_cnt == 0) {
         const shot_column_offset = obj.shot_column_offset;
         // The rolling-shot has blown up. Reset the data structure.
-        Object.assign(obj, init_plunger_shot_data);
+        Object.assign(obj, init_squiggly_shot_data);
         obj.shot_column_offset = shot_column_offset;
     }
 }

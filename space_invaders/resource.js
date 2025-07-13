@@ -5,6 +5,7 @@ const resource = {};
 resource.init = function() {
     const green = [0x00, 0xff, 0x00, 0xff];
     const white = [0xff, 0xff, 0xff, 0xff];
+    const black = [0x00, 0x00, 0x00, 0xff];
     this.playerImage = this.loadSprite(sprites_data.player, 16, 8, green);
     this.playerBlowupImages = [
         this.loadSprite(sprites_data.player_blowup1, 16, 8, green),
@@ -12,7 +13,8 @@ resource.init = function() {
     ];
 
     this.playerShotImage = this.loadSprite(sprites_data.player_shot, 1, 8, white, true);
-    this.shotExplodingImage = this.loadSprite(sprites_data.shot_exploding, 8, 8, white);
+    this.shotExplodingImage = this.loadSprite(sprites_data.shot_exploding, 8, 8, white, true);
+    this.shotExplodingRemoveImage = this.loadSprite(sprites_data.shot_exploding, 8, 8, black, true);
 
     this.shieldImage = this.loadSprite(sprites_data.shield, 22, 16, green);
 
@@ -67,8 +69,9 @@ resource.init = function() {
         ]
     ];
 
-    this.alienShotExplodingImage = this.loadSprite(sprites_data.alien_shot_explding, 6, 8, white);
-
+    this.alienShotExplodingImage = this.loadSprite(sprites_data.alien_shot_explding, 6, 8, white, true);
+    this.alienShotExplodingRemoveImage = this.loadSprite(sprites_data.alien_shot_explding, 6, 8, black, true);
+    
     this.saucerImages = [
         this.loadSprite(sprites_data.saucer, 24, 8, white),
         this.loadSprite(sprites_data.saucer_exploding, 24, 8, white)

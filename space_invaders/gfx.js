@@ -1,5 +1,10 @@
 "use strict"
 
+const P1_SCOR_X = 56, P1_SCOR_Y = 224;
+const P2_SCOR_X = 200, P2_SCOR_Y = 224;
+const HI_SCOR_X = 120, HI_SCOR_Y = 224;
+const CREDIT_X = 168, CREDIT_Y = 8, CREDIT_COINS_X = 224;
+
 const gfx = {
     canvas: null,
     canvas_ctx: null,
@@ -54,6 +59,19 @@ gfx.drawScore = function(x, y, score, num_digits) {
     }
 }
 
+gfx.drawP1Score = function() {
+    this.drawScore(P1_SCOR_X, P1_SCOR_Y, game.p1_score, 4);
+}
+
+gfx.drawP2Score = function() {
+    this.drawScore(P2_SCOR_X, P2_SCOR_Y, game.p2_score, 4);
+}
+
+gfx.drawCredit = function() {
+    this.drawString(CREDIT_X, CREDIT_Y, message_credit);
+    this.drawScore(CREDIT_COINS_X, CREDIT_Y, game.coins, 2);
+}
+
 gfx.drawString = function(x, y, str) {
     let pt = this.convertCoords({x:x, y:y});
     for (const ch of str) {
@@ -68,19 +86,12 @@ gfx.drawChar = function(x, y, ch) {
 }
 
 gfx.drawStatus = function() {
-    const P1_SCOR_X = 56, P1_SCOR_Y = 224;
-    const P2_SCOR_X = 200, P2_SCOR_Y = 224;
-    const HI_SCOR_X = 120, HI_SCOR_Y = 224;
-    const CREDIT_X = 168, CREDIT_Y = 8, CREDIT_COINS_X = 224;
-
     this.clearScreen();
     this.drawScoreHead();
-    this.drawScore(P1_SCOR_X, P1_SCOR_Y, 111, 4); // player one score
-    this.drawScore(P2_SCOR_X, P2_SCOR_Y, 222, 4); // player two score
-    this.drawScore(HI_SCOR_X, HI_SCOR_Y, 9999, 4); // hi score
-
-    this.drawString(CREDIT_X, CREDIT_Y, message_credit);
-    this.drawScore(CREDIT_COINS_X, CREDIT_Y, 1, 2);
+    this.drawP1Score(); // player one score
+    this.drawP2Score(); // player two score
+    this.drawScore(HI_SCOR_X, HI_SCOR_Y, game.hi_score, 4); // hi score
+    this.drawCredit();
 }
 
 gfx.convertCoords = function(pt) {
@@ -171,10 +182,12 @@ gfx.drawPlayerShot = function(obj) {
     this.drawSprite(x, y, image);
 }
 
-gfx.drawShotExploding = function(obj) {
+gfx.drawShotExploding = function(obj, draw) {
     const x = obj.shot_x;
     const y = obj.shot_y;
-    const image = resource.shotExplodingImage;
+    const image = draw
+        ? resource.shotExplodingImage
+        : resource.shotExplodingRemoveImage;
     this.drawSprite(x, y, image);
 }
 
@@ -191,9 +204,35 @@ gfx.drawAlienShot = function(obj) {
     this.canvas_ctx.drawImage(obj.images[imageIndex], pt.x, pt.y);
 }
 
-gfx.drawAlienShotExploding = function(obj) {
+gfx.drawAlienShotExploding = function(obj, draw) {
     const x = obj.shot_x;
     const y = obj.shot_y;
-    const image = resource.alienShotExplodingImage;
+    const image = draw 
+        ? resource.alienShotExplodingImage
+        : resource.alienShotExplodingRemoveImage;
     this.drawSprite(x, y, image);
+}
+
+gfx.drawSaucer = function(index) {
+    const x = game.saucer.coord_x;
+    const y = game.saucer.coord_y;
+    const image = resource.saucerImages[index]; // 0: normal, 1: explosion
+    this.drawSprite(x, y, image);
+}
+
+gfx.drawPlayerNumShips = function() {
+    let ship_loc_x = 56, ship_loc_y = 8;
+    // draw player ships
+    for (let i = 0; i < game.p1_num_ships; i++) {
+        const playerImage = resource.playerImage;
+        this.drawSprite(ship_loc_x, ship_loc_y, playerImage);
+        ship_loc_x += 16;
+    }
+
+    // clear rest area
+    this.eraseRect(ship_loc_x, ship_loc_y, CREDIT_X - ship_loc_x, 8);
+
+    // draw number digits
+    const dig_x = 40, dig_y = 8;
+    this.drawChar(dig_x, dig_y, game.p1_num_ships + 0x1a);
 }

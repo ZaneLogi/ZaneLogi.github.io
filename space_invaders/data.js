@@ -527,6 +527,10 @@ const init_data = {
     player_ok: 1, // 1 means OK, 0 means not
     enable_alien_fire: false, // true means alien can fire, false means not
     alien_fire_delay: 0x30,
+    alien_shot_delta: -4,
+
+    adjust_score: 0x00, // Set to 1 if score needs adjusting
+    score_delta: 0x00,
 };
 
 const init_player_ship_data = {
@@ -588,6 +592,19 @@ const init_squiggly_shot_data = {
     shot_blow_cnt: 4,
     shot_y: 0,
     shot_x: 0,
+};
+
+const init_saucer_data = {
+    start: false,
+    active: false,
+    hit: false,
+    hit_timer: 0x20,
+    coord_x: 41,
+    coord_y: 208,
+    delta_x: 2,
+    score_table_offset: 0,
+    shot_count: 0x800, // used for saucer direction, right-most bit: 1 right to left, 0 left to right
+    till_saucer: 0x600, // count down every game loop. When it reaches 0 saucer is triggerd. Reset to 0x600
 };
 
 // The "plunger" shot uses index 00-0F (inclusive)
@@ -667,3 +684,28 @@ const message_30_pts = [0x27, 0x1D, 0x1A, 0x26, 0x0F, 0x0E, 0x08, 0x0D, 0x13, 0x
 const message_20_pts = [0x27, 0x1C, 0x1A, 0x26, 0x0F, 0x0E, 0x08, 0x0D, 0x13, 0x12];
 // "=10 POINTS"
 const message_10_pts = [0x27, 0x1B, 0x1A, 0x26, 0x0F, 0x0E, 0x08, 0x0D, 0x13, 0x12];
+
+// Score table for hitting alien type
+const alien_scores = [
+    10, // Bottom 2 rows
+    20, // Middle row
+    30, // Highest row
+];
+
+// Table of possible saucer scores
+const saucer_scores = [
+    0x05, 0x10, 0x15, 0x30
+];
+
+const saucer_score_string = [
+    [0x26, 0x1F, 0x1A], // _50
+    [0x1B, 0x1A, 0x1A], // 100
+    [0x1B, 0x1F, 0x1A], // 150
+    [0x1D, 0x1A, 0x1A], // 300
+];
+
+const saucer_score_table = [
+    0x10, 0x05, 0x05, 0x10, 0x15, 0x10, 0x10, 0x05,
+    0x30, 0x10, 0x10, 0x10, 0x05, 0x15, 0x10, 0x05
+];
+
