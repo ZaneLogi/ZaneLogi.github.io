@@ -55,7 +55,7 @@ game.doFrame = function () {
 game.initIntro = function() {
     input.disable();
     gfx.drawStatus();
-    this.splashAnimate = 1; // TODO: 0 for animation during splash and 1 for not.
+    this.splashAnimate = true;
     this.taskIndex = 0;
     this.task = taskList[this.taskIndex].type;
     this.task.init(taskList[this.taskIndex].context);
@@ -73,7 +73,7 @@ game.introTick = function() {
         this.taskIndex++;
         if (this.taskIndex >= taskList.length) {
             this.taskIndex = 0;
-            this.splashAnimate = 1 - this.splashAnimate;
+            this.splashAnimate = !this.splashAnimate;
         }
 
         this.task = taskList[this.taskIndex].type;

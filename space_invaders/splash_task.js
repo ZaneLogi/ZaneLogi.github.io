@@ -89,9 +89,50 @@ const tClearPlayField = {
     }
 };
 
+const tIF = {
+    init: function(context) {this.context = context},
+    tick: function() {
+        if (!this.context.test()) {
+            while (++game.taskIndex < taskList.length) {
+                const task = taskList[game.taskIndex];
+                if (task.type == tTAG && task.context.tag == this.context.OR) {
+                    break;
+                }
+            }
+        }
+
+        return false; // goto next task
+    }
+};
+
+const tGOTO = {
+    init: function(context) {this.context = context},
+    tick: function() {
+        while (++game.taskIndex < taskList.length) {
+            const task = taskList[game.taskIndex];
+            if (task.type == tTAG && task.context.tag == this.context.GOTO) {
+                break;
+            }
+        }
+        return false; // goto next task
+    }
+};
+
+const tTAG = {
+    init: function(context) {this.context = context},
+    tick: function() {
+        return false;
+    }
+};
+
 const taskList = [
     { type: tWait, context: {ticks: 0x40}},
-    { type: tPrintMessage, context: {x:128, y:184, str:message_play_uy}},
+    { type: tIF, context: {test: () => game.splashAnimate, OR: "play_y"}},
+        { type: tPrintMessage, context: {x:128, y:184, str:message_play_uy}},
+        { type: tGOTO, context: {GOTO: "endif_play_y"}},
+    { type: tTAG, context: {tag: "play_y"}},
+        { type: tPrintMessage, context: {x:128, y:184, str:message_play_y}},
+    { type: tTAG, context: {tag: "endif_play_y"}},
     { type: tPrintMessage, context: {x:88, y:160, str:message_invaders}},
     { type: tWait, context: {ticks: 0x40}},
     { type: tPrintMessage, context: {x:64, y:128, str:message_adv}},
@@ -102,25 +143,31 @@ const taskList = [
     { type: tPrintMessage, context: {x:112, y:80, str:message_20_pts}},
     { type: tPrintMessage, context: {x:112, y:64, str:message_10_pts}},
     { type: tWait, context: {ticks: 0x80}},
-    // Animate sprite from Y=FE to Y=9E step -1
-    { type: tAnimateSprite, context: splash_screen_animation[0]},
-    // Animate sprite from Y=98 to Y=FF step 1
-    { type: tAnimateSprite, context: splash_screen_animation[1]},
-    { type: tWait, context: {ticks: 0x40}},
-    // Animate sprite from Y=FF to Y=97 step 1
-    { type: tAnimateSprite, context: splash_screen_animation[2]},
-    { type: tWait, context: {ticks: 0x40}},
-    { type: tEraseRect, context: {x:158, y:184, w:10, h:8}},
-    { type: tWait, context: {ticks: 0x80}},
+    { type: tIF, context: {test: () => game.splashAnimate, OR: "no_anim_uy"}},
+        // Animate sprite from Y=FE to Y=9E step -1
+        { type: tAnimateSprite, context: splash_screen_animation[0]},
+        // Animate sprite from Y=98 to Y=FF step 1
+        { type: tAnimateSprite, context: splash_screen_animation[1]},
+        { type: tWait, context: {ticks: 0x40}},
+        // Animate sprite from Y=FF to Y=97 step 1
+        { type: tAnimateSprite, context: splash_screen_animation[2]},
+        { type: tWait, context: {ticks: 0x40}},
+        { type: tEraseRect, context: {x:158, y:184, w:10, h:8}},
+        { type: tWait, context: {ticks: 0x80}},
+    { type: tTAG, context: {tag: "no_anim_uy"}},
     { type: tClearPlayField, context: null},
     { type: tPrintMessage, context: {x:96, y:136, str:message_coin}},
-    { type: tPrintMessage, context: {x:152, y:136, str:[0x02]}},
+    { type: tIF, context: {test: () => game.splashAnimate, OR: "no_char_c"}},
+        { type: tPrintMessage, context: {x:152, y:136, str:[0x02]}},
+    { type: tTAG, context: {tag: "no_char_c"}},
     { type: tPrintMessage, context: {x:80, y:104, str:message_p1or2}},
     { type: tPrintMessage, context: {x:80, y:80, str:message_1_coin}},
     { type: tPrintMessage, context: {x:80, y:56, str:message_2_coins}},
-    { type: tAnimateSprite, context: splash_screen_animation[3]},
-    // TODO: shoot the letter 'C'
-    { type: tPrintMessage, context: {x:152, y:136, str:[0x26]}},
+    { type: tIF, context: {test: () => game.splashAnimate, OR: "no_anim_c"}},
+        { type: tAnimateSprite, context: splash_screen_animation[3]},
+        // TODO: shoot the letter 'C'
+        { type: tPrintMessage, context: {x:152, y:136, str:[0x26]}},
+    { type: tTAG, context: {tag: "no_anim_c"}},
     { type: tWait, context: {ticks: 0x80}},
     { type: tClearPlayField, context: null},
 ];
