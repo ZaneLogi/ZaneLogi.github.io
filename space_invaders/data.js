@@ -1,0 +1,711 @@
+"use strict"
+
+const sprites_data = {
+/*
+; Alien sprite type A,B, and C at positions 0
+;  ........ ........ ........
+;  ........ ........ ........
+;  *..***.. ........ ........
+;  *..****. ...****. ........
+;  .*.****. *.***... *..**...
+;  .***.**. .*****.* .*.***..
+;  ..**.*** ..**.**. *.**.**.
+;  .*.***** ..****.. .*.*****
+;  .*.***** ..****.. .*.*****
+;  ..**.*** ..****.. *.**.**.
+;  .***.**. ..**.**. .*.***..
+;  .*.****. .*****.* *..**...
+;  *..****. *.***... ........
+;  *..***.. ...****. ........
+;  ........ ........ ........
+;  ........ ........ ........
+*/
+alien_a0:
+[0x00, 0x00, 0x39, 0x79, 0x7A, 0x6E, 0xEC, 0xFA, 0xFA, 0xEC, 0x6E, 0x7A, 0x79, 0x39, 0x00, 0x00],
+
+alien_b0:
+[0x00, 0x00, 0x00, 0x78, 0x1D, 0xBE, 0x6C, 0x3C, 0x3C, 0x3C, 0x6C, 0xBE, 0x1D, 0x78, 0x00, 0x00],
+
+alien_c0:
+[0x00, 0x00, 0x00, 0x00, 0x19, 0x3A, 0x6D, 0xFA, 0xFA, 0x6D, 0x3A, 0x19, 0x00, 0x00, 0x00, 0x00],
+/*
+; Alien sprite type A,B, and C at positions 1
+;  ........ ........ ........
+;  ........ ........ ........
+;  ...***.. ........ ........
+;  .*.****. .***.... ........
+;  *******. ...**... .*.**...
+;  *.**.**. .*****.* *.****..
+;  ..**.*** *.**.**. ...*.**.
+;  .*.***** *.****.. ..******
+;  .*.***** ..****.. ..******
+;  ..**.*** *.****.. ...*.**.
+;  *.**.**. *.**.**. *.****..
+;  *******. .*****.* .*.**...
+;  .*.****. ...**... ........
+;  ...***.. .***.... ........
+;  ........ ........ ........
+;  ........ ........ ........
+*/
+alien_a1:
+[0x00, 0x00, 0x38, 0x7A, 0x7F, 0x6D, 0xEC, 0xFA, 0xFA, 0xEC, 0x6D, 0x7F, 0x7A, 0x38, 0x00, 0x00],
+
+alien_b1:
+[0x00, 0x00, 0x00, 0x0E, 0x18, 0xBE, 0x6D, 0x3D, 0x3C, 0x3D, 0x6D, 0xBE, 0x18, 0x0E, 0x00, 0x00],
+
+alien_c1:
+[0x00, 0x00, 0x00, 0x00, 0x1A, 0x3D, 0x68, 0xFC, 0xFC, 0x68, 0x3D, 0x1A, 0x00, 0x00, 0x00, 0x00],
+/*
+PlayerSprite:
+;  ........
+;  ........
+;  ****....
+;  *****...
+;  *****...
+;  *****...
+;  *****...
+;  *******.
+;  ********
+;  *******.
+;  *****...
+;  *****...
+;  *****...
+;  *****...
+;  ****....
+;  ........
+*/
+player:
+[0x00, 0x00, 0x0F, 0x1F, 0x1F, 0x1F, 0x1F, 0x7F, 0xFF, 0x7F, 0x1F, 0x1F, 0x1F, 0x1F, 0x0F, 0x00],
+/*
+PlrBlowupSprites:
+;  ........
+;  ..*.....
+;  *.......
+;  **..*...
+;  **......
+;  ***.....
+;  **..**.*
+;  ****....
+;  ****.*..
+;  **......
+;  ****.*..
+;  *..*..*.
+;  ..*.....
+;  **......
+;  ........
+;  *.......
+;
+*/
+player_blowup1:
+[0x00, 0x04, 0x01, 0x13, 0x03, 0x07, 0xB3, 0x0F, 0x2F, 0x03, 0x2F, 0x49, 0x04, 0x03, 0x00, 0x01],
+/*
+;
+;  ......*.
+;  ...*....
+;  *.*.....
+;  **...*.*
+;  .*.*....
+;  **......
+;  **.**.*.
+;  ****....
+;  ***..*..
+;  ***..*..
+;  **.*....
+;  **.*..*.
+;  ......*.
+;  ..*....*
+;  *...*...
+;  ...*..*.
+*/
+player_blowup2:
+[0x40, 0x08, 0x05, 0xA3, 0x0A, 0x03, 0x5B, 0x0F, 0x27, 0x27, 0x0B, 0x4B, 0x40, 0x84, 0x11, 0x48],
+/*
+PlayerShotSpr:
+*/
+player_shot:
+[0x0F],
+/*
+ShotExploding:
+; *..**..*
+; ..****..
+; .******.
+; *.****..
+; ..****.*
+; .*****..
+; ..*****.
+; *..**..*
+*/
+shot_exploding:
+[0x99, 0x3C, 0x7E, 0x3D, 0xBC, 0x3E, 0x7C, 0x99],
+/*
+; Alien exploding sprite
+AlienExplode:
+;  ........
+;  ...*....
+;  *..*..*.
+;  .*...*..
+;  ..*.*...
+;  *......*
+;  .*....*.
+;  ........
+;  .*....*.
+;  *......*
+;  ..*.*...
+;  .*...*..
+;  *..*..*.
+;  ...*....
+;  ........
+;  ........
+*/
+alien_exploding:
+[0x00, 0x08, 0x49, 0x22, 0x14, 0x81, 0x42, 0x00, 0x42, 0x81, 0x14, 0x22, 0x49, 0x08, 0x00, 0x00],
+/*
+; Squigly shot picture in 4 animation frames
+SquiglyShot:
+*/
+squigly_shot:
+    [
+        [
+            0x44,   //; ..*...*.
+            0xAA,   //; .*.*.*.*
+            0x10,   //; ....*...
+        ],
+        [
+            0x88,   //; ...*...*
+            0x54,   //; ..*.*.*.
+            0x22,   //; .*...*..
+        ],
+        [
+            0x10,   //; ....*...
+            0xAA,   //; .*.*.*.*
+            0x44,   //; ..*...*.
+        ],
+        [
+            0x22,   //; .*...*..
+            0x54,   //; ..*.*.*.
+            0x88,   //; ...*...*
+        ],
+    ],
+/*
+; Alien shot exploding
+AShotExplo:      
+; .*.*..*.
+; *.*.*...
+; .*****.*
+; ******..
+; .****.*.
+; *.*..*..
+*/
+alien_shot_explding:
+[0x4A, 0x15, 0xBE, 0x3F, 0x5E, 0x25],
+/*
+; Alien shot ... the plunger looking one
+PlungerShot:
+*/
+pluger_shot:
+    [
+        [
+            0x04,  //; ..*.....
+            0xFC,  //; ..******
+            0x04,  //; ..*.....
+        ],
+        [
+            0x10,  //; ....*...
+            0xFC,  //; ..******
+            0x10,  //; ....*...
+        ],
+        [
+            0x20,  //; .....*..
+            0xFC,  //; ..******
+            0x20,  //; .....*..
+        ],
+        [
+            0x80,  //; .......*
+            0xFC,  //; ..******
+            0x80,  //; .......*
+        ]
+    ],
+/*
+; Alien shot ... the rolling one
+RollShot:
+*/
+roll_shot:
+    [
+        [
+            0x00,  //; ........
+            0xFE,  //; .*******
+            0x00,  //; ........
+        ],
+        [
+            0x24,  //; ..*..*..
+            0xFE,  //; .*******
+            0x12,  //; .*..*...
+        ],
+        [
+            0x00,  //; ........
+            0xFE,  //; .*******
+            0x00,  //; ........
+        ],
+        [
+            0x48,  //; ...*..*.
+            0xFE,  //; .*******
+            0x90,  //; ....*..*
+        ]
+    ],
+/*
+ShieldImage:
+; Shield image pattern. 2 x 22 = 44 bytes.
+;
+;************....
+;*************...
+;**************..
+;***************.
+;****************
+;..**************
+;...*************
+;....************
+;....************
+;....************
+;....************
+;....************
+;....************
+;....************
+;...*************
+;..**************
+;****************
+;****************
+;***************.
+;**************..
+;*************...
+;************....
+;
+*/
+shield:
+[
+0xFF, 0x0F, 0xFF, 0x1F, 0xFF, 0x3F, 0xFF, 0x7F, 0xFF, 0xFF, 0xFC, 0xFF, 0xF8, 0xFF, 0xF0, 0xFF, 0xF0, 0xFF, 0xF0, 0xFF, 0xF0, 0xFF,
+0xF0, 0xFF, 0xF0, 0xFF, 0xF0, 0xFF, 0xF8, 0xFF, 0xFC, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F, 0xFF, 0x3F, 0xFF, 0x1F, 0xFF, 0x0F,
+],
+/*
+SpriteSaucer:
+; ........
+; ........
+; ........
+; ........
+; ..*.....
+; ..**....
+; .****...
+; ***.**..
+; .*****..
+; ..*****.
+; ..*.***.
+; .******.
+; .******.
+; ..*.***.
+; ..*****.
+; .*****..
+; ***.**..
+; .****...
+; ..**....
+; ..*.....
+; ........
+; ........
+; ........
+; ........
+*/
+saucer:
+[0x00, 0x00, 0x00, 0x00, 0x04, 0x0C, 0x1E, 0x37, 0x3E, 0x7C, 0x74, 0x7E, 0x7E, 0x74, 0x7C, 0x3E, 0x37, 0x1E, 0x0C, 0x04, 0x00, 0x00, 0x00, 0x00],
+/*
+SpriteSaucerExp:
+;........
+;.*...*..
+;........
+;*.*..*.*
+;......*.
+;...*....
+;...**..*
+;*.****..
+;.**.**.*
+;..****..
+;.**.**..
+;*.***...
+;....*...
+;...*..*.
+;.*...**.
+;.**.**.*
+;*.***...
+;...**..*
+;...*....
+;.*....*.
+;....*..*
+;...*....
+;........
+;........
+*/
+saucer_exploding:
+[0x00, 0x22, 0x00, 0xA5, 0x40, 0x08, 0x98, 0x3D, 0xB6, 0x3C, 0x36, 0x1D, 0x10, 0x48, 0x62, 0xB6, 0x1D, 0x98, 0x08, 0x42, 0x90, 0x08, 0x00, 0x00],
+/*
+; 8 byte sprites
+; The screen is turned so rotate these pictures counter-clockwise.
+; Some of the font characters at the end were never needed. The ROM overwrites these characters with
+; data near the end. For instance, 1F90 would be a character but has the "INSERT COIN" message. The "?"
+; character is at 1FC0 and is used in messages as is 1FF8 "-". The "light colored" tiles in the grid below
+; show the character slots that have been repurposed.
+Characters:
+*/
+characters:
+[
+[0x00, 0x1F, 0x24, 0x44, 0x24, 0x1F, 0x00, 0x00],  // ........ ........ ........ ........ ........ ........ ........ ........
+[0x00, 0x7F, 0x49, 0x49, 0x49, 0x36, 0x00, 0x00],  // *****... *******. .*****.. *******. *******. *******. .*****.. *******.
+[0x00, 0x3E, 0x41, 0x41, 0x41, 0x22, 0x00, 0x00],  // ..*..*.. *..*..*. *.....*. *.....*. *..*..*. ...*..*. *.....*. ...*....
+[0x00, 0x7F, 0x41, 0x41, 0x41, 0x3E, 0x00, 0x00],  // ..*...*. *..*..*. *.....*. *.....*. *..*..*. ...*..*. *.....*. ...*....
+[0x00, 0x7F, 0x49, 0x49, 0x49, 0x41, 0x00, 0x00],  // ..*..*.. *..*..*. *.....*. *.....*. *..*..*. ...*..*. *.*...*. ...*....
+[0x00, 0x7F, 0x48, 0x48, 0x48, 0x40, 0x00, 0x00],  // *****... .**.**.. .*...*.. .*****.. *.....*. ......*. ***...*. *******.
+[0x00, 0x3E, 0x41, 0x41, 0x45, 0x47, 0x00, 0x00],  // ........ ........ ........ ........ ........ ........ ........ ........
+[0x00, 0x7F, 0x08, 0x08, 0x08, 0x7F, 0x00, 0x00],  // ........ ........ ........ ........ ........ ........ ........ ........
+
+[0x00, 0x00, 0x41, 0x7F, 0x41, 0x00, 0x00, 0x00],  // ........ ........ ........ ........ ........ ........ ........ ........
+[0x00, 0x02, 0x01, 0x01, 0x01, 0x7E, 0x00, 0x00],  // ........ .*...... *******. *******. *******. *******. .*****.. *******.
+[0x00, 0x7F, 0x08, 0x14, 0x22, 0x41, 0x00, 0x00],  // *.....*. *....... ...*.... *....... .....*.. ....*... *.....*. ...*..*.
+[0x00, 0x7F, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00],  // *******. *....... ..*.*... *....... ...**... ...*.... *.....*. ...*..*.
+[0x00, 0x7F, 0x20, 0x18, 0x20, 0x7F, 0x00, 0x00],  // *.....*. *....... .*...*.. *....... .....*.. ..*..... *.....*. ...*..*.
+[0x00, 0x7F, 0x10, 0x08, 0x04, 0x7F, 0x00, 0x00],  // ........ .******. *.....*. *....... *******. *******. .*****.. ....**..
+[0x00, 0x3E, 0x41, 0x41, 0x41, 0x3E, 0x00, 0x00],  // ........ ........ ........ ........ ........ ........ ........ ........
+[0x00, 0x7F, 0x48, 0x48, 0x48, 0x30, 0x00, 0x00],  // ........ ........ ........ ........ ........ ........ ........ ........
+
+[0x00, 0x3E, 0x41, 0x45, 0x42, 0x3D, 0x00, 0x00],  // ........ ........ ........ ........ ........ ........ ........ ........
+[0x00, 0x7F, 0x48, 0x4C, 0x4A, 0x31, 0x00, 0x00],  // .*****.. *******. .*..**.. ......*. .******. ..*****. *******. **...**.
+[0x00, 0x32, 0x49, 0x49, 0x49, 0x26, 0x00, 0x00],  // *.....*. ...*..*. *..*..*. ......*. *....... .*...... .*...... ..*.*...
+[0x00, 0x40, 0x40, 0x7F, 0x40, 0x40, 0x00, 0x00],  // *.*...*. ..**..*. *..*..*. *******. *....... *....... ..**.... ...*....
+[0x00, 0x7E, 0x01, 0x01, 0x01, 0x7E, 0x00, 0x00],  // .*....*. .*.*..*. *..*..*. ......*. *....... .*...... .*...... ..*.*...
+[0x00, 0x7C, 0x02, 0x01, 0x02, 0x7C, 0x00, 0x00],  // *.****.. *...**.. .**..*.. ......*. .******. ..*****. *******. **...**.
+[0x00, 0x7F, 0x02, 0x0C, 0x02, 0x7F, 0x00, 0x00],  // ........ ........ ........ ........ ........ ........ ........ ........
+[0x00, 0x63, 0x14, 0x08, 0x14, 0x63, 0x00, 0x00],  // ........ ........ ........ ........ ........ ........ ........ ........
+
+[0x00, 0x60, 0x10, 0x0F, 0x10, 0x60, 0x00, 0x00],  // ........ ........ ........ ........ ........ ........ ........ ........
+[0x00, 0x43, 0x45, 0x49, 0x51, 0x61, 0x00, 0x00],  // .....**. **....*. .*****.. ........ **...*.. .*....*. ..**.... .*..***.
+[0x00, 0x3E, 0x45, 0x49, 0x51, 0x3E, 0x00, 0x00],  // ....*... *.*...*. *.*...*. *....*.. *.*...*. *.....*. ..*.*... *...*.*.
+[0x00, 0x00, 0x21, 0x7F, 0x01, 0x00, 0x00, 0x00],  // ****.... *..*..*. *..*..*. *******. *..*..*. *..*..*. ..*..*.. *...*.*.
+[0x00, 0x23, 0x45, 0x49, 0x49, 0x31, 0x00, 0x00],  // ....*... *...*.*. *...*.*. *....... *..*..*. *..**.*. *******. *...*.*.
+[0x00, 0x42, 0x41, 0x49, 0x59, 0x66, 0x00, 0x00],  // .....**. *....**. .*****.. ........ *...**.. .**..**. ..*..... .***..*.
+[0x00, 0x0C, 0x14, 0x24, 0x7F, 0x04, 0x00, 0x00],  // ........ ........ ........ ........ ........ ........ ........ ........
+[0x00, 0x72, 0x51, 0x51, 0x51, 0x4E, 0x00, 0x00],  // ........ ........ ........ ........ ........ ........ ........ ........
+
+[0x00, 0x1E, 0x29, 0x49, 0x49, 0x46, 0x00, 0x00],  // ........ ........ ........ ........ ........ ........ ........ ........
+[0x00, 0x40, 0x47, 0x48, 0x50, 0x60, 0x00, 0x00],  // .****... ......*. .**.**.. *...**.. ...*.... ........ ........ ..*.*...
+[0x00, 0x36, 0x49, 0x49, 0x49, 0x36, 0x00, 0x00],  // *..*.*.. ***...*. *..*..*. *..*..*. ..*.*... *.....*. ........ ..*.*...
+[0x00, 0x31, 0x49, 0x49, 0x4A, 0x3C, 0x00, 0x00],  // *..*..*. ...*..*. *..*..*. *..*..*. .*...*.. .*...*.. ........ ..*.*...
+[0x00, 0x08, 0x14, 0x22, 0x41, 0x00, 0x00, 0x00],  // *..*..*. ....*.*. *..*..*. .*.*..*. *.....*. ..*.*... ........ ..*.*...
+[0x00, 0x00, 0x41, 0x22, 0x14, 0x08, 0x00, 0x00],  // .**...*. .....**. .**.**.. ..****.. ........ ...*.... ........ ..*.*...
+[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],  // ........ ........ ........ ........ ........ ........ ........ ........
+[0x00, 0x14, 0x14, 0x14, 0x14, 0x14, 0x00, 0x00],  // ........ ........ ........ ........ ........ ........ ........ ........
+
+[0x00, 0x22, 0x14, 0x7F, 0x14, 0x22, 0x00, 0x00],  // ........ ........
+[0x00, 0x03, 0x04, 0x78, 0x04, 0x03, 0x00, 0x00],  // .*...*.. **......
+                                                   // ..*.*... ..*.....
+                                                   // *******. ...****.
+                                                   // ..*.*... ..*.....
+                                                   // .*...*.. **......
+                                                   // ........ ........
+                                                   // ........ ........
+
+[0x00, 0x20, 0x40, 0x4D, 0x50, 0x20, 0x00, 0x00],  // index: 0x38
+[0x00, 0x08, 0x08, 0x08, 0x08, 0x08, 0x00, 0x00],  // index: 0x3f
+],
+/*
+; Small alien pushing Y back onto screen
+AlienSprCA:
+; .....**.
+; ....*...
+; ****....
+; ....*...
+; .....**.
+; ....**..
+; ...**...
+; .*.**...
+; *.****..
+; ...*.**.
+; ..******
+; ..******
+; ...*.**.
+; *.****..
+; .*.**...
+; ........
+*/
+alien_carry0:
+[0x60, 0x10, 0x0F, 0x10, 0x60, 0x30, 0x18, 0x1A, 0x3D, 0x68, 0xFC, 0xFC, 0x68, 0x3D, 0x1A, 0x00],
+/*
+AlienSprCB:
+; ........
+; .....**.
+; ....*...
+; ****....
+; ....*...
+; .....**.
+; ...***..
+; *..**...
+; .*.***..
+; *.**.**.
+; .*.*****
+; .*.*****
+; *.**.**.
+; .*.***..
+; *..**...
+; ........
+*/
+alien_carry1:
+[0x00, 0x60, 0x10, 0x0F, 0x10, 0x60, 0x38, 0x19, 0x3A, 0x6D, 0xFA, 0xFA, 0x6D, 0x3A, 0x19, 0x00],
+
+// Alien sprite type C pulling upside down Y
+alien_cya:
+[0x00, 0x03, 0x04, 0x78, 0x14, 0x13, 0x08, 0x1A, 0x3D, 0x68, 0xFC, 0xFC, 0x68, 0x3D, 0x1A, 0x00],
+
+// Alien sprite C pulling upside down Y
+alien_cyb:
+[0x00, 0x00, 0x03, 0x04, 0x78, 0x14, 0x0B, 0x19, 0x3A, 0x6D, 0xFA, 0xFA, 0x6D, 0x3A, 0x19, 0x00],
+
+};
+
+const splash_screen_animation = [
+    {
+        image_form: 0x00, // (increments each draw)
+        delta_y: 0,
+        delta_x: -1,
+        y_coord: 0xb8,
+        x_coord: 0xfe,
+        base_image: 2, // alien type: small alien
+        x_target: 0x9e,
+    },
+    {
+        image_form: 0x00, // (increments each draw)
+        delta_y: 0,
+        delta_x: 1,
+        y_coord: 0xb8,
+        x_coord: 0x98,
+        base_image: 4, // alien type: small alien pulling upside down Y
+        x_target: 0xff,
+    },
+    {
+        image_form: 0x00,
+        delta_y: 0,
+        delta_x: -1,
+        y_coord: 0xb8,
+        x_coord: 0xff,
+        base_image: 3, // alien type: small alien pushing Y back onto screen
+        x_target: 0x97,
+    },
+    {
+        image_form: 0x00,
+        delta_y: 0,
+        delta_x: 1,
+        y_coord: 0xd0,
+        x_coord: 0x22,
+        base_image: 2, // small alien
+        x_target: 0x94,
+    },
+];
+
+const shot_reload_rate = [0x30, 0x10, 0x0B, 0x08, 0x07];
+const alien_reload_score_table = [0x02, 0x10, 0x20, 0x30];
+
+const init_data = {
+    alien_is_exploding: false,
+    exp_alien_timer: 0x10, // alien explosion timer
+    alien_row: 0,       // Row number of current alien (cursor)
+    alien_frame: 0,     // Animation frame number (0 or 1) for current alien (cursor)
+    alien_cur_index: 0, // Alien cursor index (from 0 to 54)
+    ref_alien_dy: 0,    // Reference alien delta Y
+    ref_alien_dx: 2,    // Reference alien delta X
+    ref_alien_y: 0x78,  // Reference alien Y coordinate
+    ref_alien_x: 0x38,  // Reference alien X coordinate
+    alien_cursor_y: 0x78,
+    alien_cursor_x: 0x38,
+    rack_dir: 0,        // 0 = right, 1 = left
+    rack_down_delta: -8,
+
+    num_aliens: 55,
+
+    player_ok: 1, // 1 means OK, 0 means not
+    enable_alien_fire: false, // true means alien can fire, false means not
+    alien_fire_delay: 0x30,
+    alien_shot_delta: -4,
+
+    adjust_score: 0x00, // Set to 1 if score needs adjusting
+    score_delta: 0x00,
+};
+
+const init_player_ship_data = {
+    timer_msb: 0x00,
+    timer_lsb: 0x80,
+    timer_extra: 0x00,
+    player_alive: 0xff, // Player is alive (FF=alive). Toggles between 0 and 1 for blow-up images.
+    exp_animate_timer: 5,
+    exp_animate_cnt: 0x0c,
+    player_y: 0x20,
+    player_x: 0x30,
+};
+
+const init_player_shot_data = {
+    timer_msb: 0x00,
+    timer_lsb: 0x00,
+    timer_extra: 0x00,
+    player_shot_status: 0x00,
+    blow_up_timer: 0x10,
+    shot_start_y: 0x28,
+    shot_delta: 4,
+    fire_bounce: false,
+};
+
+const init_rolling_shot_data = {
+    timer_msb: 0x00,
+    timer_lsb: 0x00,
+    timer_extra: 0x02,
+    shot_status: 0,
+    shot_step_cnt: 0,
+    shot_track: 0, // A 0 means this shot tracks the player
+    shot_column_offset: 0,
+    shot_blow_cnt: 4,
+    shot_y: 0,
+    shot_x: 0,
+};
+
+const init_plunger_shot_data = {
+    timer_msb: 0x00,
+    timer_lsb: 0x00,
+    timer_extra: 0x00,
+    shot_status: 0,
+    shot_step_cnt: 0,
+    shot_track: 1, // A 1 means this shot does not track the player
+    shot_column_offset: 0,
+    shot_blow_cnt: 4,
+    shot_y: 0,
+    shot_x: 0,
+};
+
+const init_squiggly_shot_data = {
+    timer_msb: 0x00,
+    timer_lsb: 0x00,
+    timer_extra: 0x00,
+    shot_status: 0,
+    shot_step_cnt: 0,
+    shot_track: 1, // A 1 means this shot does not track the player
+    shot_column_offset: 6,
+    shot_blow_cnt: 4,
+    shot_y: 0,
+    shot_x: 0,
+};
+
+const init_saucer_data = {
+    start: false,
+    active: false,
+    hit: false,
+    hit_timer: 0x20,
+    coord_x: 41,
+    coord_y: 208,
+    delta_x: 2,
+    score_table_offset: 0,
+    shot_count: 0x800, // used for saucer direction, right-most bit: 1 right to left, 0 left to right
+    till_saucer: 0x600, // count down every game loop. When it reaches 0 saucer is triggerd. Reset to 0x600
+};
+
+// The "plunger" shot uses index 00-0F (inclusive)
+// The "squiggly" shot uses index 06-14 (inclusive)
+// The "rolling" shot targets the player
+const column_fire_table = [
+    0x01, 0x07, 0x01, 0x01, 0x01, 0x04, 0x0B, 0x01,
+    0x06, 0x03, 0x01, 0x01, 0x0B, 0x09, 0x02, 0x08,
+    0x02, 0x0B, 0x04, 0x07, 0x0A
+];
+
+// " SCORE<1> HI-SCORE SCORE<2>"
+const message_score = [
+    0x26, 0x12, 0x02, 0x0E, 0x11, 0x04, 0x24, 0x1B, 0x25, 0x26, 0x07, 0x08,
+    0x3F, 0x12, 0x02, 0x0E, 0x11, 0x04, 0x26, 0x12, 0x02, 0x0E, 0x11, 0x04,
+    0x24, 0x1C, 0x25, 0x26
+];
+
+// "CREDIT " (with space on the end)
+const message_credit = [
+    0x02, 0x11, 0x04, 0x03, 0x08, 0x13, 0x26
+];
+
+// "INSERT  COIN"
+const message_coin = [
+    0x08, 0x0D, 0x12, 0x04, 0x11, 0x13, 0x26, 0x26, 0x02, 0x0E, 0x08, 0x0D
+];
+
+// "<1 OR 2 PLAYERS>  "
+const message_p1or2 = [
+    0x24, 0x1B, 0x26, 0x0E, 0x11, 0x26, 0x1C, 0x26,
+    0x0F, 0x0B, 0x00, 0x18, 0x04, 0x11, 0x12, 0x25,
+    0x26, 0x26
+];
+
+// "*1 PLAYER  1 COIN "
+const message_1_coin = [
+    0x28, 0x1B, 0x26, 0x0F, 0x0B, 0x00, 0x18, 0x04,
+    0x11, 0x26, 0x26, 0x1B, 0x26, 0x02, 0x0E, 0x08,
+    0x0D, 0x26
+];
+
+// "*2 PLAYERS 2 COINS"
+const message_2_coins = [
+    0x28, 0x1C, 0x26, 0x0F, 0x0B, 0x00, 0x18, 0x04,
+    0x11, 0x12, 0x26, 0x1C, 0x26, 0x02, 0x0E, 0x08,
+    0x0D, 0x12
+];
+
+// "PLAY" with normal Y
+const message_play_y = [
+    0x0F, 0x0B, 0x00, 0x18
+];
+
+// "PLAy" with an upside down 'Y' for splash screen
+const message_play_uy = [
+    0x0F, 0x0B, 0x00, 0x29
+]; 
+
+// "SPACE  INVADERS"
+const message_invaders = [
+    0x12, 0x0F, 0x00, 0x02, 0x04, 0x26, 0x26, 0x08, 0x0D, 0x15, 0x00, 0x03, 0x04, 0x11, 0x12
+];
+
+// "*SCORE ADVANCE TABLE*"
+const message_adv = [
+  0x28, 0x12, 0x02, 0x0E, 0x11, 0x04, 0x26, 0x00,
+  0x03, 0x15, 0x00, 0x0D, 0x02, 0x04, 0x26, 0x13,
+  0x00, 0x01, 0x0B, 0x04, 0x28
+];
+
+// "=? MYSTERY"
+const message_myst = [0x27, 0x38, 0x26, 0x0C, 0x18, 0x12, 0x13, 0x04, 0x11, 0x18];
+// "=30 POINTS"
+const message_30_pts = [0x27, 0x1D, 0x1A, 0x26, 0x0F, 0x0E, 0x08, 0x0D, 0x13, 0x12];
+// "=20 POINTS"
+const message_20_pts = [0x27, 0x1C, 0x1A, 0x26, 0x0F, 0x0E, 0x08, 0x0D, 0x13, 0x12];
+// "=10 POINTS"
+const message_10_pts = [0x27, 0x1B, 0x1A, 0x26, 0x0F, 0x0E, 0x08, 0x0D, 0x13, 0x12];
+
+// Score table for hitting alien type
+const alien_scores = [
+    10, // Bottom 2 rows
+    20, // Middle row
+    30, // Highest row
+];
+
+// Table of possible saucer scores
+const saucer_scores = [
+    0x05, 0x10, 0x15, 0x30
+];
+
+const saucer_score_string = [
+    [0x26, 0x1F, 0x1A], // _50
+    [0x1B, 0x1A, 0x1A], // 100
+    [0x1B, 0x1F, 0x1A], // 150
+    [0x1D, 0x1A, 0x1A], // 300
+];
+
+const saucer_score_table = [
+    0x10, 0x05, 0x05, 0x10, 0x15, 0x10, 0x10, 0x05,
+    0x30, 0x10, 0x10, 0x10, 0x05, 0x15, 0x10, 0x05
+];
+
