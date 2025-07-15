@@ -17,7 +17,7 @@ game.init = function() {
 
     this.action = ACTION.NONE;
 
-    runloop.start(() => this.doFrame(), 1000/50); // 50 FPS
+    runloop.start(() => this.doFrame(), 1000/20); // 50 FPS
 }
 
 game.doFrame = function() {
@@ -28,20 +28,8 @@ game.doFrame = function() {
 }
 
 game.render = function() {
-    /* for debug
-    let index = 0;
-    for (let j = 0, y = 0; j < 10; j++, y += 11) {
-        for (let i = 0, x = 10; i < 10; i++, x += 10, index++) {
-            gfx.drawSprite(index, x, y);
-        }
-    }
-
-    return;
-    */
-
     gfx.clearScreen();
     gfx.drawStage(this.stage);
-    
 
     // play sound
 }
@@ -173,30 +161,6 @@ void LodeRunnerApp::updateGame()
     }
 }
 
-void LodeRunnerApp::renderGame()
-{
-    //Clear screen
-    SDL_RenderClear(m_renderer);
-
-    renderStage();
-}
-
-void LodeRunnerApp::paintScreen()
-{
-    //Update screen
-    SDL_RenderPresent(m_renderer);
-}
-
-
-
-
-
-
-
-
-
-
-
 */
 game.processInput = function() {
     switch (this.action) {
@@ -254,6 +218,12 @@ game.processEvents = function () {
             }
             else if (code == "KeyS") {
                 this.action = ACTION.DOWN;
+            }
+            else if (code == "BracketLeft") {
+                this.action = ACTION.DIG_LEFT;
+            }
+            else if (code == "BracketRight") {
+                this.action = ACTION.DIG_RIGHT;
             }
             else {
                 this.action = ACTION.NONE;

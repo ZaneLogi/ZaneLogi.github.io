@@ -35,6 +35,8 @@ class Guard extends Actor {
     }
 
     update() {
+        this.previousMove = this.currentMove;
+
         if (this.handleRebirth())
             return;
 
@@ -47,7 +49,7 @@ class Guard extends Actor {
                 this.yAdjust == 0)
             {
                 this.isTrapped = true;
-                this.currentMove = IN_HOLE;
+                this.currentMove = Actor.MOVE.IN_HOLE;
                 this.countdownTimer = Guard.HOLE_TIME;
                 this.trapHoleX = this.xTile;
                 this.trapHoleY = this.yTile;
@@ -203,14 +205,14 @@ class Guard extends Actor {
 
         --this.countdownTimer;
         if (this.countdownTimer > 19)
-            this.currentMove = Stage.TILE.BIRTH0;
+            this.currentMove = Actor.MOVE.BIRTH0;
         else if (this.countdownTimer > 10)
-            this.currentMove = Stage.TILE.BIRTH1;
+            this.currentMove = Actor.MOVE.BIRTH1;
         else if (this.countdownTimer > 0)
-            this.currentMove = Stage.TILE.BIRTH2;
+            this.currentMove = Actor.MOVE.BIRTH2;
         else {
             this.rebirth = false;
-            this.currentMove = Stage.TILE.FALL_DOWN;
+            this.currentMove = Actor.MOVE.FALL_DOWN;
         }
 
         return true;
@@ -221,8 +223,9 @@ class Guard extends Actor {
             return false;
 
         if (--this.countdownTimer <= Guard.SHAKE_START) {
-            if (this.this.countdownTimer > Guard.SHAKE_END) {
-                this.currentMove = (this.countdownTimer % 2) ? Guard.SHAKE_LEFT : Guard.SHAKE_RIGHT;
+            if (this.countdownTimer > Guard.SHAKE_END) {
+                this.currentMove = (this.countdownTimer % 2)
+                    ? Actor.MOVE.SHAKE_LEFT : Actor.MOVE.SHAKE_RIGHT;
             }
             else if (this.countdownTimer <= 0) {
                 if (this.yTile == this.trapHoleY) {
@@ -273,8 +276,8 @@ class Guard extends Actor {
         // scan the possible position to spawn the guard
         const first_rnd = random.rnd();
         let x = first_rnd;
-        const y = 1;
-        while (this.stage.getTileType(x, y) != Stage.EMPTY) {
+        let y = 1;
+        while (this.stage.getTileType(x, y) != Stage.TILE.EMPTY) {
             x = random.rnd();
             if (x == first_rnd) {
                 y++;
@@ -288,9 +291,9 @@ class Guard extends Actor {
         this.moveToTile(x, y);
 
         this.countdownTimer = Guard.DEAD_TIME;
-        this.currentMove = Stage.TILE.BIRTH0;
+        this.currentMove = Actor.MOVE.BIRTH0;
         this.rebirth = true;
-        this.goldCount = 0; // lost gold if it owns
+        this.goldCount = 0; // lost gold if it owns, stage.update() handles this case
     }
 
     takeChest() {
@@ -487,7 +490,7 @@ class Guard extends Actor {
                         break;
                 }
             }
-        
+
             if (x < Stage.STAGE_XMAX) {
                 // if not at right edge check right side
                 const center = this.stage.getTileBehavior(x + 1, y);

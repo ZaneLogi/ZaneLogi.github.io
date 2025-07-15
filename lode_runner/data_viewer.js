@@ -2,7 +2,9 @@
 
 const canvas = document.querySelector('canvas');
 const canvas_ctx = canvas.getContext('2d');
-const imageData = canvas_ctx.createImageData(280, 198);
+const canvas_width = canvas.width;
+const canvas_height = canvas.height;
+const imageData = canvas_ctx.createImageData(canvas_width, canvas_height);
 const sprites = [];
 const SPRITE_W = 14;
 const SPRITE_H = 11;
@@ -69,9 +71,9 @@ const print = {
 
 function renderScreen() {
     for (let i = 0; i < 104; i++) {
-        const x = (i%20) * 14;
-        const y = Math.floor(i/20) * 11;
-        //drawSprite(x, y, i);
+        const x = (i%10) * 14;
+        const y = Math.floor(i/10) * 11 + 192;
+        drawSprite(x, y, i);
     }
 
     //print.putString("ABCZ\n0129\n<.>/(-)");

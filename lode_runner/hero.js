@@ -91,7 +91,7 @@ class Hero extends Actor {
             }
             break;
         case Actor.MOVE.DIG_RIGHT:
-            if (this.canMoveTo(this.xTile + 1, this.yTile + 1, Actor.MOVE.DIG_LEFT)) {
+            if (this.canMoveTo(this.xTile + 1, this.yTile + 1, Actor.MOVE.DIG_RIGHT)) {
                 this.moveStep(Actor.MOVE.DIG_RIGHT);
                 this.currentMove = Actor.MOVE.DIG_RIGHT;
                 this.lookLeft = false;
@@ -192,7 +192,7 @@ class Hero extends Actor {
             break;
         }
         case 12: // the hole is dug.
-            this.finishDigging(true);        
+            this.finishDigging(true);
             return;
         default:
             break;
@@ -213,7 +213,8 @@ class Hero extends Actor {
             this.stage.setTileType(xHole, yHole, Stage.TILE.BLOCK);
         }
 
-        this.currentMove = this.lookLeft ? RUN_LEFT : RUN_RIGHT;
+        // finish the digging move
+        this.currentMove = this.lookLeft ? Actor.MOVE.RUN_LEFT : Actor.MOVE.RUN_RIGHT;
         this.digCycle = 0;
         this.digging = false;
     }

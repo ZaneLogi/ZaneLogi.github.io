@@ -41,7 +41,7 @@ class Stage {
     static STAGE_XMIN = 0;
     static STAGE_XMAX = Stage.STAGE_WIDTH - 1;
     static STAGE_YMIN = 0;
-    static STAGE_YMAX = Stage.STAGE_HEIGHT - 1;    
+    static STAGE_YMAX = Stage.STAGE_HEIGHT - 1;
 
     static TILE = {
         EMPTY: 0, BLOCK: 1, SOLID: 2, LADDER: 3, BAR: 4, TRAP: 5, HLADR: 6, GOLD: 7, GUARD: 8, RUNNER: 9,
@@ -200,8 +200,38 @@ class Stage {
         }
 
         // updat holes
-        for (const hole of this.holes) {
+        for (let i = this.holes.length - 1; i >= 0; i--) {
+            const hole = this.holes[i];
+            hole.update();
+            if (hole.life == 0) {
+                const x = hole.x;
+                const y = hole.y;
+                this.setTileType(hole.x, hole.y, Stage.TILE.BLOCK);
 
+                this.holes.splice(i, 1);
+
+                // check the hero
+                if (this.hero.xTile == x && this.hero.yTile == y) {
+                    this.levelStatus = Stage.LEVEL_STATUS.CAPTURED;
+                    return;
+                }
+
+                // check guards
+                for (const guard of this.guards) {
+                    if (guard.xTile == x && guard.yTile == y) {
+                        if (guard.goldCount > 0) {
+                            --this.goldCount; // the guard died with a gold
+                        }
+                        // kill the guard and respawn it
+                        guard.respawn();
+                    }
+                }
+
+                // check golds, if a gold is buried, decrease the gold count 
+                if (this.getTileType(x, y) == Stage.TILE.GOLD) {
+                    --this.goldCount;
+                }
+            }
         }
 
         // update guards
@@ -210,6 +240,8 @@ class Stage {
         while (moveCount--) {
             const guard = this.guards[this.lastGuardIndex];
             guard.update();
+
+            console.assert(guard.currentMove != undefined, "Guard erro %o", guard);
 
             this.lastGuardIndex = (this.lastGuardIndex + 1) % this.guards.length;
 

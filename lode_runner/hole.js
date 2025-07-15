@@ -3,8 +3,7 @@
 class Hole {
     static HOLE_LIFE = 202;
 
-    constructor(stage, x, y) {
-        this.stage = stage;
+    constructor(x, y) {
         this.x = x;
         this.y = y;
         this.life = Hole.HOLE_LIFE;

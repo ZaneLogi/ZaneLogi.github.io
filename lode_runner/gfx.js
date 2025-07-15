@@ -13,7 +13,7 @@ gfx.init = function() {
 
     this.sprites = [];
     for (let i = 0; i < 104; i++ ) {
-        const spr = this.loadSprite(sprites_data[i]); 
+        const spr = this.loadSprite(sprites_data[i], i); 
         this.sprites.push(spr);
     }
 }
@@ -30,11 +30,19 @@ gfx.createOffscreenCanvas = function(width, height) {
     return canvas;
 }
 
-gfx.loadSprite = function(data) {
+gfx.loadSprite = function(data, tag) {
     const pixels = decodeApple2HiresSprite(data);
 
     const imageWidth = 14;
     const imageHeight = 11;
+
+    // patch
+    if ([1, 2, 31, 32, 33, 34, 100].includes(tag)) {
+        for (let h = 0; h < imageHeight; h++) {
+            const row = pixels[h];
+            row[9] = row[8];
+        }
+    }
 
     const image = this.createOffscreenCanvas(imageWidth, imageHeight);
     const imageCtx = image.getContext('2d');
@@ -68,6 +76,14 @@ gfx.drawSprite = function(index, x, y) {
     this.canvas_ctx.drawImage(this.sprites[index], x, y);
 }
 
+gfx.drawGround = function() {
+    const y = this.TILE_HEIGHT * Stage.STAGE_HEIGHT - 5;
+    let x = 0;
+    for (let i = Stage.STAGE_XMIN; i <= Stage.STAGE_XMAX; i++, x += this.TILE_WIDTH) {
+        this.drawSprite(100, x, y);
+    }
+}
+
 gfx.drawStage = function(stage) {
     // draw the level tiles
     for (let y = 0, sy = 0; y < Stage.STAGE_HEIGHT; y++, sy += 11) {
@@ -78,31 +94,11 @@ gfx.drawStage = function(stage) {
     }
 
     gfx.drawHero(stage.hero);
+    gfx.drawHeroDigging(stage.hero);
 
-    if (stage.hero.digging) {
-        //tex = m_resMgr.getDiggingAppearance(hero, rcSrc);
-        //int xDig = hero->lookLeft() ? x - rcSrc.w : x + rcSrc.w;
-        //rcDst = { xDig, y, rcSrc.w, rcSrc.h };
-        //SDL_RenderCopy(m_renderer, tex, &rcSrc, &rcDst);
-    }
-
-    gfx.drawHoles(stage.holes);
-
-    // draw guards
-    const guards = stage.guards;
-    for (const guard of guards) {
-        this.drawGuard(guard);
-    }
-
-    // draw the ground
-    /*tex = m_resMgr.getGroundAppearance();
-    y = SCREEN_GROUND_Y;
-    x = 0;
-    for (int i = LodeRunnerStage::STAGE_XMIN; i <= LodeRunnerStage::STAGE_XMAX; i++, x += ResourceManager::GROUND_WIDTH)
-    {
-        rcDst = { x, y, rcSrc.w, ResourceManager::GROUND_HEIGHT};
-        SDL_RenderCopy(m_renderer, tex, NULL, &rcDst);
-    }*/
+    this.drawHoles(stage.holes);
+    this.drawGuards(stage.guards);
+    this.drawGround();
 
     // draw information
     /*drawText("SCORE", 0, SCREEN_INFO_Y);
@@ -169,7 +165,7 @@ gfx.getHeroAppearance = function(hero, bar) {
         tile = 37;
         break;
     default:
-        console.assert(false);
+        console.assert(false, "Hero Move is invalid, %o", hero);
         break;
     }
 
@@ -227,7 +223,7 @@ gfx.getGuardAppearance = function(guard, bar) {
         tile = 0;
         break;
     default:
-        console.assert(false);
+        console.assert(false, "Guard Move is invalid, %o", guard);
         break;
     }
 
@@ -238,32 +234,55 @@ gfx.drawGuard = function(guard) {
     const pt = this.getActorScreenAt(guard);
     const tileBehavior = guard.stage.getTileBehavior(guard.xTile, guard.yTile);
     const tile = this.getGuardAppearance(guard, tileBehavior == Stage.TILE.BAR);
-    
+
     if (guard.currentMove == Actor.MOVE.SHAKE_LEFT)
         pt.x -= 1;
     else if (guard.currentMove == Actor.MOVE.SHAKE_RIGHT)
         pt.x += 1;
-    
+
     this.drawSprite(tile, pt.x, pt.y);
 }
 
-gfx.getDiggingAppearance = function(hero) {
-    const index = [0, 1, 2, 2, 3, 3, 4, 4, 5, 4, 6, 6][hero.digCycle-1];
+gfx.drawGuards = function(guards) {
+    for (const guard of guards) {
+        this.drawGuard(guard);
+    }
+}
 
-    // TODO
-    return index + 31;
+gfx.getDiggingAppearance = function(hero) {
+    // dig cycle: 1 - 12
+    // hole: 31 - 36
+    // mud splash: left 27, 28 right 38, 39 ending 29, 30
+    const index = hero.digCycle - 1;
+    const holeSprite = 31 + Math.floor(index/2);
+    const mudSprite = hero.lookLeft
+        ? [27, 28, 29, 30][Math.floor(index/3)]
+        : [38, 39, 29, 30][Math.floor(index/3)];
+
+    return [holeSprite, mudSprite];
+}
+
+gfx.drawHeroDigging = function(hero) {
+    if (hero.digging) {
+        const tiles = this.getDiggingAppearance(hero);
+        const x = this.TILE_WIDTH *
+            (hero.lookLeft ? (hero.xTile - 1) : (hero.xTile + 1));
+        const y = (hero.yTile + 1) * this.TILE_HEIGHT;
+        this.drawSprite(tiles[0], x, y);
+        this.drawSprite(tiles[1], x, y - this.TILE_HEIGHT);
+    }
 }
 
 gfx.getHoleAppearance = function(hole) {
     // phase: 0 - 3
-    const index = [0, 55, 56, 1][hole.phase]
+    const index = [0, 55, 56, 1][hole.phase()]
     return index;
 }
 
 gfx.drawHoles = function(holes) {
     for (const hole of holes) {
         const tile = this.getHoleAppearance(hole);
-        const pt = this.getScreenAt(hole.x, hole.y);
+        const pt = this.getTileScreenAt(hole.x, hole.y);
         this.drawSprite(tile, pt.x, pt.y);
     }
 }
