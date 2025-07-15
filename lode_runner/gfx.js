@@ -18,6 +18,11 @@ gfx.init = function() {
     }
 }
 
+gfx.clearScreen = function() {
+    this.canvas_ctx.fillStyle = "#000000";
+    this.canvas_ctx.fillRect(0, 0, this.canvas_width, this.canvas_height);
+}
+
 gfx.createOffscreenCanvas = function(width, height) {
     const canvas = document.createElement('canvas');
     canvas.width = width;

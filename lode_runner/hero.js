@@ -22,7 +22,7 @@ class Hero extends Actor {
         this.digging = false;
     }
 
-    requestMove(move) {
+    userMove(move) {
         this.requestMove = move; // type: Actor.MOVE
     }
 
@@ -108,8 +108,8 @@ class Hero extends Actor {
     }
 
     moveStep(move) {
-        const centerX = Actor.MOVE.NONE; // used to adjust the center of the horizontal when the hero is moving vertically
-        const centerY = Actor.MOVE.NONE; // used to adjust the cetner of the vertical when the hero is mvoing horizontally
+        let centerX = Actor.MOVE.NONE; // used to adjust the center of the horizontal when the hero is moving vertically
+        let centerY = Actor.MOVE.NONE; // used to adjust the cetner of the vertical when the hero is mvoing horizontally
 
         switch (move) {
         // the hero is moving vertically

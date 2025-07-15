@@ -1,5 +1,10 @@
 "use strict"
 
+const ACTION = {
+    NONE: 0, LEFT:1, RIGHT:2, UP:3, DOWN:4, DIG_LEFT:5, DIG_RIGHT:6,
+    NEXT_LEVEL: 7, PREVIOUS_LEVEL:8
+};
+
 const game = {}
 
 game.init = function() {
@@ -10,13 +15,20 @@ game.init = function() {
     sys_evt.init();
     gfx.init();
 
-    this.render();
+    this.action = ACTION.NONE;
 
+    runloop.start(() => this.doFrame(), 1000/50); // 50 FPS
+}
+
+game.doFrame = function() {
     this.processEvents();
+    this.processInput();
+    this.stage.update();
+    this.render();
 }
 
 game.render = function() {
-    /*
+    /* for debug
     let index = 0;
     for (let j = 0, y = 0; j < 10; j++, y += 11) {
         for (let i = 0, x = 10; i < 10; i++, x += 10, index++) {
@@ -27,6 +39,7 @@ game.render = function() {
     return;
     */
 
+    gfx.clearScreen();
     gfx.drawStage(this.stage);
     
 
@@ -35,45 +48,7 @@ game.render = function() {
 
 
 /*
-void LodeRunnerApp::processInput()
-{
-    switch (m_gameAction) {
-    case ACTION_LEFT:
-        m_stage->getHero()->requestMove(LodeRunnerCharacter::MOVE::RUN_LEFT);
-        break;
-    case ACTION_RIGHT:
-        m_stage->getHero()->requestMove(LodeRunnerCharacter::MOVE::RUN_RIGHT);
-        break;
-    case ACTION_UP:
-        m_stage->getHero()->requestMove(LodeRunnerCharacter::MOVE::CLIMB_UP);
-        break;
-    case ACTION_DOWN:
-        m_stage->getHero()->requestMove(LodeRunnerCharacter::MOVE::CLIMB_DOWN);
-        break;
-    case ACTION_DIG_LEFT:
-        m_stage->getHero()->requestMove(LodeRunnerCharacter::MOVE::DIG_LEFT);
-        break;
-    case ACTION_DIG_RIGHT:
-        m_stage->getHero()->requestMove(LodeRunnerCharacter::MOVE::DIG_RIGHT);
-        break;
-    case ACTION_NEXT_LEVEL:
-        if (m_currentLevel < 149)
-        {
-            m_currentLevel++;
-            m_stage->buildLevelMap(CLASSIC_LEVEL_MAPS[m_currentLevel]);
-        }
-        break;
-    case ACTION_PREVIOUS_LEVEL:
-        if (m_currentLevel > 0)
-        {
-            m_currentLevel--;
-            m_stage->buildLevelMap(CLASSIC_LEVEL_MAPS[m_currentLevel]);
-        }
-        break;
-    }
 
-    m_gameAction = ACTION_NONE;
-}
 
 void LodeRunnerApp::renderStage()
 {
@@ -223,62 +198,72 @@ void LodeRunnerApp::paintScreen()
 
 
 */
+game.processInput = function() {
+    switch (this.action) {
+    case ACTION.LEFT:
+        this.stage.hero.userMove(Actor.MOVE.RUN_LEFT);
+        break;
+    case ACTION.RIGHT:
+        this.stage.hero.userMove(Actor.MOVE.RUN_RIGHT);
+        break;
+    case ACTION.UP:
+        this.stage.hero.userMove(Actor.MOVE.CLIMB_UP);
+        break;
+    case ACTION.DOWN:
+        this.stage.hero.userMove(Actor.MOVE.CLIMB_DOWN);
+        break;
+    case ACTION.DIG_LEFT:
+        this.stage.hero.userMove(Actor.MOVE.DIG_LEFT);
+        break;
+    case ACTION.DIG_RIGHT:
+        this.stage.hero.userMove(Actor.MOVE.DIG_RIGHT);
+        break;
+    case ACTION.NEXT_LEVEL:
+        /*if (m_currentLevel < 149)
+        {
+            m_currentLevel++;
+            m_stage->buildLevelMap(CLASSIC_LEVEL_MAPS[m_currentLevel]);
+        }*/
+        break;
+    case ACTION.PREVIOUS_LEVEL:
+        /*if (m_currentLevel > 0)
+        {
+            m_currentLevel--;
+            m_stage->buildLevelMap(CLASSIC_LEVEL_MAPS[m_currentLevel]);
+        }*/
+        break;
+    }
 
-const input = {
-    enabled: false,
-    has_input: false,
-
-    left_pressed: false,
-    right_pressed: false,
-    fire_pressed: false,
-
-    enable: function() {
-        this.enabled = true;
-        this.has_input = false;
-    },
-
-    disable: function() {
-        this.enabled = false;
-        this.has_input = false;
-    },
-};
+    this.action = ACTION.NONE;
+}
 
 game.processEvents = function () {
-    if (input.enabled) {
-        for (const e of sys_evt.events) {
-            switch(e.type) {
-                case sys_evt.KEY_DOWN:
-                {
-                    const code = e.context.code;
-                    if (code == "KeyA") {
-                        input.left_pressed = true;
-                    }
-                    else if (code == "KeyD") {
-                        input.right_pressed = true;
-                    }
-                    else if (code == "KeyW") {
-                        input.fire_pressed = true;
-                    }
-
-                    input.has_input = true;
-                    break;
-                }
-                case sys_evt.KEY_UP:
-                {
-                    const code = e.context.code;
-                    if (code == "KeyA") {
-                        input.left_pressed = false;
-                    }
-                    else if (code == "KeyD") {
-                        input.right_pressed = false;
-                    }
-                    else if (code == "KeyW") {
-                        input.fire_pressed = false;
-                    }
-
-                    break;
-                }
+    for (const e of sys_evt.events) {
+        switch(e.type) {
+        case sys_evt.KEY_DOWN:
+        {
+            const code = e.context.code;
+            if (code == "KeyA") {
+                this.action = ACTION.LEFT;
             }
+            else if (code == "KeyD") {
+                this.action = ACTION.RIGHT;
+            }
+            else if (code == "KeyW") {
+                this.action = ACTION.UP;
+            }
+            else if (code == "KeyS") {
+                this.action = ACTION.DOWN;
+            }
+            else {
+                this.action = ACTION.NONE;
+            }
+            break;
+        }
+        case sys_evt.KEY_UP:
+        {
+            break;
+        }
         }
     }
 

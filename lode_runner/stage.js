@@ -205,7 +205,7 @@ class Stage {
         }
 
         // update guards
-        const moveCount = GUARD_MOVE_POLICY[this.guards.length][this.guardMapIndex];
+        let moveCount = GUARD_MOVE_POLICY[this.guards.length][this.guardMapIndex];
         this.guardMapIndex = (this.guardMapIndex + 1) % GUARD_MOVE_POLICY[0].length;
         while (moveCount--) {
             const guard = this.guards[this.lastGuardIndex];

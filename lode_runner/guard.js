@@ -69,7 +69,7 @@ class Guard extends Actor {
             return;
         }
 
-        const move = this.bestMove(); // TODO: check function or variable?
+        const move = this.thinkMove();
 
         switch (move) {
         case Actor.MOVE.CLIMB_UP:
@@ -84,8 +84,8 @@ class Guard extends Actor {
             break;
         case Actor.MOVE.CLIMB_DOWN:
             if (this.yAdjust < 0 ||
-                (this.canMoveTo(m_xTile, m_yTile + 1, Actor.MOVE.CLIMB_DOWN) &&
-                 !this.stage.isGuardAt(m_xTile, m_yTile + 1)))
+                (this.canMoveTo(this.xTile, this.yTile + 1, Actor.MOVE.CLIMB_DOWN) &&
+                 !this.stage.isGuardAt(this.xTile, this.yTile + 1)))
             {
                 this.moveStep(Actor.MOVE.CLIMB_DOWN);
                 this.currentMove = Actor.MOVE.CLIMB_DOWN;
@@ -94,8 +94,8 @@ class Guard extends Actor {
             break;
         case Actor.MOVE.RUN_LEFT:
             if (this.xAdjust > 0 ||
-                (this.canMoveTo(m_xTile - 1, m_yTile, Actor.MOVE.RUN_LEFT) &&
-                 !this.stage.isGuardAt(m_xTile - 1, m_yTile)))
+                (this.canMoveTo(this.xTile - 1, this.yTile, Actor.MOVE.RUN_LEFT) &&
+                 !this.stage.isGuardAt(this.xTile - 1, this.yTile)))
             {
                 this.moveStep(Actor.MOVE.RUN_LEFT);
                 this.currentMove = Actor.MOVE.RUN_LEFT;
@@ -105,8 +105,8 @@ class Guard extends Actor {
             break;
         case Actor.MOVE.RUN_RIGHT:
             if (this.xAdjust < 0 ||
-                (this.canMoveTo(m_xTile + 1, m_yTile, Actor.MOVE.RUN_RIGHT) &&
-                 !this.stage.isGuardAt(m_xTile + 1, m_yTile)))
+                (this.canMoveTo(this.xTile + 1, this.yTile, Actor.MOVE.RUN_RIGHT) &&
+                 !this.stage.isGuardAt(this.xTile + 1, this.yTile)))
             {
                 this.moveStep(Actor.MOVE.RUN_RIGHT);
                 this.currentMove = Actor.MOVE.RUN_RIGHT;
@@ -118,25 +118,25 @@ class Guard extends Actor {
     }
 
     moveStep(move) {
-        const centerX = Stage.TILE.NONE; // used to adjust the center of the horizontal when the hero is moving vertically
-        const centerY = Stage.TILE.NONE; // used to adjust the cetner of the vertical when the hero is mvoing horizontally
+        let centerX = Stage.TILE.NONE; // used to adjust the center of the horizontal when the hero is moving vertically
+        let centerY = Stage.TILE.NONE; // used to adjust the cetner of the vertical when the hero is mvoing horizontally
 
         switch (move) {
         // the hero is moving vertically
         case Actor.MOVE.CLIMB_UP:
         case Actor.MOVE.CLIMB_DOWN:
         case Actor.MOVE.FALL_DOWN:
-            if (this.xAdjust < 0) // the hero is at the left side of the center, move the hero right
+            if (this.xAdjust < 0) // the guard is at the left side of the center, move the guard right
                 centerX = Actor.MOVE.RUN_RIGHT;
-            else if (this.xAdjust > 0) // the hero is at the right side of the center, move the hero left
+            else if (this.xAdjust > 0) // the guard is at the right side of the center, move the guard left
                 centerX = Actor.MOVE.RUN_LEFT;
             break;
         // the hero is moving horizontally
         case Actor.MOVE.RUN_LEFT:
         case Actor.MOVE.RUN_RIGHT:
-            if (this.yAdjust < 0) // the hero is above the center, move the hero down
+            if (this.yAdjust < 0) // the guard is above the center, move the hero down
                 centerY = Actor.MOVE.CLIMB_DOWN;
-            else if (this.yAdjust > 0) // the hero is below the center, move the hero up
+            else if (this.yAdjust > 0) // the guard is below the center, move the hero up
                 centerY = Actor.MOVE.CLIMB_UP;
             break;
         case Actor.MOVE.RESPAWN: // TODO: check if it is used
@@ -154,7 +154,7 @@ class Guard extends Actor {
                 this.yAdjust = 2;
             }
             else {
-                m_yAdjust--;
+                this.yAdjust--;
             }
         }
 
@@ -173,7 +173,7 @@ class Guard extends Actor {
         }
 
         if (move == Actor.MOVE.RUN_LEFT || centerX == Actor.MOVE.RUN_LEFT) {
-            if (m_xAdjust <= -2) {
+            if (this.xAdjust <= -2) {
                 this.dropChest();
                 this.xTile--;
                 this.xAdjust = 3;
@@ -217,74 +217,56 @@ class Guard extends Actor {
     }
 
     handleInHole() {
-/*
-bool LodeRunnerGuard::handleInHole()
-{
-    if (!m_isTrapped)
-        return false;
+        if (!this.isTrapped)
+            return false;
 
-    if (--m_countdownTimer <= SHAKE_START)
-    {
-        if (m_countdownTimer > SHAKE_END)
-        {
-            m_currentMove = (m_countdownTimer % 2) ? SHAKE_LEFT : SHAKE_RIGHT;
-        }
-        else if (m_countdownTimer <= 0)
-        {
-            auto stage = m_stage.lock();
-            if (!stage)
-                return true;
-
-            if (m_yTile == m_trapHoleY)
-            {
-                // climb out
-                auto top = stage->getTileBehavior(m_xTile, m_yTile - 1);
-                if (top != LodeRunnerStage::BLOCK && top != LodeRunnerStage::SOLID)
-                {
-                    moveStep(CLIMB_UP);
-                    m_currentMove = CLIMB_UP;
-                }
+        if (--this.countdownTimer <= Guard.SHAKE_START) {
+            if (this.this.countdownTimer > Guard.SHAKE_END) {
+                this.currentMove = (this.countdownTimer % 2) ? Guard.SHAKE_LEFT : Guard.SHAKE_RIGHT;
             }
-            else if (m_xTile == m_trapHoleX)
-            {
-                MOVE move = bestMove();
-                if (move == RUN_LEFT)
-                    m_lookLeft = true;
-                else if (move == RUN_RIGHT)
-                    m_lookLeft = false;
+            else if (this.countdownTimer <= 0) {
+                if (this.yTile == this.trapHoleY) {
+                    // climb out
+                    const top = this.stage.getTileBehavior(this.xTile, this.yTile - 1);
+                    if (top != Stage.TILE.BLOCK && top != Stage.TILE.SOLID) {
+                        this.moveStep(Actor.MOVE.CLIMB_UP);
+                        this.currentMove = Actor.MOVE.CLIMB_UP;
+                    }
+                }
+                else if (this.xTile == this.trapHoleX) {
+                    const move = this.thinkMove();
+                    if (move == Actor.MOVE.RUN_LEFT)
+                        this.lookLeft = true;
+                    else if (move == Actor.MOVE.RUN_RIGHT)
+                        this.lookLeft = false;
 
-                auto left = stage->getTileBehavior(m_xTile - 1, m_yTile);
-                auto right = stage->getTileBehavior(m_xTile + 1, m_yTile);
-                if (m_lookLeft && (left == LodeRunnerStage::BLOCK || left == LodeRunnerStage::SOLID))
-                    m_lookLeft = false;
-                if (!m_lookLeft && (right == LodeRunnerStage::BLOCK || right == LodeRunnerStage::SOLID))
-                    m_lookLeft = true;
+                    const left = this.stage.getTileBehavior(this.xTile - 1, this.yTile);
+                    const right = this.stage.getTileBehavior(this.xTile + 1, this.yTile);
+                    if (this.lookLeft && (left == Stage.TILE.BLOCK || left == Stage.TILE.SOLID))
+                        this.lookLeft = false;
+                    if (!this.lookLeft && (right == Stage.TILE.BLOCK || right == Stage.TILE.SOLID))
+                        this.lookLeft = true;
 
-                if (m_lookLeft && left != LodeRunnerStage::BLOCK && left != LodeRunnerStage::SOLID)
-                {
-                    moveStep(RUN_LEFT);
-                    m_currentMove = RUN_LEFT;
+                    if (this.lookLeft && left != Stage.TILE.BLOCK && left != Stage.TILE.SOLID) {
+                        this.moveStep(Actor.MOVE.RUN_LEFT);
+                        this.currentMove = Actor.MOVE.RUN_LEFT;
+                    }
+                    else if (!this.lookLeft && right != Stage.TILE.BLOCK && right != Stage.TILE.SOLID) {
+                        this.moveStep(Actor.MOVE.RUN_RIGHT);
+                        this.currentMove = Actor.MOVE.RUN_RIGHT;
+                    }
+                    else
+                    {
+                        this.isTrapped = false; // no way to go, and not trapped.
+                    }
                 }
-                else if (!m_lookLeft && right != LodeRunnerStage::BLOCK && right != LodeRunnerStage::SOLID)
-                {
-                    moveStep(RUN_RIGHT);
-                    m_currentMove = RUN_RIGHT;
+                else {
+                    this.isTrapped = false; // not trapped and not on the top of the hole
                 }
-                else
-                {
-                    m_isTrapped = false; // no way to go, and not trapped.
-                }
-            }
-            else
-            {
-                m_isTrapped = false; // not trapped and not on the top of the hole
             }
         }
-    }
 
-    return true;
-}
-*/
+        return true;
     }
 
     respawn() {
@@ -342,7 +324,7 @@ bool LodeRunnerGuard::handleInHole()
         if (!this.isTrapped &&
             this.goldCount > 0 &&
             this.currentMove != Actor.MOVE.FALL_DOWN &&
-            center == Stage.xTile.EMPTY &&
+            center == Stage.TILE.EMPTY &&
             (bottom == Stage.TILE.BLOCK || bottom == Stage.TILE.SOLID || bottom == Stage.TILE.LADDER))
         {
             this.goldCount--;
@@ -362,7 +344,7 @@ bool LodeRunnerGuard::handleInHole()
             this.stage.getTileBehavior(this.xTile, this.yTile + 1) == Stage.EMPTY);
     }
 
-    bestMove() {
+    thinkMove() {
         const hero = this.stage.hero;
         const heroX = hero.xTile;
         const heroY = hero.yTile;
@@ -482,163 +464,134 @@ bool LodeRunnerGuard::handleInHole()
     }
 
     scanUp(x, desireMove) {
-/*
-void LodeRunnerGuard::scanUp(int x, MOVE desireMove)
-{
-    auto stage = m_stage.lock();
-    if (!stage)
-        return;
+        const hero = this.stage.hero;
+        const heroY = hero.yTile;
 
-    auto hero = stage->getHero();
-    int heroX = hero->getXTile();
-    int heroY = hero->getYTile();
+        // seach up until it can move horizontally and above hero's position
+        let y = this.yTile;
 
-    // seach up until it can move horizontally and above hero's position
-    int y = m_yTile;
+        while (y > Stage.STAGE_YMIN && this.stage.getTileBehavior(x, y) == Stage.LADDER) {
+            // can go up
+            y--;
 
-    while (y > LodeRunnerStage::STAGE_YMIN &&
-        stage->getTileBehavior(x, y) == LodeRunnerStage::LADDER)
-    {
-        // can go up
-        y--;
-
-        if (x > LodeRunnerStage::STAGE_XMIN) // if not at left edge check left side
-        {
-            auto center = stage->getTileBehavior(x - 1, y);
-            auto bottom = stage->getTileBehavior(x - 1, y + 1, true);
-            if (bottom == LodeRunnerStage::BLOCK || bottom == LodeRunnerStage::SOLID || bottom == LodeRunnerStage::LADDER ||
-                center == LodeRunnerStage::LADDER || center == LodeRunnerStage::BAR)
-            {
-                // can move left, ignroe walls
-                if (y <= heroY)
-                    // above hero
-                    break;
+            if (x > Stage.STAGE_XMIN) {
+                // if not at left edge check left side
+                const center = this.stage.getTileBehavior(x - 1, y);
+                const bottom = this.stage.getTileBehavior(x - 1, y + 1, true);
+                if (bottom == Stage.TILE.BLOCK || bottom == Stage.TILE.SOLID || bottom == Stage.TILE.LADDER ||
+                    center == Stage.TILE.LADDER || center == Stage.TILE.BAR)
+                {
+                    // can move left, ignroe walls
+                    if (y <= heroY)
+                        // above hero
+                        break;
+                }
             }
-        }
         
-        if (x < LodeRunnerStage::STAGE_XMAX) // if not at right edge check right side
-        {
-            auto center = stage->getTileBehavior(x + 1, y);
-            auto bottom = stage->getTileBehavior(x + 1, y + 1, true);
-            if (bottom == LodeRunnerStage::BLOCK || bottom == LodeRunnerStage::SOLID || bottom == LodeRunnerStage::LADDER ||
-                center == LodeRunnerStage::LADDER || center == LodeRunnerStage::BAR)
-            {
-                // can move right, ignroe walls
-                if (y <= heroY)
-                    // above hero
-                    break;
+            if (x < Stage.STAGE_XMAX) {
+                // if not at right edge check right side
+                const center = this.stage.getTileBehavior(x + 1, y);
+                const bottom = this.stage.getTileBehavior(x + 1, y + 1, true);
+                if (bottom == Stage.TILE.BLOCK || bottom == Stage.TILE.SOLID || bottom == Stage.TILE.LADDER ||
+                    center == Stage.TILE.LADDER || center == Stage.TILE.BAR)
+                {
+                    // can move right, ignroe walls
+                    if (y <= heroY)
+                        // above hero
+                        break;
+                }
             }
         }
-    }
 
-    int value = 200; // 0: best, 100:mid, 200:worse
-    if (y == heroY) // same level
-    {
-        value = abs(m_xTile - x);
-        // two version:
-        // abs(heroX - x):   the guard will try to run at the same x position as possible then run to the hero vertically
-        // abs(m_xTile - x): the guard will try to run at the same y position as possible then run to the hero horizontally
-    }
-    else if (y > heroY) // below hero
-    {
-        value = y - heroY + 200;
-    }
-    else // over hero
-    {
-        value = heroY - y + 100;
-    }    
+        let value = 200; // 0: best, 100:mid, 200:worse
+        if (y == heroY) // same level
+        {
+            value = Math.abs(this.xTile - x);
+            // two version:
+            // abs(hero.xTile - x): the guard will try to run at the same x position as possible then run to the hero vertically
+            // abs(this.xTile - x): the guard will try to run at the same y position as possible then run to the hero horizontally
+        }
+        else if (y > heroY) // below hero
+        {
+            value = y - heroY + 200;
+        }
+        else // over hero
+        {
+            value = heroY - y + 100;
+        }    
 
-    if (value < m_bestValue)
-    {
-        m_bestValue = value;
-        m_bestMove = desireMove;
-    }
-}
-*/
+        if (value < this.bestValue) {
+            this.bestValue = value;
+            this.bestMove = desireMove;
+        }
     }
 
     scanDown(x, desireMove) {
-/*
-void LodeRunnerGuard::scanDown(int x, MOVE desireMove)
-{
-    auto stage = m_stage.lock();
-    if (!stage)
-        return;
+        const hero = this.stage.hero;
+        const heroY = hero.yTile;
 
-    auto hero = stage->getHero();
-    int heroX = hero->getXTile();
-    int heroY = hero->getYTile();
+        // seach down until it can move horizontally and below hero's position
+        let y = this.yTile;
 
-    // seach down until it can move horizontally and below hero's position
-    int y = m_yTile;
-
-    while (y < LodeRunnerStage::STAGE_YMAX)
-    {
-        auto bottom = stage->getTileBehavior(x, y + 1);
-        if (bottom == LodeRunnerStage::BLOCK || bottom == LodeRunnerStage::SOLID)
-        {
-            break; // can't go down
-        }
-
-        auto center = stage->getTileBehavior(x, y);
-        if (center == LodeRunnerStage::LADDER || center == LodeRunnerStage::BAR)
-        {
-            // if not falling...
-            if (x > LodeRunnerStage::STAGE_XMIN)
-            {
-                auto bottom = stage->getTileBehavior(x - 1, y + 1, true);
-                auto center = stage->getTileBehavior(x - 1, y);
-                if (bottom == LodeRunnerStage::BLOCK || bottom == LodeRunnerStage::SOLID || bottom == LodeRunnerStage::LADDER ||
-                    center == LodeRunnerStage::LADDER || center == LodeRunnerStage::BAR)
-                {
-                    // can move left
-                    if (y >= heroY)
-                        // below hero
-                        break;
-                }
+        while (y < Stage.STAGE_YMAX) {
+            const bottom = this.stage.getTileBehavior(x, y + 1);
+            if (bottom == Stage.TILE.BLOCK || bottom == Stage.TILE.SOLID) {
+                break; // can't go down
             }
 
-            if (x < LodeRunnerStage::STAGE_XMAX)
-            {
-                auto bottom = stage->getTileBehavior(x + 1, y + 1, true);
-                auto center = stage->getTileBehavior(x + 1, y);
-                if (bottom == LodeRunnerStage::BLOCK || bottom == LodeRunnerStage::SOLID || bottom == LodeRunnerStage::LADDER ||
-                    center == LodeRunnerStage::LADDER || center == LodeRunnerStage::BAR)
-                {
-                    // can move right
-                    if (y >= heroY)
-                        // below hero
-                        break;
+            const center = this.stage.getTileBehavior(x, y);
+            if (center == Stage.TILE.LADDER || center == Stage.TILE.BAR) {
+                // if not falling...
+                if (x > Stage.STAGE_XMIN) {
+                    const bottom = this.stage.getTileBehavior(x - 1, y + 1, true);
+                    const center = this.stage.getTileBehavior(x - 1, y);
+                    if (bottom == Stage.TILE.BLOCK || bottom == Stage.TILE.SOLID || bottom == Stage.TILE.LADDER ||
+                        center == Stage.TILE.LADDER || center == Stage.TILE.BAR)
+                    {
+                        // can move left
+                        if (y >= heroY)
+                            // below hero
+                            break;
+                    }
+                }
+
+                if (x < Stage.STAGE_XMAX) {
+                    const bottom = this.stage.getTileBehavior(x + 1, y + 1, true);
+                    const center = this.stage.getTileBehavior(x + 1, y);
+                    if (bottom == Stage.TILE.BLOCK || bottom == Stage.TILE.SOLID || bottom == Stage.TILE.LADDER ||
+                        center == Stage.TILE.LADDER || center == Stage.TILE.BAR)
+                    {
+                        // can move right
+                        if (y >= heroY)
+                            // below hero
+                            break;
+                    }
                 }
             }
+            y++;
         }
-        y++;
-    }
 
-    int value = 200; // 0: best, 100:mid, 200:worse
-    if (y == heroY) // same level
-    {
-        value = abs(m_xTile - x);
-        // two version:
-        // abs(heroX - x):   the guard will try to run at the same x position as possible then run to the hero vertically
-        // abs(m_xTile - x): the guard will try to run at the same y position as possible then run to the hero horizontally
-    }
-    else if (y > heroY) // below hero
-    {
-        value = y - heroY + 200;
-    }
-    else // over hero
-    {
-        value = heroY - y + 100;
-    }
+        let value = 200; // 0: best, 100:mid, 200:worse
+        if (y == heroY) // same level
+        {
+            value = Math.abs(this.xTile - x);
+            // two version:
+            // abs(hero.xTile - x): the guard will try to run at the same x position as possible then run to the hero vertically
+            // abs(this.xTile - x): the guard will try to run at the same y position as possible then run to the hero horizontally
+        }
+        else if (y > heroY) // below hero
+        {
+            value = y - heroY + 200;
+        }
+        else // over hero
+        {
+            value = heroY - y + 100;
+        }
 
-    if (value < m_bestValue)
-    {
-        m_bestValue = value;
-        m_bestMove = desireMove;
-    }
-}
-*/
+        if (value < this.bestValue) {
+            this.bestValue = value;
+            this.bestMove = desireMove;
+        }
     }
 }
 
@@ -655,7 +608,7 @@ random.rnd = function() {
     this.random += this.delta[this.ix];
     if (this.random > Stage.STAGE_XMAX)
         this.random -= Stage.STAGE_XMAX;
-    if (this.random == this.m_rnd_org)
+    if (this.random == this.rnd_org)
         this.ix = (this.ix + 1) % 7;
     return this.random;
 }
