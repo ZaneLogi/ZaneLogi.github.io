@@ -8,9 +8,9 @@ const ACTION = {
 const game = {}
 
 game.init = function() {
+    this.levelNum = 0;
     this.stage = new Stage;
-    this.stage.buildLevelMap(level001);
-    console.log(this.stage);
+    this.stage.levelStatus = Stage.LEVEL_STATUS.NEW_LEVEL;
 
     sys_evt.init();
     gfx.init();
@@ -22,6 +22,20 @@ game.init = function() {
 }
 
 game.doFrame = function() {
+    switch (this.stage.levelStatus) {
+        case Stage.LEVEL_STATUS.NEW_LEVEL:
+            this.levelNum = (this.levelNum < 150 ? this.levelNum + 1 : 1);
+
+            this.stage.buildLevelMap(classicData[this.levelNum-1]);
+            this.stage.levelStatus = Stage.LEVEL_STATUS.WAIT_START;
+            break;
+        case Stage.LEVEL_STATUS.CAPTURED:
+            // TODO:
+            this.stage.buildLevelMap(classicData[this.levelNum-1]);
+            this.stage.levelStatus = Stage.LEVEL_STATUS.WAIT_START;
+            break;
+    }
+
     this.processEvents();
     this.processInput();
     this.stage.update();
@@ -33,15 +47,7 @@ game.render = function() {
     gfx.drawStage(this.stage);
 
     // play sound
-}
-
-
-/*
-
-
-void LodeRunnerApp::renderStage()
-{
-    // play sound
+    /*
     auto move = hero->getCurrentMove();
     if (move == LodeRunnerCharacter::FALL_DOWN)
     {
@@ -55,115 +61,15 @@ void LodeRunnerApp::renderStage()
     {
         stopSound();
     }
+    */
 }
 
-void LodeRunnerApp::drawText(const char* text, int x, int y)
-{
-    SDL_Rect rcSrc, rcDst;
-    char ch;
-
-    rcDst.x = x;
-    rcDst.y = y;
-
-    while ((ch = *text++) != '\0')
-    {
-        auto tex = m_resMgr.getCharAppearance(ch, rcSrc);
-        rcDst.w = rcSrc.w;
-        rcDst.h = rcSrc.h;
-        SDL_RenderCopy(m_renderer, tex, &rcSrc, &rcDst);  
-        rcDst.x += rcSrc.w;
-    }
-}
-
-
-void LodeRunnerApp::onEvent(const SDL_Event& e)
-{
-    if (e.type == SDL_KEYDOWN)
-    {
-        switch (e.key.keysym.scancode) {
-        case SDL_SCANCODE_LEFT:
-            m_gameAction = ACTION_LEFT;
-            break;
-        case SDL_SCANCODE_RIGHT:
-            m_gameAction = ACTION_RIGHT;
-            break;
-        case SDL_SCANCODE_UP:
-            m_gameAction = ACTION_UP;
-            break;
-        case SDL_SCANCODE_DOWN:
-            m_gameAction = ACTION_DOWN;
-            break;
-        case SDL_SCANCODE_Z:
-            m_gameAction = ACTION_DIG_LEFT;
-            break;
-        case SDL_SCANCODE_X:
-            m_gameAction = ACTION_DIG_RIGHT;
-            break;
-        default:
-            m_gameAction = ACTION_NONE;
-            break;
-        }
-    }
-    else if (e.type == SDL_KEYUP)
-    {
-        switch (e.key.keysym.scancode) {
-        case SDL_SCANCODE_UP:
-        case SDL_SCANCODE_RIGHT:
-            if (e.key.keysym.mod && (KMOD_LCTRL | KMOD_RCTRL))
-            {
-                m_gameAction = ACTION_NEXT_LEVEL;
-            }
-            break;
-        case SDL_SCANCODE_DOWN:
-        case SDL_SCANCODE_LEFT:
-            if (e.key.keysym.mod && (KMOD_LCTRL | KMOD_RCTRL))
-            {
-                m_gameAction = ACTION_PREVIOUS_LEVEL;
-            }
-            break;
-        }
-    }
-}
-
-************************************
-void LodeRunnerApp::update()
-{
-    updateGame();
-}
-
-void LodeRunnerApp::render()
-{
-    renderGame();
-    paintScreen();
-}
-*************************************
-
-void LodeRunnerApp::updateGame()
-{
-    processInput();
-
-    m_stage->update();
-
-    switch (m_stage->getStatus()) {
-    case LodeRunnerStage::NEW_LEVEL:
-    {
-        if (m_currentLevel < 149)
-        {
-            m_currentLevel++;
-            m_stage->buildLevelMap(CLASSIC_LEVEL_MAPS[m_currentLevel]);
-        }
-        break;
-    }
-    case LodeRunnerStage::CAPTURED:
-    {
-        m_stage->buildLevelMap(CLASSIC_LEVEL_MAPS[m_currentLevel]);
-        break;
-    }
-    }
-}
-
-*/
 game.processInput = function() {
+    if (this.stage.levelStatus == Stage.LEVEL_STATUS.WAIT_START) {
+        if (this.action != ACTION.NONE)
+            this.stage.levelStatus = Stage.LEVEL_STATUS.RUNNING;
+    }
+
     switch (this.action) {
     case ACTION.LEFT:
         this.stage.hero.userMove(Actor.MOVE.RUN_LEFT);
@@ -233,6 +139,24 @@ game.processEvents = function () {
         }
         case sys_evt.KEY_UP:
         {
+            /*
+            switch (e.key.keysym.scancode) {
+            case SDL_SCANCODE_UP:
+            case SDL_SCANCODE_RIGHT:
+                if (e.key.keysym.mod && (KMOD_LCTRL | KMOD_RCTRL))
+                {
+                    m_gameAction = ACTION_NEXT_LEVEL;
+                }
+                break;
+            case SDL_SCANCODE_DOWN:
+            case SDL_SCANCODE_LEFT:
+                if (e.key.keysym.mod && (KMOD_LCTRL | KMOD_RCTRL))
+                {
+                    m_gameAction = ACTION_PREVIOUS_LEVEL;
+                }
+                break;
+            }
+            */
             break;
         }
         }

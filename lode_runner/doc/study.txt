@@ -1,0 +1,123 @@
+Source code investigation
+https://github.com/RobertBaruch/lode_runner_reveng/tree/main
+
+ORG $64BD
+MOVE_PLAYER: SUBROUTINE
+    ; If we're digging, see if we can keep digging.
+    TRY_DIGGING_LEFT_check_can_dig_left
+    TRY_DIGGING_RIGHT_check_can_dig_right
+
+    .check_if_player_should_fall:
+        PLAYER_Y_ADJ > 2 ; player slightly above sprite row?
+
+
+ORG $6C82
+MOVE_GUARDS: SUBROUTINE
+    decide to move guards based on GUARD_MOVE_POLICY
+
+ORG $6CDB
+MOVE_GUARD: SUBROUTINE
+
+ORG $75F4
+HANDLE_TIMERS: SUBROUTINE
+    BRICK_FILL_TIMERS are used to handle the brick fill for a hole
+
+
+ORG $609F
+.start_game:
+    call LOAD_LEVEL
+    wait a key press
+    .play_game:
+    .game_loop:
+        move player
+        if not alive goto .died
+        if GOLD_COUNT = 0, call ENABLE_NEXT_LEVEL_LADDERS
+        if at top goto .level_cleared
+        call HANDLE_TIMERS
+        if not alive goto .died
+        call MOVE_GUARDS
+        if not alive goto .died
+        goto .game_loop
+
+.level_cleared:
+    increase LEVELNUM
+    increase DISK_LEVEL_LOC
+    increase LIVES, not allow overflow, ie: max = 255
+    add the score by 1500, play notes for 15 loops and add score by 100 every loop
+    goto .start_game
+
+.died:
+    decrease LIVES
+    call PUT_STATUS_LIVES
+    call LOAD_SOUND_DATA
+    play died tune
+    if LIVES > 0 goto .start_game_
+    otherwise,
+        call RECORD_HI_SCORE_DATA_TO_DISK
+        call SPINNING_GAME_OVER
+        goto .key_pressed
+
+
+ORG $618E
+LONG_DELAY:
+    fall through to .polling_inputs
+    in .polling_inputs, when a key is pressed, goto .set_level_0_and_play_game
+
+ORG $61F6
+.key_pressed:
+    if ctrl-E is pressed, goto .start_level_editor
+    if return key is pressed, goto .read_and_hi_score_screen
+    or fall through .set_level_0_and_play_game
+
+ORG $6201
+.set_level_0_and_play_game:
+    set DISK_LEVEL_LOC = 0
+    set LEVELNUM = 1
+    set GAME_MODE = 2
+    goto INIT_GAME_DATA
+
+ORG $6056
+INIT_GAME_DATA:
+    set the score to 0
+    set the GUARD_PATTERN_OFFSET to 0
+    set LIVES to 5
+    ; if GAME_MODE was 0 or 1 (i.e. not displaying high score screen or splash screen),
+    ; play the game.
+    BEQ     .put_status_and_start_game
+
+.put_status_and_start_game:
+    fall through .start_game @$609F
+
+
+ORG $6238
+LOAD_LEVEL: SUBROUTINE
+    load the data from the disk
+    call DRAW_LEVEL_PAGE2
+
+ORG $63B3
+DRAW_LEVEL_PAGE2: SUBROUTINE
+    draw all sprites if VERBATIM is set nonzero
+    or
+        only allow max 45 ladders in a level including invisible ladders
+            invisible ladders are not removed in the level map and store the positions at the other locations.
+        check number of golds/guards/player
+        add guards to the guard list and remove them in the level map, or don't add guards, if GUARD_COUNT >= 5
+        add the player and remove it in the level map, or don't add player, if already exists
+        the guards and the player are removed from the level map.
+        traps are displayed as bricks
+    call IRIS_WIPE
+
+ORG $88A2
+IRIS_WIPE: SUBROUTINE
+
+
+6502 instructions
+https://en.wikibooks.org/wiki/6502_Assembly
+http://www.6502.org/tutorials/compare_beyond.html
+BCC is branch if less than; BCS is branch if greater than or equal.
+
+CMP NUM
+-If the Z flag is 0, then A <> NUM and BNE will branch
+-If the Z flag is 1, then A = NUM and BEQ will branch
+-If the C flag is 0, then A (unsigned) < NUM (unsigned) and BCC will branch
+-If the C flag is 1, then A (unsigned) >= NUM (unsigned) and BCS will branch

@@ -1,21 +1,4 @@
 "use strict"
-const level001 =
-"                  S         " +
-"    $             S         " +
-"#######H#######   S         " +
-"       H----------S    $    " +
-"       H    ##H   #######H##" +
-"       H    ##H          H  " +
-"     0 H    ##H       $0 H  " +
-"##H#####    ########H#######" +
-"  H                 H       " +
-"  H           0     H       " +
-"#########H##########H       " +
-"         H          H       " +
-"       $ H----------H   $   " +
-"    H######         #######H" +
-"    H         &  $         H" +
-"############################";
 
 /* 
 the guard update rate =
@@ -51,7 +34,7 @@ class Stage {
         HOLE_EMPTY: 12,    /** Volatile tile type constant used for brick completely digged (considered empty, can trap guards) */
     };
 
-    static LEVEL_STATUS = { RUNNING:0, NEW_LEVEL:1, CAPTURED:2 };
+    static LEVEL_STATUS = { WAIT_START: 0, RUNNING:1, NEW_LEVEL:2, CAPTURED:3 };
 
     constructor() {
         this.map;
