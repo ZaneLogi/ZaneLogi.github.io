@@ -29,12 +29,14 @@ class Actor {
         const currentType = this.stage.getTileBehavior(this.xTile, this.yTile);
         const bottomType = this.stage.getTileBehavior(this.xTile, this.yTile + 1);
 
+        // no fall if on a ladder or on a rope at exact sprite row (ie, yAdjust == 0)
         if (currentType == Stage.TILE.LADDER ||
             (currentType == Stage.TILE.BAR && this.yAdjust == 0))
         {
             return false;
         }
 
+        // fall if slightly above the sprite row (ie, yAdjust < 0)
         if (this.yAdjust < 0)
             return true;
 

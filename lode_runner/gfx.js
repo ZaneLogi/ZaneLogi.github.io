@@ -252,14 +252,16 @@ gfx.drawGuards = function(guards) {
 gfx.getDiggingAppearance = function(hero) {
     // dig cycle: 1 - 12
     // hole: 31 - 36
-    // mud splash: left 27, 28 right 38, 39 ending 29, 30
+    // debris splash: left 27, 28 right 38, 39 ending 29, 30
+    // TODO: take a note here for sound
+    // note_pitches  : (hex) 20 20 20 20 20 20 20 20 24 24 24 24 24
+    // note_durations: (hex) 04 04 04 04 04 04 04 04 03 03 02 02 01
     const index = hero.digCycle - 1;
+    const debrisLeftSprites =  [27, 27, 28, 28, 29, 29, 30, 30, 0, 0, 0, 0];
+    const debrisRightSprites = [38, 38, 39, 39, 29, 29, 30, 30, 0, 0, 0, 0];
     const holeSprite = 31 + Math.floor(index/2);
-    const mudSprite = hero.lookLeft
-        ? [27, 28, 29, 30][Math.floor(index/3)]
-        : [38, 39, 29, 30][Math.floor(index/3)];
-
-    return [holeSprite, mudSprite];
+    const debrisSprite = hero.lookLeft ? debrisLeftSprites[index] : debrisRightSprites[index]; 
+    return [holeSprite, debrisSprite];
 }
 
 gfx.drawHeroDigging = function(hero) {

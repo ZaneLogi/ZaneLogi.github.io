@@ -64,8 +64,8 @@ class Guard extends Actor {
             }
         }
 
-        // handle falling
-        if (this.shouldFall()) {
+        // handle falling, allow to stand on top of a guard
+        if (this.shouldFall() && !this.stage.isGuardAt(this.xTile, this.yTile + 1)) {
             this.moveStep(Actor.MOVE.FALL_DOWN);
             this.currentMove = Actor.MOVE.FALL_DOWN;
             return;
@@ -473,7 +473,7 @@ class Guard extends Actor {
         // seach up until it can move horizontally and above hero's position
         let y = this.yTile;
 
-        while (y > Stage.STAGE_YMIN && this.stage.getTileBehavior(x, y) == Stage.LADDER) {
+        while (y > Stage.STAGE_YMIN && this.stage.getTileBehavior(x, y) == Stage.TILE.LADDER) {
             // can go up
             y--;
 
@@ -511,8 +511,8 @@ class Guard extends Actor {
         {
             value = Math.abs(this.xTile - x);
             // two version:
-            // abs(hero.xTile - x): the guard will try to run at the same x position as possible then run to the hero vertically
-            // abs(this.xTile - x): the guard will try to run at the same y position as possible then run to the hero horizontally
+            // Math.abs(hero.xTile - x): the guard will try to run at the same x position as possible then run to the hero vertically
+            // Math.abs(this.xTile - x): the guard will try to run at the same y position as possible then run to the hero horizontally
         }
         else if (y > heroY) // below hero
         {
@@ -579,8 +579,8 @@ class Guard extends Actor {
         {
             value = Math.abs(this.xTile - x);
             // two version:
-            // abs(hero.xTile - x): the guard will try to run at the same x position as possible then run to the hero vertically
-            // abs(this.xTile - x): the guard will try to run at the same y position as possible then run to the hero horizontally
+            // Math.abs(hero.xTile - x): the guard will try to run at the same x position as possible then run to the hero vertically
+            // Math.abs(this.xTile - x): the guard will try to run at the same y position as possible then run to the hero horizontally
         }
         else if (y > heroY) // below hero
         {

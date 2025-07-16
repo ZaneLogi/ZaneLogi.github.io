@@ -190,16 +190,32 @@ class Stage {
             return;
 
         // update hero
-        this.hero.update();
-        const heroX = this.hero.xTile;
-        const heroY = this.hero.yTile;
-        this.exitEnabled = (this.goldCount == this.hero.goldCount);
-        if (heroY == 0 && this.hero.yAdjust == 0 && this.exitEnabled) {
-            this.levelStatus = Stage.LEVEL_STATUS.NEW_LEVEL;
+        this.levelStatus = this.handleHero();
+        if (this.levelStatus == Stage.LEVEL_STATUS.NEW_LEVEL)
             return;
-        }
 
-        // updat holes
+        // update holes
+        this.levelStatus = this.handleHoles();
+        if (this.levelStatus == Stage.LEVEL_STATUS.CAPTURED)
+            return;
+
+        // update guards
+        this.levelStatus = this.handleGuards();
+        if (this.levelStatus == Stage.LEVEL_STATUS.CAPTURED)
+            return;
+    }
+
+    handleHero() {
+        this.hero.update();
+        this.exitEnabled = (this.goldCount == this.hero.goldCount);
+        if (this.hero.yTile == 0 && this.hero.yAdjust == 0 && this.exitEnabled) {
+            return Stage.LEVEL_STATUS.NEW_LEVEL;
+        }
+        return this.levelStatus; // no chage of the level status
+    }
+
+    handleHoles() {
+        // loop the holes reversely as the hole would be removed in the loop
         for (let i = this.holes.length - 1; i >= 0; i--) {
             const hole = this.holes[i];
             hole.update();
@@ -212,8 +228,7 @@ class Stage {
 
                 // check the hero
                 if (this.hero.xTile == x && this.hero.yTile == y) {
-                    this.levelStatus = Stage.LEVEL_STATUS.CAPTURED;
-                    return;
+                    return Stage.LEVEL_STATUS.CAPTURED;
                 }
 
                 // check guards
@@ -233,8 +248,10 @@ class Stage {
                 }
             }
         }
+        return this.levelStatus; // no change of the level status
+    }
 
-        // update guards
+    handleGuards() {
         let moveCount = GUARD_MOVE_POLICY[this.guards.length][this.guardMapIndex];
         this.guardMapIndex = (this.guardMapIndex + 1) % GUARD_MOVE_POLICY[0].length;
         while (moveCount--) {
@@ -245,10 +262,10 @@ class Stage {
 
             this.lastGuardIndex = (this.lastGuardIndex + 1) % this.guards.length;
 
-            if (heroX == guard.xTile && heroY == guard.yTile) {
-                this.levelStatus = Stage.LEVEL_STATUS.CAPTURED;
-                return;
+            if (this.hero.xTile == guard.xTile && this.hero.yTile == guard.yTile) {
+                return Stage.LEVEL_STATUS.CAPTURED;
             }
         }
+        return this.levelStatus; // no change of the level status
     }
 }

@@ -39,7 +39,7 @@ class Hero extends Actor {
             }
         }
 
-        // handle falling
+        // handle falling, allow to stand on top of a guard
         if (this.shouldFall() && !(this.stage.isGuardAt(this.xTile, this.yTile + 1))) {
             this.moveStep(Actor.MOVE.FALL_DOWN);
             this.currentMove = Actor.MOVE.FALL_DOWN;

@@ -17,7 +17,8 @@ game.init = function() {
 
     this.action = ACTION.NONE;
 
-    runloop.start(() => this.doFrame(), 1000/20); // 50 FPS
+    const FPS = 30;
+    runloop.start(() => this.doFrame(), 1000/FPS);
 }
 
 game.doFrame = function() {
