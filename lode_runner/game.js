@@ -45,6 +45,7 @@ game.doFrame = function() {
 game.render = function() {
     gfx.clearScreen();
     gfx.drawStage(this.stage);
+    gfx.drawIrisWipe();
 
     // play sound
     /*

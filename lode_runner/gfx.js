@@ -1,5 +1,48 @@
 "use strict"
 
+
+// w:280  h:176
+function drawLine(x1, x2, y, context) {
+    //console.log(`line y:${y}, x:${x1}-${x2}`);
+    if (context[y] == undefined) {
+        context[y] = [9999, -9999];
+    }
+
+    if (x1 < context[y][0])
+        context[y][0] = x1;
+
+    if (x2 > context[y][1])
+        context[y][1] = x2;
+}
+
+function drawCircleFill(cx, cy, radius, drawLine, context) {
+  let x = 0;
+  let y = radius;
+
+  let d = 1 - radius;
+  let deltaE = 3;                  // corresponds to 2*x + 3
+  let deltaSE = -2 * radius + 5;   // corresponds to 2*(x - y) + 5
+
+  while (x <= y) {
+    drawLine(cx - x, cx + x, cy + y, context);
+    drawLine(cx - x, cx + x, cy - y, context);
+    drawLine(cx - y, cx + y, cy + x, context);
+    drawLine(cx - y, cx + y, cy - x, context);
+
+    if (d < 0) {
+      d += deltaE;
+      deltaE += 2;
+      deltaSE += 2;
+    } else {
+      d += deltaSE;
+      deltaE += 2;
+      deltaSE += 4;
+      y--;
+    }
+    x++;
+  }
+}
+
 const gfx = {
     TILE_WIDTH: 10,
     TILE_HEIGHT: 11,
@@ -16,6 +59,26 @@ gfx.init = function() {
         const spr = this.loadSprite(sprites_data[i], i); 
         this.sprites.push(spr);
     }
+}
+
+let wipeRadius = 5;
+gfx.drawIrisWipe = function() {
+    if (wipeRadius > 87)
+        return;
+
+    const circleData = {};
+    drawCircleFill(140, 88, wipeRadius, drawLine, circleData);
+
+    for (const [key, value] of Object.entries(circleData)) {
+        const x1 = value[0];
+        const x2 = value[1];
+        const y = parseInt(key, 10);
+        this.canvas_ctx.fillStyle = "#000000";
+        this.canvas_ctx.fillRect(0, y, x1, 1);
+        this.canvas_ctx.fillRect(x2 + 1, y, (280 - x2 - 1), 1);
+    }
+
+    wipeRadius++;
 }
 
 gfx.clearScreen = function() {
