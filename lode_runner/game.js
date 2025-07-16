@@ -28,24 +28,35 @@ game.doFrame = function() {
 
             this.stage.buildLevelMap(classicData[this.levelNum-1]);
             this.stage.levelStatus = Stage.LEVEL_STATUS.WAIT_START;
+
+            iris_wipe.start(140, 88, 5, 280, 176);
             break;
         case Stage.LEVEL_STATUS.CAPTURED:
-            // TODO:
             this.stage.buildLevelMap(classicData[this.levelNum-1]);
             this.stage.levelStatus = Stage.LEVEL_STATUS.WAIT_START;
+
+            iris_wipe.start(140, 88, 5, 280, 176);
             break;
     }
 
-    this.processEvents();
-    this.processInput();
-    this.stage.update();
+    if (iris_wipe.stop) {
+        this.processEvents();
+        this.processInput();
+        this.stage.update();
+    }
+    else {
+        sys_evt.reset();
+        iris_wipe.step();
+    }
     this.render();
 }
 
 game.render = function() {
     gfx.clearScreen();
     gfx.drawStage(this.stage);
-    gfx.drawIrisWipe();
+    if (!iris_wipe.stop)
+        iris_wipe.render(gfx.canvas_ctx);
+    gfx.drawStatus();
 
     // play sound
     /*
@@ -91,18 +102,14 @@ game.processInput = function() {
         this.stage.hero.userMove(Actor.MOVE.DIG_RIGHT);
         break;
     case ACTION.NEXT_LEVEL:
-        /*if (m_currentLevel < 149)
-        {
-            m_currentLevel++;
-            m_stage->buildLevelMap(CLASSIC_LEVEL_MAPS[m_currentLevel]);
-        }*/
+        this.levelNum = (this.levelNum < 150 ? this.levelNum + 1 : 1);
+        this.stage.buildLevelMap(classicData[this.levelNum-1]);
+        this.stage.levelStatus = Stage.LEVEL_STATUS.WAIT_START;
         break;
     case ACTION.PREVIOUS_LEVEL:
-        /*if (m_currentLevel > 0)
-        {
-            m_currentLevel--;
-            m_stage->buildLevelMap(CLASSIC_LEVEL_MAPS[m_currentLevel]);
-        }*/
+        this.levelNum = (this.levelNum > 1 ? this.levelNum - 1 : 150);
+        this.stage.buildLevelMap(classicData[this.levelNum-1]);
+        this.stage.levelStatus = Stage.LEVEL_STATUS.WAIT_START;
         break;
     }
 
@@ -140,27 +147,15 @@ game.processEvents = function () {
         }
         case sys_evt.KEY_UP:
         {
-            /*
-            switch (e.key.keysym.scancode) {
-            case SDL_SCANCODE_UP:
-            case SDL_SCANCODE_RIGHT:
-                if (e.key.keysym.mod && (KMOD_LCTRL | KMOD_RCTRL))
-                {
-                    m_gameAction = ACTION_NEXT_LEVEL;
-                }
-                break;
-            case SDL_SCANCODE_DOWN:
-            case SDL_SCANCODE_LEFT:
-                if (e.key.keysym.mod && (KMOD_LCTRL | KMOD_RCTRL))
-                {
-                    m_gameAction = ACTION_PREVIOUS_LEVEL;
-                }
-                break;
+            const code = e.context.code;
+            if (code == "Digit0") {
+                this.action = ACTION.NEXT_LEVEL;
             }
-            */
+            else if (code == "Digit9") {
+                this.action = ACTION.PREVIOUS_LEVEL;
+            }
             break;
-        }
-        }
+        }} // switch
     }
 
     sys_evt.reset();
