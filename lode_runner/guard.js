@@ -141,7 +141,7 @@ class Guard extends Actor {
             else if (this.yAdjust > 0) // the guard is below the center, move the hero up
                 centerY = Actor.MOVE.CLIMB_UP;
             break;
-        case Actor.MOVE.RESPAWN: // TODO: check if it is used
+        case Actor.MOVE.RESPAWN: // NOT USED!
         case Actor.MOVE.IN_HOLE:
             // force the character in the center of the position
             this.xAdjust = 0;

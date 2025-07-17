@@ -94,21 +94,20 @@ gfx.drawStage = function(stage) {
         }
     }
 
-    gfx.drawHero(stage.hero);
+    if (stage.levelStatus == Stage.LEVEL_STATUS.WAIT_START && iris_wipe.stop) {
+        if (game.ticks & 0x08) // toggle drawing
+            gfx.drawHero(stage.hero);
+    }
+    else {
+        gfx.drawHero(stage.hero);
+    }
     gfx.drawHeroDigging(stage.hero);
 
     this.drawHoles(stage.holes);
     this.drawGuards(stage.guards);
     this.drawGround();
 
-    // draw information
-    /*drawText("SCORE", 0, SCREEN_INFO_Y);
-    drawText("00000", 5 * ResourceManager::CHAR_WIDTH, SCREEN_INFO_Y);
-    drawText("MEN", 12 * ResourceManager::CHAR_WIDTH, SCREEN_INFO_Y);
-    drawText("005", 15 * ResourceManager::CHAR_WIDTH, SCREEN_INFO_Y);
-    drawText("LEVEL", 20 * ResourceManager::CHAR_WIDTH, SCREEN_INFO_Y);
-    drawText(formatMessage("%03d", m_currentLevel+1),
-        25 *ResourceManager::CHAR_WIDTH, SCREEN_INFO_Y);*/
+    this.drawStatus();
 }
 
 gfx.getTileScreenAt = function(xTile, yTile) {
@@ -207,7 +206,7 @@ gfx.getGuardAppearance = function(guard, bar) {
     case Actor.MOVE.CLIMB_DOWN:
         tile = [51, 52][(guard.yTile * 5 + guard.yAdjust) % 2];
         break;
-    case Actor.MOVE.RESPAWN:
+    case Actor.MOVE.RESPAWN: // NOT USED, same as BIRTH1
         tile = 57;
         break;
     case Actor.MOVE.SHAKE_LEFT:
@@ -328,15 +327,35 @@ gfx.putString = function(str) {
     }
 }
 
+gfx.putDigits = function(value, num_digits) {
+    let digits = [];
+
+    // conver to BCD, from units digit, tens digit, hundreds digit...
+    for (let i = 0; i < num_digits; i++) {
+        const d = value % 10;
+        digits.push(d);
+        value = Math.floor((value - d)/10);
+    }
+
+    // not overflow
+    if (digits[num_digits-1] > 9)
+        digits[num_digits-1] = 9;
+
+    for (let i = num_digits-1; i >= 0; i--) {
+        this.putChar(digits[i].toString());
+    }
+}
+
 gfx.drawStatus = function() {
     const y = this.GROUND_Y + 9;
     this.cursor = {x:0, y:y};
     this.putString("SCORE");
-    this.putString("0000000");
+    this.putDigits(game.score, 7);
     this.putString(" ");
     this.putString("MEN");
-    this.putString("000");
+    this.putDigits(game.lives, 3);
     this.putString(" ");
     this.putString("LEVEL");
-    this.putString("001");
+    this.putDigits
+    this.putDigits(game.levelNum, 3);
 }

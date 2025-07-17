@@ -161,7 +161,7 @@ class Stage {
     isGuardAt(xTile, yTile, includeRespawning) {
         for (const guard of this.guards) {
             if (guard.xTile == xTile && guard.yTile == yTile &&
-                (includeRespawning || guard.currentMove != Actor.MOVE.RESPAWN)) {
+                (includeRespawning || guard.currentMove != Actor.MOVE.RESPAWN || guard.rebirth)) {
                 return true;
             }
         }

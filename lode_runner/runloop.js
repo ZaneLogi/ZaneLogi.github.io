@@ -29,7 +29,7 @@ runloop.run = function (doFrame) {
         return;
     }
     
-    window.requestAnimationFrame(() => this.run(doFrame));
+    const reqId = window.requestAnimationFrame(() => this.run(doFrame));
 
     const msNow = window.performance.now();
     const msPassed = msNow - this.msPrev;
@@ -46,6 +46,7 @@ runloop.run = function (doFrame) {
     catch (error) {
         console.error(error);
         this.catch_error = true;
+        window.cancelAnimationFrame(reqId);
         return;
     }
 

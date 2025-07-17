@@ -11,17 +11,22 @@ game.init = function() {
     this.levelNum = 0;
     this.stage = new Stage;
     this.stage.levelStatus = Stage.LEVEL_STATUS.NEW_LEVEL;
+    this.lives = 5;
+    this.score = 1000;
 
     sys_evt.init();
     gfx.init();
 
     this.action = ACTION.NONE;
+    this.ticks = 0;
 
     const FPS = 30;
     runloop.start(() => this.doFrame(), 1000/FPS);
 }
 
 game.doFrame = function() {
+    this.ticks++;
+
     switch (this.stage.levelStatus) {
         case Stage.LEVEL_STATUS.NEW_LEVEL:
             this.levelNum = (this.levelNum < 150 ? this.levelNum + 1 : 1);
@@ -56,7 +61,7 @@ game.render = function() {
     gfx.drawStage(this.stage);
     if (!iris_wipe.stop)
         iris_wipe.render(gfx.canvas_ctx);
-    gfx.drawStatus();
+
 
     // play sound
     /*
