@@ -34,6 +34,18 @@ class Guard extends Actor {
         this.isTrapped = false;
     }
 
+    /**
+    * Check if this guard should fall.
+    * - a guard trapped into a digged hole doesn't fall further down
+    * - a guard on top of another trapped guard doesn't fall further down
+    */
+    shouldFall() {
+        return super.shouldFall() &&
+            !this.isTrapped &&
+            !(this.stage.isGuardAt(this.xTile, this.yTile + 1) &&
+            this.stage.getTileBehavior(this.xTile, this.yTile + 1) == Stage.TILE.EMPTY);
+    }
+
     update() {
         this.previousMove = this.currentMove;
 
@@ -65,7 +77,7 @@ class Guard extends Actor {
         }
 
         // handle falling, allow to stand on top of a guard
-        if (this.shouldFall() && !this.stage.isGuardAt(this.xTile, this.yTile + 1)) {
+        if (this.shouldFall()) {
             this.moveStep(Actor.MOVE.FALL_DOWN);
             this.currentMove = Actor.MOVE.FALL_DOWN;
             return;
@@ -335,23 +347,14 @@ class Guard extends Actor {
         }
     }
 
-    /**
-    * Check if this guard should fall.
-    * - a guard trapped into a digged hole doesn't fall further down
-    * - a guard on top of another trapped guard doesn't fall further down
-    */
-    shouldFall() {
-        return super.shouldFall() &&
-            !this.isTrapped &&
-            !(this.stage.isGuardAt(this.xTile, this.yTile + 1) &&
-            this.stage.getTileBehavior(this.xTile, this.yTile + 1) == Stage.EMPTY);
-    }
-
     thinkMove() {
         const hero = this.stage.hero;
         const heroX = hero.xTile;
         const heroY = hero.yTile;
 
+        // if stays at the same level with the hero, scan for a path towards the hero
+        // if can reach the hero, return the move based on the direction to the hero
+        // otherwise, call scanFloor() for the further thinking
         if (this.yTile == heroY) {
             // at the same level
             let x = this.xTile;
@@ -398,6 +401,13 @@ class Guard extends Actor {
         let leftEnd = this.xTile;
         let rightEnd = this.xTile;
         const y = this.yTile;
+
+        // get the left-most and the right-most postion that can reach at the current Y.
+        // if can move down from the current position, call scanDown()
+        // if can move up from the curent position, call scanUp()
+        // loops from the left-most X to the right-most X
+        //   check at the current X, if can go up, call scanUp(), if can go down, call scanDown()
+        // return the move based on this.bestMove, whose bastValue is the smallest one
 
         // get the left-most postion that can reach
         while (leftEnd > Stage.STAGE_XMIN) {
@@ -470,7 +480,11 @@ class Guard extends Actor {
         const hero = this.stage.hero;
         const heroY = hero.yTile;
 
-        // seach up until it can move horizontally and above hero's position
+        // seach up until it can move horizontally and above or at the hero's position
+        // if can reach with the same hero's Y, the value is the distance to the hero's X (this is better as it the same as the hero)
+        // or if below hero's Y, the value is y - heroY + 200; (not prefer it lower than the hero )
+        //    if above hero's Y, the value is heroY - y + 100; (prefer it higher than the hero )
+        // set this.bestMove with 'desireMove' if the the value is smaller than this.bestValue
         let y = this.yTile;
 
         while (y > Stage.STAGE_YMIN && this.stage.getTileBehavior(x, y) == Stage.TILE.LADDER) {
@@ -533,7 +547,11 @@ class Guard extends Actor {
         const hero = this.stage.hero;
         const heroY = hero.yTile;
 
-        // seach down until it can move horizontally and below hero's position
+        // seach down until it can move horizontally and below or at the hero's position
+        // if can reach with the same hero's Y, the value is the distance to the hero's X (this is better as it the same as the hero)
+        // or if below hero's Y, the value is y - heroY + 200; (not prefer it lower than the hero )
+        //    if above hero's Y, the value is heroY - y + 100; (prefer it higher than the hero )
+        // set this.bestMove with 'desireMove' if the the value is smaller than this.bestValue
         let y = this.yTile;
 
         while (y < Stage.STAGE_YMAX) {
