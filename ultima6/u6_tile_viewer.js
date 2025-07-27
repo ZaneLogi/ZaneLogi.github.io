@@ -6,12 +6,30 @@ const fileMap = new Map();
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
+const checklistDiv = document.getElementById("fileChecklist");
 const tooltip = document.getElementById("tooltip");
 
 document.getElementById("resetBtn").onclick = async () => {
   await U6DB.clear();
+  await updateChecklist();
   location.reload();
 };
+
+async function updateChecklist() {
+  let ready = true;
+  let result = "📦 Required Files:\n";
+  for (const name of expectedFiles) {
+    const data = await U6DB.get(name);
+    if (data) {
+      result += `✅ ${name.padEnd(15)} (${data.length} bytes)\n`;
+    } else {
+      result += `⛔ ${name.padEnd(15)} (missing)\n`;
+      ready = false;
+    }
+  }
+  result += `\n🎯 Ready: ${ready ? "YES" : "NO"}`;
+  checklistDiv.textContent = result;
+}
 
 document.getElementById("dropzone").addEventListener("dragover", e => e.preventDefault());
 document.getElementById("dropzone").addEventListener("drop", async (e) => {
@@ -20,9 +38,9 @@ document.getElementById("dropzone").addEventListener("drop", async (e) => {
     const data = await file.arrayBuffer();
     const uint8 = new Uint8Array(data);
     fileMap.set(file.name.toLowerCase(), uint8);
-    console.log(file.name);
     await U6DB.set(file.name, uint8);
   }
+  await updateChecklist();
   tryInitializeViewer();
 });
 
@@ -152,7 +170,7 @@ function drawAllTiles(ctx, alltiles, tileindex_vga, masktype_vga, palette) {
       tooltip.style.left = e.pageX + 10 + "px";
       tooltip.style.top = e.pageY + 10 + "px";
       tooltip.style.display = "block";
-      tooltip.innerText = `Tile ${tileIndex} (0x${tileIndex.toString(16)})\\nFormat: 0x${format.toString(16)}`;
+      tooltip.innerText = `Tile ${tileIndex} (0x${tileIndex.toString(16)})\nFormat: 0x${format.toString(16)}`;
     } else {
       tooltip.style.display = "none";
     }
@@ -183,10 +201,16 @@ async function tryInitializeViewer() {
 async function loadFromIndexedDB() {
   for (const name of expectedFiles) {
     const data = await U6DB.get(name);
-    console.log(name, data?.length);
     if (data) fileMap.set(name, data);
   }
+  await updateChecklist();
   tryInitializeViewer();
 }
 
 loadFromIndexedDB();
+
+export {
+  getTileData,
+  drawTile,
+  loadU6Palette
+};

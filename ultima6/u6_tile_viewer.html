@@ -35,11 +35,20 @@
       color: #0f0;
       cursor: pointer;
     }
+    #fileChecklist {
+      margin: 10px;
+      padding: 10px;
+      border: 1px solid #0f0;
+      background: #111;
+      font-family: monospace;
+      white-space: pre;
+    }
   </style>
 </head>
 <body>
   <div id="dropzone">Drop Ultima VI files here (maptiles.vga, objtiles.vga, tileindex.vga, masktype.vga, u6pal)</div>
   <button id="resetBtn">Reset Stored Files</button>
+  <div id="fileChecklist">Checking files...</div>
   <canvas id="canvas" width="512" height="1024"></canvas>
   <div id="tooltip"></div>
   <script type="module" src="u6_tile_viewer.js"></script>
