@@ -1,0 +1,580 @@
+A technical description of the file formats used by Ultima 6.
+Last updated on 18-Nov-2001
+
+==========================================================================
+Terminology
+==========================================================================
+  byte = 8 bits
+  word = 16 bits
+  dword = 32 bits
+
+  paragraph = a 16-byte block
+
+==========================================================================
+Debugging and Disassembly
+==========================================================================
+  The information in this file was discovered by running Ultima 6 in a
+  debugger, and by disassembling some of its driver files.
+  If you want to do the same, I suggest you use 386SWAT. This is a free, but
+  very powerful, DOS debugger. Download it at:
+
+  http://www.sudleyplace.com/swat/swat.htm
+
+==========================================================================
+Packed DOS Executables
+==========================================================================
+  The file "game.exe" is a packed exe file. To decompress it, you need an exe
+  unpacker.
+  You can use UX 0.55, which is available from:
+
+  http://www.kiarchive.ru:8093/pub/msdos/execomp/inf-ux55.zip
+
+==========================================================================
+Offsets in EXE files
+==========================================================================
+  All offsets in EXE files are relative to the start of the code.
+  In other words, you may skip the EXE-header.
+
+==========================================================================
+Files and Compression
+==========================================================================
+
+  LZW-compressed Files
+  ====================
+  Many U6 files have been compressed with the LZW encoding algorithm.
+  Decompression code is located in "u.exe", at offset 0xF20F.
+
+    What does a compressed file look like?
+    ======================================
+    Compressed files have the following structure:
+
+    struct compressed_file
+    {
+       unsigned byte size0;
+       unsigned byte size1;
+       unsigned byte size2;
+       unsigned byte size3;
+       unsigned byte compressed_data[filesize-4];
+    };
+
+    The first 4 bytes give you the length of the uncompressed file:
+    uncompressed_size = size0 + (size1 << 8) + (size2 << 16) + (size3 << 24);
+    The rest of the file contains the LZW-encoded data.
+    A valid compressed file satisfies the following conditions:
+
+    1) size3 == 0
+       That's because no compressed file has an uncompressed size greater
+       than 16 MB :-)
+    2) uncompressed_size > (filesize-4)
+    3) compressed_data[0] + ((compressed_data[1] & 1) << 8) == 0x100
+       The first 9 bits of compressed_data[] are equal to 0x100, because
+       they're a special command that tells the decompression code to
+       re-initialize its dictionary.
+
+    Which files are compressed?
+    ===========================
+    Generally speaking, all files that are loaded into memory as a whole.
+    For example, all driver files are compressed, as well as "maptiles.vga",
+    because all MapTiles are kept in memory at all times. The file
+    "objtiles.vga", on the other hand, is not compressed, because only parts
+    of it are cached in at any given time.
+
+    How can I easily encode a file for U6?
+    ======================================
+    Here's a simple method that doesn't infringe the Unisys patent:
+ 
+    a) Create a new file.
+    b) Write the 4 length bytes to the file.
+    c) Divide the uncompressed driver into blocks of, say, 64 bytes (last block can be smaller
+       than 64 bytes, of course)
+    d) For each block, do this:
+       - write the 9-bit value 0x100 to the file.
+       - write each byte of the 64-byte-block to the file (as a 9-bit value with the MSB set
+         to 0).
+    e) Write the 9-bit value 0x101 to the file.
+
+  Collections
+  ===========
+  A "collection" is a file that contains objects of the same type.
+
+  Libraries
+  =========
+  A "library" is a collection of objects of the same type, all stored in a single file.
+  There are several types of libraries:
+
+  lib_16 = set of offset_16, set of object
+  offset_16 = unsigned word ; offset of the object within the library file
+
+  lib_32 = set of offset_32, set of object
+  offset_32 = unsigned dword ; offset of the object within the library file
+
+  s_lib_16 = file_size, lib_16
+  s_lib_32 = file_size, lib_32
+
+  file_size = unsigned dword ; the length of the entire library file
+
+  Some library files are lzw-compressed. Other library files contain blocks of lzw-compressed 
+  data, even though the library files themselves are not compressed.
+  The object offsets in a library file are sorted in ascending order. This means that you can 
+  use the first offset to calculate the total number of offsets, and thus the total number of 
+  objects, in the library.
+  However, the file "converse.a" is a special case. It is a lib_32, but its first two offsets 
+  are 'null pointers.'
+
+==========================================================================
+Graphics
+==========================================================================
+  Only the VGA graphics of U6 are discussed here. If you want to know
+  anything about the other graphics types, you must do your own research.
+
+  Tiles
+  =====
+  A "tile" is a 16x16 pixel image. U6 has 0x800 tiles.
+  The first 0x200 tiles are stored in "maptiles.vga", which is LZW-compressed.
+  The other 0x600 tiles are stored in "objtiles.vga", which is not compressed.
+  Now, if you're looking for a particular tile, how do find it quickly, without searching 
+  through all of "maptiles.vga" or "objtiles.vga"? That's what "tileindx.vga" is for. This
+  file (which is LZW-compressed, btw) contains 0x800 words that give the location of of each
+  tile, as follows:
+  1) Uncompress "maptiles.vga" into a file called "alltiles.vga".
+  2) Append "objtiles.vga" to "alltiles.vga".
+  3) Take a pointer from "tileindx.vga" and multiply it by 16.
+  You now have the offset of the tile in "alltiles.vga".
+
+  U6 uses three formats to store its tiles:
+
+    Plain
+    =====
+    Plain tiles are always 256 bytes long. There are no transparent pixels. The first 16 bytes 
+    represent the first 16 pixels, and so on.
+
+    tile = line0, ... ,line15
+    line = pixel0, ... ,pixel15
+    pixel = unsigned byte
+
+    Transparent Pixels
+    ==================
+    The next step of sophistication. It's just like the "plain" format, except that 0xFF 
+    represents a completely transparent pixel.
+
+    Pixel blocks
+    ============
+    The tile is represented as a collection of horizontal strips, which I've chosen to call
+    "pixel blocks." The first word of each pixel block determines its placement within the
+    tile.
+
+    tile = tile_length, set of pixel_block, padding
+
+    tile_length = unsigned byte ; the tile length in paragraphs (a "paragraph" is a 16-byte
+                                  block)
+    pixel_block = displacement, block_length=0 ||
+                  displacement, block_length, set of pixel
+    padding = set of 0xED ; if (tile_length mod 16) != 0 --> append 0xED's at the end of the
+                            tile
+
+    displacement = unsigned word ; explained below
+    block_length = unsigned byte ; if (block_length==0) --> end of tile data (there may be a
+                                   few more 0xED's, though)
+    pixel = unsigned byte
+
+    About the "displacement" field:
+    For the first pixel block, this field determines its location relative to the tile's upper 
+    left corner.
+    For the other pixel blocks, it determines the location relative to the pixel directly to
+    the right of the previous pixel block.
+
+    The formula:
+    displacement = y*176+x
+
+    Where:
+    0 <= y <= 15
+    -16 <= x <= 15
+
+    Where does the value "176" come from? U6 doesn't draw all of its graphics directly to the 
+    screen. For some, it uses a buffer. The graphics are drawn into this buffer, which is
+    later copied to the screen. Because U6 updates the screen by regions, the buffer doesn't
+    need to be 320x200 pixels big. In fact, it's only 176 pixels wide (I don't know its
+    height).
+
+    How do I know which tiles are stored in what format?
+    ====================================================
+    That information is contained in "masktype.vga", which is LZW-compressed. The first 0x800 
+    bytes of "masktype.vga" tell you what format each tile is stored in:
+    0x0 ==> plain.
+    0x5 ==> transparent pixels.
+    0xA ==> pixel blocks.
+
+    I don't know what the other (0x600 + 0x180) bytes are for, but I suspect they have
+    something to do with the U6 tile caching algorithm.
+
+  Shapes
+  ======
+  I chose the name "shape" because this format is very similar to the U7 shape/frame format.
+
+  shape = rightX, leftX, upperY, lowerY, set of shape_pixel_block
+
+  rightX = unsigned word; no. of pixels to the right of the shape's hotspot
+  leftX = unsigned word; no. of pixels to the left of the shape's hotspot
+  upperY = unsigned word; no. of pixels above the shape's hotspot
+  lowerY = unsigned word; no. of pixels below the shape's hotspot
+
+  shape_pixel_block = double_length, x_pos, y_pos, set of pixel ||
+                      double_length=0
+  double_length = unsigned word; (length of pixel block << 1) | compression_flag
+                               ; if (double_length==0) --> end of data
+                               ; compression flag is always 0
+  x_pos = signed word; beginning of the pixel block, relative to the hotspot
+  y_pos = signed word; beginning of the pixel block, relative to the hotspot
+
+  pixel = unsigned byte
+
+  Trivia:
+  1) Take a look at the uncompressed "u6mcga.drv", offset 0x30A4. This is the start of the 
+     function that draws a shape to the screen. You will see that the "compression flag"
+     mentioned earlier has a function similar to the compression flag in the U7 shape format.
+  2) I don't know what "intro.ptr" is for. Yet.
+
+  Bitmaps
+  =======
+  A "bitmap" is an image with the following format:
+
+  bitmap = width, height, set of pixel
+ 
+  width = unsigned word
+  height = unsigned word
+
+  pixel = unsigned byte
+
+  Bitmaps are always compressed. The files "*.bmp" are lzw-compressed bitmaps.
+
+  Font
+  ====
+  The font is stored in "u6.ch". There are 256 characters. Each is 8x8 pixels big, uses 2 
+  colors, and can therefore be stored in 8 bytes.
+  Bit 0 --> color 0x31.
+  Bit 1 --> color 0x48.
+  These mappings are 'hard-coded' into "u6mcga.drv".
+
+  Portraits
+  =========
+  The portraits you see during conversations are stored in:
+  portrait.a
+  portrait.b
+  portrait.z
+
+  These files are lib_32's of lzw-compressed data blocks.
+  As far as I've been able to tell, the uncompressed data blocks are always 0xE00 = 3584 =
+  56*64 bytes long.
+  Every block contains raw pixel data for a 56x64 image (one byte per pixel).
+
+  Mouse Pointers
+  ==============
+  There are 10 mouse pointers: small arrows for the 8 compass directions, a crosshair and a
+  large arrow. The mouse pointers are stored in "u6mcga.ptr". The format of this file:
+  lzw -> s_lib_32 -> shape
+
+  Palettes
+  ========
+  There are two palette types.
+
+    In-game palette
+    ===============
+    The in-game palette is stored in the file "u6pal".
+
+    struct u6pal
+    {
+        unsigned byte palette[0x100][3];
+        byte no_idea_yet[0x100];
+    }
+
+    The first 0x300 bytes seem to contain the initial palette. The RGB
+    components are stored in the order red, green, blue. Please note that
+    even though the RGB components are stored as bytes, they only take up 6
+    bits each. That is because the color DAC of the original VGA only
+    supported 6 bits per RGB component. So if you want to use the U6 palette
+    on a modern computer, you should left-shift each component by 2 bits.
+    What the other 0x100 bytes are for, I don't know.
+
+    Cut-scene palettes
+    ==================
+    The palettes for the cut-scenes (startup, introduction, character
+    creation) are stored in "palettes.int". This file is a collection of 8
+    'packed' palettes. Every packed palette is 0x240 bytes long.
+    'Packed' means that every color component is stored as 6 bits, so that
+    3 bytes are enough to store 4 color component entries.
+    Some code to explain this:
+
+    unsigned byte packed_palette[0x240];
+    unsigned byte unpacked_palette[0x100][3];
+    for (int i = 0; i < 0x100; i++)
+    {
+        for (int j = 0; j < 3; j++)
+        {
+            int byte_pos = (i*3*6 + j*6) / 8;
+            int shift_val = (i*3*6 + j*6) % 8;
+            int color = ((packed_palette[byte_pos] +
+                        (packed_palette[byte_pos+1] << 8))
+                        >> shift_val) & 0x3F;
+            unpacked_palette[i][j] = (unsigned byte) (color << 2);
+        }
+    }
+
+
+  Animation
+  =========
+  There are two types of animations.
+
+    Palette Cycling
+    ===============
+    U6 uses this method to animate
+    ... fireplaces
+    ... candles
+    ... braziers
+    ... BluGlo[tm] magic items
+    ... cauldrons
+
+    The relevant code is located at offset 0x13D5 in the unpacked "game.exe".
+
+    All palette cycling information is 'hard-coded' into "game.exe".
+
+    The following palette intervals get cycled:
+    0xE0 - 0xE7 (fires, braziers, candles)
+    0xE8 - 0xEF (BluGlo[tm] magical items)
+    0xF0 - 0xF3 (?)
+    0xF4 - 0xF7 (kitchen cauldrons)
+    0xF8 - 0xFB (?)
+
+    The 8-entry intervals are cycled twice as fast as the 4-entry intervals.
+
+      Pseudo-code for rotating ("cycling") palette intervals
+      ======================================================
+      // the VGA palette
+      unsigned byte palette[256][3];
+
+      // cycle the 8-entry interval 0xE0 - 0xE7
+      unsigned byte temp[3];
+      for (i = 0; i < 3; i++) { temp[i] =  palette[0xE0][i]; }
+
+      for (i = 0; i < 7; i++)
+      {
+         for (j = 0; j < 3; j++)
+         {
+            palette[0xE0+i][j] = palette[0xE0+i+1][j];
+         }
+      }
+
+      for (i = 0; i < 3; i++) { palette[0xE0+7][i] =  temp[i]; }
+
+      // the 4-entry intervals are left as an exercise
+
+    Multiple Animation Frames
+    =========================
+    U6 uses this method to animate
+    ... water
+    ... fountains
+    ... pennants/flags
+    ... PC's and NPC's
+    ... protection fields
+
+    The relevant code is located at offset 0x1F28 in the unpacked "game.exe".
+
+    Animation information can be found in the file "animdata", which has the
+    following structure:
+
+    struct animdata
+    {
+        unsigned word number_of_tiles_to_animate = 0x1D;
+        unsigned word tile_to_animate[0x20];
+        unsigned word first_anim_frame[0x20]; 
+        unsigned byte and_masks[0x20];
+        unsigned byte shift_values[0x20];
+    };
+
+    Some of the Ultima 6 tiles do not contain any graphics. They represent
+    animated tiles. The actual animation frames are stored in other tiles.
+    Here's some pseudo-code to demonstrate how this works:
+
+    // pointers to the tile data
+    unsigned byte *tile_pointers[0x800];
+
+    // the game timer is incremented regularly. I don't know how regularly,
+    // though :)
+    unsigned word game_timer;
+
+    // temp variable used by the loop
+    unsigned word current_anim_frame;
+
+    for (i = 0; i < animdata.number_of_tiles_to_animate; i++)
+    {
+       current_anim_frame
+       = (game_timer & animdata.and_masks[i]) >> animdata.shift_values[i];
+
+       tile_pointers[animdata.tile_to_animate[i]]
+       = tile_pointers[animdata.first_anim_frame[i] + current_anim_frame];
+    }
+
+    Both Animaton Methods
+    =====================
+    There are tiles that use both animation methods:
+    ... protection fields
+
+    I don't know if 'multiple frame' animation and palette rotation are
+    synchronized in any way.
+
+    Hybrid Tiles
+    ============
+    Some tiles are part animated tile and part static tile, such as coast
+    lines and river banks.
+    Hybrid tiles are animated by copying parts of a regular animated
+    tile into a static tile.
+    The relevant code is located at offsets 0x2CFA and 0x2D2F in the
+    uncompressed "u6mcga.drv".
+    Here is some pseudo-code to demonstrate how this works:
+
+    //
+    // pointers to the tile data
+    //
+    unsigned byte *tile_pointers[0x800];
+
+    //
+    // array of 32 indices into the uncompressed "tileindx.vga"
+    // located at offset 0x2C00 in the uncompressed "u6mcga.drv"
+    //
+    unsigned word sources[0x20];
+
+    //
+    // array of 32 indices into the uncompressed "tileindx.vga"
+    // located at offset 0x2C40 in the uncompressed "u6mcga.drv"
+    //
+    unsigned word dests[0x20];
+
+    //
+    // the uncompressed "animmask.vga" contains
+    // 32 data blocks (each is 64 bytes long)
+    // these blocks control what parts of a
+    // source tile are copied into the correspoding
+    // destination tile
+    //
+    unsigned byte animmask_vga[0x20][0x40];
+
+
+    for (int i = 0; i < 0x20; i++)
+    {
+       //
+       // because sources[] and dests[] contains pointers into
+       // the uncompressed "tileindx.vga" (which in turn contains
+       // word pointers), the values in sources[] and dests[]
+       // must be divided by 2 before they can be used in C code.
+       //
+       unsigned byte *source_tile = tile_pointers[sources[i] / 2];
+       unsigned byte *dest_tile = tile_pointers[dests[i] / 2];
+
+          //
+          // copy parts of source_tile* into dest_tile*
+          // important: both tiles are assumed to be in "plain" or
+          // "transparent pixels" format, i.e. they must be 256
+          // bytes long.
+          //
+          int copy_pos = 0;
+          int db_index = 0;
+          int displacement;
+          int bytes2copy;
+
+
+          bytes2copy = animmask_vga[i][db_index];
+
+          if (bytes2copy != 0)
+             {
+                // copy
+                for (int j = 0; j < bytes2copy; j++)
+                {
+                   dest_tile[copy_pos] = source_tile[copy_pos];
+                   copy_pos++;
+                }
+             }
+          db_index++;
+
+
+          displacement = animmask_vga[i][db_index];
+          bytes2copy = animmask_vga[i][db_index+1];
+          db_index += 2;
+
+          while ((displacement != 0) && (bytes2copy != 0))
+          {
+             copy_pos += displacement;
+                // copy
+                for (int j = 0; j < bytes2copy; j++)
+                {
+                   dest_tile[copy_pos] = source_tile[copy_pos];
+                   copy_pos++;
+                }
+
+             displacement = animmask_vga[i][db_index];
+             bytes2copy = animmask_vga[i][db_index+1];
+             db_index += 2;
+          }
+    }
+
+
+==========================================================================
+Text
+==========================================================================
+
+  Object Names
+  ============
+  When you 'look' at an object, the game will tell you its name ("Thou dost
+  see a mouse.") The object names are stored in "look.lzd".
+  "look.lzd" is lzw-compressed. After decompression, the file is going to
+  look like this:
+
+  object_names = set of object_description
+
+  object_description = object_number, object_name
+
+  object_number = unsigned word
+  object_name = set of character, terminator=0 ||
+                terminator=0
+
+  character = unsigned byte
+  terminator = unsigned byte
+
+  The objects are sorted in ascending order:
+  offset(obj1) > offset(obj2) IFF number(obj1) > number(obj2)
+
+  The strings may contain special characters:
+  "/" --> singular word ending follows.
+  "\" --> plural word ending follows.
+  Example: "loa/f\ves of bread"
+  Word ending = [a-z]+
+
+  The game translates the object name "Avatar" into the Avatar's name.
+  The game translates an empty object name to the string "nothing".
+
+  The code that extracts strings from the uncompressed "look.lzd" is located
+  at offset 0xCFE0 in the unpacked "game.exe".
+
+  Conversations
+  =============
+  I haven't completely decoded the conversation files yet. But here's what I do know:
+  The conversations are stored in two files, "converse.a" and "converse.b".
+  "converse.a" is a lib_32 with the first two entries in the offset table set to 0.
+  Ignore them.
+  "converse.b" is a lib_32.
+
+  An entry in converse.* looks just like an LZW-compressed file:
+
+  struct entry
+  {
+     unsigned byte size0;
+     unsigned byte size1;
+     unsigned byte size2;
+     unsigned byte size3;
+     unsigned byte compressed_data[entry_size-4];
+  };
+
+==========================================================================
+To Do
+==========================================================================
+  - more info on conversations
+  - books
+
