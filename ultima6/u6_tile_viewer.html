@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Ultima VI Map Viewer</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; background: #111; color: #0f0; }
+    #dropzone {
+      padding: 20px;
+      border: 2px dashed #0f0;
+      text-align: center;
+      margin: 10px;
+      background: #222;
+    }
+    #tooltip {
+      position: absolute;
+      padding: 4px 6px;
+      background: #111;
+      color: #0f0;
+      font-family: monospace;
+      font-size: 12px;
+      border: 1px solid #0f0;
+      pointer-events: none;
+      display: none;
+    }
+    canvas {
+      background: #000;
+      display: block;
+    }
+    #resetBtn {
+      margin: 10px;
+      padding: 5px 10px;
+      background: #222;
+      border: 1px solid #0f0;
+      color: #0f0;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="dropzone">Drop Ultima VI files here (maptiles.vga, objtiles.vga, tileindex.vga, masktype.vga, u6pal)</div>
+  <button id="resetBtn">Reset Stored Files</button>
+  <canvas id="canvas" width="512" height="1024"></canvas>
+  <div id="tooltip"></div>
+  <script type="module" src="u6_tile_viewer.js"></script>
+</body>
+</html>
