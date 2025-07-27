@@ -83,3 +83,19 @@ export function lzwDecode(data, bitCount = 8) {
 
   return new Uint8Array(output);
 }
+
+function isValidCompressedFile(data) {
+  if (data.length < 6) return false;
+  if (data[3] !== 0) return false;
+  const uncompressedSize = data[0] + (data[1] << 8) + (data[2] << 16);
+  if (uncompressedSize <= data.length - 4) return false;
+  const check = data[4] + ((data[5] & 1) << 8);
+  return check === 0x100;
+}
+
+export function decompressCompressedFile(data) {
+  if (!isValidCompressedFile(data)) throw new Error("Invalid compressed file");
+
+  const compressedData = data.slice(4);
+  return lzwDecode(compressedData, 8);
+}
