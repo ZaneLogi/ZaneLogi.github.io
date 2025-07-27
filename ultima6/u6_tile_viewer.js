@@ -208,9 +208,3 @@ async function loadFromIndexedDB() {
 }
 
 loadFromIndexedDB();
-
-export {
-  getTileData,
-  drawTile,
-  loadU6Palette
-};
