@@ -6,6 +6,7 @@ export class TileManager {
     this.tileindex;
     this.masktype;
     this.cache = Array(0x800);
+    this.imageCache = Array(0x800);
   }
 
   init(fileMap) {
@@ -37,11 +38,11 @@ export class TileManager {
     const offset = this.getTileOffset(index);
     const format = this.getTileFormat(index);
     if (format === 0x00 || format === 0x05) {
-      return { format, pixels: this.alltiles.slice(offset, offset + 256) };
+      return { format, pixels: new Uint8Array(this.alltiles.buffer, offset, 256) };
     }
     if (format === 0x0A) {
       const tileLength = this.alltiles[offset] * 16;
-      return { format, pixels: this.alltiles.slice(offset, offset + tileLength) };
+      return { format, pixels: new Uint8Array(this.alltiles.buffer, offset, tileLength) };
     }
     throw new Error("Unknown tile format: " + format.toString(16));
   }
@@ -86,5 +87,44 @@ export class TileManager {
     }
 
     return this.cache[index];
+  }
+
+  getTileImage(index, palette, forceUpdate = false) {
+    //if (index >= 16 && index < 48) // the base tile for shoreline tiles
+    //  index = U6_ANIM_SRC_TILE[index-16]/2;
+
+    if (!this.imageCache[index]) {
+      // Create offscreen canvas for 16x16 tile
+      const offscreen = document.createElement("canvas");
+      offscreen.width = 16;
+      offscreen.height = 16;
+      this.imageCache[index] = offscreen;
+      forceUpdate = true;
+    }
+
+    if (forceUpdate) {
+      const tilePixels = this.getTilePixels(index);
+      const ctx = this.imageCache[index].getContext("2d");
+      const imageData = ctx.createImageData(16, 16);
+      const rgba = imageData.data;
+
+      for (let i = 0; i < 256; i++) {
+        const color = tilePixels[i];
+        const base = i * 4;
+        if (color === 0xFF) {
+          rgba[base + 3] = 0;
+        } else {
+          const [r, g, b] = palette[color];
+          rgba[base] = r;
+          rgba[base + 1] = g;
+          rgba[base + 2] = b;
+          rgba[base + 3] = 255;
+        }
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+    }
+
+    return this.imageCache[index];
   }
 }
