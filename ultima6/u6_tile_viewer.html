@@ -4,14 +4,20 @@
   <meta charset="utf-8">
   <title>Ultima VI Map Viewer</title>
   <style>
-    body { margin: 0; font-family: sans-serif; background: #111; color: #0f0; }
-    #dropzone {
-      padding: 20px;
-      border: 2px dashed #0f0;
-      text-align: center;
-      margin: 10px;
-      background: #222;
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: #111;
+      color: #0f0;
     }
+
+    canvas {
+      background: #000;
+      display: block;
+      margin: 10px;
+      border: 1px solid #0f0;
+    }
+
     #tooltip {
       position: absolute;
       padding: 4px 6px;
@@ -23,21 +29,65 @@
       pointer-events: none;
       display: none;
     }
-    canvas {
-      background: #000;
-      display: block;
+
+    /* === Floating Info Window === */
+    #infoWindow {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      width: 320px;
+      min-width: 200px;
+      background: rgba(0, 0, 0, 0.9);
+      color: #0f0;
+      border: 1px solid #0f0;
+      border-radius: 5px;
+      z-index: 10;
+      resize: both;
+      overflow: hidden;
     }
+
+    #infoHeader {
+      padding: 8px 10px;
+      cursor: move;
+      background: #060;
+      font-weight: bold;
+      user-select: none;
+    }
+
+    #infoContent {
+      padding: 10px;
+      overflow: auto;
+    }
+
+    #infoWindow.collapsed #infoContent {
+      display: none;
+    }
+
+    #infoWindow.collapsed {
+      height: auto !important;
+      resize: none;
+    }
+
+    #dropzone {
+      padding: 10px;
+      border: 1px dashed #0f0;
+      text-align: center;
+      background: #222;
+      margin-bottom: 10px;
+    }
+
     #resetBtn {
-      margin: 10px;
+      margin-bottom: 10px;
       padding: 5px 10px;
       background: #222;
       border: 1px solid #0f0;
       color: #0f0;
       cursor: pointer;
+      width: 100%;
     }
+
     #fileChecklist {
-      margin: 10px;
-      padding: 10px;
+      padding: 5px;
       border: 1px solid #0f0;
       background: #111;
       font-family: monospace;
@@ -46,11 +96,53 @@
   </style>
 </head>
 <body>
-  <div id="dropzone">Drop Ultima VI files here (maptiles.vga, objtiles.vga, tileindex.vga, masktype.vga, u6pal)</div>
-  <button id="resetBtn">Reset Stored Files</button>
-  <div id="fileChecklist">Checking files...</div>
   <canvas id="canvas" width="512" height="1024"></canvas>
   <div id="tooltip"></div>
+
+  <!-- Floating Info Window -->
+  <div id="infoWindow">
+    <div id="infoHeader">Ultima VI File Loader</div>
+    <div id="infoContent">
+      <div id="dropzone">Drop Ultima VI files here (maptiles.vga, objtiles.vga, tileindex.vga, masktype.vga, u6pal)</div>
+      <button id="resetBtn">Reset Stored Files</button>
+      <div id="fileChecklist">Checking files...</div>
+    </div>
+  </div>
+
   <script type="module" src="u6_tile_viewer.js"></script>
+
+  <script>
+    // === Floating Window Drag & Collapse ===
+    const infoWindow = document.getElementById("infoWindow");
+    const infoHeader = document.getElementById("infoHeader");
+
+    let isDragging = false;
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+
+    infoHeader.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      isDragging = true;
+      const rect = infoWindow.getBoundingClientRect();
+      dragOffsetX = e.clientX - rect.left;
+      dragOffsetY = e.clientY - rect.top;
+      e.preventDefault();
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!isDragging) return;
+      infoWindow.style.left = (e.clientX - dragOffsetX) + "px";
+      infoWindow.style.top = (e.clientY - dragOffsetY) + "px";
+    });
+
+    document.addEventListener("mouseup", () => {
+      isDragging = false;
+    });
+
+    // === Collapse Toggle ===
+    infoHeader.addEventListener("dblclick", () => {
+      infoWindow.classList.toggle("collapsed");
+    });
+  </script>
 </body>
 </html>
