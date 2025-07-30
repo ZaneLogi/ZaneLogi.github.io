@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>WebGL Indexed Tilemap with Drag</title>
+  <style>
+    html, body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+<canvas id="glcanvas" width="512" height="512"></canvas>
+<script>
+const canvas = document.getElementById("glcanvas");
+const gl = canvas.getContext("webgl2");
+if (!gl) throw new Error("WebGL2 not supported");
+
+const TILE_SIZE = 16;
+const TILES_PER_ROW = 64;
+const TILE_ROWS = 32;
+const TILE_COUNT = TILES_PER_ROW * TILE_ROWS;
+const MAP_WIDTH = 64;
+const MAP_HEIGHT = 64;
+const VIEW_WIDTH = canvas.width;
+const VIEW_HEIGHT = canvas.height;
+
+// Generate fake tiles (each tile is filled with a flat color index)
+const TILE_ATLAS_WIDTH = TILE_SIZE * TILES_PER_ROW;     // 1024
+const TILE_ATLAS_HEIGHT = TILE_SIZE * TILE_ROWS;        // 512
+const tileTextureData = new Uint8Array(TILE_ATLAS_WIDTH * TILE_ATLAS_HEIGHT);
+
+for (let tileIndex = 0; tileIndex < TILE_COUNT; tileIndex++) {
+  const color = Math.floor(Math.random() * 256);
+  const tileX = tileIndex % TILES_PER_ROW;
+  const tileY = Math.floor(tileIndex / TILES_PER_ROW);
+
+  for (let y = 0; y < TILE_SIZE; y++) {
+    for (let x = 0; x < TILE_SIZE; x++) {
+      const texX = tileX * TILE_SIZE + x;
+      const texY = tileY * TILE_SIZE + y;
+      const index = texY * TILE_ATLAS_WIDTH + texX;
+      tileTextureData[index] = color;
+    }
+  }
+}
+
+// Generate fake palette
+const paletteData = new Uint8Array(256 * 4);
+for (let i = 0; i < 256; i++) {
+  paletteData[i * 4 + 0] = i;
+  paletteData[i * 4 + 1] = 255 - i;
+  paletteData[i * 4 + 2] = (i * 3) % 256;
+  paletteData[i * 4 + 3] = 255;
+}
+
+// Generate fake map
+const mapData = [];
+for (let y = 0; y < MAP_HEIGHT; y++) {
+  for (let x = 0; x < MAP_WIDTH; x++) {
+    mapData.push(Math.floor(Math.random() * TILE_COUNT));
+  }
+}
+
+// Vertex shader
+const vsSource = `#version 300 es
+in vec2 a_position;
+in vec2 a_uv;
+out vec2 v_uv;
+uniform vec2 u_resolution;
+void main() {
+  vec2 zeroToOne = a_position / u_resolution;
+  vec2 zeroToTwo = zeroToOne * 2.0;
+  vec2 clipSpace = zeroToTwo - 1.0;
+  gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+  v_uv = a_uv;
+}`;
+
+// Fragment shader
+const fsSource = `#version 300 es
+precision mediump float;
+uniform sampler2D u_tileTexture;
+uniform sampler2D u_palette;
+in vec2 v_uv;
+out vec4 outColor;
+void main() {
+  float index = texture(u_tileTexture, v_uv).r;
+  outColor = texture(u_palette, vec2(index, 0.5));
+}`;
+
+function createShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(shader));
+    gl.deleteShader(shader);
+    return null;
+  }
+  return shader;
+}
+
+function createProgram(gl, vsSource, fsSource) {
+  const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+  const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+  const program = gl.createProgram();
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(program));
+    return null;
+  }
+  return program;
+}
+
+class ResizableFloat32Buffer {
+  constructor() {
+    this.buffer = new Float32Array(1024);
+    this.length = 0;
+    this.prevGPUSize = 0;
+  }
+
+  clear() {
+    this.length = 0;
+  }
+
+  append(array) {
+    if (this.length + array.length > this.buffer.length) {
+      let newSize = this.buffer.length * 2;
+      while (newSize < this.length + array.length) newSize *= 2;
+      const newBuf = new Float32Array(newSize);
+      newBuf.set(this.buffer);
+      this.buffer = newBuf;
+    }
+    this.buffer.set(array, this.length);
+    this.length += array.length;
+  }
+
+  subarray() {
+    return this.buffer.subarray(0, this.length);
+  }
+}
+
+const program = createProgram(gl, vsSource, fsSource);
+gl.useProgram(program);
+
+const posLoc = gl.getAttribLocation(program, "a_position");
+const uvLoc = gl.getAttribLocation(program, "a_uv");
+const resolutionLoc = gl.getUniformLocation(program, "u_resolution");
+
+const paletteTex = gl.createTexture();
+gl.activeTexture(gl.TEXTURE1);
+gl.bindTexture(gl.TEXTURE_2D, paletteTex);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, paletteData);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+
+const tileTexSize = TILE_SIZE * TILES_PER_ROW;
+const tileTex = gl.createTexture();
+gl.activeTexture(gl.TEXTURE0);
+gl.bindTexture(gl.TEXTURE_2D, tileTex);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, tileTexSize, TILE_SIZE * TILE_ROWS, 0, gl.RED, gl.UNSIGNED_BYTE, tileTextureData);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+const tileTexLoc = gl.getUniformLocation(program, "u_tileTexture");
+gl.uniform1i(tileTexLoc, 0);
+const paletteTexLoc = gl.getUniformLocation(program, "u_palette");
+gl.uniform1i(paletteTexLoc, 1);
+
+gl.viewport(0, 0, canvas.width, canvas.height);
+gl.clearColor(0, 0, 0, 1);
+
+let dragOffset = { x: 0, y: 0 };
+let dragging = false;
+let lastMouse = { x: 0, y: 0 };
+
+canvas.addEventListener("mousedown", e => {
+  dragging = true;
+  lastMouse = { x: e.clientX, y: e.clientY };
+});
+canvas.addEventListener("mousemove", e => {
+  if (!dragging) return;
+  const dx = e.clientX - lastMouse.x;
+  const dy = e.clientY - lastMouse.y;
+  dragOffset.x -= dx;
+  dragOffset.y -= dy;
+  lastMouse = { x: e.clientX, y: e.clientY };
+});
+canvas.addEventListener("mouseup", () => dragging = false);
+canvas.addEventListener("mouseleave", () => dragging = false);
+
+const vao = gl.createVertexArray();
+const posBuffer = gl.createBuffer();
+const uvBuffer = gl.createBuffer();
+
+const positionsBuf = new ResizableFloat32Buffer();
+const uvsBuf = new ResizableFloat32Buffer();
+
+gl.bindVertexArray(vao);
+
+function updateBuffers() {
+  positionsBuf.clear();
+  uvsBuf.clear();
+
+  const startTileX = Math.floor(dragOffset.x / TILE_SIZE);
+  const startTileY = Math.floor(dragOffset.y / TILE_SIZE);
+
+  const maxVisibleX = Math.ceil(canvas.width / TILE_SIZE) + 1;
+  const maxVisibleY = Math.ceil(canvas.height / TILE_SIZE) + 1;
+
+  for (let ty = 0; ty < maxVisibleY; ty++) {
+    for (let tx = 0; tx < maxVisibleX; tx++) {
+      const mx = tx + startTileX;
+      const my = ty + startTileY;
+      if (mx < 0 || my < 0 || mx >= MAP_WIDTH || my >= MAP_HEIGHT) continue;
+
+      // need to do following to prevent from the negative values of dragOffset
+      // const screenX = tx * TILE_SIZE - (dragOffset.x % TILE_SIZE);
+      // const screenY = ty * TILE_SIZE - (dragOffset.y % TILE_SIZE);
+      const offsetX = dragOffset.x % TILE_SIZE;
+      const offsetY = dragOffset.y % TILE_SIZE;
+      const pixelOffsetX = offsetX >= 0 ? offsetX : offsetX + TILE_SIZE;
+      const pixelOffsetY = offsetY >= 0 ? offsetY : offsetY + TILE_SIZE;
+      const screenX = tx * TILE_SIZE - pixelOffsetX;
+      const screenY = ty * TILE_SIZE - pixelOffsetY;
+
+      const tileIndex = mapData[my * MAP_WIDTH + mx];
+
+      const tu = tileIndex % TILES_PER_ROW;
+      const tv = Math.floor(tileIndex / TILES_PER_ROW);
+      const u0 = tu * TILE_SIZE / tileTexSize;
+      const v0 = tv * TILE_SIZE / tileTexSize;
+      const u1 = (tu + 1) * TILE_SIZE / tileTexSize;
+      const v1 = (tv + 1) * TILE_SIZE / tileTexSize;
+
+      const x0 = screenX;
+      const y0 = screenY;
+      const x1 = screenX + TILE_SIZE;
+      const y1 = screenY + TILE_SIZE;
+
+      positionsBuf.append([
+        x0, y0, x1, y0, x0, y1,
+        x0, y1, x1, y0, x1, y1
+      ]);
+      uvsBuf.append([
+        u0, v0, u1, v0, u0, v1,
+        u0, v1, u1, v0, u1, v1
+      ]);
+    }
+  }
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+  if (positionsBuf.length * 4 > positionsBuf.prevGPUSize) {
+    gl.bufferData(gl.ARRAY_BUFFER, positionsBuf.length * 4, gl.DYNAMIC_DRAW);
+    positionsBuf.prevGPUSize = positionsBuf.length * 4;
+  }
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, positionsBuf.subarray());
+  gl.enableVertexAttribArray(posLoc);
+  gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
+  if (uvsBuf.length * 4 > uvsBuf.prevGPUSize) {
+    gl.bufferData(gl.ARRAY_BUFFER, uvsBuf.length * 4, gl.DYNAMIC_DRAW);
+    uvsBuf.prevGPUSize = uvsBuf.length * 4;
+  }
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, uvsBuf.subarray());
+  gl.enableVertexAttribArray(uvLoc);
+  gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, 0, 0);
+
+  return positionsBuf.length / 2;
+}
+
+function render() {
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.uniform2f(resolutionLoc, canvas.width, canvas.height);
+  gl.bindVertexArray(vao);
+  const count = updateBuffers();
+  gl.drawArrays(gl.TRIANGLES, 0, count);
+  requestAnimationFrame(render);
+}
+
+render();
+</script>
+</body>
+</html>
