@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>8-bit Palette Renderer</title>
+  <style>
+    canvas {
+      border: 1px solid black;
+      image-rendering: pixelated;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" width="1024" height="1024"></canvas>
+
+  <script>
+    const width = 1024;
+    const height = 1024;
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    // Generate a random 256-color palette (RGB only)
+    const palette = new Uint8Array(256 * 3);
+    for (let i = 0; i < 256; i++) {
+      palette[i * 3 + 0] = Math.random() * 255;
+      palette[i * 3 + 1] = Math.random() * 255;
+      palette[i * 3 + 2] = Math.random() * 255;
+    }
+
+    // Indexed image data (uint8 indices into palette)
+    const indexedBuffer = new Uint8Array(width * height);
+
+    // Fill with pattern (animated later)
+    function generatePattern(frame) {
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = y * width + x;
+          indexedBuffer[i] = (x + y + frame) % 256;
+        }
+      }
+    }
+
+    // Create and reuse RGBA buffer and ImageData
+    const rgba = new Uint8ClampedArray(width * height * 4);
+    const imageData = new ImageData(rgba, width, height);
+
+    function updateImageData() {
+      for (let i = 0; i < indexedBuffer.length; i++) {
+        const index = indexedBuffer[i];
+        const r = palette[index * 3 + 0];
+        const g = palette[index * 3 + 1];
+        const b = palette[index * 3 + 2];
+
+        const base = i * 4;
+        rgba[base] = r;
+        rgba[base + 1] = g;
+        rgba[base + 2] = b;
+        rgba[base + 3] = 255;
+      }
+    }
+
+    // Main render loop at 60 FPS
+    let frame = 0;
+    function render() {
+      generatePattern(frame);
+      updateImageData();
+      ctx.putImageData(imageData, 0, 0);
+      frame++;
+      requestAnimationFrame(render);
+    }
+
+    render();
+  </script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>8-bit Palette Renderer (WebGL)</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      height: 100%;
+      background: #111;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<script type="module">
+import { WebGLIndexedRenderer } from './webgl_indexed_renderer.js';
+
+const canvas = document.getElementById("canvas");
+const renderer = new WebGLIndexedRenderer(canvas);
+
+const palette = new Uint8Array(256 * 4);
+for (let i = 0; i < 256; i++) {
+  palette[i * 4 + 0] = Math.random() * 255;
+  palette[i * 4 + 1] = Math.random() * 255;
+  palette[i * 4 + 2] = Math.random() * 255;
+  palette[i * 4 + 3] = 255;
+}
+palette[0] = palette[1] = palette[2] = 0;
+palette[4] = palette[5] = palette[6] = 255;
+
+renderer.setPalette(palette);
+
+// === Resize canvas and reallocate buffers/textures ===
+function resizeCanvas() {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+
+  renderer.resize(width, height);
+}
+window.addEventListener("resize", resizeCanvas);
+
+// === Generate pattern ===
+function generatePattern(frame) {
+  const indexedBuffer = renderer.getBuffer();
+  const {width, height} = canvas;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      indexedBuffer[y * width + x] = (x + y + frame) % 256;
+    }
+  }
+
+  let color = 0;
+  for (let y = 0; y < height; y++) {
+    let offset = y * width;
+    for (let x = 0; x < 16; x++) {
+      indexedBuffer[offset + x] = color;
+    }
+    if ((y & 0xf) === 0xf) color = 1 - color;
+  }
+}
+
+// === Render loop ===
+let frame = 0;
+function render() {
+  generatePattern(frame);
+
+  renderer.render();
+
+  frame++;
+  requestAnimationFrame(render);
+}
+
+resizeCanvas();
+render();
+</script>
+</body>
+</html>
