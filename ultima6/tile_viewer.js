@@ -1,5 +1,8 @@
 import { U6DB } from './u6db.js';
 import { TileManager } from './tile.js';
+import { PaletteManager } from './palette_manager.js';
+import { IndexedTextureManager } from './indexed_texture_manager.js';
+import { AnimDataManager } from './anim_data_manager.js';
 
 const tileManager = new TileManager();
 
@@ -16,97 +19,7 @@ const tilesPerCol = 32;
 const atlasW = tilesPerRow * tileSize;
 const atlasH = tilesPerCol * tileSize;
 
-// === Shader Source ===
-/*
-code below is refactored by gl_InstanceID and gl_VertexID
-
-const vsSource = `#version 300 es
-in vec2 a_position;
-in vec2 a_uv;
-uniform vec2 u_resolution;
-out vec2 v_uv;
-void main() {
-  vec2 normalized = (a_position / u_resolution * 2.0 - 1.0) * vec2(1.0, -1.0);
-  gl_Position = vec4(normalized, 0, 1);
-  v_uv = a_uv;
-}`;
-*/
-const vsSource = `#version 300 es
-in float a_tileIndex;
-in vec2 a_tilePos;
-
-uniform vec2 u_resolution;
-uniform float u_tileSize;
-uniform float u_tilesPerRow;
-uniform float u_atlasW;
-uniform float u_atlasH;
-
-out vec2 v_uv;
-
-const vec2 quadVerts[6] = vec2[6](
-  vec2(0.0, 0.0),
-  vec2(1.0, 0.0),
-  vec2(0.0, 1.0),
-  vec2(0.0, 1.0),
-  vec2(1.0, 0.0),
-  vec2(1.0, 1.0)
-);
-
-void main() {
-  vec2 offset = a_tilePos * u_tileSize;
-  vec2 pos = (quadVerts[gl_VertexID] * u_tileSize) + offset;
-
-  vec2 normalized = (pos / u_resolution * 2.0 - 1.0) * vec2(1.0, -1.0);
-  gl_Position = vec4(normalized, 0, 1);
-
-  float tx = mod(a_tileIndex, u_tilesPerRow);
-  float ty = floor(a_tileIndex / u_tilesPerRow);
-  vec2 uv0 = vec2(tx * u_tileSize / u_atlasW, ty * u_tileSize / u_atlasH);
-  vec2 uv1 = uv0 + vec2(u_tileSize / u_atlasW, u_tileSize / u_atlasH);
-
-  v_uv = mix(uv0, uv1, quadVerts[gl_VertexID]);
-}`;
-
-const fsSource = `#version 300 es
-precision mediump float;
-uniform sampler2D u_indexedTexture;
-uniform sampler2D u_paletteTexture;
-in vec2 v_uv;
-out vec4 outColor;
-void main() {
-  float index = texture(u_indexedTexture, v_uv).r * 255.0;
-  float paletteU = (index + 0.5) / 256.0;
-  outColor = texture(u_paletteTexture, vec2(paletteU, 0.5));
-}`;
-
-/* original version:
-float index = texture(u_indexedTexture, v_uv).r;
-outColor = texture(u_paletteTexture, vec2(index, 0.5));
-
-as WebGL normalizes values from 0–255 to the range 0.0–1.0,
-'index' is the value from 0.0-1.0, need to convert it back to 0-255
-so it should do ('index' * 255.0 + 0.5) / 256.0
-:index = 0 → paletteU = 0.5 / 256 = center of the 0th texel
-:index = 1 → paletteU = 255.5 / 256 = center of the last (255th) texel
-:This ensures alignment with the exact centers of all 256 texels → no sampling error, no black pixels
-*/
-
-// === Shader Utilities ===
-function createShader(gl, type, src) {
-  const shader = gl.createShader(type);
-  gl.shaderSource(shader, src);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS))
-    throw new Error(gl.getShaderInfoLog(shader));
-  return shader;
-}
-
-// === Program Setup ===
-const program = gl.createProgram();
-gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
-gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
-gl.linkProgram(program);
-gl.useProgram(program);
+import { program } from './tile_viewer_shader.js';
 
 // === Uniforms ===
 const u_resolution = gl.getUniformLocation(program, 'u_resolution');
@@ -117,158 +30,10 @@ gl.uniform1i(u_indexed, 0);
 gl.uniform1i(u_palette, 1);
 
 // === Palette Manager ===
-const PaletteManager = {
-  texture: null,
-  data: new Uint8Array(256 * 4),
-
-  init(gl) {
-    for (let i = 0; i < 256; i++) {
-      this.data[i*4 + 0] = (i * 97) % 256;
-      this.data[i*4 + 1] = (i * 47) % 256;
-      this.data[i*4 + 2] = (i * 67) % 256;
-      this.data[i*4 + 3] = 255;
-    }
-    this.texture = gl.createTexture();
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, this.data);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    console.log("PaletteManager initialized");
-  },
-
-  setFromU6(gl, u6pal) {
-    for (let i = 0; i < 256; i++) {
-      this.data[i*4 + 0] = u6pal[i*3] * 4;
-      this.data[i*4 + 1] = u6pal[i*3 + 1] * 4;
-      this.data[i*4 + 2] = u6pal[i*3 + 2] * 4;
-      this.data[i*4 + 3] = 255;
-    }
-    this.update(gl);
-  },
-
-  update(gl) {
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.RGBA, gl.UNSIGNED_BYTE, this.data);
-  },
-
-  getColor(index) {
-    const offset = index * 4;
-    return {
-      r: this.data[offset],
-      g: this.data[offset + 1],
-      b: this.data[offset + 2],
-    };
-  },
-
-  colorCycling(gl, frame) {
-    const rotate = function(data, start, end) {
-      const temp = new Uint8Array(4);
-      const base = start * 4;
-      // Copy first color into temp
-      temp.set(data.subarray(base, base + 4));
-      // Move colors forward (7 colors)
-      data.copyWithin(base, base + 4, end * 4);
-      // Put saved first color at the end
-      data.set(temp, (end - 1) * 4);
-    };
-    let updated = false;
-    // 8-entry intervals: cycle every 4 frames
-    if (frame % 4 === 0) {
-      rotate(this.data, 0xe0, 0xe8);
-      rotate(this.data, 0xe8, 0xf0);
-      updated = true;
-    }
-    // 4-entry intervals: cycle every 8 frames
-    if (frame % 8 === 0) {
-      rotate(this.data, 0xf0, 0xf4);
-      rotate(this.data, 0xf4, 0xf8);
-      rotate(this.data, 0xf8, 0xfc);
-      updated = true;
-    }
-    if (updated) this.update(gl);
-  },
-};
-
 PaletteManager.init(gl);
 
 // === IndexedTextureManager ===
-const IndexedTextureManager = {
-  texture: null,
-  data: null,
-  width: 0,
-  height: 0,
-
-  init(gl) {
-    this.generateAtlas(tileCount, tileSize, tilesPerRow);
-    this.createTexture(gl);
-  },
-
-  generateAtlas(tileCount, tileSize, tilesPerRow) {
-    const tilesPerCol = Math.ceil(tileCount / tilesPerRow);
-    this.width = tilesPerRow * tileSize;
-    this.height = tilesPerCol * tileSize;
-    this.data = new Uint8Array(this.width * this.height);
-
-    for (let i = 0; i < tileCount; i++) {
-      const index = i % 256;
-      const tx = i % tilesPerRow;
-      const ty = Math.floor(i / tilesPerRow);
-      const baseX = tx * tileSize;
-      const baseY = ty * tileSize;
-      for (let y = 0; y < tileSize; y++) {
-        for (let x = 0; x < tileSize; x++) {
-          const dstX = baseX + x;
-          const dstY = baseY + y;
-          this.data[dstY * this.width + dstX] = index;
-        }
-      }
-    }
-  },
-
-  createTexture(gl) {
-    this.texture = gl.createTexture();
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.texImage2D(
-      gl.TEXTURE_2D, 0, gl.R8,
-      this.width, this.height, 0,
-      gl.RED, gl.UNSIGNED_BYTE, this.data
-    );
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  },
-
-  getIndex(x, y) {
-    if (x < 0 || y < 0 || x >= this.width || y >= this.height) return null;
-    return this.data[y * this.width + x];
-  },
-
-  blitTile(srcPixels, xTile, yTile) {
-    let dstOffset = yTile * 16 * this.width + xTile * 16;
-    for (let ty = 0, srcOffset = 0; ty < tileSize; ty++, srcOffset += 16) {
-      this.data.set(srcPixels.subarray(srcOffset, srcOffset + tileSize), dstOffset);
-      dstOffset += this.width;
-    }
-  },
-
-  update(gl) {
-    for (let i = 0; i < tileCount; i++) {
-      const tileIndex = i;
-      const pixels = tileManager.getTilePixels(tileIndex);
-      const xTile = i % tilesPerRow;
-      const yTile = Math.floor(i / tilesPerRow);
-      this.blitTile(pixels, xTile, yTile);
-    }
-
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.width, this.height, gl.RED, gl.UNSIGNED_BYTE, this.data);
-  },
-};
-
-IndexedTextureManager.init(gl);
+IndexedTextureManager.init(gl, tileCount, tileSize, tilesPerRow);
 
 // === Generate Map Data (64x32) ===
 const mapW = 64, mapH = 32;
@@ -301,36 +66,6 @@ function makeInstancedBuffer(attr, size, type, data) {
 
 const tileIndexBuffer = makeInstancedBuffer('a_tileIndex', 1, gl.FLOAT, new Float32Array(mapTileIndices));
 const tilePosBuffer = makeInstancedBuffer('a_tilePos', 2, gl.FLOAT, mapTilePositions);
-
-const AnimDataManager = {
-  tileIndexMap: Uint16Array.from({ length: 2048 }, (_, i) => i),
-  data: null,
-
-  update(frame) {
-    if (this.data === null)
-      return;
-
-    const {
-      number_of_tiles_to_animate,
-      tile_to_animate,
-      first_anim_frame,
-      and_masks,
-      shift_values
-    } = this.data; 
-
-    for (let i = 0; i < number_of_tiles_to_animate; i++) {
-      const mask = and_masks[i];
-      const shift = shift_values[i];
-
-      const current_anim_frame = (frame & mask) >> shift;
-
-      const target_index = tile_to_animate[i];
-      const source_index = first_anim_frame[i] + current_anim_frame;
-
-      this.tileIndexMap[target_index] = source_index;
-    }
-  },
-};
 
 function updateTileIndexBuffer(frame) {
   AnimDataManager.update(frame);
@@ -382,29 +117,6 @@ function makeBuffer(attr, size, data) {
 makeBuffer('a_position', 2, positions);
 makeBuffer('a_uv', 2, uvs);
 */
-// === Tooltip ===
-const tooltip = document.getElementById("tooltip");
-
-canvas.addEventListener("mousemove", (e) => {
-  const rect = canvas.getBoundingClientRect();
-  const x = Math.floor((e.clientX - rect.left));
-  const y = Math.floor((e.clientY - rect.top));
-  if (x >= 0 && x < atlasW && y >= 0 && y < atlasH) {
-    const index = IndexedTextureManager.getIndex(x, y);
-    const color = PaletteManager.getColor(index);
-    tooltip.style.left = (e.clientX + window.scrollX + 10) + "px";
-    tooltip.style.top = (e.clientY + window.scrollY + 10) + "px";
-    tooltip.style.display = "block";
-    tooltip.innerHTML = `Index ${index}<br>RGB(${color.r}, ${color.g}, ${color.b})<br>
-      <div style="width: 20px; height: 20px;
-        background-color: rgb(${color.r}, ${color.g}, ${color.b});
-        border: 1px solid #000;
-        margin-top: 4px;"></div>`;
-  } else {
-    tooltip.style.display = "none";
-  }
-});
-
 
 const times = [];
 const time_samples = 60;
@@ -444,49 +156,28 @@ function animate(timestamp) {
 requestAnimationFrame(animate);
 
 
-function parseAnimData(data) {
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  let offset = 0;
+// === Tooltip ===
+const tooltip = document.getElementById("tooltip");
 
-  const number_of_tiles_to_animate = view.getUint16(offset, true); offset += 2;
-
-  const tile_to_animate = new Uint16Array(0x20);
-  for (let i = 0; i < 0x20; i++) {
-    tile_to_animate[i] = view.getUint16(offset, true);
-    offset += 2;
+canvas.addEventListener("mousemove", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - rect.left));
+  const y = Math.floor((e.clientY - rect.top));
+  if (x >= 0 && x < atlasW && y >= 0 && y < atlasH) {
+    const index = IndexedTextureManager.getIndex(x, y);
+    const color = PaletteManager.getColor(index);
+    tooltip.style.left = (e.clientX + window.scrollX + 10) + "px";
+    tooltip.style.top = (e.clientY + window.scrollY + 10) + "px";
+    tooltip.style.display = "block";
+    tooltip.innerHTML = `Index ${index}<br>RGB(${color.r}, ${color.g}, ${color.b})<br>
+      <div style="width: 20px; height: 20px;
+        background-color: rgb(${color.r}, ${color.g}, ${color.b});
+        border: 1px solid #000;
+        margin-top: 4px;"></div>`;
+  } else {
+    tooltip.style.display = "none";
   }
-
-  const first_anim_frame = new Uint16Array(0x20);
-  for (let i = 0; i < 0x20; i++) {
-    first_anim_frame[i] = view.getUint16(offset, true);
-    offset += 2;
-  }
-
-  const and_masks = new Uint8Array(0x20);
-  for (let i = 0; i < 0x20; i++) {
-    and_masks[i] = view.getUint8(offset++);
-  }
-
-  const shift_values = new Uint8Array(0x20);
-  for (let i = 0; i < 0x20; i++) {
-    shift_values[i] = view.getUint8(offset++);
-  }
-
-  return {
-    number_of_tiles_to_animate,
-    tile_to_animate,
-    first_anim_frame,
-    and_masks,
-    shift_values
-  };
-}
-
-function loadAnimData(fileMap) {
-  const animMaskData = fileMap.get("animdata");
-  AnimDataManager.data = parseAnimData(animMaskData);
-}
-
-
+});
 
 // === File Handling ===
 const expectedFiles = ["maptiles.vga", "objtiles.vga", "tileindx.vga", "masktype.vga", "u6pal", "animdata"];
@@ -535,11 +226,11 @@ async function tryInitializeViewer() {
     PaletteManager.setFromU6(gl, u6pal);
 
     console.log("load animdata");
-    const tileIndexMap = loadAnimData(fileMap);
+    AnimDataManager.init(fileMap);
 
     console.log("load tiles");
     tileManager.init(fileMap);
-    IndexedTextureManager.update(gl);
+    IndexedTextureManager.update(gl, tileManager);
   }
 }
 
