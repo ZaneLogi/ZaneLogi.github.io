@@ -52,28 +52,33 @@ for (let my = 0; my < mapH; my++) {
     mapTilePositions[i * 2 + 1] = my;
   }
 }
-function makeInstancedBuffer(attr, size, type, data) {
+
+function makeInstancedBuffer(attr, size, type, data, isInteger = false) {
   const loc = gl.getAttribLocation(program, attr);
   const buf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); // 可動態更新
+  gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
 
   gl.enableVertexAttribArray(loc);
-  gl.vertexAttribPointer(loc, size, type, false, 0, 0);
-  gl.vertexAttribDivisor(loc, 1); // 每 instance 用一次
+
+  if (isInteger) {
+    gl.vertexAttribIPointer(loc, size, type, 0, 0); // 注意是 IPointer（整數）
+  } else {
+    gl.vertexAttribPointer(loc, size, type, false, 0, 0);
+  }
+
+  gl.vertexAttribDivisor(loc, 1);
   return buf;
 }
 
-const tileIndexBuffer = makeInstancedBuffer('a_tileIndex', 1, gl.FLOAT, new Float32Array(mapTileIndices));
+const tileIndexBuffer = makeInstancedBuffer('a_tileIndex', 1, gl.UNSIGNED_SHORT, mapTileIndices, true);
 const tilePosBuffer = makeInstancedBuffer('a_tilePos', 2, gl.FLOAT, mapTilePositions);
 
 function updateTileIndexBuffer(frame) {
   AnimDataManager.update(frame);
-  for (let i = 0; i < map.length; i++) {
-    mapTileIndices[i] = AnimDataManager.tileIndexMap[i];
-  }
+
   gl.bindBuffer(gl.ARRAY_BUFFER, tileIndexBuffer);
-  gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(mapTileIndices));
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, AnimDataManager.tileIndexMap);
 }
 
 gl.uniform1f(gl.getUniformLocation(program, "u_tileSize"), tileSize);
@@ -81,42 +86,6 @@ gl.uniform1f(gl.getUniformLocation(program, "u_tilesPerRow"), tilesPerRow);
 gl.uniform1f(gl.getUniformLocation(program, "u_atlasW"), atlasW);
 gl.uniform1f(gl.getUniformLocation(program, "u_atlasH"), atlasH);
 
-
-/*
-code below is refactored by gl_InstanceID and gl_VertexID
-
-// === Build VBO ===
-const positions = [], uvs = [];
-for (let my = 0; my < mapH; my++) {
-  for (let mx = 0; mx < mapW; mx++) {
-    const tileIndex = map[my * mapW + mx];
-    const tx = tileIndex % tilesPerRow;
-    const ty = Math.floor(tileIndex / tilesPerRow);
-    const u0 = (tx * tileSize) / atlasW;
-    const v0 = (ty * tileSize) / atlasH;
-    const u1 = ((tx + 1) * tileSize) / atlasW;
-    const v1 = ((ty + 1) * tileSize) / atlasH;
-    const x0 = mx * tileSize;
-    const y0 = my * tileSize;
-    const x1 = x0 + tileSize;
-    const y1 = y0 + tileSize;
-    positions.push(x0, y0, x1, y0, x0, y1, x0, y1, x1, y0, x1, y1);
-    uvs.push(u0, v0, u1, v0, u0, v1, u0, v1, u1, v0, u1, v1);
-  }
-}
-
-function makeBuffer(attr, size, data) {
-  const loc = gl.getAttribLocation(program, attr);
-  const buf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(loc);
-  gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
-}
-
-makeBuffer('a_position', 2, positions);
-makeBuffer('a_uv', 2, uvs);
-*/
 
 const times = [];
 const time_samples = 60;
