@@ -405,9 +405,28 @@ canvas.addEventListener("mousemove", (e) => {
   }
 });
 
+
+const times = [];
+const time_samples = 60;
+let lastTimestamp = null;
+const frameRateDiv = document.getElementById("frameRate");
+
 // === Animation ===
 let frame = 0;
-function animate() {
+function animate(timestamp) {
+  if (lastTimestamp !== null) {
+    const delta = timestamp - lastTimestamp;
+    times.push(delta);
+  }
+  lastTimestamp = timestamp;
+
+  if (times.length == time_samples) {
+    times.shift();// remove first timestamp
+    const avg = times.reduce((a, b) => a + b, 0) / times.length;
+    const refreshRate = Math.round(1000 / avg);
+    frameRateDiv.textContent = `Estimated Refresh Rate: ${refreshRate} Hz\n(avg interval: ${avg.toFixed(3)} ms)`;
+  }
+
   requestAnimationFrame(animate);
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.uniform2f(u_resolution, canvas.width, canvas.height);
@@ -422,7 +441,7 @@ function animate() {
   frame++;
 }
 
-animate();
+requestAnimationFrame(animate);
 
 
 function parseAnimData(data) {
