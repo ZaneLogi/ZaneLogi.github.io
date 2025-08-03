@@ -4,6 +4,7 @@ import { PaletteManager } from './palette_manager.js';
 import { IndexedTextureManager } from './indexed_texture_manager.js';
 import { AnimDataManager } from './anim_data_manager.js';
 import { U6Map } from './u6map.js'
+import { ObjManager } from './obj_manager.js';
 
 const tileManager = new TileManager();
 const u6map = new U6Map();
@@ -216,7 +217,21 @@ canvas.addEventListener("mousemove", (e) => {
 // === File Handling ===
 const expectedFiles = [
   "maptiles.vga", "objtiles.vga", "tileindx.vga", "masktype.vga", "u6pal", "animdata",
-  "chunks", "map" ];
+  "chunks", "map", "objlist",
+];
+// Add OBJBLKAA to OBJBLKHH (8x8 surface)
+for (let row = 0; row < 8; row++) {
+  for (let col = 0; col < 8; col++) {
+    const name = `OBJBLK${String.fromCharCode(65 + col)}${String.fromCharCode(65 + row)}`;
+    expectedFiles.push(name.toLowerCase());
+  }
+}
+// Add OBJBLKAI to OBJBLKEI (5 dungeon)
+for (let i = 0; i < 5; i++) {
+  const name = `OBJBLK${String.fromCharCode(65 + i)}I`;
+  expectedFiles.push(name.toLowerCase());
+}
+
 const fileMap = new Map();
 const checklistDiv = document.getElementById("fileChecklist");
 
@@ -318,6 +333,9 @@ async function tryInitializeViewer() {
     console.log("load map");
     u6map.init(fileMap);
     updateMap();
+
+    ObjManager.init(fileMap);
+    console.log(ObjManager.actors.slice(0, 5));
   }
 }
 
