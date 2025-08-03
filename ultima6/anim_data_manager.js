@@ -45,8 +45,7 @@ export const AnimDataManager = {
   },
 
   update(frame) {
-    if (this.data === null)
-      return;
+    if (this.data === null) return new Set();
 
     const {
       number_of_tiles_to_animate,
@@ -54,7 +53,9 @@ export const AnimDataManager = {
       first_anim_frame,
       and_masks,
       shift_values
-    } = this.data; 
+    } = this.data;
+
+    const changed = new Set();
 
     for (let i = 0; i < number_of_tiles_to_animate; i++) {
       const mask = and_masks[i];
@@ -65,7 +66,12 @@ export const AnimDataManager = {
       const target_index = tile_to_animate[i];
       const source_index = first_anim_frame[i] + current_anim_frame;
 
-      this.tileIndexMap[target_index] = source_index;
+      if (this.tileIndexMap[target_index] !== source_index) {
+        this.tileIndexMap[target_index] = source_index;
+        changed.add(target_index);
+      }
     }
+
+    return changed;
   },
 };
