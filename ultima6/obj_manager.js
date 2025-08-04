@@ -1,5 +1,5 @@
 const OBJ_STATUS_OK_TO_TAKE    = 0x01;
-const OBJ_STATUS_SEEN_EGG      = 0x02;
+const OBJ_STATUS_INVISIBLE     = 0x02;
 const OBJ_STATUS_IN_CONTAINER  = 0x08;
 const OBJ_STATUS_IN_INVENTORY  = 0x10;
 const OBJ_STATUS_TEMPORARY     = 0x20;
@@ -33,6 +33,10 @@ class Obj {
            this.quality === other.quality; // <-- 注意這裡應該是 this.quality === other.quality
   }
 
+  is_visible() {
+    return (this.status & OBJ_STATUS_INVISIBLE) === 0;
+  }
+
   in_container() {
     // ((status & 0x18) === 0x08)
     return (this.status & OBJ_STATUS_READIED) === OBJ_STATUS_IN_CONTAINER;
@@ -59,18 +63,45 @@ class Obj {
   }
 }
 
+class TileFlag {
+  constructor(id = 0, flags1 = 0, flags2 = 0, flags3 = 0) {
+    this.id = id;
+    this.flags1 = flags1;
+    this.flags2 = flags2;
+    this.flags3 = flags3;
+  }
+
+  isWater() { return (this.flags1 & 0x01) !== 0; }
+  isPassable() { return (this.flags1 & 0x02) === 0;}
+  isTopTile() { return (this.flags2 & 0x10) !== 0; }
+  isBoundary() { return (this.flags2 & 0x04) !== 0 || (this.flags2 & 0x08) !== 0; }
+  isDoubleHeight() { return (this.flags2 & 0x40) !== 0; }
+  isDoubleWidth() { return (this.flags2 & 0x80) !== 0; }
+  article() { return (this.flags3 & 0xC0) >> 6; }
+  isForceLowerTile() { return (this.flags3 & 0x04) !== 0; } // something like a boat, a carrier...
+}
+
+
 export const ObjManager = {
   surfaceObjs: Array.from({ length: 8 }, () => Array.from({ length: 8 }, () => [])),
   dungeonObjs: Array.from({ length: 5 }, () => []),
   actors: [], // 已由 loadObjlist 填入
   partyMembers: [],
+  objToTile: null,
+  tileFlags: [], // 已由 loadTileFlag 填入
 
   // a placeholder for tile info
   get_info(obj_number, obj_frame) {
-    return { name: `tile_${obj_number}_${obj_frame}` };
+    const tileIndex = this.objToTile[obj_number] + obj_frame;
+    return {
+      name: `tile_${obj_number}_${obj_frame}`,
+      tileIndex: tileIndex,
+      info: this.tileFlags[tileIndex] || null };
   },
 
   init(fileMap) {
+    this.loadBaseTile(fileMap);
+    this.loadTileFlag(fileMap);
     this.loadObjlist(fileMap);
     this.loadObjblk(fileMap);
   },
@@ -264,5 +295,21 @@ export const ObjManager = {
       quantity:   (high >> 16) & 0xFF,
       quality:    (high >> 24) & 0xFF
     };
+  },
+
+  loadBaseTile(fileMap) {
+    const data = fileMap.get("basetile");
+    this.objToTile = new Uint16Array(data.buffer);
+  },
+
+  loadTileFlag(fileMap) {
+    const data = fileMap.get("tileflag");
+    for (let i = 0; i < 2048; i++) {
+      const flags1 = data[i];
+      const flags2 = data[2048 + i];
+      const flags3 = data[0x1400 + i];
+      const tile = new TileFlag(i, flags1, flags2, flags3);
+      this.tileFlags.push(tile);
+    }
   },
 };

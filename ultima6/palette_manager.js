@@ -18,12 +18,15 @@ export const PaletteManager = {
     console.log("PaletteManager initialized");
   },
 
-  setFromU6(gl, u6pal) {
+  setFromU6(gl, u6pal, useTransparent = false) {
     for (let i = 0; i < 256; i++) {
       this.data[i*4 + 0] = u6pal[i*3] * 4;
       this.data[i*4 + 1] = u6pal[i*3 + 1] * 4;
       this.data[i*4 + 2] = u6pal[i*3 + 2] * 4;
       this.data[i*4 + 3] = 255;
+    }
+    if (useTransparent) {
+      this.data[255 * 4 + 3] = 0;
     }
     this.update(gl);
   },

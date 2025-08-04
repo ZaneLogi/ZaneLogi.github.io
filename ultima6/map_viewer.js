@@ -32,9 +32,18 @@ PaletteManager.init(gl);
 IndexedTextureManager.init(gl, tileCount, tileSize, tilesPerRow);
 
 function resizeCanvas() {
-  const dpr = window.devicePixelRatio || 1;
+  // using the updated devicePixelRatio.
+  // essentially overriding the browser’s zoom effect by always rendering at the full pixel density.
+  //const dpr = window.devicePixelRatio || 1;
+
+  // canvas.width matches its CSS layout size,
+  // And the content will be rendered at the zoomed-in CSS size, even if pixelated.
+  const dpr = 1;
+
   const displayWidth  = Math.floor(canvas.clientWidth * dpr);
   const displayHeight = Math.floor(canvas.clientHeight * dpr);
+
+  console.log(`Resize canvas to ${displayWidth}x${displayHeight} (DPR: ${dpr})`);
 
   if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
     canvas.width = displayWidth;
@@ -44,8 +53,9 @@ function resizeCanvas() {
   }
 }
 
-let mapW = 0, mapH = 0;
-let map = null, mapTileIndices, mapTilePositions;
+let mapW = 0, mapH = 0, map;
+let mapTileIndices, mapTilePositions;
+let objectTileIndices, objectTilePositions;
 
 // Map from static tile ID to list of indices in map[]
 const tileUsageMap = new Map();
@@ -54,7 +64,7 @@ function resizeMapToCanvas() {
   mapW = Math.ceil(canvas.width / tileSize);
   mapH = Math.ceil(canvas.height / tileSize);
 
-  console.log("Map", mapW, mapH);
+  console.log("Map", mapW, mapH, "from resizeMapToCanvas");
 
   // Reallocate data arrays
   map = new Uint16Array(mapW * mapH);
@@ -84,13 +94,14 @@ function resizeMapToCanvas() {
   Shader.createBuffers(mapTileIndices, mapTilePositions);
 
   updateMap();
+  updateObjects();
 }
 
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas(); // trigger first time
 
-let mapOriginX = 128;
-let mapOriginY = 128;
+let mapOriginX = 268;
+let mapOriginY = 344;
 
 function updateMap() {
   if (u6map.chunks == null) return;
@@ -126,6 +137,132 @@ function updateMap() {
   Shader.updateTileIndexBuffer(mapTileIndices);
 }
 
+let objectsInView = [];
+
+function findObjectAtTile(mx, my, objectsInView) {
+  return objectsInView.find(obj =>
+    (obj.x - mapOriginX) === mx && (obj.y - mapOriginY) === my
+  );
+}
+
+function updateObjects() {
+  if (u6map.chunks == null) return;
+
+  const xstart = mapOriginX;
+  const ystart = mapOriginY;
+  const xend = xstart + mapW;
+  const yend = ystart + mapH;
+
+  console.log(`Update objects in view: x1:${xstart}, y1:${ystart}, x2:${xend}, y2:${yend}, w:${mapW}, h:${mapH}`);
+
+  const objects = [];
+
+  const chunkX0 = Math.floor(xstart / 128); // from 0 to 7
+  const chunkY0 = Math.floor(ystart / 128);
+  const chunkX1 = Math.floor((xend - 1) / 128);
+  const chunkY1 = Math.floor((yend - 1) / 128);
+
+  for (let chunkY = chunkY0; chunkY <= chunkY1; chunkY++) {
+    for (let chunkX = chunkX0; chunkX <= chunkX1; chunkX++) {
+      const chunkObjs = ObjManager.surfaceObjs[chunkY%8][chunkX%8];
+
+      console.log(`--Processing chunk (${chunkX}, ${chunkY}), found ${chunkObjs.length} objects`);
+
+      for (const obj of chunkObjs) {
+        if (obj.in_container() || obj.in_inventory()) continue;
+
+        const ox = obj.x;
+        const oy = obj.y;
+
+        // Check if inside current view
+        if (ox >= xstart && ox < xend && oy >= ystart && oy < yend) {
+          objects.push(obj);
+        }
+      }
+    }
+  }
+
+  console.log(`--Found ${objects.length} objects in view`);
+  objectsInView = objects;
+
+  // Optional: sort by Z (or depth)
+  //objects.sort((a, b) => a.z - b.z);
+
+  // === Build instance data ===
+  objectTileIndices = [];
+  objectTilePositions = [];
+
+  // draw sequence:
+  // draw force-lower objects first (something like a boat, a carrier...)
+  // draw lower objects
+  // draw actors
+  // draw upper objects
+  const drawObject = function(obj, forceLower, topTile) {
+    const tileInfo = obj.tile_info.info
+    if (!forceLower && tileInfo.isForceLowerTile() && !topTile) return;
+    if (forceLower && !tileInfo.isForceLowerTile()) return;
+
+    const baseTileIndex = obj.tile_info.tileIndex;
+    let tileFlag = obj.tile_info.info;
+    const ox = obj.x - xstart;
+    const oy = obj.y - ystart;
+
+    // draw the tile if it matches the top tile condition
+    if (tileFlag.isTopTile() !== topTile)
+      return;
+      
+    drawTile(baseTileIndex, ox, oy);
+
+    let next = 1;
+
+    // Double-width
+    if (tileFlag?.isDoubleWidth()) {
+      const tileIndex = baseTileIndex - next++;
+      drawTile(tileIndex, ox-1, oy);
+    }
+
+    // Double-height
+    if (tileFlag?.isDoubleHeight()) {
+      const tileIndex = baseTileIndex - next++;
+      drawTile(tileIndex, ox, oy-1);
+    }
+
+    // Double-width + double-height
+    if (tileFlag?.isDoubleWidth() && tileFlag?.isDoubleHeight()) {
+      const tileIndex = baseTileIndex - next++;
+      drawTile(tileIndex, ox-1, oy-1);
+    }
+  }
+
+  const drawTile = function(tileIndex, x, y) {
+    objectTileIndices.push(tileIndex);
+    objectTilePositions.push(x);
+    objectTilePositions.push(y);
+  }
+
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const obj = objects[i];
+    drawObject(obj, true, false); // force-lower objects
+  }
+
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const obj = objects[i];
+    drawObject(obj, false, false); // lower objects
+  }
+
+  // TODO: draw actors (party members, NPCs, etc.)
+
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const obj = objects[i];
+    drawObject(obj, false, true); // top tiles
+  }
+
+  objectTileIndices = new Uint16Array(objectTileIndices);
+  objectTilePositions = new Float32Array(objectTilePositions);
+
+  Shader.updateObjectBuffers(objectTileIndices, objectTilePositions);
+}
+
 function updateFrame(frame) {
   const animFrame = Math.floor(frame / 8); // Update every 8 render frames
   // Get the set of tile IDs whose animation frame changed
@@ -154,7 +291,7 @@ function updateFrame(frame) {
     return;
   }
 
-  console.log(modifiedIndices.size);
+  //console.log(modifiedIndices.size);
 
   Shader.updateTileIndexBuffer(mapTileIndices, modifiedIndices);
 }
@@ -184,12 +321,14 @@ function animate(timestamp) {
 
   if (pendingMapUpdate) {
     updateMap();
+    updateObjects();
     pendingMapUpdate = false;
   }
 
   updateFrame(frame);
 
-  Shader.render(frame, AnimDataManager, PaletteManager, map);
+  Shader.render(frame, PaletteManager, mapTileIndices.length, objectTileIndices?.length ?? 0);
+
   frame++;
 }
 
@@ -201,23 +340,34 @@ const tooltip = document.getElementById("tooltip");
 
 canvas.addEventListener("mousemove", (e) => {
   const rect = canvas.getBoundingClientRect();
-  const x = Math.floor((e.clientX - rect.left)/16);
-  const y = Math.floor((e.clientY - rect.top)/16);
-  if (x >= 0 && x < Shader.mapW && y >= 0 && y < Shader.mapH) {
-    const index = Shader.map[y * Shader.mapW + x];
-    tooltip.style.left = (e.clientX + window.scrollX + 10) + "px";
-    tooltip.style.top = (e.clientY + window.scrollY + 10) + "px";
-    tooltip.style.display = "block";
-    tooltip.innerHTML = `Tile Index ${index}`;
-  } else {
-    tooltip.style.display = "none";
+  const mx = Math.floor((e.clientX - rect.left) / tileSize);
+  const my = Math.floor((e.clientY - rect.top) / tileSize);
+
+  if (mx >= 0 && mx < mapW && my >= 0 && my < mapH) {
+    const obj = findObjectAtTile(mx, my, objectsInView); // 你需要把 objectsInView 暴露出來
+
+    if (obj) {
+      tooltip.style.left = (e.clientX + window.scrollX + 10) + "px";
+      tooltip.style.top = (e.clientY + window.scrollY + 10) + "px";
+      tooltip.style.display = "block";
+      tooltip.innerHTML =
+        `🧱 Object<br>` +
+        `#${obj.obj_number} Frame:${obj.obj_frame}<br>` +
+        `Tile:#${ObjManager.objToTile[obj.obj_number]}<br>` +
+        `Qty: ${obj.quantity} Quality: ${obj.quality}<br>` +
+        `Status: ${obj.status.toString(16)}`;
+      return;
+    }
   }
+
+  tooltip.style.display = "none";
 });
+
 
 // === File Handling ===
 const expectedFiles = [
   "maptiles.vga", "objtiles.vga", "tileindx.vga", "masktype.vga", "u6pal", "animdata",
-  "chunks", "map", "objlist",
+  "chunks", "map", "basetile", "tileflag", "objlist",
 ];
 // Add OBJBLKAA to OBJBLKHH (8x8 surface)
 for (let row = 0; row < 8; row++) {
@@ -321,7 +471,7 @@ async function tryInitializeViewer() {
   if (expectedFiles.every(f => fileMap.has(f))) {
     const u6pal = fileMap.get("u6pal");
     console.log("load u6pal");
-    PaletteManager.setFromU6(gl, u6pal);
+    PaletteManager.setFromU6(gl, u6pal, true);
 
     console.log("load animdata");
     AnimDataManager.init(fileMap);
@@ -334,8 +484,9 @@ async function tryInitializeViewer() {
     u6map.init(fileMap);
     updateMap();
 
+    console.log("load objects");
     ObjManager.init(fileMap);
-    console.log(ObjManager.actors.slice(0, 5));
+    updateObjects();
   }
 }
 

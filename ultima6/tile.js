@@ -52,7 +52,11 @@ export class TileManager {
     let ptr = 0;
 
     const tileDataLengthDiv16 = src[ptr++]; // the size in 16-byte pages of the tile data
-    let dstOffset = 0;
+
+    // vertical displacement is encoded in the first two bytes
+    let vertLowByte = (src[ptr] >> 4); // the low byte of the vertical displacement
+    let vertHighByte = (src[ptr+1] & 0x0F); // the high byte of the vertical displacement
+    let dstOffset = 16 * Math.floor((vertLowByte | (vertHighByte << 4))/11);
 
     while (true) {
       const b0 = src[ptr++]; // b0, b1: displacement

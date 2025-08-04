@@ -58,6 +58,20 @@ function createShader(gl, type, src) {
 }
 
 export const Shader = {
+  canvas: null,
+  gl: null,
+  program: null,
+  u_resolution: null,
+  u_indexed: null,
+  u_palette: null,
+  tileSize: 0,
+  tileIndexBuffer: null,
+  tilePosBuffer: null,
+  groundVAO: null,
+  objectTileIndexBuffer: null,
+  objectPosBuffer: null,
+  objectVAO: null,
+
   init(canvas, tileSize, tilesPerRow, atlasW, atlasH) {
     this.canvas = canvas;
     this.gl = canvas.getContext("webgl2");
@@ -70,6 +84,10 @@ export const Shader = {
     gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
     gl.linkProgram(program);
     gl.useProgram(program);
+
+    // enable alpha blending
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
     // === Uniforms ===
     this.u_resolution = gl.getUniformLocation(program, 'u_resolution');
@@ -87,29 +105,36 @@ export const Shader = {
     this.tileSize = tileSize;
   },
 
-  makeInstancedBuffer(attr, size, type, data, isInteger = false) {
-    const gl = this.gl;
-    const loc = gl.getAttribLocation(this.program, attr);
-    const buf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
-
-    gl.enableVertexAttribArray(loc);
-
-    if (isInteger) {
-      gl.vertexAttribIPointer(loc, size, type, 0, 0); // 注意是 IPointer（整數）
-    } else {
-      gl.vertexAttribPointer(loc, size, type, false, 0, 0);
-    }
-
-    gl.vertexAttribDivisor(loc, 1);
-    return buf;
-  },
-
   createBuffers(mapTileIndices, mapTilePositions) {
     const gl = this.gl;
-    this.tileIndexBuffer = Shader.makeInstancedBuffer('a_tileIndex', 1, gl.UNSIGNED_SHORT, mapTileIndices, true);
-    this.tilePosBuffer = Shader.makeInstancedBuffer('a_tilePos', 2, gl.FLOAT, mapTilePositions);
+
+    // delete old buffers
+    if (this.tileIndexBuffer) gl.deleteBuffer(this.tileIndexBuffer);
+    if (this.tilePosBuffer) gl.deleteBuffer(this.tilePosBuffer);
+    if (this.groundVAO) gl.deleteVertexArray(this.groundVAO);
+
+    this.groundVAO = gl.createVertexArray();
+    gl.bindVertexArray(this.groundVAO);
+
+    // a_tileIndex buffer
+    this.tileIndexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tileIndexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, mapTileIndices, gl.DYNAMIC_DRAW);
+    const locIdx = gl.getAttribLocation(this.program, 'a_tileIndex');
+    gl.enableVertexAttribArray(locIdx);
+    gl.vertexAttribIPointer(locIdx, 1, gl.UNSIGNED_SHORT, 0, 0);
+    gl.vertexAttribDivisor(locIdx, 1);
+
+    // a_tilePos buffer
+    this.tilePosBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tilePosBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, mapTilePositions, gl.STATIC_DRAW);
+    const locPos = gl.getAttribLocation(this.program, 'a_tilePos');
+    gl.enableVertexAttribArray(locPos);
+    gl.vertexAttribPointer(locPos, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(locPos, 1);
+
+    gl.bindVertexArray(null);
   },
 
   updateTileIndexBuffer(mapTileIndices, modifiedIndices = null) {
@@ -137,15 +162,69 @@ export const Shader = {
     }
   },
 
-  render(frame, AnimDataManager, PaletteManager, map) {
+  updateObjectBuffers(objectTileIndices, objectPositions) {
     const gl = this.gl;
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.uniform2f(this.u_resolution, this.canvas.width, this.canvas.height);
 
-    PaletteManager.colorCycling(gl, frame);
+    if (this.objectVAO) gl.deleteVertexArray(this.objectVAO);
+    if (this.objectTileIndexBuffer) gl.deleteBuffer(this.objectTileIndexBuffer);
+    if (this.objectPosBuffer) gl.deleteBuffer(this.objectPosBuffer);
 
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, map.length); // 6 個 vertex、N 個 instance
+    this.objectVAO = gl.createVertexArray();
+    gl.bindVertexArray(this.objectVAO);
+
+    // a_tileIndex
+    this.objectTileIndexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.objectTileIndexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, objectTileIndices, gl.DYNAMIC_DRAW);
+    const locIdx = gl.getAttribLocation(this.program, 'a_tileIndex');
+    gl.enableVertexAttribArray(locIdx);
+    gl.vertexAttribIPointer(locIdx, 1, gl.UNSIGNED_SHORT, 0, 0);
+    gl.vertexAttribDivisor(locIdx, 1);
+
+    // a_tilePos
+    this.objectPosBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.objectPosBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, objectPositions, gl.DYNAMIC_DRAW);
+    const locPos = gl.getAttribLocation(this.program, 'a_tilePos');
+    gl.enableVertexAttribArray(locPos);
+    gl.vertexAttribPointer(locPos, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(locPos, 1);
+
+    gl.bindVertexArray(null);
   },
 
+  render(frame, PaletteManager, groundTileLength, objectTileLength) {
+    const gl = this.gl;
+    PaletteManager.colorCycling(gl, frame);
+
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.clearColor(0.0, 0.2, 0.0, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    this.renderGround(groundTileLength);
+    this.renderObjects(objectTileLength);
+  },
+
+  renderGround(groundTileLength) {
+    const gl = this.gl;
+    gl.useProgram(this.program);
+    gl.uniform2f(this.u_resolution, this.canvas.width, this.canvas.height);
+    gl.uniform1f(gl.getUniformLocation(this.program, "u_tileSize"), this.tileSize);
+
+    gl.bindVertexArray(this.groundVAO);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, groundTileLength);
+    gl.bindVertexArray(null);
+  },
+
+  renderObjects(objectTileLength) {
+    if (objectTileLength === 0) return;
+    const gl = this.gl;
+    gl.useProgram(this.program);
+    gl.uniform2f(this.u_resolution, this.canvas.width, this.canvas.height);
+    gl.uniform1f(gl.getUniformLocation(this.program, "u_tileSize"), this.tileSize);
+
+    gl.bindVertexArray(this.objectVAO);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, objectTileLength);
+    gl.bindVertexArray(null);
+  },
 };

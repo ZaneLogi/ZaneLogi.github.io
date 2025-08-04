@@ -132,21 +132,24 @@ canvas.addEventListener("mousemove", (e) => {
   const rect = canvas.getBoundingClientRect();
   const x = Math.floor((e.clientX - rect.left));
   const y = Math.floor((e.clientY - rect.top));
-  if (x >= 0 && x < atlasW && y >= 0 && y < atlasH) {
-    const index = IndexedTextureManager.getIndex(x, y);
-    const color = PaletteManager.getColor(index);
+
+  // 計算 tile 網格位置
+  const tileX = Math.floor(x / tileSize);
+  const tileY = Math.floor(y / tileSize);
+
+  if (tileX >= 0 && tileX < mapW && tileY >= 0 && tileY < mapH) {
+    const mapIndex = tileY * mapW + tileX;
+    const tileIndex = mapTileIndices[mapIndex];
+
     tooltip.style.left = (e.clientX + window.scrollX + 10) + "px";
     tooltip.style.top = (e.clientY + window.scrollY + 10) + "px";
     tooltip.style.display = "block";
-    tooltip.innerHTML = `Index ${index}<br>RGB(${color.r}, ${color.g}, ${color.b})<br>
-      <div style="width: 20px; height: 20px;
-        background-color: rgb(${color.r}, ${color.g}, ${color.b});
-        border: 1px solid #000;
-        margin-top: 4px;"></div>`;
+    tooltip.innerHTML = `Tile [${tileX}, ${tileY}]<br>Index: ${tileIndex}`;
   } else {
     tooltip.style.display = "none";
   }
 });
+
 
 // === File Handling ===
 const expectedFiles = ["maptiles.vga", "objtiles.vga", "tileindx.vga", "masktype.vga", "u6pal", "animdata"];
