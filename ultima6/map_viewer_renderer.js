@@ -193,6 +193,12 @@ export const Shader = {
     gl.bindVertexArray(null);
   },
 
+  updateObjTileIndexBuffer(objTileIndices, modifiedIndices = null) {
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.objectTileIndexBuffer);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, objTileIndices);
+  },
+
   render(frame, PaletteManager, groundTileLength, objectTileLength) {
     const gl = this.gl;
     PaletteManager.colorCycling(gl, frame);

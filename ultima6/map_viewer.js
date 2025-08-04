@@ -59,6 +59,7 @@ let objectTileIndices, objectTilePositions;
 
 // Map from static tile ID to list of indices in map[]
 const tileUsageMap = new Map();
+const objTileUsageMap = new Map();
 
 function resizeMapToCanvas() {
   mapW = Math.ceil(canvas.width / tileSize);
@@ -100,8 +101,8 @@ function resizeMapToCanvas() {
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas(); // trigger first time
 
-let mapOriginX = 268;
-let mapOriginY = 344;
+let mapOriginX = 276;
+let mapOriginY = 367;
 
 function updateMap() {
   if (u6map.chunks == null) return;
@@ -138,6 +139,7 @@ function updateMap() {
 }
 
 let objectsInView = [];
+let actorsInView = [];
 
 function findObjectAtTile(mx, my, objectsInView) {
   return objectsInView.find(obj =>
@@ -148,6 +150,8 @@ function findObjectAtTile(mx, my, objectsInView) {
 function updateObjects() {
   if (u6map.chunks == null) return;
 
+  objTileUsageMap.clear();
+
   const xstart = mapOriginX;
   const ystart = mapOriginY;
   const xend = xstart + mapW;
@@ -156,6 +160,7 @@ function updateObjects() {
   console.log(`Update objects in view: x1:${xstart}, y1:${ystart}, x2:${xend}, y2:${yend}, w:${mapW}, h:${mapH}`);
 
   const objects = [];
+  const actors = [];
 
   const chunkX0 = Math.floor(xstart / 128); // from 0 to 7
   const chunkY0 = Math.floor(ystart / 128);
@@ -185,6 +190,20 @@ function updateObjects() {
   console.log(`--Found ${objects.length} objects in view`);
   objectsInView = objects;
 
+  // TODO: as allow map wrapping, need to handle this case
+
+  for (let ytile = ystart; ytile < yend; ytile++) {
+    for (let xtile = xstart; xtile < xend; xtile++) {
+      for (const actor of ObjManager.actors) {
+        if (actor.z === 0 && actor.x === xtile && actor.y === ytile)
+          actors.push(actor);
+      }
+    }
+  }
+
+  console.log(`--Found ${actors.length} actors in view`);
+  actorsInView = actors;
+
   // Optional: sort by Z (or depth)
   //objects.sort((a, b) => a.z - b.z);
 
@@ -210,7 +229,7 @@ function updateObjects() {
     // draw the tile if it matches the top tile condition
     if (tileFlag.isTopTile() !== topTile)
       return;
-      
+
     drawTile(baseTileIndex, ox, oy);
 
     let next = 1;
@@ -235,9 +254,13 @@ function updateObjects() {
   }
 
   const drawTile = function(tileIndex, x, y) {
-    objectTileIndices.push(tileIndex);
+    const mappedTileIndex = AnimDataManager.tileIndexMap[tileIndex];
+    objectTileIndices.push(mappedTileIndex);
     objectTilePositions.push(x);
     objectTilePositions.push(y);
+
+    if (!objTileUsageMap.has(tileIndex)) objTileUsageMap.set(tileIndex, []);
+    objTileUsageMap.get(tileIndex).push(objectTileIndices.length-1);
   }
 
   for (let i = objects.length - 1; i >= 0; i--) {
@@ -250,7 +273,9 @@ function updateObjects() {
     drawObject(obj, false, false); // lower objects
   }
 
-  // TODO: draw actors (party members, NPCs, etc.)
+  for (const actor of actors) {
+    drawObject(actor, false, false);
+  }
 
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
@@ -264,9 +289,9 @@ function updateObjects() {
 }
 
 function updateFrame(frame) {
-  const animFrame = Math.floor(frame / 8); // Update every 8 render frames
+  const animFrame = Math.floor(frame / 4); // Update every 4 render frames
   // Get the set of tile IDs whose animation frame changed
-  const changedIndices = AnimDataManager.update(frame);
+  const changedIndices = AnimDataManager.update(animFrame);
 
   // Record which positions in mapTileIndices[] are actually modified
   const modifiedIndices = new Set();
@@ -286,14 +311,31 @@ function updateFrame(frame) {
     }
   }
 
-  if (modifiedIndices.size === 0) {
-    // No changes this frame; skip buffer update
-    return;
+  if (modifiedIndices.size !== 0) {
+    //console.log(modifiedIndices.size);
+    Shader.updateTileIndexBuffer(mapTileIndices, modifiedIndices);
   }
 
-  //console.log(modifiedIndices.size);
+  //
+  // for obj tile index buffer
+  let needToUpdate = false;
+  for (const tileID of changedIndices) {
+    const positions = objTileUsageMap.get(tileID);
+    if (!positions) continue;
 
-  Shader.updateTileIndexBuffer(mapTileIndices, modifiedIndices);
+    const updatedIndex = AnimDataManager.tileIndexMap[tileID];
+
+    for (const i of positions) {
+      if (objectTileIndices[i] !== updatedIndex) {
+        objectTileIndices[i] = updatedIndex;
+        needToUpdate = true;
+      }
+    }
+  }
+
+  if (needToUpdate) {
+    Shader.updateObjTileIndexBuffer(objectTileIndices);
+  }
 }
 
 const times = [];
