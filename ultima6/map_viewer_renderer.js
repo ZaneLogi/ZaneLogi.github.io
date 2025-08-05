@@ -71,6 +71,7 @@ export const Shader = {
   objectTileIndexBuffer: null,
   objectPosBuffer: null,
   objectVAO: null,
+  tileLayers: [],
 
   init(canvas, tileSize, tilesPerRow, atlasW, atlasH) {
     this.canvas = canvas;
@@ -105,101 +106,124 @@ export const Shader = {
     this.tileSize = tileSize;
   },
 
-  createBuffers(mapTileIndices, mapTilePositions) {
+  createVAO(tileIndices, tilePositions) {
     const gl = this.gl;
+    const program = this.program;
 
-    // delete old buffers
-    if (this.tileIndexBuffer) gl.deleteBuffer(this.tileIndexBuffer);
-    if (this.tilePosBuffer) gl.deleteBuffer(this.tilePosBuffer);
-    if (this.groundVAO) gl.deleteVertexArray(this.groundVAO);
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
 
-    this.groundVAO = gl.createVertexArray();
-    gl.bindVertexArray(this.groundVAO);
-
-    // a_tileIndex buffer
-    this.tileIndexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.tileIndexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, mapTileIndices, gl.DYNAMIC_DRAW);
-    const locIdx = gl.getAttribLocation(this.program, 'a_tileIndex');
+    // Tile index buffer
+    const tileIndexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, tileIndexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, tileIndices, gl.DYNAMIC_DRAW);
+    const locIdx = gl.getAttribLocation(program, 'a_tileIndex');
     gl.enableVertexAttribArray(locIdx);
     gl.vertexAttribIPointer(locIdx, 1, gl.UNSIGNED_SHORT, 0, 0);
     gl.vertexAttribDivisor(locIdx, 1);
 
-    // a_tilePos buffer
-    this.tilePosBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.tilePosBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, mapTilePositions, gl.STATIC_DRAW);
-    const locPos = gl.getAttribLocation(this.program, 'a_tilePos');
+    // Tile position buffer
+    const tilePosBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, tilePosBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, tilePositions, gl.STATIC_DRAW);
+    const locPos = gl.getAttribLocation(program, 'a_tilePos');
     gl.enableVertexAttribArray(locPos);
     gl.vertexAttribPointer(locPos, 2, gl.FLOAT, false, 0, 0);
     gl.vertexAttribDivisor(locPos, 1);
 
     gl.bindVertexArray(null);
+
+    const instanceCount = tileIndices.length;
+
+    return {
+      vao,
+      tileIndexBuffer,
+      tilePosBuffer,
+      instanceCount
+    };
   },
 
-  updateTileIndexBuffer(mapTileIndices, modifiedIndices = null) {
+  createLayer(index, tileIndices, tilePositions) {
     const gl = this.gl;
-
-    if (modifiedIndices == null) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.tileIndexBuffer);
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, mapTileIndices);
+    if (this.tileLayers[index]) {
+      // If layer already exists, delete it
+      const layer = this.tileLayers[index];
+      if (layer.tileIndexBuffer) gl.deleteBuffer(layer.tileIndexBuffer);
+      if (layer.tilePosBuffer) gl.deleteBuffer(layer.tilePosBuffer);
+      if (layer.vao) gl.deleteVertexArray(layer.vao);
     }
-    else {
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.tileIndexBuffer);
+    const layer = this.createVAO(tileIndices, tilePositions);
+    this.tileLayers[index] = layer;
+  },
 
-      const MAX_PER_TILE_UPDATES = 64;
+  getUpdateThresholdRatio(tileCount) {
+    if (tileCount < 500) return 0.15;     // Small map: be more aggressive with full update
+    if (tileCount < 2000) return 0.25;    // Medium map: default ratio
+    return 0.35;                          // Large map: tolerate more partial updates
+  },
 
-      if (modifiedIndices.size > MAX_PER_TILE_UPDATES) {
-        // Too many changes, update the whole buffer at once
-        gl.bufferSubData(gl.ARRAY_BUFFER, 0, mapTileIndices);
+  calculateUpdateThreshold(tileCount, minThreshold = 16) {
+    const ratio = this.getUpdateThresholdRatio(tileCount);
+    return Math.max(tileCount * ratio, minThreshold);
+  },
+
+  shouldUseFullUpdate(tileCount, modifiedCount, minThreshold = 16) {
+    const threshold = this.calculateUpdateThreshold(tileCount, minThreshold);
+    return modifiedCount > threshold;
+  },
+
+  updateLayer(index, tileIndices, modifiedIndices = null) {
+    const layer = this.tileLayers?.[index];
+    if (!layer || (layer.instanceCount ?? 0) === 0) return;
+
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, layer.tileIndexBuffer);
+
+    if (modifiedIndices == null || modifiedIndices.size === 0) {
+      // Full update
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, tileIndices);
+      return;
+    }
+
+    const tileCount = tileIndices.length;
+    const modifiedCount = modifiedIndices.size;
+
+    if (this.shouldUseFullUpdate(tileCount, modifiedCount)) {
+      // Too many updates, treat as full
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, tileIndices);
+      return;
+    }
+
+    // === Consolidate continuous index ranges ===
+    const sorted = Array.from(modifiedIndices).filter(i => i < tileCount).sort((a, b) => a - b);
+
+    let start = sorted[0];
+    let end = start + 1;
+
+    for (let i = 1; i <= sorted.length; ++i) {
+      const current = sorted[i];
+      if (current === end) {
+        end++;
       } else {
-        // Few changes, only update the modified parts
-        for (const i of modifiedIndices) {
-          const byteOffset = i * 2; // Uint16 = 2 bytes
-          gl.bufferSubData(gl.ARRAY_BUFFER, byteOffset, mapTileIndices.subarray(i, i + 1));
-        }
+        const byteOffset = start * 2;
+        const sub = tileIndices.subarray(start, end);
+        gl.bufferSubData(gl.ARRAY_BUFFER, byteOffset, sub);
+
+        start = current;
+        end = current + 1;
       }
     }
   },
 
-  updateObjectBuffers(objectTileIndices, objectPositions) {
+  renderLayer(layer) {
+    if ((layer?.instanceCount ?? 0) === 0) return;
     const gl = this.gl;
-
-    if (this.objectVAO) gl.deleteVertexArray(this.objectVAO);
-    if (this.objectTileIndexBuffer) gl.deleteBuffer(this.objectTileIndexBuffer);
-    if (this.objectPosBuffer) gl.deleteBuffer(this.objectPosBuffer);
-
-    this.objectVAO = gl.createVertexArray();
-    gl.bindVertexArray(this.objectVAO);
-
-    // a_tileIndex
-    this.objectTileIndexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.objectTileIndexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, objectTileIndices, gl.DYNAMIC_DRAW);
-    const locIdx = gl.getAttribLocation(this.program, 'a_tileIndex');
-    gl.enableVertexAttribArray(locIdx);
-    gl.vertexAttribIPointer(locIdx, 1, gl.UNSIGNED_SHORT, 0, 0);
-    gl.vertexAttribDivisor(locIdx, 1);
-
-    // a_tilePos
-    this.objectPosBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.objectPosBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, objectPositions, gl.DYNAMIC_DRAW);
-    const locPos = gl.getAttribLocation(this.program, 'a_tilePos');
-    gl.enableVertexAttribArray(locPos);
-    gl.vertexAttribPointer(locPos, 2, gl.FLOAT, false, 0, 0);
-    gl.vertexAttribDivisor(locPos, 1);
-
+    gl.bindVertexArray(layer.vao);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, layer.instanceCount);
     gl.bindVertexArray(null);
   },
 
-  updateObjTileIndexBuffer(objTileIndices, modifiedIndices = null) {
-    const gl = this.gl;
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.objectTileIndexBuffer);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, objTileIndices);
-  },
-
-  render(frame, PaletteManager, groundTileLength, objectTileLength) {
+  render(frame, PaletteManager) {
     const gl = this.gl;
     PaletteManager.colorCycling(gl, frame);
 
@@ -207,30 +231,17 @@ export const Shader = {
     gl.clearColor(0.0, 0.2, 0.0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    this.renderGround(groundTileLength);
-    this.renderObjects(objectTileLength);
-  },
-
-  renderGround(groundTileLength) {
-    const gl = this.gl;
     gl.useProgram(this.program);
     gl.uniform2f(this.u_resolution, this.canvas.width, this.canvas.height);
     gl.uniform1f(gl.getUniformLocation(this.program, "u_tileSize"), this.tileSize);
 
-    gl.bindVertexArray(this.groundVAO);
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, groundTileLength);
-    gl.bindVertexArray(null);
-  },
+    // 0:gournd, 1:lower objects, 2:actors, 3:top objects
+    const visible = [true, true, true, true, true, true, true, true];
 
-  renderObjects(objectTileLength) {
-    if (objectTileLength === 0) return;
-    const gl = this.gl;
-    gl.useProgram(this.program);
-    gl.uniform2f(this.u_resolution, this.canvas.width, this.canvas.height);
-    gl.uniform1f(gl.getUniformLocation(this.program, "u_tileSize"), this.tileSize);
-
-    gl.bindVertexArray(this.objectVAO);
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, objectTileLength);
-    gl.bindVertexArray(null);
+    for (let i = 0; i < this.tileLayers.length; ++i) {
+      if (!visible[i]) continue; // Skip hidden layers
+      const layer = this.tileLayers[i];
+      this.renderLayer(layer);
+    }
   },
 };

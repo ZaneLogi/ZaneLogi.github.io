@@ -54,8 +54,7 @@ function resizeCanvas() {
 }
 
 let mapW = 0, mapH = 0, map;
-let mapTileIndices, mapTilePositions;
-let objectTileIndices, objectTilePositions;
+const layerTileIndices = [], layerTilePositions = [];
 
 // Map from static tile ID to list of indices in map[]
 const tileUsageMap = new Map();
@@ -71,7 +70,7 @@ function resizeMapToCanvas() {
   map = new Uint16Array(mapW * mapH);
   for (let i = 0; i < map.length; i++) map[i] = i % 2048;
 
-  mapTileIndices = new Uint16Array(mapW * mapH);
+  const mapTileIndices = new Uint16Array(mapW * mapH);
   tileUsageMap.clear();  // clear old mapping
   for (let i = 0; i < mapTileIndices.length; i++) {
     const tile_index = map[i];
@@ -82,7 +81,7 @@ function resizeMapToCanvas() {
     mapTileIndices[i] = AnimDataManager.tileIndexMap[tile_index];
   }
 
-  mapTilePositions = new Float32Array(mapW * mapH * 2);
+  const mapTilePositions = new Float32Array(mapW * mapH * 2);
   for (let my = 0; my < mapH; my++) {
     for (let mx = 0; mx < mapW; mx++) {
       const i = my * mapW + mx;
@@ -91,8 +90,11 @@ function resizeMapToCanvas() {
     }
   }
 
+  layerTileIndices[0] = mapTileIndices;
+  layerTilePositions[0] = mapTilePositions;
+
   // Recreate buffers
-  Shader.createBuffers(mapTileIndices, mapTilePositions);
+  Shader.createLayer(0, mapTileIndices, mapTilePositions);
 
   updateMap();
   updateObjects();
@@ -106,6 +108,8 @@ let mapOriginY = 367;
 
 function updateMap() {
   if (u6map.chunks == null) return;
+
+  const mapTileIndices = layerTileIndices[0];
 
   tileUsageMap.clear();  // clear old mapping
 
@@ -135,7 +139,7 @@ function updateMap() {
     }
   }
 
-  Shader.updateTileIndexBuffer(mapTileIndices);
+  Shader.updateLayer(0, mapTileIndices);
 }
 
 let objectsInView = [];
@@ -208,8 +212,8 @@ function updateObjects() {
   //objects.sort((a, b) => a.z - b.z);
 
   // === Build instance data ===
-  objectTileIndices = [];
-  objectTilePositions = [];
+  const objectTileIndices = [];
+  const objectTilePositions = [];
 
   // draw sequence:
   // draw force-lower objects first (something like a boat, a carrier...)
@@ -263,6 +267,10 @@ function updateObjects() {
     objTileUsageMap.get(tileIndex).push(objectTileIndices.length-1);
   }
 
+  // bottom tiles layer
+  objectTileIndices.length = 0;
+  objectTilePositions.length = 0;
+
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
     drawObject(obj, true, false); // force-lower objects
@@ -273,19 +281,37 @@ function updateObjects() {
     drawObject(obj, false, false); // lower objects
   }
 
+  layerTileIndices[1] = new Uint16Array(objectTileIndices);
+  layerTilePositions[1] = new Float32Array(objectTilePositions);
+
+  Shader.createLayer(1, layerTileIndices[1], layerTilePositions[1]);
+
+  // Actor layer
+  objectTileIndices.length = 0;
+  objectTilePositions.length = 0;
+
   for (const actor of actors) {
     drawObject(actor, false, false);
   }
+
+  layerTileIndices[2] = new Uint16Array(objectTileIndices);
+  layerTilePositions[2] = new Float32Array(objectTilePositions);
+
+  Shader.createLayer(2, layerTileIndices[2], layerTilePositions[2]);
+
+  // top tiles layer
+  objectTileIndices.length = 0;
+  objectTilePositions.length = 0;
 
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
     drawObject(obj, false, true); // top tiles
   }
 
-  objectTileIndices = new Uint16Array(objectTileIndices);
-  objectTilePositions = new Float32Array(objectTilePositions);
+  layerTileIndices[3] = new Uint16Array(objectTileIndices);
+  layerTilePositions[3] = new Float32Array(objectTilePositions);
 
-  Shader.updateObjectBuffers(objectTileIndices, objectTilePositions);
+  Shader.createLayer(3, layerTileIndices[3], layerTilePositions[3]);
 }
 
 function updateFrame(frame) {
@@ -295,6 +321,8 @@ function updateFrame(frame) {
 
   // Record which positions in mapTileIndices[] are actually modified
   const modifiedIndices = new Set();
+
+  const mapTileIndices = layerTileIndices[0];
 
   // Track how many positions are modified in this frame
   for (const tileID of changedIndices) {
@@ -313,12 +341,14 @@ function updateFrame(frame) {
 
   if (modifiedIndices.size !== 0) {
     //console.log(modifiedIndices.size);
-    Shader.updateTileIndexBuffer(mapTileIndices, modifiedIndices);
+    Shader.updateLayer(0, mapTileIndices, modifiedIndices);
   }
 
   //
-  // for obj tile index buffer
+  // for obj tile index buffer. only update the bottom layer (1)
+  // note: do this for other layers if needed
   let needToUpdate = false;
+  const objectTileIndices = layerTileIndices[1];
   for (const tileID of changedIndices) {
     const positions = objTileUsageMap.get(tileID);
     if (!positions) continue;
@@ -334,7 +364,7 @@ function updateFrame(frame) {
   }
 
   if (needToUpdate) {
-    Shader.updateObjTileIndexBuffer(objectTileIndices);
+    Shader.updateLayer(1, objectTileIndices);
   }
 }
 
@@ -369,7 +399,7 @@ function animate(timestamp) {
 
   updateFrame(frame);
 
-  Shader.render(frame, PaletteManager, mapTileIndices.length, objectTileIndices?.length ?? 0);
+  Shader.render(frame, PaletteManager);
 
   frame++;
 }
