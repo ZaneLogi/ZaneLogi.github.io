@@ -57,8 +57,7 @@ let mapW = 0, mapH = 0, map;
 const layerTileIndices = [], layerTilePositions = [];
 
 // Map from static tile ID to list of indices in map[]
-const tileUsageMap = new Map();
-const objTileUsageMap = new Map();
+const tileUsageMapList = Array.from({ length: 5 }, () => new Map());
 
 function resizeMapToCanvas() {
   mapW = Math.ceil(canvas.width / tileSize);
@@ -69,6 +68,8 @@ function resizeMapToCanvas() {
   // Reallocate data arrays
   map = new Uint16Array(mapW * mapH);
   for (let i = 0; i < map.length; i++) map[i] = i % 2048;
+
+  const tileUsageMap = tileUsageMapList[0];
 
   const mapTileIndices = new Uint16Array(mapW * mapH);
   tileUsageMap.clear();  // clear old mapping
@@ -110,6 +111,8 @@ function updateMap() {
   if (u6map.chunks == null) return;
 
   const mapTileIndices = layerTileIndices[0];
+
+  const tileUsageMap = tileUsageMapList[0];
 
   tileUsageMap.clear();  // clear old mapping
 
@@ -154,8 +157,6 @@ function findObjectAtTile(mx, my, objectsInView) {
 function updateObjects() {
   if (u6map.chunks == null) return;
 
-  objTileUsageMap.clear();
-
   const xstart = mapOriginX;
   const ystart = mapOriginY;
   const xend = xstart + mapW;
@@ -195,6 +196,7 @@ function updateObjects() {
   objectsInView = objects;
 
   // TODO: as allow map wrapping, need to handle this case
+  // TODO: change actor.z === 0 for dungeons
 
   for (let ytile = ystart; ytile < yend; ytile++) {
     for (let xtile = xstart; xtile < xend; xtile++) {
@@ -212,8 +214,12 @@ function updateObjects() {
   //objects.sort((a, b) => a.z - b.z);
 
   // === Build instance data ===
+  for (let i = 1; i < tileUsageMapList.length; i++)
+    tileUsageMapList[i].clear();
+
   const objectTileIndices = [];
   const objectTilePositions = [];
+  let objTileUsageMap = null;
 
   // draw sequence:
   // draw force-lower objects first (something like a boat, a carrier...)
@@ -270,6 +276,7 @@ function updateObjects() {
   // bottom tiles layer
   objectTileIndices.length = 0;
   objectTilePositions.length = 0;
+  objTileUsageMap = tileUsageMapList[1];
 
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
@@ -289,6 +296,7 @@ function updateObjects() {
   // Actor layer
   objectTileIndices.length = 0;
   objectTilePositions.length = 0;
+  objTileUsageMap = tileUsageMapList[2];
 
   for (const actor of actors) {
     drawObject(actor, false, false);
@@ -302,6 +310,7 @@ function updateObjects() {
   // top tiles layer
   objectTileIndices.length = 0;
   objectTilePositions.length = 0;
+  objTileUsageMap = tileUsageMapList[3];
 
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
@@ -323,6 +332,7 @@ function updateFrame(frame) {
   const modifiedIndices = new Set();
 
   const mapTileIndices = layerTileIndices[0];
+  const tileUsageMap = tileUsageMapList[0];
 
   // Track how many positions are modified in this frame
   for (const tileID of changedIndices) {
@@ -345,26 +355,30 @@ function updateFrame(frame) {
   }
 
   //
-  // for obj tile index buffer. only update the bottom layer (1)
-  // note: do this for other layers if needed
-  let needToUpdate = false;
-  const objectTileIndices = layerTileIndices[1];
-  for (const tileID of changedIndices) {
-    const positions = objTileUsageMap.get(tileID);
-    if (!positions) continue;
+  // for obj tile index buffer.
+  for (let i = 1; i < tileUsageMapList.length; i++) {
+    let needToUpdate = false;
+    const objectTileIndices = layerTileIndices[i];
+    const objTileUsageMap = tileUsageMapList[i];
+    if (objTileUsageMap.size === 0) continue;
 
-    const updatedIndex = AnimDataManager.tileIndexMap[tileID];
+    for (const tileID of changedIndices) {
+      const positions = objTileUsageMap.get(tileID);
+      if (!positions) continue;
 
-    for (const i of positions) {
-      if (objectTileIndices[i] !== updatedIndex) {
-        objectTileIndices[i] = updatedIndex;
-        needToUpdate = true;
+      const updatedIndex = AnimDataManager.tileIndexMap[tileID];
+
+      for (const i of positions) {
+        if (objectTileIndices[i] !== updatedIndex) {
+          objectTileIndices[i] = updatedIndex;
+          needToUpdate = true;
+        }
       }
     }
-  }
 
-  if (needToUpdate) {
-    Shader.updateLayer(1, objectTileIndices);
+    if (needToUpdate) {
+      Shader.updateLayer(i, objectTileIndices);
+    }
   }
 }
 
@@ -416,8 +430,16 @@ canvas.addEventListener("mousemove", (e) => {
   const my = Math.floor((e.clientY - rect.top) / tileSize);
 
   if (mx >= 0 && mx < mapW && my >= 0 && my < mapH) {
-    const obj = findObjectAtTile(mx, my, objectsInView); // 你需要把 objectsInView 暴露出來
+    const actor =findObjectAtTile(mx, my, actorsInView);
+    if (actor) {
+      tooltip.style.left = (e.clientX + window.scrollX + 10) + "px";
+      tooltip.style.top = (e.clientY + window.scrollY + 10) + "px";
+      tooltip.style.display = "block";
+      tooltip.innerHTML = `🧱 Actor #${actor.id}`;
+      return;
+    }
 
+    const obj = findObjectAtTile(mx, my, objectsInView);
     if (obj) {
       tooltip.style.left = (e.clientX + window.scrollX + 10) + "px";
       tooltip.style.top = (e.clientY + window.scrollY + 10) + "px";
