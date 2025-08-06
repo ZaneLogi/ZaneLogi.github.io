@@ -107,6 +107,8 @@ function resizeMapToCanvas() {
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas(); // trigger first time
 
+const shoreline = [];
+
 function updateMap() {
   if (u6map.chunks == null) return;
 
@@ -142,9 +144,25 @@ function updateMap() {
 
   const getTileIndex = (mapZ === 0) ? worldTileIndex : dungeonTileIndex;
 
+  const U6_ANIM_SRC_TILE = [
+    0x16,0x16,0x1a,0x1a,0x1e,0x1e,0x12,0x12,
+    0x1a,0x1e,0x16,0x12,0x16,0x1a,0x1e,0x12,
+    0x1a,0x1e,0x1e,0x12,0x12,0x16,0x16,0x1a,
+    0x12,0x16,0x1e,0x1a,0x1a,0x1e,0x12,0x16
+  ];
+
+  shoreline.length = 0; // renew the shorline information
+
   for (let ytile = ystart; ytile < yend; ytile++) {
     for (let xtile = xstart; xtile < xend; xtile++) {
-      const tile_index = getTileIndex(xtile, ytile, mapZ);
+      let tile_index = getTileIndex(xtile, ytile, mapZ);
+
+      if (tile_index >= 16 && tile_index < 48 ) {
+        // if this is a shorline tile, save it to shoreline
+        // and change it with U6_ANIM_SRC_TILE
+        shoreline.push({mx: xtile - xstart, my: ytile - ystart, tile_index});
+        tile_index = U6_ANIM_SRC_TILE[tile_index - 16] / 2;
+      }
 
       const i = (ytile - ystart) * mapW + (xtile - xstart);
       map[i] = tile_index;
@@ -328,6 +346,12 @@ function updateObjects() {
   objectTilePositions.length = 0;
   objTileUsageMap = tileUsageMapList[1];
   objTileUsageMap.clear();
+
+  // draw shorline
+  for (let i = 0; i < shoreline.length; i++) {
+    const data = shoreline[i];
+    drawTile(data.tile_index, data.mx, data.my);
+  }
 
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
@@ -528,7 +552,8 @@ canvas.addEventListener("mouseleave", () => {
 
 // === File Handling ===
 const expectedFiles = [
-  "maptiles.vga", "objtiles.vga", "tileindx.vga", "masktype.vga", "u6pal", "animdata",
+  "maptiles.vga", "objtiles.vga", "tileindx.vga", "masktype.vga",
+  "u6pal", "animdata", "animmask.vga",
   "chunks", "map", "basetile", "tileflag", "objlist",
 ];
 // Add OBJBLKAA to OBJBLKHH (8x8 surface)

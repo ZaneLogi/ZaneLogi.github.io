@@ -152,7 +152,8 @@ canvas.addEventListener("mousemove", (e) => {
 
 
 // === File Handling ===
-const expectedFiles = ["maptiles.vga", "objtiles.vga", "tileindx.vga", "masktype.vga", "u6pal", "animdata"];
+const expectedFiles = ["maptiles.vga", "objtiles.vga", "tileindx.vga",
+  "masktype.vga", "u6pal", "animdata", "animmask.vga"];
 const fileMap = new Map();
 const checklistDiv = document.getElementById("fileChecklist");
 

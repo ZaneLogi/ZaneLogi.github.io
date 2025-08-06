@@ -22,6 +22,31 @@ export class TileManager {
     this.alltiles = new Uint8Array(maptiles.length + objtiles.length);
     this.alltiles.set(maptiles, 0);
     this.alltiles.set(objtiles, maptiles.length);
+
+    const rawAnimMask = fileMap.get("animmask.vga");
+    this.animmask = decompressCompressedFile(rawAnimMask);
+  }
+
+  processAnimMask(i, pixels) {
+    const data = this.animmask;
+    let dataOffset = (i-16) * 64;
+    let pixelOffset = 0;
+    let clen = data[dataOffset++];
+    let displacement = 0;
+
+    do {
+      if (displacement > 0) {
+        pixelOffset += displacement;
+      }
+
+      if (clen > 0) {
+        pixels.fill(0xff, pixelOffset, pixelOffset + clen);
+        pixelOffset += clen;
+      }
+
+      displacement = data[dataOffset++];
+      clen = data[dataOffset++];
+    } while( displacement != 0 && clen != 0);
   }
 
   getTileOffset(index) {
@@ -87,6 +112,10 @@ export class TileManager {
       }
       else {
         this.cache[index] = new Uint8Array(256).fill(0xFF);
+      }
+
+      if (index >= 16 && index < 48) {
+        this.processAnimMask(index, this.cache[index]);
       }
     }
 
