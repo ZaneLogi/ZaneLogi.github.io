@@ -5,6 +5,7 @@ import { IndexedTextureManager } from './indexed_texture_manager.js';
 import { AnimDataManager } from './anim_data_manager.js';
 import { U6Map } from './u6map.js'
 import { ObjManager } from './obj_manager.js';
+import { OBJ_U6 } from './u6objects.js';
 
 const tileManager = new TileManager();
 const u6map = new U6Map();
@@ -53,8 +54,10 @@ function resizeCanvas() {
   }
 }
 
-let mapW = 0, mapH = 0, map;
+let mapW = 0, mapH = 0, mapZ = 0, map;
 const layerTileIndices = [], layerTilePositions = [];
+let mapOriginX = 276;
+let mapOriginY = 367;
 
 // Map from static tile ID to list of indices in map[]
 const tileUsageMapList = Array.from({ length: 5 }, () => new Map());
@@ -104,9 +107,6 @@ function resizeMapToCanvas() {
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas(); // trigger first time
 
-let mapOriginX = 276;
-let mapOriginY = 367;
-
 function updateMap() {
   if (u6map.chunks == null) return;
 
@@ -120,16 +120,31 @@ function updateMap() {
   const ystart = mapOriginY;
   const xend = xstart + mapW;
   const yend = ystart + mapH;
-  const WORLD_TILES = 1024;
+
+  const worldTileIndex = function(xtile, ytile, level = 0) {
+    const x_coord = xtile % 1024;
+    const y_coord = ytile % 1024;
+    const chunk_index = u6map.superChunks.get(y_coord >> 3, x_coord >> 3);
+    const chunk_offset = chunk_index * 64;
+    const tile_index = u6map.chunks[chunk_offset + (y_coord & 7) * 8 + (x_coord & 7)];
+    return tile_index;
+  }
+
+  const dungeonTileIndex = function(xtile, ytile, level) {
+    const x_coord = xtile % 256;
+    const y_coord = ytile % 256;
+    level = level - 1; // dungeon levels are 1-5, but array is 0-4
+    const chunk_index = u6map.dungeonChunks.get(level, y_coord >> 3, x_coord >> 3);
+    const chunk_offset = chunk_index * 64;
+    const tile_index = u6map.chunks[chunk_offset + (y_coord & 7) * 8 + (x_coord & 7)];
+    return tile_index;
+  }
+
+  const getTileIndex = (mapZ === 0) ? worldTileIndex : dungeonTileIndex;
 
   for (let ytile = ystart; ytile < yend; ytile++) {
     for (let xtile = xstart; xtile < xend; xtile++) {
-      const x_coord = xtile % WORLD_TILES;
-      const y_coord = ytile % WORLD_TILES;
-
-      const chunk_index = u6map.superChunks.get(y_coord >> 3, x_coord >> 3);
-      const chunk_offset = chunk_index * 64;
-      const tile_index = u6map.chunks[chunk_offset + (y_coord & 7) * 8 + (x_coord & 7)];
+      const tile_index = getTileIndex(xtile, ytile, mapZ);
 
       const i = (ytile - ystart) * mapW + (xtile - xstart);
       map[i] = tile_index;
@@ -149,8 +164,11 @@ let objectsInView = [];
 let actorsInView = [];
 
 function findObjectAtTile(mx, my, objectsInView) {
+  const mapTiles = (mapZ === 0) ? 1024 : 256;
+  // handle map wrapping
   return objectsInView.find(obj =>
-    (obj.x - mapOriginX) === mx && (obj.y - mapOriginY) === my
+    ((obj.x - mapOriginX) === mx || (obj.x + mapTiles - mapOriginX) === mx) &&
+    ((obj.y - mapOriginY) === my || (obj.y + mapTiles - mapOriginY) === my)
   );
 }
 
@@ -167,42 +185,79 @@ function updateObjects() {
   const objects = [];
   const actors = [];
 
-  const chunkX0 = Math.floor(xstart / 128); // from 0 to 7
-  const chunkY0 = Math.floor(ystart / 128);
-  const chunkX1 = Math.floor((xend - 1) / 128);
-  const chunkY1 = Math.floor((yend - 1) / 128);
+  const collectObjectsInSurface = function(objects, xstart, ystart, xend, yend) {
+    const chunkX0 = Math.floor(xstart / 128); // from 0 to 7
+    const chunkY0 = Math.floor(ystart / 128);
+    const chunkX1 = Math.floor((xend - 1) / 128);
+    const chunkY1 = Math.floor((yend - 1) / 128);
 
-  for (let chunkY = chunkY0; chunkY <= chunkY1; chunkY++) {
-    for (let chunkX = chunkX0; chunkX <= chunkX1; chunkX++) {
-      const chunkObjs = ObjManager.surfaceObjs[chunkY%8][chunkX%8];
+    for (let chunkY = chunkY0; chunkY <= chunkY1; chunkY++) {
+      for (let chunkX = chunkX0; chunkX <= chunkX1; chunkX++) {
+        const chunkObjs = ObjManager.surfaceObjs[chunkY%8][chunkX%8];
 
-      console.log(`--Processing chunk (${chunkX}, ${chunkY}), found ${chunkObjs.length} objects`);
+        console.log(`--Processing chunk (${chunkX}, ${chunkY}), found ${chunkObjs.length} objects`);
 
-      for (const obj of chunkObjs) {
-        if (obj.in_container() || obj.in_inventory()) continue;
+        for (const obj of chunkObjs) {
+          if (obj.in_container() || obj.in_inventory()) continue;
 
-        const ox = obj.x;
-        const oy = obj.y;
+          const ox = obj.x;
+          const oy = obj.y;
 
-        // Check if inside current view
-        if (ox >= xstart && ox < xend && oy >= ystart && oy < yend) {
-          objects.push(obj);
+          // Handle map wrapping
+          let insideXRange = (ox >= xstart && ox < xend);
+          if (!insideXRange) insideXRange = ((ox + 1024) >= xstart && (ox + 1024) < xend);
+          let insideYRange = (oy >= ystart && oy < yend);
+          if (!insideYRange) insideYRange = ((oy + 1024) >= ystart && (oy + 1024) < yend);
+
+          // Check if inside current view
+          if (insideXRange && insideYRange) {
+            objects.push(obj);
+          }
         }
       }
     }
   }
 
+  const collectObjectsInDungeon = function(objects, xstart, ystart, xend, yend, level) {
+    level = level - 1; // dungeon levels are 1-5, but array is 0-4
+    const dungeonObjs = ObjManager.dungeonObjs[level];
+    console.log(`--Processing dungeon ${level}, found ${dungeonObjs.length} objects`);
+    for (const obj of dungeonObjs) {
+      if (obj.in_container() || obj.in_inventory()) continue;
+
+      const ox = obj.x;
+      const oy = obj.y;
+
+      // Handle map wrapping
+      let insideXRange = (ox >= xstart && ox < xend);
+      if (!insideXRange) insideXRange = ((ox + 256) >= xstart && (ox + 256) < xend);
+      let insideYRange = (oy >= ystart && oy < yend);
+      if (!insideYRange) insideYRange = ((oy + 256) >= ystart && (oy + 256) < yend);
+
+      // Check if inside current view
+      if (insideXRange && insideYRange) {
+        objects.push(obj);
+      }
+    }
+  }
+
+  const collectObjects = (mapZ === 0) ? collectObjectsInSurface : collectObjectsInDungeon;
+  collectObjects(objects, xstart, ystart, xend, yend, mapZ);
+
   console.log(`--Found ${objects.length} objects in view`);
   objectsInView = objects;
 
-  // TODO: as allow map wrapping, need to handle this case
-  // TODO: change actor.z === 0 for dungeons
+  const mapTiles = (mapZ === 0) ? 1024 : 256;
 
   for (let ytile = ystart; ytile < yend; ytile++) {
     for (let xtile = xstart; xtile < xend; xtile++) {
       for (const actor of ObjManager.actors) {
-        if (actor.z === 0 && actor.x === xtile && actor.y === ytile)
-          actors.push(actor);
+        // Handle map wrapping
+        if (actor.z === mapZ &&
+          (actor.x === xtile || (actor.x + mapTiles) === xtile) &&
+          (actor.y === ytile || (actor.y + mapTiles) === ytile)
+        )
+        actors.push(actor);
       }
     }
   }
@@ -210,13 +265,7 @@ function updateObjects() {
   console.log(`--Found ${actors.length} actors in view`);
   actorsInView = actors;
 
-  // Optional: sort by Z (or depth)
-  //objects.sort((a, b) => a.z - b.z);
-
   // === Build instance data ===
-  for (let i = 1; i < tileUsageMapList.length; i++)
-    tileUsageMapList[i].clear();
-
   const objectTileIndices = [];
   const objectTilePositions = [];
   let objTileUsageMap = null;
@@ -231,10 +280,11 @@ function updateObjects() {
     if (!forceLower && tileInfo.isForceLowerTile() && !topTile) return;
     if (forceLower && !tileInfo.isForceLowerTile()) return;
 
+    const mapTiles = (mapZ === 0) ? 1024 : 256;
     const baseTileIndex = obj.tile_info.tileIndex;
     let tileFlag = obj.tile_info.info;
-    const ox = obj.x - xstart;
-    const oy = obj.y - ystart;
+    const ox = (obj.x > xstart) ? obj.x - xstart : obj.x + mapTiles - xstart;
+    const oy = (obj.y > ystart) ? obj.y - ystart : obj.y + mapTiles - ystart;
 
     // draw the tile if it matches the top tile condition
     if (tileFlag.isTopTile() !== topTile)
@@ -277,6 +327,7 @@ function updateObjects() {
   objectTileIndices.length = 0;
   objectTilePositions.length = 0;
   objTileUsageMap = tileUsageMapList[1];
+  objTileUsageMap.clear();
 
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
@@ -297,6 +348,7 @@ function updateObjects() {
   objectTileIndices.length = 0;
   objectTilePositions.length = 0;
   objTileUsageMap = tileUsageMapList[2];
+  objTileUsageMap.clear();
 
   for (const actor of actors) {
     drawObject(actor, false, false);
@@ -311,6 +363,7 @@ function updateObjects() {
   objectTileIndices.length = 0;
   objectTilePositions.length = 0;
   objTileUsageMap = tileUsageMapList[3];
+  objTileUsageMap.clear();
 
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
@@ -430,33 +483,48 @@ canvas.addEventListener("mousemove", (e) => {
   const my = Math.floor((e.clientY - rect.top) / tileSize);
 
   if (mx >= 0 && mx < mapW && my >= 0 && my < mapH) {
-    const actor =findObjectAtTile(mx, my, actorsInView);
-    if (actor) {
+    const showTooltip = (html) => {
       tooltip.style.left = (e.clientX + window.scrollX + 10) + "px";
       tooltip.style.top = (e.clientY + window.scrollY + 10) + "px";
       tooltip.style.display = "block";
-      tooltip.innerHTML = `🧱 Actor #${actor.id}`;
+      tooltip.innerHTML = html;
+    };
+
+    const actor =findObjectAtTile(mx, my, actorsInView);
+    if (actor) {
+      showTooltip(
+        `🧍 Actor<br>` +
+        `#${actor.id}<br>` +
+        `x:${mapOriginX+mx}, y:${mapOriginY+my}`);
       return;
     }
 
     const obj = findObjectAtTile(mx, my, objectsInView);
     if (obj) {
-      tooltip.style.left = (e.clientX + window.scrollX + 10) + "px";
-      tooltip.style.top = (e.clientY + window.scrollY + 10) + "px";
-      tooltip.style.display = "block";
-      tooltip.innerHTML =
+      showTooltip(
         `🧱 Object<br>` +
         `#${obj.obj_number} Frame:${obj.obj_frame}<br>` +
-        `Tile:#${ObjManager.objToTile[obj.obj_number]}<br>` +
+        `Tile:#${ObjManager.objToTile[obj.obj_number]+obj.obj_frame}<br>` +
         `Qty: ${obj.quantity} Quality: ${obj.quality}<br>` +
-        `Status: ${obj.status.toString(16)}`;
+        `Status: ${obj.status.toString(16)}<br>` +
+        `x:${mapOriginX+mx}, y:${mapOriginY+my}`);
       return;
     }
+
+    const tileIndex = map[my * mapW + mx];
+    showTooltip(
+      `🗺️ Tile<br>` +
+      `#${tileIndex}<br>` +
+      `x:${mapOriginX+mx}, y:${mapOriginY+my}`);
+    return;
   }
 
   tooltip.style.display = "none";
 });
 
+canvas.addEventListener("mouseleave", () => {
+  tooltip.style.display = "none";
+});
 
 // === File Handling ===
 const expectedFiles = [
@@ -519,10 +587,71 @@ let isCanvasDragging = false;
 let dragCanvasOffsetX = 0;
 let dragCanvasOffsetY = 0;
 let lastMapX, lastMapY;
-let pendingMapUpdate = false; 
+let pendingMapUpdate = false;
+
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 canvas.addEventListener("pointerdown", (e) => {
-  if (e.button !== 0) return;
+  if (e.button === 2) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = Math.floor((e.clientX - rect.left) / tileSize);
+    const my = Math.floor((e.clientY - rect.top) / tileSize);
+
+    const obj = findObjectAtTile(mx, my, objectsInView);
+    //console.log(obj);
+    if ((obj?.obj_number !== OBJ_U6.LADDER) && (obj?.obj_number !== OBJ_U6.CAVE))
+      return;
+
+    if (obj.obj_frame === 0 || obj.obj_number === OBJ_U6.CAVE) {
+      // go down a level
+      if (mapZ === 0) {
+        // handle the transition from the surface to the first dungeon level
+        // surface => 8 x 16 = 128 chunks for one direction
+        // dungeon => 32 chunks for one direction
+        // 128 / 32 = 4 for one direction => ratio 4 : 1
+        // 4 x 4 surface chunks map to one dungeon chunk
+        const nxtile = (obj.x & 0x07) | ((obj.x >> 2) & 0xF8);
+        const nytile = (obj.y & 0x07) | ((obj.y >> 2) & 0xF8);
+        const xOffset = (obj.x - mapOriginX + 1024) % 1024;
+        const yOffset = (obj.y - mapOriginY + 1024) % 1024;
+        mapZ = 1;
+        mapOriginX = nxtile - xOffset;
+        mapOriginY = nytile - yOffset;
+        if (mapOriginX < 0) mapOriginX += 256;
+        if (mapOriginY < 0) mapOriginY += 256;
+      }
+      else {
+        //dungeon ladders line up so we simply drop straight down
+        mapZ++;
+      }
+    }
+    else {
+      // go up a level
+      console.assert(obj.obj_number === OBJ_U6.LADDER, "Only ladders can go up");
+      console.assert(obj.obj_frame === 1, "Ladder frame should be 1 for going up");
+      console.assert(mapZ > 0, "Cannot go up from surface");
+
+      if (mapZ === 1) {
+        // use obj.quality to tell us which surface chunk to come up in.
+        const nxtile = Math.floor(obj.x / 8) * 8 * 4 + ((obj.quality & 0x03) * 8) + (obj.x - Math.floor(obj.x / 8) * 8);
+        const nytile = Math.floor(obj.y / 8) * 8 * 4 + (((obj.quality >> 2) & 0x03) * 8) + (obj.y - Math.floor(obj.y / 8) * 8);
+        const xOffset = (obj.x - mapOriginX + 256) % 256;
+        const yOffset = (obj.y - mapOriginY + 256) % 256;
+        mapZ = 0;
+        mapOriginX = nxtile - xOffset;
+        mapOriginY = nytile - yOffset;
+        if (mapOriginX < 0) mapOriginX += 1024;
+        if (mapOriginY < 0) mapOriginY += 1024;
+      }
+      else {
+        mapZ--;
+      }
+    }
+    pendingMapUpdate = true;
+    return;
+  }
+
+  if (e.button !== 0) return; // not left button
 
   // lock the pointer event，even the cursor is out of canvas,
   // still can receive pointerup/pointermove
@@ -545,11 +674,13 @@ canvas.addEventListener("pointermove", (e) => {
   mapOriginX = lastMapX - Math.floor((e.clientX - dragCanvasOffsetX));
   mapOriginY = lastMapY - Math.floor((e.clientY - dragCanvasOffsetY));
 
-  if (mapOriginX < 0) mapOriginX += 1024;
-  else if (mapOriginX >= 1024) mapOriginX -= 1024;
+  const mapTiles = (mapZ === 0) ? 1024 : 256;
 
-  if (mapOriginY < 0) mapOriginY += 1024;
-  else if (mapOriginY >= 1024) mapOriginY -= 1024;
+  if (mapOriginX < 0) mapOriginX += mapTiles;
+  else if (mapOriginX >= mapTiles) mapOriginX -= mapTiles;
+
+  if (mapOriginY < 0) mapOriginY += mapTiles;
+  else if (mapOriginY >= mapTiles) mapOriginY -= mapTiles;
 
   pendingMapUpdate = true;
 });
