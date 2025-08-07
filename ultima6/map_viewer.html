@@ -93,43 +93,50 @@
       white-space: pre-line;
     }
 
-    /* === Generic Floating Window === */
-    .floatingWindow {
-      position: fixed;
-      top: 100px;
-      left: 100px;
-      width: 320px;
-      background: rgba(0, 0, 0, 0.9);
+    .headerButtons {
+      display: flex;
+      gap: 4px;
+    }
+
+    .headerButtons button {
+      background: transparent;
+      border: none;
       color: #0f0;
+      font-size: 16px;
+      cursor: pointer;
+      padding: 2px 6px;
+    }
+
+    .headerButtons button:hover {
+      color: #fff;
+    }
+
+    .list-view {
+      height: 200px;
+      overflow-y: auto;
       border: 1px solid #0f0;
-      border-radius: 5px;
-      z-index: 10;
-      resize: both;
-      overflow: hidden;
+      background: #111;
+      font-family: monospace;
+      font-size: 13px;
+      padding: 5px;
     }
 
-    .floatingHeader {
-      padding: 8px 10px;
-      cursor: move;
-      background: #060;
-      font-weight: bold;
-      user-select: none;
+    .list-item {
+      padding: 2px 4px;
+      border-bottom: 1px solid #333;
+      cursor: default;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
 
-    .floatingContent {
-      padding: 10px;
-      overflow: auto;
-    }
-
-    .floatingWindow.collapsed .floatingContent {
-      display: none;
-    }
-
-    .floatingWindow.collapsed {
-      height: auto !important;
-      resize: none;
+    .list-item:hover {
+      background: #0f0;
+      color: #000;
     }
   </style>
+
+  <link rel="stylesheet" href="./floating_window.css">
 </head>
 <body>
   <canvas id="glcanvas"></canvas>
@@ -137,7 +144,11 @@
 
   <!-- Floating Info Window -->
   <div class="floatingWindow" id="infoWindow">
-    <div class="floatingHeader">Ultima VI File Loader</div>
+    <div class="floatingHeader">Ultima VI File Loader
+      <div class="headerButtons">
+        <button class="collapse-btn">−</button>
+      </div>
+    </div>
     <div class="floatingContent">
       <div id="dropzone">Drop Ultima VI files here</div>
       <button id="resetBtn">Reset Stored Files</button>
@@ -154,6 +165,18 @@
     </div>
   </div>
 
+  <div class="floatingWindow" id="list-window">
+    <div class="floatingHeader">
+      List Window
+      <div class="headerButtons">
+        <button class="collapse-btn">−</button>
+        <button class="close-btn">×</button>
+      </div>
+    </div>
+    <div class="floatingContent">
+      <div class="list-view" id="myListView"></div>
+    </div>
+  </div>
 
   <script type="module" src="map_viewer.js"></script>
 
@@ -163,8 +186,9 @@
       FloatingWindowManager.resetAllLayout();
     });
 
-    const infoWindow = new FloatingWindowManager("infoWindow");
     const optionsWindow = new FloatingWindowManager("optionsWindow");
+    const infoWindow = new FloatingWindowManager("infoWindow");
+    const listWindow = new FloatingWindowManager("list-window");
   </script>
 </body>
 </html>

@@ -9,22 +9,52 @@ export class TileManager {
     this.imageCache = Array(0x800);
   }
 
-  init(fileMap) {
+  init(fileMap, tileOnly = false) {
     const objtiles = fileMap.get("objtiles.vga");
     this.tileindex = fileMap.get("tileindx.vga");
 
     const rawMapTiles = fileMap.get("maptiles.vga");
     const maptiles = decompressCompressedFile(rawMapTiles);
 
-    const rawMaskType = fileMap.get("masktype.vga");
-    this.masktype = decompressCompressedFile(rawMaskType);
-
     this.alltiles = new Uint8Array(maptiles.length + objtiles.length);
     this.alltiles.set(maptiles, 0);
     this.alltiles.set(objtiles, maptiles.length);
 
-    const rawAnimMask = fileMap.get("animmask.vga");
-    this.animmask = decompressCompressedFile(rawAnimMask);
+    const rawMaskType = fileMap.get("masktype.vga");
+    this.masktype = decompressCompressedFile(rawMaskType);
+
+    if (!tileOnly) {
+      const rawAnimMask = fileMap.get("animmask.vga");
+      this.animmask = decompressCompressedFile(rawAnimMask);
+
+      const rawLook = fileMap.get("look.lzd");
+      this.parseLook(decompressCompressedFile(rawLook));
+    }
+  }
+
+  parseLook(data) {
+    this.looks = new Array(2048);
+    let offset = 0;
+    for (let i = 0; i < 2048; i++) {
+      const tile_index = data[offset] + data[offset + 1] * 256;
+      offset += 2;
+
+      const start = offset;
+
+      // Skip to next '\0'
+      while (data[offset] !== 0) {
+        offset++;
+      }
+      offset++; // skip '\0'
+
+      // convert to string
+      const lookName = new TextDecoder().decode(data.subarray(start, offset - 1));
+      for (let j = i; j <= tile_index && j < 2048; j++) {
+        this.looks[j] = lookName;
+      }
+
+      i = tile_index;     
+    }
   }
 
   processAnimMask(i, pixels) {
@@ -47,6 +77,20 @@ export class TileManager {
       displacement = data[dataOffset++];
       clen = data[dataOffset++];
     } while( displacement != 0 && clen != 0);
+  }
+
+  getTileLook(index, quantity = 1) {
+    if (index < 0 || index >= this.looks.length) {
+      return "Unknown";
+    }
+
+    const look = this.looks[index] || "Unknown";
+    if (look.indexOf('\\')) {
+      const isPlural = quantity >= 1;
+      return look.replace(/\\es/g, isPlural ? "es" : "")
+        .replace(/\\s/g, isPlural ? "s" : "");
+    }
+    return look;
   }
 
   getTileOffset(index) {
@@ -114,7 +158,8 @@ export class TileManager {
         this.cache[index] = new Uint8Array(256).fill(0xFF);
       }
 
-      if (index >= 16 && index < 48) {
+      // Process animation mask for shoreline tiles
+      if (this.animmask && index >= 16 && index < 48) {
         this.processAnimMask(index, this.cache[index]);
       }
     }
@@ -123,14 +168,13 @@ export class TileManager {
   }
 
   getTileImage(index, palette, forceUpdate = false) {
-    //if (index >= 16 && index < 48) // the base tile for shoreline tiles
-    //  index = U6_ANIM_SRC_TILE[index-16]/2;
-
     if (!this.imageCache[index]) {
       // Create offscreen canvas for 16x16 tile
       const offscreen = document.createElement("canvas");
       offscreen.width = 16;
       offscreen.height = 16;
+      offscreen.style.width = '16px';
+      offscreen.style.height = '16px';
       this.imageCache[index] = offscreen;
       forceUpdate = true;
     }
@@ -147,7 +191,7 @@ export class TileManager {
         if (color === 0xFF) {
           rgba[base + 3] = 0;
         } else {
-          const [r, g, b] = palette[color];
+          const {r, g, b} = palette.getColor(color);
           rgba[base] = r;
           rgba[base + 1] = g;
           rgba[base + 2] = b;

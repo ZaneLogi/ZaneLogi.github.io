@@ -46,37 +46,28 @@ document.getElementById("dropzone").addEventListener("drop", async (e) => {
 });
 
 function loadU6Palette(u6pal) {
-  const palette = [];
-  for (let i = 0; i < 256; i++) {
-    palette.push([
-      u6pal[i * 3] << 2,
-      u6pal[i * 3 + 1] << 2,
-      u6pal[i * 3 + 2] << 2
-    ]);
-  }
-  return palette;
-}
+  const PaletteManager = {
+    data: new Uint8Array(256 * 4),
+    
+    getColor(index) {
+      const offset = index * 4;
+      return {
+        r: this.data[offset],
+        g: this.data[offset + 1],
+        b: this.data[offset + 2],
+      };
+    },
+  };
 
-function drawTile(ctx, tilePixels, x, y, palette) {
-  const imageData = ctx.createImageData(16, 16);
-  const data = imageData.data;
-  const buf = tilePixels;
-
+  const data = PaletteManager.data;
   for (let i = 0; i < 256; i++) {
-    const color = buf[i];
-    const base = i * 4;
-    if (color === 0xFF) {
-      data[base + 3] = 0;
-    } else {
-      const [r, g, b] = palette[color];
-      data[base] = r;
-      data[base + 1] = g;
-      data[base + 2] = b;
-      data[base + 3] = 255;
-    }
+    data[i*4 + 0] = u6pal[i*3] * 4;
+    data[i*4 + 1] = u6pal[i*3 + 1] * 4;
+    data[i*4 + 2] = u6pal[i*3 + 2] * 4;
+    data[i*4 + 3] = 255;
   }
 
-  ctx.putImageData(imageData, x, y);
+  return PaletteManager;
 }
 
 function drawAllTiles(ctx, palette) {
@@ -88,8 +79,8 @@ function drawAllTiles(ctx, palette) {
   for (let i = 0; i < 2048; i++) {
     const x = (i % cols) * 16;
     const y = Math.floor(i / cols) * 16;
-    const tilePixels = tileManager.getTilePixels(i);
-    drawTile(ctx, tilePixels, x, y, palette);
+    const tileImage = tileManager.getTileImage(i, palette);
+    ctx.drawImage(tileImage, x, y);
   }
 
   canvas.addEventListener("mousemove", (e) => {
@@ -111,7 +102,7 @@ function drawAllTiles(ctx, palette) {
 
 async function tryInitializeViewer() {
   if (expectedFiles.every(f => fileMap.has(f))) {
-    tileManager.init(fileMap);
+    tileManager.init(fileMap, true);
 
     const u6pal = fileMap.get("u6pal");
     const palette = loadU6Palette(u6pal);

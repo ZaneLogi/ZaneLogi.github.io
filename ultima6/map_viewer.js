@@ -518,7 +518,7 @@ canvas.addEventListener("mousemove", (e) => {
     if (actor) {
       showTooltip(
         `🧍 Actor<br>` +
-        `#${actor.id}<br>` +
+        `#${actor.id} ${actor.name}<br>` +
         `x:${mapOriginX+mx}, y:${mapOriginY+my}`);
       return;
     }
@@ -539,7 +539,8 @@ canvas.addEventListener("mousemove", (e) => {
     showTooltip(
       `🗺️ Tile<br>` +
       `#${tileIndex}<br>` +
-      `x:${mapOriginX+mx}, y:${mapOriginY+my}`);
+      `x:${mapOriginX+mx}, y:${mapOriginY+my}<br>` +
+      `Name: ${tileManager.getTileLook(tileIndex)}`);
     return;
   }
 
@@ -550,11 +551,58 @@ canvas.addEventListener("mouseleave", () => {
   tooltip.style.display = "none";
 });
 
+// === list view ===
+function populateList(items) {
+  const listView = document.getElementById('myListView');
+  listView.innerHTML = ''; // clear existing
+
+  items.forEach((item, index) => {
+    const div = document.createElement('div');
+    div.className = 'list-item';
+    let textContent = null;
+    if (typeof item === 'string') {
+      div.textContent = item;
+      textContent = item;
+    } else {
+      const objTileIndex = ObjManager.objToTile[item.obj_number] + item.obj_frame;
+      const canvas = tileManager.getTileImage(objTileIndex, PaletteManager)
+      div.appendChild(canvas);
+
+      const textSpan = document.createElement('span');
+      const tileName = tileManager.getTileLook(objTileIndex);
+      const text = `${item.quantity > 1 ? item.quantity + ' ' : ''}${tileName}`;
+      textSpan.textContent = text;
+      div.appendChild(textSpan);
+
+      textContent = text;
+    }
+    div.addEventListener('click', () => {
+      console.log(`Clicked item #${index}: ${textContent}`);
+    });
+    listView.appendChild(div);
+  });
+}
+
+// Example usage
+const testItems = [
+  "maptiles.vga",
+  "objtiles.vga",
+  "tileindex.vga",
+  "masktype.vga",
+  "u6pal",
+  "chunks",
+  "map",
+  "objlist"
+];
+
+populateList(testItems);
+
+
 // === File Handling ===
 const expectedFiles = [
   "maptiles.vga", "objtiles.vga", "tileindx.vga", "masktype.vga",
   "u6pal", "animdata", "animmask.vga",
-  "chunks", "map", "basetile", "tileflag", "objlist",
+  "chunks", "map", "basetile", "tileflag", "objlist", "look.lzd"
 ];
 // Add OBJBLKAA to OBJBLKHH (8x8 surface)
 for (let row = 0; row < 8; row++) {
@@ -617,11 +665,11 @@ let pendingMapUpdate = false;
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 canvas.addEventListener("pointerdown", (e) => {
-  if (e.button === 2) {
-    const rect = canvas.getBoundingClientRect();
-    const mx = Math.floor((e.clientX - rect.left) / tileSize);
-    const my = Math.floor((e.clientY - rect.top) / tileSize);
+  const canvasRect = canvas.getBoundingClientRect();
+  const mx = Math.floor((e.clientX - canvasRect.left) / tileSize);
+  const my = Math.floor((e.clientY - canvasRect.top) / tileSize);
 
+  if (e.button === 2) {
     const obj = findObjectAtTile(mx, my, objectsInView);
     //console.log(obj);
     if ((obj?.obj_number !== OBJ_U6.LADDER) && (obj?.obj_number !== OBJ_U6.CAVE))
@@ -677,6 +725,14 @@ canvas.addEventListener("pointerdown", (e) => {
   }
 
   if (e.button !== 0) return; // not left button
+
+  const actor = findObjectAtTile(mx, my, actorsInView);
+  if (actor) {
+    populateList(actor.obj_list);
+  } else {
+    const obj = findObjectAtTile(mx, my, objectsInView);
+    if (obj) populateList(obj.obj_list);
+  }
 
   // lock the pointer event，even the cursor is out of canvas,
   // still can receive pointerup/pointermove

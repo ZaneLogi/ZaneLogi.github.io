@@ -1,0 +1,39 @@
+.floatingWindow {
+  position: fixed;
+  top: 100px;
+  left: 100px;
+  width: 320px;
+  background: rgba(0, 0, 0, 0.9);
+  color: #0f0;
+  border: 1px solid #0f0;
+  border-radius: 5px;
+  z-index: 10;
+  resize: both;
+  overflow: hidden;
+}
+
+.floatingHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  cursor: move;
+  background: #060;
+  font-weight: bold;
+  user-select: none;
+}
+
+.floatingContent {
+  position: relative;
+  padding: 10px;
+  overflow: auto;
+}
+
+.floatingWindow.collapsed .floatingContent {
+  display: none;
+}
+
+.floatingWindow.collapsed {
+  height: auto !important;
+  resize: none;
+}

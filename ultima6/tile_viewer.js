@@ -144,7 +144,8 @@ canvas.addEventListener("mousemove", (e) => {
     tooltip.style.left = (e.clientX + window.scrollX + 10) + "px";
     tooltip.style.top = (e.clientY + window.scrollY + 10) + "px";
     tooltip.style.display = "block";
-    tooltip.innerHTML = `Tile [${tileX}, ${tileY}]<br>Index: ${tileIndex}`;
+    tooltip.innerHTML = `Tile [${tileX}, ${tileY}]<br>` +
+      `Index: ${tileIndex}<br>Name: ${tileManager.getTileLook(tileIndex)}`;
   } else {
     tooltip.style.display = "none";
   }
@@ -153,7 +154,7 @@ canvas.addEventListener("mousemove", (e) => {
 
 // === File Handling ===
 const expectedFiles = ["maptiles.vga", "objtiles.vga", "tileindx.vga",
-  "masktype.vga", "u6pal", "animdata", "animmask.vga"];
+  "masktype.vga", "u6pal", "animdata", "animmask.vga", "look.lzd"];
 const fileMap = new Map();
 const checklistDiv = document.getElementById("fileChecklist");
 
