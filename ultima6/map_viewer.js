@@ -597,6 +597,37 @@ const testItems = [
 
 populateList(testItems);
 
+// === dialog window ===
+const displayArea = document.getElementById('displayArea');
+const textInput = document.getElementById('textInput');
+
+function escapeHTML(str) {
+  return str.replace(/[&<>"']/g, m =>
+    ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }[m])
+  );
+}
+
+textInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    const raw = textInput.value.trim();
+    if (raw) {
+      const safe = escapeHTML(raw);
+      const colored = safe
+        .replace(/hello/g, '<span style="color: red">hello</span>')
+        .replace(/world/g, '<span style="color: blue">world</span>');
+
+      displayArea.innerHTML += colored + "<br>";
+      textInput.value = '';
+    }
+  }
+});
 
 // === File Handling ===
 const expectedFiles = [

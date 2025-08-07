@@ -127,6 +127,50 @@
       padding: 5px;
     }
 
+    /* === dialog window === */
+    #dialog-window {
+      height: 300px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #dialog-window .floatingContent {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 10px;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+
+    #displayArea {
+      flex-grow: 1;
+      overflow: auto;
+      padding: 8px;
+      background: #111;
+      color: #0f0;
+      font-family: monospace;
+      font-size: 14px;
+      border: 1px solid #0f0;
+      margin-bottom: 8px;
+      user-select: text;
+      white-space: pre-line;
+    }
+
+    #textInput {
+      height: 30px;
+      resize: horizontal;
+      padding: 4px 8px;
+      font-size: 14px;
+      font-family: monospace;
+      background: #222;
+      color: #0f0;
+      border: 1px solid #0f0;
+      outline: none;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
     /* === generic configurations === */
     .headerButtons {
       display: flex;
@@ -213,6 +257,15 @@
     </div>
   </div>
 
+  <div class="floatingWindow" id="dialog-window">
+    <div class="floatingHeader">Dialog</div>
+    <div class="floatingContent">
+      <div id="displayArea">Display something here<br></div>
+      <input type="text" id="textInput" placeholder="Input something here..."
+      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+    </div>
+  </div>
+
   <script type="module" src="map_viewer.js"></script>
 
   <script src="./floating_window_manager.js"></script>
@@ -224,6 +277,7 @@
     const optionsWindow = new FloatingWindowManager("optionsWindow");
     const infoWindow = new FloatingWindowManager("infoWindow");
     const listWindow = new FloatingWindowManager("list-window");
+    const dialogWindow = new FloatingWindowManager("dialog-window");
   </script>
 </body>
 </html>

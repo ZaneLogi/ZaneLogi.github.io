@@ -220,7 +220,7 @@ class FloatingWindowManager {
       if (!instance) continue;
 
       const win = instance.window;
-      win.style.display = "block"; // Make visible
+      win.style.display = "flex"; // Make visible
       win.classList.remove("collapsed");
 
       // clear the storage
