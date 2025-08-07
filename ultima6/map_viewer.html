@@ -99,22 +99,9 @@
       resize: none;
     }
 
-    #optionsWindow .floatingContent {
-      padding: 10px;
-      overflow: visible;
-    }
-
     /* === list window === */
     #list-window {
       height: 300px;
-    }
-
-    #list-window .floatingContent {
-      flex: 1 1 auto;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      padding: 10px;
     }
 
     #list-window .list-view {
@@ -132,15 +119,6 @@
       height: 300px;
       display: flex;
       flex-direction: column;
-    }
-
-    #dialog-window .floatingContent {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      padding: 10px;
-      box-sizing: border-box;
-      overflow: hidden;
     }
 
     #displayArea {
@@ -171,25 +149,31 @@
       box-sizing: border-box;
     }
 
-    /* === generic configurations === */
-    .headerButtons {
+    #buttonRow {
       display: flex;
-      gap: 4px;
+      justify-content: flex-start; /* or space-between, center, etc. */
+      gap: 6px;
+      margin-top: 8px;
+      flex-wrap: wrap; /* optional, allows buttons to wrap on small screens */
     }
 
-    .headerButtons button {
-      background: transparent;
-      border: none;
+    #buttonRow button {
+      padding: 6px 12px;
+      font-family: monospace;
+      font-size: 14px;
+      background: #111;
       color: #0f0;
-      font-size: 16px;
+      border: 1px solid #0f0;
       cursor: pointer;
-      padding: 2px 6px;
+      white-space: nowrap; /* prevents wrapping inside the button */
     }
 
-    .headerButtons button:hover {
-      color: #fff;
+    #buttonRow button:hover {
+      background: #0f0;
+      color: #000;
     }
 
+    /* === generic configurations === */
     .list-view {
       height: 200px;
       overflow-y: auto;
@@ -244,6 +228,7 @@
     </div>
   </div>
 
+  <!-- Floating List Window -->
   <div class="floatingWindow" id="list-window">
     <div class="floatingHeader">
       List Window
@@ -262,7 +247,13 @@
     <div class="floatingContent">
       <div id="displayArea">Display something here<br></div>
       <input type="text" id="textInput" placeholder="Input something here..."
-      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <div id="buttonRow">
+        <button id="buttonMoveTo">MoveTo</button>
+        <button id="buttonTalk">Talk</button>
+        <button id="buttonRaw">Raw</button>
+        <button id="buttonDecoded">Decoded</button>
+      </div>
     </div>
   </div>
 

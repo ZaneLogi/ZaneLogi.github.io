@@ -301,8 +301,8 @@ function updateObjects() {
     const mapTiles = (mapZ === 0) ? 1024 : 256;
     const baseTileIndex = obj.tile_info.tileIndex;
     let tileFlag = obj.tile_info.info;
-    const ox = (obj.x > xstart) ? obj.x - xstart : obj.x + mapTiles - xstart;
-    const oy = (obj.y > ystart) ? obj.y - ystart : obj.y + mapTiles - ystart;
+    const ox = (obj.x >= xstart) ? obj.x - xstart : obj.x + mapTiles - xstart;
+    const oy = (obj.y >= ystart) ? obj.y - ystart : obj.y + mapTiles - ystart;
 
     // draw the tile if it matches the top tile condition
     if (tileFlag.isTopTile() !== topTile)
@@ -600,6 +600,10 @@ populateList(testItems);
 // === dialog window ===
 const displayArea = document.getElementById('displayArea');
 const textInput = document.getElementById('textInput');
+const buttonMoveTo = document.getElementById('buttonMoveTo');
+const buttonTalk = document.getElementById('buttonTalk');
+const buttonRaw = document.getElementById('buttonRaw');
+const buttonDecoded = document.getElementById('buttonDecoded');
 
 function escapeHTML(str) {
   return str.replace(/[&<>"']/g, m =>
@@ -628,6 +632,33 @@ textInput.addEventListener('keydown', (event) => {
     }
   }
 });
+
+buttonMoveTo.addEventListener('click', () => {
+  const value = parseInt(textInput.value.trim());
+  if (!isNaN(value) && value >= 0 && value < 255)
+    displayArea.innerHTML = `MoveTo ${value}<br>`;
+  else {
+    displayArea.innerHTML = "Invalid value!<br>Set an actor id in the input area<br>";
+    return;
+  }
+
+  const actor = ObjManager.actors[value];
+  mapOriginX = actor.x - Math.floor(mapW/2);
+  mapOriginY = actor.y - Math.floor(mapH/2);
+  mapZ = actor.z;
+  // handle wrapping
+  if (mapZ === 0) {
+    mapOriginX = (mapOriginX + 1024) % 1024;
+    mapOriginY = (mapOriginY + 1024) % 1024;
+  }
+  else {
+    mapOriginX = (mapOriginX + 256) % 256;
+    mapOriginY = (mapOriginY + 256) % 256;
+  }
+
+  updateMap();
+  updateObjects();
+})
 
 // === File Handling ===
 const expectedFiles = [
