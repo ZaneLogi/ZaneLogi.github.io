@@ -10,6 +10,8 @@
   z-index: 10;
   resize: both;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;  /*vertical layout*/
 }
 
 .floatingHeader {

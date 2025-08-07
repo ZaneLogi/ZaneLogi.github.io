@@ -93,6 +93,41 @@
       white-space: pre-line;
     }
 
+    /* === option window === */
+    #optionsWindow {
+      height: auto;
+      resize: none;
+    }
+
+    #optionsWindow .floatingContent {
+      padding: 10px;
+      overflow: visible;
+    }
+
+    /* === list window === */
+    #list-window {
+      height: 300px;
+    }
+
+    #list-window .floatingContent {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 10px;
+    }
+
+    #list-window .list-view {
+      flex-grow: 1;
+      overflow-y: auto;
+      border: 1px solid #0f0;
+      background: #111;
+      font-family: monospace;
+      font-size: 13px;
+      padding: 5px;
+    }
+
+    /* === generic configurations === */
     .headerButtons {
       display: flex;
       gap: 4px;
