@@ -6,6 +6,8 @@ import { AnimDataManager } from './anim_data_manager.js';
 import { U6Map } from './u6map.js'
 import { ObjManager } from './obj_manager.js';
 import { OBJ_U6 } from './u6objects.js';
+import { Library } from './library.js';
+import { ScriptInterpreter } from './script.js';
 
 const tileManager = new TileManager();
 const u6map = new U6Map();
@@ -24,6 +26,7 @@ const atlasW = tilesPerRow * tileSize;
 const atlasH = tilesPerCol * tileSize;
 
 import { Shader } from './map_viewer_renderer.js';
+import { decompressCompressedFile } from './lzw_decoder.js';
 Shader.init(canvas, tileSize, tilesPerRow, atlasW, atlasH);
 
 // === Palette Manager ===
@@ -605,6 +608,8 @@ const buttonTalk = document.getElementById('buttonTalk');
 const buttonRaw = document.getElementById('buttonRaw');
 const buttonDecoded = document.getElementById('buttonDecoded');
 
+let scriptLib, scriptIndex, script, dialog, dialogStatus;
+
 function escapeHTML(str) {
   return str.replace(/[&<>"']/g, m =>
     ({
@@ -618,21 +623,35 @@ function escapeHTML(str) {
 }
 
 textInput.addEventListener('keydown', (event) => {
+  if (dialogStatus === ScriptInterpreter.PAUSE) {
+    event.preventDefault();
+    const output = [];
+    dialogStatus = dialog.run('', output);
+    displayArea.innerHTML += output.join('') + "<br>";
+    displayArea.scrollTop = displayArea.scrollHeight;
+    return;
+  }
+
   if (event.key === 'Enter') {
     event.preventDefault();
     const raw = textInput.value.trim();
     if (raw) {
       const safe = escapeHTML(raw);
-      const colored = safe
-        .replace(/hello/g, '<span style="color: red">hello</span>')
-        .replace(/world/g, '<span style="color: blue">world</span>');
 
-      displayArea.innerHTML += colored + "<br>";
       textInput.value = '';
+      displayArea.innerHTML += `<span style="color: orange">${safe}</span><br>`;
+
+      if (dialog) {
+        const output = [];
+        dialogStatus = dialog.run(raw, output);
+        displayArea.innerHTML += output.join('') + "<br>";
+        displayArea.scrollTop = displayArea.scrollHeight;
+      }
     }
   }
 });
 
+// === MoveTo ===
 buttonMoveTo.addEventListener('click', () => {
   const value = parseInt(textInput.value.trim());
   if (!isNaN(value) && value >= 0 && value < 255)
@@ -658,13 +677,100 @@ buttonMoveTo.addEventListener('click', () => {
 
   updateMap();
   updateObjects();
-})
+});
+
+// === Talk ===
+buttonTalk.addEventListener('click', () => {
+  const value = parseInt(textInput.value.trim());
+  if (!isNaN(value) && value >= 0 && value < 255)
+    displayArea.innerHTML = `Talk ${value}<br>`;
+  else {
+    displayArea.innerHTML = "Invalid value!<br>Set an actor id in the input area<br>";
+    return;
+  }
+
+  const item = scriptLib.getItem(value);
+  if (item == null) {
+    displayArea.innerHTML = `No script for #${value}<br>`;
+    return;
+  }
+
+  textInput.value = '';
+  textInput.focus();
+  script = decompressCompressedFile(item);
+  scriptIndex = value;
+
+  dialog = new ScriptInterpreter(script);
+  const output = [];
+  dialogStatus = dialog.run("", output);
+  if (output.length > 0) {
+    displayArea.innerHTML = output.join('') + "<br>";
+  }
+});
+
+// === Raw ===
+buttonRaw.addEventListener('click', () => {
+  const value = parseInt(textInput.value.trim());
+  if (!isNaN(value) && value >= 0 && value < 255)
+    displayArea.innerHTML = `Raw ${value}<br>`;
+  else {
+    displayArea.innerHTML = "Invalid value!<br>Set an actor id in the input area<br>";
+    return;
+  }
+
+  const item = scriptLib.getItem(value);
+  if (item == null) {
+    displayArea.innerHTML = `No script for #${value}<br>`;
+    return;
+  }
+  script = decompressCompressedFile(item);
+  scriptIndex = value;
+
+  const blob = new Blob([script], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const paddedValue = String(value).padStart(3, '0');
+  a.href = url;
+  a.download = `u6actor${paddedValue}.bin`;
+  a.click();
+});
+
+// === Decoded ===
+buttonDecoded.addEventListener('click', () => {
+  const value = parseInt(textInput.value.trim());
+  if (!isNaN(value) && value >= 0 && value < 255)
+    displayArea.innerHTML = `Decoded ${value}<br>`;
+  else {
+    displayArea.innerHTML = "Invalid value!<br>Set an actor id in the input area<br>";
+    return;
+  }
+
+  const item = scriptLib.getItem(value);
+  if (item == null) {
+    displayArea.innerHTML = `No script for #${value}<br>`;
+    return;
+  }
+  script = decompressCompressedFile(item);
+  scriptIndex = value;
+
+  const interpreter = new ScriptInterpreter(script);
+  const s = interpreter.formatScript();
+
+  const blob = new Blob([s], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const paddedValue = String(value).padStart(3, '0');
+  a.href = url;
+  a.download = `u6actor${paddedValue}.txt`;
+  a.click();
+});
 
 // === File Handling ===
 const expectedFiles = [
   "maptiles.vga", "objtiles.vga", "tileindx.vga", "masktype.vga",
   "u6pal", "animdata", "animmask.vga",
-  "chunks", "map", "basetile", "tileflag", "objlist", "look.lzd"
+  "chunks", "map", "basetile", "tileflag", "objlist", "look.lzd",
+  "converse.a", "converse.b"
 ];
 // Add OBJBLKAA to OBJBLKHH (8x8 surface)
 for (let row = 0; row < 8; row++) {
@@ -855,6 +961,8 @@ async function tryInitializeViewer() {
     console.log("load objects");
     ObjManager.init(fileMap);
     updateObjects();
+
+    scriptLib = new Library(fileMap.get("converse.a").buffer);
   }
 }
 
