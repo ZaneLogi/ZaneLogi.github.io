@@ -1,5 +1,8 @@
 import { U6OP } from "./u6opcode.js";
 
+import { ObjManager } from "./obj_manager.js";
+import { Obj } from "./obj.js";
+
 function hexString(value, width) {
   return value.toString(16).toUpperCase().padStart(width, '0');
 }
@@ -26,15 +29,57 @@ function assert(condition, message, result) {
   }
 }
 
+function MaxHP(actor) {
+	let value = actor.level * 30;
+  if (value <= 0) value = 1;
+  if (value > 255) value = 255;
+  return value;
+}
+
+function TALK_initTalk(info, partyId, objNum) {
+  const party = ObjManager.partyMembers
+  const actor = party[partyId];
+  const npc = ObjManager.actors[objNum];
+
+  const VarStr = info.VarStr;
+  VarStr['G'.charCodeAt(0) - 0x37] = ObjManager.avatarSex ? "milady" : "milord";
+  VarStr['N'.charCodeAt(0) - 0x37] = npc?.name ?? "unknown_NPC_name";
+  VarStr['P'.charCodeAt(0) - 0x37] = actor.name;
+
+  const TIME_H = ObjManager.TIME_H;
+  VarStr['T'.charCodeAt(0) - 0x37] = (TIME_H < 12)?"morning":(TIME_H < 18)?"afternoon":"evening";
+
+  // VarInt
+  const VarInt = info.VarInt;
+  VarInt['A'.charCodeAt(0) - 0x37] = actor.dexterity;
+  VarInt['D'.charCodeAt(0) - 0x37] = ObjManager.Date_D;
+  VarInt['E'.charCodeAt(0) - 0x37] = actor.exp;
+  VarInt['H'.charCodeAt(0) - 0x37] = ObjManager.Time_H;
+  VarInt['I'.charCodeAt(0) - 0x37] = actor.intelligence;
+  VarInt['K'.charCodeAt(0) - 0x37] = ObjManager.KARMA;
+  VarInt['M'.charCodeAt(0) - 0x37] = ObjManager.Date_M;
+  VarInt['N'.charCodeAt(0) - 0x37] = party.length - 1;
+  VarInt['P'.charCodeAt(0) - 0x37] = actor.hp;
+  VarInt['S'.charCodeAt(0) - 0x37] = actor.strength;
+  VarInt['W'.charCodeAt(0) - 0x37] = npc.npcMode; // npc's [w]orktype
+  VarInt['Y'.charCodeAt(0) - 0x37] = ObjManager.Date_Y;
+}
+
 export class ScriptInterpreter {
   static END = 0;
   static INPUT = 1;
   static PAUSE = 2;
+  static INPUTNUM = 3;
 
-  constructor(data) {
+  constructor(data, partyId, talkTo) {
     this.data = data;
     this.textDecoder = new TextDecoder('ascii');
-    this.context = { current: 0, start: 0, end: data.length };
+    this.context = {
+      current: 0, start: 0, end: data.length,
+      VarInt: new Array(10+26).fill(0),
+      VarStr: new Array(10+26).fill(''),
+    };
+    TALK_initTalk(this.context, partyId, talkTo);
   }
 
   asciiString(offset, length) {
@@ -53,7 +98,26 @@ export class ScriptInterpreter {
       if (code < 0x80) {
         // printable
         --info.current;
-        const text = this.getString(info);
+        let text = this.getString(info);
+        // replace with the system strings
+        const sg = info.VarStr['G'.charCodeAt(0) - 0x37];
+        const sn = info.VarStr['N'.charCodeAt(0) - 0x37];
+        const sp = info.VarStr['P'.charCodeAt(0) - 0x37];
+        const st = info.VarStr['T'.charCodeAt(0) - 0x37];
+        const sy = info.VarStr['Y'.charCodeAt(0) - 0x37];
+        text = text.replace(/\$G/g, sg);
+        text = text.replace(/\$N/g, sn);
+        text = text.replace(/\$P/g, sp);
+        text = text.replace(/\$T/g, st);
+        text = text.replace(/\$Y/g, sy);
+
+        // replace with the system integers
+        text = text.replace(/#(\d+)/g, (fullMatch, num) => {
+          const n = parseInt(num, 10);
+          return info.VarInt[n].toString() || fullMatch;
+          // replace if found, else keep original
+        });
+
         output.push(text);
         if (text.charAt(text.length - 1) === "*") {
           return ScriptInterpreter.PAUSE;
@@ -80,6 +144,25 @@ export class ScriptInterpreter {
         output.push(candidates);
         output.push(')');
         return ScriptInterpreter.INPUT;
+      }
+      else if (code === U6OP.GETINT || code === U6OP.GETDIGIT) {
+        // first time here or the input is not an integer
+        if (!info.checkInputNumber || ! /^-?\d+$/.test(input)) {
+          // let the script run from this opcode next time
+          info.current--;
+          info.checkInputNumber = true;
+          return ScriptInterpreter.INPUTNUM;
+        }
+
+        info.checkInputNumber = false;
+
+        const num = parseInt(input, 10);
+ 
+        const varIndex = this.data[info.current]
+        const varType = this.data[info.current+1];
+        info.current += 2;
+        assert(varType === U6OP.VAR, "expect the integer type");
+        info.VarInt[varIndex] = num;
       }
       else if (code === U6OP.KEYWORDS) {
         const keywords = this.getString(info);
@@ -120,14 +203,16 @@ export class ScriptInterpreter {
       else if (code === U6OP.SETF) {
         let npc = this.evaluate(info);
         npc = (npc != 0xeb ? npc : info.npcId);
+        const actor = ObjManager.actors[npc];
         const flagIndex = this.evaluate(info);
-        // set npc.flag
+        actor.talkFlags |= (1 << flagIndex);
       }
       else if (code === U6OP.CLEARF) {
         let npc = this.evaluate(info);
         npc = (npc != 0xeb ? npc : info.npcId);
+        const actor = ObjManager.actors[npc];
         const flagIndex = this.evaluate(info);
-        // clear npc.flag
+        actor.talkFlags &= ~(1 << flagIndex);
       }
       else if (code === U6OP.DECL) {
         const index = this.data[info.current++];
@@ -136,14 +221,12 @@ export class ScriptInterpreter {
         assert(next_op === U6OP.ASSIGN);
         const result = this.evaluate(info);
         if (type === U6OP.VAR) {
-          if (!info.integerVariables) info.integerVariables = [];
-          info.integerVariables[index] = result;
+          info.VarInt[index] = result;
         }
         else if (type === U6OP.SVAR) {
           // TODO
           assert(false);
-          if (!info.stringVariables) info.stringVariables = [];
-          info.stringVariables[index] = "";
+          info.VarStr[index] = "";
         }
         else {
           assert(false, `unknown var type 0x${hexString(type,2)}`);
@@ -162,11 +245,17 @@ export class ScriptInterpreter {
       }
       else if (code === U6OP.NEW) {
         let npc = this.evaluate(info);
-        const obj = this.evaluate(info);
+        const objType = this.evaluate(info);
         const qual = this.evaluate(info);
         const quant = this.evaluate(info);
         npc = (npc != 0xeb ? npc : info.npcId);
-        // create item for npc
+        const actor = ObjManager.actors[npc];
+        const obj = new Obj({
+          status:0, x:0, y:0, z:0,
+          obj_number:objType, obj_frame:0,
+          quantity:quant, qualigy:qual
+        });
+        actor.obj_list.push(obj);
       }
       else if (code === U6OP.DELETE) {
         let npc = this.evaluate(info);
@@ -175,6 +264,10 @@ export class ScriptInterpreter {
         const quant = this.evaluate(info);
         npc = (npc != 0xeb ? npc : info.npcId);
         // remove item from npc
+      }
+      else if (code === U6OP.SHOWINVENTORY) {
+        const inventoryNum = this.evaluate(info);
+        output.push(`SHOW INVENTORY ${inventoryNum}\r\n`);
       }
       else if (code === U6OP.PORTRAIT) {
         const portraitNum = this.evaluate(info);
@@ -188,17 +281,32 @@ export class ScriptInterpreter {
         let npc = this.evaluate(info);
         npc = (npc != 0xeb ? npc : info.npcId);
         const worktype = this.evaluate(info);
-        // set npc worktype
+        const actor = ObjManager.actors[npc];
+        actor.npcMode = worktype;
+      }
+      else if (code === U6OP.SETNAME) {
+        let npc = this.evaluate(info);
+        npc = (npc != 0xeb ? npc : info.npcId);
+        const actor = ObjManager.actors[npc];
+        info.VarStr['Y'.charCodeAt(0) - 0x37] = actor.name;
       }
       else if (code === U6OP.HEAL) {
         let npc = this.evaluate(info);
         npc = (npc != 0xeb ? npc : info.npcId);
-        // TODO: heal npc
+        const actor = ObjManager.actors[npc];
+        actor.hp = MaxHP(actor);
       }
       else if (code === U6OP.CURE) {
         let npc = this.evaluate(info);
         npc = (npc != 0xeb ? npc : info.npcId);
-        // TODO: cure npc
+        const actor = ObjManager.actors[npc];
+        actor.npcStatus.clrPoisoned();
+      }
+      else if (code === U6OP.GETHORSE) {
+        let npc = this.evaluate(info);
+        npc = (npc != 0xeb ? npc : info.npcId);
+        const actor = ObjManager.actors[npc];
+        actor.obj_number = 0x1af;
       }
       else {
         assert(false,
@@ -241,20 +349,23 @@ export class ScriptInterpreter {
       }
       else if (code === U6OP.VAR) {
         const arg1 = stack.pop();
-        stack.push(info.integerVariables[arg1]);
+        stack.push(info.VarInt[arg1]);
       }
       else if (code === U6OP.SVAR) {
         const arg1 = stack.pop();
-        stack.push(info.stringVariables[arg1]);
+        stack.push(info.VarStr[arg1]);
         // TODO
         assert(false);
       }
       else if (code === U6OP.DATA) {
-        const arg1 = stack.pop();
-        stack.push(0); // TODO
+        const integerVariable = stack.pop();
+        const arrayIndex = stack.pop();
+        const offset = (arrayIndex << 1) + integerVariable;
+        const s16 = new DataView(this.data.buffer, offset, 2).getInt16(0, true);
+        stack.push(s16);
         assert(false);
       }
-      else if (code === 0xa7) {
+      else if (code === U6OP.EVAL) {
         assert(stack.length === 1);
         return stack.pop();
       }
@@ -318,18 +429,38 @@ export class ScriptInterpreter {
         const arg1 = stack.pop();
         stack.push(arg1 & arg2 ? 1 : 0);
       }
+      else if (code === U6OP.CANCARRY) {
+        let npc = stack.pop();
+        npc = (npc != 0xeb ? npc : info.npcId);
+        const actor = ObjManager.actors[npc];
+        stack.push(actor.strength * 200);
+      }
+      else if (code === U6OP.WEIGHT) {
+        const objType = stack.pop();
+        const quantity = stack.pop();
+        const typeWeight = 10; // fake: todo based on TypeWeight()
+        stack.push(typeWeight * quantity);
+      }
+      else if (code === U6OP.HORSED) {
+        let npc = stack.pop();
+        npc = (npc != 0xeb ? npc : info.npcId);
+        const actor = ObjManager.actors[npc];
+        stack.push(actor.obj_number === 0x1af ? 1 : 0);
+      }
       else if (code === U6OP.FLAG) {
         const arg2 = stack.pop(); // flag index
         let arg1 = stack.pop(); // npc id
         arg1 = (arg1 != 0xeb ? arg1 : info.npcId);
-        //stack.push((m_npc_flags[arg1] & (1 << arg2)) ? 1 : 0);
-        stack.push(1);
+        const actor = ObjManager.actors[arg1];
+        stack.push((actor.talkFlags >> arg2) & 1);
       }
       else if (code === U6OP.INPARTY) {
+        const party = ObjManager.partyMembers;
         let arg1 = stack.pop(); // npc id
         arg1 = (arg1 != 0xeb ? arg1 : info.npcId);
-        stack.push(0);
-        // fake: always in the party
+
+        const exists = party.some(obj => obj.id === arg1);
+        stack.push(exists ? 1 : 0);
       }
       else if (code === U6OP.OBJINPARTY) {
         const arg2 = stack.pop(); // qual
@@ -338,21 +469,42 @@ export class ScriptInterpreter {
         // fake: not in the party
       }
       else if (code === U6OP.JOIN) {
+        const party = ObjManager.partyMembers;
         let arg1 = stack.pop(); // npc id
         arg1 = (arg1 != 0xeb ? arg1 : info.npcId);
-        stack.push(0);
         // 3: ALREADY IN PARTY
         // 2: PARTY TOO LARGE
         // 1: NOT ON LAND (vehicle)
         // 0: SUCCESS
+        const exists = party.some(obj => obj.id === arg1);
+        if (exists) {
+          stack.push(3);
+        }
+        else if (party.length >= 16) {
+          stack.push(2);
+        }
+        // todo: handle not on land
+        else {
+          party.push(ObjManager.actors[arg1]);
+          stack.push(0);
+        }
       }
       else if (code === U6OP.LEAVE) {
+        const party = ObjManager.partyMembers;
         let arg1 = stack.pop(); // npc id
         arg1 = (arg1 != 0xeb ? arg1 : info.npcId);
-        stack.push(0);
         // 2: NOT IN PARTY
         // 1: NOT ON LAND
         // 0: SUCCESS
+        const index = party.findIndex(obj => obj.id === arg1);
+        if (index === -1) {
+          stack.push(2);
+        }
+        // todo: handle not on land
+        else {
+          party.splice(index, 1);
+          stack.push(0);
+        }
       }
       else if (code === U6OP.RAND) {
         const arg1 = stack.pop(); // val1
@@ -360,17 +512,73 @@ export class ScriptInterpreter {
         stack.push(Math.floor(Math.random() * (arg1 - arg2 + 1)) + arg2);
       }
       else if (code === U6OP.NPC) {
-        const arg2 = stack.pop(); // unknow usage
+        const arg2 = stack.pop(); // unknown usage
         const arg1 = stack.pop(); // index in the party
-        stack.push(arg1); // TODO: when party is ready
+        const party = ObjManager.partyMembers;
+        stack.push(party[arg1].id);
       }
       else if (code === U6OP.WOUNDED) {
         const arg1 = stack.pop(); // npi id
-        stack.push(1); // TODO: when npc status is ready
+        const actor = ObjManager.actors[arg1];
+        stack.push((MaxHP(actor) - actor.hp) > 0 ? 1 : 0);
       }
       else if (code === U6OP.POISONED) {
         const arg1 = stack.pop(); // npc id
-        stack.push(1); // TODO: when npc status is ready
+        const actor = ObjManager.actors[arg1];
+        stack.push(actor.npcStatus.isPoisoned() ? 1 : 0);
+      }
+      else if (code === U6OP.OWNS) {
+        const objQial = stack.pop();
+        const objType = stack.pop();
+        let actorId = stack.pop();
+        actorId = (actorId != 0xeb ? actorId : info.npcId);
+        const actor = ObjManager.actors[actorId];
+        // check if the actor owns the object
+        stack.push(0); // TODO: fake value, implement owns
+      }
+      else if (code === U6OP.EXP) {
+        let actorId = stack.pop();
+        const value = stack.pop();
+        actorId = (actorId != 0xeb ? actorId : info.npcId);
+        const actor = ObjManager.actors[actorId];
+        actor.exp += value;
+        if (actor.exp > 9999) actor.exp = 9999;
+        stack.push(actor.exp);
+      }
+      else if (code === U6OP.LVL) {
+        let actorId = stack.pop();
+        const value = stack.pop();
+        actorId = (actorId != 0xeb ? actorId : info.npcId);
+        const actor = ObjManager.actors[actorId];
+        actor.level += value;
+        stack.push(actor.level);
+      }
+      else if (code === U6OP.STR) {
+        let actorId = stack.pop();
+        const value = stack.pop();
+        actorId = (actorId != 0xeb ? actorId : info.npcId);
+        const actor = ObjManager.actors[actorId];
+        actor.strength += value;
+        if (actor.strength > 30) actor.strength = 30;
+        stack.push(actor.strength);
+      }
+      else if (code === U6OP.INT) {
+        let actorId = stack.pop();
+        const value = stack.pop();
+        actorId = (actorId != 0xeb ? actorId : info.npcId);
+        const actor = ObjManager.actors[actorId];
+        actor.intelligence += value;
+        if (actor.intelligence > 30) actor.intelligence = 30;
+        stack.push(actor.intelligence);
+      }
+      else if (code ===  U6OP.DEX) {
+        let actorId = stack.pop();
+        const value = stack.pop();
+        actorId = (actorId != 0xeb ? actorId : info.npcId);
+        const actor = ObjManager.actors[actorId];
+        actor.dexterity += value;
+        if (actor.dexterity > 30) actor.dexterity = 30;
+        stack.push(actor.dexterity);
       }
       else {
         assert(code < 0x80,
@@ -608,20 +816,20 @@ export class ScriptInterpreter {
           assert(blockType === U6OP.IF || blockType === U6OP.ELSE, "error", result);
           return;
         }
-        case U6OP.INPUT: {
+        case U6OP.GETINT: {
           const var_index = this.data[info.current];
           const var_type = this.data[info.current+1];
           info.current += 2;
-          result.push(`    INPUT (vi=${hexString(var_index,2)}, vt=${hexString(var_type,2)}) `);
+          result.push(`    GETINT (vi=${hexString(var_index,2)}, vt=${hexString(var_type,2)}) `);
           this.collectText(result, info);
           result.push("\r\n");
           break;
         }
-        case U6OP.INPUTNUM: {
+        case U6OP.GETDIGIT: {
           const var_index = this.data[info.current]
           const var_type = this.data[info.current+1];
           info.current += 2;
-          result.push(`    INPUTNUM (vi=${hexString(var_index,2)}, vt=${hexString(var_type,2)}) `);
+          result.push(`    GETDIGIT (vi=${hexString(var_index,2)}, vt=${hexString(var_type,2)}) `);
           this.collectText(result, info);
           result.push("\r\n");
           break;
@@ -847,8 +1055,10 @@ export class ScriptInterpreter {
 
         case U6OP.CANCARRY:   result.push("CANCARRY "); break;
         case U6OP.WEIGHT:     result.push("WEIGHT "); break;
+        case U6OP.GETHORSE:   result.push("GETHORSE"); break;
         case U6OP.HORSED:     result.push("HORSED "); break;
-        case U6OP.HASOBJ:     result.push("HASOBJ "); break;
+        case U6OP.REST:       result.push("REST"); break;
+        case U6OP.OWNS:       result.push("OWNS "); break;
         case U6OP.RAND:       result.push("RAND "); break;
         case U6OP.FLAG:       result.push("FLAG "); break;
         case U6OP.OBJCOUNT:   result.push("OBJCOUNT "); break;
@@ -1078,13 +1288,18 @@ export class ScriptInterpreter {
             this.skipEvalBlock(info); // quality
             this.skipEvalBlock(info); // quantity
             break;
+          case U6OP.SHOWINVENTORY:
           case U6OP.PORTRAIT:
             this.skipEvalBlock(info);
-              break;
+            break;
           case U6OP.PAUSE:
             break;
+          case U6OP.HEAL:
+          case U6OP.CURE:
+            this.skipEvalBlock(info); // npc number
+            break;
           default:
-            assert(false);
+            assert(false, `code 0x${hexString(code,2)} offset 0x${hexString(info.current,4)}}`);
             break;
         } // switch
       } // else

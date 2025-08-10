@@ -1,66 +1,99 @@
-const OBJ_STATUS_OK_TO_TAKE    = 0x01;
-const OBJ_STATUS_INVISIBLE     = 0x02;
-const OBJ_STATUS_IN_CONTAINER  = 0x08;
-const OBJ_STATUS_IN_INVENTORY  = 0x10;
-const OBJ_STATUS_TEMPORARY     = 0x20;
-const OBJ_STATUS_EGG_ACTIVE    = 0x40;
+import { Obj } from "./obj.js"
 
-const OBJ_STATUS_READIED = OBJ_STATUS_IN_CONTAINER | OBJ_STATUS_IN_INVENTORY;
+class NPCStatus {
+  static ALIGNMENT = {
+    NEUTRAL: 0x00,
+    EVIL:    0x20,
+    GOOD:    0x40,
+    CHAOTIC: 0x60,
+    MASK:    0x60 // mask for alignment bits
+  };
 
-class Obj {
-  constructor(info = {}) {
-    this.status = info.status ?? 0;
-    this.x = info.x ?? 0;
-    this.y = info.y ?? 0;
-    this.z = info.z ?? 0;
+  static BIT = {
+    PROTECTED:  0x01,
+    PARALYZED:  0x02,
+    ASLEEP:     0x04,
+    POISONED:   0x08,
+    DEAD:       0x10,
+    PLRCONTROL: 0x80
+  };
 
-    this.obj_number = info.obj_number ?? 0;
-    this.obj_frame = info.obj_frame ?? 0;
-
-    this.quantity = info.quantity ?? 0;
-    this.quality = info.quality ?? 0;
-
-    this.tile_info = null;
-    this.obj_list = [];
+  constructor(status = 0) {
+    this.value = status;
   }
 
-  equals(other) {
-    return this.x === other.x &&
-           this.y === other.y &&
-           this.z === other.z &&
-           this.obj_number === other.obj_number &&
-           this.quantity === other.quantity &&
-           this.quality === other.quality; // <-- 注意這裡應該是 this.quality === other.quality
+  // ===== Alignment =====
+  getAlignment() {
+    return this.value & NPCStatus.ALIGNMENT.MASK;
+  }
+  setAlignment(v) {
+    this.value = (this.value & ~NPCStatus.ALIGNMENT.MASK) | (v & NPCStatus.ALIGNMENT.MASK);
+  }
+  isATKPLR() {
+    return this.getAlignment() & NPCStatus.ALIGNMENT.EVIL;
+  }
+  isATKMON() {
+    return this.getAlignment() & NPCStatus.ALIGNMENT.GOOD;
   }
 
-  is_visible() {
-    return (this.status & OBJ_STATUS_INVISIBLE) === 0;
+  // ===== Status checks =====
+  isProtected()  { return (this.value & NPCStatus.BIT.PROTECTED) !== 0; }
+  isParalyzed()  { return (this.value & NPCStatus.BIT.PARALYZED) !== 0; }
+  isAsleep()     { return (this.value & NPCStatus.BIT.ASLEEP) !== 0; }
+  isPoisoned()   { return (this.value & NPCStatus.BIT.POISONED) !== 0; }
+  isDead()       { return (this.value & NPCStatus.BIT.DEAD) !== 0; }
+  isPlrControl() { return (this.value & NPCStatus.BIT.PLRCONTROL) !== 0; }
+
+  // ===== Setters =====
+  setProtected()  { this.value |= NPCStatus.BIT.PROTECTED; }
+  setParalyzed()  { this.value |= NPCStatus.BIT.PARALYZED; }
+  setAsleep()     { this.value |= NPCStatus.BIT.ASLEEP; }
+  setPoisoned()   { this.value |= NPCStatus.BIT.POISONED; }
+  setDead()       { this.value |= NPCStatus.BIT.DEAD; }
+  setPlrControl() { this.value |= NPCStatus.BIT.PLRCONTROL; }
+
+  // ===== Clearers =====
+  clrProtected()  { this.value &= ~NPCStatus.BIT.PROTECTED; }
+  clrParalyzed()  { this.value &= ~NPCStatus.BIT.PARALYZED; }
+  clrAsleep()     { this.value &= ~NPCStatus.BIT.ASLEEP; }
+  clrPoisoned()   { this.value &= ~NPCStatus.BIT.POISONED; }
+  clrDead()       { this.value &= ~NPCStatus.BIT.DEAD; }
+  clrPlrControl() { this.value &= ~NPCStatus.BIT.PLRCONTROL; }
+}
+
+class NPCFlag {
+  constructor(flag = 0) {
+    this.value = flag; // stores the bitfield
   }
 
-  in_container() {
-    // ((status & 0x18) === 0x08)
-    return (this.status & OBJ_STATUS_READIED) === OBJ_STATUS_IN_CONTAINER;
+  // === Direction (bits 0–2) ===
+  getDirection() {
+    return this.value & 0x07; // same as & 7
+  }
+  setDirection(v) {
+    this.value = (this.value & ~0x07) | (v & 0x07);
   }
 
-  container() {
-    return this.x | ((this.y & 0x3) << 10);
+  // === BKAlignment (bits 5–6) ===
+  getBKAlignment() {
+    return this.value & 0x60; // same as & 0x60
+  }
+  setBKAlignment(v) {
+    this.value = (this.value & ~0x60) | (v & 0x60);
   }
 
-  in_inventory() {
-    return (this.status & OBJ_STATUS_IN_INVENTORY) !== 0;
-  }
+  // === Single-bit flags ===
+  isSkipSomeTest()  { return (this.value & 0x08) !== 0; }
+  isDraggedUnder()  { return (this.value & 0x10) !== 0; }
+  isWalking()       { return (this.value & 0x80) !== 0; }
 
-  owner() {
-    return this.x;
-  }
+  setSkipSomeTest() { this.value |= 0x08; }
+  setDraggedUnder() { this.value |= 0x10; }
+  setWalking()      { this.value |= 0x80; }
 
-  is_readied() {
-    return (this.status & OBJ_STATUS_READIED) === OBJ_STATUS_READIED;
-  }
-
-  type() {
-    return 'OBJ'; // JS 無 enum 類型，直接用字串或定義常數
-  }
+  clrSkipSomeTest() { this.value &= ~0x08; }
+  clrDraggedUnder() { this.value &= ~0x10; }
+  clrWalking()      { this.value &= ~0x80; }
 }
 
 class TileFlag {
@@ -113,12 +146,17 @@ export const ObjManager = {
 
     this.actors = Array(256).fill(0).map((_, i) => ({
       id: i,
+      name: "(undefined)",
       obj_list:[],
     }));
 
-    let p = 0x100;
+    let p = 0;
 
-    // --- Position: x, y, z ---
+    // --- ObjStatus 0x0000 ~ 0x0100 ---
+    // used by U6 engine, not used here
+    p += 256;
+
+    // --- Position: x, y, z 0x0100 ~ 0x0400 ---
     for (let i = 0; i < 256; i++) {
       const b1 = view.getUint8(p++);
       const b2 = view.getUint8(p++);
@@ -134,7 +172,7 @@ export const ObjManager = {
       actor.z = z;
     }
 
-    // --- Obj number and frame ---
+    // --- Obj number and frame 0x0400 ~ 0x0600 ---
     for (let i = 0; i < 256; i++) {
       const b1 = view.getUint8(p++);
       const b2 = view.getUint8(p++);
@@ -147,68 +185,158 @@ export const ObjManager = {
       actor.tile_info = this.get_info(obj_number, obj_frame);
     }
 
-    // --- Strength ---
-    p = 0x900;
+    // --- Amount 0x0600 ~ 0x0800 ---
+    // used by U6 engine, not used here
+    console.assert(p === 0x0600);
+    p += 512;
+
+    // --- NPCStatus 0x0800 ~ 0x0900 ---
+    console.assert(p === 0x0800);
+    for (let i = 0; i < 256; i++) {
+      this.actors[i].npcStatus = new NPCStatus(view.getUint8(p++));
+    }
+
+    // --- Strength 0x0900 ~ 0x0a00 ---
+    console.assert(p === 0x0900);
     for (let i = 0; i < 256; i++) {
       this.actors[i].strength = view.getUint8(p++);
     }
 
-    // --- Dexterity ---
-    p = 0xa00;
+    // --- Dexterity 0x0a00 ~ 0x0b00 ---
+    console.assert(p === 0x0a00);
     for (let i = 0; i < 256; i++) {
       this.actors[i].dexterity = view.getUint8(p++);
     }
 
-    // --- Intelligence ---
-    p = 0xb00;
+    // --- Intelligence 0x0b00 ~ 0x0c00 ---
+    console.assert(p === 0x0b00);
     for (let i = 0; i < 256; i++) {
       this.actors[i].intelligence = view.getUint8(p++);
     }
 
-    // --- Experience (16-bit LE) ---
-    p = 0xc00;
+    // --- Experience (16-bit LE) 0x0c00 ~ 0x0e00 ---
+    console.assert(p === 0x0c00);
     for (let i = 0; i < 256; i++) {
       this.actors[i].exp = view.getUint16(p, true);
       p += 2;
     }
 
-    // --- HP ---
-    p = 0xe00;
+    // --- HP 0x0e00 ~ 0x0f00 ---
+    console.assert(p === 0xe00);
     for (let i = 0; i < 256; i++) {
       this.actors[i].hp = view.getUint8(p++);
     }
 
-    // --- Level ---
-    p = 0xff1;
+    // --- names 0x0f00 (16 x 14)---
+    console.assert(p === 0x0f00);
+    function decodeFixedString(data, offset, length) {
+      const chunk = data.subarray(offset, offset + length);
+      const firstZero = chunk.indexOf(0);
+      const nameBytes = firstZero === -1 ? chunk : chunk.subarray(0, firstZero);
+      const name = decoder.decode(nameBytes);
+      return name;
+    }
+    const memberNamesInParty = [];
+    for (let i = 0; i < 16; i++) {
+      const name = decodeFixedString(data, p, 14);
+      memberNamesInParty[i] = name;
+      p += 14;
+    }
+
+    // --- party 0x0fe0 ~ 0x0ff0 ---
+    console.assert(p === 0x0fe0);
+    const membersInParty = [];
+    for (let i = 0; i < 16; i++) {
+      membersInParty[i] = view.getUint8(p++);
+    }
+
+    // --- party size 0x0ff0 ---
+    const partySize = view.getUint8(p++);
+
+    // --- Level 0x0ff1 ~ 0x10f1 ---
+    console.assert(p === 0x0ff1);
     for (let i = 0; i < 256; i++) {
       this.actors[i].level = view.getUint8(p++);
     }
 
-    // --- MP ---
-    p = 0x13f1;
+    // --- schedule index 0x10f1 ~ 0x11f1 ---
+    for (let i = 0; i < 256; i++) {
+      this.actors[i].schedule = view.getUint8(p++);
+    }
+
+    // --- NPC mode 0x11f1 ~ 0x12f1 ---
+    for (let i = 0; i < 256; i++) {
+      this.actors[i].npcMode = view.getUint8(p++);
+    }
+
+    // -- NPC combat mode 0x12f1 ~ 0x13f1 ---
+    for (let i = 0; i < 256; i++) {
+      this.actors[i].npcComMode = view.getUint8(p++);
+    }
+
+    // --- MP 0x13f1 ~ 0x14f1 ---
+    console.assert( p === 0x13f1);
     for (let i = 0; i < 256; i++) {
       this.actors[i].mp = view.getUint8(p++);
     }
 
-    // --- Flags ---
-    p = 0x17f1;
+    // --- Move Points 0x14f1 ~ 0x15f1 ---
+    console.assert( p === 0x14f1);
     for (let i = 0; i < 256; i++) {
-      this.actors[i].flags = view.getUint8(p++);
+      this.actors[i].movePts = view.getUint8(p++);
     }
 
+    // --- Original Shape Type 0x15f1 ~ 0x17f1 ---
+    // used by U6 engine, not used here
+    console.assert( p === 0x15f1);
+    p += 512;
+
+    // --- Talk Flags 0x17f1 ~ 0x18f1 ---
+    console.assert( p === 0x17f1);
+    for (let i = 0; i < 256; i++) {
+      this.actors[i].talkFlags = view.getUint8(p++);
+    }
+
+    // --- Leader 0x18f1 ~ 0x19f1 ---
+    console.assert( p === 0x18f1);
+    for (let i = 0; i < 256; i++) {
+      this.actors[i].leader = view.getUint8(p++);
+    }
+
+    // --- NPC flag 0x19f1 ~ 0x1af1 ---
+    console.assert( p === 0x19f1);
+    for (let i = 0; i < 256; i++) {
+      this.actors[i].npcFlag = new NPCFlag(view.getUint8(p++));
+    }
+
+    // --- something related to path findings 0x1af1 ~ 0x1bf1 from D_8C42 ---
+    p += 256;
+
+    // --- miscellaneous 0x1bf1 ~ ... from obj_2C4A to D_2CCC ---
+    console.assert( p === 0x1bf1);
+    function getByte(u6offset) {
+      return view.getUint8(p + (u6offset - 0x2c4a));
+    }
+    this.IsOnQuest = getByte(0x2c4a);
+    this.NextSleep = getByte(0x2c4b);
+    this.Time_M = getByte(0x2c4c);
+    this.Time_H = getByte(0x2c4d);
+    this.Date_D = getByte(0x2c4e);
+    this.Date_M = getByte(0x2c4f);
+    this.Date_Y = getByte(0x2c50);
+    this.KARMA = getByte(0x2c52);
+    this.avatarSex = getByte(0x2cca);
+    p += (0x2ccc - 0x2c4a);
+
+    console.log("objlist file read offset:", p);
+
     // --- Party members ---
-    const partyCount = view.getUint8(0xff0);
-    const nameBase = 0xf00;
-    const indexBase = 0xfe0;
+    this.partyMembers.length = 0;
 
-    this.partyMembers = [];
-
-    for (let i = 0; i < partyCount; i++) {
-      const actorIdx = view.getUint8(indexBase + i);
-      const nameBytes = new Uint8Array(data.buffer, nameBase + i * 14, 14);
-      const name = decoder.decode(nameBytes).replace(/\0+$/, "");
-      this.actors[actorIdx].name = name;
-      this.partyMembers.push(this.actors[actorIdx]);
+    for (let i = 0; i < partySize; i++) {
+      const actorIdx = membersInParty[i];
+      this.actors[actorIdx].name = memberNamesInParty[i];
+      this.partyMembers[i] = this.actors[actorIdx];
     }
   },
 
@@ -251,23 +379,23 @@ export const ObjManager = {
     const decoder = new TextDecoder("ascii");
 
     for (let i = 0; i < objCount; i++) {
-      const info = this.parseFileObjInfo(view, offset);
+      const obj = new Obj(buffer, offset);
       offset += 8;
 
-      const obj = new Obj(info);
       obj.tile_info = this.get_info(obj.obj_number, obj.obj_frame);
 
-      if (obj.in_container()) {
-        const containerIdx = obj.container();
+      if (obj.inContainer) {
+        const containerIdx = obj.container;
         const containerObj = objRefs[containerIdx];
         if (!containerObj) {
           console.warn(`Missing container object at index ${containerIdx}`);
           continue;
         }
+        if (!containerObj.obj_list) containerObj.obj_list = [];
         containerObj.obj_list.push(obj);
         objRefs[i] = containerObj.obj_list[containerObj.obj_list.length - 1];
-      } else if (obj.in_inventory()) {
-        const owner = obj.owner();
+      } else if (obj.inInventory) {
+        const owner = obj.owner;
         if (!this.actors[owner]) {
           console.warn(`Invalid owner index ${owner} for obj #${i}`, obj);
           continue;
@@ -279,22 +407,6 @@ export const ObjManager = {
         objRefs[i] = objList[objList.length - 1];
       }
     }
-  },
-
-  parseFileObjInfo(view, offset) {
-    const low = view.getUint32(offset, true);
-    const high = view.getUint32(offset + 4, true);
-
-    return {
-      status:     (low >> 0)  & 0xFF,
-      x:          (low >> 8)  & 0x3FF,
-      y:          (low >> 18) & 0x3FF,
-      z:          (low >> 28) & 0xF,
-      obj_number: (high >> 0)  & 0x3FF,
-      obj_frame:  (high >> 10) & 0x3F,
-      quantity:   (high >> 16) & 0xFF,
-      quality:    (high >> 24) & 0xFF
-    };
   },
 
   loadBaseTile(fileMap) {

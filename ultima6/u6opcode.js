@@ -35,10 +35,12 @@ export const U6OP = {
   LOR: 0x94,       // |
   LAND: 0x95,      // &
 
-  CANCARRY: 0x9a,
+  CANCARRY: 0x9a, // how much weight the npc can carry
   WEIGHT: 0x9b,
+  GETHORSE: 0x9c,
   HORSED: 0x9d,
-  HASOBJ: 0x9f,
+  REST: 0x9e,
+  OWNS: 0x9f,      // has the specific obj
 
   RAND: 0xa0,      // generate a random number (min, max)
   IF: 0xa1,
@@ -53,25 +55,32 @@ export const U6OP = {
   FLAG: 0xab,      // get npc flags
 
   JUMP: 0xb0,      // jump to the address
-
+  CALL: 0xb1,
   VAR: 0xb2,       // integer data
   SVAR: 0xb3,      // string data
   DATA: 0xb4,      // list data
-
+  PRINTSTR: 0xb5,
   BYE: 0xb6,
+
+  STRSEARCH: 0xb7,
+  ENDSEARCH: 0xb8,
 
   NEW: 0xb9,       // create a new object for npc
   DELETE: 0xba,    // delete an object from npc
   OBJCOUNT: 0xbb,
 
+  SHOWINVENTORY: 0xbe,
   PORTRAIT: 0xbf,
 
+  SELECTOBJECT: 0xc0,
+  OWNER: 0xc1,
+  OBJTYPE: 0xc2,
+  VALSEARCH: 0xc3,
   ADDKARMA: 0xc4,
   SUBKARMA: 0xc5,
-
   INPARTY: 0xc6,
   OBJINPARTY: 0xc7,
-
+  MOVEOBJ: 0xc8,
   GIVE: 0xc9,
   JOIN: 0xca,      // return 3: ALREADY IN PARTY, 2: PARTY TOO LARGE, 1: NOT ON LAND (vehicle), 0: SUCCESS
   PAUSE: 0xcb,     // pause the script and wait to hit any key
@@ -110,9 +119,10 @@ export const U6OP = {
   ANSWER: 0xf6,
   ASK: 0xf7,
   ASKC: 0xf8,
-
-  INPUT: 0xfb,
-  INPUTNUM: 0xfc,
+  GETSTR: 0xf9,
+  GETCHR: 0xfa,
+  GETINT: 0xfb,
+  GETDIGIT: 0xfc,
 
   ID: 0xff,
 };

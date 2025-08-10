@@ -219,7 +219,7 @@ function updateObjects() {
         console.log(`--Processing chunk (${chunkX}, ${chunkY}), found ${chunkObjs.length} objects`);
 
         for (const obj of chunkObjs) {
-          if (obj.in_container() || obj.in_inventory()) continue;
+          if (obj.inContainer || obj.Inventory) continue;
 
           const ox = obj.x;
           const oy = obj.y;
@@ -625,10 +625,13 @@ function escapeHTML(str) {
 textInput.addEventListener('keydown', (event) => {
   if (dialogStatus === ScriptInterpreter.PAUSE) {
     event.preventDefault();
-    const output = [];
-    dialogStatus = dialog.run('', output);
-    displayArea.innerHTML += output.join('') + "<br>";
-    displayArea.scrollTop = displayArea.scrollHeight;
+
+    if (event.key === ' ') {
+      const output = [];
+      dialogStatus = dialog.run('', output);
+      displayArea.innerHTML += output.join('') + "<br>";
+      displayArea.scrollTop = displayArea.scrollHeight;
+    }
     return;
   }
 
@@ -645,8 +648,12 @@ textInput.addEventListener('keydown', (event) => {
         const output = [];
         dialogStatus = dialog.run(raw, output);
         displayArea.innerHTML += output.join('') + "<br>";
-        displayArea.scrollTop = displayArea.scrollHeight;
+        if (dialogStatus === ScriptInterpreter.END) {
+          displayArea.innerHTML += "END OF CONVERSATION<br>";
+        }
       }
+
+      displayArea.scrollTop = displayArea.scrollHeight;
     }
   }
 });
@@ -681,26 +688,27 @@ buttonMoveTo.addEventListener('click', () => {
 
 // === Talk ===
 buttonTalk.addEventListener('click', () => {
-  const value = parseInt(textInput.value.trim());
-  if (!isNaN(value) && value >= 0 && value < 255)
-    displayArea.innerHTML = `Talk ${value}<br>`;
+  const actorId = parseInt(textInput.value.trim());
+  if (!isNaN(actorId) && actorId >= 0 && actorId < 255)
+    displayArea.innerHTML = `Talk ${actorId}<br>`;
   else {
     displayArea.innerHTML = "Invalid value!<br>Set an actor id in the input area<br>";
     return;
   }
 
-  const item = scriptLib.getItem(value);
+  const item = scriptLib.getItem(actorId);
   if (item == null) {
-    displayArea.innerHTML = `No script for #${value}<br>`;
+    displayArea.innerHTML = `No script for #${actorId}<br>`;
     return;
   }
 
   textInput.value = '';
   textInput.focus();
   script = decompressCompressedFile(item);
-  scriptIndex = value;
+  scriptIndex = actorId;
 
-  dialog = new ScriptInterpreter(script);
+  // set Avatar as the speaker, talk to 'scriptIndex'
+  dialog = new ScriptInterpreter(script, 0, scriptIndex);
   const output = [];
   dialogStatus = dialog.run("", output);
   if (output.length > 0) {
@@ -899,7 +907,7 @@ canvas.addEventListener("pointerdown", (e) => {
     populateList(actor.obj_list);
   } else {
     const obj = findObjectAtTile(mx, my, objectsInView);
-    if (obj) populateList(obj.obj_list);
+    if (obj) populateList(obj.obj_list ?? []);
   }
 
   // lock the pointer event，even the cursor is out of canvas,
