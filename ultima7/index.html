@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <title>Ultima VII Map Viewer</title>
-
+    <link rel="stylesheet" href="./index.css">
     <link rel="stylesheet" href="./floating_window.css">
     <link rel="stylesheet" href="./info_window.css">
   </head>
@@ -28,11 +28,11 @@
     <script src="./floating_window_manager.js"></script>
     <!--script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script-->
     <script src="./libs/jszip.min.js"></script>
-    <script type="module" src="./map_viewer.js"></script>
     <script type="module">
+        const infoWindow = new FloatingWindowManager("infoWindow");
         await import("./unittest_filestore.js");
         await import("./unittest_flexfile.js");
-        const infoWindow = new FloatingWindowManager("infoWindow");
+        await import("./map_viewer.js");
     </script>
   </body>
 </html>

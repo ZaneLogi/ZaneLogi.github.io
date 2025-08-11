@@ -19,7 +19,6 @@ export const fileStore = (() => {
   }
 
   async function set(fileList) {
-    console.log(fileList);
     const db = await open();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");

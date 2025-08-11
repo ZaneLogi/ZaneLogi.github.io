@@ -3,9 +3,66 @@ import { fileStore } from './filestore.js';
 const JSZip = window.JSZip;
 if (!JSZip) throw new Error("JSZip not loaded");
 
+// === Global WebGL Setup ===
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl2');
+if (!gl) alert("WebGL2 not supported");
 
 
 
+
+
+// === runloop ===
+const times = [];
+const time_samples = 60;
+let lastTimestamp = null;
+const frameRateDiv = document.getElementById("frameRate");
+
+let frame = 0;
+function runloop(timestamp) {
+  if (lastTimestamp !== null) {
+    const delta = timestamp - lastTimestamp;
+    times.push(delta);
+  }
+  lastTimestamp = timestamp;
+
+  if (times.length == time_samples) {
+    times.shift();// remove first timestamp
+    const avg = times.reduce((a, b) => a + b, 0) / times.length;
+    const refreshRate = Math.round(1000 / avg);
+    frameRateDiv.textContent = `Estimated Refresh Rate: ${refreshRate} Hz\n(avg interval: ${avg.toFixed(3)} ms)`;
+  }
+
+  requestAnimationFrame(runloop);
+
+  // render something here
+
+  frame++;
+}
+
+requestAnimationFrame(runloop); // trigger first time
+
+// === Handle Canvas Resizing ===
+function resizeCanvas() {
+  //const dpr = window.devicePixelRatio || 1;
+  const dpr = 1;
+
+  const displayWidth  = Math.floor(canvas.clientWidth * dpr);
+  const displayHeight = Math.floor(canvas.clientHeight * dpr);
+
+  console.log(`Resize canvas to ${displayWidth}x${displayHeight} (DPR: ${dpr})`);
+
+  if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+    canvas.width = displayWidth;
+    canvas.height = displayHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.0, 0.2, 0.0, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+}
+
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas(); // trigger first time
 
 // === File Handling ===
 const fileMap = new Map();
