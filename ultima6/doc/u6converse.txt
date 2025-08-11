@@ -1,0 +1,305 @@
+Ultima 6 Conversation scripting...
+This document describes the NPC conversation data used by
+"Ultima VI: The False Prophet" by Origin Systems.
+
+Nuvie Project (a game engine for Ultima 6)
+<http://nuvie.sourceforge.net>
+
+Overview:
+All of the conversations are contained in two files: converse.a, and converse.b.
+These are LZW encoded lib_32 packages, whose format is explained in the
+u6tech.txt file. Basically it starts with a list of 32bit entry offsets, one for
+each of the entries in the file. The offset is the start of that item (entry) in
+the file. If an offset is 0, that item is empty.
+If the items in both files are added together, they match up with NPC numbers.
+Converse.a:Item 0 = empty
+Converse.a:Item 1 = empty (the Avatar)
+Converse.a:Item 2 = NPC 2 (Dupre)
+Converse.a:Item 3 = NPC 3 (Iolo)
+Converse.a:Item 4 = NPC 4 (Shamino)
+...
+Converse.a:Item 98 = NPC 98 (Aurendir)
+Converse.b:Item 0 = NPC 99 (Patrick)
+Converse.b:Item 1 = NPC 100 (Thindle)
+...
+Including empty items, converse.a has 99 entries. Converse.b has 125 entries.
+
+The last 14 non-empty items in converse.b contain the conversations for the
+shrines and temporary NPCs (Wisp, Guard.) Conversations are also called scripts.
+
+Each item starts with the four byte uncompressed size of the script at that
+location (which immediately follows the size.)  If the uncompressed size is 0,
+the data is not compressed. If it is not 0, the item has to be decoded before
+you can start reading it.
+
+
+File contents:
+Once you have an uncompressed item, it will look like this:
+Location   Description/Value
+00 - XX    0xFF, NPC number, NPC name
+            NPC number is 1 byte
+            NPC name continues to Look section
+XX - XX    0xF1, Character description.
+            (You see %description). Optional scripting can follow the
+            description.
+XX - EOF   0xF2/0xF3 (unknown what the difference is), Converse script
+            The rest of the text and code.
+The script can be divided into sections. NPC identification, look script, and
+converse script. All sections must be included, and in order, for U6 to
+interpret them properly.
+
+
+Semantics:
+The script is a sequence of statements. It doesn't look like a compiled bytecode
+language. There are two types of statements, Text, and Control. Both types of
+statements are interspersed freely.
+
+A Text statement is just text that is printed to the conversation window. It is
+not terminated in any way (such as a NULL character.) There isn't any "print"
+command. If the character that starts a statement is considered printable, it
+and all characters up to the next non-printable character are printed to the
+screen. This is all considered one Text statement.
+The printable characters in U6 are 0x0a, and 0x20 to 0x7a (inclusive.)
+
+A Control statement starts with some command, and contains arguments to that
+command. The commands have a fixed number of arguments (apparently), but each
+argument can have a variable number of "values." The command is a control code.
+The values are control codes or data. Control statements are interpreted, and
+define objects of the game world, modify NPC flags, move data between variables,
+and control the flow of execution of the script.
+
+Data isn't moved around all that much. There is no stack. You have variables
+that can accessed with "let x" type statements, assigned and modified with
+other statements. Variables are identified by a number and the variable data-
+suffix. I havn't determined what variable numbers are available, but I do know
+that some of them are initialized before the script begins. As far as I have
+seen, variables only contain integer data.
+
+Flow control is made up of things like "if...else...endif" and input switches.
+There are also goto statements for jumping around to absolute offsets.
+
+If a control statement contains more than one argument, the 0xa7 terminator
+code is between each, and follows the last. If the statement contains one
+argument, and it has multiple values, the terminator follows the last value.
+
+Argument values are by default 1 byte. Some control codes allow exceptions to
+this rule (the format for jump is <0xb0 4bytes>.) For most commands, if any
+value is not 1 byte, it must be preceded by a data-size code. Even if the value
+is 1 byte, it freqently follows the data-size code for 1 byte.
+
+Some commands accept text arguments (format is <CMD Text>.)
+
+So a script might look like this:
+ f2 or f3
+ Text
+ Control(0 args) <cmd>
+ Control(1 arg) <cmd val>
+ Control(1 arg/multi-val) <cmd (multiple values) a7>
+ Text
+ Control(2 args) <cmd val a7 val a7>
+ Text
+ Control(2 args/multi-val) <cmd (multiple values) a7 (multiple values) a7>
+ Text
+ Control
+ Control
+
+I haven't completely decoded the statement format, or all of the commands, but a
+The known command-set is listed below. Some of my notes are also included.
+If anyone reading this has information they think I should know, or that should
+go in this document, please send it to me. Contact information is at the end of
+the file.
+
+
+Symbols in text:
+@ = following word is highlighted
+* = stop and wait for ENTER/SPACE/ESC key (same as `wait' command)
+\n = newline
+$G = gender title ("milord", "milady")
+$P = player name
+$N = NPC name
+$T = time of day ("morning", "afternoon", "evening")
+$Y = some party member (set-able) ???
+$Z = previous input
+$1 = something you bought? ???
+#X = the value of variable X
+
+
+Commands/Instructions and Syntax:
+ff, f1, f2/f3 = These are the "section markers" (see `File contents'.)
+
+a1 = Do some comparison between values, and continue execution if the result is
+     true. Jump to the next a3 or a2 if result is false.
+<a1 CMP1 [CMP2] [FUNC] [...] a7> ??
+ With CMP1 & CMP2, FUNC is one of:
+ ab : flag(CMP1) of npc(CMP2) is set
+ 95 : (?) && (?) ??
+ 87 : (error)
+ 86 : CMP1 == CMP2
+ 85 : CMP1 != CMP2
+ 84 : CMP1 <= CMP2
+ 83 : CMP1 < CMP2
+ 82 : ?? >=
+ 81 : CMP1 > CMP2
+ 80 : (error)
+ With only CMP1, FUNC is one of:
+ c6 : npc(CMP1) is in Avatar's party
+ With no FUNC and only CMP1 : CMP1 == true
+(a1 (d3 eb, d3 07, ab a7) : is flag 0x07 of 0xeb set?)
+(a1 (d3 XX, d3 YY, c7, d4 0180, 86/85, a7) : item obj=XX,qual=YY is/is'nt in
+                                             player inventory??)
+
+a2 = Script execution continues if the last a1 comparison was false, and there
+     was no a3(else) section first. The script also continues from here if the
+     comparison was true and interpreting of the a1 section has finished.
+
+a3 = Code that follows only executes if the last a1 comparison was false.
+
+a4 = Set npc flag.
+<a4 NPCNUM a7 FLAGNUM a7>
+
+a5 = Clear npc flag.
+<a5 NPCNUM a7 FLAGNUM a7>
+
+a6 = Create/Assign variable. Variables are accessed by a number. This
+     statement has to be followed by the assignment command a8. If a8 doesn't
+     follow, the next byte in the code is swallowed, but does not get assigned
+     to the variable.
+<a6 XX b2: where XX is number of the variable> ??
+
+a8 = Assign a value, and optionally perform some operation on the data, to the
+     variable identified by the previous a6 command. An error occurs if a6 was
+     not before this.
+<a8 Y1 [mathfunc] [Y2] ... a7> ??
+(= YY
+ a8 d3 00 a7 : let #var0 = 0x00)
+ mathfunc is one of:
+ 90 : XX = Y1 + Y2
+ 91 : XX = Y1 - Y2
+(a6 00 b2; a8 00 b2 d3 01 01 90 a7 : let #var0 = 0x01 + 0x01)
+
+a7 = Ends command arguments that allow a variable number of values. ??
+
+b0 = jump to 4-byte absolute offset
+<b0 LOCATION>
+
+b5 = Compile and print text list.
+<b5 offset offset/range1 offset/range2 a0 a7> ??
+ the first arg is byte offset of text list
+ the second arg is byte offset or range1 
+ the third arg, if set, is range2
+ if arg3 is unset, all text to second byte offset is printed, 1 string per line
+ if arg3 is set, a random string in list from range1 to range2 is printed
+ a0 a7 ??
+
+b6 = End conversation. If there is no terminating b6 somewhere, when interpreted
+     by U6, script execution runs over to the next NPC's conversation data.
+
+b9 = Create an object/item, and places it in a character's inventory. The
+     quantity set on a single object in a single inventory slot can only be up
+     to 144. If you add more, they will be divided across multiple slots.
+<b9 d3 NPCNUM a7 d3 OBJNUM a7 d3 QUAL a7 d3 QUANT a7> ??
+ ?? Need to test different quant values. (0 gives anything? or nothing with no
+    grouping?)
+ ?? lens is probably just 10bit number, but what about spells?
+ ?? no idea what it means when npc is 00, or the number of an npc not in party
+    and not being spoken to
+ (iolo gives everyones gold to player:
+  b9 (d3 01 a7) (d3 58 a7) (d3 00 a7) (05 b2 a7)
+  iolo splits up party gold between everyone who has room to carry it:
+  b9 (09 b2 a7) (d3 58 a7) (d3 00 a7) (05 b2 a7)
+  iolo divides everyones gold up evenly:
+  b9 (09 b2 a7) (d3 58 a7) (d3 00 a7) (05 b2 a7)
+  if the player chooses to give sherry some cheese:
+  b9 (d3 eb a7) (d3 84 a7) (d3 00 a7) (d3 01 a7)
+  ephemerides gives you a lens:
+  b9 (d3 01 a7) (d4 8a01 a7) (d3 00 a7) (d3 01 a7)
+  xiao sells you a spell:
+  b9 (03 b2 a7) (d3 3a a7) (d2 8b0e0000, 00 b2, 04 b2, 90 b4 a7) (d3 01 a7))
+
+be = Show NPC inventory (even if they're not in the player's party.)
+<be NPCNUM>
+
+bf = Show NPC portrait, and their inventory if they are in the player's party.
+<bf NPCNUM>
+(bf d3 eb : show portrait of self... 0xEB is always the talking NPC)
+
+c9 = Transfers object from one characters inventory to another (give item).
+<c9 OBJNUM QUALITY FROM TO> ??
+(Ariana gives the Avatar the Rune of Compassion:
+ c9 (d3 f3 a7) (d3 00 a7) (d3 eb a7) (d3 01 a7))
+
+cb = Page break & wait for input. Script execution stops and a down arrow is
+     displayed until player inputs ENTER, SPACE or ESC to continue.
+
+cd = Set NPC Worktype.
+<cd NPC a7 NEWWORK a7>
+
+d8 sets $Y to player name
+<d8 partymember d3 00 dd a7> ??
+(partymember 0 = the avatar)
+
+f7 = Prompt player for input ("you say: ").
+
+ef keyword = End previous "answer" in block, start next keyword definition. If
+             there is no previous answer, start "ask" block. An ask block
+             contains any number of "ef keyword f6" answers, and ends with ee.
+             The keyword list for a single answer continues until the start of
+             the answer, marked by f6. Multiple keywords that trigger that
+             answer are seperated by commas.
+<ef keyword(s)>
+
+f6 = Immediately follows keyword(s). Start answer section. Answer script
+     continues until next ef or ee.
+
+ee = End "ask" block (follows last "answer" in block.)
+
+<f7> <ef keyword(s) f6 ... ef keyword(s) f6 ... ee>
+
+f8 = Prompt player for single character input. (no visible prompt)
+     A string follows containing the characters that may be input. As soon as
+     that character is entered, processing continues. Any other keys do nothing.
+<f8 permitted characters>
+
+fb = Numerical "0-9" input into variable (as integer.) Multiple digits can be
+     input, with Enter used to end input. Esc key will input 0. Any character
+     input is allowed.
+
+fc = Single character "0-9" input into variable (as integer.) Enter and Esc keys
+     from player will input 0. No other keys are allowed.
+
+00 = Follows an items in a db section. A db section can be anywhere in the file,
+     and contains data (of the same type?) in an indexed list. The db items only
+     have meaning when some command tries to compile and access the list.
+??
+
+Statement syntax followed by ?? means I havn't completely figured that out, or I
+havn't confirmed it.
+
+Data sizes:
+ d4 : 2 bytes follow (signed??)
+ d3 : 1 byte follows (default??)
+ d2 : 4 bytes follow
+ 00 : ?? no value follows (and no more arguments??)
+
+Data suffix:
+ b2 : preceding value is a variable reference
+ b3 : ??
+ b4 : ??
+
+
+Notes:
+Only Ultima VI has been tested with above findings. "Martian Dreams" and
+"The Savage Empire" have the U6 engine but may have a slightly different
+interpreter.
+
+Some variables are initialized outside the script: #20 = worktype
+Some constant values have special meaning: npc 0xEB = self
+
+F1 does not always end name, sometimes its something else.
+Either F2 or F3 ends description/starts conversation. Why?
+
+
+--
+Document updated May 6th, 2003
+Author/Contact: Joseph Applegate (SB-X) / sb-x@users.sourceforge.net
+                                        / sbx@mailandnews.com

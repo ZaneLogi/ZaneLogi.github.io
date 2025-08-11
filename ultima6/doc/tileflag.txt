@@ -1,0 +1,39 @@
+0x000
+
+bit 0 : 1 water for boat travel.
+bit 1 : 0 passable 1 not passable
+bit 2 : Wall tile
+bit 3 :
+bit 4 :
+bit 5 :
+bit 6 :
+bit 7 :
+
+0x800
+
+bit 0 :
+bit 1 : 
+bit 2 : boundary
+bit 3 : look through boundary
+bit 4 : toptile
+bit 5 : Balloon boundary
+bit 6 : vertical size
+bit 7 : horizontal size
+
+0x1000
+
+?? unknown
+
+0x1400
+
+bit 0 : unknown lava tiles ??
+bit 1 :
+bit 2 :
+bit 3 :
+bit 4 :
+bit 5 :
+bit 6 : - article "", "a", "an", "the"
+bit 7 : / 
+
+0x1c00
+

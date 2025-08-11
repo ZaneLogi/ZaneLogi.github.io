@@ -1,0 +1,107 @@
+This file contains Actor/NPC related data.
+
+0x000
+
+?? 256 Temp NPC flags ??
+
+0x100 
+
+256 NPC positions in 3 byte x,y,z notation.
+
+0x400
+
+256 NPC object number + frame number combinations. 2 byte.
+
+0x600
+
+?? looks to be 2 bytes per NPC mostly set to 1
+
+0x800
+
+NPC status flags
+
+bit 0 pink glow ?
+bit 1
+bit 2 
+bit 3 Poisoned.
+bit 4 Dead. ?
+bit 5
+bit 6 In Party 
+bit 7 In Party
+
+0x900
+
+NPC strength
+
+0xa00
+
+NPC dexterity
+
+0xb00
+
+NPC inteligence
+
+0xc00
+
+Experience. 2 bytes each
+
+0xe00
+
+NPC Health Points
+
+0xf00
+
+16 Party  Names. Each name can be a max of 13 chars long. strings are null 
+terminated.
+
+0xfe0
+
+Party Roster order of command.
+
+0xff0 (1 byte) Number of party members ??
+
+0xff1
+
+NPC Level. 1 byte each
+
+0x10f1
+
+??
+
+0x11f1
+
+??
+
+0x13f1
+
+Magic points. 1 byte each
+
+0x14f1
+
+??
+
+0x17f1
+
+NPC flags 1 byte each
+
+0x18f1 
+
+??
+
+0x1bf1 quest flag (1 byte)
+
+??
+
+0x1bf3 minutes
+0x1bf4 hour
+0x1bf5 day
+0x1bf6 month
+0x1bf7 year
+0x1bf8 year 
+0x1bf9 Player's Karma (1 byte)
+0x1bfa wind direction (1 byte) 0 .. 7 N, NE, E, SE, S, SW, W, NW. C = 0xff
+
+??
+
+0x1c71 Player Gender. 0 male, 1 female
+0x1c72 Player portrait number. 6 female, 6 male starting from 0

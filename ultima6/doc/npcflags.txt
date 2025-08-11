@@ -1,0 +1,6 @@
+This is a list of when NPC flags are set.
+Flag  NPC                Condition
+
+7     Lord British(5)    after you pass the Compendium quiz and he tells you
+                         the state of Britannia
+      Nystul
