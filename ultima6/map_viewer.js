@@ -623,13 +623,20 @@ function escapeHTML(str) {
 }
 
 textInput.addEventListener('keydown', (event) => {
+  function colorizeAtWords(text) {
+    // Replace "@word" with <span style="color:red">word</span>
+    return text.replace(/@(\w+)/g, '<span style="color:red">$1</span>');
+  }
+
   if (dialogStatus === ScriptInterpreter.PAUSE) {
     event.preventDefault();
 
     if (event.key === ' ') {
       const output = [];
       dialogStatus = dialog.run('', output);
-      displayArea.innerHTML += output.join('') + "<br>";
+      let result = output.join('') + "<br>";
+      result = colorizeAtWords(result);
+      displayArea.innerHTML += result;
       displayArea.scrollTop = displayArea.scrollHeight;
     }
     return;
@@ -647,7 +654,9 @@ textInput.addEventListener('keydown', (event) => {
       if (dialog) {
         const output = [];
         dialogStatus = dialog.run(raw, output);
-        displayArea.innerHTML += output.join('') + "<br>";
+        let result = output.join('') + "<br>";
+        result = colorizeAtWords(result);
+        displayArea.innerHTML += result;
         if (dialogStatus === ScriptInterpreter.END) {
           displayArea.innerHTML += "END OF CONVERSATION<br>";
         }
