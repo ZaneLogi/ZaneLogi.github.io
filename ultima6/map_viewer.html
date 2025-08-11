@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Ultima VI Map Viewer</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #tooltip {
+      position: absolute;
+      padding: 4px 6px;
+      background: #111;
+      color: #0f0;
+      font-family: monospace;
+      font-size: 12px;
+      border: 1px solid #0f0;
+      pointer-events: none;
+      display: none;
+    }
+
+    ::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #111;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background-color: #0f0;
+      border-radius: 5px;
+      border: 2px solid #111;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background-color: #6f6;
+    }
+
+    /* === Floating Info Window === */
+    #dropzone {
+      padding: 10px;
+      border: 1px dashed #0f0;
+      text-align: center;
+      background: #222;
+      margin-bottom: 10px;
+    }
+
+    #resetBtn {
+      margin-bottom: 10px;
+      padding: 5px 10px;
+      background: #222;
+      border: 1px solid #0f0;
+      color: #0f0;
+      cursor: pointer;
+      width: 100%;
+    }
+
+    #fileChecklist {
+      margin-bottom: 10px;
+      padding: 5px;
+      border: 1px solid #0f0;
+      box-shadow: inset 0 0 6px #0f0;
+      background: #111;
+      font-family: monospace;
+      white-space: pre;
+      overflow: auto;
+      max-height: 200px;
+    }
+
+    #frameRate {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      font-size: 16px;
+      padding: 8px 12px;
+      background: #111;
+      color: #0f0;
+      border: 1px solid #0f0;
+      box-shadow: inset 0 0 6px #0f0;
+      font-family: monospace;
+      white-space: pre-line;
+    }
+
+    /* === option window === */
+    #optionsWindow {
+      height: auto;
+      resize: none;
+    }
+
+    /* === list window === */
+    #list-window {
+      height: 300px;
+    }
+
+    #list-window .list-view {
+      flex-grow: 1;
+      overflow-y: auto;
+      border: 1px solid #0f0;
+      background: #111;
+      font-family: monospace;
+      font-size: 13px;
+      padding: 5px;
+    }
+
+    /* === dialog window === */
+    #dialog-window {
+      height: 300px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #displayArea {
+      flex-grow: 1;
+      overflow: auto;
+      padding: 8px;
+      background: #111;
+      color: #0f0;
+      font-family: monospace;
+      font-size: 14px;
+      border: 1px solid #0f0;
+      margin-bottom: 8px;
+      user-select: text;
+      white-space: pre-line;
+    }
+
+    #textInput {
+      height: 30px;
+      resize: horizontal;
+      padding: 4px 8px;
+      font-size: 14px;
+      font-family: monospace;
+      background: #222;
+      color: #0f0;
+      border: 1px solid #0f0;
+      outline: none;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    #buttonRow {
+      display: flex;
+      justify-content: flex-start; /* or space-between, center, etc. */
+      gap: 6px;
+      margin-top: 8px;
+      flex-wrap: wrap; /* optional, allows buttons to wrap on small screens */
+    }
+
+    #buttonRow button {
+      padding: 6px 12px;
+      font-family: monospace;
+      font-size: 14px;
+      background: #111;
+      color: #0f0;
+      border: 1px solid #0f0;
+      cursor: pointer;
+      white-space: nowrap; /* prevents wrapping inside the button */
+    }
+
+    #buttonRow button:hover {
+      background: #0f0;
+      color: #000;
+    }
+
+    /* === generic configurations === */
+    .list-view {
+      height: 200px;
+      overflow-y: auto;
+      border: 1px solid #0f0;
+      background: #111;
+      font-family: monospace;
+      font-size: 13px;
+      padding: 5px;
+    }
+
+    .list-item {
+      padding: 2px 4px;
+      border-bottom: 1px solid #333;
+      cursor: default;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .list-item:hover {
+      background: #0f0;
+      color: #000;
+    }
+  </style>
+
+  <link rel="stylesheet" href="./floating_window.css">
+</head>
+<body>
+  <canvas id="glcanvas"></canvas>
+  <div id="tooltip"></div>
+
+  <!-- Floating Info Window -->
+  <div class="floatingWindow" id="infoWindow">
+    <div class="floatingHeader">Ultima VI File Loader
+      <div class="headerButtons">
+        <button class="collapse-btn">−</button>
+      </div>
+    </div>
+    <div class="floatingContent">
+      <div id="dropzone">Drop Ultima VI files here</div>
+      <button id="resetBtn">Reset Stored Files</button>
+      <div id="fileChecklist">Checking files...</div>
+      <div id="frameRate">Measuring...</div>
+    </div>
+  </div>
+
+  <div class="floatingWindow" id="optionsWindow">
+    <div class="floatingHeader">Options</div>
+    <div class="floatingContent">
+      <!-- your content -->
+      <button id="reset_layout">Reset Floating Windows</button>
+    </div>
+  </div>
+
+  <!-- Floating List Window -->
+  <div class="floatingWindow" id="list-window">
+    <div class="floatingHeader">
+      List Window
+      <div class="headerButtons">
+        <button class="collapse-btn">−</button>
+        <button class="close-btn">×</button>
+      </div>
+    </div>
+    <div class="floatingContent">
+      <div class="list-view" id="myListView"></div>
+    </div>
+  </div>
+
+  <div class="floatingWindow" id="dialog-window">
+    <div class="floatingHeader">Dialog</div>
+    <div class="floatingContent">
+      <div id="displayArea">Display something here<br></div>
+      <input type="text" id="textInput" placeholder="Input something here..."
+        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <div id="buttonRow">
+        <button id="buttonMoveTo">MoveTo</button>
+        <button id="buttonTalk">Talk</button>
+        <button id="buttonRaw">Raw</button>
+        <button id="buttonDecoded">Decoded</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="map_viewer.js"></script>
+
+  <script src="./floating_window_manager.js"></script>
+  <script>
+    document.getElementById("reset_layout").addEventListener("click", () => {
+      FloatingWindowManager.resetAllLayout();
+    });
+
+    const optionsWindow = new FloatingWindowManager("optionsWindow");
+    const infoWindow = new FloatingWindowManager("infoWindow");
+    const listWindow = new FloatingWindowManager("list-window");
+    const dialogWindow = new FloatingWindowManager("dialog-window");
+  </script>
+</body>
+</html>

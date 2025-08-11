@@ -1,0 +1,41 @@
+https://github.com/ergonomy-joe/u6-decompiled
+
+u6.h
+    global information
+    
+    the definition of ScratchBuf is here, struct t_9E39 (306)
+
+seg_0903
+    cdecl main (426)
+
+seg_0A33
+    game loop (1020)
+
+seg_0C9C
+    restore game (290)
+    save game (357)
+
+seq_1184
+    AddObj (635) => call AddMapObj or AddInvObj
+    AddMapObj (642)
+    AddInvObj (668)
+    C_1184_2722 (1222) write a objblk
+    C_1184_2888 (1262) call C_1184_2722 (write a objblk if out of the area)
+    __ObjectsDeserialize (1370) is used to deploy/build the obj information to 'Link' from ScratchBuf
+    C_1184_2DEF (1429) read a objblk
+    C_1184_30A6 (1524) read a dungeon objblk
+        from 1544, ScratchBuf is a buffer for objblk
+    LoadNewRegions (1550)
+
+seg_16E1
+    TALK_initTalk (11) initialize VarStr and VarInt
+
+seg_1703: talkdr:conversation engine module
+    LeaveParty (246)
+    execute_op (714)
+
+seg_2337
+    MaxHP (226)
+
+seg_3200
+    restore health (167)

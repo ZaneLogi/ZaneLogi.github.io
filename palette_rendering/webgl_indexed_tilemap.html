@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>WebGL Indexed Tilemap with Palette Cycling</title>
+  <style>
+    canvas { 
+      border: 1px solid black;
+      image-rendering: pixelated;
+    }
+  </style>
+</head>
+<body>
+<canvas id="glcanvas" width="1024" height="1024"></canvas>
+<script>
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl2');
+if (!gl) alert("WebGL2 not supported");
+
+// === Vertex Shader ===
+const vsSource = `#version 300 es
+in vec2 a_position;
+in vec2 a_uv;
+uniform vec2 u_resolution;
+out vec2 v_uv;
+
+void main() {
+  vec2 normalized = (a_position / u_resolution * 2.0 - 1.0) * vec2(1.0, -1.0);
+  gl_Position = vec4(normalized, 0, 1);
+  v_uv = a_uv;
+}`;
+
+// === Fragment Shader ===
+const fsSource = `#version 300 es
+precision mediump float;
+uniform sampler2D u_indexedTexture;
+uniform sampler2D u_paletteTexture;
+in vec2 v_uv;
+out vec4 outColor;
+
+void main() {
+  float index = texture(u_indexedTexture, v_uv).r;
+  outColor = texture(u_paletteTexture, vec2(index, 0.5));
+}`;
+
+// === Shader Compilation ===
+function createShader(gl, type, src) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, src);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS))
+    throw new Error(gl.getShaderInfoLog(shader));
+  return shader;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(program);
+gl.useProgram(program);
+
+// === Uniforms ===
+const u_resolution = gl.getUniformLocation(program, 'u_resolution');
+gl.uniform2f(u_resolution, canvas.width, canvas.height);
+const u_indexed = gl.getUniformLocation(program, 'u_indexedTexture');
+const u_palette = gl.getUniformLocation(program, 'u_paletteTexture');
+gl.uniform1i(u_indexed, 0);
+gl.uniform1i(u_palette, 1);
+
+// === Palette ===
+const palette = new Uint8Array(256 * 4);
+for (let i = 0; i < 256; i++) {
+  palette[i*4 + 0] = (i * 97) % 256;
+  palette[i*4 + 1] = (i * 47) % 256;
+  palette[i*4 + 2] = (i * 67) % 256;
+  palette[i*4 + 3] = 255;
+}
+const paletteTex = gl.createTexture();
+gl.activeTexture(gl.TEXTURE1);
+gl.bindTexture(gl.TEXTURE_2D, paletteTex);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, palette);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+// === Tile Atlas (2048 tiles, 16x16) ===
+const tileSize = 16;
+const tileCount = 2048;
+const tilesPerRow = Math.ceil(Math.sqrt(tileCount));
+const tilesPerCol = Math.ceil(tileCount / tilesPerRow);
+const atlasW = tilesPerRow * tileSize;
+const atlasH = tilesPerCol * tileSize;
+
+const atlas = new Uint8Array(atlasW * atlasH);
+for (let i = 0; i < tileCount; i++) {
+  const color = Math.floor(Math.random() * 256);
+  const tx = i % tilesPerRow;
+  const ty = Math.floor(i / tilesPerRow);
+  const baseX = tx * tileSize;
+  const baseY = ty * tileSize;
+  for (let y = 0; y < tileSize; y++) {
+    for (let x = 0; x < tileSize; x++) {
+      const dstX = baseX + x;
+      const dstY = baseY + y;
+      atlas[dstY * atlasW + dstX] = color;
+    }
+  }
+}
+const indexTex = gl.createTexture();
+gl.activeTexture(gl.TEXTURE0);
+gl.bindTexture(gl.TEXTURE_2D, indexTex);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, atlasW, atlasH, 0, gl.RED, gl.UNSIGNED_BYTE, atlas);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+// === Generate Map Data (64x64) ===
+const mapW = 64, mapH = 64;
+const map = new Uint16Array(mapW * mapH);
+for (let i = 0; i < map.length; i++) map[i] = Math.floor(Math.random() * tileCount);
+
+// === Build VBO ===
+const positions = [];
+const uvs = [];
+for (let my = 0; my < mapH; my++) {
+  for (let mx = 0; mx < mapW; mx++) {
+    const tileIndex = map[my * mapW + mx];
+    const tx = tileIndex % tilesPerRow;
+    const ty = Math.floor(tileIndex / tilesPerRow);
+    const u0 = (tx * tileSize) / atlasW;
+    const v0 = (ty * tileSize) / atlasH;
+    const u1 = ((tx + 1) * tileSize) / atlasW;
+    const v1 = ((ty + 1) * tileSize) / atlasH;
+    const x0 = mx * tileSize;
+    const y0 = my * tileSize;
+    const x1 = x0 + tileSize;
+    const y1 = y0 + tileSize;
+    positions.push(x0, y0, x1, y0, x0, y1, x0, y1, x1, y0, x1, y1);
+    uvs.push(u0, v0, u1, v0, u0, v1, u0, v1, u1, v0, u1, v1);
+  }
+}
+function makeBuffer(attr, size, data) {
+  const loc = gl.getAttribLocation(program, attr);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+}
+makeBuffer('a_position', 2, positions);
+makeBuffer('a_uv', 2, uvs);
+
+// === Animate Palette Cycling ===
+let frame = 0;
+function animate() {
+  requestAnimationFrame(animate);
+
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.uniform2f(u_resolution, canvas.width, canvas.height);
+
+  if (frame % 4 === 0) {
+    const first = palette.slice(0, 4);
+    for (let i = 0; i < 255; i++) {
+      palette.set(palette.slice((i + 1) * 4, (i + 2) * 4), i * 4);
+    }
+    palette.set(first, 255 * 4);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, paletteTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.RGBA, gl.UNSIGNED_BYTE, palette);
+  }
+
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.drawArrays(gl.TRIANGLES, 0, positions.length / 2);
+  frame++;
+}
+
+animate();
+</script>
+</body>
+</html>
