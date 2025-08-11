@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Ultima VII Map Viewer</title>
+  </head>
+  <body>
+    <canvas id="glcanvas"></canvas>
+
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script type="module">
+      // make sure window.JSZip have been loaded, them import the modules
+      async function start() {
+        if (typeof JSZip === 'undefined') {
+          await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = './libs/jszip.min.js';
+            script.onload = () => resolve();
+            script.onerror = () => reject(new Error('Failed to load local jszip'));
+            document.head.appendChild(script);
+          });
+        }
+        
+        console.log("ready to start");
+        // Asynchronous loading — modules may finish loading in any order
+        import('./unittest_filestore.js');
+        import('./unittest_flexfile.js');
+        // Output logs from these modules may appear in any order
+      }
+      start();
+    </script>
+  </body>
+</html>
