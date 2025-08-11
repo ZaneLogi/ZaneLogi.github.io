@@ -1,6 +1,3 @@
-const JSZip = window.JSZip;
-if (!JSZip) throw new Error('JSZip not loaded');
-
 export const fileStore = (() => {
   const DB_NAME = "u7";
   const STORE_NAME = "files";
@@ -21,12 +18,15 @@ export const fileStore = (() => {
     });
   }
 
-  async function set(filename, uint8array) {
+  async function set(fileList) {
+    console.log(fileList);
     const db = await open();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");
       const store = tx.objectStore(STORE_NAME);
-      store.put(uint8array, filename.toLowerCase());
+      for (const entry of fileList) {
+        store.put(entry.uint8, entry.filename.toLowerCase());
+      }
       tx.oncomplete = () => resolve();
       tx.onerror = (e) => reject(e);
     });
@@ -43,41 +43,6 @@ export const fileStore = (() => {
     });
   }
 
-  async function clear() {
-    const db = await open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.clear();
-      req.onsuccess = () => resolve();
-      req.onerror = (e) => reject(e);
-    });
-  }
-
-  async function storeZipFile(zipFile) {
-    const arrayBuffer = await zipFile.arrayBuffer();
-    const zip = await JSZip.loadAsync(arrayBuffer);
-
-    const db = await open();
-
-    // Open DB and start one transaction for all files
-    return new Promise(async (resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      const store = tx.objectStore(STORE_NAME);
-
-      for (const name in zip.files) {
-        const entry = zip.files[name];
-        if (entry.dir) continue;
-
-        const fileData = await entry.async("uint8array");
-        store.put(fileData, name.toLowerCase());
-      }
-
-      tx.oncomplete = () => resolve();
-      tx.onerror = (e) => reject(e);
-    });
-  }
-
   async function remove(filename) {
     const db = await open();
     return new Promise((resolve, reject) => {
@@ -89,5 +54,16 @@ export const fileStore = (() => {
     });
   }
 
-  return { set, get, clear, storeZipFile, remove };
+  async function clear() {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.clear();
+      req.onsuccess = () => resolve();
+      req.onerror = (e) => reject(e);
+    });
+  }
+
+  return { set, get, remove, clear };
 })();

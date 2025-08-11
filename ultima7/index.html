@@ -3,31 +3,36 @@
   <head>
     <meta charset="utf-8">
     <title>Ultima VII Map Viewer</title>
+
+    <link rel="stylesheet" href="./floating_window.css">
+    <link rel="stylesheet" href="./info_window.css">
   </head>
   <body>
     <canvas id="glcanvas"></canvas>
 
-    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <!-- Floating Info Window -->
+    <div class="floatingWindow" id="infoWindow">
+      <div class="floatingHeader">Ultima VII File Loader
+        <div class="headerButtons">
+          <button class="collapse-btn">−</button>
+        </div>
+      </div>
+      <div class="floatingContent">
+        <div id="dropzone">Drop Ultima VII files here</div>
+        <button id="resetBtn">Reset Stored Files</button>
+        <div id="fileChecklist">Checking files...</div>
+        <div id="frameRate">Measuring...</div>
+      </div>
+    </div>
+
+    <script src="./floating_window_manager.js"></script>
+    <!--script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script-->
+    <script src="./libs/jszip.min.js"></script>
+    <script type="module" src="./map_viewer.js"></script>
     <script type="module">
-      // make sure window.JSZip have been loaded, them import the modules
-      async function start() {
-        if (typeof JSZip === 'undefined') {
-          await new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = './libs/jszip.min.js';
-            script.onload = () => resolve();
-            script.onerror = () => reject(new Error('Failed to load local jszip'));
-            document.head.appendChild(script);
-          });
-        }
-        
-        console.log("ready to start");
-        // Asynchronous loading — modules may finish loading in any order
-        import('./unittest_filestore.js');
-        import('./unittest_flexfile.js');
-        // Output logs from these modules may appear in any order
-      }
-      start();
+        await import("./unittest_filestore.js");
+        await import("./unittest_flexfile.js");
+        const infoWindow = new FloatingWindowManager("infoWindow");
     </script>
   </body>
 </html>

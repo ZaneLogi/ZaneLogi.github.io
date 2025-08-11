@@ -11,7 +11,7 @@ async function testFileStore() {
   }
 
   // write to IndexedDB
-  await fileStore.set(fileName, dataToStore);
+  await fileStore.set([{filename:fileName, uint8:dataToStore}]);
   console.log("Data saved to IndexedDB.");
 
   // read from IndexedDB
