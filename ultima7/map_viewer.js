@@ -1,6 +1,6 @@
 import { fileStore } from './filestore.js';
 import { WebGLIndexedRenderer } from './webgl_indexed_renderer.js';
-import { palettes, shapesVga, worldMap } from './globals.js';
+import { palettes, shapesVga, worldMap, timeQueue } from './globals.js';
 
 console.log("=== world_viewer ===");
 
@@ -54,13 +54,26 @@ function runloop(timestamp) {
   requestAnimationFrame(runloop);
 
   // render something here
-  //palettes.draw(renderer.getBuffer());
+  const frameBuffer = renderer.getBuffer();
 
   if (shapesVga.shapes) {
-    const frameBuffer = renderer.getBuffer();
+    timeQueue.trigger(timestamp);
+
     //if (frame !== 30)
     worldMap.draw(frameBuffer, worldX, worldY);
   }
+
+  if ((frame % 8) === 0) {
+    palettes.rotateColors(0xfc, 0xfc+4);
+    palettes.rotateColors(0xf8, 0xf8+4);
+    palettes.rotateColors(0xf4, 0xf4+4);
+    palettes.rotateColors(0xf0, 0xf0+4);
+    palettes.rotateColors(0xe8, 0xe8+8);
+    palettes.rotateColors(0xe0, 0xe0+8);
+    renderer.setPalette(palettes.current());
+  }
+
+  //palettes.draw(frameBuffer);
 
   renderer.render();
 

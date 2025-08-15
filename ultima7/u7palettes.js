@@ -42,6 +42,22 @@ export class U7Palettes {
     }
   }
 
+  rotateColors(start, end) {
+    const temp = new Uint8Array(4);
+    const lastIndex = (end - 1) * 4;
+
+    const data = this.data;
+
+    // Copy last color
+    temp.set(data.subarray(lastIndex, lastIndex + 4));
+
+    // Shift colors backward
+    data.copyWithin(start * 4 + 4, start * 4, lastIndex);
+
+    // Put last color at the front
+    data.set(temp, start * 4);
+  }
+
   draw(frameBuffer) {
     const {p, width, height, pitch} = frameBuffer;
     const palW = Math.min(width, 256);

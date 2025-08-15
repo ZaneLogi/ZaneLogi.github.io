@@ -1,14 +1,5 @@
-import { shapesVga, terrains, shpdims, tfa } from "./globals.js";
-
-class FrameAnimator {
-  constructor(obj) {
-    this.obj = obj;
-  }
-
-  update(timestamp, context) {
-
-  }
-}
+import { shapesVga, terrains, shpdims, tfa, timeQueue } from "./globals.js";
+import { FrameAnimator } from "./animator.js";
 
 class MapComponent {
   constructor(xchunk, ychunk, xtile, ytile, lift) {
@@ -21,10 +12,10 @@ class MapComponent {
 }
 
 class Ground {
-  constructor(xtile, ytile, frameImage) {
+  constructor(xtile, ytile, shapeId) {
     this.x = xtile * 8 + 7; // hotspot (7,7)
     this.y = ytile * 8 + 7;
-    this.frameImage = frameImage;
+    this.frameImage = shapesVga.shapes[shapeId.type].frames[shapeId.frame];
   }
 
   draw(frameBuffer, ox, oy) {
@@ -33,24 +24,32 @@ class Ground {
 }
 
 class TerrainOverlay {
-  constructor(xtile, ytile, frameImage, shapeId) {
+  constructor(xtile, ytile, shapeId) {
     this.x = xtile * 8 + 7; // hotspot (7,7)
     this.y = ytile * 8 + 7;
-    this.frameImage = frameImage;
-    this.shapeType = shapeId.type;
-    this.shapeFrame = shapeId.frame;
     this.reflected = shapeId.reflected;
-    if (tfa.getReusableView(this.shapeType).isAnimated) {
-      const animator = {
-        firstFrame: 0,
-        lastFrame: shapeId.frame,
-        frames: shapesVga.shapes[shapeId.type].frames.length
-      };
-    }
+    this.frameImage = shapesVga.shapes[shapeId.type].frames[shapeId.frame];
   }
 
   draw(frameBuffer, ox, oy) {
     this.frameImage.draw(frameBuffer, ox + this.x, oy + this.y, null, this.reflected);
+  }
+}
+
+class AnimatedTerrainOverlay extends TerrainOverlay {
+  constructor(xtile, ytile, shapeId) {
+    super(xtile, ytile, shapeId);
+    this.frames = shapesVga.shapes[shapeId.type].frames;
+    this.animator = new FrameAnimator(this);
+  }
+
+  draw(frameBuffer, ox, oy) {
+    this.animator.requestAnimation(); // add this to timeQueue
+    super.draw(frameBuffer, ox, oy);
+  }
+
+  updateFrame(frameIndex) {
+    this.frameImage = this.frames[frameIndex];
   }
 }
 
@@ -72,10 +71,15 @@ class MapChunk {
         shapeArray.decodeAt(baseIndex + x, shapeId);
         const frameImage = shapes[shapeId.type].frames[shapeId.frame];
         if (frameImage.rle) {
-          this.terrainOverlay.push(new TerrainOverlay(x, y, frameImage, shapeId));
+          if (tfa.getReusableView(shapeId.type).isAnimated) {
+            this.terrainOverlay.push(new AnimatedTerrainOverlay(x, y, shapeId));
+          }
+          else {
+            this.terrainOverlay.push(new TerrainOverlay(x, y, shapeId));
+          }
         }
         else {
-          this.ground.push(new Ground(x, y, frameImage));
+          this.ground.push(new Ground(x, y, shapeId));
         }
       }
     }
