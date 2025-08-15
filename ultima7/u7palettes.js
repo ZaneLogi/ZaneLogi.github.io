@@ -41,4 +41,17 @@ export class U7Palettes {
       this.data[transparentColor * 4 + 3] = 0;
     }
   }
+
+  draw(frameBuffer) {
+    const {p, width, height, pitch} = frameBuffer;
+    const palW = Math.min(width, 256);
+    const palH = Math.min(height, 256);
+    for (let y = 0; y < palH; y++) {
+      const offsetBase = y * width;
+      const colorBase = Math.floor(y/16) * 16;
+      for (let x = 0; x < palW; x++) {
+        p[offsetBase + x] = colorBase + Math.floor(x/16);
+      }
+    }
+  }
 }

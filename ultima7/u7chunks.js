@@ -11,6 +11,13 @@ class ShapeIDView {
     return this;
   }
 
+  decode(out) {
+    const v = this.buffer[this.index];
+    out.type = v & 0x03ff;
+    out.frame = (v >> 10) & 0x1f;
+    out.reflected = (v >> 15) & 1;
+  }
+
   get value() {
     return this.buffer[this.index];
   }
@@ -63,26 +70,20 @@ class ShapeIDArray {
     } else {
       throw new Error("buffer must be Uint8Array or Uint16Array");
     }
-
-    // Pre-allocated reusable ShapeIDView for iteration
-    this._viewCache = new ShapeIDView(this.buffer, 0);
   }
 
   get length() { return this.buffer.length; }
 
-  // --- Fast bit-field API ---
-  getType(i)       { return this.buffer[i] & 0x03ff; }
-  setType(i, v)    { this.buffer[i] = (this.buffer[i] & ~0x03ff) | (v & 0x03ff); }
+  decodeAt(index, out) {
+    const v = this.buffer[index];
+    out.type = v & 0x03ff;
+    out.frame = (v >> 10) & 0x1f;
+    out.reflected = (v >> 15) & 1;
+  }
 
-  getFrame(i)      { return (this.buffer[i] >> 10) & 0x1f; }
-  setFrame(i, v)   { this.buffer[i] = (this.buffer[i] & ~0x7c00) | ((v & 0x1f) << 10); }
-
-  getReflected(i)  { return (this.buffer[i] >> 15) & 1; }
-  setReflected(i,v){ this.buffer[i] = (this.buffer[i] & ~0x8000) | ((v & 1) << 15); }
-
-  setAll(i, type, frame, reflected) {
-    this.buffer[i] =
-      (type & 0x03ff) |
+  encodeAt(index, type, frame, reflected) {
+    this.buffer[index] =
+      type & 0x03ff |
       ((frame & 0x1f) << 10) |
       ((reflected & 1) << 15);
   }
@@ -98,14 +99,6 @@ class ShapeIDArray {
     }
     return new ShapeIDView(this.buffer, i);
   }
-
-  // Returns a reusable ShapeIDView for iteration (fast)
-  getReusableView(i) {
-    if (i < 0 || i >= this.buffer.length) {
-      throw new RangeError("Index out of bounds");
-    }
-    return this._viewCache.setTarget(this.buffer, i);
-  }
 }
 
 const TILES_PER_CHUNK = 16;
@@ -117,18 +110,20 @@ class U7Chunk {
   }
 
   // get a tile ShapeID from the chunk (x, y: 0~15)
-  get(x, y) {
-    return this.shapeArray.getReusableView(y * TILES_PER_CHUNK + x);
+  get(x, y, out) {
+    this.shapeArray.decodeAt(y * TILES_PER_CHUNK + x, out);
   }
 
   // set a tile in the chunk
   set(x, y, type, frame, reflected) {
-    this.shapeArray.setAll(y * TILES_PER_CHUNK + x, type, frame, reflected);
+    this.shapeArray.encodeAt(y * TILES_PER_CHUNK + x, type, frame, reflected);
   }
 }
 
 export class U7Chunks {
-  constructor(uint8Buffer) {
+  constructor() {}
+
+  load(uint8Buffer) {
     // Wrap as ShapeIDArray
     this.shapeIDs = new ShapeIDArray(uint8Buffer);
 

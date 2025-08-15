@@ -1,9 +1,8 @@
 import { fileStore } from './filestore.js';
-import { ShapeFile } from './shapefile.js';
-import { FlexFile } from './flexfile.js';
 import { WebGLIndexedRenderer } from './webgl_indexed_renderer.js';
-import { U7Palettes } from './u7palettes.js';
-import { U7Chunks } from './u7chunks.js';
+import { palettes, shapesVga, worldMap } from './globals.js';
+
+console.log("=== world_viewer ===");
 
 const JSZip = window.JSZip;
 if (!JSZip) throw new Error("JSZip not loaded");
@@ -14,10 +13,6 @@ const gl = canvas.getContext('webgl2');
 if (!gl) alert("WebGL2 not supported");
 
 console.log(`GL max texture size: ${gl.getParameter(gl.MAX_TEXTURE_SIZE)}`);
-
-const palettes = new U7Palettes();
-let chunks = null;
-const shapeFile = new ShapeFile();
 
 const renderer = new WebGLIndexedRenderer(canvas);
 renderer.setPalette(palettes.current());
@@ -46,6 +41,12 @@ const displayFrameRate = (() => {
 
 // === runloop ===
 let frame = 0;
+let worldX = 0, worldY = 0;
+const PIXELS_PER_TILE = 8;
+const TILES_PER_CHUNK = 16;
+const CHUNKS_PER_SUPERCHUNK = 16;
+const SUPERCHUNKS_PER_WORLD = 12;
+const PIXELS_PER_WORLD = SUPERCHUNKS_PER_WORLD * CHUNKS_PER_SUPERCHUNK * TILES_PER_CHUNK * PIXELS_PER_TILE; // 24576
 
 function runloop(timestamp) {
   displayFrameRate(timestamp);
@@ -53,40 +54,12 @@ function runloop(timestamp) {
   requestAnimationFrame(runloop);
 
   // render something here
-  const {width, height} = canvas;
-  const palW = Math.min(width, 256);
-  const palH = Math.min(height, 256);
-  const frameBuffer = renderer.getBuffer().p;
-  if (frame === 10) {
-    for (let y = 0; y < palH; y++) {
-      for (let x = 0; x < palW; x++) {
-        frameBuffer[y * width + x] = Math.floor(x/16) + Math.floor(y/16)*16;
-      }
-    }
-  }
+  //palettes.draw(renderer.getBuffer());
 
-  if (shapeFile.shapes) {
-    //const shapeFrames = shapeFile.shapes[0].frames;
-    //for (let i = 0; i < shapeFrames.length; i++) {
-    //  shapeFrames[i].draw(renderer.getBuffer(), i * 8+7, 256 + 7);
-    //}
-
-    if (frame === 30) {
-      const {width, height} = renderer.getBuffer();
-      const shape150 = shapeFile.shapes[150];
-      const frames150 = shape150.frames;
-      const frame0 = frames150[0];
-      const x = Math.floor(frame0.width/2);
-      const y = 262 + frame0.height;
-
-      const halfW = Math.floor(frame0.width/2);
-      const halfH = Math.floor(frame0.height/2);
-
-      frame0.draw(renderer.getBuffer(), 300, 300, null, false);
-      frame0.draw(renderer.getBuffer(), width, halfH, null, true);
-      frame0.draw(renderer.getBuffer(), halfW, height, null, true);
-      frame0.draw(renderer.getBuffer(), width, height, null, true);
-    }
+  if (shapesVga.shapes) {
+    const frameBuffer = renderer.getBuffer();
+    //if (frame !== 30)
+    worldMap.draw(frameBuffer, worldX, worldY);
   }
 
   renderer.render();
@@ -95,6 +68,51 @@ function runloop(timestamp) {
 }
 
 requestAnimationFrame(runloop); // trigger first time
+
+// === Handle Canvas Dragging ===
+let isCanvasDragging = false;
+let dragCanvasOffsetX = 0;
+let dragCanvasOffsetY = 0;
+let lastMapX, lastMapY;
+
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+canvas.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return; // not left button
+
+  // lock the pointer event，even the cursor is out of canvas,
+  // still can receive pointerup/pointermove
+  canvas.setPointerCapture(e.pointerId);
+
+  isCanvasDragging = true;
+
+  const rect = canvas.getBoundingClientRect();
+  dragCanvasOffsetX = e.clientX - rect.left;
+  dragCanvasOffsetY = e.clientY - rect.top;
+  lastMapX = worldX;
+  lastMapY = worldY;
+
+  e.preventDefault();
+});
+
+canvas.addEventListener("pointermove", (e) => {
+  if (!isCanvasDragging) return;
+
+  worldX = lastMapX - Math.floor((e.clientX - dragCanvasOffsetX));
+  worldY = lastMapY - Math.floor((e.clientY - dragCanvasOffsetY));
+
+  if (worldX < 0) worldX += PIXELS_PER_WORLD;
+  else if (worldX >= PIXELS_PER_WORLD) worldX -= PIXELS_PER_WORLD;
+
+  if (worldY < 0) worldY += PIXELS_PER_WORLD;
+  else if (worldY >= PIXELS_PER_WORLD) worldY -= PIXELS_PER_WORLD;
+});
+
+canvas.addEventListener("pointerup", (e) => {
+  // release pointer capture
+  canvas.releasePointerCapture(e.pointerId);
+  isCanvasDragging = false;
+});
 
 // === Handle Canvas Resizing ===
 function resizeCanvas() {
@@ -125,6 +143,7 @@ const fileMap = new Map();
 
 const expectedFiles = [
   "static/u7chunks", "static/u7map", "static/palettes.flx", "static/shapes.vga",
+  "static/tfa.dat", "static/shpdims.dat"
 ];
 
 function findFileIndex(expectedFiles, inputFileName) {
@@ -202,42 +221,21 @@ async function updateChecklist() {
   checklistDiv.textContent = result;
 }
 
-
-
-function parseShapeFile(uint8) {
-  shapeFile.load(uint8);
-  console.log(`${shapeFile}:shape0 ${shapeFile.shapes[0]}`);
-  const a = shapeFile.collectSize();
-}
-
-function loadChunkFile(uint8) {
-  chunks = new U7Chunks(uint8);
-  console.log(`chunk count: ${chunks.chunkCount}`);
-
-  const chunk0 = chunks.getChunk(0);
-  console.log(chunk0);
-  const chunk1 = chunks.getChunk(1);
-  console.log(chunk1);
-
-  const tile0 = chunk0.get(0,0);
-  console.log(tile0.toString());
-
-  console.log(`${chunk1.get(0,0)}, ${chunk1.get(1,0)}`);
-}
-
-function loadPalettes(uint8) {
-  palettes.load(uint8)
-  palettes.select(0);
-  renderer.setPalette(palettes.current());
-}
-
 async function tryInitializeViewer() {
   if (expectedFiles.every(f => fileMap.has(f))) {
     console.log("everything is ready!");
 
-    loadPalettes(fileMap.get("static/palettes.flx"));
-    parseShapeFile(fileMap.get("static/shapes.vga"));
-    loadChunkFile(fileMap.get("static/u7chunks"));
+    // load shapes.vga
+    shapesVga.load(fileMap.get("static/shapes.vga"));
+    console.log(`${shapesVga}:shape0 ${shapesVga.shapes[0]}`);
+
+    // load palettes
+    palettes.load(fileMap.get("static/palettes.flx"))
+    palettes.select(0);
+    renderer.setPalette(palettes.current());
+
+    // load world map
+    worldMap.load(fileMap);
   }
 }
 
