@@ -59,21 +59,22 @@ function runloop(timestamp) {
   if (shapesVga.shapes) {
     timeQueue.trigger(timestamp);
 
+    if ((frame % 8) === 0) {
+      palettes.rotateColors(0xfc, 0xfc+4);
+      palettes.rotateColors(0xf8, 0xf8+4);
+      palettes.rotateColors(0xf4, 0xf4+4);
+      palettes.rotateColors(0xf0, 0xf0+4);
+      palettes.rotateColors(0xe8, 0xe8+8);
+      palettes.rotateColors(0xe0, 0xe0+8);
+      renderer.setPalette(palettes.current());
+    }
+
     //if (frame !== 30)
     worldMap.draw(frameBuffer, worldX, worldY);
   }
-
-  if ((frame % 8) === 0) {
-    palettes.rotateColors(0xfc, 0xfc+4);
-    palettes.rotateColors(0xf8, 0xf8+4);
-    palettes.rotateColors(0xf4, 0xf4+4);
-    palettes.rotateColors(0xf0, 0xf0+4);
-    palettes.rotateColors(0xe8, 0xe8+8);
-    palettes.rotateColors(0xe0, 0xe0+8);
-    renderer.setPalette(palettes.current());
+  else {
+    palettes.draw(frameBuffer);
   }
-
-  //palettes.draw(frameBuffer);
 
   renderer.render();
 
@@ -83,73 +84,23 @@ function runloop(timestamp) {
 requestAnimationFrame(runloop); // trigger first time
 
 // === Handle Canvas Dragging ===
-let isCanvasDragging = false;
-let dragCanvasOffsetX = 0;
-let dragCanvasOffsetY = 0;
-let lastMapX, lastMapY;
-
-canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-
-canvas.addEventListener("pointerdown", (e) => {
-  if (e.button !== 0) return; // not left button
-
-  // lock the pointer event，even the cursor is out of canvas,
-  // still can receive pointerup/pointermove
-  canvas.setPointerCapture(e.pointerId);
-
-  isCanvasDragging = true;
-
-  const rect = canvas.getBoundingClientRect();
-  dragCanvasOffsetX = e.clientX - rect.left;
-  dragCanvasOffsetY = e.clientY - rect.top;
-  lastMapX = worldX;
-  lastMapY = worldY;
-
-  e.preventDefault();
-});
-
-canvas.addEventListener("pointermove", (e) => {
-  if (!isCanvasDragging) return;
-
-  worldX = lastMapX - Math.floor((e.clientX - dragCanvasOffsetX));
-  worldY = lastMapY - Math.floor((e.clientY - dragCanvasOffsetY));
-
-  if (worldX < 0) worldX += PIXELS_PER_WORLD;
-  else if (worldX >= PIXELS_PER_WORLD) worldX -= PIXELS_PER_WORLD;
-
-  if (worldY < 0) worldY += PIXELS_PER_WORLD;
-  else if (worldY >= PIXELS_PER_WORLD) worldY -= PIXELS_PER_WORLD;
-});
-
-canvas.addEventListener("pointerup", (e) => {
-  // release pointer capture
-  canvas.releasePointerCapture(e.pointerId);
-  isCanvasDragging = false;
-});
-
-// === Handle Canvas Resizing ===
-function resizeCanvas() {
-  //const dpr = window.devicePixelRatio || 1;
-  const dpr = 1;
-
-  const displayWidth  = Math.floor(canvas.clientWidth * dpr);
-  const displayHeight = Math.floor(canvas.clientHeight * dpr);
-
-  console.log(`Resize canvas to ${displayWidth}x${displayHeight} (DPR: ${dpr})`);
-
-  if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
-    canvas.width = displayWidth;
-    canvas.height = displayHeight;
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clearColor(0.0, 0.2, 0.0, 1.0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-
-    renderer.resize(displayWidth, displayHeight);
-  }
+export function setWorldPosition(x, y) {
+  worldX = (x + PIXELS_PER_WORLD) % PIXELS_PER_WORLD;
+  worldY = (y + PIXELS_PER_WORLD) % PIXELS_PER_WORLD;
 }
 
-window.addEventListener('resize', resizeCanvas);
-resizeCanvas(); // trigger first time
+export function getWorldPosition() {
+  return { x: worldX, y: worldY };
+}
+
+// === Handle Canvas Resizing ===
+export function onResizeCanvas(width, height) {
+  gl.viewport(0, 0, width, height);
+  gl.clearColor(0.0, 0.2, 0.0, 1.0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  renderer.resize(width, height);
+}
 
 // === File Handling ===
 const fileMap = new Map();

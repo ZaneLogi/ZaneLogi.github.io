@@ -90,15 +90,36 @@ export class WebGLIndexedRenderer {
     const gl = this.gl;
 
     // Palette texture (256x1 RGBA)
+    const palette = new Uint8Array(256 * 4);
+    for (let i = 0, offset = 0; i < 256; i++, offset += 4) {
+      palette[offset] = i;
+      palette[offset+1] = i;
+      palette[offset+2] = i;
+      palette[offset+3] = 255;
+    }
+
     this.paletteTex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, palette);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 
     // Framebuffer texture (will resize on demand)
+    const {width, height} = this.canvas;
+    const p = new Uint8Array(width * height);
+    this.frameBuffer.p = p;
+    this.frameBuffer.pitch = width;
+    this.frameBuffer.width = width;
+    this.frameBuffer.height = height;
+
     this.indexTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.indexTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE, p);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
     const u_indexed = gl.getUniformLocation(this.program, "u_indexedTexture");
     const u_palette = gl.getUniformLocation(this.program, "u_paletteTexture");
@@ -139,7 +160,7 @@ export class WebGLIndexedRenderer {
 
   render() {
     const gl = this.gl;
-    const { width, height } = this.canvas;
+    const { width, height } = this.frameBuffer;
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.indexTex);

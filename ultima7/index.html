@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8">
     <title>Ultima VII Map Viewer</title>
-    <link rel="stylesheet" href="./index.css">
-    <link rel="stylesheet" href="./floating_window.css">
-    <link rel="stylesheet" href="./info_window.css">
+    <link rel="stylesheet" href="./css/index.css">
+    <link rel="stylesheet" href="./css/floating_window.css">
+    <link rel="stylesheet" href="./css/info_window.css">
   </head>
   <body>
     <canvas id="glcanvas"></canvas>
@@ -33,6 +33,10 @@
         await import("./unittest_filestore.js");
         await import("./unittest_flexfile.js");
         await import("./map_viewer.js");
+
+        const { setupCanvasDragging } = await import("./canvas_controls.js");
+        const canvas = document.getElementById("glcanvas");
+        setupCanvasDragging(canvas, 12*16*16*8);
     </script>
   </body>
 </html>
