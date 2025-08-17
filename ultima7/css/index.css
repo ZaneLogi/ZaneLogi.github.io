@@ -10,3 +10,15 @@ canvas {
   width: 100vw;
   height: 100vh;
 }
+
+#tooltip {
+  position: absolute;
+  padding: 4px 6px;
+  background: #111;
+  color: #0f0;
+  font-family: monospace;
+  font-size: 12px;
+  border: 1px solid #0f0;
+  pointer-events: none;
+  display: none;
+}

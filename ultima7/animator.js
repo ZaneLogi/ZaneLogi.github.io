@@ -1,4 +1,4 @@
-import { shapesVga, timeQueue } from "./globals.js";
+import { timeQueue } from "./globals.js";
 
 export class FrameAnimator {
   static LOOPING = 0;
