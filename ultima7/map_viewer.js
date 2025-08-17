@@ -1,6 +1,9 @@
 import { fileStore } from './filestore.js';
 import { WebGLIndexedRenderer } from './webgl_indexed_renderer.js';
-import { palettes, shapesVga, worldMap, timeQueue, PIXELS_PER_CHUNK } from './globals.js';
+import {
+  palettes, shapesVga, worldMap, timeQueue,
+  PIXELS_PER_CHUNK
+} from './globals.js';
 
 console.log("=== world_viewer ===");
 
@@ -83,6 +86,7 @@ function runloop(timestamp) {
 }
 
 requestAnimationFrame(runloop); // trigger first time
+
 
 // === Handle Canvas Dragging ===
 export function setWorldPosition(x, y) {

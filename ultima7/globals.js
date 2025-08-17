@@ -51,3 +51,5 @@ export const occlude = new Occlude();
 export const worldMap = new WorldMap();
 export const timeQueue = new TimeQueue();
 
+export const uilevel = {highestVisibleLevel: 15};
+

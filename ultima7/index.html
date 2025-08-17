@@ -26,6 +26,22 @@
       </div>
     </div>
 
+    <!-- Floating Level Window -->
+    <div class="floatingWindow" id="levelWindow">
+      <div class="floatingHeader">Highest Visible Level
+        <div class="headerButtons">
+          <button class="collapse-btn">−</button>
+        </div>
+      </div>
+    <div class="floatingContent">
+      <label for="levelSelect">Show up to:</label>
+      <select id="levelSelect" style="margin-top: 8px;"></select>
+      <div style="margin-top: 8px; font-size: 12px; opacity: 0.8;">
+        “Ground” is below level 0.  
+        </div>
+      </div>
+    </div>
+
     <script src="./floating_window_manager.js"></script>
     <!--script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script-->
     <script src="./libs/jszip.min.js"></script>
@@ -35,9 +51,12 @@
         await import("./unittest_flexfile.js");
         await import("./map_viewer.js");
 
-        const { setupCanvasDragging } = await import("./canvas_controls.js");
+        const { setupCanvasDragging } = await import("./ui_canvas_controls.js");
         const canvas = document.getElementById("glcanvas");
         setupCanvasDragging(canvas, 12*16*16*8);
+
+        const { setupLevelWindow } = await import("./ui_level_control.js");
+        setupLevelWindow();
     </script>
   </body>
 </html>

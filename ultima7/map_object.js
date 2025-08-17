@@ -1,6 +1,7 @@
 import { shapesVga, tfa, occlude, worldMap } from "./globals.js";
 import { LinkedList } from "./linked_list.js";
 import {
+  uilevel,
   PIXELS_PER_TILE,
   PIXELS_PER_CHUNK,
   PIXELS_PER_WORLD,
@@ -94,9 +95,8 @@ export class MapObject {
       }
     }
 
-    // todo: set the level of the view
-    //if (this.z > 2)
-    //  return;
+    if (this.z > uilevel.highestVisibleLevel)
+      return;
 
     // Finally, paint this one.
     ox += this.xoffset;
