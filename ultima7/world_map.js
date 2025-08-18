@@ -1,7 +1,8 @@
-import { terrains, shpdims, tfa, occlude } from "./globals.js";
 import { FlexFile } from "./flexfile.js";
 import { MapChunk } from "./map_chunk.js";
-import { MapObject } from "./map_object.js";
+import { MapObject, StandardIregObject, ContainerObject, SpellbookObject } from "./map_object.js";
+import { ShapeClass } from "./tfa.js";
+import { terrains, shpdims, tfa, occlude, ShapeID, worldMap } from "./globals.js";
 
 import {
   CHUNKS_PER_SUPERCHUNK,
@@ -12,6 +13,7 @@ import {
   prevChunk,
   nextChunk
 } from "./globals.js";
+
 
 export class WorldMap {
   constructor() {
@@ -226,6 +228,10 @@ export class WorldMap {
       for (let x = 0; x < CHUNKS_PER_SUPERCHUNK; x++) {
         const chunkIndex = baseIndex + x;
 
+        //debug
+        //if (absChunkX + x != 24 || absChunkY + y != 19)
+        //  continue;
+
         const n = this.loadIfixChunkObjects(
           file.objData(chunkIndex),
           absChunkX + x,
@@ -240,7 +246,35 @@ export class WorldMap {
   }
 
   loadIregObjects(sx, sy) {
-    // TODO: implement actual loading logic
+    // compute filename (e.g., "gamedat/u7ireg00")
+    const index = sx + sy * SUPERCHUNKS_PER_WORLD;
+    const hex = index.toString(16).padStart(2, "0");
+    const filename = `gamedat/u7ireg${hex}`;
+
+    const uint8 = this.fileMap.get(filename);
+    const stream = {data:uint8, offset:0};
+
+    // reg_items = 16x16 chk_items (one for each chunk of the region)
+    // chk_items = item, item, ..., item, 00 (or just 00 if no item for this chunk)
+    const absChunkX = sx * CHUNKS_PER_SUPERCHUNK;
+    const absChunkY = sy * CHUNKS_PER_SUPERCHUNK;
+    let itemsLoaded = 0;
+
+    for (let y = 0, baseIndex = 0; y < CHUNKS_PER_SUPERCHUNK;
+      y++, baseIndex += CHUNKS_PER_SUPERCHUNK)
+    {
+      for (let x = 0; x < CHUNKS_PER_SUPERCHUNK; x++) {
+
+        const n = this.loadIregChunkObjects(
+          stream,
+          absChunkX + x,
+          absChunkY + y
+        );
+        itemsLoaded += n;
+      }
+    }
+
+    console.log(`${filename} (${itemsLoaded} items loaded)`);
     return true;
   }
 
@@ -269,20 +303,96 @@ export class WorldMap {
 
       const obj = new MapObject(absChunkX, absChunkY, xtile, ytile, z, shapeId);
       mapChunk.addObj(obj);
-/*
-todo: animated IFIX objects
-      let newObj;
-      if (shapeType.isAnimated) {
-        console.warn("Animated IFIX object detected — not yet implemented");
-        newObj = new AnimatedIfixComponent(ifixData, absChunkX, absChunkY);
-      } else {
-        newObj = new IfixComponent(ifixData, absChunkX, absChunkY);
-      }
-
-      this.getMapChunk(absChunkX, absChunkY).add(newObj);
-*/
     }
 
     return Math.floor(chunkData.length / ITEM_SIZE);
+  }
+
+  loadIregChunkObjects(stream, absChunkX, absChunkY, container = null) {
+    const xchunkInS = absChunkX % CHUNKS_PER_SUPERCHUNK;
+    const ychunkInS = absChunkY % CHUNKS_PER_SUPERCHUNK;
+    let itemCount = 0;
+
+    //for debug
+    //const test = (absChunkX === 24 && absChunkY === 19);
+
+    while (stream.offset + 1 < stream.data.length) {
+      const entlen = stream.data[stream.offset++];
+      if (entlen === 0) {// end of a chunk
+        if (container) throw new Error("Unexpected value 0");
+        return itemCount;
+      }
+
+      if (entlen === 1) {// end of items in a container
+        if (!container) throw new Error("Unpexted value 1");
+        return itemCount;
+      }
+
+      if (entlen != 6 && entlen != 12 && entlen != 18)
+        throw new Error("Invalid entry length!");
+
+      const data = stream.data.subarray(stream.offset, stream.offset + entlen);
+      stream.offset += entlen;
+      itemCount++;
+
+      const xchunk = (data[0] >> 4) & 0x0f;
+      const ychunk = (data[1] >> 4) & 0x0f; 
+      const shapeId = new ShapeID(data[2] | data[3] << 8);
+
+      if (!container && (xchunk !== xchunkInS || ychunk !== ychunkInS ))
+        throw new Error("Mismatch chunk location!");
+
+      const shapeClass = tfa.getReusableView(shapeId.type).shapeClass;
+      if (shapeClass === ShapeClass.spellbook) {
+        const obj = new SpellbookObject(data, absChunkX, absChunkY);
+
+        if (container) {
+          container.objList.push(obj);
+        } else {
+          const mapChunk = worldMap.getMapChunk(absChunkX, absChunkY);
+          mapChunk.addObj(obj);
+        }
+      }
+      else if (shapeClass === ShapeClass.hatchable) {
+
+      }
+      else if (shapeClass === ShapeClass.barge) {
+
+      }
+      else if (shapeClass === ShapeClass.virtueStone) {
+
+      }
+      else if (shapeClass === ShapeClass.container) {
+        const obj = new ContainerObject(data, absChunkX, absChunkY);
+
+        if (container) {
+          container.objList.push(obj);
+        }
+        else {
+          const mapChunk = worldMap.getMapChunk(absChunkX, absChunkY);
+          mapChunk.addObj(obj);
+        }
+
+        if (obj.type > 0) { // (0000 if empty)
+          itemCount += this.loadIregChunkObjects(stream,
+            !container ? -1 : absChunkX-1, obj.type, obj);
+        }
+      }
+      else {
+        if (entlen !== 6)
+          throw new Error("the entry length !== 6");
+
+        const obj = new StandardIregObject(data, absChunkX, absChunkY);
+
+        if (container) {
+          container.objList.push(obj);
+        } else {
+          const mapChunk = worldMap.getMapChunk(absChunkX, absChunkY);
+          mapChunk.addObj(obj);
+        }
+      }
+    }
+
+    return itemCount;
   }
 }

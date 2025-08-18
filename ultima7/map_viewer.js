@@ -44,7 +44,7 @@ const displayFrameRate = (() => {
 
 // === runloop ===
 let frame = 0;
-let worldX = 1360, worldY = 2130;
+let worldX = 2724, worldY = 2244;
 import {
   PIXELS_PER_TILE,
   TILES_PER_CHUNK,
@@ -149,6 +149,13 @@ const expectedFiles = [
 for (let i = 0; i < 144; i++) {
   const hex = i.toString(16).padStart(2, '0');  // "00" .. "8f"
   const name = `STATIC/U7IFIX${hex}`;
+  expectedFiles.push(name.toLowerCase());
+}
+
+// Add U7IREG00 to U7IREG8F (12 x 12 = 144 superchunks)
+for (let i = 0; i < 144; i++) {
+  const hex = i.toString(16).padStart(2, '0');  // "00" .. "8f"
+  const name = `GAMEDAT/U7IREG${hex}`;
   expectedFiles.push(name.toLowerCase());
 }
 

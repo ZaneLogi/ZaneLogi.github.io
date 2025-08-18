@@ -10,7 +10,7 @@ export class FrameAnimator {
     this.created = 0;
     this.delay = 100;
     this.type = FrameAnimator.LOOPING;
-    this.frames = this.obj.frames.length;
+    this.frameCount = this.obj.frameImages.length;
   }
 
   requestAnimation() {
@@ -27,7 +27,7 @@ export class FrameAnimator {
 
   handleEvent(curTime, context) {
     let frameNum = Math.floor((curTime / this.delay) + this.created);
-    frameNum %= this.frames;
+    frameNum %= this.frameCount;
     frameNum += this.firstFrame;
     this.obj.updateFrame(frameNum);
 

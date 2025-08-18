@@ -82,3 +82,43 @@ export class TFA {
     return new TFAView(this.buffer, i);
   }
 }
+
+function createEnum(definition) {
+  const forward = Object.freeze({ ...definition });
+  const reverse = Object.freeze(
+    Object.fromEntries(
+      Object.entries(definition).map(([k, v]) => [v, k])
+    )
+  );
+
+  return Object.freeze({
+    ...forward, // expose keys as direct properties
+    getName(value) {
+      return reverse[value] ?? null;
+    },
+    getValue(name) {
+      return forward[name] ?? null;
+    }
+  });
+}
+
+export const ShapeClass = createEnum({
+  unusable: 0,          // Trees
+  quality: 2,
+  quantity: 3,          // Can have more than 1: coins, arrows
+  hp: 4,                // Breakable items (if hp != 0)
+  qualityFlags: 5,      // Item quality is set of flags
+  container: 6,
+  hatchable: 7,         // Eggs, traps, moongates
+  spellbook: 8,
+  barge: 9,
+  virtueStone: 11,
+  monster: 12,          // Non-human
+  human: 13,            // Human NPCs
+  building: 14          // Roof, window, mountain
+});
+
+// ShapeClass.monster;       // 12
+// ShapeClass.getName(12);   // "monster"
+// ShapeClass.getValue("hp") // 4
+

@@ -1,5 +1,6 @@
-import { shapesVga, tfa, occlude, worldMap } from "./globals.js";
+import { shapesVga, tfa, occlude, worldMap, ShapeID } from "./globals.js";
 import { LinkedList } from "./linked_list.js";
+import { FrameAnimator } from "./animator.js";
 import {
   uilevel,
   PIXELS_PER_TILE,
@@ -8,6 +9,7 @@ import {
   TILES_PER_CHUNK
 } from "./globals.js";
 
+// === MapObject ===
 export class MapObject {
   constructor(xchunk, ychunk, xtile, ytile, lift, shapeId) {
     this.xchunk = xchunk;
@@ -20,7 +22,9 @@ export class MapObject {
     const z = this.z * 4;
     this.xoffset = xtile * PIXELS_PER_TILE + 7 - z;
     this.yoffset = ytile * PIXELS_PER_TILE + 7 - z;
-    this.frameImage = shapesVga.shapes[shapeId.type].frames[shapeId.frame];
+
+    this.frameImages = shapesVga.shapes[shapeId.type].frames;
+    this.frameImage = this.frameImages[shapeId.frame];
 
     this.dependencies = new LinkedList(); // Objects which must be painted before this can be rendered.
     this.dependors = new LinkedList();    // Objects which must be painted after.
@@ -39,12 +43,12 @@ export class MapObject {
     const tz = this.tileCoord.z;
     let nx, ny, nz;
     if (!shapeId.reflected) {
-      nx = objTFA.shapeXSize + 1;
-      ny = objTFA.shapeYSize + 1;
+      nx = objTFA.shapeXSize;
+      ny = objTFA.shapeYSize;
     }
     else {
-      nx = objTFA.shapeYSize + 1;
-      ny = objTFA.shapeXSize + 1;
+      nx = objTFA.shapeYSize;
+      ny = objTFA.shapeXSize;
     }
     nz = objTFA.shapeHeight;
 
@@ -64,7 +68,7 @@ export class MapObject {
       occluded
     };
 
-    const frameImage = shapesVga.shapes[shapeId.type].frames[shapeId.frame];
+    const frameImage = this.frameImage;
     const left = tx * PIXELS_PER_TILE + 7 - frameImage.hotspotX;
     const right = left + frameImage.width;
     const top = ty * PIXELS_PER_TILE + 7 - frameImage.hotspotY;
@@ -72,12 +76,23 @@ export class MapObject {
 
     // map area in pixel unit
     this.area = {left, right, top, bottom, width:right-left, height:bottom-top};
+
+    // isAnimated?
+    if (objTFA.isAnimated) {
+      this.animator = new FrameAnimator(this);
+    }
+  }
+
+  updateFrame(frameIndex) {
+    this.frameImage = this.frameImages[frameIndex];
   }
 
   draw(frameBuffer, ox, oy, dependent=false) {
     const renderSequence = worldMap.currentRenderSequence();
     if (this.renderSeq === renderSequence)
       return;
+
+    this.animator?.requestAnimation(); // add this to timeQueue if available
 
     this.renderSeq = renderSequence;
 
@@ -331,4 +346,60 @@ function compareRange(from1, to1, from2, to2) {
   }
 
   return {cmp, overlap};
+}
+
+// === IregObject ===
+class IregObject extends MapObject {
+  constructor(uint8, xchunk, ychunk, z) {
+    super(xchunk, ychunk,
+      uint8[0] & 0x0f,
+      uint8[1] & 0x0f,
+      z,
+      new ShapeID(uint8[2] | uint8[3] << 8));
+    this.data = uint8;
+  }
+}
+
+export class StandardIregObject extends IregObject {
+  constructor(uint8, xchunk, ychunk) {
+    super(uint8, xchunk, ychunk, (uint8[4] >> 4) & 0x0f);
+  }
+}
+
+export class ExtendedIregObject extends IregObject {
+  constructor(uint8, xchunk, ychunk) {
+    super(uint8, xchunk, ychunk, (uint8[9] >> 4) & 0x0f);
+  }
+}
+
+export class ContainerObject extends ExtendedIregObject {
+  constructor(uint8, xchunk, ychunk) {
+    super(uint8, xchunk, ychunk);
+    this.objList = [];
+  }
+
+  get type() {return this.data[4] | this.data[5] << 8;}
+  get region() {return this.data[6];}
+  get quality() {return this.data[7];}
+  get quantity() {return this.data[8];}
+  get regionRef() {return this.data[9] & 0x0f;}
+  get resist() {return this.data[10];}
+  get flags() {return this.data[11];}
+}
+
+export class SpellbookObject extends ExtendedIregObject {
+  constructor(uint8, xchunk, ychunk) {
+    super(uint8, xchunk, ychunk);
+  }
+
+  get circle1() {return this.data[4];}
+  get circle2() {return this.data[5];}
+  get circle3() {return this.data[6];}
+  get circle4() {return this.data[7];}
+  get circle5() {return this.data[8];}
+  get circle6() {return this.data[10];}
+  get circle7() {return this.data[11];}
+  get circle8() {return this.data[12];}
+  get circle9() {return this.data[13];}
+  get flags() {return this.data[14] | this.data[15] << 8 | this.data[16] << 16 | this.data[17] << 24;}
 }

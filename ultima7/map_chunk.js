@@ -1,9 +1,9 @@
-import { shapesVga, terrains, tfa } from "./globals.js";
-import { FrameAnimator } from "./animator.js";
+import { shapesVga, terrains } from "./globals.js";
 import { LinkedList } from "./linked_list.js";
 import { MapObject } from "./map_object.js";
 import { prevChunk, nextChunk, ShapeID } from "./globals.js";
 
+// === Ground ===
 class Ground {
   constructor(xtile, ytile, shapeId) {
     this.x = xtile * 8 + 7; // hotspot (7,7)
@@ -17,29 +17,7 @@ class Ground {
   }
 }
 
-class TerrainOverlay extends MapObject {
-  constructor(xchunk, ychunk, xtile, ytile, z, shapeId) {
-    super(xchunk, ychunk, xtile, ytile, z, shapeId);
-  }
-}
-
-class AnimatedTerrainOverlay extends MapObject {
-  constructor(xchunk, ychunk, xtile, ytile, z, shapeId) {
-    super(xchunk, ychunk, xtile, ytile, z, shapeId);
-    this.frames = shapesVga.shapes[shapeId.type].frames;
-    this.animator = new FrameAnimator(this);
-  }
-
-  draw(frameBuffer, ox, oy) {
-    this.animator.requestAnimation(); // add this to timeQueue
-    super.draw(frameBuffer, ox, oy);
-  }
-
-  updateFrame(frameIndex) {
-    this.frameImage = this.frames[frameIndex];
-  }
-}
-
+// === MapChunk ===
 export class MapChunk {
   constructor(xchunk, ychunk, terrainId) {
     this.xchunk = xchunk;
@@ -61,15 +39,12 @@ export class MapChunk {
       for (let x = 0; x < 16; x++) {
         const shapeId = new ShapeID(shapeArray.getValue(baseIndex + x));
         const frameImage = shapes[shapeId.type].frames[shapeId.frame];
+
         if (frameImage.rle) {
-          let obj;
-          if (tfa.getReusableView(shapeId.type).isAnimated) {
-            obj = new AnimatedTerrainOverlay(xchunk, ychunk, x, y, 0, shapeId);
-          }
-          else {
-            obj = new TerrainOverlay(xchunk, ychunk, x, y, 0, shapeId);
-          }
-         this.addObj(obj);
+          //for debug:
+          //if (xchunk !== 24 || ychunk !== 19 || x >= 8 || y <= 10) continue;
+          const obj = new MapObject(xchunk, ychunk, x, y, 0, shapeId);
+          this.addObj(obj);
         }
         else {
           this.ground.push(new Ground(x, y, shapeId));
@@ -85,6 +60,8 @@ export class MapChunk {
     }
 
     if (obj.z > 0 || obj.spaceInfo.nz > 0) { // not flat
+      //for debug:
+      //console.log(obj);
       this.addDependencies(obj);
 
       if (this.fromBelow) // Overlaps from below?
