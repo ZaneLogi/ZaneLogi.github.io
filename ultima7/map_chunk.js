@@ -9,11 +9,11 @@ class Ground {
     this.x = xtile * 8 + 7; // hotspot (7,7)
     this.y = ytile * 8 + 7;
     this.frameImage = shapesVga.shapes[shapeId.type].frames[shapeId.frame];
-    // todo: handle shapeId.reflected
+    this.reflected = shapeId.reflected;
   }
 
   draw(frameBuffer, ox, oy) {
-    this.frameImage.draw(frameBuffer, ox + this.x, oy + this.y);
+    this.frameImage.draw(frameBuffer, ox + this.x, oy + this.y, null, this.reflected);
   }
 }
 

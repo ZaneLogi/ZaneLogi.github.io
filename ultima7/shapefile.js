@@ -84,14 +84,79 @@ function drawPlainClip(frameBuffer, x, y, clipRect, shapeFrame) {
   }
 }
 
-function drawPlainReflect(frameBuffer, x, y, clipRect, shapeFrame) {
-  // useless, when executed, it should be asserted
-  throw new Error("drawPlainReflect not supported!");
+function drawPlainReflect(frameBuffer, x, y, shapeFrame) {
+  // this is only correct for the square image with the hotspot on the diagoanl
+  const {p, pitch} = frameBuffer;
+  const {width, height} = shapeFrame;
+  const uint8 = shapeFrame.uint8;
+  const left = x - shapeFrame.hotspotY;
+  const top = y - shapeFrame.hotspotX;
+  let di = top * pitch + left;
+  let si = 0;
+  for (let h = height; h > 0; --h, di++) {
+    for (let w = width, offset = di; w > 0; --w, offset += pitch) {
+      p[offset] = uint8[si++];
+    }
+  }
 }
 
 function drawPlainReflectClip(frameBuffer, x, y, clipRect, shapeFrame) {
-  // useless, when executed, it should be asserted
-  throw new Error("drawPlainReflectClip not supported!");
+  const {p, pitch} = frameBuffer;
+  const {width, height} = shapeFrame;
+  const uint8 = shapeFrame.uint8;
+  const left = x - shapeFrame.hotspotY;
+  const top = y - shapeFrame.hotspotX;
+  let di = top * pitch + left;
+  let si = 0;
+
+  let h = height, skipTop = 0, skipBottom = 0;
+  // clip top
+  if ( top < clipRect.top ) {
+    const diff = clipRect.top - top;
+    h -= diff;
+    if ( h <= 0 )
+      return; // completely outside
+    skipTop = diff;
+  }
+  // clip bottom
+  if ( top + height > clipRect.bottom ) {
+    const diff = top + height - clipRect.bottom;
+    h -= diff;
+    if ( h <= 0 )
+      return; // completely outside
+    skipBottom = diff;
+  }
+  // clip left
+  let w = width, skipLeft = 0, skipRight = 0;
+  if (left < clipRect.left ) {
+    const diff = clipRect.left - left;
+    w -= diff;
+    if ( w <= 0 )
+      return; // completely outside
+    skipLeft = diff;
+  }
+  // clip right
+  if ( left + width > clipRect.right ) {
+    const diff = left + width - clipRect.right;
+    w -= diff;
+    if ( w <= 0 )
+      return; // completely outside
+    skipRight = diff;
+  }
+
+  di += skipTop * pitch;
+  si += skipTop;
+
+  di += skipLeft;
+  si += skipLeft * width;
+
+  while (h-- > 0) {
+    for (let w1 = 0, offset = di; w1 < w; w1++, offset += pitch) {
+      p[offset] = uint8[si+w1];
+    }
+    si += width;
+    di++;
+  }
 }
 
 function drawRle(frameBuffer, x, y, shapeFrame) {
@@ -492,9 +557,8 @@ class ShapeFrame {
     }
   }
 
-  draw(frameBuffer, x, y, clipRect, reflected) {
+  draw(frameBuffer, x, y, clipRect, reflected = false) {
     clipRect = clipRect ? clipRect : {top:0, left:0, bottom:frameBuffer.height, right:frameBuffer.width};
-    reflected = reflected ? reflected : false;
 
     let left, top, width, height;
     if ( !reflected ) {
