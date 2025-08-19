@@ -510,6 +510,130 @@ function drawRleReflectClip(frameBuffer, x, y, clipRect, shapeFrame) {
   } // while(true)
 }
 
+function hasPointPlain() {
+  return false;
+}
+
+function hasPointPlainReflect() {
+  return false;
+}
+
+function hasPointRle(anchorX, anchorY, hitX, hitY, shapeFrame) {
+  const height = shapeFrame.height;
+  const uint8 = shapeFrame.uint8;
+  const uint8Length = uint8.length;
+  let si = 8; // skip 4 shorts (8 bytes)
+
+  while (si + 2 <= uint8Length) {
+    const slength = uint8[si] | (uint8[si+1] << 8);
+    si += 2;
+    if (slength === 0) break; // end of RLE
+
+    const type_of_slice = slength & 1;  // b0    =type of slice (0=standard, 1=compressed)
+    let length_in_pixel = slength >> 1; // b1..bF=length in pixel
+
+    let xoff = uint8[si] | (uint8[si + 1] << 8);
+    if (xoff & 0x8000) xoff -= 0x10000; // signed
+    si += 2;
+    let yoff = uint8[si] | (uint8[si + 1] << 8);
+    if (yoff & 0x8000) yoff -= 0x10000; // signed
+    si += 2;
+
+    // there is an illegal case for the shape 10 @SPRITES.VGA
+    if (yoff + shapeFrame.hotspotY > height) {
+      return false;
+    }
+
+    const currentY = anchorY + yoff;
+    if (currentY === hitY) {
+      const currentX = anchorX + xoff;
+      if (currentX <= hitX && hitX < currentX + length_in_pixel)
+        return true;
+    }
+
+    if (currentY > hitY)
+      return false;
+
+    if (type_of_slice == 0) { // scontent= set of pixel  (if standard slice)
+      si += length_in_pixel;
+    }
+    else { // scontent= set of block  (if compressed slice)
+      while (length_in_pixel > 0) {
+        const blength = uint8[si++];
+        const type_of_block = blength & 1; // b0    =type of block (0=standard, 1=repeated pixel)
+        const block_length = blength >> 1; // b1..b7=length in pixel
+
+        if (type_of_block == 0) { // set of pixel  (if standard block)
+          si += block_length;
+        }
+        else { // pixel (if repeated pixel block)
+          si++;
+        }
+        length_in_pixel -= block_length;  
+      } // compressed slice
+    } // if type_of_slice
+  } // while(true)
+}
+
+function hasPointRleReflect(anchorX, anchorY, hitX, hitY, shapeFrame) {
+  const height = shapeFrame.height;
+  const uint8 = shapeFrame.uint8;
+  const uint8Length = uint8.length;
+  let si = 8; // skip 4 shorts (8 bytes)
+
+  while (si + 2 <= uint8Length) {
+    const slength = uint8[si] | (uint8[si+1] << 8);
+    si += 2;
+    if (slength === 0) break; // end of RLE
+
+    const type_of_slice = slength & 1;  // b0    =type of slice (0=standard, 1=compressed)
+    let length_in_pixel = slength >> 1; // b1..bF=length in pixel
+
+    let xoff = uint8[si] | (uint8[si + 1] << 8);
+    if (xoff & 0x8000) xoff -= 0x10000; // signed
+    si += 2;
+    let yoff = uint8[si] | (uint8[si + 1] << 8);
+    if (yoff & 0x8000) yoff -= 0x10000; // signed
+    si += 2;
+
+    // there is an illegal case for the shape 10 @SPRITES.VGA
+    if (yoff + shapeFrame.hotspotY > height) {
+      return false;
+    }
+
+    const currentX = anchorX + yoff;
+    if (currentX === hitX) {
+      const currentY = anchorY + xoff;
+      if (currentY <= hitY && hitY < currentY + length_in_pixel)
+        return true;
+    }
+
+    if (currentX > hitX)
+      return false;
+
+
+    if (type_of_slice == 0) { // scontent= set of pixel  (if standard slice)
+      si += length_in_pixel;
+    }
+    else { // scontent= set of block  (if compressed slice)
+      while (length_in_pixel > 0) {
+        const blength = uint8[si++];
+        const type_of_block = blength & 1; // b0    =type of block (0=standard, 1=repeated pixel)
+        let block_length = blength >> 1; // b1..b7=length in pixel
+
+        length_in_pixel -= block_length;
+
+        if (type_of_block == 0) { // set of pixel  (if standard block)
+          si += block_length;
+        }
+        else { // pixel (if repeated pixel block)
+          si++;
+        }
+      } // compressed slice
+    } // if type_of_slice
+  } // while(true)
+}
+
 class ShapeFrame {
   rle;
   uint8;
@@ -543,6 +667,8 @@ class ShapeFrame {
       this.drawFrameClip = drawRleClip;
       this.drawFrameReflect = drawRleReflect;
       this.drawFrameReflectClip = drawRleReflectClip;
+      this.hasPoint = hasPointRle;
+      this.hasPointReflect = hasPointRleReflect;
     }
     else {
       this.hotspotX = 7;
@@ -552,8 +678,10 @@ class ShapeFrame {
 
       this.drawFrame = drawPlain;
       this.drawFrameClip = drawPlainClip;
-      this.drawFrameReflect = drawPlainReflect;
-      this.drawFrameReflectClip = drawPlainReflectClip;
+      this.drawFrameReflect = drawPlain; //drawPlainReflect;
+      this.drawFrameReflectClip = drawPlainClip; //drawPlainReflectClip;
+      this.hasPoint = hasPointPlain;
+      this.hasPointReflect = hasPointPlainReflect;
     }
   }
 
@@ -595,6 +723,28 @@ class ShapeFrame {
       else
         this.drawFrame(frameBuffer, x, y, this);
     }
+  }
+
+  hit(anchorX, anchorY, hitX, hitY, reflected) {
+    let left, top, width, height;
+    if ( !reflected ) {
+      left  = anchorX - this.hotspotX;
+      top  = anchorY - this.hotspotY;
+      width  = this.width;
+      height = this.height;
+    } else {
+      left  = anchorX - this.hotspotY;
+      top  = anchorY - this.hotspotX;
+      width  = this.height;
+      height  = this.width;
+    }
+
+    if (hitX < left || hitX >= left + width || hitY < top || hitY >= top + height)
+      return false;
+
+    return reflected
+      ? this.hasPointReflect(anchorX, anchorY, hitX, hitY, this)
+      : this.hasPoint(anchorX, anchorY, hitX, hitY, this);
   }
 
   toString() {

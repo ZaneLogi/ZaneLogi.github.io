@@ -2,7 +2,8 @@ import { fileStore } from './filestore.js';
 import { WebGLIndexedRenderer } from './webgl_indexed_renderer.js';
 import {
   palettes, shapesVga, worldMap, timeQueue,
-  PIXELS_PER_CHUNK
+  PIXELS_PER_CHUNK,
+  CHUNKS_PER_WORLD
 } from './globals.js';
 
 console.log("=== world_viewer ===");
@@ -46,12 +47,8 @@ const displayFrameRate = (() => {
 let frame = 0;
 let worldX = 2724, worldY = 2244;
 import {
-  PIXELS_PER_TILE,
-  TILES_PER_CHUNK,
-  CHUNKS_PER_SUPERCHUNK,
-  SUPERCHUNKS_PER_WORLD
+  PIXELS_PER_TILE, PIXELS_PER_WORLD // 24576
 } from "./globals.js";
-const PIXELS_PER_WORLD = SUPERCHUNKS_PER_WORLD * CHUNKS_PER_SUPERCHUNK * TILES_PER_CHUNK * PIXELS_PER_TILE; // 24576
 
 function runloop(timestamp) {
   displayFrameRate(timestamp);
@@ -107,6 +104,17 @@ export function onResizeCanvas(width, height) {
   renderer.resize(width, height);
 }
 
+// === Find the clicked object ===
+canvas.addEventListener('click', function(event) {
+    // Get the mouse position relative to the canvas
+    const rect = canvas.getBoundingClientRect();
+    const hitX = event.clientX - rect.left;
+    const hitY = event.clientY - rect.top;
+
+    console.log(`Canvas clicked at: (${hitX}, ${hitY})`);
+    worldMap.findObject(worldX, worldY, hitX, hitY);
+});
+
 // === Handle Tooltip ===
 const tooltip = document.getElementById("tooltip");
 
@@ -116,10 +124,10 @@ canvas.addEventListener("mouseleave", () => {
 
 canvas.addEventListener("mousemove", (e) => {
   const rect = canvas.getBoundingClientRect();
-  const xoff = worldX + (e.clientX - rect.left);
-  const yoff = worldY +(e.clientY - rect.top);
-  const xchunk = Math.floor(xoff / PIXELS_PER_CHUNK);
-  const ychunk = Math.floor(yoff / PIXELS_PER_CHUNK);
+  const xoff = (worldX + (e.clientX - rect.left)) % PIXELS_PER_WORLD;
+  const yoff = (worldY + (e.clientY - rect.top)) % PIXELS_PER_WORLD;
+  const xchunk = Math.floor(xoff / PIXELS_PER_CHUNK) % CHUNKS_PER_WORLD;
+  const ychunk = Math.floor(yoff / PIXELS_PER_CHUNK) % CHUNKS_PER_WORLD;
   const xtile = Math.floor((xoff % PIXELS_PER_CHUNK) / PIXELS_PER_TILE);
   const ytile = Math.floor((yoff % PIXELS_PER_CHUNK) / PIXELS_PER_TILE);
 
@@ -130,7 +138,7 @@ canvas.addEventListener("mousemove", (e) => {
       tooltip.innerHTML = html;
     };
 
-  showTooltip(`x:${xoff}, y:${yoff}<br>` +
+  showTooltip(`x:${xoff}, y:${yoff} (${xoff-worldX},${yoff-worldY})<br>` +
     `xchunk:${xchunk}, ychunk:${ychunk}<br>` +
     `xtile:${xtile}, ytile:${ytile}`
   );

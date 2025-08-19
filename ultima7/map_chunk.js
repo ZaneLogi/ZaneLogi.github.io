@@ -1,4 +1,4 @@
-import { shapesVga, terrains } from "./globals.js";
+import { PIXELS_PER_TILE, shapesVga, terrains } from "./globals.js";
 import { LinkedList } from "./linked_list.js";
 import { MapObject } from "./map_object.js";
 import { prevChunk, nextChunk, ShapeID } from "./globals.js";
@@ -42,7 +42,7 @@ export class MapChunk {
 
         if (frameImage.rle) {
           //for debug:
-          //if (xchunk !== 24 || ychunk !== 19 || x >= 8 || y <= 10) continue;
+          //if (xchunk !== 26 || ychunk !== 18) continue;
           const obj = new MapObject(xchunk, ychunk, x, y, 0, shapeId);
           this.addObj(obj);
         }
@@ -137,6 +137,25 @@ export class MapChunk {
   drawObjects(frameBuffer, ox, oy) {
     for (const node of this.objList) {
       node.value.draw(frameBuffer, ox, oy, true);
+    }
+  }
+
+  findObjects(maxZ, ox, oy, hitX, hitY, found) {
+    if (this.objList.empty())
+      return;
+
+    for (const node of this.objList) {
+      const obj = node.value;
+      if (obj.z > maxZ)
+        continue;
+
+      const zoff = obj.z * 4;
+      const xoffset = ox + obj.xtile * PIXELS_PER_TILE + 7 - zoff;
+      const yoffset = oy + obj.ytile * PIXELS_PER_TILE + 7 - zoff;
+
+      if (obj.frameImage.hit(xoffset, yoffset, hitX, hitY)) {
+        found.push(obj);
+      }
     }
   }
 }

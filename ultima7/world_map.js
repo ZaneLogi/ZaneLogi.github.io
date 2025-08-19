@@ -2,7 +2,10 @@ import { FlexFile } from "./flexfile.js";
 import { MapChunk } from "./map_chunk.js";
 import { MapObject, StandardIregObject, ContainerObject, SpellbookObject } from "./map_object.js";
 import { ShapeClass } from "./tfa.js";
-import { terrains, shpdims, tfa, occlude, ShapeID, worldMap } from "./globals.js";
+import {
+  terrains, shpdims, tfa, occlude, ShapeID, worldMap,
+  uilevel,
+} from "./globals.js";
 
 import {
   CHUNKS_PER_SUPERCHUNK,
@@ -229,7 +232,7 @@ export class WorldMap {
         const chunkIndex = baseIndex + x;
 
         //debug
-        //if (absChunkX + x != 24 || absChunkY + y != 19)
+        //if (absChunkX + x != 26 || absChunkY + y != 18)
         //  continue;
 
         const n = this.loadIfixChunkObjects(
@@ -394,5 +397,54 @@ export class WorldMap {
     }
 
     return itemCount;
+  }
+
+  findObject(viewportX, viewportY, hitX, hitY) {
+    // hitX, hitY are from (0, 0) to (viewport.width, viewport.height)
+    let found = [];
+
+    // See what was clicked on.
+    this.findObjects(uilevel.highestVisibleLevel, viewportX, viewportY, hitX, hitY, found);
+
+    console.log(`found ${found.length} objects.`);
+    if (found.length === 0)
+      return null; // Nothing found.
+
+    // Find 'best' one.
+    let target = found[0];
+    for (let i = 1; i < found.length; i++) {
+      if (target.compare(found[i]) < 0) {
+        target = found[i];
+      }
+    }
+
+    console.log(target);
+
+    return target;
+  }
+
+  findObjects(maxZ, viewportX, viewportY, hitX, hitY, found) {
+    const hitChunkX = Math.floor((viewportX + hitX) / PIXELS_PER_CHUNK) % CHUNKS_PER_WORLD;
+    const hitChunkY = Math.floor((viewportY + hitY) / PIXELS_PER_CHUNK) % CHUNKS_PER_WORLD;
+    const endChunkX = (hitChunkX + 2) % CHUNKS_PER_WORLD;
+    const endChunkY = (hitChunkY + 2) % CHUNKS_PER_WORLD;
+
+    const hitWorldX = viewportX + hitX;
+    const hitWorldY = viewportY + hitY;
+    const alignedHitX = hitWorldX - (hitWorldX % PIXELS_PER_CHUNK); // chunk_size = 128
+    const alignedHitY = hitWorldY - (hitWorldY % PIXELS_PER_CHUNK);
+
+    for (let chky = hitChunkY, offy = alignedHitY - viewportY;
+      chky != endChunkY;
+      chky = nextChunk(chky), offy += PIXELS_PER_CHUNK)
+    {
+      for (let chkx = hitChunkX, offx = alignedHitX - viewportX;
+        chkx != endChunkX;
+        chkx = nextChunk(chkx), offx += PIXELS_PER_CHUNK)
+      {
+        const mapChunk = this.getMapChunk(chkx, chky);
+        mapChunk.findObjects(maxZ, offx, offy, hitX, hitY, found);
+      }
+    }
   }
 }
