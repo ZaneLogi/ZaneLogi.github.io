@@ -88,6 +88,7 @@ export class MapObject {
   }
 
   draw(frameBuffer, ox, oy, dependent=false) {
+    // (ox, oy): the (x, y) coordinates of the map chunk in the screen coordinates
     const renderSequence = worldMap.currentRenderSequence();
     if (this.renderSeq === renderSequence)
       return;
@@ -128,6 +129,13 @@ export class MapObject {
     //  ShapesVga().Draw( m_ShapeID.type, m_ShapeID.frame, ox, oy, pib, prcClip, m_ShapeID.reflected );
     //}
     this.frameImage.draw(frameBuffer, ox, oy, null, this.shapeId.reflected);
+  }
+
+  hit(ox, oy, hitX, hitY) {
+    // (ox, oy): the (x, y) coordinates of the map chunk in the screen coordinates
+    ox += this.xoffset;
+    oy += this.yoffset;
+    return this.frameImage.hit(ox, oy, hitX, hitY, this.shapeId.reflected);
   }
 
   compare(obj) {

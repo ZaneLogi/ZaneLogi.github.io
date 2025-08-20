@@ -2,32 +2,40 @@ import { uilevel } from "./globals.js";
 
 export function setupLevelWindow() {
   // Attach window behavior
-  const levelWin = new FloatingWindowManager("levelWindow");
+  new FloatingWindowManager("levelWindow");
 
-  // Build the select: "ground", 0..15
-  const select = document.getElementById("levelSelect");
-  select.innerHTML = ""; // safety
+  const container = document.getElementById("levelButtons");
+  container.innerHTML = ""; // clear any existing buttons
 
-  // “Ground” -> value -1
-  const optGround = document.createElement("option");
-  optGround.value = "-1";
-  optGround.textContent = "ground";
-  select.appendChild(optGround);
+  function makeButton(label, value) {
+    const btn = document.createElement("button");
+    btn.textContent = label;
+    btn.dataset.value = value;
 
-  for (let i = 0; i <= 15; i++) {
-    const opt = document.createElement("option");
-    opt.value = String(i);
-    opt.textContent = `level ${i}`;
-    select.appendChild(opt);
+    btn.addEventListener("click", () => {
+      // Update global level
+      uilevel.highestVisibleLevel = parseInt(value, 10);
+
+      // Remove active from all buttons
+      container.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+
+      // Add active to clicked button
+      btn.classList.add("active");
+    });
+
+    container.appendChild(btn);
+    return btn;
   }
 
-  // Default to level 15 (everything)
-  select.value = "15";
+  // Ground button ("G" -> -1)
+  makeButton("G", -1);
 
-  // When the user changes the highest visible level:
-  select.addEventListener("change", () => {
-    const level = parseInt(select.value, 10);
+  // Levels 0..15
+  for (let i = 0; i <= 15; i++) {
+    makeButton(String(i), i);
+  }
 
-    uilevel.highestVisibleLevel = level;
-  });
+  // Default to 15 (everything)
+  const defaultBtn = container.querySelector("button[data-value='15']");
+  if (defaultBtn) defaultBtn.classList.add("active");
 }

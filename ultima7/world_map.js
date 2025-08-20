@@ -24,7 +24,10 @@ export class WorldMap {
     this.superChunkRead = new Array(SUPERCHUNKS_PER_WORLD * SUPERCHUNKS_PER_WORLD).fill(false);
     this.viewport = {x:0, y:0, width:16, height:16};
     this.renderSequence = 0;
+    this._ready = false;
   }
+
+  get ready() {return this._ready;}
 
   currentRenderSequence() {
     return this.renderSequence;
@@ -53,6 +56,9 @@ export class WorldMap {
     shpdims.load(fileMap.get("static/shpdims.dat"));
     tfa.load(fileMap.get("static/tfa.dat"));
     occlude.load(fileMap.get("static/occlude.dat"));
+
+    // readAreaMap will read the objects dynamically when rendering the map chunks
+    this._ready = true;
   }
 
   loadU7Map(uint8) {
@@ -400,7 +406,7 @@ export class WorldMap {
   }
 
   findObject(viewportX, viewportY, hitX, hitY) {
-    // hitX, hitY are from (0, 0) to (viewport.width, viewport.height)
+    // hitX, hitY are in the range from (0, 0) to (viewport.width, viewport.height)
     let found = [];
 
     // See what was clicked on.
@@ -424,6 +430,7 @@ export class WorldMap {
   }
 
   findObjects(maxZ, viewportX, viewportY, hitX, hitY, found) {
+    // hitX, hitY are in the range from (0, 0) to (viewport.width, viewport.height)
     const hitChunkX = Math.floor((viewportX + hitX) / PIXELS_PER_CHUNK) % CHUNKS_PER_WORLD;
     const hitChunkY = Math.floor((viewportY + hitY) / PIXELS_PER_CHUNK) % CHUNKS_PER_WORLD;
     const endChunkX = (hitChunkX + 2) % CHUNKS_PER_WORLD;

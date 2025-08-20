@@ -56,7 +56,7 @@ function runloop(timestamp) {
   // render something here
   const frameBuffer = renderer.getBuffer();
 
-  if (shapesVga.shapes) {
+  if (worldMap.ready) {
     timeQueue.trigger(timestamp);
 
     if ((frame % 8) === 0) {

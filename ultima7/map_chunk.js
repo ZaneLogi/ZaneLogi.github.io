@@ -123,24 +123,29 @@ export class MapChunk {
   }
 
   drawBase(frameBuffer, ox, oy) {
+    // (ox, oy): the (x, y) coordinates of the map chunk in the screen coordinates
     for (const g of this.ground) {
       g.draw(frameBuffer, ox, oy);
     }
   }
 
   drawTerrainOverlay(frameBuffer, ox, oy) {
+    // (ox, oy): the (x, y) coordinates of the map chunk in the screen coordinates
     for (const t of this.terrainOverlay) {
       t.draw(frameBuffer, ox, oy);
     }
   }
 
   drawObjects(frameBuffer, ox, oy) {
+    // (ox, oy): the (x, y) coordinates of the map chunk in the screen coordinates
     for (const node of this.objList) {
       node.value.draw(frameBuffer, ox, oy, true);
     }
   }
 
   findObjects(maxZ, ox, oy, hitX, hitY, found) {
+    // (ox, oy): the (x, y) coordinates of the map chunk in the screen coordinates
+    // (hitX, hitY): the (x, y) in the screen coordinates
     if (this.objList.empty())
       return;
 
@@ -149,11 +154,7 @@ export class MapChunk {
       if (obj.z > maxZ)
         continue;
 
-      const zoff = obj.z * 4;
-      const xoffset = ox + obj.xtile * PIXELS_PER_TILE + 7 - zoff;
-      const yoffset = oy + obj.ytile * PIXELS_PER_TILE + 7 - zoff;
-
-      if (obj.frameImage.hit(xoffset, yoffset, hitX, hitY)) {
+      if (obj.hit(ox, oy, hitX, hitY)) {
         found.push(obj);
       }
     }

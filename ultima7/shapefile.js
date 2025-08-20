@@ -85,7 +85,7 @@ function drawPlainClip(frameBuffer, x, y, clipRect, shapeFrame) {
 }
 
 function drawPlainReflect(frameBuffer, x, y, shapeFrame) {
-  // this is only correct for the square image with the hotspot on the diagoanl
+  // this is only correct for the square image with the hotspot on the diagonal
   const {p, pitch} = frameBuffer;
   const {width, height} = shapeFrame;
   const uint8 = shapeFrame.uint8;
@@ -93,6 +93,7 @@ function drawPlainReflect(frameBuffer, x, y, shapeFrame) {
   const top = y - shapeFrame.hotspotX;
   let di = top * pitch + left;
   let si = 0;
+  // draw the vertical lines from the horizontal lines of the plain image
   for (let h = height; h > 0; --h, di++) {
     for (let w = width, offset = di; w > 0; --w, offset += pitch) {
       p[offset] = uint8[si++];
@@ -101,61 +102,42 @@ function drawPlainReflect(frameBuffer, x, y, shapeFrame) {
 }
 
 function drawPlainReflectClip(frameBuffer, x, y, clipRect, shapeFrame) {
+  // this is only correct for the square image with the hotspot on the diagonal
   const {p, pitch} = frameBuffer;
   const {width, height} = shapeFrame;
   const uint8 = shapeFrame.uint8;
-  const left = x - shapeFrame.hotspotY;
+  let left = x - shapeFrame.hotspotY;
   const top = y - shapeFrame.hotspotX;
+  const skipLeft = (clipRect.top > top) ? (clipRect.top - top) : 0;
+  const skipRight = (top + width >= clipRect.bottom) ? top + width - clipRect.bottom : 0;
+
   let di = top * pitch + left;
   let si = 0;
-
-  let h = height, skipTop = 0, skipBottom = 0;
-  // clip top
-  if ( top < clipRect.top ) {
-    const diff = clipRect.top - top;
-    h -= diff;
-    if ( h <= 0 )
-      return; // completely outside
-    skipTop = diff;
-  }
-  // clip bottom
-  if ( top + height > clipRect.bottom ) {
-    const diff = top + height - clipRect.bottom;
-    h -= diff;
-    if ( h <= 0 )
-      return; // completely outside
-    skipBottom = diff;
-  }
-  // clip left
-  let w = width, skipLeft = 0, skipRight = 0;
-  if (left < clipRect.left ) {
-    const diff = clipRect.left - left;
-    w -= diff;
-    if ( w <= 0 )
-      return; // completely outside
-    skipLeft = diff;
-  }
-  // clip right
-  if ( left + width > clipRect.right ) {
-    const diff = left + width - clipRect.right;
-    w -= diff;
-    if ( w <= 0 )
-      return; // completely outside
-    skipRight = diff;
-  }
-
-  di += skipTop * pitch;
-  si += skipTop;
-
-  di += skipLeft;
-  si += skipLeft * width;
-
-  while (h-- > 0) {
-    for (let w1 = 0, offset = di; w1 < w; w1++, offset += pitch) {
-      p[offset] = uint8[si+w1];
+  // draw the vertical lines from the horizontal lines of the plain image
+  for (let h = height; h > 0; --h, di++, left++) {
+    if (left < clipRect.left) {
+      si += width; // skip one line from the horizontal line of the image
     }
-    si += width;
-    di++;
+    else if (left >= clipRect.right) {
+      break; // skip all remained horizontal lines of the image
+    }
+    else {
+      let offset = di;
+      let w = width;
+      for (let i = 0; i < skipLeft; i++) {
+        --w;
+        ++si;
+        offset += pitch;
+      }
+
+      w -= skipRight;
+      while (w-- > 0) {
+        p[offset] = uint8[si++];
+        offset += pitch;
+      }
+
+      si += skipRight;
+    }
   }
 }
 
@@ -678,8 +660,8 @@ class ShapeFrame {
 
       this.drawFrame = drawPlain;
       this.drawFrameClip = drawPlainClip;
-      this.drawFrameReflect = drawPlain; //drawPlainReflect;
-      this.drawFrameReflectClip = drawPlainClip; //drawPlainReflectClip;
+      this.drawFrameReflect = drawPlainReflect;
+      this.drawFrameReflectClip = drawPlainReflectClip;
       this.hasPoint = hasPointPlain;
       this.hasPointReflect = hasPointPlainReflect;
     }
