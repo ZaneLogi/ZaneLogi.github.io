@@ -1,7 +1,7 @@
 import { fileStore } from './filestore.js';
 import { WebGLIndexedRenderer } from './webgl_indexed_renderer.js';
 import {
-  palettes, shapesVga, worldMap, timeQueue,
+  palettes, shapesVga, worldMap, timeQueue, textFile, fonts,
   PIXELS_PER_CHUNK,
   CHUNKS_PER_WORLD
 } from './globals.js';
@@ -50,6 +50,10 @@ import {
   PIXELS_PER_TILE, PIXELS_PER_WORLD // 24576
 } from "./globals.js";
 
+let clickX = 0, clickY = 0;
+let clickedObjName = null;
+let clickedFrameOff;
+
 function runloop(timestamp) {
   displayFrameRate(timestamp);
 
@@ -71,6 +75,17 @@ function runloop(timestamp) {
 
     //if (frame !== 30)
     worldMap.draw(frameBuffer, worldX, worldY);
+
+    // only 8 fonts available
+    /*for (let i = 0, y = 32; i < 8; i++, y += 32) {
+      const font = fonts.fonts[i];
+      font.draw(frameBuffer, 0, y, "Hello World");
+    }*/
+    if (clickedObjName && clickedFrameOff > 0) {
+      const font = fonts.fonts[0];
+      font.draw(frameBuffer, clickX, clickY, clickedObjName);
+      clickedFrameOff--;
+    }
   }
   else {
     palettes.draw(frameBuffer);
@@ -112,7 +127,19 @@ canvas.addEventListener('click', function(event) {
     const hitY = event.clientY - rect.top;
 
     console.log(`Canvas clicked at: (${hitX}, ${hitY})`);
-    worldMap.findObject(worldX, worldY, hitX, hitY);
+    const obj = worldMap.findObject(worldX, worldY, hitX, hitY);
+    if (obj != null) {
+      console.log(obj);
+      const name = textFile.getObjName(obj.shapeId.type, obj.shapeId.frame);
+      clickedObjName = name;
+      clickX = hitX;
+      clickY = hitY;
+      clickedFrameOff = 2 * 60;
+    }
+    else {
+      clickedObjName = null;
+      clickedFrameOff = 0;
+    }
 });
 
 // === Handle Tooltip ===
@@ -150,7 +177,8 @@ const fileMap = new Map();
 
 const expectedFiles = [
   "static/u7chunks", "static/u7map", "static/palettes.flx", "static/shapes.vga",
-  "static/tfa.dat", "static/shpdims.dat", "static/occlude.dat"
+  "static/tfa.dat", "static/shpdims.dat", "static/occlude.dat",
+  "static/text.flx", "static/fonts.vga"
 ];
 
 // Add U7IFIX00 to U7IFIX8F (12 x 12 = 144 superchunks)
@@ -253,6 +281,10 @@ async function tryInitializeViewer() {
     palettes.load(fileMap.get("static/palettes.flx"))
     palettes.select(0);
     renderer.setPalette(palettes.current());
+
+    // load text & fonts
+    textFile.load(fileMap.get("static/text.flx"));
+    fonts.load(fileMap.get("static/fonts.vga"));
 
     // load world map
     worldMap.load(fileMap);

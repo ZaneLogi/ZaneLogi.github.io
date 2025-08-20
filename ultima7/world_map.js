@@ -424,8 +424,6 @@ export class WorldMap {
       }
     }
 
-    console.log(target);
-
     return target;
   }
 

@@ -6,6 +6,8 @@ import { TFA } from "./tfa.js";
 import { Occlude } from './occlude.js';
 import { WorldMap } from './world_map.js';
 import { TimeQueue } from './time_queue.js';
+import { U7Text } from './u7text.js';
+import { U7Fonts } from './u7fonts.js';
 
 export const PIXELS_PER_TILE = 8;
 export const TILES_PER_CHUNK = 16;
@@ -50,6 +52,8 @@ export const tfa = new TFA();
 export const occlude = new Occlude();
 export const worldMap = new WorldMap();
 export const timeQueue = new TimeQueue();
+export const textFile = new U7Text();
+export const fonts = new U7Fonts();
 
 export const uilevel = {highestVisibleLevel: 15};
 

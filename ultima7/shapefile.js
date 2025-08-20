@@ -734,7 +734,7 @@ class ShapeFrame {
   }
 }
 
-class Shape {
+export class Shape {
   constructor(uint8) {
     const view = new DataView(uint8.buffer, uint8.byteOffset, uint8.byteLength);
     const entrySize = view.getUint32(0, true);
@@ -784,22 +784,17 @@ export class ShapeFile {
     const b = file.open(uint8);
     if (!b) throw new Error("failed to load the shape file!");
 
-    const shapes = [];
+    this.shapes = [];
+    const shapes = this.shapes;
     for (const obj of file.objects) {
-      const shape = new Shape(obj.data);
-      shapes.push(shape);
-    }
-    this.shapes = shapes;
-  }
-
-  collectSize() {
-    const a = [];
-    for (const shape of this.shapes) {
-      for (const frame of shape.frames) {
-        a.push([frame.width, frame.height]);
+      if (obj.data && obj.size > 0) {
+        const shape = new Shape(obj.data);
+        shapes.push(shape);
+      }
+      else {
+        shapes.push("Invalid shape here!");
       }
     }
-    return a;
   }
 
   toString() {
