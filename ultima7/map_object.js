@@ -411,3 +411,10 @@ export class SpellbookObject extends ExtendedIregObject {
   get circle9() {return this.data[13];}
   get flags() {return this.data[14] | this.data[15] << 8 | this.data[16] << 16 | this.data[17] << 24;}
 }
+
+export class NpcObject extends MapObject {
+  constructor(xchunk, ychunk, xtile, ytile, z, shapeId) {
+    super(xchunk, ychunk, xtile, ytile, z, shapeId);
+    this.objList = [];
+  }
+}

@@ -45,7 +45,7 @@ const displayFrameRate = (() => {
 
 // === runloop ===
 let frame = 0;
-let worldX = 2724, worldY = 2244;
+let worldX = 2640, worldY = 4613;
 import {
   PIXELS_PER_TILE, PIXELS_PER_WORLD // 24576
 } from "./globals.js";
@@ -178,7 +178,8 @@ const fileMap = new Map();
 const expectedFiles = [
   "static/u7chunks", "static/u7map", "static/palettes.flx", "static/shapes.vga",
   "static/tfa.dat", "static/shpdims.dat", "static/occlude.dat",
-  "static/text.flx", "static/fonts.vga"
+  "static/text.flx", "static/fonts.vga",
+  "gamedat/u7ibuf.dat", "gamedat/u7nbuf.dat"
 ];
 
 // Add U7IFIX00 to U7IFIX8F (12 x 12 = 144 superchunks)

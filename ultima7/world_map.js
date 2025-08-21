@@ -1,6 +1,6 @@
 import { FlexFile } from "./flexfile.js";
 import { MapChunk } from "./map_chunk.js";
-import { MapObject, StandardIregObject, ContainerObject, SpellbookObject } from "./map_object.js";
+import { MapObject, StandardIregObject, ContainerObject, SpellbookObject, NpcObject } from "./map_object.js";
 import { ShapeClass } from "./tfa.js";
 import {
   terrains, shpdims, tfa, occlude, ShapeID, worldMap,
@@ -57,6 +57,8 @@ export class WorldMap {
     tfa.load(fileMap.get("static/tfa.dat"));
     occlude.load(fileMap.get("static/occlude.dat"));
 
+    this.loadNPCs(fileMap.get("gamedat/u7ibuf.dat"), fileMap.get("gamedat/u7nbuf.dat"));
+
     // readAreaMap will read the objects dynamically when rendering the map chunks
     this._ready = true;
   }
@@ -79,6 +81,46 @@ export class WorldMap {
       }
     }
     this.baseMap = baseMap;
+  }
+
+  loadNPCs(ibuf, nbuf) {
+    this.npcObjs = new Array(256);
+    let nbufOffset = 0;
+    for (let i = 0; i < 256; i++) {
+      const npcBlock = nbuf.subarray(nbufOffset, nbufOffset + 105);
+      nbufOffset += 105;
+
+      const index = npcBlock[0] | npcBlock[1] << 8;
+      const referent = npcBlock[2] | npcBlock[3] << 8;
+
+      const npcInfo = ibuf.subarray(referent, referent + 8);
+      const x = npcInfo[2];
+      const y = npcInfo[3];
+      const shapeId = new ShapeID(npcInfo[4] | npcInfo[5] << 8);
+      const extra = npcInfo[6] | npcInfo[7] << 8;
+
+      const npcInfoExtra = ibuf.subarray(extra, extra + 8);
+      const region = npcInfoExtra[2];
+      const id = npcInfoExtra[4]; // zero-based
+      const z = npcInfoExtra[5] >> 4;
+
+      const sx = region % 12;
+      const sy = Math.floor(region / 12);
+      const xchunk = sx * 16 + (x >> 4);
+      const ychunk = sy * 16 + (y >> 4);
+      const xtile = (x & 0x0f);
+      const ytile = (y & 0x0f);
+
+      //console.log(`npc${id}: chunk(${xchunk},${ychunk}), tile(${xtile},${ytile})`);
+      if (id !== i) {
+        this.npcObjs[i] = "Invalid NPC object!";
+        continue;
+      }
+
+      const npcObj = new NpcObject(xchunk, ychunk, xtile, ytile, z, shapeId);
+      this.getMapChunk(xchunk, ychunk).addObj(npcObj);
+      this.npcObjs[i] = npcObj;
+    }
   }
 
   getMapChunk(x, y) {
