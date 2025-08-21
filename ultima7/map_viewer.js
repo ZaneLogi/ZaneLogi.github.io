@@ -141,25 +141,42 @@ export function onResizeCanvas(width, height) {
 
 // === Find the clicked object ===
 canvas.addEventListener('click', function(event) {
-    // Get the mouse position relative to the canvas
-    const rect = canvas.getBoundingClientRect();
-    const hitX = event.clientX - rect.left;
-    const hitY = event.clientY - rect.top;
+  // Get the mouse position relative to the canvas
+  const rect = canvas.getBoundingClientRect();
+  const hitX = event.clientX - rect.left;
+  const hitY = event.clientY - rect.top;
 
-    console.log(`Canvas clicked at: (${hitX}, ${hitY})`);
-    const obj = worldMap.findObject(worldX, worldY, hitX, hitY);
-    if (obj != null) {
-      console.log(obj);
-      const name = textFile.getObjName(obj.shapeId.type, obj.shapeId.frame);
-      clickedObjName = name;
-      clickX = hitX;
-      clickY = hitY;
-      clickedFrameOff = 2 * 60;
-    }
-    else {
-      clickedObjName = null;
-      clickedFrameOff = 0;
-    }
+  console.log(`Canvas clicked at: (${hitX}, ${hitY})`);
+  const obj = worldMap.findObject(worldX, worldY, hitX, hitY);
+  if (obj != null) {
+    console.log(obj);
+    const name = textFile.getObjName(obj.shapeId.type, obj.shapeId.frame);
+    clickedObjName = name;
+    clickX = hitX;
+    clickY = hitY;
+    clickedFrameOff = 2 * 60;
+  }
+  else {
+    clickedObjName = null;
+    clickedFrameOff = 0;
+  }
+});
+
+// right-click
+canvas.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+
+  // Get the mouse position relative to the canvas
+  const rect = canvas.getBoundingClientRect();
+  const hitX = e.clientX - rect.left;
+  const hitY = e.clientY - rect.top;
+
+  console.log(`Canvas clicked at: (${hitX}, ${hitY})`);
+  const obj = worldMap.findObject(worldX, worldY, hitX, hitY);
+  if (obj != null) {
+    const mapChunk = worldMap.getMapChunk(obj.xchunk, obj.ychunk);
+    mapChunk.removeObj(obj);
+  }
 });
 
 // === Handle Tooltip ===

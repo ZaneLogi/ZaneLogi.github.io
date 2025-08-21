@@ -1,7 +1,6 @@
-import { PIXELS_PER_TILE, shapesVga, terrains } from "./globals.js";
 import { LinkedList } from "./linked_list.js";
 import { MapObject } from "./map_object.js";
-import { prevChunk, nextChunk, ShapeID } from "./globals.js";
+import { shapesVga, terrains, prevChunk, nextChunk, ShapeID, worldMap } from "./globals.js";
 
 // === Ground ===
 class Ground {
@@ -80,8 +79,8 @@ export class MapChunk {
       // We don't care whether the paiting areas of the objects extrude on top and left chunks or not,
       // the painting algorithm can deal with it. But when a object physically extend to the top or left chunks,
       // we need to deal with it by the relation of dependencies.
-      const extLeft =  (obj.xtile - obj.nx) < 0;
-      const extAbove = (obj.ytile - obj.ny) < 0;
+      const extLeft =  (obj.xtile - obj.spaceInfo.nx) < 0;
+      const extAbove = (obj.ytile - obj.spaceInfo.ny) < 0;
 
       if (extLeft ) {
         this.addOutsideDependencies(prevChunk(this.xchunk), this.ychunk, obj).fromRight++;
@@ -120,6 +119,32 @@ export class MapChunk {
     const mapChunk = worldMap.getMapChunk(xchunk,uchunk);
     mapChunk.addDependencies(newObj);
     return mapChunk;
+  }
+
+  removeObj(obj) {
+    const b = this.objList.removeValue(obj);
+    if (!b)
+      return null;
+
+    obj.clearDependencies();
+
+    if (obj.z > 0 || obj.spaceInfo.nz) {
+      const extLeft =  (obj.xtile - obj.spaceInfo.nx) < 0;
+      const extAbove = (obj.ytile - obj.spaceInfo.ny) < 0;
+
+      if (extLeft ) {
+        worldMap.getMapChunk(prevChunk(this.xchunk), this.ychunk).fromRight--;
+        if (extAbove) {
+          worldMap.getMapChunk(prevChunk(this.xchunk), prevChunk(this.ychunk)).fromBelowRight--;
+        }
+      }
+
+      if (extAbove) {
+        worldMap.getMapChunk(this.xchunk, prevChunk(this.ychunk)).fromBelow--;
+      }
+    }
+
+    return obj;
   }
 
   drawBase(frameBuffer, ox, oy) {

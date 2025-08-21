@@ -83,6 +83,16 @@ export class MapObject {
     }
   }
 
+  clearDependencies() {
+    // Remove this from dependencies' dependors
+    this.dependencies.forEach(obj => obj.dependors.removeValue(this));
+    this.dependencies.clear();
+
+    // Remove this from dependors' dependencies
+    this.dependors.forEach(obj => obj.dependencies.removeValue(this));
+    this.dependors.clear();
+  }
+
   updateFrame(frameIndex) {
     this.frameImage = this.frameImages[frameIndex];
   }

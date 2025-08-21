@@ -9,8 +9,6 @@ export function setupCanvasDragging(canvas, PIXELS_PER_WORLD) {
   let dragOffsetY = 0;
   let lastX, lastY;
 
-  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-
   canvas.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
     canvas.setPointerCapture(e.pointerId);

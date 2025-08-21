@@ -116,6 +116,18 @@ export class LinkedList {
     this.size--;
   }
 
+  removeValue(value) {
+    let cur = this.head;
+    while (cur) {
+      if (cur.value === value) {
+        this.remove(cur);
+        return true; // removed successfully
+      }
+      cur = cur.next;
+    }
+    return false; // value not found
+  }
+
   // --- Search / traversal ---
   find(predicate) {
     let cur = this.head;

@@ -45,8 +45,8 @@ export function setupConsoleWindow() {
     version: (args) => {
       return "Console v1.0";
     },
-    movetoloc: (args) => {
-      if (args.length != 2) throw new Error("Syntax: movetoloc [x] [y]");
+    moveto: (args) => {
+      if (args.length != 2) throw new Error("Syntax: moveto [x] [y]");
       const x = parseInt(args[0], 10);
       const y = parseInt(args[1], 10);
       centerWorldPosition(x, y);
