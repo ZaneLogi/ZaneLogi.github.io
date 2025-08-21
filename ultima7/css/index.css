@@ -37,3 +37,37 @@ canvas {
   color: #fff;            /* optional: white text for contrast */
   font-weight: bold;
 }
+
+#consoleWindow {
+  height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+#displayArea {
+  flex-grow: 1;
+  overflow: auto;
+  padding: 8px;
+  background: #111;
+  color: #0f0;
+  font-family: monospace;
+  font-size: 14px;
+  border: 1px solid #0f0;
+  margin-bottom: 8px;
+  user-select: text;
+  white-space: pre-line;
+}
+
+#textInput {
+  height: 30px;
+  resize: horizontal;
+  padding: 4px 8px;
+  font-size: 14px;
+  font-family: monospace;
+  background: #222;
+  color: #0f0;
+  border: 1px solid #0f0;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}

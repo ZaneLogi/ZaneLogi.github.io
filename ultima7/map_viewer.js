@@ -110,6 +110,26 @@ export function getWorldPosition() {
   return { x: worldX, y: worldY };
 }
 
+export function centerWorldPosition(x, y) {
+  const {width, height} = canvas;
+  x -= Math.floor(width/2);
+  y -= Math.floor(height/2);
+  worldX = (x + PIXELS_PER_WORLD) % PIXELS_PER_WORLD;
+  worldY = (y + PIXELS_PER_WORLD) % PIXELS_PER_WORLD;
+}
+
+export function centerNpc(npcIndex) {
+  const npcCount = worldMap.npcObjs?.length ?? -1
+  if (npcCount < 0 || npcIndex < 0 || npcIndex >= npcCount)
+    return false;
+  const npcObj = worldMap.npcObjs[npcIndex];
+  if (typeof npcObj === "string")
+    return false;
+
+  centerWorldPosition(npcObj.area.left, npcObj.area.top);
+  return true;
+}
+
 // === Handle Canvas Resizing ===
 export function onResizeCanvas(width, height) {
   gl.viewport(0, 0, width, height);
