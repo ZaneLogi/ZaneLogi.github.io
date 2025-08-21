@@ -20,10 +20,15 @@ import {
 
 export class WorldMap {
   constructor() {
+    this.reset();
+  }
+
+  reset() {
     this.mapChunks = new Array(192 * 192);
     this.superChunkRead = new Array(SUPERCHUNKS_PER_WORLD * SUPERCHUNKS_PER_WORLD).fill(false);
     this.viewport = {x:0, y:0, width:16, height:16};
     this.renderSequence = 0;
+    this.npcObjs = new Array(256);
     this._ready = false;
   }
 
@@ -50,6 +55,8 @@ export class WorldMap {
   }
 
   load(fileMap) {
+    this.reset();
+
     this.fileMap = fileMap;
     this.loadU7Map(fileMap.get("static/u7map"));
     terrains.load(fileMap.get("static/u7chunks"));
@@ -84,7 +91,6 @@ export class WorldMap {
   }
 
   loadNPCs(ibuf, nbuf) {
-    this.npcObjs = new Array(256);
     let nbufOffset = 0;
     for (let i = 0; i < 256; i++) {
       const npcBlock = nbuf.subarray(nbufOffset, nbufOffset + 105);
@@ -118,6 +124,7 @@ export class WorldMap {
       }
 
       const npcObj = new NpcObject(xchunk, ychunk, xtile, ytile, z, shapeId);
+      npcObj.npcId = id;
       this.getMapChunk(xchunk, ychunk).addObj(npcObj);
       this.npcObjs[i] = npcObj;
     }

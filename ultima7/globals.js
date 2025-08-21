@@ -37,6 +37,7 @@ export class ShapeID {
     this.type = value & 0x03ff;
     this.frame = (value >> 10) & 0x1f;
     this.reflected = (value >> 15) & 1;
+    this.value = value;
   }
 
   toString() {

@@ -1,7 +1,9 @@
 import { fileStore } from './filestore.js';
+import { FlexFile } from './flexfile.js';
 import { WebGLIndexedRenderer } from './webgl_indexed_renderer.js';
 import {
   palettes, shapesVga, worldMap, timeQueue, textFile, fonts,
+  ShapeID,
   PIXELS_PER_CHUNK,
   CHUNKS_PER_WORLD
 } from './globals.js';
@@ -141,6 +143,8 @@ export function onResizeCanvas(width, height) {
 
 // === Find the clicked object ===
 canvas.addEventListener('click', function(event) {
+  if (!worldMap.ready)
+    return;
   // Get the mouse position relative to the canvas
   const rect = canvas.getBoundingClientRect();
   const hitX = event.clientX - rect.left;
@@ -165,6 +169,9 @@ canvas.addEventListener('click', function(event) {
 // right-click
 canvas.addEventListener("contextmenu", (e) => {
   e.preventDefault();
+
+  if (!worldMap.ready)
+    return;
 
   // Get the mouse position relative to the canvas
   const rect = canvas.getBoundingClientRect();
@@ -247,6 +254,165 @@ document.getElementById("resetBtn").onclick = async () => {
   location.reload();
 };
 
+const getFixedString = (() => {
+  const decoder = new TextDecoder("ascii");
+  function decodeFixedString(data, offset, length) {
+    const chunk = data.subarray(offset, offset + length);
+    const firstZero = chunk.indexOf(0);
+    const nameBytes = firstZero === -1 ? chunk : chunk.subarray(0, firstZero);
+    const name = decoder.decode(nameBytes);
+    return name;
+  }
+  return decodeFixedString;
+})();
+
+async function userDownload(fileList, zipName = "archive.zip") {
+  const zip = new JSZip();
+
+  for (const file of fileList) {
+    if (file.folder) {
+      zip.folder(file.folder).file(file.name, file.data);
+    } else {
+      zip.file(file.name, file.data);
+    }
+  }
+
+  // Generate zip as Blob
+  const content = await zip.generateAsync({ type: "blob" });
+
+  // Trigger download
+  const url = URL.createObjectURL(content);
+
+  // Create a temporary <a> element
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = zipName;
+  document.body.appendChild(a); // Required for Firefox
+  a.click();
+
+  // Cleanup
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function extractInitGameDat(file) {
+  const fileList = [];
+
+  const flexFile = new FlexFile();
+  flexFile.open(await file.arrayBuffer());
+  const count = flexFile.objCount;
+  for (let i = 0; i < count; i++) {
+    const data = flexFile.objData(i);
+    const size = flexFile.objSize(i);
+    if (data && size > 0) {
+      const name = getFixedString(data, 0, 13);
+      fileList.push({name:name, data:data.subarray(13, size)});
+    }
+  }
+
+  userDownload(fileList, "initgame.zip");
+}
+
+async function extractNpcDat(file) {
+  // this is used for the creation of the faked U7NBUF.DAT and U7IBUF.DAT frin NPC.DAT in INITGAME.DAT
+  const buffer = await file.arrayBuffer();
+  const view = new DataView(buffer);
+  let offset = 0;
+  const npc1count = view.getUint16(offset, true);
+  const npc2count = view.getUint16(offset+2, true);
+  console.log(`count1: ${npc1count}, count2: ${npc2count}`);
+  offset = 4;
+
+  let i = 0;
+  const nbuf = new Uint8Array(npc1count * 105);
+
+  const ibuf = new Array(16).fill(0);
+
+  while (i < npc1count && offset < buffer.byteLength) {
+    const npcHeader = new Uint8Array(buffer, offset, 12);
+    offset += 12;
+    const npcInfo = new Uint8Array(buffer, offset, 105);
+    offset += 105;
+
+    nbuf.set(npcInfo, i * 105); // set npc info to nbuf
+    const ibufOffset = npcInfo[2] | npcInfo[3] << 8;
+
+    const x = npcHeader[0]; // x offset in the superchunk
+    const y = npcHeader[1]; // y offset in the superchunk
+    const shapeId = new ShapeID(npcHeader[2] | npcHeader[3] << 8);
+    const type = npcHeader[4] | npcHeader[5] << 8;
+    const region = npcHeader[6];
+    const id = npcHeader[8];
+    const inside = (npcHeader[9] & 0x0f);
+    const lift = (npcHeader[9] >> 4) & 0x0f;
+    const data2 = npcHeader[10] | npcHeader[11] << 8;
+
+    const diff = ibufOffset + 16 - ibuf.length;
+    if (diff > 0) {
+      ibuf.concat(new Array(diff).fill(0));
+    }
+    ibuf[ibufOffset] = 0; // ignore
+    ibuf[ibufOffset+1] = 0; // ignore
+    ibuf[ibufOffset+2] = x;
+    ibuf[ibufOffset+3] = y;
+    ibuf[ibufOffset+4] = npcHeader[2];
+    ibuf[ibufOffset+5] = npcHeader[3];
+    ibuf[ibufOffset+6] = (ibufOffset+8) & 0xff;
+    ibuf[ibufOffset+7] = ((ibufOffset+8) >> 8) & 0xff;
+    ibuf[ibufOffset+8] = 0; // ignore
+    ibuf[ibufOffset+9] = 0; // ignore
+    ibuf[ibufOffset+10] = npcHeader[6]; // region
+    ibuf[ibufOffset+11] = npcHeader[7];
+    ibuf[ibufOffset+12] = npcHeader[8]; // id
+    ibuf[ibufOffset+13] = npcHeader[9]; // lift
+    ibuf[ibufOffset+14] = npcHeader[10]; // data2
+    ibuf[ibufOffset+15] = npcHeader[11];
+
+    const sx = region % 12;
+    const sy = Math.floor(region / 12);
+    const xchunk = sx * 16 + (x >> 4);
+    const ychunk = sy * 16 + (y >> 4);
+    const xtile = (x & 0x0f);
+    const ytile = (y & 0x0f);
+
+    const name = getFixedString(npcInfo, 105-16, 16);
+
+    console.log(`npc${id}: chunk(${xchunk},${ychunk}), tile(${xtile},${ytile},${lift}), Name"${name}"`);
+    console.log(`ibuf offset 0x${ibufOffset.toString(16).padStart(4, '0')}`);
+    console.log(`item offset 0x${type.toString(16).padStart(4, '0')}`);
+
+    if (i !== id)
+      console.log(`!!! Invalid id, expected ${i}, obtained ${id}`);
+    if (type === 0)
+      console.log("!!! No items");
+    if (ibufOffset === 0)
+      console.log("!!! No IBUF OFFSET");
+
+    if (type !== 0 && i === id) { // no items or invalid id (for example, 139, 148)
+      while (offset < buffer.byteLength) {
+        const len = view.getUint8(offset++);
+        if (len === 0)
+          break; // end of the item list
+        if (len === 1)
+          continue; // end of the item list in a container
+        if (len != 6 && len != 12 && len != 18)
+          throw new Error(`invalid: offset ${offset-1}, obtained ${len}`);
+        offset += len;
+      }
+    }
+
+    console.log(`current offset: 0x${offset.toString(16).padStart(4, '0')}`);
+    i++;
+  }
+
+  const fileList = [
+    {name:"U7NBUF.DAT", folder:"GAMEDAT", data:nbuf},
+    {name:"U7IBUF.DAT", folder:"GAMEDAT", data:new Uint8Array(ibuf)},
+  ]
+
+  userDownload(fileList);
+}
+
 document.getElementById("dropzone").addEventListener("dragover", e => e.preventDefault());
 document.getElementById("dropzone").addEventListener("drop", async (e) => {
   e.preventDefault();
@@ -254,6 +420,19 @@ document.getElementById("dropzone").addEventListener("drop", async (e) => {
   for (const file of e.dataTransfer.files) {
     console.log(file.name);
     const ext = file.name.split('.').pop().toLowerCase();
+
+    // extract NPC.DAT
+    if (file.name.toLowerCase() === "initgame.dat") {
+      extractInitGameDat(file);
+      continue;
+    }
+
+    // parse npc.dat
+    if (file.name.toLowerCase() === "npc.dat") {
+      extractNpcDat(file);
+      continue;
+    }
+
     if (ext === 'zip') {
       const data = await file.arrayBuffer();
       const zip = await JSZip.loadAsync(data);
