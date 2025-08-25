@@ -1,0 +1,44 @@
+/* === Floating Info Window === */
+#dropzone {
+  padding: 10px;
+  border: 1px dashed #0f0;
+  text-align: center;
+  background: #222;
+  margin-bottom: 10px;
+}
+
+#resetBtn {
+  margin-bottom: 10px;
+  padding: 5px 10px;
+  background: #222;
+  border: 1px solid #0f0;
+  color: #0f0;
+  cursor: pointer;
+  width: 100%;
+}
+
+#fileChecklist {
+  margin-bottom: 10px;
+  padding: 5px;
+  border: 1px solid #0f0;
+  box-shadow: inset 0 0 6px #0f0;
+  background: #111;
+  font-family: monospace;
+  white-space: pre;
+  overflow: auto;
+  max-height: 200px;
+}
+
+#frameRate {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 16px;
+  padding: 8px 12px;
+  background: #111;
+  color: #0f0;
+  border: 1px solid #0f0;
+  box-shadow: inset 0 0 6px #0f0;
+  font-family: monospace;
+  white-space: pre-line;
+}

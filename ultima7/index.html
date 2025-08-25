@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Ultima VII Map Viewer</title>
+    <link rel="stylesheet" href="./css/index.css">
+    <link rel="stylesheet" href="./css/floating_window.css">
+    <link rel="stylesheet" href="./css/info_window.css">
+  </head>
+  <body>
+    <canvas id="glcanvas"></canvas>
+    <div id="tooltip"></div>
+
+    <!-- Floating Info Window -->
+    <div class="floatingWindow" id="infoWindow">
+      <div class="floatingHeader">Ultima VII File Loader
+        <div class="headerButtons">
+          <button class="collapse-btn">−</button>
+        </div>
+      </div>
+      <div class="floatingContent">
+        <div id="dropzone">Drop Ultima VII files here</div>
+        <button id="resetBtn">Reset Stored Files</button>
+        <div id="fileChecklist">Checking files...</div>
+        <div id="frameRate">Measuring...</div>
+      </div>
+    </div>
+
+    <!-- Floating Level Window -->
+    <div class="floatingWindow" id="levelWindow">
+      <div class="floatingHeader">Highest Visible Level
+        <div class="headerButtons">
+          <button class="collapse-btn">−</button>
+        </div>
+      </div>
+      <div class="floatingContent">
+        <label>Show up to:</label>
+        <div id="levelButtons" style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px;"></div>
+        <div style="margin-top: 8px; font-size: 12px; opacity: 0.8;">
+          “Ground” is below level 0.</div>
+      </div>
+    </div>
+
+    <!-- Floating Console Window -->
+    <div class="floatingWindow" id="consoleWindow">
+    <div class="floatingHeader">Console
+      <div class="headerButtons">
+          <button class="collapse-btn">−</button>
+      </div>
+    </div>
+    <div class="floatingContent">
+      <div id="displayArea">'help' lists available commands<br></div>
+      <input type="text" id="textInput" placeholder="Input something here..."
+        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+    </div>
+
+    <script src="./floating_window_manager.js"></script>
+    <!--script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script-->
+    <script src="./libs/jszip.min.js"></script>
+    <script type="module">
+        const infoWindow = new FloatingWindowManager("infoWindow");
+        await import("./unittest_filestore.js");
+        await import("./unittest_flexfile.js");
+        await import("./map_viewer.js");
+
+        const { setupCanvasDragging } = await import("./ui_canvas_controls.js");
+        const canvas = document.getElementById("glcanvas");
+        setupCanvasDragging(canvas, 12*16*16*8);
+
+        const { setupLevelWindow } = await import("./ui_level_control.js");
+        setupLevelWindow();
+
+        const { setupConsoleWindow } = await import("./ui_console_window.js");
+        setupConsoleWindow();
+    </script>
+  </body>
+</html>
