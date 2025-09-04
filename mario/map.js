@@ -1,6 +1,10 @@
-"use strict"
+import { Player } from "./player.js";
+import { Block } from "./block.js";
+import { Sprite } from "./sprite.js";
+import { MapLevel } from "./map_level.js";
+import { game } from "./game.js";
 
-const map = {
+export const map = {
     xpos: 0, // x position in the screen coordinate
     ypos: 0, // y position in the screen coordinate
 

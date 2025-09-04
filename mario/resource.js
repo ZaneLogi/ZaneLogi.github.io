@@ -1,6 +1,4 @@
-"use strict"
-
-const resource = {
+export const resource = {
     'res/images/mario/mario': 0,
     'res/images/mario/mario1': 0,
     'res/images/mario/mario1_end': 0,
@@ -187,7 +185,7 @@ const resource = {
     'res/images/uw_0': 0,
 };
 
-const res_loader = {
+export const res_loader = {
     count: 0,
     total: 0,
     completion: null,

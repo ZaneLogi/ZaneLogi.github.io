@@ -1,12 +1,15 @@
-"use strict"
+import { res_loader } from "./resource.js";
+import { runloop } from "./runloop.js";
+import { map } from "./map.js";
+import "./dat_levels.js";
 
-const LEFT = false;
-const RIGHT = true;
+export const LEFT = false;
+export const RIGHT = true;
 
 const KEY_DOWN = 0;
 const KEY_UP = 1;
 
-const game = {
+export const game = {
     canvas: null,
     canvas_ctx: null,
     window_width: 0,

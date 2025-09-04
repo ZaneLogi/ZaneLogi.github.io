@@ -1,6 +1,9 @@
-"use strict"
+import { LEFT, RIGHT } from "./game.js";
+import { Sprite } from "./sprite.js";
+import { map } from "./map.js";
+import { game } from "./game.js";
 
-class Player {
+export class Player {
     static #MAX_MOVE = 4;
 
     static #SMALL_W = 24;

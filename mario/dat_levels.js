@@ -1,4 +1,4 @@
-"use strict"
+import { map } from "./map.js";
 
 map.struckBlockQ = function (x, y, width) {
     const mapping = {

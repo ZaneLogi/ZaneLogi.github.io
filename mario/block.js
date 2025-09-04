@@ -1,6 +1,4 @@
-"use strict"
-
-class Block {
+export class Block {
     #sprite;
     #blockID;
     #collision;

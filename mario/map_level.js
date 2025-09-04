@@ -1,6 +1,4 @@
-"use strict"
-
-class MapLevel {
+export class MapLevel {
     #iBlockID;
     #iNumOfUse;
     #spawnMushroom;
