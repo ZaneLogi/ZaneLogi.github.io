@@ -102,7 +102,7 @@ export class Player {
                     this.#currentJumpSpeed = 2.5;
                 }
 
-                if (!game.keySpacee && this.#currentJumpDistance > 64 && !this.#springJump) {
+                if (!game.keySpace && this.#currentJumpDistance > 64 && !this.#springJump) {
                     this.#jumpDistance = 16;
                     this.#currentJumpDistance = 0;
                     this.#currentJumpSpeed = 2.5;
