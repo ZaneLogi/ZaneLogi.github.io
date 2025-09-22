@@ -19,6 +19,7 @@ const FRICTION = 0.8;
 const ACCEL = 0.5;
 const MAX_SPEED_X = 4;
 const JUMP_SPEED = 12;
+const JUMP_CUT = 3; // how strongly to cut upward speed when jump released
 
 // ----------------------
 // Simple level (0 = empty, 1 = solid block)
@@ -43,7 +44,8 @@ let player = {
   x: 64, y: 0,
   vx: 0, vy: 0,
   w: 28, h: 28,
-  onGround: false
+  onGround: false,
+  jumping: false // track if jump button was held
 };
 
 // ----------------------
@@ -82,10 +84,17 @@ function update() {
   // Apply gravity
   player.vy += GRAVITY;
 
-  // Jump
+  // Jump start
   if (keys["Space"] && player.onGround) {
     player.vy = -JUMP_SPEED;
     player.onGround = false;
+    player.jumping = true;
+  }
+
+  // Short jump cut when releasing Space
+  if (!keys["Space"] && player.jumping && player.vy < -JUMP_CUT) {
+    player.vy = -JUMP_CUT;
+    player.jumping = false;
   }
 
   // Movement with collision
