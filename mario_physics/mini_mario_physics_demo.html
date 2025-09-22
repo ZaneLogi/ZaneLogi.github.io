@@ -9,25 +9,13 @@
 </head>
 <body>
 <canvas id="game" width="640" height="480"></canvas>
-<script>
+<script type="module">
+import { Actor } from './actor.js';
+
 // ----------------------
 // Basic constants
 // ----------------------
 const TILE_SIZE = 32;
-const GRAVITY = 0.6;
-const FRICTION = 0.8;
-
-// Walking parameters
-const WALK_ACCEL = 0.4;
-const WALK_MAX_SPEED = 3.0;
-
-// Running parameters
-const RUN_ACCEL = 0.6;
-const RUN_MAX_SPEED = 6.0;
-
-// Jump parameters
-const JUMP_SPEED = 12;
-const JUMP_CUT = 3;
 
 // ----------------------
 // Simple level (0 = empty, 1 = solid block)
@@ -39,7 +27,7 @@ const level = [
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [1,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0],
   [1,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
   [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
@@ -48,13 +36,12 @@ const level = [
 // ----------------------
 // Player object
 // ----------------------
-let player = {
-  x: 64, y: 0,
-  vx: 0, vy: 0,
-  w: 28, h: 28,
-  onGround: false,
-  jumping: false // track if jump button was held
-};
+const player = new Actor();
+player.x = 64;
+player.y = 0;
+player.w = 28;
+player.h = 28;
+
 
 // ----------------------
 // Input handling
@@ -77,38 +64,12 @@ function isSolidTileAt(x, y) {
 // Game update
 // ----------------------
 function update() {
-  // Decide if running
-  let running = keys["ShiftLeft"] || keys["KeyZ"]; // hold Shift or Z to run
-  let accel = running ? RUN_ACCEL : WALK_ACCEL;
-  let maxSpeed = running ? RUN_MAX_SPEED : WALK_MAX_SPEED;
-
-  // Horizontal movement
-  if (keys["ArrowLeft"]) player.vx -= accel;
-  if (keys["ArrowRight"]) player.vx += accel;
-
-  // Friction when no input
-  if (!keys["ArrowLeft"] && !keys["ArrowRight"]) {
-    player.vx *= FRICTION;
-  }
-
-  // Clamp horizontal speed
-  player.vx = Math.max(-maxSpeed, Math.min(maxSpeed, player.vx));
-
-  // Apply gravity
-  player.vy += GRAVITY;
-
-  // Jump start
-  if (keys["Space"] && player.onGround) {
-    player.vy = -JUMP_SPEED;
-    player.onGround = false;
-    player.jumping = true;
-  }
-
-  // Short jump cut when releasing Space
-  if (!keys["Space"] && player.jumping && player.vy < -JUMP_CUT) {
-    player.vy = -JUMP_CUT;
-    player.jumping = false;
-  }
+  const input = {};
+  input.run = keys["ShiftLeft"] || keys["KeyZ"]; // hold Shift or Z to run
+  input.left = keys["ArrowLeft"];
+  input.right = keys["ArrowRight"];
+  input.jump = keys["Space"];
+  player.update(input);
 
   // Movement with collision
   moveAndCollide(player);
