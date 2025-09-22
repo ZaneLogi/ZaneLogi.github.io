@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Mini Mario Physics Demo</title>
+  <style>
+    canvas { background: #5ec0ff; display: block; margin: auto; }
+  </style>
+</head>
+<body>
+<canvas id="game" width="640" height="480"></canvas>
+<script>
+// ----------------------
+// Basic constants
+// ----------------------
+const TILE_SIZE = 32;
+const GRAVITY = 0.6;
+const FRICTION = 0.8;
+const ACCEL = 0.5;
+const MAX_SPEED_X = 4;
+const JUMP_SPEED = 12;
+
+// ----------------------
+// Simple level (0 = empty, 1 = solid block)
+// ----------------------
+const level = [
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [1,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+];
+
+// ----------------------
+// Player object
+// ----------------------
+let player = {
+  x: 64, y: 0,
+  vx: 0, vy: 0,
+  w: 28, h: 28,
+  onGround: false
+};
+
+// ----------------------
+// Input handling
+// ----------------------
+let keys = {};
+document.addEventListener("keydown", e => keys[e.code] = true);
+document.addEventListener("keyup", e => keys[e.code] = false);
+
+// ----------------------
+// Collision helper
+// ----------------------
+function isSolidTileAt(x, y) {
+  let tx = Math.floor(x / TILE_SIZE);
+  let ty = Math.floor(y / TILE_SIZE);
+  if (ty < 0 || ty >= level.length || tx < 0 || tx >= level[0].length) return false;
+  return level[ty][tx] === 1;
+}
+
+// ----------------------
+// Game update
+// ----------------------
+function update() {
+  // Horizontal movement
+  if (keys["ArrowLeft"]) player.vx -= ACCEL;
+  if (keys["ArrowRight"]) player.vx += ACCEL;
+
+  // Friction when no input
+  if (!keys["ArrowLeft"] && !keys["ArrowRight"]) {
+    player.vx *= FRICTION;
+  }
+
+  // Clamp horizontal speed
+  player.vx = Math.max(-MAX_SPEED_X, Math.min(MAX_SPEED_X, player.vx));
+
+  // Apply gravity
+  player.vy += GRAVITY;
+
+  // Jump
+  if (keys["Space"] && player.onGround) {
+    player.vy = -JUMP_SPEED;
+    player.onGround = false;
+  }
+
+  // Movement with collision
+  moveAndCollide(player);
+
+  draw();
+  requestAnimationFrame(update);
+}
+
+// ----------------------
+// Move and handle collisions
+// ----------------------
+function moveAndCollide(p) {
+  // Horizontal move
+  p.x += p.vx;
+  if (p.vx > 0) { // moving right
+    if (isSolidTileAt(p.x + p.w, p.y) || isSolidTileAt(p.x + p.w, p.y + p.h - 1)) {
+      p.x = Math.floor((p.x + p.w) / TILE_SIZE) * TILE_SIZE - p.w - 0.01;
+      p.vx = 0;
+    }
+  } else if (p.vx < 0) { // moving left
+    if (isSolidTileAt(p.x, p.y) || isSolidTileAt(p.x, p.y + p.h - 1)) {
+      p.x = Math.floor(p.x / TILE_SIZE + 1) * TILE_SIZE;
+      p.vx = 0;
+    }
+  }
+
+  // Vertical move
+  p.y += p.vy;
+  if (p.vy > 0) { // falling
+    if (isSolidTileAt(p.x, p.y + p.h) || isSolidTileAt(p.x + p.w - 1, p.y + p.h)) {
+      p.y = Math.floor((p.y + p.h) / TILE_SIZE) * TILE_SIZE - p.h - 0.01;
+      p.vy = 0;
+      p.onGround = true;
+    } else {
+      p.onGround = false;
+    }
+  } else if (p.vy < 0) { // jumping upward
+    if (isSolidTileAt(p.x, p.y) || isSolidTileAt(p.x + p.w - 1, p.y)) {
+      p.y = Math.floor(p.y / TILE_SIZE + 1) * TILE_SIZE;
+      p.vy = 0;
+    }
+  }
+}
+
+// ----------------------
+// Drawing
+// ----------------------
+const ctx = document.getElementById("game").getContext("2d");
+function draw() {
+  ctx.clearRect(0,0,640,480);
+
+  // Draw level
+  for (let y = 0; y < level.length; y++) {
+    for (let x = 0; x < level[0].length; x++) {
+      if (level[y][x] === 1) {
+        ctx.fillStyle = "#654321";
+        ctx.fillRect(x*TILE_SIZE, y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+      }
+    }
+  }
+
+  // Draw player
+  ctx.fillStyle = "red";
+  ctx.fillRect(player.x, player.y, player.w, player.h);
+}
+
+// ----------------------
+update();
+</script>
+</body>
+</html>
