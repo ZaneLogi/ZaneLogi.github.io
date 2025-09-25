@@ -14,25 +14,39 @@ export class World {
     }
   }
 
-  draw(ctx) {
-    ctx.clearRect(0,0,640,480);
+  draw(ctx, camera) {
+    const vpW = camera.viewWidth;
+    const vpH = camera.viewHeight;
+    ctx.clearRect(0, 0, vpW, vpH);
 
     const level = this.levelMap.tileData;
     const TILE_SIZE = this.levelMap.tileSize;
 
-    // Draw level
-    for (let y = 0; y < level.length; y++) {
-      for (let x = 0; x < level[0].length; x++) {
-        if (level[y][x] === 1) {
+    // Draw visible tiles only
+    const startX = Math.floor(camera.x / TILE_SIZE);
+    const startY = Math.floor(camera.y / TILE_SIZE);
+    const endX = Math.ceil((camera.x + vpW) / TILE_SIZE);
+    const endY = Math.ceil((camera.y + vpH) / TILE_SIZE);
+
+    for (let y = startY; y < endY; y++) {
+      for (let x = startX; x < endX; x++) {
+        if (level[y]?.[x] === 1) {
+          const { sx, sy } = camera.worldToScreen(x * TILE_SIZE, y * TILE_SIZE);
           ctx.fillStyle = "#654321";
-          ctx.fillRect(x*TILE_SIZE, y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          ctx.fillRect(Math.round(sx), Math.round(sy), TILE_SIZE, TILE_SIZE);
+        }
+        else if (level[y]?.[x] === 2) {
+          const { sx, sy } = camera.worldToScreen(x * TILE_SIZE, y * TILE_SIZE);
+          ctx.fillStyle = "#883300";
+          ctx.fillRect(Math.round(sx), Math.round(sy), TILE_SIZE, TILE_SIZE);
         }
       }
     }
 
     const player = this.actors[0]; // assuming first actor is the player
     // Draw player
+    const { sx, sy } = camera.worldToScreen(player.x, player.y);
     ctx.fillStyle = "red";
-    ctx.fillRect(player.x, player.y, player.w, player.h);
+    ctx.fillRect(sx, sy, player.w, player.h);
   }
 }
