@@ -17,9 +17,11 @@ const JUMP_SPEED = 12;
 const JUMP_CUT = 3;
 
 export class Actor {
-  constructor() {
-    this.x = 0;
-    this.y = 0;
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.w = 20;
+    this.h = 28;
     this.vx = 0;
     this.vy = 0;
 
@@ -43,7 +45,7 @@ export class Actor {
     this.currentState = "idle"; // main animation state
   }
 
-  update(input) {
+  doPhysics(input) {
     let desiredSpeed = input.run ? this.speedRun : this.speedWalk;
     let accel = this.onGround ? (input.run ? this.accelRun : this.accelWalk) : this.airAccel;
 
@@ -105,5 +107,46 @@ export class Actor {
     } else {
       this.currentState = "idle";
     }
+  }
+
+  moveAndCollide(levelMap) {
+    const TILE_SIZE = levelMap.tileSize;
+    const isSolidTileAt = (x, y) => levelMap.isSolidAt(x, y);
+
+    // Horizontal move
+    this.x += this.vx;
+    if (this.vx > 0) { // moving right
+      if (isSolidTileAt(this.x + this.w, this.y) || isSolidTileAt(this.x + this.w, this.y + this.h - 1)) {
+        this.x = Math.floor((this.x + this.w) / TILE_SIZE) * TILE_SIZE - this.w - 0.01;
+        this.vx = 0;
+      }
+    } else if (this.vx < 0) { // moving left
+      if (isSolidTileAt(this.x, this.y) || isSolidTileAt(this.x, this.y + this.h - 1)) {
+        this.x = Math.floor(this.x / TILE_SIZE + 1) * TILE_SIZE;
+        this.vx = 0;
+      }
+    }
+
+    // Vertical move
+    this.y += this.vy;
+    if (this.vy > 0) { // falling
+      if (isSolidTileAt(this.x, this.y + this.h) || isSolidTileAt(this.x + this.w - 1, this.y + this.h)) {
+        this.y = Math.floor((this.y + this.h) / TILE_SIZE) * TILE_SIZE - this.h - 0.01;
+        this.vy = 0;
+        this.onGround = true;
+      } else {
+        this.onGround = false;
+      }
+    } else if (this.vy < 0) { // jumping upward
+      if (isSolidTileAt(this.x, this.y) || isSolidTileAt(this.x + this.w - 1, this.y)) {
+        this.y = Math.floor(this.y / TILE_SIZE + 1) * TILE_SIZE;
+        this.vy = 0;
+      }
+    }
+  }
+
+  update(input, levelMap) {
+    this.doPhysics(input);
+    this.moveAndCollide(levelMap);
   }
 }

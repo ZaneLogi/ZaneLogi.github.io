@@ -11,6 +11,8 @@
 <canvas id="game" width="640" height="480"></canvas>
 <script type="module">
 import { Actor } from './actor.js';
+import { LevelMap } from './level_map.js';
+import { World } from './world.js';
 
 // ----------------------
 // Basic constants
@@ -33,15 +35,15 @@ const level = [
   [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
 ];
 
+const levelMap = new LevelMap(level, TILE_SIZE);
+const world = new World(levelMap);
+
 // ----------------------
 // Player object
 // ----------------------
-const player = new Actor();
-player.x = 64;
-player.y = 0;
-player.w = 28;
-player.h = 28;
+const player = new Actor(64, 0);
 
+world.addActor(player);
 
 // ----------------------
 // Input handling
@@ -49,16 +51,6 @@ player.h = 28;
 let keys = {};
 document.addEventListener("keydown", e => keys[e.code] = true);
 document.addEventListener("keyup", e => keys[e.code] = false);
-
-// ----------------------
-// Collision helper
-// ----------------------
-function isSolidTileAt(x, y) {
-  let tx = Math.floor(x / TILE_SIZE);
-  let ty = Math.floor(y / TILE_SIZE);
-  if (ty < 0 || ty >= level.length || tx < 0 || tx >= level[0].length) return false;
-  return level[ty][tx] === 1;
-}
 
 // ----------------------
 // Game update
@@ -69,73 +61,17 @@ function update() {
   input.left = keys["ArrowLeft"];
   input.right = keys["ArrowRight"];
   input.jump = keys["Space"];
-  player.update(input);
 
-  // Movement with collision
-  moveAndCollide(player);
-
-  draw();
+  world.update(input);
+  world.draw(ctx);
+  
   requestAnimationFrame(update);
-}
-
-// ----------------------
-// Move and handle collisions
-// ----------------------
-function moveAndCollide(p) {
-  // Horizontal move
-  p.x += p.vx;
-  if (p.vx > 0) { // moving right
-    if (isSolidTileAt(p.x + p.w, p.y) || isSolidTileAt(p.x + p.w, p.y + p.h - 1)) {
-      p.x = Math.floor((p.x + p.w) / TILE_SIZE) * TILE_SIZE - p.w - 0.01;
-      p.vx = 0;
-    }
-  } else if (p.vx < 0) { // moving left
-    if (isSolidTileAt(p.x, p.y) || isSolidTileAt(p.x, p.y + p.h - 1)) {
-      p.x = Math.floor(p.x / TILE_SIZE + 1) * TILE_SIZE;
-      p.vx = 0;
-    }
-  }
-
-  // Vertical move
-  p.y += p.vy;
-  if (p.vy > 0) { // falling
-    if (isSolidTileAt(p.x, p.y + p.h) || isSolidTileAt(p.x + p.w - 1, p.y + p.h)) {
-      p.y = Math.floor((p.y + p.h) / TILE_SIZE) * TILE_SIZE - p.h - 0.01;
-      p.vy = 0;
-      p.onGround = true;
-    } else {
-      p.onGround = false;
-    }
-  } else if (p.vy < 0) { // jumping upward
-    if (isSolidTileAt(p.x, p.y) || isSolidTileAt(p.x + p.w - 1, p.y)) {
-      p.y = Math.floor(p.y / TILE_SIZE + 1) * TILE_SIZE;
-      p.vy = 0;
-    }
-  }
 }
 
 // ----------------------
 // Drawing
 // ----------------------
 const ctx = document.getElementById("game").getContext("2d");
-function draw() {
-  ctx.clearRect(0,0,640,480);
-
-  // Draw level
-  for (let y = 0; y < level.length; y++) {
-    for (let x = 0; x < level[0].length; x++) {
-      if (level[y][x] === 1) {
-        ctx.fillStyle = "#654321";
-        ctx.fillRect(x*TILE_SIZE, y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
-      }
-    }
-  }
-
-  // Draw player
-  ctx.fillStyle = "red";
-  ctx.fillRect(player.x, player.y, player.w, player.h);
-}
-
 // ----------------------
 update();
 </script>
