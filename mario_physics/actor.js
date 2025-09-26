@@ -16,6 +16,11 @@ const RUN_MAX_SPEED = 6.0;
 const JUMP_SPEED = 12;
 const JUMP_CUT = 3;
 
+const SMALL_W = 24;
+const SMALL_H = 32;
+const BIG_W = 32;
+const BIG_H = 64;
+
 // Time based movement constants
 // Why (dt * 60)?
 // the constants (accel = 0.4, gravity = 0.6) are tuned for 60 FPS.
@@ -25,8 +30,8 @@ export class Actor {
   constructor(x, y) {
     this.x = x;
     this.y = y;
-    this.w = 20;
-    this.h = 28;
+    this.w = SMALL_W;
+    this.h = SMALL_H;
     this.vx = 0;
     this.vy = 0;
 
@@ -125,12 +130,12 @@ export class Actor {
     // Horizontal move
     this.x += this.vx * (dt * 60); // scaled
     if (this.vx > 0) { // moving right
-      if (isSolidTileAt(this.x + this.w, this.y) || isSolidTileAt(this.x + this.w, this.y + this.h - 1)) {
+      if (isSolidTileAt(this.x + this.w, this.y + 0.01) || isSolidTileAt(this.x + this.w, this.y + this.h - 1.01)) {
         this.x = Math.floor((this.x + this.w) / TILE_SIZE) * TILE_SIZE - this.w - 0.01;
         this.vx = 0;
       }
     } else if (this.vx < 0) { // moving left
-      if (isSolidTileAt(this.x, this.y) || isSolidTileAt(this.x, this.y + this.h - 1)) {
+      if (isSolidTileAt(this.x, this.y + 0.01) || isSolidTileAt(this.x, this.y + this.h - 1.01)) {
         this.x = Math.floor(this.x / TILE_SIZE + 1) * TILE_SIZE;
         this.vx = 0;
       }

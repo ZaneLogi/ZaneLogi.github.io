@@ -1,16 +1,17 @@
 export class World {
   constructor(levelMap) {
     this.levelMap = levelMap;
-    this.actors = [];
+    this.objects = [];
   }
 
-  addActor(actor) {
-    this.actors.push(actor);
+  addActor(actor, actorAnimator) {
+    this.objects.push({actor: actor, animator: actorAnimator});
   }
 
   update(input, dt) {
-    for (const actor of this.actors) {
-      actor.update(input, this.levelMap, dt);
+    for (const obj of this.objects) {
+      obj.actor.update(input, this.levelMap, dt);
+      obj.animator.update(obj.actor.currentState, dt);
     }
   }
 
@@ -43,10 +44,10 @@ export class World {
       }
     }
 
-    const player = this.actors[0]; // assuming first actor is the player
+    const player = this.objects[0].actor; // assuming first actor is the player
+    const playerAnimator = this.objects[0].animator;
     // Draw player
     const { sx, sy } = camera.worldToScreen(player.x, player.y);
-    ctx.fillStyle = "red";
-    ctx.fillRect(sx, sy, player.w, player.h);
+    playerAnimator.draw(ctx, sx, sy, player.facing === -1);
   }
 }
