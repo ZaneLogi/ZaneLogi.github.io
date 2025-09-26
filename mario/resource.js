@@ -191,13 +191,13 @@ export const res_loader = {
   completion: null,
 }
 
-res_loader.start = function (completion) {
+res_loader.start = function (completion, rootPath = "") {
   this.count = 0;
   this.total = Object.keys(resource).length;
   this.completion = completion;
 
   Object.keys(resource).forEach(key => {
-    this.loadImage(key + ".bmp").then(image => {
+    this.loadImage(rootPath + key + ".bmp").then(image => {
       console.log("Image '" + key + "' is ready.");
       const buffer = this.createOffscreenCanvas(image.width, image.height);
       const ctx = buffer.getContext('2d');

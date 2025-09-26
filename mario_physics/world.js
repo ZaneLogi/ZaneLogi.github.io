@@ -8,9 +8,9 @@ export class World {
     this.actors.push(actor);
   }
 
-  update(input) {
+  update(input, dt) {
     for (const actor of this.actors) {
-      actor.update(input, this.levelMap);
+      actor.update(input, this.levelMap, dt);
     }
   }
 
