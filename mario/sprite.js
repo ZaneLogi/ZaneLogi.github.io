@@ -1,6 +1,6 @@
-"use strict"
+import { IMG } from "./img.js";
 
-class Sprite {
+export class Sprite {
     #images;
     #delays;
     #rotate;
@@ -9,7 +9,7 @@ class Sprite {
     #endFrame;
     #timePassed;
 
-    constructor(nameArray, delayArray, rotate) {
+    constructor(nameArray, delayArray, rotate=false) {
         this.#images = nameArray.map((value) => new IMG(value));
 
         this.#delays = delayArray;
