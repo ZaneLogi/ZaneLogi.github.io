@@ -1,1 +1,4 @@
 __pycache__/
+
+# Claude Code per-user / per-project local config
+.claude/
