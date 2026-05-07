@@ -12,6 +12,7 @@ export const input = {
     barrierPressed: false,
     coinPressed: false,
     startPressed: false,
+    gridPressed: false,
     prev: null,
 
     init() {
@@ -26,6 +27,7 @@ export const input = {
             barrier: this.barrierPressed,
             coin:    this.coinPressed,
             start:   this.startPressed,
+            grid:    this.gridPressed,
         };
     },
 
@@ -42,6 +44,7 @@ export const input = {
                 case "ShiftLeft":  this.barrierPressed = down; break;
                 case "Digit5":     this.coinPressed    = down; break;
                 case "Digit1":     this.startPressed   = down; break;
+                case "KeyG":       this.gridPressed    = down; break;
             }
         }
         sys_evt.reset();
@@ -51,4 +54,5 @@ export const input = {
     barrierEdge() { return this.barrierPressed && !this.prev.barrier; },
     coinEdge()    { return this.coinPressed    && !this.prev.coin; },
     startEdge()   { return this.startPressed   && !this.prev.start; },
+    gridEdge()    { return this.gridPressed    && !this.prev.grid; },
 };

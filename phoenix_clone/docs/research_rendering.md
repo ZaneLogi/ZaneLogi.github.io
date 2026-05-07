@@ -85,16 +85,9 @@ this complexity — a single AABB does the job (see §6).
 
 ### 2.1 Decode all 256 tiles at init
 
-```js
-// resource.js
-resource.tileImages = new Array(256);   // ImageBitmap each, 8x8 px
-
-function init() {
-    for (let i = 0; i < 256; i++) {
-        resource.tileImages[i] = decodeOneTile(i);
-    }
-}
-```
+`resource.js` decodes both tile ROMs (`fgtilesData` and `bgtilesData`)
+to two arrays of 256 `ImageBitmap`s each at boot, fed to
+`gfx.drawObject` via the tile indices stored on each game object.
 
 Decode the **full tile-ROM** (256 tiles), not a list of named sprite
 atlases. Reasons:
@@ -106,10 +99,23 @@ atlases. Reasons:
 - Picking which tiles to decode is more work than decoding everything;
   forgetting one renders as `undefined`
 
-Tile data format (from `bgtiles.md`, `fgtiles.md`, and the Journal):
-8×8 pixels, 2 bits/pixel from two bitplanes, 8 bytes per plane,
-16 bytes total per tile. Palette comes from PROM data per `proms.md`
-(see `research_coordinate_system.md` §6).
+**Tile-ROM byte layout.** Each ROM file is 4096 bytes — two 2KB ICs
+concatenated, one bitplane each. For tile `T` byte `i`:
+`bp0 = rom[T*8 + i]`, `bp1 = rom[2048 + T*8 + i]`. The intermediate
+pixel value at (col=i, row=b) is
+`((bp1 >> (7-b)) & 1) << 1 | ((bp0 >> (7-b)) & 1)`.
+
+**Orientation transform.** The intermediate is anti-diagonally flipped
+relative to the player's display — every decoded tile must therefore be
+written to `grid[(7-x)*8 + (7-y)]` rather than `grid[y*8 + x]`. This
+matches the `rotateCCW` + `flipHorizontal` pair in
+`Phoenix.js:getBackground8x8Data` upstream. Without the flip, font
+glyphs render as right-side-up (rotated 90° CW) and asymmetric sprites
+look like garbage that resembles explosion debris.
+
+Palette comes from PROM data per `proms.md` (see
+`research_coordinate_system.md` §6); `resource.js` currently uses a
+4-color debug palette and consumes only the tile bytes from `data.js`.
 
 ### 2.2 Composite shapes (the `$1700` shape table)
 

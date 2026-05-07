@@ -14,15 +14,21 @@ export const state = {
         this.player1Lives  = 3;       // $4390
         this.player2Lives  = 0;       // $4391
 
-        // Object list — placeholder skeleton. Once tile decode lands
-        // (step 1), `tiles[]` carries the per-8x8 tile indices and
-        // drawObject walks them.
+        // Player ship — fg-tile shape from $1770 (player-ship-intact),
+        // 4×4 tiles laid out row-major. Color-map switches (#CM1 / #CM7)
+        // in the source shape are ignored for now — debug palette is
+        // applied uniformly until PROM-driven palette lands.
         this.player = {
             x: 100,                   // PlayerShipX default
             y: 216,                   // PlayerShipY default
-            w: 16,
-            h: 8,
-            tiles: [],
+            w: 32,
+            h: 32,
+            tiles: [
+                0xEC, 0xED, 0xEE, 0xEF,
+                0xFC, 0x30, 0x31, 0xFF,
+                0xFD, 0x40, 0x41, 0xFE,
+                0xF4, 0xF5, 0xF6, 0xF7,
+            ],
         };
 
         this.bgScrollY = 0;           // $5800 scroll register (research_hardware.md §4)

@@ -1,10 +1,11 @@
-import { sys_evt } from './sys_evt.js';
-import { input }   from './input.js';
-import { gfx }     from './gfx.js';
-import { state }   from './state.js';
-import { states }  from './states.js';
-import { render }  from './render.js';
-import { runloop } from './runloop.js';
+import { sys_evt }  from './sys_evt.js';
+import { input }    from './input.js';
+import { gfx }      from './gfx.js';
+import { state }    from './state.js';
+import { states }   from './states.js';
+import { render }   from './render.js';
+import { runloop }  from './runloop.js';
+import { resource } from './resource.js';
 
 // L001A — Code.md:MainLoop. Three-phase frame structure
 // (research_code_flow.md §5.1):
@@ -13,11 +14,12 @@ import { runloop } from './runloop.js';
 //   3. UpdateScoresAndSound (game-mode only; stub for skeleton)
 
 const game = {
-    init() {
+    async init() {
         sys_evt.init();
         input.init();
         gfx.init();
         state.init();
+        await resource.init();
 
         runloop.start(() => this.tick(), () => this.render());
     },
