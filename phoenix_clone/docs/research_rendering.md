@@ -1,0 +1,475 @@
+# Phoenix Rendering and Collision — JS Port Design
+
+This is the rendering/collision spec for the Phoenix port. It covers
+sprite decoding, coordinate handling, object representation, the
+render pipeline, and collision detection. The runloop and frame
+structure live in `research_code_flow.md`.
+
+Source-of-truth: `D:\tmp\computer_archeology_phonenix\content\Arcade\Phoenix\Code.md`,
+plus `RAMUse.md`, `bgtiles.md`, `fgtiles.md`, `proms.md`. Claims tagged
+**[verified]** with citations, **[inferred]** when reasoning beyond
+the source, or **[uncertain]** when the source is ambiguous.
+
+The reference implementation pattern is the `space_invaders/` sub-
+project in this repo — pre-decoded sprite atlas, object-list state,
+`convertCoords` as a single coord-translation point (identity in
+Phoenix, see §3.3), AABB collision.
+
+---
+
+## 1. Source's rendering model — what we're porting from
+
+Phoenix has **no sprite hardware**. The CPU writes tile indices
+directly into FG/BG tile-RAM windows; the tile chip composites them
+every frame. "Sprites" are software constructs: multi-tile shapes
+assembled from 8×8 tile cells, with a "shape table" at `$1700` listing
+tile patterns per shape, and `DrawImageCbyB` ($0AD6) walking that
+table to write tile indices into FG tile-RAM at an offset from the
+object's position.
+
+Two consequences shape the JS port design:
+
+### 1.1 Sub-tile motion via 8 pre-shifted variants
+
+State X/Y coords are pixel-granular. `PlayerShipX` defaults to `$64 = 100`
+(not 8-aligned); the player ship moves 1 px/frame via `DEC (HL)` at
+`Code.md:L0900`. Bullets, enemies, and most other moving objects are
+likewise stored in pixel units.
+
+Since the tile chip can only address 8-pixel cells, the source carries
+**8 pre-shifted shape variants** in tile-ROM for moving sprites. Tables
+`T1600` (player ship) and `T1620` (player bullet, comment "**8 player
+bullets for the fine bit shifting**") map `(X & 7) → shape_index` so
+the right pre-shifted variant gets blitted at the tile-aligned position.
+
+This is a tile-chip workaround. Modern canvas's `drawImage` renders a
+composite sprite at any integer pixel coordinate without the trick.
+
+[verified, `Code.md:L0900`, `Code.md:T1600`, `Code.md:T1620`]
+
+### 1.2 Tile-RAM-readback collision (three-phase)
+
+Phoenix's collision (e.g. `L0E10` for player-bullet vs alien) is a
+three-phase mechanism wrapped around the tile-RAM:
+
+| Phase | Granularity | Mechanism |
+|---|---|---|
+| 1. Identify category | Tile (1 byte read) | Tile-RAM-readback at the cell directly above the bullet; tile-value range encodes what was hit |
+| 2. Sub-tile precision | Pixel (within an 8-px cell) | `T1740` per-variant solid-pixel bounds; bullet's `X & 7` must fall within `[lower, upper]` |
+| 3. Identify instance | Tile, with anchor offset | `T1740` byte 2 + scan `$4B70` alien-list to find which alien owns that tile |
+
+The three-phase complexity exists because the pre-shifted variants
+make each cell's solid-pixel range variant-dependent. Different alien
+tile variants cover different sub-pixel ranges within their 8-pixel
+cell — see `T1740` data below:
+
+```
+1740: 08 00 00 FF   ; variant 0: hits in sub-X 0..7 (full cell)
+1744: 01 00 F8 FF   ; variant 1: hits only in sub-X 0
+1748: 08 01 02 FF   ; variant 2: hits in sub-X 1..7
+174C: 04 00 FA FF   ; variant 3: hits in sub-X 0..3
+1750: 08 01 04 FF   ; variant 4: hits in sub-X 1..7
+1754: 08 00 FC FF   ; variant 5: hits in sub-X 0..7
+1758: 08 05 06 FF   ; variant 6: hits in sub-X 5..7
+175C: 08 00 FE FF   ; variant 7: hits in sub-X 0..7
+```
+
+[verified, `Code.md:L0E10`, `Code.md:T1740`]
+
+The JS port doesn't carry pre-shifted variants, so it doesn't need
+this complexity — a single AABB does the job (see §6).
+
+---
+
+## 2. Sprite / tile decoding
+
+### 2.1 Decode all 256 tiles at init
+
+```js
+// resource.js
+resource.tileImages = new Array(256);   // ImageBitmap each, 8x8 px
+
+function init() {
+    for (let i = 0; i < 256; i++) {
+        resource.tileImages[i] = decodeOneTile(i);
+    }
+}
+```
+
+Decode the **full tile-ROM** (256 tiles), not a list of named sprite
+atlases. Reasons:
+- Damage-stage tiles for shield blocks (`$4B..$5E` for the mothership
+  shield decrement, the `$1B40` LUT for conveyor-belt damage) are
+  unnamed but vital — see §7
+- Character / score tiles, BG star tiles, and alien-formation variant
+  tiles all live in tile-ROM
+- Picking which tiles to decode is more work than decoding everything;
+  forgetting one renders as `undefined`
+
+Tile data format (from `bgtiles.md`, `fgtiles.md`, and the Journal):
+8×8 pixels, 2 bits/pixel from two bitplanes, 8 bytes per plane,
+16 bytes total per tile. Palette comes from PROM data per `proms.md`
+(see `research_coordinate_system.md` §6).
+
+### 2.2 Composite shapes (the `$1700` shape table)
+
+Multi-tile sprites are composed from individual tiles. Port the
+shape table at `$1700`-`$17DC` as a JS data structure:
+
+```js
+// shapes.js — port of $1700-$17DC
+export const SHAPES = {
+    PLAYER_SHIP_INTACT:        { w: 4, h: 4, tiles: [/* T1770 */] },
+    PLAYER_SHIP_LARGE_SHIELDS: { w: 4, h: 4, tiles: [/* T1770 */] },
+    PLAYER_SHIP_SMALL_SHIELDS: { w: 4, h: 4, tiles: [/* T1780 */] },
+    GREEN_SHIP_LARGE_SHIELDS:  { w: 4, h: 4, tiles: [/* T1790 */] },
+    GREEN_SHIP_NO_SHIELDS:     { w: 4, h: 4, tiles: [/* T17A0 */] },
+    ALIEN_FORMATION_TYPE0:     { w: 2, h: 2, tiles: [/* ... */] },
+    // etc.
+};
+```
+
+**Port one shape per logical sprite, not the 7 pre-shifted variants
+the source carries.** Source code uses `PlayerShipX & 7` to index into
+8 variants (frames `#1..#8` in `T1600`); we use only the 8-aligned
+variant (typically the first one) and let `drawImage` handle sub-tile
+positioning at the canvas level.
+
+### 2.3 Damage-progression LUTs
+
+For destructibles like the mothership conveyor belt, port the lookup
+tables verbatim:
+
+```js
+// shapes.js
+export const SHIELD_DAMAGE_LUT = [/* 16 bytes from Code.md:$1B40 */];
+```
+
+See §7 for how this is used.
+
+---
+
+## 3. Coordinate space and granularity
+
+### 3.1 Pixel-granular state, integer X/Y
+
+All game-object X/Y coords are integers in pixels, matching source
+units verbatim:
+
+```js
+state.player.x = 100;     // matches source PlayerShipX = $64 = 100
+state.player.y = 216;     // matches source PlayerShipY = $D8 = 216
+```
+
+Movement is in 1-pixel increments — `state.player.x -= 1` for left
+(equivalent to source `DEC PlayerShipX`), `+= 1` for right. Bullets
+and enemies similarly.
+
+### 3.2 No sub-pixel positioning
+
+Because state coords are integers and `drawImage` accepts integer
+arguments, there's no sub-pixel rendering. We don't need
+`imageSmoothingEnabled = false` magic or the source's 8-variant
+trick; we don't pass non-integer X/Y to `drawImage`.
+
+### 3.3 `convertCoords` is essentially identity
+
+**The source's object X/Y are already in display orientation** —
+portrait, X→right, Y↓, identical to the standard canvas coordinate
+convention. No ROT90 transform is needed at draw time.
+
+Evidence: `PlayerShipX = 0x64 = 100` is centered on the 208-wide
+display axis; `PlayerShipY = 0xD8 = 216` is near the bottom of the
+256-tall axis; player bullet's Y is ship Y `- 8` ("8 pixels above")
+confirming Y↓; enemy bullets initialise with `Y = 0x20 = 32` near the
+top. These are all standard portrait-display values.
+
+The "rotation" mentioned in `research_coordinate_system.md` lives
+entirely in **memory layout** — the source's screen-RAM addresses
+(`$4000-$433F`) are arranged in raw-scan (pre-rotation) layout, where
+`+1` to a pointer = 1 row down on display and `+32` = 1 column LEFT
+on display. `L09BA` (`GetScreenRamAddress`) applies the rotation when
+mapping (X, Y) → memory address: `addr = 0x4000 + (25 - col) * 32 + row`.
+
+We don't mirror screen RAM (object-list state, see §4), so we don't
+need that rotation. Object X/Y go straight to canvas X/Y:
+
+```js
+// gfx.js
+gfx.convertCoords = function(srcPt) {
+    return { x: srcPt.x, y: srcPt.y };
+    // The only thing this might add is a small constant offset if a
+    // playfield letterbox shifts source (0, 0) relative to canvas (0, 0)
+    // — verify by drawing the player ship at default coords during scaffolding.
+};
+```
+
+`convertCoords` is still the **single place** any orientation /
+offset adjustment lives — keep the indirection so a future tweak
+(e.g. a constant `+ playfieldOriginX`) only touches one function. But
+expect it to stay simple. Same pattern as `space_invaders/gfx.js`.
+
+---
+
+## 4. Object representation
+
+### 4.1 Object list (no FG tile-RAM mirror)
+
+Game state is a list of logical objects. Each carries its position,
+its current tile pattern, and any per-object state:
+
+```js
+state.player    = { x, y, w, h, shape, tiles, alive, ... };
+state.aliens    = [/* up to ~30 alien objects */];
+state.birds     = [/* phoenix-bird objects */];
+state.bullets   = [/* player bullets, max 2 */];
+state.bombs     = [/* enemy bullets, max 5 */];
+state.mothership = { x, y, w, h, tiles, state, alive, ... };
+```
+
+Per-object fields (typical):
+- `x, y` — source pixel coords
+- `w, h` — width and height in pixels (used for AABB and bounds)
+- `tiles[]` — live tile-pattern (mutable; damage updates mutate
+  individual entries, see §7)
+- `shape` — SHAPES key, only when the same object can switch
+  visual states (e.g. ship intact vs ship with shields); on switch,
+  copy `SHAPES[shape].tiles` into `obj.tiles` so the live tiles can
+  still be mutated independently
+- Object-specific fields: `alive`, animation frame, shield count, etc.
+
+### 4.2 Background as a small tile-grid
+
+The BG starfield is the **one place** a tile-RAM-style mirror is the
+right shape, because it's a uniform fixed-position scrolling layer:
+
+```js
+state.bgTiles  = new Uint8Array(832);    // 32 cols × 26 rows
+state.bgScrollY = 0;                      // 0..255, units = pixels
+```
+
+`drawBackground()` walks `bgTiles` and `drawImage`s each cell with
+the `scrollY` offset applied via `convertCoords`.
+
+---
+
+## 5. Render pipeline
+
+Per-frame, after `tick()`:
+
+```js
+// render.js
+function render(state) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawBackground(state);
+    for (const obj of allDrawableObjects(state)) {
+        drawObject(obj);
+    }
+}
+
+function drawObject(obj) {
+    for (let row = 0; row < obj.h / 8; row++) {
+        for (let col = 0; col < obj.w / 8; col++) {
+            const tile = obj.tiles[row * (obj.w / 8) + col];
+            if (tile === 0) continue;     // 0 = transparent (FourByFourEmpty $17F0)
+            const pt = gfx.convertCoords({
+                x: obj.x + col * 8,
+                y: obj.y + row * 8,
+            });
+            ctx.drawImage(resource.tileImages[tile], pt.x, pt.y);
+        }
+    }
+}
+```
+
+`drawObject` works for every object type (player, aliens, birds,
+mothership, bullets) because they all share the same `{x, y, tiles[]}`
+shape. The function is ~10 lines and never branches by object type.
+
+**Render cost.** Worst case ~50 visible objects × ~16 tiles per object
+= ~800 `drawImage` calls per frame. Trivial on modern hardware.
+
+**No "erase prior position" work.** The source uses
+`OldPlayerShipMSB/LSB`-style pointers to clear the previous position
+from FG tile-RAM before redrawing. Our canvas-clear-per-frame
+replaces that — drop the old-position bookkeeping entirely.
+
+---
+
+## 6. Collision
+
+### 6.1 AABB primary
+
+```js
+// collision.js
+function aabbHit(a, b) {
+    return a.x < b.x + b.w &&
+           a.x + a.w > b.x &&
+           a.y < b.y + b.h &&
+           a.y + a.h > b.y;
+}
+
+// Player bullet vs aliens (port of L0E10):
+for (const bullet of state.bullets) {
+    if (!bullet.alive) continue;
+    for (const alien of state.aliens) {
+        if (!alien.alive) continue;
+        if (aabbHit(bullet, alien)) {
+            onAlienHit(alien, bullet);
+            break;
+        }
+    }
+}
+```
+
+This is functionally equivalent to Phoenix's three-phase
+tile-readback + T1740 sub-tile bounds + alien-list scan. The source's
+complexity came from the pre-shifted-variants design choice; we don't
+need it because each of our objects has one consistent sprite at any
+X — the AABB IS the alien's solid extent.
+
+Cost: ~5 bullets × ~50 enemies = ~250 tests/frame, trivial.
+
+### 6.2 Per-tile sub-test for destructibles
+
+For objects with internal structure that gets destroyed piecewise
+(notably the mothership shield blocks), AABB tells you which object
+was hit; a per-tile lookup within that object's `tiles[]` tells you
+which block:
+
+```js
+function tileWithinObject(obj, hitX, hitY) {
+    const dx = hitX - obj.x;
+    const dy = hitY - obj.y;
+    const col = dx >> 3;
+    const row = dy >> 3;
+    const wTiles = obj.w / 8;
+    const hTiles = obj.h / 8;
+    if (col < 0 || col >= wTiles || row < 0 || row >= hTiles) return -1;
+    const idx = row * wTiles + col;
+    if (obj.tiles[idx] === 0) return -1;   // already destroyed (transparent)
+    return idx;
+}
+```
+
+For most enemies (uniform shape), skip §6.2 — the AABB hit IS the
+whole answer. Use §6.2 only when the object has heterogeneous internal
+state (mothership shield, possibly bird boss as it matures).
+
+### 6.3 Coverage of source paths
+
+| Source collision path | JS port equivalent |
+|---|---|
+| Player bullet vs formation alien (`L0E10`) | `aabbHit(bullet, alien)` |
+| Player bullet vs swooping alien (`L0E39`) | `aabbHit(bullet, alien)` |
+| Player bullet vs mothership shield (`L237B`) | `aabbHit(bullet, mothership)` → `tileWithinObject` → §7 damage |
+| Enemy bullet vs player shield (`L0CAC`) | `aabbHit(bomb, playerShield)` |
+| Enemy bullet vs player ship (`L0CB4`) | `aabbHit(bomb, player)` |
+| Alien collision with player ship sides (`L0CF4`) | `aabbHit(player, alien)` |
+
+---
+
+## 7. Worked example: mothership shield damage
+
+The mothership stage shows partial damage on shield blocks before
+they fully disappear — the "trace of destruction" the player observes
+on each hit. The source achieves this via tile-bitmap swapping (not
+pixel manipulation; the tile chip can't address pixels).
+
+### 7.1 Source mechanism 1 — sequential tile decrement (`L237B`)
+
+```
+237B: LD A,(DE) / AND $F7 / LD (DE),A    ; mark shield element damaged in state byte
+2384: LD A,B   / DEC A   / LD (HL),A     ; tile_index--  → next damage stage tile
+2387: CP $4B   / RET NZ                  ; not at fully-destroyed yet → done
+238A: LD (HL),$00                        ; otherwise → transparent
+```
+
+Tiles `$5E`, `$5D`, `$5C`, …, `$4B` in tile-ROM are
+progressively-damaged versions of the same shield block. Each hit
+decrements the on-screen tile index by 1.
+
+[verified, `Code.md:L237B`]
+
+### 7.2 Source mechanism 2 — tile lookup table (`L23AF`)
+
+```
+23AF: LD A,B / AND $0F / ADD A,E / LD E,A   ; index into table at $1B40
+23B4: LD A,(DE) / LD (HL),A                  ; lookup → next damage tile
+```
+
+A 16-entry LUT at `$1B40` maps `current_tile & 0x0F` → next damage
+stage tile. Used for the conveyor-belt blocks.
+
+[verified, `Code.md:L23AF`]
+
+### 7.3 JS port
+
+```js
+// shapes.js
+export const SHIELD_DAMAGE_LUT = [/* 16 bytes from Code.md:$1B40 */];
+
+// state.js
+state.mothership = {
+    x, y, w, h,
+    tiles: [/* initial intact-tile values from $1700 shape */],
+    state: [/* per-tile damage-state bytes (mirrors source's parallel array) */],
+};
+
+// On bullet impact (port of L237B — shield-block region):
+function onShieldHitDecrement(mothership, tileIdx) {
+    let t = mothership.tiles[tileIdx];
+    t -= 1;
+    if (t < 0x4B) t = 0x00;
+    mothership.tiles[tileIdx] = t;
+    mothership.state[tileIdx] &= 0xF7;
+}
+
+// On bullet impact (port of L23AF — conveyor-belt region):
+function onShieldHitLUT(mothership, tileIdx) {
+    const cur = mothership.tiles[tileIdx];
+    mothership.tiles[tileIdx] = SHIELD_DAMAGE_LUT[cur & 0x0F];
+}
+```
+
+**No render changes** — `drawObject(mothership)` is unchanged. It
+walks `mothership.tiles[]` and `drawImage`s each tile; the next frame
+naturally shows the swapped damage tile.
+
+This worked example is also why the **decode-all-256-tiles** decision
+(§2.1) matters: damage-progression tiles `$4B..$5E` and the LUT
+targets aren't in any named sprite atlas; if `resource.js` only
+decoded "named" sprites, the shield damage would render as
+`undefined`. Decode the whole tile-ROM upfront.
+
+---
+
+## 8. Player ship animation
+
+Source switches `PlayerShape` (`$43C1`) between several frame variants
+based on input/state — different shapes for "intact ship", "ship with
+large shield", "ship with small shield", "green ship", etc. (See
+`Code.md:T1770-T17A0`.)
+
+In our port, `state.player.shape` is a `SHAPES` key; updating it
+triggers a copy of `SHAPES[shape].tiles` into `state.player.tiles`
+(so the live tiles can still be mutated independently if needed).
+
+Animation frame **for sub-tile X positioning** (the 8-variant trick
+in `T1600`) is NOT used — see §1.1 / §3.
+
+---
+
+## 9. Implementation checklist
+
+When working on rendering or collision code, verify:
+
+- [ ] `resource.tileImages[]` decodes all 256 tiles (not just named ones)
+- [ ] `state.player.x` / `state.aliens[*].x` etc. are integers in source pixel units
+- [ ] No call site passes non-integer X/Y to `drawImage`
+- [ ] All canvas-touching code goes through `gfx.convertCoords` (kept as the single indirection point even though it's identity)
+- [ ] Each object has `{x, y, w, h, tiles[]}` minimum
+- [ ] `drawObject` is one function used by every object type
+- [ ] Mothership shield damage uses §7 tile-swap pattern, not pixel mutation
+- [ ] Collision is AABB primary; per-tile sub-test only for destructibles
+- [ ] No `OldPlayerShipMSB`-style "erase prior frame" bookkeeping
