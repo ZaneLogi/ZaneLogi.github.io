@@ -485,7 +485,7 @@ just tile-write traffic into `0x4000-0x4FFF`.
 | computerarcheology.com [Phoenix index](https://www.computerarcheology.com/Arcade/Phoenix/) | High | CPU = 8085, sound chip = MN6221AA |
 | computerarcheology.com [Hardware.html](https://www.computerarcheology.com/Arcade/Phoenix/Hardware.html) | High | Memory map, IN0/DSW0 layout, video/scroll/sound port addresses, sound chip part number |
 | computerarcheology.com [RAMUse.html](https://www.computerarcheology.com/Arcade/Phoenix/RAMUse.html) | High | Per-byte RAM map, two-bank video memory structure, alien/player object layout |
-| computerarcheology.com [Code.html](https://www.computerarcheology.com/Arcade/Phoenix/Code.html) (local clone: `D:\tmp\computer_archeology_phonenix\content\Arcade\Phoenix\Code.md`) | High | Polled VBLANK confirmation, sound mute example, reset/init at `$0008`; **scroll register width/units (§4.1), full sound bit-field map (§5.1, §5.2), IN0 raw-store confirmation (§7.1), video-register bit map (§7.2)** |
+| computerarcheology.com [Code.html](https://www.computerarcheology.com/Arcade/Phoenix/Code.html) (local clone: `Code.md` — see `../CLAUDE.md` for path) | High | Polled VBLANK confirmation, sound mute example, reset/init at `$0008`; **scroll register width/units (§4.1), full sound bit-field map (§5.1, §5.2), IN0 raw-store confirmation (§7.1), video-register bit map (§7.2)** |
 | MAME [`phoenix.cpp`](https://github.com/mamedev/mame/blob/master/src/mame/phoenix/phoenix.cpp) | High | 2.75 MHz CPU clock; address-map handler names (`phoenix_videoram_w`, `phoenix_videoreg_w`, `phoenix_scroll_w`, `control_a_w`, `control_b_w`); sound device modelling (`TMS36XX` with `MM6221AA`) |
 
 The Hardware.html page is the source of truth for memory geometry; MAME

@@ -9,7 +9,7 @@ in Section 7.4 are the only items still unconfirmed.
 This is the up-front coordinate-system spec for the Phoenix port. It is
 derived primarily from the Computer Archeology Phoenix disassembly
 (`https://www.computerarcheology.com/Arcade/Phoenix/`, also mirrored
-locally in `D:\tmp\computer_archeology_phonenix\content\Arcade\Phoenix\`)
+locally — see `../CLAUDE.md` for the per-PC clone path)
 and cross-checked against the MAME `phoenix.cpp` driver.
 
 The architecture of Phoenix is fundamentally different from Galaga

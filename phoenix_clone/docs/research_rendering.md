@@ -5,8 +5,9 @@ sprite decoding, coordinate handling, object representation, the
 render pipeline, and collision detection. The runloop and frame
 structure live in `research_code_flow.md`.
 
-Source-of-truth: `D:\tmp\computer_archeology_phonenix\content\Arcade\Phoenix\Code.md`,
-plus `RAMUse.md`, `bgtiles.md`, `fgtiles.md`, `proms.md`. Claims tagged
+Source-of-truth: `Code.md`, `RAMUse.md`, `bgtiles.md`, `fgtiles.md`,
+`proms.md` from the local ComputerArcheology Phoenix clone (see
+`../CLAUDE.md` for the per-PC path). Claims tagged
 **[verified]** with citations, **[inferred]** when reasoning beyond
 the source, or **[uncertain]** when the source is ambiguous.
 

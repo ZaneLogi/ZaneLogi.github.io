@@ -19,11 +19,17 @@ source disassembly** before designing.
 
 ## Source of truth
 
-Local clone (sparse-checkout of the official ComputerArcheology repo):
+Local clone (sparse-checkout of the official ComputerArcheology repo).
+The path is **per-PC** — both currently in use, depending on which PC
+you're on:
 
-```
-D:\tmp\computer_archeology_phonenix\content\Arcade\Phoenix\
-```
+- `D:\tmp\computer_archeology_phonenix\content\Arcade\Phoenix\`
+- `C:\Z_Temp\computer_archeology_phoenix\content\Arcade\Phoenix\`
+
+Use whichever exists locally. The "phonenix" typo in the first path
+preserves an existing directory name and is not worth renaming. The
+research docs under `docs/` cite source files by relative name only
+(`Code.md`, `RAMUse.md`, etc.); the absolute path lives only here.
 
 Upstream: <https://github.com/topherCantrell/computerarcheology>
 (rendered at <https://www.computerarcheology.com/Arcade/Phoenix/>).

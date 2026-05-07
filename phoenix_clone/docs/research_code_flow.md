@@ -12,8 +12,9 @@ delegates per-feature internals to:
   video-register and scroll writes (§4 / §7.2).
 - `research_coordinate_system.md` — display orientation.
 
-Source-of-truth: `D:\tmp\computer_archeology_phonenix\content\Arcade\Phoenix\Code.md`
-(8085 listing) and `RAMUse.md`. Claims tagged **[verified]** with an
+Source-of-truth: `Code.md` (8085 listing) and `RAMUse.md` from the
+local ComputerArcheology Phoenix clone (see `../CLAUDE.md` for the
+per-PC path). Claims tagged **[verified]** with an
 address citation, **[inferred]** when reasoning beyond the source, or
 **[uncertain]** when the source is ambiguous.
 

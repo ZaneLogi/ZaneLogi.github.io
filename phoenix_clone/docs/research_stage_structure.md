@@ -3,12 +3,13 @@
 Source-of-truth: a local clone of the computerarcheology.com Phoenix
 project (Z80/8085 hybrid listing produced from the original ROM).
 
-- **Disassembly** — `D:\tmp\computer_archeology_phonenix\content\Arcade\Phoenix\Code.md`
-  (full 8085 listing with labels like `L0515`, `T0598`, `T1760`).
-- **RAM map** — `D:\tmp\computer_archeology_phonenix\content\Arcade\Phoenix\RAMUse.md`
-  (every label in this doc resolves there).
-- **Journal** — `D:\tmp\computer_archeology_phonenix\content\Arcade\Phoenix\Journal.md`
-  (Peter's research notes).
+- **Disassembly** — `Code.md` (full 8085 listing with labels like
+  `L0515`, `T0598`, `T1760`).
+- **RAM map** — `RAMUse.md` (every label in this doc resolves there).
+- **Journal** — `Journal.md` (Peter's research notes).
+
+These files live in the local ComputerArcheology Phoenix clone — see
+`../CLAUDE.md` for the per-PC path.
 
 Every claim is tagged **[verified]** with an address citation
 (e.g. `Code.md:$0515` / `RAMUse.md:$43AB`), **[inferred]** when
