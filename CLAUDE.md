@@ -54,6 +54,38 @@ games:
 `imagedata/`, `input/`, `lzw/`, `palette_rendering/`,
 `resizable_canvas/`, `set_color_key/`
 
+## Cross-PC workflow
+
+The user works on this repo across **two PCs**, syncing only through the
+git remote. Auto-memory is per-PC and does not sync across them, so each
+Claude session needs to discover what the other PC did from git itself.
+
+**Working rules (binding, agreed 2026-05-08):**
+- **Pull at the start of every PC session; push at the end.**
+- **One PC at a time.** Don't make commits on both PCs in parallel —
+  parallel work on `galaga_clone` once produced a 61/61-commit divergence.
+- **Force-push is allowed when it's the better choice** (e.g. rebasing
+  feature branches onto a cross-cutting main change to keep history
+  linear). Confirm with the user first. The other PC, after pulling,
+  will need `git reset --hard origin/<branch>` for any rebased branch —
+  which is acceptable *only because* of the one-PC-at-a-time rule.
+- **Write rich commit messages.** They are the cross-PC communication
+  channel — anything you'd want the other-PC me to know belongs there
+  (or in a research doc / CLAUDE.md update committed in the same change).
+
+**The "last-known HEAD" sync protocol:** at session end (or whenever you
+make/observe a commit), record `git rev-parse HEAD` for the active
+branch in your auto-memory (e.g. a file like
+`reference_cross_pc_sync_state.md`). At session start (or when the user
+says they pulled), compare to current HEAD; if they differ, run
+`git log <recorded>..HEAD` and read the new commits to update your
+project memories. Then update the recorded SHA.
+
+If you don't have a sync-state memory file yet (first session on this
+PC after this convention is added), bootstrap one by recording the
+current HEAD of each branch you work on, and start the protocol from
+there.
+
 ## Per-project conventions
 
 Each game was built at a different time and they **don't share code or
