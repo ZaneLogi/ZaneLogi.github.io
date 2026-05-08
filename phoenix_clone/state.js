@@ -75,9 +75,35 @@ export const state = {
             x: 0, y: 0, controlA: 0, controlB: 0, alive: false,
         }));
         // Per-alien movement-pattern pointer (mirror of $4B50-$4B6F, 2
-        // bytes per alien). Copied from T1520 by $0650 each state-2; not
-        // consumed yet (alien motion lands in step 6).
+        // bytes per alien). Copied from T1520 by $0650 each state-2.
+        // Stored as a 16-bit ROM address (high byte from T1520[i*2], low
+        // byte from T1520[i*2+1]); AlienMovementUpdate ($0D1C) walks
+        // MOTION_PATH_BASE at offset (ptr - 0x1000), advancing one byte
+        // per 8-px grid crossing. End-of-list (path byte = 0) resets to
+        // (alienPathSeedHi, alienPathSeedLo) below — see L0DDE.
         this.alienMovePtr = new Uint16Array(16);
+
+        // L2000 4-frame round-robin counter — mirror of ($435F & 3).
+        // Each combat-stage frame increments and dispatches a different
+        // sub-set of work (research_enemy_motion.md §1):
+        //   lane 0: draw + behavior + alien-vs-player collision
+        //   lane 1: enemy bullets + AlienMovementUpdate
+        //   lane 2: AlienAnimationUpdate + L2560 (enemy fire trigger)
+        //   lane 3: enemy bullets + L0A6C + L0FC0
+        // Step 6 only runs lanes 1 and 2 (motion + anim).
+        this.combatLane = 0;
+
+        // Path-list reset target — mirror of $4394 (MSB) / $4395 (LSB).
+        // L0DDE writes these into a per-alien path pointer when its
+        // current path byte is 0 (end-marker). Init'd at state-2 end by
+        // copying the high byte of alienMovePtr[0] (= T1520[stage*2])
+        // and clearing the low byte — mirrors L0506 ($0506-$0513).
+        // For all stages T1520 = (0x10, 0x00), so the seed always points
+        // at T1000 / MOTION_PATH_BASE[0]. AlienBehaviorUpdate ($3000 —
+        // deferred) is what would mutate these to redirect aliens onto
+        // a swoop pattern; with $3000 unported, the seed is constant.
+        this.alienPathSeedHi = 0x10;
+        this.alienPathSeedLo = 0x00;
 
         this.bgScrollY = 0;           // $5800 scroll register (research_hardware.md §4)
 

@@ -8,6 +8,10 @@ import {
     ALIEN_CONTROL_INIT,   // source T1500
     ALIEN_MOVE_PTR_INIT,  // source T1520
     ALIEN_FORMATIONS,     // source T1540
+    MOTION_PATH_BASE,     // source T1000
+    MOTION_DIRECTIONS,    // source T1700
+    ANIMATION_TABLE,      // source T16A0
+    SHAPE_LSB_TABLE,      // source T1600
 } from './data.js';
 
 // L0400 — Code.md:GameStateMachine. JT1 jump table → JS switch
@@ -18,6 +22,18 @@ import {
 // STAGE_BLOCK_INDEX (source T0598) stores LSBs in the $A8..$CC range;
 // subtract $A8 to get the slice index.
 const STAGE_BLOCK_BASE = 0xA8;
+
+// MOTION_PATH_BASE is rooted at source T1000 = $1000. Per-alien path
+// pointers (state.alienMovePtr[i]) carry full ROM addresses; subtract
+// this to index the JS array. Reset target (alienPathSeedHi/Lo) is
+// also a ROM address.
+const PATH_BASE_ADDR = 0x1000;
+
+// Decode a signed-byte motion delta. T1700 packs (dx, dy) as 8-bit
+// two's-complement (e.g. $FF = -1, $FC = -4).
+function s8(b) {
+    return b & 0x80 ? b - 0x100 : b;
+}
 
 export const states = {
     dispatch() {
@@ -76,6 +92,13 @@ export const states = {
         this.initGlobalLevelData();
         this.initPlayerDataStructure();
         this.initAlienData();
+        // L0506 — clear $4392-$4397 and seed ($4394) from $4B50 MSB.
+        // Step 6 only consumes alienPathSeedHi/Lo; the rest of the
+        // $4392-$4397 zone (Counter93, behavior-state scratch) is owned
+        // by AlienBehaviorUpdate $3000 and lands when swoops do.
+        state.combatLane = 0;
+        state.alienPathSeedHi = (state.alienMovePtr[0] >> 8) & 0xFF;
+        state.alienPathSeedLo = 0;
     },
 
     // L0580 InitGlobalLevelData — index STAGE_BLOCK_INDEX (source T0598)
@@ -111,8 +134,10 @@ export const states = {
         const stage = state.levelAndRound & 0x0F;
         const controlA = ALIEN_CONTROL_INIT[stage * 2];
         const controlB = ALIEN_CONTROL_INIT[stage * 2 + 1];
-        const movePtr  = ALIEN_MOVE_PTR_INIT[stage * 2]
-                       | (ALIEN_MOVE_PTR_INIT[stage * 2 + 1] << 8);
+        // T1520 stores big-endian (MSB at +0, LSB at +1) — see source $0650
+        // ($065B-$065D loads D from MSB then E from LSB).
+        const movePtr  = (ALIEN_MOVE_PTR_INIT[stage * 2] << 8)
+                       |  ALIEN_MOVE_PTR_INIT[stage * 2 + 1];
 
         // L0610 formation lookup. RRCA(LevelAndRound) & 0x0F selects the
         // FORMATION_INDEX (source T063A) entry; bit 0 of LevelAndRound
@@ -207,19 +232,111 @@ export const states = {
         }
     },
 
-    // L2000 — combat stub. Step 5 leaves aliens sitting in formation with
-    // the controlA/B values written by state-2 init (controlA=$09 → Bit3
-    // "Draw 2×1", controlB=$60 → ALIEN_SHAPE_TABLE entry for source $1460
-    // = shape #7, single tile $6A). The alive=true loops mirror L2000's
-    // per-frame AlienDataController ($0A50) and PlayerUpdate ($0876)
-    // calls — without them, both aliens and player would stay invisible
-    // since state-2 init no longer sets alive itself. Movement, firing,
-    // and attack patterns land in steps 6-8.
+    // L2000 — combat handler for stages 1/3/B. Step 6 implements the two
+    // motion lanes; firing, swoops, and collision land in steps 7-8.
+    //
+    // Source per-frame work: PlayerUpdate ($0876), bullet-vs-alien coll.
+    // ($0DF0), L24A0, then a 4-lane round-robin keyed by ($435F & 3):
+    //   lane 0: AlienDataController + AlienBehaviorUpdate + alien-vs-player
+    //   lane 1: enemy-bullets + AlienMovementUpdate + L0FC0
+    //   lane 2: AlienAnimationUpdate + L2560
+    //   lane 3: enemy-bullets + L0A6C + L0FC0
+    // research_enemy_motion.md §1. We run only lanes 1 and 2 for now.
+    //
+    // The alive=true loop mirrors AlienDataController ($0A50): in the
+    // source, that routine is what actually paints aliens to screen RAM
+    // (gated by Bit3Controller checking controlA bit 3). The canvas port
+    // checks alive at draw-time, so we set alive=true for every active
+    // alien (controlA bit 3 set) each frame — same gating, different
+    // implementation. Player likewise stays drawn.
     stageAlienCombat() {
-        for (let i = 0; i < state.aliensLeft; i++) {
-            state.aliens[i].alive = true;
-        }
         state.player.alive = true;
+        for (let i = 0; i < 16; i++) {
+            const a = state.aliens[i];
+            if ((a.controlA & 0x08) !== 0) a.alive = true;
+        }
+
+        const lane = state.combatLane & 3;
+        state.combatLane = (state.combatLane + 1) & 0xFF;
+        if      (lane === 1) this.alienMovementUpdate();
+        else if (lane === 2) this.alienAnimationUpdate();
+    },
+
+    // L0D1C / L0D30 — AlienMovementUpdate. Walks 16 alien slots; for
+    // each: read current path byte from MOTION_PATH_BASE at offset
+    // (movePtr - $1000), look up MOTION_DIRECTIONS[idx*2..+1] for
+    // (dx, dy), apply to (x, y). When the post-update coordinate's low
+    // 3 bits go zero (8-pixel grid line crossed), advance the path
+    // pointer one byte. End-of-list reset is handled by
+    // alienAnimationUpdate (matches the source — L0DDE only fires from
+    // $0D86, never from $0D30).
+    //
+    // The source has three branches based on whether dx, dy, or both
+    // are zero — and the grid-cross test runs against the *coordinate
+    // that was actually updated last*. Mirror the dispatch:
+    //   default (both nonzero):    update X then Y, test Y  ($0D55)
+    //   dx == 0   ($0D43 → $0D4F): update Y only,  test Y  ($0D55)
+    //   dy == 0   ($0D48 → $0D5E): update X only,  test X  ($0D62)
+    alienMovementUpdate() {
+        for (let i = 0; i < 16; i++) {
+            const a = state.aliens[i];
+            if ((a.controlA & 0x08) === 0) continue;
+            const ptr = state.alienMovePtr[i];
+            const idx = MOTION_PATH_BASE[ptr - PATH_BASE_ADDR];
+            const rawDx = MOTION_DIRECTIONS[idx * 2];
+            const rawDy = MOTION_DIRECTIONS[idx * 2 + 1];
+            const dx = s8(rawDx);
+            const dy = s8(rawDy);
+            let crossed;
+            if (rawDy === 0) {
+                a.x = (a.x + dx) & 0xFF;
+                crossed = (a.x & 7) === 0;
+            } else if (rawDx === 0) {
+                a.y = (a.y + dy) & 0xFF;
+                crossed = (a.y & 7) === 0;
+            } else {
+                a.x = (a.x + dx) & 0xFF;
+                a.y = (a.y + dy) & 0xFF;
+                crossed = (a.y & 7) === 0;
+            }
+            if (crossed) state.alienMovePtr[i] = (ptr + 1) & 0xFFFF;
+        }
+    },
+
+    // L0D70 / L0D86 — AlienAnimationUpdate. Walks 16 alien slots; for
+    // each: read current path byte; if 0 (end-marker), reset pointer to
+    // (alienPathSeedHi, alienPathSeedLo) per L0DDE and re-read. Then
+    // look up ANIMATION_TABLE[pathByte*3 .. +2] = (drawMode, calcStyle,
+    // t1600Base). Compute SHAPE_LSB_TABLE offset based on calcStyle
+    // (XY/X/Y bits of alien position), write the looked-up byte to
+    // controlB, and OR drawMode into controlA's low 3 bits — note that
+    // the draw mode itself can change per path step (e.g. 2×1 horizontal
+    // drift switches to 2×2 during diagonal swoops).
+    alienAnimationUpdate() {
+        for (let i = 0; i < 16; i++) {
+            const a = state.aliens[i];
+            if ((a.controlA & 0x08) === 0) continue;
+            let ptr = state.alienMovePtr[i];
+            let pathByte = MOTION_PATH_BASE[ptr - PATH_BASE_ADDR];
+            if (pathByte === 0) {
+                ptr = ((state.alienPathSeedHi << 8) | state.alienPathSeedLo) & 0xFFFF;
+                state.alienMovePtr[i] = ptr;
+                pathByte = MOTION_PATH_BASE[ptr - PATH_BASE_ADDR];
+            }
+            const drawMode  = ANIMATION_TABLE[pathByte * 3];
+            const calcStyle = ANIMATION_TABLE[pathByte * 3 + 1];
+            const t1600Base = ANIMATION_TABLE[pathByte * 3 + 2];
+            // Calc-style decode mirrors $0DA7-$0DAE: RRCA twice; first
+            // carry (bit 0) → XY mode, second carry (bit 1) → X mode,
+            // else (bit 2) → Y mode. Order matters when multiple bits
+            // are set (e.g. $03 picks XY because bit 0 is checked first).
+            let off;
+            if      (calcStyle & 0x01) off = (a.x & 0x04) + ((a.y >> 1) & 0x03) + t1600Base;
+            else if (calcStyle & 0x02) off = ((a.x >> 1) & 0x03) + t1600Base;
+            else                       off = ((a.y >> 1) & 0x03) + t1600Base;
+            a.controlA = (a.controlA & 0xF8) | (drawMode & 0x07);
+            a.controlB = SHAPE_LSB_TABLE[off & 0xFF];
+        }
     },
 
     state4_PlayerExplosion()     {},   // L0AEA

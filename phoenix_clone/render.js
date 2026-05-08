@@ -132,6 +132,7 @@ export const render = {
             `stage=${stage} round=${round}  ` +
             `counterA5=${state.counterA5}  ` +
             `counterB4=${state.stageBlock[9]}  ` +
+            `lane=${state.combatLane & 3}  ` +
             `grid=${gridLabel}\n` +
             `keys: ←/→ move · space fire · shift barrier · 5 coin · 1 start · g cycle tile-ROM overlay`;
     },

@@ -67,6 +67,13 @@ RAW_SLICES = [
     # InitAlienPositions ($0610). Two rows of 8 bytes (round 1 / round 2+);
     # indexed by (LevelAndRound RRCA & 0x0F).
     ("FORMATION_INDEX", 0x063A, 16),
+    # source T1000 — 17-byte alien formation-drift path: a sequence of
+    # T1700 (MOTION_DIRECTIONS) indices, null-terminated. Walked one byte
+    # per 8-pixel grid crossing by AlienMovementUpdate ($0D1C) — see
+    # research_enemy_motion.md §3.3. The closed-loop swoop patterns
+    # T1020-T13D0 are deferred until the AlienBehaviorUpdate ($3000)
+    # port lands.
+    ("MOTION_PATH_BASE", 0x1000, 17),
     # source T1420 — 192-byte alien character-block shapes table consumed
     # by the Bit3 draw functions L0788 (Draw 2x1) and L07AA (Draw 1x2).
     # Indexed by alien controlB (with H=$14 prefix, so source addresses
@@ -85,6 +92,25 @@ RAW_SLICES = [
     # (X, Y) pairs at $1540/$1560/$1580/$15A0/$15C0/$15E0/$1600/$1620.
     # The FORMATION_INDEX LSB selects which sub-table this stage uses.
     ("ALIEN_FORMATIONS", 0x1540, 256),
+    # source T1600 — 160-byte alien shape-LSB lookup, addressed as
+    # SHAPE_LSB_TABLE[T16A0_base + offset]. Each byte is a low byte into
+    # T1420 (ALIEN_SHAPE_TABLE) selecting which alien shape to draw.
+    # AlienAnimationUpdate ($0D86) writes the looked-up byte to
+    # alien.controlB. Spans $1600-$169F: enough for all bases referenced
+    # by ANIMATION_TABLE (max $90 + 8 = $98). research_enemy_motion.md §4.3.
+    ("SHAPE_LSB_TABLE", 0x1600, 160),
+    # source T16A0 — 96-byte alien animation table: 32 entries × 3 bytes
+    # (drawMode, calcStyle, t1600Base). Indexed by current path byte.
+    # drawMode is OR'd into controlA's low 3 bits (so the draw mode can
+    # change per path step!). calcStyle picks which (x,y) bits compute
+    # the SHAPE_LSB_TABLE offset. research_enemy_motion.md §4.2.
+    ("ANIMATION_TABLE", 0x16A0, 96),
+    # source T1700 — 64-byte alien motion direction table: 32 entries ×
+    # 2 bytes (signed dx, signed dy). Indexed by current path byte.
+    # AlienMovementUpdate ($0D30) reads the (dx, dy) and applies to
+    # alien (x, y). Index 0 is unused (path byte 0 = end-of-list marker).
+    # research_enemy_motion.md §3.2.
+    ("MOTION_DIRECTIONS", 0x1700, 64),
     # source T1760 — 8-byte alien-vs-bird partition. Indexed by
     # (LevelAndRound & 0x0E) >> 1 inside $2204; positive byte ($10) sets
     # AliensLeft = 16, negative byte ($88) sets BirdsLeft = 8. Carried
