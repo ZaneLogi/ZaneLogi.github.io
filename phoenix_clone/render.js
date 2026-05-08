@@ -15,7 +15,7 @@ const GRID_FG  = 1;
 const GRID_BG  = 2;
 
 export const render = {
-    gridMode: GRID_FG,   // Default ON so first boot shows the decoded tiles.
+    gridMode: GRID_OFF,   // Default OFF so first boot no shows the decoded tiles.
 
     frame() {
         if (input.gridEdge()) {
@@ -25,6 +25,7 @@ export const render = {
         gfx.clear();
         this.drawDebugGrid();
         if (this.gridMode !== GRID_OFF) this.drawTileRomOverlay();
+        for (const row of state.staticTextRows) gfx.drawObject(row);
         gfx.drawObject(state.player);
         this.drawHud();
     },

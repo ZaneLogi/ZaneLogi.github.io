@@ -258,6 +258,68 @@ state.bgScrollY = 0;                      // 0..255, units = pixels
 `drawBackground()` walks `bgTiles` and `drawImage`s each cell with
 the `scrollY` offset applied via `convertCoords`.
 
+### 4.3 Static text tables (T1800 / T1860 / T1960 / T19C0 / T1BA0)
+
+Static screen text — score labels, copyright, prompts — is laid out
+in code-ROM tables consumed by `PrintTextLines` at `Code.md:$01D0`.
+Each entry is exactly **32 bytes**:
+
+```
++0..+1   screen-RAM address (MSB, LSB)         e.g. 43 20 = $4320
++2..+5   four FF padding bytes                 (skipped via L+=5)
++6..+31  26 tile bytes, one per display column (drawn left-to-right)
+```
+
+`PrintTextLines` walks `C` consecutive entries; the caller passes the
+table base in `HL` and the row count in `C`. `DrawRow` (`Code.md:$01ED`)
+stores the 26 tile bytes via `(DE) := A; DE -= 32` per column, which
+moves one display column rightward (the source's `RightOneColumn`
+helper at `Code.md:$0217` is the 8085 expression of "stride -32 in
+tile-RAM == +1 in display X").
+
+**Address inverse (port-time only).** Since the port doesn't model
+tile-RAM addresses (rendering is canvas-direct, see §4.1), the
+`(MSB, LSB)` field is converted to `(x, y)` once during the build
+step and never used at runtime:
+
+```
+plane_off = ((MSB << 8) | LSB) - 0x4000
+col = 25 - (plane_off >> 5)               // 0..25
+row = plane_off & 0x1F                    // 0..31
+x = col * 8
+y = row * 8
+```
+
+(Inverse of `Code.md:L09BA` `GetScreenRamAddress`. We never need a
+runtime port of the forward function — see §4.1.)
+
+**Port shape.** Each table entry becomes one object-list record. A
+26-tile horizontal strip is `{x, y, w: 208, h: 8, tiles: [26 bytes]}`,
+which `drawObject` (§5) renders without any special-case path:
+
+```js
+state.staticTextRows = [
+    { x: 0, y:  0, w: 208, h: 8, tiles: [/* …26… */] },  // T1800[0]
+    { x: 0, y:  8, w: 208, h: 8, tiles: [/* …26… */] },  // T1800[1]
+    { x: 0, y: 16, w: 208, h: 8, tiles: [/* …26… */] },  // T1800[2]
+];
+```
+
+Tile bytes go through the same FG palette path as moving objects: the
+upper 3 bits of the tile index pick the color group (§3.3 of
+`research_coordinate_system.md`), so e.g. T1800 row 0 renders the
+letter tiles (`0x03..0x1F`) in color group 0 and the digit/punct tiles
+(`0x20..0x3F`) in color group 1 — Phoenix's "letters and digits in
+different colors" effect, free of charge.
+
+**Build pipeline.** `tools/build_data.py` reads `maincpu.bin`, parses
+each requested `(name, offset, row_count)` triple in its `TEXT_TABLES`
+list, and emits an `export const <name> = [...]` array of records. To
+add a new table when a new caller lands, append one line to
+`TEXT_TABLES` and re-run the script. The currently-emitted set is
+intentionally minimal — see the call-site map in the script's header
+comment for the other known tables and their (offset, row_count).
+
 ---
 
 ## 5. Render pipeline

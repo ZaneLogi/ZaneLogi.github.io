@@ -2,6 +2,8 @@
 // possible (research_code_flow.md §5.3, RAMUse.md). Game-object data lives
 // on the objects themselves (research_rendering.md §4).
 
+import { T1800 } from './data.js';
+
 export const state = {
     init() {
         // RAM-labeled fields ($43xx region)
@@ -32,5 +34,14 @@ export const state = {
         };
 
         this.bgScrollY = 0;           // $5800 scroll register (research_hardware.md §4)
+
+        // Cold-init mirror of $0008 → $0050 → $01D0 (research_code_flow.md §1).
+        // The 8085 boot sequence clears VRAM/scroll/sound regs (no-op in port —
+        // canvas-clear-per-frame replaces the VRAM model; sound regs not yet
+        // wired) and then calls PrintTextLines on T1800 to lay down the three
+        // score/coin rows. In the port that "PrintTextLines" reduces to copying
+        // the parsed T1800 records (data.js, populated by build_data.py) into
+        // the object-list as static FG rows. See research_rendering.md §4.3.
+        this.staticTextRows = T1800.map(r => ({ ...r, w: 208, h: 8 }));
     },
 };

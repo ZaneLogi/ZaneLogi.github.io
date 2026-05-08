@@ -108,11 +108,12 @@ Deferred:
 
 ## Documentation
 
-To be added as the project takes shape (mirroring galaga_clone):
-
-- `progress.html` — implementation step tracker
-- `architecture.html` — design + code-flow map; the first thing to
-  read when resuming work in a later session
+- `docs/progress.md` — implementation step tracker. Read this first
+  when resuming work to see which step is in progress and what's next.
+  Conventions for editing are in the doc itself.
+- `architecture.html` *(planned)* — design + code-flow map (mirrors
+  galaga_clone's architecture.html); intended as the resume-point
+  visual once the project takes more shape.
 
 When you discover something — a corrected value, a behavior the doc
 glossed over, a fixed table — update the matching doc in the same
