@@ -78,14 +78,19 @@ Research docs live under `docs/`. Done — see the corresponding files:
 5. ✅ **Rendering & collision** — `docs/research_rendering.md` (sprite
    decoding, object-list state, render pipeline, AABB collision,
    mothership shield damage worked example)
+6. ✅ **Alien combat motion / animation** — `docs/research_enemy_motion.md`
+   (per-frame 4-lane round-robin, path-following motion via T1700 +
+   T1000-T13D0 bytecode, position-keyed animation via T16A0 + T1600,
+   stage-clear hand-off). Bird stages (L3400) and the swoop scheduler
+   (L3000 — partial-traced) are still open.
 
 Still open (do these before serious gameplay code):
 
-6. **Enemy motion / attack patterns** — per-stage bird behavior,
-   formations, swoop curves, egg-to-bird hatching
-7. **Player mechanics + shield** — movement, firing, timed shield
+7. **Bird-stage motion + egg hatching** (`L3400`) — distinct from
+   alien combat; covers swoop curves and the egg → bird transformation
+8. **Player mechanics + shield** — movement, firing, timed shield
    (Phoenix's distinguishing feature)
-8. **Mothership stage** — destructible shield-block layers, mothership
+9. **Mothership stage** — destructible shield-block layers, mothership
    AI, win condition
 
 Deferred:

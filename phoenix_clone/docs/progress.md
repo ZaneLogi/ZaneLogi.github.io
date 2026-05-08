@@ -27,7 +27,7 @@ Sibling docs:
 | 3 | Background tile-grid + scrolling | ⏳ | `state.bgTiles[]`, `state.bgScrollY`, `drawBackground()` first then FG on top |
 | 4 | Input poll + main-loop skeleton (empty handlers) | ✅ | State 0/1/2/3 timing matches L0430/L04AC/L0515/L0800 (state 1 = 128 frames; per L04BD Counter9A is zeroed every state-1 frame except the $7F first iteration). Score-flash paints/erases the active player's 6 digits via `scoring.printNumber`/`eraseDigits` based on bit 3 of CounterA5 (L04C4); `UpdateScoresAndSound` (L2700) wired as a stub — buffer at $4370-$437F is empty until enemies hit, sound deferred. Coin debounce (WaitVBlankCoin tail) lands with attract mode. |
 | 5 | State 0 → 1 (score flash) → 2 (stage 0 init) → 3 (stage 0 fade-in → stage 1 sit) | ✅ | State 2 ports L0515 chain: $0580 InitGlobalLevelData (T0598 + STAGE_BLOCKS), $0547 InitPlayerDataStructure (T0560 → player x/y), $0532 alien-data init ($05EC T1500 → controlA/B, $0650 T1520 move-ptr carried unused, $0610 T063A → T1540+ formation lookup). State 3 dispatches JT4; stage 0 ports L0834 fade-in (counterB4 decrement, GetAnimationChrs walks controlB through $6C/$6D/$6E/$6F/$68 in 4-frame phases below counterB4=$15, L05FA per-frame all-alien rewrite, L0848 stage-clear → LevelAndRound++ + GameState=2). Stage 1 (L2000) is a no-op stub — aliens sit in formation with controlA=$09 controlB=$60 (T1420 shape #1) until step 6. Render dispatch mirrors Bit3Controller: low3=0 Draw 1×1 (controlB raw, fade-in), low3=1 Draw 2×1 (T1420[controlB..+1] horizontal), 3 Draw 1×2, 4 Draw 2×2. Player.alive guards drawing until state 2 runs. Deferred: $06F0 background scroll → step 3 (stub means screen stays black for the first ~$EA frames of stage 0); alien motion and T1520 consumption → step 6; player input/fire and L2000 body → step 7; attack swoops → step 8. |
-| 6 | Stage 0 alien fade-in (`$0834`) | ⏳ | Pulls in still-open enemy-motion research |
+| 6 | Alien combat motion + animation (`L2000` body) | 🚧 | Research landed in `research_enemy_motion.md`. Implementation sub-tasks: ① extract `MOTION_DIRECTIONS` / `ANIMATION_TABLE` / `SHAPE_LSB_TABLE` / `MOTION_PATH_BASE` raw slices via `tools/build_data.py`; ② add `state.combatLane` + `state.alienPathSeedHi/Lo` mirrors; ③ port `AlienMovementUpdate $0D1C` (path-following, 8-px grid advance); ④ port `AlienAnimationUpdate $0D70` (path+(x,y) → `controlB`, can also rewrite `controlA` low3 mid-flight); ⑤ replace `stageAlienCombat` stub to drive both via the `($435F & 3)` 4-frame round-robin. Defers: `AlienBehaviorUpdate $3000` swoops, `EnemyBulletUpdate`/`L2560` fire, kill mechanic — those land bundled with player firing in step 7+. |
 | 7 | Player movement + bullet (`PlayerUpdate $0876`) | ⏳ | Pulls in still-open player-mechanics research |
 | 8 | Alien combat (state 3 stage 1, `$2000`) + AABB collision | ⏳ | Pulls in `research_rendering.md` §6 |
 | 9 | Birds (`$3400`) + mothership (`$22B4`/`$22CA`) + shield-block tile-swapping | ⏳ | Pulls in still-open mothership research |
@@ -35,7 +35,8 @@ Sibling docs:
 
 ## Open research (gating future steps)
 
-- **Enemy motion / attack patterns** — gates step 6
+- **Bird-stage motion + egg hatching** (`L3400`) — gates step 9 bird stages; the alien-side motion is documented in `research_enemy_motion.md`
+- **Alien swoop scheduler (`AlienBehaviorUpdate $3000`)** — `research_enemy_motion.md` §6 traces the 8-state Counter93 jump table; the per-pattern path-pointer rewrite path is partial-traced only. Gates the swoop sub-step (likely bundled with step 7 player fire).
 - **Player mechanics + shield** — gates step 7
 - **Mothership stage** — gates step 9
 
