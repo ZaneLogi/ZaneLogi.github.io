@@ -53,6 +53,14 @@ export const render = {
         const images = resource.fgTileImages;
         const low3 = alien.controlA & 0x07;
         const b = alien.controlB;
+        // Variant-mode dispatches (1, 3, 4) use AlienAnimationUpdate's
+        // pre-shifted tile variants — the chosen tile carries the sub-cell
+        // pixel offset, so we draw at the tile-cell boundary (x & ~7,
+        // y & ~7) to let the variant supply the sub-tile shift. Drawing
+        // at exact (x, y) would double-count it (visible as 4-px jitter
+        // during X drift). low3=0 (raw fade-in tile) has no variant cycling.
+        const tx = alien.x & ~7;
+        const ty = alien.y & ~7;
         switch (low3) {
             case 0:                                       // L076D Draw 1×1
                 if (b !== 0) ctx.drawImage(images[b], alien.x, alien.y);
@@ -60,15 +68,15 @@ export const render = {
             case 1: {                                     // L0788 Draw 2×1
                 const idx = b - 0x20;
                 const t0 = ALIEN_SHAPE_TABLE[idx], t1 = ALIEN_SHAPE_TABLE[idx + 1];
-                if (t0 !== 0) ctx.drawImage(images[t0], alien.x,     alien.y);
-                if (t1 !== 0) ctx.drawImage(images[t1], alien.x + 8, alien.y);
+                if (t0 !== 0) ctx.drawImage(images[t0], tx,     ty);
+                if (t1 !== 0) ctx.drawImage(images[t1], tx + 8, ty);
                 break;
             }
             case 3: {                                     // L07AA Draw 1×2
                 const idx = b - 0x20;
                 const t0 = ALIEN_SHAPE_TABLE[idx], t1 = ALIEN_SHAPE_TABLE[idx + 1];
-                if (t0 !== 0) ctx.drawImage(images[t0], alien.x, alien.y);
-                if (t1 !== 0) ctx.drawImage(images[t1], alien.x, alien.y + 8);
+                if (t0 !== 0) ctx.drawImage(images[t0], tx, ty);
+                if (t1 !== 0) ctx.drawImage(images[t1], tx, ty + 8);
                 break;
             }
             case 4: {                                     // L07D2 Draw 2×2
@@ -81,7 +89,7 @@ export const render = {
                     if (t[i] === 0) continue;
                     const dx = (i & 1) * 8;
                     const dy = (i >> 1) * 8;
-                    ctx.drawImage(images[t[i]], alien.x + dx, alien.y + dy);
+                    ctx.drawImage(images[t[i]], tx + dx, ty + dy);
                 }
                 break;
             }

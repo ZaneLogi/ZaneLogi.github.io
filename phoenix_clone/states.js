@@ -256,10 +256,21 @@ export const states = {
             if ((a.controlA & 0x08) !== 0) a.alive = true;
         }
 
+        // Source separates movement (lane 1) and animation (lane 2) for
+        // CPU-budget reasons on the 8085 — its screen-RAM model hides the
+        // 1-tick gap because the cell only changes when animation rewrites
+        // it. Our port reads alien.x and alien.controlB separately at
+        // render time, so any tick-pairing drift (e.g., a dropped frame
+        // shifting which lanes land in the same render) leaves controlB
+        // one tick behind x and the alien visibly jitters. Run animation
+        // immediately after movement in the same tick so controlB always
+        // matches the current x — JS has no CPU budget to ration.
         const lane = state.combatLane & 3;
         state.combatLane = (state.combatLane + 1) & 0xFF;
-        if      (lane === 1) this.alienMovementUpdate();
-        else if (lane === 2) this.alienAnimationUpdate();
+        if (lane === 1) {
+            this.alienMovementUpdate();
+            this.alienAnimationUpdate();
+        }
     },
 
     // L0D1C / L0D30 — AlienMovementUpdate. Walks 16 alien slots; for
@@ -330,6 +341,9 @@ export const states = {
             // carry (bit 0) → XY mode, second carry (bit 1) → X mode,
             // else (bit 2) → Y mode. Order matters when multiple bits
             // are set (e.g. $03 picks XY because bit 0 is checked first).
+            // The sub-position bits select one of N pre-shifted tile
+            // variants — render.js draws at (x & ~7, y & ~7) so the
+            // variant provides the sub-tile offset (see drawAlien).
             let off;
             if      (calcStyle & 0x01) off = (a.x & 0x04) + ((a.y >> 1) & 0x03) + t1600Base;
             else if (calcStyle & 0x02) off = ((a.x >> 1) & 0x03) + t1600Base;

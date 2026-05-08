@@ -645,7 +645,141 @@ in `T1600`) is NOT used — see §1.1 / §3.
 
 ---
 
-## 9. Implementation checklist
+## 9. Render-time atomicity vs. source's screen-RAM model
+
+Phoenix's source updates per-object state across multiple game ticks
+via "lane scheduling". For combat aliens (`L2000`), each 4-tick cycle
+does:
+
+| Lane | Source work |
+|------|-------------|
+| 0 | `AlienDataController` — writes current shape to screen RAM |
+| 1 | `AlienMovementUpdate` — change `alien.x` |
+| 2 | `AlienAnimationUpdate` — recompute `controlB` based on new `alien.x` |
+| 3 | other (enemy bullets, etc.) |
+
+Lanes 1 and 2 land on different ticks (8085 CPU budget). Between
+them, `alien.x` is fresh but `controlB` is stale (still computed for
+the previous `x`). The source hides this gap because the display
+reads from screen RAM, and screen RAM is only rewritten on lane 0 of
+the *next* cycle when `DataController` blits the tile bytes for the
+new (x, controlB) pair — by which time both are fresh.
+
+Our port keeps `alien.x` and `alien.controlB` as separate object
+fields and `render.frame` reads both at draw time. If render runs
+*between* lane 1 and lane 2, we draw new x with stale controlB →
+visible glitter.
+
+### 9.1 Tick-pair amplification at non-1:1 render rates
+
+`runloop.js` runs `tick()` at `TICK_HZ = 60` and calls `render()` once
+per `requestAnimationFrame`.
+
+- **60 Hz monitor:** 1 tick per render. The stale-controlB frame lasts
+  ~17 ms and is usually invisible.
+- **30 Hz monitor (or any case where the runloop accumulates 2 ticks
+  per render):** lanes group into stable pairs within each render
+  frame. Two pairings exist:
+  - **Pairing A:** `(1,2)` and `(3,0)` — every render that does work
+    does both movement and animation. x and controlB stay synced.
+  - **Pairing B:** `(0,1)` and `(2,3)` — every render does *either*
+    movement or animation, never both. Stale controlB frame lasts a
+    full ~33 ms, very visible.
+
+Pairing is sticky until a single tick is dropped (browser hiccup, GC,
+`rAF` skip), which rotates A↔B and the new pairing sticks. So a clean
+30 Hz run can flip to permanent stutter mid-stage.
+
+### 9.2 Fix: collapse movement + animation into one tick
+
+8085 split the lanes for CPU budget; JS has no equivalent pressure.
+Run animation immediately after movement in the same tick:
+
+```js
+// states.js stageAlienCombat
+if (lane === 1) {
+    this.alienMovementUpdate();
+    this.alienAnimationUpdate();   // keep controlB locked to current x
+}
+// lane 2 is now empty — drop the else-if
+```
+
+`alien.x` and `alien.controlB` now update atomically within one tick;
+tick-pair drift can't expose the gap.
+
+### 9.3 Pre-shift variants need tile-aligned drawing
+
+Same source/port disconnect, different symptom. `AlienAnimationUpdate`
+picks one of N pre-shifted tile variants based on `(x>>1) & 3` (X-mode)
+etc. The source blits each variant at a **tile-cell-aligned**
+position; the sub-tile pixel offset baked into the variant places the
+alien at the correct sub-cell X. With 4 X-mode variants × 2-px each
+= 8-px coverage, plus the tile-aligned coarse step, you get full
+1-px-granular *apparent* motion.
+
+If the port draws the variant tile at exact `alien.x`, the sub-tile
+offset double-counts (variant adds 2 px, `drawImage` adds another
+2 px) → visible ~4-px jitter on X drift. Fix: for variant-mode
+dispatches (`low3 ∈ {1, 3, 4}`) draw at `(alien.x & ~7, alien.y & ~7)`
+(see `render.js drawAlien`). Variant contributes the sub-cell offset;
+the tile-aligned position contributes the coarse 8-px step; together
+they reconstruct the source's visible position.
+
+This is why §1.1 / §2.2 advice ("we don't need pre-shift variants —
+`drawImage` handles sub-pixel positioning") applies to the **player
+ship** but NOT to combat aliens. Player ship has no per-frame
+controlB rewrite, so we can pin variant 0 and let `drawImage` work.
+Aliens have the per-frame rewrite (`AlienAnimationUpdate`), so we
+must align to tile cells.
+
+### 9.4 Known faithful artifact: fade-in → combat half-alien
+
+At the moment a stage transitions from fade-in (`L0834`) to combat
+(`L2000`), aliens often render as a half-width sprite for one frame.
+This is **faithful behavior, not a port bug**. Trace:
+
+1. `L0848` ends fade-in: `INC LevelAndRound`, `GameState = 2`. Aliens
+   still hold `(controlA=$08, controlB=$68)` from the last fade-in
+   frame.
+2. State-2 init runs `InitAlienControlStates` (`$05EC`) which loads
+   `ALIEN_CONTROL_INIT[stage*2..+1]`. For odd stages (combat) that's
+   `(controlA=$09, controlB=$60)`. So aliens enter L2000 with the
+   stale combat-init values, *before* `AlienAnimationUpdate` has run
+   to compute a fresh variant.
+3. L2000's first frame typically lands on lane 0 (`$435F & 3 = 0` —
+   the counter isn't reset between stages), which calls
+   `AlienDataController` → `Bit3Controller` → `L0788` (Draw 2×1) with
+   `controlB=$60` → indexes `ALIEN_SHAPE_TABLE[$40..$41] = ($6A, $00)`.
+   Source's `L0788` writes both bytes unconditionally, so screen RAM
+   gets `(tile=$6A, tile=$00)` — left half = `$6A`, right half blank.
+4. ~3 ticks later when lane 2 runs, `AlienAnimationUpdate` rewrites
+   `controlB` to a real variant and the alien renders correctly from
+   then on.
+
+So the original arcade also flashed half-aliens at every stage entry
+for ~17 ms. At 30 Hz the artifact lasts ~33 ms and is more noticeable
+on a modern display, but reproducing it is "correct" port behavior.
+Don't add a port-specific guard (e.g. delaying the first
+`AlienDataController` call until after `AlienAnimationUpdate`) unless
+the project's faithfulness stance changes.
+
+### 9.5 General lesson
+
+Any source mechanism that's only "atomic from screen RAM's
+perspective" needs care when ported to a "render reads object state
+directly" model. Look for:
+- Multi-tick partial updates to object display state (lane
+  scheduling, sub-routine round-robins)
+- Sub-pixel tricks that assume tile-cell-aligned blit positions
+- Anywhere source writes part of an object's display state in one
+  tick and the rest in another
+
+[verified, `Code.md:L2000`, `Code.md:$0D1C` AlienMovementUpdate,
+`Code.md:$0D70` AlienAnimationUpdate]
+
+---
+
+## 10. Implementation checklist
 
 When working on rendering or collision code, verify:
 
