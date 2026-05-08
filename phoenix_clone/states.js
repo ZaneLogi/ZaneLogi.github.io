@@ -1,6 +1,7 @@
 import { state } from './state.js';
 import { input } from './input.js';
 import { gfx } from './gfx.js';
+import { scoring } from './scoring.js';
 
 // L0400 — Code.md:GameStateMachine. JT1 jump table → JS switch
 // (research_code_flow.md §5.1).
@@ -25,10 +26,24 @@ export const states = {
         state.gameState = 1;
     },
 
-    // L04AC — score flash for ~128 frames (CounterA5 $80 → $00).
+    // L04AC — score flash for 128 frames (CounterA5 $80 → $00). Per L04BD,
+    // source also zeroes Counter9A every frame (re-incremented next tick by
+    // WaitVBlankCoin), so it stays ≈0 throughout state 1. The L04B8
+    // first-iteration jump to $07F0 — scroll-reg reset, ClearForeground,
+    // SetBitsVideoRegister — is a no-op until steps 3 / 5 land those models.
+    // L04C4 — bit 3 of (post-decrement) counterA5 toggles paint vs erase of
+    // the active player's 6 score digits (~8 frames per phase, 8 flashes).
+    // L04C9 CALL $06E8 (paint path only) re-paints T1800 row 0 labels — no-op
+    // here since render.frame() redraws all staticTextRows every frame.
     state1_ScoreFlash() {
-        if (state.counterA5 > 0) state.counterA5--;
-        if (state.counterA5 === 0) state.gameState = 2;
+        state.counterA5--;
+        if (state.counterA5 === 0) {
+            state.gameState = 2;
+            return;
+        }
+        if (state.counterA5 !== 0x7F) state.counter9a = 0;
+        if ((state.counterA5 & 0x08) === 0) scoring.printNumber(state.gameAndDemoOrSplash);
+        else                                scoring.eraseDigits(state.gameAndDemoOrSplash);
     },
 
     // L0515 — per-stage init, one frame.

@@ -6,6 +6,7 @@ import { states }   from './states.js';
 import { render }   from './render.js';
 import { runloop }  from './runloop.js';
 import { resource } from './resource.js';
+import { scoring }  from './scoring.js';
 
 // L001A — Code.md:MainLoop. Three-phase frame structure
 // (research_code_flow.md §5.1):
@@ -32,7 +33,7 @@ const game = {
             states.attractFrame();
         } else {
             states.dispatch();
-            // updateScoresAndSound() — stub; lands with scoring.js / sound.js
+            scoring.update();        // L2700 UpdateScoresAndSound
         }
     },
 
