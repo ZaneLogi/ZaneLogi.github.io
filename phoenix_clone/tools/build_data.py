@@ -42,7 +42,54 @@ MAINCPU_SIZE = 16384
 #     $02A2 (PromptForStartGame):  T1BA0, 1 row
 #     $06ED:                       T1800, 1 row (reuses first T1800 entry)
 TEXT_TABLES = [
-    ("T1800", 0x1800, 3),
+    ("STATIC_TEXT_ROWS", 0x1800, 3),     # source label T1800
+]
+
+# Raw byte-array slices from maincpu.bin used by the per-stage init
+# pipeline (research_stage_structure.md §4 / research_rendering.md "alien
+# render model"). Each tuple is (export name, code-ROM offset, length).
+RAW_SLICES = [
+    # source T0560 — 32-byte default player + bullets block, copied to
+    # $43C0 by InitPlayerDataStructure ($0547). Step 5 only consumes the
+    # first 4 bytes (PlayerState/Shape/X/Y) but the full block is carried
+    # so the bullet slots can light up in later steps.
+    ("PLAYER_INIT_BLOCK", 0x0560, 32),
+    # source T0598 — 16-byte LSB dispatch table for InitGlobalLevelData
+    # ($0580). Indexed by stage low nibble; high byte of pointer is fixed
+    # at $05; the LSBs all fall in the $A8..$CC range, pointing at one of
+    # the four blocks below.
+    ("STAGE_BLOCK_INDEX", 0x0598, 16),
+    # source $05A8/$05B4/$05C0/$05CC — the four unique 12-byte per-stage
+    # blocks, packed as one 48-byte slice. Decoded by
+    # research_stage_structure.md §4.1.
+    ("STAGE_BLOCKS", 0x05A8, 48),
+    # source T063A — 16-byte alien-formation LSB index for
+    # InitAlienPositions ($0610). Two rows of 8 bytes (round 1 / round 2+);
+    # indexed by (LevelAndRound RRCA & 0x0F).
+    ("FORMATION_INDEX", 0x063A, 16),
+    # source T1420 — 192-byte alien character-block shapes table consumed
+    # by the Bit3 draw functions L0788 (Draw 2x1) and L07AA (Draw 1x2).
+    # Indexed by alien controlB (with H=$14 prefix, so source addresses
+    # $1400+controlB; subtract $20 to get the array offset).
+    ("ALIEN_SHAPE_TABLE", 0x1420, 192),
+    # source T1500 — 32-byte alien control-state init table copied to
+    # $4B70+ by InitAlienControlStates ($05EC). 16 entries × (controlA,
+    # controlB); even-stage entries are the fade-in start state ($08, $6C),
+    # odd-stage entries are the post-fade combat state ($09, $60).
+    ("ALIEN_CONTROL_INIT", 0x1500, 32),
+    # source T1520 — 32-byte alien movement-pattern pointer table copied
+    # to $4B50-$4B6F by $0650. 16 entries × 2-byte pointer. Carried for
+    # source-faithful symmetry but unused until step 6 wires alien motion.
+    ("ALIEN_MOVE_PTR_INIT", 0x1520, 32),
+    # source T1540 — 256-byte alien formation table: 8 sub-tables of 16
+    # (X, Y) pairs at $1540/$1560/$1580/$15A0/$15C0/$15E0/$1600/$1620.
+    # The FORMATION_INDEX LSB selects which sub-table this stage uses.
+    ("ALIEN_FORMATIONS", 0x1540, 256),
+    # source T1760 — 8-byte alien-vs-bird partition. Indexed by
+    # (LevelAndRound & 0x0E) >> 1 inside $2204; positive byte ($10) sets
+    # AliensLeft = 16, negative byte ($88) sets BirdsLeft = 8. Carried
+    # but not consumed until bird-stage step.
+    ("ALIEN_BIRD_PARTITION", 0x1760, 8),
 ]
 
 
@@ -109,6 +156,14 @@ def main() -> None:
         out.append(f"export const {name} = [")
         out.append(format_text_table(records))
         out.append("];")
+        out.append("")
+
+    for name, offset, length in RAW_SLICES:
+        slice_bytes = maincpu[offset:offset + length]
+        out.append(f"// {name} — code-ROM offset 0x{offset:04X}, {length} byte(s).")
+        out.append(f"export const {name} = new Uint8Array([")
+        out.append(format_bytes(slice_bytes))
+        out.append("]);")
         out.append("")
 
     OUT_FILE.write_text("\n".join(out), encoding="utf-8")

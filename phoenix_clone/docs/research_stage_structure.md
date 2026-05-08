@@ -340,20 +340,57 @@ based path for the mothership.
 ### 5.1 Alien-stage path — `$0834 / $084E`
 
 The fade-in handler at `Code.md:$0834-$0855` is reached on JT4 stages
-0 and 2 (the `aliens fade in` intro). It decrements `$43B4`
-(`CounterB4`, byte 9 of the per-stage block) every frame; when
-`$43B4` hits 0 it does:
+0 and 2 (the `aliens fade in` intro). Per-frame work splits into a
+silent "wait" phase and a visible "animation" phase, both gated by
+`CounterB4`:
 
-```
-084E: mvi  l, $b8           ; HL → $43B8
-0850: inr  m                ; ++stage
-0851: mvi  l, $a4           ; HL → $43A4
-0853: mvi  m, $02           ; GameState := 2 (re-init for next stage)
-0855: ret
-```
+1. **Every frame:** `$06F0` updates the scroll register and refills
+   the background. Then `CounterB4` (`$43B4`, byte 9 of the per-stage
+   block) is decremented.
+2. **Wait phase (`CounterB4 ≥ $15`, ~234 frames from initial `$FF`):**
+   handler returns. `AlienDataController` is *not* called, so aliens
+   are not drawn — see `research_rendering.md` §4.4 for why "data
+   block valid" doesn't imply "drawn." Player ship is also absent
+   throughout (PlayerUpdate isn't called from `L0834`).
+3. **Animation phase (`CounterB4 < $15`, last 22 frames):**
+   `GetAnimationChrs` (`$085A`) picks the current animation tile from
+   `CounterB4`:
 
-So alien fade-in stages clear after a fixed number of frames (`$FF`
-from block `$05A8`, `$A0` from block `$05C0`).
+   | `CounterB4` | controlB tile |
+   |---|---|
+   | `$11..$14` | `$6C` |
+   | `$0D..$10` | `$6D` |
+   | `$09..$0C` | `$6E` |
+   | `$05..$08` | `$6F` |
+   | `$00..$04` | `$68` |
+
+   `$05FA` rewrites every active alien's `(controlA, controlB)` to
+   `($08, anim_tile)`. `controlA = $08` → low3 = 0 → Bit3 "Draw 1×1"
+   (see `research_rendering.md` §2.4) → the alien renders as a single
+   tile = controlB raw. So all 16 aliens animate in lockstep through
+   5 single-tile shapes (4 frames per shape). `$0A50
+   AlienDataController` is then called to actually draw them.
+4. **Stage clear (`CounterB4 == 0`):** the L0848 tail bumps
+   `LevelAndRound` and sets `GameState = 2`:
+
+   ```
+   084E: mvi  l, $b8           ; HL → $43B8
+   0850: inr  m                ; ++stage  (0 → 1, or 2 → 3)
+   0851: mvi  l, $a4           ; HL → $43A4
+   0853: mvi  m, $02           ; GameState := 2 (re-init for next stage)
+   0855: ret
+   ```
+
+   On the next frame state-2 init runs again, copies the new
+   `(controlA, controlB)` from `T1500` (`($09, $60)` for combat
+   stages), and stage 1 / 3 begins. The alien's visible shape jumps
+   from the fade-in's final single tile (`$68`) to the combat sprite
+   that `controlB = $60` selects from `ALIEN_SHAPE_TABLE` (entry at
+   source `$1460` = "shape #7", single tile `$6A`).
+
+So alien fade-in stages clear after a fixed total of frames (`$FF`
+from block `$05A8`, `$A0` from block `$05C0`) — initial value minus
+$15 is the wait, then 22 frames of animation.
 
 ### 5.2 Bird/mothership-stage path — `$2204`
 

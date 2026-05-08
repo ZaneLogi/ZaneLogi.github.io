@@ -3,10 +3,11 @@ import { state } from './state.js';
 import { runloop } from './runloop.js';
 import { input } from './input.js';
 import { resource } from './resource.js';
+import { ALIEN_SHAPE_TABLE } from './data.js';   // source T1420
 
 // research_rendering.md §5 — per-frame: clear → drawBackground → walk objects.
-// Skeleton draws a debug grid in place of the BG tile-grid and a placeholder
-// rectangle in place of drawObject(state.player).
+// Skeleton draws a debug grid in place of the BG tile-grid; per-object draws
+// go via gfx.drawObject (player) or drawAlien (aliens; Bit3 dispatch mirror).
 //
 // Press G to cycle the tile-ROM debug overlay: off → fg → bg → off.
 
@@ -26,8 +27,65 @@ export const render = {
         this.drawDebugGrid();
         if (this.gridMode !== GRID_OFF) this.drawTileRomOverlay();
         for (const row of state.staticTextRows) gfx.drawObject(row);
-        gfx.drawObject(state.player);
+        for (const alien of state.aliens) this.drawAlien(alien);
+        if (state.player.alive) gfx.drawObject(state.player);
         this.drawHud();
+    },
+
+    // Mirror of Bit3Controller ($0740) draw-side. controlA bit 3 enables
+    // draw; bits 0-2 dispatch the layout via T0759:
+    //   low3=0  L076D  Draw 1×1  → single tile = controlB raw (fade-in path)
+    //   low3=1  L0788  Draw 2×1  → ALIEN_SHAPE_TABLE[b..+1] horizontal (16w × 8h)
+    //   low3=3  L07AA  Draw 1×2  → ALIEN_SHAPE_TABLE[b..+1] vertical   (8w × 16h)
+    //   low3=4  L07D2  Draw 2×2  → ALIEN_SHAPE_TABLE[b..+3] grid       (16w × 16h)
+    // The source's delete-then-draw double-buffer (bit 4 in controlA) is a
+    // no-op in the canvas port — the per-frame canvas clear replaces it.
+    //
+    // ALIEN_SHAPE_TABLE indexing note: source loads `H=$14, L=controlB` so
+    // the lookup address is $1400+controlB, not $1420+controlB. The source
+    // T1420 table (our ALIEN_SHAPE_TABLE) happens to start at $1420, so
+    // controlB values < $20 would index outside it. Subtract $20 from
+    // controlB to get the array offset.
+    drawAlien(alien) {
+        if (!alien.alive) return;
+        if ((alien.controlA & 0x08) === 0) return;
+        const ctx = gfx.ctx;
+        const images = resource.fgTileImages;
+        const low3 = alien.controlA & 0x07;
+        const b = alien.controlB;
+        switch (low3) {
+            case 0:                                       // L076D Draw 1×1
+                if (b !== 0) ctx.drawImage(images[b], alien.x, alien.y);
+                break;
+            case 1: {                                     // L0788 Draw 2×1
+                const idx = b - 0x20;
+                const t0 = ALIEN_SHAPE_TABLE[idx], t1 = ALIEN_SHAPE_TABLE[idx + 1];
+                if (t0 !== 0) ctx.drawImage(images[t0], alien.x,     alien.y);
+                if (t1 !== 0) ctx.drawImage(images[t1], alien.x + 8, alien.y);
+                break;
+            }
+            case 3: {                                     // L07AA Draw 1×2
+                const idx = b - 0x20;
+                const t0 = ALIEN_SHAPE_TABLE[idx], t1 = ALIEN_SHAPE_TABLE[idx + 1];
+                if (t0 !== 0) ctx.drawImage(images[t0], alien.x, alien.y);
+                if (t1 !== 0) ctx.drawImage(images[t1], alien.x, alien.y + 8);
+                break;
+            }
+            case 4: {                                     // L07D2 Draw 2×2
+                const idx = b - 0x20;
+                const t = [
+                    ALIEN_SHAPE_TABLE[idx],     ALIEN_SHAPE_TABLE[idx + 1],
+                    ALIEN_SHAPE_TABLE[idx + 2], ALIEN_SHAPE_TABLE[idx + 3],
+                ];
+                for (let i = 0; i < 4; i++) {
+                    if (t[i] === 0) continue;
+                    const dx = (i & 1) * 8;
+                    const dy = (i >> 1) * 8;
+                    ctx.drawImage(images[t[i]], alien.x + dx, alien.y + dy);
+                }
+                break;
+            }
+        }
     },
 
     drawDebugGrid() {
@@ -66,11 +124,14 @@ export const render = {
         const hud = document.getElementById('hud');
         if (!hud) return;
         const gridLabel = ["off", "fg", "bg"][this.gridMode];
+        const stage = state.levelAndRound & 0x0F;
+        const round = state.levelAndRound >> 4;
         hud.textContent =
             `tick=${runloop.tickCount}  ` +
             `state=${state.gameState}  ` +
+            `stage=${stage} round=${round}  ` +
             `counterA5=${state.counterA5}  ` +
-            `player=(${state.player.x},${state.player.y})  ` +
+            `counterB4=${state.stageBlock[9]}  ` +
             `grid=${gridLabel}\n` +
             `keys: ←/→ move · space fire · shift barrier · 5 coin · 1 start · g cycle tile-ROM overlay`;
     },

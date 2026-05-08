@@ -118,29 +118,44 @@ Palette comes from PROM data per `proms.md` (see
 `research_coordinate_system.md` §6); `resource.js` currently uses a
 4-color debug palette and consumes only the tile bytes from `data.js`.
 
-### 2.2 Composite shapes (the `$1700` shape table)
+### 2.2 Composite shapes
 
-Multi-tile sprites are composed from individual tiles. Port the
-shape table at `$1700`-`$17DC` as a JS data structure:
+Multi-tile sprites compose from individual tile bytes. Two distinct
+sprite conventions live in source, picked by object type:
+
+**Player ship — fixed 2×2 tile block.** Source `T1400` (`Code.md:$1400`,
+8 entries × 4 tiles) holds 8 pre-shifted variants of the bare player
+ship for sub-cell X positioning; `PlayerShape` (initial `$10` from
+`PLAYER_INIT_BLOCK` byte 1) is computed each frame from
+`(PlayerShipX & 7) << 2` so the variant cycles every pixel of motion.
+We use only frame #1 (`30 31 / 40 41`, the 8-aligned variant) and let
+`drawImage` handle pixel-precise positioning at the canvas level — the
+8 pre-shifted variants are unnecessary when X isn't tile-cell-quantized.
 
 ```js
-// shapes.js — port of $1700-$17DC
-export const SHAPES = {
-    PLAYER_SHIP_INTACT:        { w: 4, h: 4, tiles: [/* T1770 */] },
-    PLAYER_SHIP_LARGE_SHIELDS: { w: 4, h: 4, tiles: [/* T1770 */] },
-    PLAYER_SHIP_SMALL_SHIELDS: { w: 4, h: 4, tiles: [/* T1780 */] },
-    GREEN_SHIP_LARGE_SHIELDS:  { w: 4, h: 4, tiles: [/* T1790 */] },
-    GREEN_SHIP_NO_SHIELDS:     { w: 4, h: 4, tiles: [/* T17A0 */] },
-    ALIEN_FORMATION_TYPE0:     { w: 2, h: 2, tiles: [/* ... */] },
-    // etc.
-};
+state.player = { x, y, w: 16, h: 16, tiles: [0x30, 0x31, 0x40, 0x41] };
 ```
 
-**Port one shape per logical sprite, not the 7 pre-shifted variants
-the source carries.** Source code uses `PlayerShipX & 7` to index into
-8 variants (frames `#1..#8` in `T1600`); we use only the 8-aligned
-variant (typically the first one) and let `drawImage` handle sub-tile
-positioning at the canvas level.
+The shielded-ship sprites (`T1770` "Regular ship, large shields";
+`T1780` "Regular ship, small shields") are 4×4 = 16 tile blocks where
+the *center* 2×2 is the same `30 31 / 40 41` ship and the perimeter
+tiles are shield decoration. Source draws shields via the separate
+`DrawShields` routine (`Code.md:$0AA0`) only when `ShieldCount > 0`;
+the bare ship stays 2×2 always. Don't carry a `PLAYER_SHIP_INTACT`
+shape that bakes in the shielded layout.
+
+**Aliens (and bullets) — Bit3-dispatched 2-tile pairs.** Aliens are
+2-tile sprites whose **shape and layout are picked per-frame** by the
+Bit3Controller dispatch model documented in §2.4. The shape table at
+`Code.md:$1420` (192 bytes, exported as `ALIEN_SHAPE_TABLE`) holds 96
+shape entries × 2 tile bytes; the alien's `controlB` selects which
+entry. Many entries use `$00` (= transparent) as the second tile, so
+the visible sprite is often a single 8×8 cell.
+
+Bird and mothership shape tables follow similar conventions but are
+keyed off different per-object state bytes (`Code.md:$3E08` /
+`$3E80` for birds — see step 9 research). Defer their decoding until
+their stage handlers are ported.
 
 ### 2.3 Damage-progression LUTs
 
@@ -153,6 +168,56 @@ export const SHIELD_DAMAGE_LUT = [/* 16 bytes from Code.md:$1B40 */];
 ```
 
 See §7 for how this is used.
+
+### 2.4 Per-object draw dispatch (Bit3Controller / Bit4Controller)
+
+Source's per-object data block has a 1-byte `controlA` that encodes
+both *whether* and *how* to draw the object. The per-frame
+`*DataController` for each object type (PlayerDataController `$0700`,
+AlienDataController `$0A50`, the bullet/shield controllers) routes
+through `UpdateScreenObjects` (`$0718`) which calls two phases in
+order:
+
+- **Bit4Controller (`$0720`)** — if `controlA & $10`, dispatch on
+  bits 4-6 (via `T0735`) to one of four "delete" handlers that clear
+  the previously-drawn cells in screen RAM. The handler also clears
+  bit 4 and rewrites bits 4-6 with the *current* low-nibble draw mode,
+  so next frame's delete matches whatever this frame draws.
+- **Bit3Controller (`$0740`)** — if `controlA & $08`, dispatch on
+  bits 0-2 (via `T0759`) to one of four "draw" handlers, then OR `$18`
+  back into `controlA` so next frame both pre-deletes (bit 4) and
+  redraws (bit 3).
+
+The four draw modes (low 3 bits of `controlA`):
+
+| low3 | Handler | Display layout | Source comment |
+|------|---------|----------------|----------------|
+| 0    | `L076D` | 1×1 — single 8×8 tile = `controlB` raw | "Draw 1×1 (used at 'fade in' animation)" |
+| 1    | `L0788` | 2×1 — horizontal 16×8 from shape table | "Draw 2×1 (alien)" |
+| 3    | `L07AA` | 1×2 — vertical 8×16 from shape table | "Draw 1×2 (alien)" |
+| 4    | `L07D2` | 2×2 — 16×16 from shape table | "Draw 2×2 (player ship, alien, planets)" |
+
+For modes 1/3/4 the shape lookup loads `H=$14, L=controlB`, so the ROM
+address is `$1400 + controlB`. The named alien shape table starts at
+`$1420` (`ALIEN_SHAPE_TABLE`), so subtract `$20` from `controlB` to get
+the JS array offset. Mode 0 doesn't index any shape table — `controlB`
+IS the tile byte.
+
+**Indexing gotcha — `controlB < $20`.** Because `H=$14` is fixed,
+`controlB` values 0..$1F land in the *player ship* pre-shift table at
+`$1400-$141F` (`T1400`), not in the alien table. Aliens never set
+`controlB` that low in normal play, but the player uses this branch:
+its `controlA = $0C` (Draw 2×2) reads 4 bytes at `$1400 + PlayerShape`,
+which is exactly the pre-shift mechanism described in §2.2.
+
+**Canvas port short-circuit.** We don't model screen RAM, so
+delete-then-draw double-buffering is unnecessary — `gfx.clear()` at the
+top of `render.frame` does the equivalent every frame. Our `drawAlien`
+(in `render.js`) only ports the Bit3 draw path: read `controlA`'s
+draw-enable bit and low 3 bits, fetch tiles from the shape table (or
+take `controlB` raw for mode 0), `drawImage` at `(x, y)` with per-mode
+offsets. We also don't mutate `controlA` after drawing — there's no
+next-frame delete to set up. Bit4Controller has no port at all.
 
 ---
 
@@ -226,24 +291,37 @@ Game state is a list of logical objects. Each carries its position,
 its current tile pattern, and any per-object state:
 
 ```js
-state.player    = { x, y, w, h, shape, tiles, alive, ... };
-state.aliens    = [/* up to ~30 alien objects */];
-state.birds     = [/* phoenix-bird objects */];
+state.player    = { x, y, w: 16, h: 16, tiles, alive };           // fixed 2×2 sprite
+state.aliens    = [/* 16 slots: { x, y, controlA, controlB, alive } */];
+state.birds     = [/* phoenix-bird objects, fields TBD step 9 */];
 state.bullets   = [/* player bullets, max 2 */];
 state.bombs     = [/* enemy bullets, max 5 */];
-state.mothership = { x, y, w, h, tiles, state, alive, ... };
+state.mothership = { x, y, controlA, controlB, ..., alive };
 ```
 
-Per-object fields (typical):
-- `x, y` — source pixel coords
-- `w, h` — width and height in pixels (used for AABB and bounds)
-- `tiles[]` — live tile-pattern (mutable; damage updates mutate
-  individual entries, see §7)
-- `shape` — SHAPES key, only when the same object can switch
-  visual states (e.g. ship intact vs ship with shields); on switch,
-  copy `SHAPES[shape].tiles` into `obj.tiles` so the live tiles can
-  still be mutated independently
-- Object-specific fields: `alive`, animation frame, shield count, etc.
+Per-object fields:
+- `x, y` — source pixel coords (integers; Y↓; identity-mapped to
+  canvas via `convertCoords`).
+- `w, h` — only on objects with a fixed sprite layout (player, static
+  text rows). For Bit3-dispatched objects (aliens, bullets,
+  mothership) the layout is read from `controlA` bits 0-2 each frame —
+  see §2.4 — so `w/h` aren't carried.
+- `tiles[]` — only on objects with a fixed sprite layout. For
+  Bit3-dispatched objects the tile bytes come from a per-frame lookup
+  (`ALIEN_SHAPE_TABLE[controlB - $20]` for aliens) keyed by `controlB`,
+  so they aren't carried either.
+- `controlA, controlB` — per-frame draw dispatch state for objects
+  whose layout/shape can change frame-to-frame. Mirror of the per-
+  object data block at `$43C0` (player), `$4B70+` (aliens), etc.
+- `alive` — per-frame "is this object visible" flag — see §4.4.
+
+### 4.1.1 Damage / live-tile mutation
+
+For sprites that *do* carry a `tiles[]` array (player, mothership
+shield blocks), damage-progression and shape changes mutate individual
+entries in place. This is how the source's "as the ship loses
+shields, replace shield tiles with damaged versions" effect comes
+through — see §7 for the mothership shield decrement walkthrough.
 
 ### 4.2 Background as a small tile-grid
 
@@ -319,6 +397,44 @@ add a new table when a new caller lands, append one line to
 `TEXT_TABLES` and re-run the script. The currently-emitted set is
 intentionally minimal — see the call-site map in the script's header
 comment for the other known tables and their (offset, row_count).
+
+### 4.4 `alive` semantics — per-frame draw enablement
+
+In source, an object is drawn this frame iff a per-frame routine calls
+its `*DataController` (which then runs Bit3Controller — see §2.4).
+**Per-stage init writes the data block but does not draw**; only the
+per-frame stage handler does. So whether an object is visible on a
+given frame is determined by *which stage handler is currently running*,
+not by the data block alone.
+
+Two examples relevant to current stages:
+
+- `PlayerUpdate` (`$0876`, calls `PlayerDataController`) is invoked
+  from `L2000` (alien combat, JT4 stages 1/3/B) and `L3400` (bird
+  combat, stages 5/7) — *not* from `L0834` (alien fade-in, stages 0/2).
+  So the player ship is invisible during the entire fade-in intro,
+  even though state-2 init copied a valid `controlA = $0C` (Draw 2×2,
+  bit 3 set) into `$43C0`.
+- `AlienDataController` (`$0A50`) is invoked from `L2000` every frame
+  but from `L0834` only after `CounterB4 < $15` (the last 22 of ~256
+  fade-in frames). So aliens stay invisible through the wait phase
+  even though state-2 init wrote their `(controlA, controlB)` and
+  formation positions.
+
+In our object model the `alive` field captures this. Each object is
+created with `alive: false`. The per-frame stage handler sets `alive
+= true` whenever its source-equivalent would call the relevant
+DataController. `render.frame` skips any object with `alive = false`
+or with `controlA & $08 == 0`.
+
+**`alive` is not "the entity exists".** It's a per-frame draw-enable
+toggle. A killed alien clears its `controlA` bit 3 (and the next
+frame's Bit4Controller delete fires) — `alive` stays whatever the
+per-frame handler is setting it to. For step 5 the two flags are
+redundant (`alive` only ever flips with `controlA` bit 3 set), but
+once kills land in step 8, the cleaner separation is: `alive` =
+"per-frame handler is iterating me", `controlA` bit 3 = "source's
+draw-enable bit". Both must be true to render.
 
 ---
 
