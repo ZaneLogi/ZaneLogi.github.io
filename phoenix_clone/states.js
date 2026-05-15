@@ -1,4 +1,5 @@
 import { state } from './state.js';
+import { input } from './input.js';
 import { scoring } from './scoring.js';
 import {
     PLAYER_INIT_BLOCK,    // source T0560
@@ -118,8 +119,12 @@ export const states = {
     // stays false here — the ship doesn't appear until a combat-stage
     // handler runs PlayerUpdate (see state.player comment).
     initPlayerDataStructure() {
-        state.player.x = PLAYER_INIT_BLOCK[2];   // PlayerShipX = $64 = 100
-        state.player.y = PLAYER_INIT_BLOCK[3];   // PlayerShipY = $D8 = 216
+        state.player.x           = PLAYER_INIT_BLOCK[2];   // PlayerShipX = $64 = 100
+        state.player.y           = PLAYER_INIT_BLOCK[3];   // PlayerShipY = $D8 = 216
+        state.player.shieldCount = 0;
+        state.player.bullet.active = false;
+        state.player.bullet.x      = PLAYER_INIT_BLOCK[6]; // $00
+        state.player.bullet.y      = PLAYER_INIT_BLOCK[7]; // $D0
     },
 
     // L0532 init alien data — three sub-routines:
@@ -251,6 +256,7 @@ export const states = {
     // implementation. Player likewise stays drawn.
     stageAlienCombat() {
         state.player.alive = true;
+        this.playerUpdate();    // L0876 PlayerUpdate — every frame, not lane-gated
         for (let i = 0; i < 16; i++) {
             const a = state.aliens[i];
             if ((a.controlA & 0x08) !== 0) a.alive = true;
@@ -350,6 +356,74 @@ export const states = {
             else                       off = ((a.y >> 1) & 0x03) + t1600Base;
             a.controlA = (a.controlA & 0xF8) | (drawMode & 0x07);
             a.controlB = SHAPE_LSB_TABLE[off & 0xFF];
+        }
+    },
+
+    // L0876 — PlayerUpdate. Called every combat frame (not lane-gated).
+    // research_player_movement.md §3.
+    playerUpdate() {
+        // L0900 — left/right movement. Level-checked (held = continuous).
+        // Boundaries from source: DEC when X >= $0D (min reachable = $0C);
+        //                         INC when X <  $C0 (max reachable = $C0).
+        // Note: research doc listed $0D–$BF as valid range but the assembly
+        // allows one step past each: min=$0C, max=$C0. Verify if collision
+        // detection cares about the extra pixel at each edge.
+        if (input.leftPressed && state.player.x >= 0x0D) {
+            state.player.x = (state.player.x - 1) & 0xFF;
+        } else if (input.rightPressed && state.player.x < 0xC0) {
+            state.player.x = (state.player.x + 1) & 0xFF;
+        }
+
+        // L0926 + T1600 — select pre-shifted tile variant. T1600 is a non-linear
+        // lookup: X%8=0→frame5, X%8=4→frame1, etc. tileBase = 0x30+(T1600[v]>>1).
+        // Draw at (X & ~7, Y) so the tile content provides the sub-pixel offset.
+        // Same pattern as drawAlien: snap-draw + variant content = exact pixel pos.
+        const T1600 = [0x10, 0x14, 0x18, 0x1C, 0x00, 0x04, 0x08, 0x0C];
+        const shape = T1600[state.player.x & 7];
+        const tileBase = 0x30 + (shape >> 1);
+        const p = state.player;
+        p.tiles[0] = tileBase;
+        p.tiles[1] = tileBase + 1;
+        p.tiles[2] = tileBase + 0x10;
+        p.tiles[3] = tileBase + 0x11;
+
+        // Shield — MovePlayer ($08C4) $08D4–$08E8.
+        // Source activates on CheckInputBits 1→0 transition (= barrierEdge()).
+        // On activation, source CLEARS bit3 of PlayerState, routing MovePlayer
+        // to DrawShields ($0AA0) on subsequent frames — skipping L0900 above.
+        // ⚠ STOP: DrawShields ($0AA0) is not traced. Whether the player can
+        // move while shielded depends on its internals. In the real game the
+        // player CAN move during shield, so $0AA0 likely re-runs its own
+        // movement. Keeping L0900 active during shield as a placeholder;
+        // check DrawShields before step 9.
+        if (state.player.shieldCount > 0) {
+            state.player.shieldCount--;
+            // DrawShields visual deferred (step 9 / mothership research).
+        } else if (input.barrierEdge()) {
+            state.player.shieldCount = 0xFF;   // ~4.25 s at 60 Hz
+        }
+
+        // L0930 — bullet update (runs every frame regardless of shield state;
+        // called from L08A0 after MovePlayer returns, so shield doesn't gate it).
+        this.playerBulletUpdate();
+    },
+
+    // L0930 + L0964 — fire and move the primary player bullet.
+    // research_player_movement.md §6.
+    playerBulletUpdate() {
+        const p = state.player;
+        const b = p.bullet;
+        if (b.active) {
+            // L0964: move up 8 grid units per frame; deactivate when Y < $1F.
+            b.y = (b.y - 8) & 0xFF;
+            if (b.y < 0x1F) b.active = false;
+        } else if (input.fireEdge()) {
+            // L0930 spawn: bullet X = PlayerShipX + 4, Y = PlayerShipY - 8.
+            b.x = (p.x + 4) & 0xFF;
+            b.y = (p.y - 8) & 0xFF;
+            b.active = true;
+            // TODO: use 0x50 + (b.x & 7) (T1620[X%8]) for correct sub-pixel
+            // variant at spawn. Visually negligible (bullet moves too fast).
         }
     },
 

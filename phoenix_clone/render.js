@@ -18,17 +18,18 @@ const GRID_BG  = 2;
 export const render = {
     gridMode: GRID_OFF,   // Default OFF so first boot no shows the decoded tiles.
 
-    frame() {
-        if (input.gridEdge()) {
-            this.gridMode = (this.gridMode + 1) % 3;
-        }
+    checkHotkeys() {
+        if (input.gridEdge()) this.gridMode = (this.gridMode + 1) % 3;
+    },
 
+    frame() {
         gfx.clear();
         this.drawDebugGrid();
         if (this.gridMode !== GRID_OFF) this.drawTileRomOverlay();
         for (const row of state.staticTextRows) gfx.drawObject(row);
         for (const alien of state.aliens) this.drawAlien(alien);
-        if (state.player.alive) gfx.drawObject(state.player);
+        if (state.player.alive) this.drawPlayer();
+        if (state.player.bullet.active) this.drawPlayerBullet();
         this.drawHud();
     },
 
@@ -94,6 +95,26 @@ export const render = {
                 break;
             }
         }
+    },
+
+    // 2×2 ship drawn at (X & ~7, Y). T1600 variant selected in playerUpdate
+    // encodes the sub-pixel X offset; snapping to tile boundary lets it work.
+    drawPlayer() {
+        const p = state.player;
+        const ctx = gfx.ctx;
+        const images = resource.fgTileImages;
+        const tx = p.x & ~7;
+        const ty = p.y;
+        ctx.drawImage(images[p.tiles[0]], tx,     ty);
+        ctx.drawImage(images[p.tiles[1]], tx + 8, ty);
+        ctx.drawImage(images[p.tiles[2]], tx,     ty + 8);
+        ctx.drawImage(images[p.tiles[3]], tx + 8, ty + 8);
+    },
+
+    // L0930 / L07D2 — single 8×8 tile at bullet (x, y).
+    drawPlayerBullet() {
+        const b = state.player.bullet;
+        gfx.ctx.drawImage(resource.fgTileImages[b.tile], b.x, b.y);
     },
 
     drawDebugGrid() {

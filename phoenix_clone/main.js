@@ -27,6 +27,7 @@ const game = {
 
     tick() {
         input.sample();
+        render.checkHotkeys();
         state.counter9a = (state.counter9a + 1) & 0xFFFF;
 
         if (state.gameOrAttract === 0) {

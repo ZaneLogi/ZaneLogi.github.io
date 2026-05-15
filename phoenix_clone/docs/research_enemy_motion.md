@@ -313,6 +313,23 @@ form a flap cycle.
   several x-positions per path-index, and `T1600` is keyed on
   `(x >> 1) & 3`, so the sprite cycles 4 frames per path index.
 
+### 4.5 JS port: snap-draw required for variant modes
+
+`AlienAnimationUpdate` writes a variant tile that has its sprite content
+**pre-shifted** by a sub-pixel amount. To reconstruct the correct visual
+position, the canvas port must draw at the **tile-snapped** position
+`(x & ~7, y & ~7)`, not at exact `(x, y)`. Drawing at exact position
+double-counts the sub-pixel offset and produces ~4 px jitter on X drift.
+
+This is the **snap-draw rule**: variant content provides the sub-pixel
+offset; the snap position provides the coarse 8-px step; together they
+match the source's visible position.
+
+The same rule applies to the player ship (T1600 cycling in
+`playerUpdate` + draw at `(X & ~7, Y)` in `render.drawPlayer`).
+
+See `research_rendering.md` §9.3 for the full analysis.
+
 ## 5. Stage-init recap (where the data comes from)
 
 The `state-2` init at `L0515` (already implemented in step 5) wires

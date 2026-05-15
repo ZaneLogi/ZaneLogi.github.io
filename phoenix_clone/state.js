@@ -63,6 +63,14 @@ export const state = {
             w: 16,
             h: 16,
             tiles: [0x30, 0x31, 0x40, 0x41],
+            // $43A6 ShieldCount — 255 frames (~4.25 s) when shield is active.
+            shieldCount: 0,
+            // Mirror of $43C4-$43C7 PlayerBulletState/Shape/X/Y.
+            // active mirrors bit3 of PlayerBulletState; tile is fixed $50
+            // (T1620[0]) — source selects T1620[X%8] for sub-pixel shifting
+            // but the canvas port skips pre-shifted variants (same decision
+            // as player ship tiles).
+            bullet: { active: false, x: 0, y: 0, tile: 0x50 },
         };
 
         // 16 alien slots, mirror of $4B70-$4BAF (4 bytes per alien:

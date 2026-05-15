@@ -128,13 +128,29 @@ sprite conventions live in source, picked by object type:
 ship for sub-cell X positioning; `PlayerShape` (initial `$10` from
 `PLAYER_INIT_BLOCK` byte 1) is computed each frame from
 `(PlayerShipX & 7) << 2` so the variant cycles every pixel of motion.
-We use only frame #1 (`30 31 / 40 41`, the 8-aligned variant) and let
-`drawImage` handle pixel-precise positioning at the canvas level — the
-8 pre-shifted variants are unnecessary when X isn't tile-cell-quantized.
+The port cycles through all 8 variants using the T1600 lookup (non-linear:
+X%8=0→frame #5, X%8=4→frame #1) and draws at tile-snapped `(X & ~7, Y)` —
+the same snap-draw pattern as combat aliens (§9.3). The variant tile encodes
+the sub-pixel visual offset; the snap position provides the coarse 8-px step;
+together they reproduce the original visual position exactly.
 
 ```js
-state.player = { x, y, w: 16, h: 16, tiles: [0x30, 0x31, 0x40, 0x41] };
+// states.js playerUpdate — called each combat frame
+const T1600 = [0x10, 0x14, 0x18, 0x1C, 0x00, 0x04, 0x08, 0x0C];
+const shape  = T1600[state.player.x & 7];
+const base   = 0x30 + (shape >> 1);          // top-left tile of selected frame
+p.tiles = [base, base+1, base+0x10, base+0x11];
+// render.js drawPlayer — snap X to tile boundary
+ctx.drawImage(images[p.tiles[0]], p.x & ~7,       p.y);
+ctx.drawImage(images[p.tiles[1]], (p.x & ~7) + 8, p.y);
+// bottom row at p.y + 8, same X pattern
 ```
+
+**Important:** a naïve linear cycle (`v = X & 7; base = 0x30 + v*2`) is wrong.
+T1600 is non-linear, so the linear formula assigns the wrong variant to every X
+position, causing visible wobble. Use the T1600 table.
+
+[verified, `Code.md:$0926`, `Code.md:T1600`]
 
 The shielded-ship sprites (`T1770` "Regular ship, large shields";
 `T1780` "Regular ship, small shields") are 4×4 = 16 tile blocks where
@@ -237,12 +253,14 @@ Movement is in 1-pixel increments — `state.player.x -= 1` for left
 (equivalent to source `DEC PlayerShipX`), `+= 1` for right. Bullets
 and enemies similarly.
 
-### 3.2 No sub-pixel positioning
+### 3.2 Integer positioning — with snap-draw for variant-animated objects
 
-Because state coords are integers and `drawImage` accepts integer
-arguments, there's no sub-pixel rendering. We don't need
-`imageSmoothingEnabled = false` magic or the source's 8-variant
-trick; we don't pass non-integer X/Y to `drawImage`.
+State coords are integers; `drawImage` accepts integers. `imageSmoothingEnabled`
+is not a concern. However, objects driven by per-frame variant animation (player
+ship and combat aliens) use **snap-draw**: draw at `(X & ~7, Y)` (player) or
+`(x & ~7, y & ~7)` (aliens), not exact `(X, Y)`. The tile variant content
+encodes the sub-pixel offset; the snap provides the coarse 8-px step. The net
+visible position is pixel-exact. See §9.3 for the full explanation.
 
 ### 3.3 `convertCoords` is essentially identity
 
@@ -636,12 +654,15 @@ based on input/state — different shapes for "intact ship", "ship with
 large shield", "ship with small shield", "green ship", etc. (See
 `Code.md:T1770-T17A0`.)
 
-In our port, `state.player.shape` is a `SHAPES` key; updating it
-triggers a copy of `SHAPES[shape].tiles` into `state.player.tiles`
-(so the live tiles can still be mutated independently if needed).
+In our port, `state.player.tiles[]` is mutated directly each combat frame
+by `states.playerUpdate()` via the T1600 lookup. There is no separate
+`state.player.shape` key — `tiles[]` is the live, mutable shape.
 
-Animation frame **for sub-tile X positioning** (the 8-variant trick
-in `T1600`) is NOT used — see §1.1 / §3.
+Animation frame **for sub-tile X positioning** (the 8-variant trick in
+`T1600`) **IS used** — see §2.2 and §9.3. The T1600 lookup is non-linear
+(X%8=0→frame #5, X%8=4→frame #1). A linear `X & 7` cycle is incorrect and
+produces visible wobble because the variant pixel content doesn't match the
+draw position for each X value.
 
 ---
 
@@ -725,12 +746,17 @@ dispatches (`low3 ∈ {1, 3, 4}`) draw at `(alien.x & ~7, alien.y & ~7)`
 the tile-aligned position contributes the coarse 8-px step; together
 they reconstruct the source's visible position.
 
-This is why §1.1 / §2.2 advice ("we don't need pre-shift variants —
-`drawImage` handles sub-pixel positioning") applies to the **player
-ship** but NOT to combat aliens. Player ship has no per-frame
-controlB rewrite, so we can pin variant 0 and let `drawImage` work.
-Aliens have the per-frame rewrite (`AlienAnimationUpdate`), so we
-must align to tile cells.
+The snap-draw rule applies to **both** combat aliens and the player ship:
+
+- **Aliens:** `AlienAnimationUpdate` rewrites `controlB` each frame; draw at
+  `(x & ~7, y & ~7)`.
+- **Player ship:** `playerUpdate` rewrites `tiles[]` via T1600 each frame; draw
+  at `(X & ~7, Y)`.
+
+Both follow the same model: variant content encodes the sub-pixel offset, snap
+position provides the coarse step. The earlier claim ("player ship can pin
+variant 0 and let `drawImage` work") was wrong — it ignored the visual animation
+that T1600 cycling produces as the ship moves.
 
 ### 9.4 Known faithful artifact: fade-in → combat half-alien
 
