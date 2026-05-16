@@ -15,7 +15,12 @@
 
 from pathlib import Path
 
-ROM_DIR  = Path("D:/tmp/computer_archeology_phonenix/content/Arcade/Phoenix/roms")
+# Path is per-PC; both known paths are tried (see phoenix_clone/CLAUDE.md).
+_ROM_CANDIDATES = [
+    Path("D:/tmp/computer_archeology_phonenix/content/Arcade/Phoenix/roms"),
+    Path("C:/Z_Temp/computer_archeology_phoenix/content/Arcade/Phoenix/roms"),
+]
+ROM_DIR = next((p for p in _ROM_CANDIDATES if p.is_dir()), _ROM_CANDIDATES[0])
 OUT_FILE = Path(__file__).resolve().parent.parent / "data.js"
 
 ROMS = [
@@ -88,10 +93,15 @@ RAW_SLICES = [
     # to $4B50-$4B6F by $0650. 16 entries × 2-byte pointer. Carried for
     # source-faithful symmetry but unused until step 6 wires alien motion.
     ("ALIEN_MOVE_PTR_INIT", 0x1520, 32),
-    # source T1540 — 256-byte alien formation table: 8 sub-tables of 16
-    # (X, Y) pairs at $1540/$1560/$1580/$15A0/$15C0/$15E0/$1600/$1620.
-    # The FORMATION_INDEX LSB selects which sub-table this stage uses.
-    ("ALIEN_FORMATIONS", 0x1540, 256),
+    # source T1540 — 192-byte alien formation table: 6 sub-tables of 16
+    # (X, Y) pairs at $1540/$1560/$1580/$15A0/$15C0/$15E0. The
+    # FORMATION_INDEX LSB selects which sub-table this stage uses (see
+    # FORMATION_LABELS below for per-sub-table boundaries and the in-game
+    # level each is used at). NOTE: an earlier extraction was 256 bytes,
+    # but the trailing 64 bytes at $1600-$163F belong to T1600 (shape-LSB
+    # pointer table) and T1620 (player bullet pre-shift tiles), not
+    # formations — they're separate exports below.
+    ("ALIEN_FORMATIONS", 0x1540, 192),
     # source T1600 — 160-byte alien shape-LSB lookup, addressed as
     # SHAPE_LSB_TABLE[T16A0_base + offset]. Each byte is a low byte into
     # T1420 (ALIEN_SHAPE_TABLE) selecting which alien shape to draw.
@@ -116,6 +126,105 @@ RAW_SLICES = [
     # AliensLeft = 16, negative byte ($88) sets BirdsLeft = 8. Carried
     # but not consumed until bird-stage step.
     ("ALIEN_BIRD_PARTITION", 0x1760, 8),
+    # source T3300 — 8-byte table mapping relative alien-X distance
+    # (8 distance buckets) to a column index used by T3310.
+    # AlienBehaviorUpdate $3000 sub-state 5 ($31B4). §6.4.
+    ("PATTERN_COL_TABLE", 0x3300, 8),
+    # source T3310 — 32-byte table: (col_offset*4 + row 0-3) → byte
+    # offset into T3330 region. Lower 16 bytes ($3310-$331F) used when
+    # alien is RIGHT of player (lr=0); upper 16 bytes ($3320-$332F)
+    # used when alien is LEFT of player (lr=4, since L31B4 adds 4 to
+    # the column offset before *4). §6.4.
+    ("PATTERN_ROW_TABLE", 0x3310, 32),
+    # source T3330+ — extended pattern address table. The source uses
+    # `LD L,A / LD H,$33` to address into this region with LSB =
+    # (T3310 value) + (random & 6). T3310 values span $30-$F8 across
+    # all 32 entries (lower 16 = alien-right-of-player, upper 16 =
+    # alien-left-of-player), so worst-case LSB = $F8 + $06 = $FE,
+    # plus +1 for the LSB byte = $FF. Extracting 208 bytes covers
+    # $3330-$33FF. Stored as raw bytes so the lookup uses byte-offset
+    # addressing directly, matching source semantics. §6.4.
+    ("PATTERN_ADDR_TABLE", 0x3330, 208),
+    # Path-data ROM slices used by getPathByte() for alien path traversal.
+    # Path data lives in two regions of the CPU ROM:
+    #   0x1000-0x13FF — drift loop (T1000) + 18 closed-loop patterns (T1020-T13D0)
+    #   0x2C00-0x2FFF — 18 more closed-loop patterns (T2C00-T2FA0)
+    #     including the two angry-pattern swoops at T2E00/T2E40
+    # The 6 KB between is graphics/code; not exported. getPathByte dispatches
+    # on ptr range: ptr<0x1400 → PATH_ROM_LOW[ptr - 0x1000];
+    # else → PATH_ROM_HIGH[ptr - 0x2C00].
+    # See PATH_PATTERN_LABELS below for per-pattern boundaries; the format
+    # routine emits one labeled block per pattern in the generated data.js.
+    ("PATH_ROM_LOW",  0x1000, 0x0400),
+    ("PATH_ROM_HIGH", 0x2C00, 0x0400),
+]
+
+
+# Pattern boundaries within the two PATH_ROM_* slices.
+# Mirrors the `T1020:` / `T1064:` / ... labels in
+# Code.md $1020-$13D0 and $2C00-$2FA0 so the generated arrays
+# read self-describingly. Each entry: (address, label, description).
+# These are used by format_path_rom() to insert `// label` comments
+# at the right byte offset in the emitted Uint8Array literal, and to
+# build the PATTERNS dictionary export so JS code can reference
+# patterns by name (e.g. PATTERNS.T1020).
+PATH_PATTERN_LABELS = [
+    # PATH_ROM_LOW — drift + 18 closed-loop patterns
+    (0x1000, "T1000", "Formation drift (R×4, L×8, R×4)"),
+    (0x1020, "T1020", "Pattern 1"),
+    (0x1064, "T1064", "Pattern 2"),
+    (0x10A8, "T10A8", "Pattern 3 (phase 3)"),
+    (0x10D4, "T10D4", "Pattern 4"),
+    (0x1100, "T1100", "Pattern 5"),
+    (0x1130, "T1130", "Pattern 6"),
+    (0x1160, "T1160", "Pattern 7"),
+    (0x11A4, "T11A4", "Pattern 8"),
+    (0x11D0, "T11D0", "Pattern 9"),
+    (0x1200, "T1200", "Pattern 10"),
+    (0x1244, "T1244", "Pattern 11"),
+    (0x1288, "T1288", "Pattern 12"),
+    (0x12CA, "T12CA", "Pattern 13"),
+    (0x1300, "T1300", "Pattern 14"),
+    (0x1328, "T1328", "Pattern 15"),
+    (0x1354, "T1354", "Pattern 16"),
+    (0x139C, "T139C", "Pattern 17"),
+    (0x13D0, "T13D0", "Pattern 18"),
+
+    # PATH_ROM_HIGH — 18 more closed-loop patterns (continued below)
+    (0x2C00, "T2C00", "Pattern 19"),
+    (0x2C34, "T2C34", "Pattern 20"),
+    (0x2C90, "T2C90", "Pattern 21"),
+    (0x2CC8, "T2CC8", "Pattern 22"),
+    (0x2D00, "T2D00", "Pattern 23"),
+    (0x2D44, "T2D44", "Pattern 24"),
+    (0x2D88, "T2D88", "Pattern 25"),
+    (0x2DC0, "T2DC0", "Pattern 26"),
+    (0x2E00, "T2E00", "Pattern 27 — angry, playerX bit 0 == 1"),
+    (0x2E20, "T2E20", "Pattern 28"),
+    (0x2E40, "T2E40", "Pattern 29 — angry, playerX bit 0 == 0"),
+    (0x2E6C, "T2E6C", "Pattern 30"),
+    (0x2E90, "T2E90", "Pattern 31"),
+    (0x2EC4, "T2EC4", "Pattern 32"),
+    (0x2F00, "T2F00", "Pattern 33"),
+    (0x2F34, "T2F34", "Pattern 34"),
+    (0x2F64, "T2F64", "Pattern 35"),
+    (0x2FA0, "T2FA0", "Pattern 36"),
+]
+
+
+# Sub-table boundaries within ALIEN_FORMATIONS. Each formation is a
+# 32-byte block of 16 (X, Y) pairs giving the starting (x, y) of each
+# alien for one or more stages. FORMATION_INDEX (T063A) maps
+# (LevelAndRound RRCA & 0xF) → sub-table LSB, so multiple stages
+# share the same formation (see research_stage_structure.md §4.2).
+# Comments mirror Code.md's "Level N initial screen coordinates" labels.
+FORMATION_LABELS = [
+    (0x1540, "T1540", "Stages 0x02-0x03 (fade-in second wave, round 1)"),
+    (0x1560, "T1560", "Level 1 — stages 0x00-0x01 (round 1 alien combat)"),
+    (0x1580, "T1580", "Level 10 — stages 0x14-0x1B (round 2 later combat)"),
+    (0x15A0, "T15A0", "Level 7 — stages 0x12-0x13 (round 2 fade-in 2nd wave)"),
+    (0x15C0, "T15C0", "Level 6 — stages 0x10-0x11 (round 2 fade-in 1st wave)"),
+    (0x15E0, "T15E0", "Level 5 — stages 0x04-0x0B (round 1 later combat)"),
 ]
 
 
@@ -132,6 +241,70 @@ def format_bytes(data: bytes, indent: str = "    ", per_row: int = 16) -> str:
     for row_start in range(0, len(data), per_row):
         row = data[row_start:row_start + per_row]
         lines.append(indent + ", ".join(f"0x{b:02X}" for b in row) + ",")
+    return "\n".join(lines)
+
+
+def format_formations(data: bytes, base_addr: int, indent: str = "    ") -> str:
+    """
+    Emit ALIEN_FORMATIONS as labeled 32-byte blocks, one per sub-table.
+    Each row inside a block is one alien's (X, Y) pair (16 aliens per
+    sub-table, 32 bytes). Tag each row with the alien index so the
+    formation reads like a position table at a glance.
+    """
+    lines = []
+    for i, (addr, lbl, desc) in enumerate(FORMATION_LABELS):
+        seg_start = addr - base_addr
+        lines.append(f"{indent}// {lbl} (${addr:04X}): {desc}")
+        for alien_idx in range(16):
+            off = seg_start + alien_idx * 2
+            x_byte = data[off]
+            y_byte = data[off + 1]
+            lines.append(
+                f"{indent}0x{x_byte:02X}, 0x{y_byte:02X},  "
+                f"// i={alien_idx:2d}: (x={x_byte}, y={y_byte})"
+            )
+    return "\n".join(lines)
+
+
+def format_path_rom(data: bytes, base_addr: int, indent: str = "    ",
+                    per_row: int = 16) -> str:
+    """
+    Emit a path-ROM slice as labeled per-pattern blocks. Each pattern in
+    PATH_PATTERN_LABELS that falls within [base_addr, base_addr+len(data))
+    gets a `// label (addr): description` header before its bytes. The
+    bytes for a pattern run from its label address up to (but not
+    including) the next pattern's label address, which keeps the
+    inter-pattern 0x00 terminator + 0xFF padding visible at the tail of
+    each block — matching Code.md's layout.
+    """
+    end_addr = base_addr + len(data)
+    labels = sorted(
+        (addr, lbl, desc) for addr, lbl, desc in PATH_PATTERN_LABELS
+        if base_addr <= addr < end_addr
+    )
+
+    lines = []
+    for i, (addr, lbl, desc) in enumerate(labels):
+        next_addr = labels[i + 1][0] if i + 1 < len(labels) else end_addr
+        seg_start = addr - base_addr
+        seg_end   = next_addr - base_addr
+
+        lines.append(f"{indent}// {lbl} (${addr:04X}): {desc}")
+        for byte_idx in range(seg_start, seg_end, per_row):
+            row = data[byte_idx:min(byte_idx + per_row, seg_end)]
+            lines.append(indent + ", ".join(f"0x{b:02X}" for b in row) + ",")
+
+    return "\n".join(lines)
+
+
+def format_patterns_dict(indent: str = "    ") -> str:
+    """
+    Emit the PATTERNS dictionary export — maps each pattern label to
+    its ROM address so JS code can reference patterns by name.
+    """
+    lines = []
+    for addr, lbl, desc in PATH_PATTERN_LABELS:
+        lines.append(f"{indent}{lbl}: 0x{addr:04X},  // {desc}")
     return "\n".join(lines)
 
 
@@ -188,9 +361,28 @@ def main() -> None:
         slice_bytes = maincpu[offset:offset + length]
         out.append(f"// {name} — code-ROM offset 0x{offset:04X}, {length} byte(s).")
         out.append(f"export const {name} = new Uint8Array([")
-        out.append(format_bytes(slice_bytes))
+        if name in ("PATH_ROM_LOW", "PATH_ROM_HIGH"):
+            # Emit with per-pattern boundary comments (mirrors Code.md).
+            out.append(format_path_rom(slice_bytes, offset))
+        elif name == "ALIEN_FORMATIONS":
+            # Emit with per-sub-table boundary comments and per-alien
+            # position annotations (mirrors Code.md T1540/T1560/...).
+            out.append(format_formations(slice_bytes, offset))
+        else:
+            out.append(format_bytes(slice_bytes))
         out.append("]);")
         out.append("")
+
+    # PATTERNS — pattern-label → ROM address map. Lets JS reference
+    # closed-loop patterns by name (e.g. PATTERNS.T1020) instead of magic
+    # numbers. Mirrors the Tnnnn labels in Code.md $1020-$13D0 / $2C00-$2FA0.
+    out.append("// PATTERNS — pattern label → ROM address. 36 closed-loop")
+    out.append("// swoop patterns plus T1000 (formation drift). See")
+    out.append("// research_enemy_motion.md §3.3 / §6.4 for usage.")
+    out.append("export const PATTERNS = {")
+    out.append(format_patterns_dict())
+    out.append("};")
+    out.append("")
 
     OUT_FILE.write_text("\n".join(out), encoding="utf-8")
     total = sum(len(b) for b in rom_blocks)

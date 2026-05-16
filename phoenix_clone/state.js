@@ -113,6 +113,23 @@ export const state = {
         this.alienPathSeedHi = 0x10;
         this.alienPathSeedLo = 0x00;
 
+        // AlienBehaviorUpdate ($3000) state — mirrors $4393/$4350-$4357 region.
+        // Initialised to 0 in state-2 init ($32B0 clears $4350-$437F).
+        // research_enemy_motion.md §6.
+        this.counter93           = 0;   // $4393 — incremented every lane-0 tick
+        this.alienBehaviorState  = 0;   // $4350 — 0=idle,1=triggered,2=count,3=alien,4=angry-ready,5=pattern,6=scan-done
+        this.alienSwoopPatternHi = 0;   // $4351 — MSB of chosen swoop pattern address
+        this.alienSwoopPatternLo = 0;   // $4352 — LSB of chosen swoop pattern address
+        this.alienSwoopCount     = 0;   // $4353 — number of aliens to swoop this cycle
+        this.alienSwoopTarget    = 0xFF;// $4354 — chosen alien index (0xFF = none)
+        this.alienSwoopLsb       = 0;   // $4356 — saved old $4395 used for commit match
+        this.alienPhaseCount     = 0;   // $4357 — angry-pattern fire count (0-3 max per round)
+        this.alienPhaseTimer     = 0;   // $4358 — angry-pattern countdown; 0 = needs init
+        this.alienCooldown       = 60;  // $4355 stub: lane-0 ticks until next normal swoop trigger
+
+        // Player-death timer — not a source field; used while state4 is a stub.
+        this.playerExplosionTimer = 0;
+
         this.bgScrollY = 0;           // $5800 scroll register (research_hardware.md §4)
 
         // Cold-init mirror of $0008 → $0050 → $01D0 (research_code_flow.md §1).

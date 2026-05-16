@@ -81,17 +81,49 @@ export const render = {
                 break;
             }
             case 4: {                                     // L07D2 Draw 2×2
-                const idx = b - 0x20;
-                const t = [
-                    ALIEN_SHAPE_TABLE[idx],     ALIEN_SHAPE_TABLE[idx + 1],
-                    ALIEN_SHAPE_TABLE[idx + 2], ALIEN_SHAPE_TABLE[idx + 3],
+                // Tile order is COLUMN-MAJOR in ALIEN_SHAPE_TABLE because
+                // Phoenix's CRT is rotated; source's screen-RAM addressing
+                // (`INC DE` = visually down, `RightOneColumn` = visually
+                // right) lays out the 4 bytes as [UL, LL, UR, LR], not
+                // [UL, UR, LL, LR] (research_rendering.md §2.5).
+                //
+                // PORT DEVIATION — full-sprite + exact-position draw:
+                // Source's SHAPE_LSB_TABLE cycle includes "partial" variants
+                // (e.g. controlB=0xA0 has tiles [0x8B, 0x9B, 0, 0]) that
+                // rely on the previous frame's tiles still being in screen
+                // RAM. Our canvas-cleared-per-frame model can't reproduce
+                // that, so partial sprites would render with missing halves.
+                // Instead: keep the alien's most recently-seen FULL controlB
+                // and substitute it when the current controlB is partial.
+                // Draw at exact (alien.x, alien.y) — canvas pixel-accurate
+                // positioning replaces source's tile pre-shifting trick.
+                let idx = b - 0x20;
+                let tiles = [
+                    ALIEN_SHAPE_TABLE[idx    ],   // UL
+                    ALIEN_SHAPE_TABLE[idx + 1],   // LL
+                    ALIEN_SHAPE_TABLE[idx + 2],   // UR
+                    ALIEN_SHAPE_TABLE[idx + 3],   // LR
                 ];
-                for (let i = 0; i < 4; i++) {
-                    if (t[i] === 0) continue;
-                    const dx = (i & 1) * 8;
-                    const dy = (i >> 1) * 8;
-                    ctx.drawImage(images[t[i]], tx + dx, ty + dy);
+                if (tiles[0] === 0 || tiles[1] === 0 ||
+                    tiles[2] === 0 || tiles[3] === 0) {
+                    // Partial — fall back to alien's last-known full variant.
+                    const fb = alien.lastFullControlB ?? 0xA8;
+                    const fbIdx = fb - 0x20;
+                    tiles = [
+                        ALIEN_SHAPE_TABLE[fbIdx    ],
+                        ALIEN_SHAPE_TABLE[fbIdx + 1],
+                        ALIEN_SHAPE_TABLE[fbIdx + 2],
+                        ALIEN_SHAPE_TABLE[fbIdx + 3],
+                    ];
+                } else {
+                    // Full — remember as the fallback for future partial frames.
+                    alien.lastFullControlB = b;
                 }
+                // Exact-position draw (no tile-boundary snap).
+                ctx.drawImage(images[tiles[0]], alien.x,     alien.y    );
+                ctx.drawImage(images[tiles[1]], alien.x,     alien.y + 8);
+                ctx.drawImage(images[tiles[2]], alien.x + 8, alien.y    );
+                ctx.drawImage(images[tiles[3]], alien.x + 8, alien.y + 8);
                 break;
             }
         }
@@ -162,6 +194,8 @@ export const render = {
             `counterA5=${state.counterA5}  ` +
             `counterB4=${state.stageBlock[9]}  ` +
             `lane=${state.combatLane & 3}  ` +
+            `aliens=${state.aliensLeft}  ` +
+            `score=${state.score1[2].toString(16).padStart(2,'0')}${state.score1[1].toString(16).padStart(2,'0')}${state.score1[0].toString(16).padStart(2,'0')}  ` +
             `grid=${gridLabel}\n` +
             `keys: ←/→ move · space fire · shift barrier · 5 coin · 1 start · g cycle tile-ROM overlay`;
     },

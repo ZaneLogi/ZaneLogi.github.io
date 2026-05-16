@@ -235,6 +235,92 @@ take `controlB` raw for mode 0), `drawImage` at `(x, y)` with per-mode
 offsets. We also don't mutate `controlA` after drawing — there's no
 next-frame delete to set up. Bit4Controller has no port at all.
 
+### 2.5 CRT rotation: column-major tile order in 2×2 sprites
+
+Phoenix is a vertical-orientation arcade game — the cabinet's CRT is
+rotated 90° clockwise relative to how the screen-RAM bytes are laid
+out in memory. This rotation makes screen-RAM addressing
+**column-major when viewed on the screen**:
+
+| Memory delta | Source operation | Visual direction |
+|---|---|---|
+| `+1` | `INC DE` | DOWN within a column (next row) |
+| `+0x20` | `CALL RightOneColumn` (`$0217`) | RIGHT to next column |
+
+This affects how multi-tile sprites in `ALIEN_SHAPE_TABLE` (T1420) are
+stored. Source's `L07D2` "Draw 2×2" writes the 4 bytes from the shape
+table in this order (`Code.md:$07DC-$07EC`):
+
+```
+write byte 0 at DE          ; upper-left visually
+INC DE                       ; DE +1 → visually DOWN one row
+write byte 1 at DE          ; LOWER-left (NOT "upper right" despite some comments)
+DEC DE
+CALL RightOneColumn          ; DE +0x20 → visually RIGHT one column
+write byte 2 at DE          ; upper-RIGHT
+INC DE                       ; +1 → visually down again
+write byte 3 at DE          ; lower-right
+```
+
+So the 4 bytes in `ALIEN_SHAPE_TABLE` for one 2×2 sprite are stored
+**column-major visually**: `[UL, LL, UR, LR]`, NOT the row-major
+`[UL, UR, LL, LR]` a casual reader would assume.
+
+**Concrete example** (player ship frame #1 at `T1400`, comment in
+`Code.md`):
+
+```
+1400: 30 40 31 41     ;frame#1
+```
+
+Decoded column-major (`[UL, LL, UR, LR]`):
+
+```
+UL=0x30  UR=0x31
+LL=0x40  LR=0x41
+```
+
+Sensible: tiles `0x30`/`0x31` are the upper row, `0x40`/`0x41` the
+lower row — they share a tile-row index in the source ROM.
+
+Decoded as row-major would produce `[UL=0x30, UR=0x40, LL=0x31,
+LR=0x41]` — the alien's lower-left tile painted in the upper-right
+slot of the 2×2 cell, scrambling the sprite.
+
+**Port impact.** `render.js`'s 2×2 dispatch must read the table as
+column-major:
+
+```js
+const tiles = [
+    ALIEN_SHAPE_TABLE[idx    ],   // UL
+    ALIEN_SHAPE_TABLE[idx + 1],   // LL
+    ALIEN_SHAPE_TABLE[idx + 2],   // UR
+    ALIEN_SHAPE_TABLE[idx + 3],   // LR
+];
+const positions = [[0, 0], [0, 8], [8, 0], [8, 8]];
+for (let i = 0; i < 4; i++) {
+    if (tiles[i] === 0) continue;
+    ctx.drawImage(images[tiles[i]], tx + positions[i][0], ty + positions[i][1]);
+}
+```
+
+**The 1×2 and 2×1 modes don't have this gotcha** — they only read 2
+tiles in a single dimension, and source's INC-DE-then-write sequence
+just produces "tile 0 then tile 1 in that direction":
+
+- `L0788` 2×1: `[LEFT, RIGHT]` (next column, single row).
+- `L07AA` 1×2: `[TOP, BOTTOM]` (single column, two rows down).
+
+Both row-major and column-major interpretations agree on a single
+linear axis. Only 2×2 mode requires explicit column-major handling.
+
+**Verification.** Rendering each of the 4 `controlB` variants from a
+diagonal-swoop animation cycle side-by-side as static sprites makes
+this immediately visible: row-major gave scrambled aliens; column-
+major produces correctly-shaped diving aliens with subtle wing-
+position variants across the cycle. The investigation that found
+this bug is in this doc's commit history.
+
 ---
 
 ## 3. Coordinate space and granularity

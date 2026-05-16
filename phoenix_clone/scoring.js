@@ -27,11 +27,30 @@ function eraseDigits(player) {
     for (let i = 0; i < 6; i++) tiles[right - i] = 0;
 }
 
+// Add `pts` (decimal) to the BCD score for `player` (0 or 1), then repaint.
+// Source routes kills through a $4370-$437F buffer drained by L2700; for
+// step 8 we add directly (buffer model lands with sound support).
+// TODO: replace placeholder 50-point kill with per-alien score from source.
+function addPoints(pts, player) {
+    const score = player === 0 ? state.score1 : state.score2;
+    // BCD → integer → add → BCD
+    let val = (score[0] & 0x0F)
+            + ((score[0] >> 4) & 0x0F) * 10
+            + (score[1] & 0x0F) * 100
+            + ((score[1] >> 4) & 0x0F) * 1000
+            + (score[2] & 0x0F) * 10000
+            + ((score[2] >> 4) & 0x0F) * 100000;
+    val = Math.min(val + pts, 999999);
+    score[0] = ((Math.floor(val / 10) % 10) << 4) | (val % 10);
+    score[1] = ((Math.floor(val / 1000) % 10) << 4) | (Math.floor(val / 100) % 10);
+    score[2] = ((Math.floor(val / 100000) % 10) << 4) | (Math.floor(val / 10000) % 10);
+    printNumber(player);
+}
+
 // L2700 UpdateScoresAndSound. Drains the per-enemy score-pending buffer at
 // $4370-$437F into Score1/Score2, then UpdateSoundControlHW + UpdateSounds.
-// Buffer is empty until enemies start dying (steps 7-8) and sound is
-// deferred per research_hardware.md §5 — body lands then.
+// Buffer model and sound deferred per research_hardware.md §5.
 function update() {
 }
 
-export const scoring = { printNumber, eraseDigits, update };
+export const scoring = { printNumber, eraseDigits, addPoints, update };

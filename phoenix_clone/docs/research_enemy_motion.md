@@ -75,6 +75,116 @@ animation fire — the four lanes are otherwise the same:
   kill-anim, enemy fire, etc.) outside this doc's scope; flagged here
   so the lane table reads cleanly.
 
+### 1.0 Port lane assignment — and why we swapped
+
+`stageAlienCombat` in `states.js` only routes work for lanes 0 and 1
+(lanes 2 and 3 are no-op stubs — enemy fire / kill-anim deferred to
+step 9). But the work assigned to each lane is **deliberately swapped
+relative to source**:
+
+| `combatLane & 3` | Source's L2000                                  | Our port's `stageAlienCombat`                       |
+|------|--------------------------------------------------|------------------------------------------------------|
+| 0    | draw + `AlienBehaviorUpdate` + alien-vs-player coll | `alienMovementUpdate` + `alienAnimationUpdate`    |
+| 1    | `AlienMovementUpdate`                              | `alienBehaviorUpdate` + `alienVsPlayerCollision`  |
+| 2    | `AlienAnimationUpdate`                             | (empty)                                              |
+| 3    | enemy fire + screen-RAM rebuild                    | (empty)                                              |
+
+Two deviations are baked in:
+
+1. **Movement+animation merged on one lane.** Source runs movement on
+   lane-1 and animation on lane-2 (1-frame separation). Our port runs
+   both inside the port's lane-0 handler — back to back. This was an
+   earlier decision driven by tick-pairing atomicity
+   (`research_rendering.md` §9.2): rendering uses both alien position
+   AND animation tile, and a 1-frame split caused 30 Hz tick-pair
+   visual stutter.
+2. **Movement-then-behavior order, not behavior-then-movement.** This
+   is the *swap* — source has behavior on lane-0 and movement on
+   lane-1 (behavior fires first each cycle, then movement 1 frame
+   later). Our port reverses: movement fires first, behavior fires
+   the next frame.
+
+The reason for #2 is **swoop entry alignment**. `behaviorCommit`
+(case-0 of the 8-state cycle) overwrites an alien's path pointer to
+start a swoop. The swoop's first byte is often `dx=±4`, which can
+only advance the ptr when `alien.x%8 ∈ {0, 4}`
+(`research_enemy_motion.md` §3.5). Source's lane order puts commit
+**before** the next movement in time, so commit fires with the
+alien at whatever `x%8` the previous cycle left it at — and in our
+port's lockstep formation that turns out to always be `x%8 = 7`,
+which is misaligned for `dx=±4`.
+
+By swapping movement to fire BEFORE behavior each cycle, the alien
+crosses to `x%8 = 0` exactly one frame before commit reads it, so
+the commit always sees a freshly-aligned alien. Side benefits:
+
+- The earlier `behaviorCommit` x-snap workaround (`a.x = (a.x + 4) &
+  0xF8`) is no longer needed — alignment is natural. Removed.
+- Aliens that have swooped no longer drift offset from formation
+  (the x-snap was producing ±3 px permanent offsets accumulating
+  across swoops; that desync is gone).
+- `behaviorScanAdvance` and `behaviorPickAlien` can use the
+  source-faithful match key `alienSwoopLsb` ($4356) instead of our
+  earlier port-specific `alienPathSeedLo` workaround.
+
+The trade-off is that we deviate from source on lane ordering — the
+individual sub-state handlers (`behaviorCommit`, `behaviorPickAlien`,
+etc.) are byte-for-byte faithful to source, but the *frame within
+each 4-frame cycle* on which each runs has shifted by one.
+`alienMovementUpdate` and `alienAnimationUpdate` themselves are
+byte-faithful too; only the lane they live in differs.
+
+Why source's lane order works in arcade Phoenix despite this same
+math: open question. Likely candidates: (a) source's much longer
+cooldown (`L30E4` seeded from `Counter9A` high byte + level factor,
+≈40-47 case-2 firings vs our stubbed 6) lets cumulative drift shift
+the phase before commits start firing; (b) MAME emulation timing
+differs subtly from real hardware; (c) the arcade has the same
+"stuck swoop" potential but the random pattern picker rarely lands
+on dx=±4-leading patterns when misaligned. Reproducing this exactly
+is a research effort we deferred.
+
+### 1.1 Functions that affect alien movement
+
+"Movement" here means anything that writes to `alien.x` / `alien.y` or
+to the path pointer at `$4B50+i*2` — i.e. the state that determines
+where the alien will be next frame. Useful when debugging "why is this
+alien at this position".
+
+**Direct** — they write `(x, y)` or the path pointer:
+
+| Function                              | Lane     | What it writes                                                                                          |
+|---------------------------------------|----------|---------------------------------------------------------------------------------------------------------|
+| `AlienMovementUpdate ($0D1C)`         | 1        | `x += dx, y += dy` from `MOTION_DIRECTIONS[pathByte]`; path ptr += 1 on grid crossing                   |
+| `AlienAnimationUpdate ($0D70)` → L0DDE| 2        | On `pathByte == 0`, rewrites path ptr to `($4394, $4395)` (drift seed). Only mover that *resets* the ptr |
+| `AlienBehaviorUpdate ($3000)` → commit `$3264` | 0 | When pipeline ready (`$4350 ≥ 5`), overwrites matching aliens' path ptrs with the chosen swoop pattern address |
+| `InitAlienPositions ($0610)`          | state-2  | Initial `(x, y)` from `ALIEN_FORMATIONS` (T1540+)                                                       |
+| `$0650` (in $0532 init chain)         | state-2  | Initial path ptr for each alien from `ALIEN_MOVE_PTR_INIT` (T1520)                                      |
+| `L0506`                               | state-2  | Seeds `$4394` from MSB of `alienMovePtr[0]` — the reset target L0DDE will use                            |
+
+**Indirect** — they don't move aliens themselves, but change whether
+the three direct functions act on a given alien:
+
+| Function | Lane | Effect on movement |
+|---|---|---|
+| `L0DF0` (player bullet vs alien) | every frame | Clears `controlA` bit-3 → all three movers early-return for that slot |
+| `L0F00` (alien body vs player)   | 0 | Same: clears bit-3 |
+
+Data tables that drive the math (not functions, but on the critical
+path for "where will this alien be next frame"):
+
+- `MOTION_DIRECTIONS` (T1700) — `(dx, dy)` per path byte
+- `MOTION_PATH_BASE` (T1000) — drift loop bytes
+- `PATH_ROM_LOW` (0x1000-0x13FF) and `PATH_ROM_HIGH` (0x2C00-0x2FFF) —
+  the two slices that hold all 36 closed-loop swoop pattern byte
+  sequences (T1020-T13D0 in low, T2C00-T2FA0 in high), plus the drift
+  loop T1000. Pattern-boundary labels embedded in `data.js`; pattern
+  label → ROM address dictionary exported as `PATTERNS`
+- `ALIEN_FORMATIONS` (T1540+) — starting `(x, y)` values
+- `$4394 / $4395` (`alienPathSeedHi / alienPathSeedLo`) — runtime reset
+  target rewritten by L0DDE; `$4395` is incremented once per L3264 call
+  so the reset lands on a different drift-loop entry point each cycle
+
 ## 2. Per-alien data layout
 
 The combat stage uses two parallel arrays of 16 entries each:
@@ -232,6 +342,75 @@ constant — `L3000` and other behavior code overwrite it during attack
 sequences to redirect aliens onto a swoop pattern, then restore it
 when the swoop ends. See §6.
 
+### 3.5 Grid-alignment requirement for fast motion bytes
+
+The ptr-advance condition is `(coord & 7) == 0` after the move, where
+*coord* is `y` for diagonal/vertical motion (`L0D55`) and `x` for
+pure-horizontal motion (`L0D62`). This means **the alien must land on
+a multiple of 8** for the path pointer to advance to the next byte.
+
+Whether that's reachable from a given starting position depends on
+the motion's step size via a simple modular-arithmetic property:
+
+> With step `D` and modulus 8, the value `coord % 8` cycles through
+> `gcd(D, 8)` distinct values starting from any fixed initial value.
+> It will eventually reach 0 if and only if `(starting coord) % gcd(D, 8) == 0`.
+
+Filling this in for every motion direction the source uses:
+
+| Step `D`       | `gcd(D, 8)` | Reachable `coord%8` starts | Notes                                |
+|----------------|-------------|----------------------------|--------------------------------------|
+| ±1 (drift)     | 1           | `{0,1,2,3,4,5,6,7}` (any)  | Always advances within 8 steps       |
+| ±2 (diagonal)  | 2           | `{0,2,4,6}` (even only)    | Used in `(±4, ±2)` and similar bytes |
+| ±4 (fast)      | 4           | `{0,4}` only               | The dangerous case — see below       |
+
+Implications for the design of the swoop patterns (`T1020-T13D0`,
+`T2C00-T2FA0`):
+
+- **`dx=±1` drift bytes are universally safe.** That's why
+  `MOTION_PATH_BASE` (T1000) is built entirely from indices 1 and 2:
+  the formation drift can never get stuck regardless of where each
+  alien is sub-pixel-wise within the 8-pixel grid.
+- **`dx=±4` fast bytes only work when alien `x%8 ∈ {0, 4}`** at the
+  time the byte starts executing. If `x%8 ∈ {1,2,3,5,6,7}`, repeated
+  +4 (or -4) just oscillates `x%8` between two non-zero values and
+  the ptr never advances — the alien gets stuck sliding horizontally
+  forever at its current `y`.
+- **`(dx=±4, dy=±2)` diagonal bytes** advance on the `(y & 7) == 0`
+  check (since both dx and dy are nonzero, source uses Y in `L0D55`).
+  These work when `y%8 ∈ {0, 2, 4, 6}` — every other y line, since
+  `gcd(2, 8) = 2`.
+- **Patterns chain motion such that the alignment invariant is
+  preserved across byte boundaries.** When the trace simulator walks
+  T13D0 starting from `(168, 48)` (formation entry, x%8=0, y%8=0),
+  every intermediate `(x, y)` lands on `x%8 ∈ {0, 4}` and `y%8 ∈
+  {0, 2, 4, 6}`. The closed loop is a coordinated sequence of
+  motion bytes designed to keep alignment intact for the entire
+  ~128-step trajectory.
+
+**Where alignment comes from — the entry condition.** All `T15xx`
+formation positions are at `x%8 = 0` (multiples of 8). During drift,
+each alien's `x%8` cycles `0→1→2→...→7→0` at `dx=±1`, taking 8
+movement updates per ptr advancement. The alien's ptr advances to
+the next byte of `T1000` *only* on the frames where `x%8 == 0`.
+
+This is the crucial link to `behaviorPickAlien` (`L315A`, §6.4): the
+source picks an alien whose `ptr.LSB == $4356` (saved
+`alienPathSeedLo` from the previous commit cycle). The match
+implies the alien's ptr last advanced to that LSB at some prior
+moment, which is also when the alien was last at `x%8 = 0`. The 3
+counter93 ticks between pickAlien and commit (~12 frames = 3
+movement updates) then bring the alien to `x%8 ∈ {0, 4}` at the
+commit moment — exactly the alignment the swoop's leading `dx=±4`
+bytes need.
+
+**Without this gate** (as in our port's current `behaviorPickAlien`),
+aliens are committed at arbitrary `x%8` and Case-B stuck behavior
+shows up roughly 75% of the time when the chosen pattern starts
+with `dx=±4`. Trace simulation in `tools/` (or via `preview_eval`)
+makes this empirically reproducible — see `progress.md` "Known
+deferred issues" for the in-port consequence.
+
 ## 4. Position-keyed sprite animation
 
 `AlienAnimationUpdate` (`$0D70`) walks the same 16-alien array and
@@ -367,43 +546,376 @@ So at the moment the stage 1 combat handler `L2000` first runs:
   (proper alien sprite, not the placeholder). After that, the wing
   flap cycles through shapes #1-#4 as `x` advances.
 
-## 6. Attack swoops — `AlienBehaviorUpdate $3000` overview
+## 6. Attack swoops — `AlienBehaviorUpdate $3000`
 
 This is the **path-switching** scheduler: every 4 frames (lane 0 of
 §1) it advances `Counter93 ($4393)` and dispatches one of 8 sub-states
-based on the low 3 bits.
+based on `Counter93 & 7`.
 
 ```
 T3018 (jump table, 8 × 2 bytes):
-    0 → L3264 (counter init / bookkeeping)
-    1 → L3028 ("Angry pattern A/B" — bumps formation downward)
-    2 → L30BA (decrement attack cooldown timers)
-    3 → L3124 (decide how many aliens swoop together this round)
-    4 → L315A (pick which aliens — uses GetRandomNumber)
-    5 → L31B4 (pick which closed-loop pattern T1020-T13D0)
-    6 → L322C (commit the swoop — overwrite per-alien path ptr)
-    7 → L3012 (ret — do nothing)
+    0 → L3264  commit swoop + $4395 increment (see §6.2)
+    1 → L3028  "Angry pattern A/B" — bumps formation downward
+    2 → L30BA  decrement attack cooldown timers
+    3 → L3124  calculate swoop count → $4353 (gates on $4350==1)
+    4 → L315A  pick which alien → $4354 (gates on $4350==2)
+    5 → L31B4  pick closed-loop pattern → $4351/$4352 (gates on $4350==3)
+    6 → L322C  scan-and-advance pipeline (gates on $4350==4)
+    7 → L3012  RET — do nothing
 ```
 
-[verified, `Code.md:$3000-$3026`]
+[verified, `Code.md:$3000-$3026`, `$3124-$32AF`]
 
-Net effect: every 8 × 4 = 32 frames (~0.5 s), the scheduler decides
-whether to start a new swoop, picks 1-N aliens at random, picks one of
-18 closed-loop patterns, and overwrites their path pointers to point
-into the chosen pattern.
+### 6.0 Cadence and mental model
 
-The chosen aliens then follow the swoop pattern via the same
-`AlienMovementUpdate` machinery in §3 — no separate "swoop motion"
-code path. When the swoop pattern hits its end-marker, `L0DDE` resets
-to `($4394, $4395)`. **`L3000` rewrites `$4394`/`$4395` during the
-swoop window** so the aliens that finish the swoop go back to `T1000`,
-not into another swoop loop. [inferred from `Code.md:$3196`,
-`$323C`-`$3286`; not yet exhaustively traced]
+`alienBehaviorUpdate` is called once per 4 frames (lane 0 of §1), so:
 
-**For step 6 we will not implement `L3000`.** This means stage 1
-combat will show formation drift only — no swoops. Swoops land in a
-later step (likely combined with player firing / collision so the
-gameplay loop is testable end-to-end).
+- **`Counter93` increments at 15 Hz** (60 / 4).
+- **Each sub-state handler fires at 15 / 8 ≈ 1.875 Hz** (~0.53 sec
+  apart), since dispatch is `Counter93 & 7`.
+- **`AlienMovementUpdate` / `AlienAnimationUpdate` fire at 15 Hz** in
+  the source (lanes 1 and 2 — see §1) / 15 Hz merged on lane 1 in the
+  port (§9.2). So between any two commits, the body executes **8
+  motion steps** before the AI gets another say.
+
+The 8:1 ratio is the key timing insight: AI decides slowly, body
+executes fast.
+
+```
+counter93:   0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 ...
+fires:       co an cd sc pa pp sa --  co an cd sc pa pp sa -- ...
+                                   ^ wraps every 8 ticks (4.3 sec)
+```
+
+**Two distinct flows through the state machine:**
+
+Normal swoop (more common, gated through cases 2-5-0):
+```
+state: 0 ──cd──> 1 ──sc──> 2 ──pa──> 3 ──pp──> 5 ──commit──> 0
+       (case 2)  (case 3)  (case 4)  (case 5)   (case 0)
+```
+
+Angry wave (rare, max 3 per round, gated through cases 1-6-0):
+```
+state: 0 ──angry timer──> 4 ──scan──> 6 ──commit──> 0
+            (case 1)        (case 6)   (case 0)
+```
+
+The two paths never interleave: case-1 only fires when state < 4, and
+once state = 4 the normal pipeline cases (3-5) all early-return on
+their `state == N` guards. The cooldown handler (case-2) also
+early-returns when state ≠ 0, so the cooldown timer pauses while a
+swoop is in flight.
+
+**Initial `Counter93` value is irrelevant.** The dispatch is a strict
+mod-8 round-robin, so any starting value converges to identical
+behavior within 8 ticks (≈ 32 frames). The port resets it to 0 at
+`state2_StageInit` (mirrors source's `L32B0` clearing `$4350-$437F`),
+but any value would work.
+
+**Diagnostic: comment out the `this.alienBehaviorUpdate()` call** in
+`stageAlienCombat` and aliens drift left-right forever in formation,
+following `MOTION_PATH_BASE = [1,1,1,1, 2,2,2,2,2,2,2,2, 1,1,1,1, 0]`
+(net X displacement per loop = 0). `alienPathSeedLo` stays at 0, so
+end-of-list reset always lands at `0x1000` — same loop, every cycle.
+Useful "safe mode" when debugging issues that are downstream of
+swoops.
+
+### 6.1 Secondary gate — `$4350` (AlienBehaviorState)
+
+Each sub-state handler checks `$4350 == expected` before executing.
+This is what makes the round-robin counter93 dispatch into a strict
+sequencer: a handler fires every 0.53 sec but only does work when
+its expected state value is present. The full table:
+
+| `counter93 & 7` | Handler | Guard | Transition on success |
+|---|---|---|---|
+| 0 | `behaviorCommit` (`$3264`) | `≥ 5` | writes alien ptrs; state = 0 |
+| 1 | `behaviorAngryPattern` (`$3028`) | `< 4` and `$4357 < 3` | (timer expired) state = 4, count = 16, target = `$50` |
+| 2 | `behaviorCooldown` (`$30BA`) | `== 0` | (cooldown expired) state = 1 |
+| 3 | `behaviorSwoopCount` (`$3124`) | `== 1` | state = 2 |
+| 4 | `behaviorPickAlien` (`$315A`) | `== 2` | state = 3 |
+| 5 | `behaviorPickPattern` (`$31B4`) | `== 3` | state = 5 (skips 4 — that slot is the angry path) |
+| 6 | `behaviorScanAdvance` (`$322C`) | `== 4` | (all aliens aligned) state = 6 |
+| 7 | `$3012` (RET) | — | — |
+
+So `$4350` has three roles:
+
+1. **Sequencer** — enforces strict order through the decision pipeline.
+2. **Mutual exclusion** — at most one handler does work per counter93
+   tick; the rest early-return.
+3. **Mode selector** — value 4 routes through the angry path
+   (case-6); values 1-3 / 5 route through the normal path (cases 3-5,
+   0). The two paths never interleave.
+
+[verified, `Code.md:$3124-$32AF`]
+
+### 6.2 How the commit works (sub-state 0, `$3264`)
+
+Sub-state 0 does two things every time it runs:
+
+1. **Advance `$4395`** (= `alienPathSeedLo`): read, increment, wrap to
+   0-15, write back. Saves the OLD value to `$4356` (= `alienSwoopLsb`)
+   first, for use as the current-cycle LSB match key.
+2. **Commit the swoop** (only when `$4350 >= 5`): walk `$4353`
+   (= `alienSwoopCount`) aliens starting from `$4354`
+   (= `alienSwoopTarget`, the move-ptr-table byte offset $50+i*2);
+   for each alien whose path-pointer matches `($4394, $4356)`,
+   overwrite the pointer with `($4351, $4352)` (the pre-chosen swoop
+   pattern address). Then reset `$4350 = 0`.
+
+The "walk count aliens from target" semantics is what makes one-by-one
+normal swoops (count = 1) and angry mass swoops (count = 16) share the
+same commit code path. For normal swoops the target is the picked
+alien's index; for angry, target = `$50` (= start at alien 0) with
+count = 16 walking the whole formation.
+
+**Match key now source-faithful (post lane-swap).** Both
+`behaviorScanAdvance` (case-6) and `behaviorCommit` (case-0) match
+against `$4356` (`alienSwoopLsb` — saved by the most recent commit),
+exactly as source does. An earlier port version used `alienPathSeedLo`
+(current seed) instead, as a workaround for a timing mismatch in our
+old lane order. The lane swap (§1.0) put movement before behavior in
+each cycle, which moved alien ptr advancement one frame earlier and
+restored the source's expected phase relationship — aliens now land
+at `LSB == alienSwoopLsb` after end-of-list reset, matching source.
+
+**Port-specific simplifications in commit:**
+- `alienSwoopTarget` is stored as the raw alien index (0-15) when set
+  by `behaviorPickAlien`, or as the source-format sentinel `$50` when
+  set by `behaviorAngryPattern`. Commit normalizes via a magnitude
+  check: `>= $50 → (target - $50) >> 1`, else `target`.
+- Loop uses `(startIdx + n) & 0x0F` for wrap-around instead of source's
+  two-counter (B for "slots before wrap", C for "remaining count").
+  Functionally equivalent for `count ≤ 16`.
+- An extra `if (!(a.controlA & 0x08)) continue;` skip on dead aliens.
+  Source has no such check — a dead alien's ptr wouldn't normally
+  match anyway, so this is defensive overhead, intentionally left in.
+
+[verified, `Code.md:$3264-$32AF`]
+
+### 6.3 How the alien returns to formation
+
+`$4394` is **never changed by `L3000`** — it stays `0x10` (T1000 page)
+throughout. Only `$4395` is mutated (cycling 0–15).
+
+When a swooping alien's pattern hits `0x00`, `L0DDE` reads `($4394,
+$4395)` — which still points into **T1000** (the formation drift list)
+— and resets that alien's individual path pointer there. The alien
+automatically rejoins formation drift with no extra bookkeeping.
+
+The swoop patterns (T1020–T13D0) are one-shot circuits: they end with
+`0x00` and do **not** self-loop in their data. The name "closed-loop"
+refers to the visual trajectory (the path curves back toward the
+formation area), not the data encoding.
+
+[verified, `Code.md:$0DDE`, `$3264-$326E`, `$1060` (T1020 terminator = 0x00)]
+
+### 6.4 Pattern selection (sub-state 5, `$31B4`)
+
+`behaviorPickPattern` is the most elaborate handler — it routes
+three input signals through three layered tables to pick one of 36
+swoop patterns. Three inputs:
+
+1. **Absolute X distance** `|alienX - playerX|` → bin into 8 buckets
+   of 32 px each (source: RLCA × 3 then AND $07, equivalent to
+   `(diff >> 5) & 7`).
+2. **L/R relationship** — adds 4 to the column offset when alien is
+   LEFT of player (= `playerX >= alienX`). Keeps swoop patterns
+   curving *toward* the player from either side.
+3. **Y-band or phase count** — `L3210` dispatches:
+   - if `alienSwoopCount == 1` (typical normal swoop): use alien's
+     Y-band (0/1/2/3 at thresholds $58/$78/$98)
+   - else (multi-alien swoop / angry wave): use `alienPhaseCount`
+     (the angry wave count, 0-2)
+
+Three-stage table lookup:
+
+| Stage | Table  | Source addr | Length | Content |
+|-------|--------|-------------|--------|---------|
+| 1 | T3300  | `$3300`     | 8 bytes  | bucket (0-7) → column index (0-3) |
+| 2 | T3310  | `$3310`     | 32 bytes | (col*4 + lr*16 + row) → T3330 byte offset (LSB) |
+| 3 | T3330+ | `$3330`     | 208 bytes | byte offset → (MSB, LSB) of pattern address |
+
+The L/R asymmetry is encoded in T3310's structure: the lower 16
+bytes (`$3310-$331F`) are used when alien is RIGHT of player; the
+upper 16 (`$3320-$332F`) when alien is LEFT. The source addressing
+uses `LD H,$33 / LD L,A` with `A = (T3300[bucket] + lr_offset) * 4
++ rowOrPhase + $10`, so `lr_offset = 4 → A += 16 → upper half`.
+
+T3330 is structurally a wide table of 4-byte rows (4 candidate
+patterns × 2 bytes each). The random pick within a row is
+`GetRandomNumber & 0x06` (= 0, 2, 4, or 6) — added to the T3310 LSB
+to select one of 4 candidate (MSB, LSB) pairs. T3310 values span
+`$30-$F8`; with random max `$06` the addressed range covers
+`$3330-$33FE`, hence the 208-byte extraction.
+
+**Port status:** source-faithful as of step 8. Earlier (pre-fix) port
+had four deviations: 16-px X bins instead of 32, no L/R offset, Y
+row via `y >> 6` unconditionally (no phase-count branch), and
+modulo wraparound on a too-small table. All four fixed by reading
+the full source algorithm and extending the data extraction
+(`PATTERN_ROW_TABLE` 16 → 32 bytes, `PATTERN_ADDR_TABLE` 36 → 208
+bytes). See in-code commentary at `states.js:behaviorPickPattern`.
+
+[verified, `Code.md:$31B4-$320D` and `L3210` at `$3210-$3228`]
+
+### 6.5 Swoop count (sub-state 3, `$3124`)
+
+Source algorithm:
+
+```
+cap = (LevelAndRound RRCA RRCA) & 0x0F     ; (level<<2 | round)
+cap = min(cap + 5, 0x11)                    ; ceiling
+cap -= alienPhaseCount                      ; angry waves shrink cap
+roll = GetRandomNumber + 1                  ; uniform 1..16
+count = (roll < cap) ? roll : 1             ; usually 1, max ~5
+$4353 = count
+```
+
+The skewing in the last line is what makes "send one alien at a time"
+the typical outcome: random rolls 1-16 mostly overshoot the cap
+(which sits at ~5 in normal stages) and fall through to count = 1.
+Cap grows with level/round; angry-wave count shrinks it.
+
+**Port deviation:** `behaviorSwoopCount` uses a simpler formula:
+`cap = min(5, 1 + (LevelAndRound >> 1))` and ignores `alienPhaseCount`.
+Stage 1 always produces count = 1; late-stage multi-alien swoops are
+weaker than source. Acceptable at the current port stage; revisit when
+porting later levels. See in-code note at `states.js:behaviorSwoopCount`
+and progress.md "Known deferred issues".
+
+[verified, `Code.md:$3124-$314E`]
+
+### 6.6 Angry pattern (sub-state 1, `$3028`)
+
+Two-level timer that drives mass-formation swoops. Up to 3 angry
+waves per round (`alienPhaseCount` capped at 3); each wave sends
+the entire formation simultaneously on pattern T2E00 or T2E40
+(picked by player X bit 0).
+
+Pseudocode:
+
+```
+if alienPhaseCount >= 3 or alienBehaviorState >= 4: return
+if alienPhaseTimer == 0:
+    alienPhaseTimer = (alienPhaseCount << 2) + computeLevelFactor + 7
+    return
+alienPhaseTimer--
+if alienPhaseTimer != 0: return
+
+; trigger angry wave
+alienPhaseCount++
+alienBehaviorState = 4
+alienSwoopCount = 16
+alienSwoopTarget = 0x50           ; sentinel = start at alien 0
+alienSwoopPatternHi = 0x2E
+alienSwoopPatternLo = (playerX & 1) ? 0x00 : 0x40
+```
+
+`computeLevelFactor` (source `L3074`): four-step level-derived value
+typically in [24, 31] for stage 1. The phase timer thus seeds to
+~30 on first wave, decrements once per case-1 fire (every 32 frames
+≈ 0.53 sec), giving a 16-20 second wait between angry waves.
+
+Once state = 4 is set, `behaviorScanAdvance` (case-6) becomes
+active. Scan waits until all alive aliens are at ptr = (`$10`,
+match-LSB), then sets state = 6 → next commit overwrites those
+aliens with the angry pattern address.
+
+**Port status: currently disabled.** `behaviorAngryPattern` early-
+returns at the top. With the function enabled, aliens commit to
+T2E00/T2E40 but get stuck mid-path on a dx=4 motion byte at
+`0x2F36` because the swoop expects `x%8 ∈ {0, 4}` but the formation
+drifts them to other phases. Root cause likely in the
+ptr-advance condition vs. how the source paths assume alignment.
+See `progress.md` "Known deferred issues" for details.
+
+[verified, `Code.md:$3028-$3059`, `$305C-$306D`, `$3074-$30A8`]
+
+### 6.7 Cooldown (sub-state 2, `$30BA`)
+
+Source `L30BA` processes a cluster of cooldown timers at
+`$4359/$435A/$435B` (separate from the angry-pattern `$4358` timer).
+When one expires, the normal-swoop pipeline kicks off by setting
+`alienBehaviorState = 1`. Source `L30E4` seeds the timer based on
+Counter9A high byte + a level factor — adaptive pacing tied to game
+progress.
+
+**Port status: stubbed.** `behaviorCooldown` uses a single
+`alienCooldown` counter decremented to zero (initial value 6 in
+`state2_StageInit` and on every reset). Each case-2 fire decrements
+once. Cooldown of 6 × case-2 cadence (0.53 sec) ≈ 3.2 sec between
+swoops. Trivial to tune by changing the reset value. Source's level-
+based seeding deferred.
+
+[verified, `Code.md:$30BA-$30DA`, `$30E4` partial trace]
+
+### 6.8 Scan-and-advance (sub-state 6, `$322C`)
+
+Gate for the angry-wave commit. Only runs when `alienBehaviorState == 4`
+(set by angry pattern in case-1). Walks all 16 aliens and checks that
+every alive alien's path pointer matches `(alienPathSeedHi,
+alienSwoopLsb)`. If all match → set state = 6, letting the next
+case-0 commit fire. If any mismatch → return without state change
+(pipeline stalls until next cycle).
+
+Source-faithful in the current port: matches against
+`$4356` (`alienSwoopLsb`) — the same value the next commit will use.
+This is correct because the lane swap (§1.0) puts alien ptr
+advancement one frame ahead of behavior, so by the time scan fires
+the aliens have settled at the LSB matching what commit saved last
+cycle.
+
+[verified, `Code.md:$322C-$325E`]
+
+### 6.9 Port investigation summary (alienBehaviorUpdate)
+
+Sub-state-by-sub-state status of the port vs. source as of the
+lane-swap fix:
+
+| Sub-state | Handler | Port status |
+|-----------|---------|-------------|
+| 0 commit  | `behaviorCommit`       | source-faithful; small port-side simplifications (alien-index target format, single-counter wrap, defensive dead-alien skip) — see §6.2 |
+| 1 angry   | `behaviorAngryPattern` | **disabled** — not yet re-tested after lane swap; may now work (alignment fix should apply equally), worth a verification pass — see progress.md |
+| 2 cooldown| `behaviorCooldown`     | stubbed (single counter vs source's 3-timer cluster + level seeding) |
+| 3 count   | `behaviorSwoopCount`   | simplified cap formula (acceptable for now) |
+| 4 pick    | `behaviorPickAlien`    | source-faithful (post lane swap — the ptr-LSB-match gate now works) |
+| 5 pattern | `behaviorPickPattern`  | source-faithful: full L31B4 algorithm (T3300/T3310/T3330 lookup with L/R asymmetry + Y-band-or-phase-count) |
+| 6 scan    | `behaviorScanAdvance`  | source-faithful (post lane swap — matches against `alienSwoopLsb`) |
+| 7 RET     | (no-op)                | n/a |
+
+Key port deviation that makes all of this work: **the lane swap in
+`stageAlienCombat`** (§1.0). Source has behavior on lane-0 / movement
+on lane-1; we run movement on lane-0 / behavior on lane-1. This puts
+movement one frame BEFORE behavior in each 4-frame cycle, so when
+`behaviorCommit` reads the alien's position, the alien has just
+crossed a grid boundary (alien.x%8 == 0) — exactly the alignment that
+dx=±4 swoop pattern bytes need to advance their ptr.
+
+**Data tables involved:** `PATTERN_COL_TABLE` (T3300, 8 bytes),
+`PATTERN_ROW_TABLE` (T3310, 32 bytes), `PATTERN_ADDR_TABLE` (T3330,
+208 bytes), `PATH_ROM_LOW` + `PATH_ROM_HIGH` (1024 bytes each, with
+per-pattern boundary comments mirroring `code.md`), `PATTERNS`
+(label → address dict). All four enlarged from the step-6-era
+extraction to cover the full T3310 + T3330 span source-faithfully.
+
+**Known deferred issues** (also in `progress.md`):
+1. **Angry pattern** still `return`s at the top. The lane-swap fix
+   likely covers it (the dx=4 stuck root cause was the same alignment
+   issue normal swoops had), but it hasn't been re-tested after the
+   swap landed. Worth removing the early-return and observing.
+2. **`behaviorCooldown` is a single-counter stub.** Source's L30BA
+   handles three timers ($4359/$435A/$435B) and L30E4 seeds the
+   primary cooldown from `Counter9A` high byte + level factor. Port
+   when bird stages land (step 9).
+3. **`behaviorSwoopCount` simplified cap.** Stage 1 always produces
+   count = 1; later stages get weaker multi-alien swoops than arcade.
+   Acceptable at current port stage; revisit when porting later
+   levels.
+4. **`alienVsPlayerCollision` disabled** because state-4
+   (player-explosion) is a stub without lives counter / explosion
+   sprite / game-over. Re-enable when step 9 completes those.
 
 ## 7. Enemy fire — `L2560` (out of scope for step 6)
 
@@ -491,6 +1003,17 @@ the stage will simply continue forever (no kill mechanic yet).
 All four are pure ROM data with no decode step — same `RAW_SLICES`
 shape as the existing exports.
 
+**Additional tables landed for step 8 (swoops):**
+
+| Symbol              | Source addr | Length | Use                                                         |
+|---------------------|-------------|--------|-------------------------------------------------------------|
+| `PATH_ROM_LOW`      | `$1000`     | 1024   | T1000 drift + T1020-T13D0 (18 patterns)                     |
+| `PATH_ROM_HIGH`     | `$2C00`     | 1024   | T2C00-T2FA0 (18 more patterns)                              |
+| `PATTERN_COL_TABLE` | `$3300`     | 8      | T3300: alien-X distance → column index                      |
+| `PATTERN_ROW_TABLE` | `$3310`     | 32     | T3310: (col*4 + row) → T3330 byte offset (L/R asymmetric)   |
+| `PATTERN_ADDR_TABLE`| `$3330`     | 208    | T3330: 104 (MSB, LSB) pattern address pairs, byte-addressed |
+| `PATTERNS` (export) | —           | —      | Label → ROM address map for the 37 named patterns           |
+
 ### 9.4 New `state.js` fields
 
 - `state.combatLane` (uint8, 0-3) — the `$435F & 3` mirror.
@@ -509,13 +1032,11 @@ shape as the existing exports.
   a row 4 alien? `D` is computed from `LevelAndRound` (gates fire-rate
   by stage progress) but the row-selection logic is partial-traced
   only.
-- **`L3000` $4394/$4395 manipulation** — the swoop scheduler clearly
-  reads/writes these, but which sub-state does the rewrite and which
-  restores it isn't fully traced. Not a blocker for step 6, but
-  needs answering before swoops can be ported.
-- **Path pattern semantics for `T1020`-`T13D0`** — the comments call
-  them "closed-loop" patterns and they each contain ~30-100 bytes of
-  T1700 indices. Whether they self-loop or rely on the L0DDE reset to
-  the formation list is not yet confirmed by trace; a likely picture
-  is that swoops temporarily reseed `($4394, $4395)` with the swoop
-  pattern's address and then restore on swoop end.
+- **`L3000` $4394/$4395 manipulation** — ✅ resolved (§6.3). `$4394`
+  is never changed by L3000. `$4395` cycles 0–15 in sub-state 0.
+  L3000 writes only per-alien path pointers (`$4B50+`), not the global
+  seed. Returning aliens reset to T1000 via L0DDE automatically.
+- **Path pattern semantics for `T1020`-`T13D0`** — ✅ resolved (§6.3).
+  Patterns terminate with `0x00`; do not self-loop. L0DDE resets the
+  alien to `($4394, $4395)` = T1000 (formation drift). "Closed-loop"
+  refers to the visual trajectory, not the data encoding.

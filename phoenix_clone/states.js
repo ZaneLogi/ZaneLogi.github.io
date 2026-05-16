@@ -9,10 +9,16 @@ import {
     ALIEN_CONTROL_INIT,   // source T1500
     ALIEN_MOVE_PTR_INIT,  // source T1520
     ALIEN_FORMATIONS,     // source T1540
+    ALIEN_BIRD_PARTITION, // source T1760
     MOTION_PATH_BASE,     // source T1000
     MOTION_DIRECTIONS,    // source T1700
     ANIMATION_TABLE,      // source T16A0
     SHAPE_LSB_TABLE,      // source T1600
+    PATTERN_COL_TABLE,    // source T3300
+    PATTERN_ROW_TABLE,    // source T3310
+    PATTERN_ADDR_TABLE,   // source T3330
+    PATH_ROM_LOW,         // 0x1000-0x13FF — drift + early swoops
+    PATH_ROM_HIGH,        // 0x2C00-0x2FFF — late swoops + angry patterns
 } from './data.js';
 
 // L0400 — Code.md:GameStateMachine. JT1 jump table → JS switch
@@ -24,11 +30,28 @@ import {
 // subtract $A8 to get the slice index.
 const STAGE_BLOCK_BASE = 0xA8;
 
-// MOTION_PATH_BASE is rooted at source T1000 = $1000. Per-alien path
-// pointers (state.alienMovePtr[i]) carry full ROM addresses; subtract
-// this to index the JS array. Reset target (alienPathSeedHi/Lo) is
-// also a ROM address.
-const PATH_BASE_ADDR = 0x1000;
+// Per-alien path pointers carry full ROM addresses. Path data lives in two
+// ROM regions: 0x1000-0x13FF (drift + early swoops T1020-T13D0) and
+// 0x2C00-0x2FFF (late swoops + angry T2E00/T2E40). Dispatch on ptr range.
+function getPathByte(ptr) {
+    if (ptr < 0x1400) return PATH_ROM_LOW[ptr - 0x1000] ?? 0;
+    return PATH_ROM_HIGH[ptr - 0x2C00] ?? 0;
+}
+
+// Return { w, h } bounding box for an alien from its controlA draw-mode bits.
+// Used for AABB collision (research_rendering.md §6.1, §2.4).
+function alienBox(controlA) {
+    const mode = controlA & 7;
+    if (mode === 1) return { w: 16, h: 8  };   // 2×1
+    if (mode === 3) return { w: 8,  h: 16 };   // 1×2
+    if (mode === 4) return { w: 16, h: 16 };   // 2×2
+    return { w: 8, h: 8 };                      // 1×1 (mode 0)
+}
+
+// AABB overlap test (research_rendering.md §6.1).
+function aabbHit(ax, ay, aw, ah, bx, by, bw, bh) {
+    return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
 
 // Decode a signed-byte motion delta. T1700 packs (dx, dy) as 8-bit
 // two's-complement (e.g. $FF = -1, $FC = -4).
@@ -94,12 +117,15 @@ export const states = {
         this.initPlayerDataStructure();
         this.initAlienData();
         // L0506 — clear $4392-$4397 and seed ($4394) from $4B50 MSB.
-        // Step 6 only consumes alienPathSeedHi/Lo; the rest of the
-        // $4392-$4397 zone (Counter93, behavior-state scratch) is owned
-        // by AlienBehaviorUpdate $3000 and lands when swoops do.
+        // L32B0 — clear $4350-$437F (AlienBehaviorUpdate scratch region).
         state.combatLane = 0;
-        state.alienPathSeedHi = (state.alienMovePtr[0] >> 8) & 0xFF;
-        state.alienPathSeedLo = 0;
+        state.alienPathSeedHi    = (state.alienMovePtr[0] >> 8) & 0xFF;
+        state.alienPathSeedLo    = 0;
+        state.counter93          = 0;
+        state.alienBehaviorState = 0;
+        state.alienSwoopCount    = 0;
+        state.alienSwoopTarget   = 0xFF;
+        state.alienCooldown      = 6;
     },
 
     // L0580 InitGlobalLevelData — index STAGE_BLOCK_INDEX (source T0598)
@@ -237,69 +263,184 @@ export const states = {
         }
     },
 
-    // L2000 — combat handler for stages 1/3/B. Step 6 implements the two
-    // motion lanes; firing, swoops, and collision land in steps 7-8.
+    // L2000 — combat handler for stages 1/3/B.
     //
-    // Source per-frame work: PlayerUpdate ($0876), bullet-vs-alien coll.
-    // ($0DF0), L24A0, then a 4-lane round-robin keyed by ($435F & 3):
+    // Source per-frame work: PlayerUpdate ($0876), bullet-vs-alien scan
+    // ($0DF0 — runs every frame, not lane-gated), then a 4-lane round-robin:
     //   lane 0: AlienDataController + AlienBehaviorUpdate + alien-vs-player
     //   lane 1: enemy-bullets + AlienMovementUpdate + L0FC0
     //   lane 2: AlienAnimationUpdate + L2560
     //   lane 3: enemy-bullets + L0A6C + L0FC0
-    // research_enemy_motion.md §1. We run only lanes 1 and 2 for now.
+    // JS port: movement+animation merged into lane 1 for tick-pair atomicity
+    // (research_rendering.md §9.2). Lanes 2/3 are empty stubs.
     //
-    // The alive=true loop mirrors AlienDataController ($0A50): in the
-    // source, that routine is what actually paints aliens to screen RAM
-    // (gated by Bit3Controller checking controlA bit 3). The canvas port
-    // checks alive at draw-time, so we set alive=true for every active
-    // alien (controlA bit 3 set) each frame — same gating, different
-    // implementation. Player likewise stays drawn.
+    // alive=true loop mirrors AlienDataController ($0A50): in source it paints
+    // aliens to screen RAM gated by Bit3Controller; here alive=true enables
+    // render.js drawAlien for this frame.
     stageAlienCombat() {
+        // Stage-clear check: if no aliens remain, drain the post-clear
+        // counter instead of running normal combat (mirrors L2015 JZ L21BA).
+        if (state.aliensLeft === 0) {
+            this.stageClearUpdate();
+            return;
+        }
+
         state.player.alive = true;
-        this.playerUpdate();    // L0876 PlayerUpdate — every frame, not lane-gated
+        this.playerUpdate();          // L0876 — every frame, not lane-gated
         for (let i = 0; i < 16; i++) {
             const a = state.aliens[i];
             if ((a.controlA & 0x08) !== 0) a.alive = true;
         }
 
-        // Source separates movement (lane 1) and animation (lane 2) for
-        // CPU-budget reasons on the 8085 — its screen-RAM model hides the
-        // 1-tick gap because the cell only changes when animation rewrites
-        // it. Our port reads alien.x and alien.controlB separately at
-        // render time, so any tick-pairing drift (e.g., a dropped frame
-        // shifting which lanes land in the same render) leaves controlB
-        // one tick behind x and the alien visibly jitters. Run animation
-        // immediately after movement in the same tick so controlB always
-        // matches the current x — JS has no CPU budget to ration.
+        // Bullet-vs-alien scan: runs every frame outside the lane router
+        // ($0DF0 in source, called before the lane switch at $200E).
+        this.playerBulletCollision();
+
         const lane = state.combatLane & 3;
         state.combatLane = (state.combatLane + 1) & 0xFF;
-        if (lane === 1) {
+        // ⚠ PORT-SPECIFIC LANE SWAP — see research_enemy_motion.md §6.10
+        // (swoop alignment via lane-order swap):
+        //   Source's L2000 has behavior on lane-0 and movement on lane-1,
+        //   so behaviorCommit fires at counter93=8 BEFORE the next
+        //   movement crosses the alien to a tile boundary — meaning the
+        //   alien is at x%8=7 when commit writes a dx=±4 swoop pattern,
+        //   producing a stuck horizontal slide (§3.5 alignment).
+        //   Our port swaps: movement runs in lane-0, behavior in lane-1.
+        //   This makes movement (which can advance the alien past a grid
+        //   boundary) fire ONE FRAME BEFORE behaviorCommit, so commit
+        //   sees alien at x%8=0 (just crossed) and the upcoming dx=±4
+        //   swoop bytes can advance the ptr naturally. Replaces the
+        //   x-snap workaround that was in behaviorCommit; removes the
+        //   ±3 pixel jolt + drift-desync side effects.
+        if (lane === 0) {
             this.alienMovementUpdate();
             this.alienAnimationUpdate();
+        } else if (lane === 1) {
+            this.alienBehaviorUpdate();
+            this.alienVsPlayerCollision();
+        }
+        // Lanes 2 and 3: enemy fire (L2560, EnemyBulletUpdate) deferred.
+    },
+
+    // L0DF0 — bullet-vs-alien scan. Called every frame (not lane-gated).
+    // research_rendering.md §6.1.
+    playerBulletCollision() {
+        const b = state.player.bullet;
+        if (!b.active) return;
+        // Bullet bounding box: 8×8 tile at (b.x, b.y).
+        for (let i = 0; i < 16; i++) {
+            const a = state.aliens[i];
+            if ((a.controlA & 0x08) === 0) continue;
+            const ax = a.x & ~7;
+            const ay = a.y & ~7;
+            const { w, h } = alienBox(a.controlA);
+            if (aabbHit(ax, ay, w, h, b.x, b.y, 8, 8)) {
+                this.onAlienHit(a);
+                b.active = false;
+                break;   // one bullet hits one alien (source L0E18 breaks after first hit)
+            }
+        }
+    },
+
+    // L0CF4 — alien-body-vs-player collision. Runs in lane-1 of the
+    // port (paired with behaviorUpdate; lane-0 in the source, but
+    // lane-swapped here — see stageAlienCombat).
+    //
+    // ⚠ DISABLED: when this fires, `onPlayerHit` routes to gameState=4
+    // (player-explosion), but our state-4 handler is just a stub that
+    // re-spawns after 128 frames — there's no lives counter, no
+    // explosion sprite, no proper game-over. Visually the player just
+    // briefly vanishes and reappears, which is confusing while
+    // observing swoop trajectories. Re-enable when step 9 lands the
+    // lives / explosion-anim / game-over pieces.
+    alienVsPlayerCollision() {
+        return;
+        // eslint-disable-next-line no-unreachable
+        if (!state.player.alive) return;
+        const px = state.player.x & ~7;
+        const py = state.player.y;
+        for (let i = 0; i < 16; i++) {
+            const a = state.aliens[i];
+            if ((a.controlA & 0x08) === 0) continue;
+            const ax = a.x & ~7;
+            const ay = a.y & ~7;
+            const { w, h } = alienBox(a.controlA);
+            if (aabbHit(ax, ay, w, h, px, py, 16, 16)) {
+                this.onPlayerHit();
+                return;   // one hit per lane-0 tick is enough
+            }
+        }
+    },
+
+    // Called when a player bullet hits an alien (bullet-vs-alien path).
+    // Clears the alien's draw-enable bit, decrements aliensLeft, adds score.
+    onAlienHit(alien) {
+        alien.controlA &= ~0x08;   // Bit4Controller delete path clears this in source
+        alien.alive = false;
+        state.aliensLeft = Math.max(0, state.aliensLeft - 1);
+        // TODO: look up per-alien score from source score table (L0E10 path).
+        // Placeholder: 50 points per kill.
+        scoring.addPoints(50, state.gameAndDemoOrSplash);
+    },
+
+    // Called when the player ship is hit (alien body or enemy bullet).
+    // Minimal stub: hide ship, arm explosion timer, route to state 4.
+    onPlayerHit() {
+        state.player.alive = false;
+        state.playerExplosionTimer = 128;   // ~2 s at 60 Hz
+        state.gameState = 4;
+    },
+
+    // L21BA — post-stage-clear countdown. Decrements stageBlock[11] ($43B6)
+    // each tick; when it drops below $A0, advances to the next stage via GameState=2.
+    // research_enemy_motion.md §8.
+    stageClearUpdate() {
+        const cnt = (state.stageBlock[11] - 1) & 0xFF;
+        state.stageBlock[11] = cnt;
+        if (cnt >= 0xA0) return;
+
+        state.gameState = 2;
+        state.player.shieldCount = 0;
+        state.levelAndRound = (state.levelAndRound + 1) & 0xFF;
+
+        // T1760[(LevelAndRound >> 1) & 7]: positive → alien count; bit 7 set → bird count.
+        const waveIdx = (state.levelAndRound >> 1) & 7;
+        const waveByte = ALIEN_BIRD_PARTITION[waveIdx];
+        if (waveByte & 0x80) {
+            state.birdsLeft  = waveByte & 0x7F;
+            state.aliensLeft = 0;
+        } else {
+            state.aliensLeft = waveByte;
+            state.birdsLeft  = 0;
         }
     },
 
     // L0D1C / L0D30 — AlienMovementUpdate. Walks 16 alien slots; for
-    // each: read current path byte from MOTION_PATH_BASE at offset
-    // (movePtr - $1000), look up MOTION_DIRECTIONS[idx*2..+1] for
-    // (dx, dy), apply to (x, y). When the post-update coordinate's low
-    // 3 bits go zero (8-pixel grid line crossed), advance the path
-    // pointer one byte. End-of-list reset is handled by
-    // alienAnimationUpdate (matches the source — L0DDE only fires from
-    // $0D86, never from $0D30).
+    // each: read current path byte from `getPathByte(ptr)`, look up
+    // MOTION_DIRECTIONS[idx*2..+1] for (dx, dy), apply to (x, y). When
+    // the post-update coordinate's low 3 bits go zero (8-pixel grid
+    // line crossed), advance the path pointer one byte. End-of-list
+    // reset is handled by alienAnimationUpdate (matches source —
+    // L0DDE only fires from $0D86, never from $0D30).
     //
-    // The source has three branches based on whether dx, dy, or both
-    // are zero — and the grid-cross test runs against the *coordinate
-    // that was actually updated last*. Mirror the dispatch:
+    // Three branches based on whether dx, dy, or both are zero — the
+    // grid-cross test runs against the *coordinate that was actually
+    // updated last*. Mirrors source:
     //   default (both nonzero):    update X then Y, test Y  ($0D55)
     //   dx == 0   ($0D43 → $0D4F): update Y only,  test Y  ($0D55)
     //   dy == 0   ($0D48 → $0D5E): update X only,  test X  ($0D62)
+    //
+    // Runs in lane-0 of stageAlienCombat (port-side lane swap — source
+    // runs this in lane-1). Critical that movement runs BEFORE
+    // behaviorUpdate (lane-1) within each 4-frame cycle so commits
+    // happen the frame after a grid crossing — see stageAlienCombat
+    // comment and research_enemy_motion.md §3.5 for why.
     alienMovementUpdate() {
         for (let i = 0; i < 16; i++) {
             const a = state.aliens[i];
             if ((a.controlA & 0x08) === 0) continue;
             const ptr = state.alienMovePtr[i];
-            const idx = MOTION_PATH_BASE[ptr - PATH_BASE_ADDR];
+            const idx = getPathByte(ptr);
             const rawDx = MOTION_DIRECTIONS[idx * 2];
             const rawDy = MOTION_DIRECTIONS[idx * 2 + 1];
             const dx = s8(rawDx);
@@ -329,16 +470,21 @@ export const states = {
     // controlB, and OR drawMode into controlA's low 3 bits — note that
     // the draw mode itself can change per path step (e.g. 2×1 horizontal
     // drift switches to 2×2 during diagonal swoops).
+    //
+    // Runs in lane-0 of stageAlienCombat after alienMovementUpdate
+    // (port-side lane swap — see stageAlienCombat comment). Source
+    // runs animation in lane-2.
     alienAnimationUpdate() {
         for (let i = 0; i < 16; i++) {
             const a = state.aliens[i];
             if ((a.controlA & 0x08) === 0) continue;
             let ptr = state.alienMovePtr[i];
-            let pathByte = MOTION_PATH_BASE[ptr - PATH_BASE_ADDR];
+            let pathByte = getPathByte(ptr);
             if (pathByte === 0) {
+                // L0DDE — reset to per-stage path seed (always T1000 / formation drift).
                 ptr = ((state.alienPathSeedHi << 8) | state.alienPathSeedLo) & 0xFFFF;
                 state.alienMovePtr[i] = ptr;
-                pathByte = MOTION_PATH_BASE[ptr - PATH_BASE_ADDR];
+                pathByte = getPathByte(ptr);
             }
             const drawMode  = ANIMATION_TABLE[pathByte * 3];
             const calcStyle = ANIMATION_TABLE[pathByte * 3 + 1];
@@ -348,8 +494,13 @@ export const states = {
             // else (bit 2) → Y mode. Order matters when multiple bits
             // are set (e.g. $03 picks XY because bit 0 is checked first).
             // The sub-position bits select one of N pre-shifted tile
-            // variants — render.js draws at (x & ~7, y & ~7) so the
-            // variant provides the sub-tile offset (see drawAlien).
+            // variants. Drawing strategy in the port (per drawMode):
+            //   1 (2×1) / 3 (1×2): snap-draw at (x & ~7, y & ~7) — the
+            //     variant tile content carries the sub-pixel offset.
+            //   4 (2×2):           draw at exact (x, y), with a port-
+            //     specific full-sprite substitution when the variant
+            //     has partial (zero) tiles — see render.js drawAlien
+            //     case 4 and research_rendering.md §2.5.
             let off;
             if      (calcStyle & 0x01) off = (a.x & 0x04) + ((a.y >> 1) & 0x03) + t1600Base;
             else if (calcStyle & 0x02) off = ((a.x >> 1) & 0x03) + t1600Base;
@@ -357,6 +508,327 @@ export const states = {
             a.controlA = (a.controlA & 0xF8) | (drawMode & 0x07);
             a.controlB = SHAPE_LSB_TABLE[off & 0xFF];
         }
+    },
+
+    // $30AA — pseudo-random 4-bit value. Uses Counter9A high byte ($439A)
+    // rotated left 3 bits, low 3 bits added to PlayerX, masked to 0x0F.
+    getRandomNumber() {
+        const lo  = state.counter9a & 0xFF;          // $439B — LSB, changes every frame
+        const rot = ((lo << 3) | (lo >> 5)) & 0xFF;
+        return ((rot & 7) + state.player.x) & 0x0F;
+    },
+
+    // L3074 — level-based timing factor C (≈24–31 for stage 1, round 0).
+    // Used by L305C to seed the angry-pattern phase timer M4358.
+    computeLevelFactor() {
+        const lr = state.levelAndRound & 0xFF;
+        // Step 1: RRCA on LR → low 3 bits → 7 minus that
+        const r1 = ((lr >> 1) | ((lr & 1) << 7)) & 0xFF;
+        let   c  = 7 - (r1 & 7);
+        // Step 2: high nibble of LR (capped at $70) → 7 minus that, add to C
+        const a2 = lr < 0x80 ? lr : 0x70;
+        c       += 7 - ((a2 >> 4) & 7);
+        // Step 3: AliensLeft contribution
+        const al = state.aliensLeft;
+        c       += al >= 5 ? (al - 5) : 0x10;
+        // Step 4: random jitter 0–7
+        c       += this.getRandomNumber() & 7;
+        return c & 0xFF;
+    },
+
+    // L3000 — AlienBehaviorUpdate. Increments Counter93, dispatches on
+    // (Counter93 & 7) via the T3018 jump table to one of 8 sub-states.
+    // Runs in lane-1 of stageAlienCombat (port-side lane swap — source
+    // runs this in lane-0). The swap puts movement BEFORE behavior
+    // each 4-frame cycle, so any commit fires the frame AFTER an alien
+    // crossed a grid boundary — that alignment is what lets dx=±4 swoop
+    // bytes advance their ptr (research_enemy_motion.md §3.5 / §6).
+    // research_enemy_motion.md §6 covers the per-sub-state logic.
+    alienBehaviorUpdate() {
+        state.counter93 = (state.counter93 + 1) & 0xFF;
+        switch (state.counter93 & 7) {
+            case 0: this.behaviorCommit();       break;  // L3264
+            case 1: this.behaviorAngryPattern(); break;  // L3028
+            case 2: this.behaviorCooldown();     break;  // L30BA stub
+            case 3: this.behaviorSwoopCount();   break;  // L3124
+            case 4: this.behaviorPickAlien();    break;  // L315A
+            case 5: this.behaviorPickPattern();  break;  // L31B4
+            case 6: this.behaviorScanAdvance(); break;  // L322C
+            case 7: break;                               // L3012 RET
+        }
+    },
+
+    // L3028 — angry-pattern two-level timer (sub-state 1).
+    // Up to 3 angry attacks per round; each sends all 16 aliens on T2E00/T2E40.
+    // Timer seed: M4357*4 + computeLevelFactor() + 7 (L305C).
+    behaviorAngryPattern() {
+        // DEBUG: angry pattern temporarily disabled to isolate normal swoop behavior.
+        // Aliens get stuck mid-swoop at dx=4 path bytes when x%8 isn't 0/4.
+        return;
+        // eslint-disable-next-line no-unreachable
+        if (state.alienPhaseCount >= 3 || state.alienBehaviorState >= 4) return;
+        if (state.alienPhaseTimer === 0) {
+            const c = this.computeLevelFactor();
+            state.alienPhaseTimer = ((state.alienPhaseCount << 2) + c + 7) & 0xFF;
+            return;
+        }
+        state.alienPhaseTimer--;
+        if (state.alienPhaseTimer !== 0) return;
+        state.alienPhaseCount++;
+        state.alienBehaviorState  = 4;
+        state.alienSwoopCount     = 16;
+        state.alienSwoopTarget    = 0x50;
+        state.alienSwoopPatternHi = 0x2E;
+        state.alienSwoopPatternLo = (state.player.x & 1) ? 0x00 : 0x40;
+    },
+
+    // L30BA — cooldown timers (sub-state 2). Stubbed: a single
+    // alienCooldown counter that decrements on each case-2 firing
+    // and, when it hits zero, advances state to 1 to kick off a swoop
+    // pipeline cycle. The reset value of 6 gives ~3 seconds between
+    // swoop attempts at 60 Hz (case-2 fires every 8 counter93 ticks ≈
+    // 0.5 s on a 60 Hz display). Multiple swoops can overlap in
+    // flight — each cooldown→pipeline run picks one alien.
+    //
+    // ⚠ DEVIATION FROM SOURCE: source's `L30BA` processes three
+    // counter slots ($4359/$435A/$435B) via L30DA, plus a more
+    // elaborate L30E4 seeding that uses `Counter9A`'s high byte and
+    // a level-based factor. Port that when bird stages land, since
+    // bird-stage behavior also reads those counters. For alien-only
+    // stages 0-3, this single-counter stub is sufficient.
+    behaviorCooldown() {
+        if (state.alienBehaviorState !== 0) return;
+        state.alienCooldown--;
+        if (state.alienCooldown <= 0) {
+            state.alienBehaviorState = 1;
+            state.alienCooldown = 6;
+        }
+    },
+
+    // L3124 — compute swoop count into $4353 (gates on $4350 == 1).
+    // research_enemy_motion.md §6.5.
+    //
+    // ⚠ DEVIATION FROM SOURCE — acceptable for now, may need tuning later.
+    // Source L3124 computes the cap as:
+    //   A = (LevelAndRound RRCA RRCA) & 0x0F   ; (level<<2 | round)
+    //   A = min(A + 5, 0x11)
+    //   A -= alienPhaseCount                   ; angry waves shrink the cap
+    //   roll = GetRandomNumber + 1             ; uniform 1..16
+    //   count = (roll < A) ? roll : 1          ; usually 1, occasionally up to ~5
+    // Our port uses a much smaller cap (= 1 at stage 1) and ignores
+    // alienPhaseCount. Net effect: stage 1 always produces count=1.
+    // Visible-but-not-broken: late-stage gameplay would have weaker
+    // multi-alien swoops than the arcade. Revisit when porting later
+    // levels — see progress.md "Known deferred issues".
+    behaviorSwoopCount() {
+        if (state.alienBehaviorState !== 1) return;
+        // Cap grows with LevelAndRound; round 1 sends 1 alien.
+        const cap = Math.min(5, 1 + (state.levelAndRound >> 1));
+        state.alienSwoopCount    = Math.max(1, 1 + Math.floor(Math.random() * cap));
+        state.alienBehaviorState = 2;
+    },
+
+    // L315A — pick which alien to swoop (gates on $4350 == 2).
+    //
+    // Source L315A walks all 16 alien slots starting from a random
+    // index and picks the FIRST alien that satisfies:
+    //   (controlA & 0x08) != 0       ; alive
+    //   ptr.MSB == alienPathSeedHi   ; in the drift page (0x10xx)
+    //   ptr.LSB == $4356             ; ptr matches saved match key
+    // If no alien matches, state stays at 2 and the pipeline stalls
+    // until next cycle.
+    //
+    // After the lane-order swap in stageAlienCombat (movement runs on
+    // lane-0, BEFORE behavior on lane-1), the timing relationship
+    // between alien crossings and commit firings matches what source
+    // expects: aliens land at LSB == alienSwoopLsb after end-of-list
+    // reset, AND alien.x%8 == 0 at commit time (because movement just
+    // crossed). So both the ptr-match check and the dx=±4 alignment
+    // gating happen naturally here, exactly as source intends.
+    behaviorPickAlien() {
+        if (state.alienBehaviorState !== 2) return;
+
+        const matchHi = state.alienPathSeedHi;        // $4394 (= 0x10)
+        const matchLo = state.alienSwoopLsb;          // $4356 (source-faithful after lane swap)
+        const startIdx = this.getRandomNumber() & 0x0F;
+
+        for (let n = 0; n < 16; n++) {
+            const i = (startIdx + n) & 0x0F;
+            const a = state.aliens[i];
+            if (!(a.controlA & 0x08)) continue;       // skip dead
+            const ptr = state.alienMovePtr[i];
+            if (((ptr >> 8) & 0xFF) !== matchHi) continue;
+            if ((ptr & 0xFF) !== matchLo) continue;
+            // Match — pick this alien. Store target in source format.
+            state.alienSwoopTarget   = 0x50 + i * 2;
+            state.alienBehaviorState = 3;
+            return;
+        }
+        // No matching alien — pipeline stalls; case-4 retries next 32-frame cycle.
+    },
+
+    // L31B4 — pick swoop pattern for the chosen alien (gates on $4350 == 3).
+    // research_enemy_motion.md §6.4.
+    //
+    // Source-faithful port of the three-stage T3300/T3310/T3330 lookup:
+    //   1. Compute |alienX - playerX| and L/R relationship (alien left or
+    //      right of player). Bucket the X distance into 8 bins of 32 px.
+    //   2. Stage 1: colMul4 = (T3300[bucket] + lrOffset) * 4
+    //      where lrOffset = 4 if alien is LEFT of player, else 0.
+    //   3. Stage 2: rowIdx = colMul4 + phaseOrYBand
+    //      phaseOrYBand = Y-band (0/1/2/3 at $58/$78/$98) when swoopCount==1
+    //                     alienPhaseCount (& 3) otherwise (angry waves)
+    //      T3330 LSB = T3310[rowIdx]
+    //   4. Stage 3: rand6 = random & 0x06 (= 0, 2, 4, or 6) selects 1 of 4
+    //      pattern candidates within the row.
+    //      Final pattern (MSB, LSB) = T3330[T3310_value + rand6 - 0x30] / +1
+    //   Tables in port: PATTERN_COL_TABLE (T3300, 8 bytes),
+    //   PATTERN_ROW_TABLE (T3310, 32 bytes — lower 16 for alien-right,
+    //   upper 16 for alien-left), PATTERN_ADDR_TABLE (T3330+, 208 bytes
+    //   covering byte offsets 0x30-0xFF).
+    behaviorPickPattern() {
+        if (state.alienBehaviorState !== 3) return;
+
+        // Resolve alien index. Port stores raw 0-15 in alienSwoopTarget;
+        // source stores $50 + i*2. Accept both formats.
+        const i = state.alienSwoopTarget >= 0x50
+            ? (state.alienSwoopTarget - 0x50) >> 1
+            : state.alienSwoopTarget;
+        const a = state.aliens[i];
+        if (!a || !(a.controlA & 0x08)) {
+            state.alienBehaviorState = 5;
+            return;
+        }
+
+        // L/R relationship and absolute X distance.
+        // Source L31C8-L31D4: if playerX >= alienX then C=4 (alien LEFT of
+        // player or same X), else C=0 (alien RIGHT of player). The labels
+        // can be counter-intuitive: "left of player" means alien.x < player.x.
+        let lrOffset, diff;
+        if (state.player.x >= a.x) {
+            lrOffset = 4;                       // alien LEFT of player
+            diff     = state.player.x - a.x;
+        } else {
+            lrOffset = 0;                       // alien RIGHT of player
+            diff     = a.x - state.player.x;
+        }
+
+        // X distance bucket. Source L31D7-L31DA: RLCA×3, AND $07 — i.e.
+        // bring the high 3 bits of |diff| to the low 3. Equivalent to
+        // (diff >> 5) & 7 for diff < 256. 8 buckets of 32 px each.
+        const bucket = (diff >> 5) & 7;
+
+        // Stage 1: T3300[bucket] → column index, + lrOffset, × 4.
+        // Max value: (3 + 4) << 2 = 28 (fits in T3310's 32-entry range).
+        const colMul4 = (PATTERN_COL_TABLE[bucket] + lrOffset) << 2;
+
+        // Stage 2 prep: phase or Y-band (source L3210).
+        let phaseOrYBand;
+        if (state.alienSwoopCount === 1) {
+            // Y-band: thresholds match source CP $58/$78/$98 at L3210.
+            const y = a.y;
+            if      (y < 0x58) phaseOrYBand = 0;
+            else if (y < 0x78) phaseOrYBand = 1;
+            else if (y < 0x98) phaseOrYBand = 2;
+            else               phaseOrYBand = 3;
+        } else {
+            // Multi-alien swoop (incl. angry wave): use alienPhaseCount.
+            phaseOrYBand = state.alienPhaseCount & 0x03;
+        }
+
+        // Stage 2 lookup: T3310[colMul4 + phaseOrYBand] → T3330 byte offset.
+        // Max idx: 28 + 3 = 31, within PATTERN_ROW_TABLE's 32 entries.
+        const t3310Idx   = (colMul4 + phaseOrYBand) & 0xFF;
+        const t3330Lsb   = PATTERN_ROW_TABLE[t3310Idx];
+
+        // Stage 3: random pick (0, 2, 4, or 6) within the 4-candidate row.
+        const rand6      = Math.floor(Math.random() * 256) & 0x06;
+
+        // Final byte offset into T3330+. Source addressing uses the LSB
+        // directly with H=$33; in JS we subtract 0x30 since
+        // PATTERN_ADDR_TABLE starts at $3330. Max offset:
+        // (0xF8 + 6) - 0x30 = 0xCE; PATTERN_ADDR_TABLE is 208 bytes (0-207).
+        const t3330Off   = (t3330Lsb + rand6) - 0x30;
+        const msb        = PATTERN_ADDR_TABLE[t3330Off];
+        const lsb        = PATTERN_ADDR_TABLE[t3330Off + 1];
+
+        state.alienSwoopPatternHi = msb;
+        state.alienSwoopPatternLo = lsb;
+        state.alienBehaviorState  = 5;
+    },
+
+    // L322C — scan-and-advance gate for angry pattern (sub-state 6).
+    // Guards on M4350==4; checks every active alien's move pointer against
+    // (M4394=0x10, M4356=alienSwoopLsb). Any mismatch → return early.
+    // All match → M4350=6, letting behaviorCommit fire on the next case-0 tick.
+    // L322C — scan-and-advance gate for angry pattern (sub-state 6).
+    // Source-faithful: matches against alienSwoopLsb ($4356, saved by
+    // most recent commit). After the lane-order swap in stageAlienCombat
+    // (movement on lane-0, behavior on lane-1), alien ptrs naturally
+    // land at LSB == alienSwoopLsb after end-of-list reset — the same
+    // phase relationship the source assumes.
+    behaviorScanAdvance() {
+        if (state.alienBehaviorState !== 4) return;
+        const matchHi = state.alienPathSeedHi;  // M4394 = 0x10
+        const matchLo = state.alienSwoopLsb;    // M4356 — saved by last commit
+        for (let i = 0; i < 16; i++) {
+            if (!(state.aliens[i].controlA & 0x08)) continue;
+            const ptr = state.alienMovePtr[i];
+            if (((ptr >> 8) & 0xFF) !== matchHi || (ptr & 0xFF) !== matchLo) return;
+        }
+        state.alienBehaviorState = 6;
+    },
+
+    // L3264 — commit: advance $4395, then write swoop pattern pointer to matching aliens.
+    // research_enemy_motion.md §6.2.
+    behaviorCommit() {
+        // Save old $4395 value as the match key ($4356), then cycle $4395 0-15.
+        const oldLsb = state.alienPathSeedLo;
+        state.alienSwoopLsb      = oldLsb;
+        state.alienPathSeedLo    = (oldLsb + 1) & 0x0F;
+
+        if (state.alienBehaviorState < 5) return;   // pipeline not yet ready
+
+        // Source L3264: walks alienSwoopCount aliens starting at alienSwoopTarget,
+        // checking each one's ptr against ($4394, $4356). Only matching aliens
+        // get the new swoop pattern written. For normal swoops typically count=1
+        // so a single alien is committed; for angry swoops count=16 so all are.
+        //
+        // Source stores $4354 as the move-ptr table LSB ($50 + i*2). Our
+        // behaviorPickAlien stores the raw alien index (0-15); behaviorAngry
+        // stores the sentinel $50 (= start at alien 0, since (0x50-0x50)/2 = 0).
+        const matchHi  = state.alienPathSeedHi;
+        const newPtr   = (state.alienSwoopPatternHi << 8) | state.alienSwoopPatternLo;
+        const startIdx = state.alienSwoopTarget >= 0x50
+            ? (state.alienSwoopTarget - 0x50) >> 1
+            : state.alienSwoopTarget;
+        const count = state.alienSwoopCount;
+        for (let n = 0; n < count; n++) {
+            const i = (startIdx + n) & 0x0F;
+            const a = state.aliens[i];
+            // NOTE: source L3264 does NOT skip dead aliens here — it only
+            // checks ptr MSB/LSB. We add the bit-3 guard defensively (a
+            // dead alien's ptr wouldn't normally match anyway, so this is
+            // a harmless extra filter). Leaving as-is for safety; flag if
+            // ever debugging an apparent "no swoop fired" with a dead
+            // alien that should have been overwritten.
+            if (!(a.controlA & 0x08)) continue;
+            const ptr = state.alienMovePtr[i];
+            if (((ptr >> 8) & 0xFF) === matchHi && (ptr & 0xFF) === oldLsb) {
+                state.alienMovePtr[i] = newPtr;
+                // NOTE: previously this also snapped alien.x to the
+                // nearest multiple of 8 to align dx=±4 swoop bytes
+                // (workaround for a phase-mismatch between commit and
+                // alien crossings). That workaround caused a ±3 px
+                // visual jolt and drift desync. The lane-order swap in
+                // stageAlienCombat (movement on lane-0, behavior on
+                // lane-1) now puts movement one frame BEFORE the
+                // commit firing, so the alien crosses to x%8=0 right
+                // before commit reads it — alignment is natural and
+                // no snap is needed.
+            }
+        }
+        state.alienBehaviorState = 0;
     },
 
     // L0876 — PlayerUpdate. Called every combat frame (not lane-gated).
@@ -427,7 +899,17 @@ export const states = {
         }
     },
 
-    state4_PlayerExplosion()     {},   // L0AEA
+    // L0AEA — player explosion + respawn. Stub: wait ~128 ticks then respawn.
+    // Real source: plays explosion animation, decrements lives, game-over if 0.
+    state4_PlayerExplosion() {
+        state.playerExplosionTimer--;
+        if (state.playerExplosionTimer <= 0) {
+            state.player.x     = PLAYER_INIT_BLOCK[2];
+            state.player.y     = PLAYER_INIT_BLOCK[3];
+            state.player.alive = true;
+            state.gameState    = 3;
+        }
+    },
     state5_GameOver()            {},   // L0B60
     state6_MothershipExplosion() {},   // L2400
     state7_MothershipScore()     {},   // L244C

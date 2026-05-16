@@ -307,6 +307,88 @@ set of formations, round 2+ uses another. `AliensLeft` (default 16) is
 preserved across this; the table just gives the starting `(X, Y)`
 positions.
 
+#### Worked example — stage 1, round 1 (`T1560`)
+
+`LevelAndRound = 1` → `RRCA = 0x80` → `& 0x0F = 0` → `T063A[0] = 0x60`
+→ sub-table at `$1560`. The 32 bytes of `T1560` decode as 16 `(X, Y)`
+pairs, one per alien slot (`state.aliens[i]`):
+
+```
+i= 0: (0x60, 0x48) = ( 96, 72)        i= 8: (0x18, 0x40) = ( 24, 64)
+i= 1: (0x60, 0x58) = ( 96, 88)        i= 9: (0xA8, 0x40) = (168, 64)
+i= 2: (0x48, 0x58) = ( 72, 88)        i=10: (0x18, 0x30) = ( 24, 48)
+i= 3: (0x78, 0x58) = (120, 88)        i=11: (0xA8, 0x30) = (168, 48)
+i= 4: (0x38, 0x50) = ( 56, 80)        i=12: (0x28, 0x28) = ( 40, 40)
+i= 5: (0x88, 0x50) = (136, 80)        i=13: (0x98, 0x28) = (152, 40)
+i= 6: (0x28, 0x48) = ( 40, 72)        i=14: (0x38, 0x20) = ( 56, 32)
+i= 7: (0x98, 0x48) = (152, 72)        i=15: (0x88, 0x20) = (136, 32)
+```
+
+On the 208×256 playfield this draws a hollow diamond, with index 0 in
+the center row alone and indices 1–3 in a tight cluster directly
+below — alien 0 is the apex / "leader" of the formation, indices grow
+outward from there. (You can verify in the running port: poll
+`window.state.aliens` after stage 1 init.)
+
+#### Invariant: all aliens in a sub-table share `x % 8`
+
+Inspect every X byte in any sub-table and you'll see they all have the
+same low-3 bits. For `T1560`: `0x60, 0x48, 0x78, 0x38, 0x88, 0x28, …`
+— all `x % 8 == 0`. This is by design: it means **every alien crosses
+the same 8-pixel grid boundary on the same frame**, which keeps their
+path pointers in lockstep during the drift loop. Both
+`AlienMovementUpdate` (`$0D1C`) and `AlienAnimationUpdate` (`$0D70`)
+gate ptr-advance on `(coord & 7) == 0`
+(`research_enemy_motion.md` §3.1 / §3.4), so identical `x % 8` is what
+makes "all 16 aliens advance their `state.alienMovePtr[i]` together"
+hold throughout the drift phase.
+
+Consequence: a swoop trigger that just walks the formation and rewrites
+matching ptrs (the `behaviorCommit` loop at `$3264`) would, naively,
+overwrite all 16 every time the scan hits — which is exactly why
+`$3264` is gated by `alienSwoopCount` (`$4353`) and
+`alienSwoopTarget` (`$4354`) so it only touches a single alien on
+normal swoops. The angry wave (sub-state 1, `$3028`) sets count = 16
+and target = `$50` deliberately to swoop the whole formation at once,
+exploiting that lockstep rather than fighting it.
+
+#### `T063A` `0xFF` slots
+
+Indices 6, 7, 14, 15 hold `0xFF` rather than a valid LSB:
+
+```
+063A: 60 40 E0 E0 E0 E0 FF FF   ; round 1
+0642: C0 A0 80 80 80 80 FF FF   ; round 2
+```
+
+These correspond to `LevelAndRound` values where the level nibble's
+high bit is set (stages C-F per row). The bird/mothership stages at
+those slots don't use `InitAlienPositions` at all — birds get their
+positions from `L3400` machinery and the mothership has a fixed entry
+point. So `0xFF` is a never-read placeholder, not a sentinel checked
+at runtime. [unverified — confirmation pending the bird-stage
+research and full mothership trace; flag for follow-up if a stage in
+this index range is ever observed reading `T063A`.]
+
+#### Index → screen position relationship
+
+The alien index `i` (0..15) is also the firing order from `T1500`
+(`research_enemy_motion.md` §5) and the iteration order used by every
+function that walks `$4B70-$4BAF`. There's no separate "row" or
+"column" — indices map directly to formation positions via the
+sub-table. From the worked example above, the typical pattern is:
+
+- **Index 0** is the formation apex / leader (lowest center).
+- **Odd / even indices alternate left and right** as the formation
+  widens outward — e.g. `T1560` has index 2 on the left of 1 and
+  index 3 on the right; 4/5, 6/7, etc. follow the same pairing.
+- **Higher indices are higher on screen** (smaller Y), forming the
+  back rows of the diamond.
+
+This is the layout you'll see when polling `state.aliens` in the
+running port; it's also why early-index aliens tend to be the first
+to swoop (they're at the front of every "pick a target" iteration).
+
 The partition between alien-stage and bird-stage is in `T1760` at
 `Code.md:$1760`:
 
