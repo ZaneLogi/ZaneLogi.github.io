@@ -144,6 +144,52 @@ differs subtly from real hardware; (c) the arcade has the same
 on dx=±4-leading patterns when misaligned. Reproducing this exactly
 is a research effort we deferred.
 
+### 1.0.1 Timing interlock — read before changing anything in this group
+
+The following timing decisions are **interlocked** — they were tuned
+*together* to make the swoop pipeline work end-to-end. Changing one
+without re-validating the others can silently break alien-return-to-
+formation, swoop alignment, or rendering — sometimes producing
+symptoms that look like a different bug entirely (e.g. all aliens
+stuck mid-swoop, or `controlB=0xFF` reaching the renderer).
+
+| Decision | Where | What it does | Source-faithful? |
+|---|---|---|---|
+| **Lane assignment** | `stageAlienCombat` | Lane-0 runs `alienMovementUpdate` + `alienAnimationUpdate`; lane-1 runs `alienBehaviorUpdate`. | **No** — swapped from source's lane-0=behavior, lane-1=movement. See §1.0 for swoop-entry-alignment rationale. |
+| **Movement + animation merged** | `stageAlienCombat` lane-0 handler | Movement and animation run back-to-back inside the same lane (atomic per cycle). | **No** — source splits them across lane-1 and lane-2 (1-frame separation). See `research_rendering.md` §9.2 for tick-pair stutter rationale. |
+| **Counter93 dispatch phase** | `alienBehaviorUpdate` | Port dispatches on the **post-increment** value (`counter93 = (counter93+1) & 0xFF; switch (counter93 & 7)`). | **No** — source does `LD A,(HL); INC (HL); AND $07` (pre-increment). The port's post-increment shifts every sub-state by one frame relative to source. |
+
+**Why the interlock exists:** the lane swap relies on movement firing
+**before** behavior so that `behaviorCommit` (sub-state 0) reads
+freshly grid-aligned alien positions. The Counter93 phase further
+determines *which frame within the 4-frame lane cycle* commit fires
+on. The merge of movement+animation determines whether the alien's
+visible position and tile match each frame.
+
+The three are not orthogonal:
+- Changing the **lane order** without re-tuning the Counter93 phase
+  reproduces the original "stuck on dx=±4" swoop bug (the symptom
+  that motivated the lane swap in the first place).
+- Changing the **Counter93 phase to pre-increment** while keeping the
+  current lane order shifts commit one frame earlier in the cycle.
+  *Verified empirically 2026-05-16:* this causes swooping aliens to
+  not return to formation — commit's match-key timing falls out of
+  sync with the alien's ptr-LSB cycle, so the same alien gets
+  repeatedly committed onto new swoop patterns without ever cycling
+  back through `(M4394, M4356)` sync. Visible as "all aliens
+  swooping at once, none returning". Also produces `controlB=0xFF`
+  values reaching render — a symptom that *looks* like a rendering
+  bug but is actually a timing failure mode upstream.
+- Separating **movement and animation** back to source's lane-1/lane-2
+  split brings back the 30 Hz tick-pair render stutter.
+
+**Before changing anything in this section's scope** (lane handlers,
+`alienBehaviorUpdate`'s Counter93 read, the per-lane work order in
+`stageAlienCombat`), re-read §1.0, identify which of the three
+decisions you'd be touching, and validate the other two still hold
+afterwards. Visual playtest is the only reliable check — these
+failure modes don't surface through unit tests or console output.
+
 ### 1.1 Functions that affect alien movement
 
 "Movement" here means anything that writes to `alien.x` / `alien.y` or

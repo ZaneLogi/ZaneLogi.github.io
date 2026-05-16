@@ -125,7 +125,13 @@ export const state = {
         this.alienSwoopLsb       = 0;   // $4356 — saved old $4395 used for commit match
         this.alienPhaseCount     = 0;   // $4357 — angry-pattern fire count (0-3 max per round)
         this.alienPhaseTimer     = 0;   // $4358 — angry-pattern countdown; 0 = needs init
-        this.alienCooldown       = 60;  // $4355 stub: lane-0 ticks until next normal swoop trigger
+        this.alienCooldown       = 0;   // $4355 — primary swoop cooldown; 0 triggers L30E4 reseed
+        // L30BA secondary cooldown timers — three independent decrementing slots that
+        // gate the C-rotation in L3112 during L30E4 reseed. Each starts at 0 (L32B0
+        // zero-fill); L3112 seeds one of them to 12 per reseed when their slot is 0.
+        this.alienCooldownTimer1 = 0;   // $4359
+        this.alienCooldownTimer2 = 0;   // $435A
+        this.alienCooldownTimer3 = 0;   // $435B
 
         // Player-death timer — not a source field; used while state4 is a stub.
         this.playerExplosionTimer = 0;

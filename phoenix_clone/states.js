@@ -118,14 +118,27 @@ export const states = {
         this.initAlienData();
         // L0506 — clear $4392-$4397 and seed ($4394) from $4B50 MSB.
         // L32B0 — clear $4350-$437F (AlienBehaviorUpdate scratch region).
+        // Source zero-fills 48 bytes; port mirrors that for every field it
+        // models in this range. Critical: alienPhaseCount ($4357) MUST reset
+        // here, otherwise after 3 angry waves on wave-1 the angry gate
+        // (M4357 < 3) fails for the rest of the game and no further waves
+        // get angry attacks.
         state.combatLane = 0;
         state.alienPathSeedHi    = (state.alienMovePtr[0] >> 8) & 0xFF;
         state.alienPathSeedLo    = 0;
         state.counter93          = 0;
-        state.alienBehaviorState = 0;
-        state.alienSwoopCount    = 0;
-        state.alienSwoopTarget   = 0xFF;
-        state.alienCooldown      = 6;
+        state.alienBehaviorState  = 0;  // $4350
+        state.alienSwoopPatternHi = 0;  // $4351
+        state.alienSwoopPatternLo = 0;  // $4352
+        state.alienSwoopCount     = 0;  // $4353
+        state.alienSwoopTarget   = 0xFF;// $4354 (port: 0xFF sentinel for "no target", source: 0)
+        state.alienCooldown      = 0;   // $4355 — first behaviorCooldown call will L30E4-reseed
+        state.alienSwoopLsb       = 0;  // $4356 — saved match key, fresh per stage
+        state.alienPhaseCount     = 0;  // $4357 — angry-wave cap (was the carry-over bug)
+        state.alienPhaseTimer     = 0;  // $4358 — angry-pattern countdown; 0 triggers re-seed
+        state.alienCooldownTimer1 = 0;  // $4359
+        state.alienCooldownTimer2 = 0;  // $435A
+        state.alienCooldownTimer3 = 0;  // $435B
     },
 
     // L0580 InitGlobalLevelData — index STAGE_BLOCK_INDEX (source T0598)
@@ -274,6 +287,13 @@ export const states = {
     // JS port: movement+animation merged into lane 1 for tick-pair atomicity
     // (research_rendering.md §9.2). Lanes 2/3 are empty stubs.
     //
+    // ⚠ TIMING IS INTERLOCKED — see research_enemy_motion.md §1.0.1 before
+    // changing lane assignments, the movement/animation merge, or the
+    // Counter93 dispatch phase in alienBehaviorUpdate. These three knobs
+    // were tuned together and a change in any one can silently break the
+    // others (e.g. swoops never returning to formation, controlB=0xFF
+    // reaching the renderer). Verified via empirical regression 2026-05-16.
+    //
     // alive=true loop mirrors AlienDataController ($0A50): in source it paints
     // aliens to screen RAM gated by Bit3Controller; here alive=true enables
     // render.js drawAlien for this frame.
@@ -403,6 +423,16 @@ export const states = {
         state.player.shieldCount = 0;
         state.levelAndRound = (state.levelAndRound + 1) & 0xFF;
 
+        // ⚠ STEP 8D STOP-GAP: stages 4-A (spiral-fill, bird combat, mothership)
+        // are not implemented yet (step 9 territory). Without this wrap, LR
+        // advances to 4 after the wave-2 combat clear and state3_Gameplay's
+        // switch falls through with no work → screen "freezes". For now,
+        // skip stages 4-F back to stage 0 of the next round so play continues.
+        // Remove this block when step 9 lands.
+        if ((state.levelAndRound & 0x0F) >= 4) {
+            state.levelAndRound = (state.levelAndRound + 0x10) & 0xF0;
+        }
+
         // T1760[(LevelAndRound >> 1) & 7]: positive → alien count; bit 7 set → bird count.
         const waveIdx = (state.levelAndRound >> 1) & 7;
         const waveByte = ALIEN_BIRD_PARTITION[waveIdx];
@@ -435,6 +465,7 @@ export const states = {
     // behaviorUpdate (lane-1) within each 4-frame cycle so commits
     // happen the frame after a grid crossing — see stageAlienCombat
     // comment and research_enemy_motion.md §3.5 for why.
+    // ⚠ Timing-sensitive: research_enemy_motion.md §1.0.1.
     alienMovementUpdate() {
         for (let i = 0; i < 16; i++) {
             const a = state.aliens[i];
@@ -474,6 +505,7 @@ export const states = {
     // Runs in lane-0 of stageAlienCombat after alienMovementUpdate
     // (port-side lane swap — see stageAlienCombat comment). Source
     // runs animation in lane-2.
+    // ⚠ Timing-sensitive: research_enemy_motion.md §1.0.1.
     alienAnimationUpdate() {
         for (let i = 0; i < 16; i++) {
             const a = state.aliens[i];
@@ -544,6 +576,13 @@ export const states = {
     // crossed a grid boundary — that alignment is what lets dx=±4 swoop
     // bytes advance their ptr (research_enemy_motion.md §3.5 / §6).
     // research_enemy_motion.md §6 covers the per-sub-state logic.
+    //
+    // ⚠ Counter93 dispatch phase is post-increment in the port and is NOT
+    // source-faithful (source is pre-increment: LD A,(HL); INC (HL); AND
+    // $07). The deviation is intentional — it is part of the interlocked
+    // timing tuning explained in research_enemy_motion.md §1.0.1. Do not
+    // "fix" this to match source without re-validating the lane swap; a
+    // change here reproduces an "aliens never return to formation" bug.
     alienBehaviorUpdate() {
         state.counter93 = (state.counter93 + 1) & 0xFF;
         switch (state.counter93 & 7) {
@@ -562,10 +601,6 @@ export const states = {
     // Up to 3 angry attacks per round; each sends all 16 aliens on T2E00/T2E40.
     // Timer seed: M4357*4 + computeLevelFactor() + 7 (L305C).
     behaviorAngryPattern() {
-        // DEBUG: angry pattern temporarily disabled to isolate normal swoop behavior.
-        // Aliens get stuck mid-swoop at dx=4 path bytes when x%8 isn't 0/4.
-        return;
-        // eslint-disable-next-line no-unreachable
         if (state.alienPhaseCount >= 3 || state.alienBehaviorState >= 4) return;
         if (state.alienPhaseTimer === 0) {
             const c = this.computeLevelFactor();
@@ -582,50 +617,102 @@ export const states = {
         state.alienSwoopPatternLo = (state.player.x & 1) ? 0x00 : 0x40;
     },
 
-    // L30BA — cooldown timers (sub-state 2). Stubbed: a single
-    // alienCooldown counter that decrements on each case-2 firing
-    // and, when it hits zero, advances state to 1 to kick off a swoop
-    // pipeline cycle. The reset value of 6 gives ~3 seconds between
-    // swoop attempts at 60 Hz (case-2 fires every 8 counter93 ticks ≈
-    // 0.5 s on a 60 Hz display). Multiple swoops can overlap in
-    // flight — each cooldown→pipeline run picks one alien.
+    // L30BA — cooldown timers (sub-state 2). Source-faithful port.
     //
-    // ⚠ DEVIATION FROM SOURCE: source's `L30BA` processes three
-    // counter slots ($4359/$435A/$435B) via L30DA, plus a more
-    // elaborate L30E4 seeding that uses `Counter9A`'s high byte and
-    // a level-based factor. Port that when bird stages land, since
-    // bird-stage behavior also reads those counters. For alien-only
-    // stages 0-3, this single-counter stub is sufficient.
+    // Pipeline:
+    //   1. Tick down 3 secondary timers ($4359/$435A/$435B) unconditionally
+    //      via L30DA — these gate the C-rotation in L30E4's reseed.
+    //   2. If alienBehaviorState != 0, return (pipeline busy).
+    //   3. If primary cooldown ($4355) == 0, call L30E4 to reseed it.
+    //   4. Otherwise decrement primary cooldown; if it hits 0, set
+    //      alienBehaviorState = 1 to kick off the swoop pipeline.
+    //
+    // The reseed (L30E4) computes:
+    //   C = computeLevelFactor() + (0x0F - clamp(Counter9A high byte, 0x0F))
+    //   For each of {$4359, $435A, $435B}: if the slot is 0, rotate C right
+    //     by 1; for the FIRST 0-slot encountered (B starts at 1), also write
+    //     0x0C into it.
+    //   alienCooldown = ((C >> 2) & 0x3F) + 1
+    //
+    // Net behavior at stage 1: primary cooldown values in roughly 1-12
+    // range, giving 1-12 case-2 firings (= 32-384 frames = ~0.5-6.4s)
+    // between successive swoop pipeline kicks. Matches arcade pacing
+    // (1-4 s typical) and varies with Counter9A and level.
     behaviorCooldown() {
-        if (state.alienBehaviorState !== 0) return;
-        state.alienCooldown--;
-        if (state.alienCooldown <= 0) {
-            state.alienBehaviorState = 1;
-            state.alienCooldown = 6;
+        // L30DA × 3 — tick secondary timers unconditionally (decrement if non-zero).
+        if (state.alienCooldownTimer1 !== 0) state.alienCooldownTimer1--;
+        if (state.alienCooldownTimer2 !== 0) state.alienCooldownTimer2--;
+        if (state.alienCooldownTimer3 !== 0) state.alienCooldownTimer3--;
+
+        if (state.alienBehaviorState !== 0) return;          // pipeline busy
+
+        if (state.alienCooldown === 0) {
+            this.cooldownReseed();                            // L30E4
+            return;
+        }
+        state.alienCooldown = (state.alienCooldown - 1) & 0xFF;
+        if (state.alienCooldown === 0) {
+            state.alienBehaviorState = 1;                     // kick off swoop pipeline
         }
     },
 
+    // L30E4 — reseed primary cooldown $4355 from Counter9A high byte +
+    // level factor, modulated by the state of the 3 secondary timers.
+    // See behaviorCooldown comment for derivation; L3112 inlined here.
+    cooldownReseed() {
+        // L3074 — level-derived factor (≈24-31 on stage 1, round 0).
+        let c = this.computeLevelFactor();
+        // Counter9A high byte ($439A), clamped to max 0x0F.
+        const c9aHi = (state.counter9a >> 8) & 0xFF;
+        const clamped = c9aHi >= 0x10 ? 0x0F : c9aHi;
+        c = (c + (0x0F - clamped)) & 0xFF;
+
+        // L3112 × 3 inlined. B starts at 1; the FIRST 0-valued secondary
+        // timer gets written to 0x0C, and B decrements (so only one slot
+        // is written per reseed). C rotates right for every slot that's
+        // 0 (regardless of whether it was the writable one).
+        let b = 1;
+        const slots = ['alienCooldownTimer1', 'alienCooldownTimer2', 'alienCooldownTimer3'];
+        for (const slot of slots) {
+            if (state[slot] !== 0) continue;        // RET NZ — skip when non-zero
+            c = (c >> 1) & 0x7F;                    // RRCA + AND $7F
+            if (b === 0) continue;                  // L3112 RET Z — skip the write
+            b--;
+            state[slot] = 0x0C;
+        }
+
+        // Final: $4355 = ((C >> 2) & 0x3F) + 1, range 1-64.
+        state.alienCooldown = ((c >> 2) & 0x3F) + 1;
+    },
+
     // L3124 — compute swoop count into $4353 (gates on $4350 == 1).
-    // research_enemy_motion.md §6.5.
+    // Source-faithful port. research_enemy_motion.md §6.5.
     //
-    // ⚠ DEVIATION FROM SOURCE — acceptable for now, may need tuning later.
-    // Source L3124 computes the cap as:
-    //   A = (LevelAndRound RRCA RRCA) & 0x0F   ; (level<<2 | round)
-    //   A = min(A + 5, 0x11)
-    //   A -= alienPhaseCount                   ; angry waves shrink the cap
-    //   roll = GetRandomNumber + 1             ; uniform 1..16
-    //   count = (roll < A) ? roll : 1          ; usually 1, occasionally up to ~5
-    // Our port uses a much smaller cap (= 1 at stage 1) and ignores
-    // alienPhaseCount. Net effect: stage 1 always produces count=1.
-    // Visible-but-not-broken: late-stage gameplay would have weaker
-    // multi-alien swoops than the arcade. Revisit when porting later
-    // levels — see progress.md "Known deferred issues".
+    // Formula:
+    //   raw = ((LevelAndRound RRCA RRCA) & 0x0F) + 5
+    //   if raw >= 0x11: raw = 5            ; source RESETS to 5 (not min/cap)
+    //   cap = raw - alienPhaseCount         ; angry waves shrink the cap
+    //   roll = getRandomNumber + 1          ; uniform 1..16
+    //   swoopCount = (roll < cap) ? roll : 1
+    //
+    // Stage 1 (LR=1): RRCA×2 → 0x40 & 0xF = 0 → raw = 5 → cap = 5 pre-angry,
+    //   shrinking to 2 after 3 angry waves. P(swoop=1)=13/16, P(2..4)=1/16
+    //   each; average ~1.4 aliens per swoop. After 3 angry waves cap=2 forces
+    //   swoopCount=1 always.
     behaviorSwoopCount() {
         if (state.alienBehaviorState !== 1) return;
-        // Cap grows with LevelAndRound; round 1 sends 1 alien.
-        const cap = Math.min(5, 1 + (state.levelAndRound >> 1));
-        state.alienSwoopCount    = Math.max(1, 1 + Math.floor(Math.random() * cap));
         state.alienBehaviorState = 2;
+
+        const lr = state.levelAndRound & 0xFF;
+        // RRCA × 2 — rotate right twice; bits 1,0 wrap to bits 7,6.
+        const r1 = ((lr >> 1) | ((lr & 1) << 7)) & 0xFF;
+        const r2 = ((r1 >> 1) | ((r1 & 1) << 7)) & 0xFF;
+        let raw = (r2 & 0x0F) + 5;
+        if (raw >= 0x11) raw = 5;
+        const cap = (raw - state.alienPhaseCount) & 0xFF;
+
+        const roll = (this.getRandomNumber() + 1) & 0xFF;   // 1..16
+        state.alienSwoopCount = (roll < cap) ? roll : 1;
     },
 
     // L315A — pick which alien to swoop (gates on $4350 == 2).
