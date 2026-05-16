@@ -30,6 +30,7 @@ export const render = {
         for (const alien of state.aliens) this.drawAlien(alien);
         if (state.player.alive) this.drawPlayer();
         if (state.player.bullet.active) this.drawPlayerBullet();
+        this.drawEnemyBullets();
         this.drawHud();
     },
 
@@ -147,6 +148,19 @@ export const render = {
     drawPlayerBullet() {
         const b = state.player.bullet;
         gfx.ctx.drawImage(resource.fgTileImages[b.tile], b.x, b.y);
+    },
+
+    // EnemyBulletDataController $0CD8 — draw active enemy bullets. Each
+    // bullet is a single 8×8 fg tile in the range $58-$5F (shape stored on
+    // the bullet itself; L0C84 animates by toggling bit 2 between $58/$5C,
+    // $59/$5D, etc.). Inactive slots (state & 0x08 == 0) are skipped.
+    drawEnemyBullets() {
+        const ctx = gfx.ctx;
+        const images = resource.fgTileImages;
+        for (const b of state.enemyBullets) {
+            if ((b.state & 0x08) === 0) continue;
+            ctx.drawImage(images[b.shape], b.x, b.y);
+        }
     },
 
     drawDebugGrid() {

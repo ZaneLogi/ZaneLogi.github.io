@@ -32,7 +32,7 @@ Sibling docs:
 | 8 | Alien combat (state 3 stage 1, `$2000`) + AABB collision | ✅ | `AlienBehaviorUpdate $3000` swoop scheduler ported source-faithfully: 8-state Counter93 dispatch, T3300/T3310/T3330 pattern lookup with L/R asymmetry + Y-band-or-phase-count branch (`behaviorPickPattern` mirrors `L31B4` byte-for-byte), ptr-LSB sync gate in `behaviorPickAlien` (`L315A`), `behaviorScanAdvance` + `behaviorCommit` matching against `alienSwoopLsb`. Closed-loop swoop paths traversed via two 1 KB `PATH_ROM_LOW`/`PATH_ROM_HIGH` slices covering $1000-$13FF (T1020-T13D0) and $2C00-$2FFF (T2C00-T2FA0), labeled per-pattern + `PATTERNS` dict export. AABB collision: `playerBulletCollision`, `alienVsPlayerCollision` (currently disabled — see Known issues), `onAlienHit`, `onPlayerHit`. `stageClearUpdate`. `scoring.js` ported. **Lane swap**: movement+animation on lane-0, behavior on lane-1 (source: opposite). The swap is what makes swoop dx=±4 alignment work without port-specific x-snap hacks; lets all sub-states stay source-faithful (`research_enemy_motion.md §1.0`). **2×2 sprite rendering**: tile order is column-major (`[UL, LL, UR, LR]`, not row-major) because Phoenix's CRT is rotated; partial-sprite variants from source's tile-persistence cycle substituted with last-known-full controlB and drawn at exact `(x, y)` (`research_rendering.md §2.5`). Open issues tracked under "Known deferred issues" below. |
 | 8a-e | Swoop pipeline hardening | ✅ | **8a**: re-enabled `behaviorAngryPattern` (debug `return;` removed). **8b**: source-faithful `behaviorCooldown` port — L30BA tick-down of three secondary timers + new `cooldownReseed` helper implementing L30E4 + L3112 (primary cooldown derived from `Counter9A` high byte + `computeLevelFactor` + secondary-timer state). **8c**: source-faithful `behaviorSwoopCount` port — L3124 cap formula `((LR RRCA RRCA) & 0x0F) + 5` with "reset to 5 if ≥ 0x11" branch, `alienPhaseCount`-shrinking cap, and `roll < cap ? roll : 1` selection. **8d**: stage 4+ stop-gap — `stageClearUpdate` wraps `LevelAndRound` to next round's stage 0 instead of advancing into unimplemented stages (spiral-fill/birds/mothership), keeping play looping through alien waves until step 11 lands. **8e**: `state2_StageInit` zero-fills all 12 modeled fields in `$4350-$435B` (L32B0 mirror) so `alienPhaseCount` and friends reset between stages — fixes a latent bug where the angry-wave triple on wave-1 would have suppressed all future angry waves. Timing interlock between lane swap, movement+animation merge, and Counter93 dispatch phase documented at `research_enemy_motion.md §1.0.1` with `⚠` pointers from `stageAlienCombat`, `alienMovementUpdate`, `alienAnimationUpdate`, and `alienBehaviorUpdate`. |
 | 8f | L2146 depleted-formation routing | ✅ | Source-faithful port of the `$435E` sticky flag + L2146 dispatch. When `AliensLeft<5` and the masked counter reaches 0, `aliensLeftFlag` (mirror of `$435E`) latches `$FF`; subsequent frames OR lanes 2 and 3 into the existing lane-0/lane-1 handlers, doubling movement and behavior to every-2-frames instead of every-4. Flag cleared by L32B0 zero-fill at state-2 init. New `state.aliensLeftFlag` field. Lane mapping preserves the §1.0 lane swap and §1.0.1 interlock (none of the three interlocked knobs touched). Port-side detail in `research_enemy_motion.md §1.0.3`. |
-| 9 | Alien bullet (`L2560` / `EnemyBulletUpdate`) + re-enable `alienVsPlayerCollision` | ⏳ | Add enemy fire trigger and bullet update lanes; re-enable alien-vs-player collision once state-4 player-explosion has lives/explosion-anim coverage (may need its own sub-step). Slots into existing combat lane structure (lane 2 in full-formation, doubled to lanes 0,2 in depleted via the L2146 mapping). |
+| 9 | Alien bullet (`L2560` / `EnemyBulletUpdate`) | ✅ | `enemyBulletUpdate` ports L0C40 chain (per-slot fall +4 y/tick, shape-bit-2 animation toggle, deactivate at y≥$F9). `enemyFireScanAndSpawn` ports the L2560 → L2596 → L25B7 → L25E0 chain: column-pick via `counter93 & 1`, 8-alien scan with controlA/controlB/y/x filters, round-based slot cap (3/4/5 for rounds 0/1/2+), spawn at `(alienX+4, alienY+0x0C)` with pseudo-random shape in $58-$5F. New `state.enemyBullets[5]` (mirror of $43CC-$43DF), `mappedPlayerX()` helper (L097A inline). Lane dispatch: enemyBulletUpdate on full lanes 0+3 (matches source's 30 Hz cadence from source lanes 1+3), enemyFireScanAndSpawn on full lane 2 (source lane 2); in depleted both bundled onto port lanes 1+3 mirroring source L2190. Port mapping detail in `research_enemy_motion.md §1.0.4`. **Player-hit path NOT ported** (per user direction): L0CB4/L0CC4 skipped, bullets pass through player harmlessly. Re-enabling alien-vs-player collision and the L0CB4 enemy-bullet → player path is deferred to a follow-up alongside lives / proper state-4 explosion. |
 | 10 | Stage→stage transition visual | ⏳ | Fade-out + JT4 stage advance — symmetric to step-5's L0834 fade-in. Same GetAnimationChrs / controlA/B phasing machinery. Remove step-8d `LevelAndRound` wrap stop-gap when the full transition lands (or when step 11 lands, whichever first). |
 | 11 | Birds (`$3400`) + mothership (`$22B4`/`$22CA`) + shield-block tile-swapping | ⏳ | Renumbered from old step 9. Pulls in still-open mothership research. Closes out the 5-stage round cycle; remove the 8d wrap stop-gap as part of this. |
 | – | Sound (MN6221AA bit-field synthesis) | ⏸️ | Per `research_hardware.md` §5; only matters for audio fidelity |
@@ -41,7 +41,8 @@ Sibling docs:
 
 Items where the port currently deviates from source behavior in a way
 the user can observe at runtime. Listed here (not buried in step rows)
-so they don't get lost. Resolve in step 9 or a dedicated cleanup pass.
+so they don't get lost. Resolve in a follow-up sub-step or dedicated
+cleanup pass.
 
 - **Lane swap: movement+animation on lane-0, behavior on lane-1.**
   Source has behavior on lane-0 and movement+animation on lanes 1+2.
@@ -55,13 +56,15 @@ so they don't get lost. Resolve in step 9 or a dedicated cleanup pass.
   source's much longer `L30E4`-seeded cooldown shifts the phase
   before commits start firing).
 
-- **`alienVsPlayerCollision` disabled.** Returns at the top. When
-  enabled, it routes to `gameState=4` (player-explosion), but
-  state-4 is a stub: no lives counter, no explosion sprite, no
-  game-over. Visually the player just briefly vanishes and reappears
-  during a swoop, which is confusing. Re-enable as part of step 9
-  (alien bullet) once lives / explosion-anim / game-over are in
-  place — may need a sub-step.
+- **`alienVsPlayerCollision` disabled + enemy-bullet → player path
+  skipped.** Both routes go through `gameState=4` (player explosion),
+  which is still a stub: no lives counter, no explosion sprite, no
+  game-over. `alienVsPlayerCollision` returns at the top;
+  `enemyBulletUpdate` does not run the L0CB4 → L0CC4 player-hit check
+  per user direction during step 9 (bullets fall through harmlessly).
+  Net effect: the player cannot die. Re-enable both as a follow-up
+  once lives / explosion-anim / game-over are in place — likely a
+  sub-step before step 10 / 11.
 
 - **Stage 4+ stop-gap: LR wraps to next round's stage 0.** Step 8d
   added a wrap in `stageClearUpdate` so when `LevelAndRound`'s stage

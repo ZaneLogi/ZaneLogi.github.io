@@ -73,6 +73,20 @@ export const state = {
             bullet: { active: false, x: 0, y: 0, tile: 0x50 },
         };
 
+        // Enemy bullets — 5 slots, mirror of $43CC-$43DF (4 bytes per slot:
+        // State, Shape, X, Y). research_enemy_motion.md (step 9 work) and
+        // RAMUse.md $43CC-$43DF. Source spawns bullets via L25E0; they fall
+        // at y += 4 per EnemyBulletUpdate tick (L0C84). `state` mirrors bit 3
+        // of the source $08-flag (active when set); `shape` is a tile code
+        // in $58-$5F (animation toggles bit 2 between $58/$5C, etc.).
+        // Inactive slots stay at state=0 and are skipped by render.
+        this.enemyBullets = Array.from({ length: 5 }, () => ({
+            state: 0,    // $43CC+i*4
+            shape: 0,    // $43CD+i*4
+            x: 0,        // $43CE+i*4
+            y: 0,        // $43CF+i*4
+        }));
+
         // 16 alien slots, mirror of $4B70-$4BAF (4 bytes per alien:
         // controlA, controlB, X, Y). InitAlienControlStates ($05EC) sets
         // controlA/B from T1500; InitAlienPositions ($0610) sets x/y from

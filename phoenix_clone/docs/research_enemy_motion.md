@@ -234,6 +234,66 @@ swap, movement+animation merge, Counter93 phase) are touched. Movement
 still fires the frame before behavior in both 4-state and 2-state
 cycles.
 
+### 1.0.4 Enemy fire + bullet update port mapping
+
+`L2560` (enemy fire trigger / spawn) and `EnemyBulletUpdate` ($0C40)
+share the combat-lane dispatch with movement and behavior. Source's
+per-lane mapping (full-formation L2130 from the §1 table):
+
+| Source lane | Source work                                     |
+|------|--------------------------------------------------------|
+| 0    | `AlienDataController` + `AlienBehaviorUpdate` + `L0F00` |
+| 1    | `L24C4` + **`EnemyBulletUpdate`** + `AlienMovementUpdate` + `L0FC0` |
+| 2    | `AlienAnimationUpdate` + **`L2560`**                    |
+| 3    | `L24C4` + **`EnemyBulletUpdate`** + `L0A6C` + `L0FC0`   |
+
+Source's depleted L2146 (per §1.0.3) compresses this 4-lane layout
+into a 2-state bit-0 dispatch:
+
+- `L2190` (bit-0 = 0, counters 0 and 2): behavior + `L0F00` + **`L2560` + `EnemyBulletUpdate`**
+- `L21A5` (bit-0 = 1, counters 1 and 3): movement + animation + `L0A6C` + `L0FC0` + `L24C4`
+
+Port placement (preserves the §1.0 lane swap and matches source's
+per-call rates):
+
+| `combatLane & 3` | Full-formation (≥5)                                | Depleted (<5)                                       |
+|------|-----------------------------------------------------------|------------------------------------------------------|
+| 0    | movement + animation + **`enemyBulletUpdate`**             | movement + animation                                 |
+| 1    | behavior + collision                                       | behavior + collision + **`enemyFireScanAndSpawn` + `enemyBulletUpdate`** |
+| 2    | **`enemyFireScanAndSpawn`**                                | movement + animation                                 |
+| 3    | **`enemyBulletUpdate`**                                    | behavior + collision + **`enemyFireScanAndSpawn` + `enemyBulletUpdate`** |
+
+Per-cycle rates match source exactly:
+
+- `enemyBulletUpdate`: 2× per 4 frames in both modes (full: lanes 0+3;
+  depleted: lanes 1+3) → 30 Hz position update → bullet falls at 4 px
+  every 2 frames = 120 px/s.
+- `enemyFireScanAndSpawn`: full 1× per 4 frames (lane 2) = 15 Hz scan;
+  depleted 2× per 4 frames (lanes 1+3) = 30 Hz scan. The 2× depleted
+  rate is what makes the late-stage "more aggressive fire" feel.
+
+**Why not extend step 8f's lane-doubling pattern.** Step 8f's depleted
+dispatch simply duplicated lane-0/lane-1 work onto lanes 2/3. That
+pattern can't carry `enemyFireScanAndSpawn` because source's L2190
+puts it on the **behavior** side (not on the movement-side it would
+land on if we re-used lane 0). The port's depleted dispatch therefore
+needs its own bundle for the behavior-side lanes (1+3) rather than a
+generic "double everything" rule. Same applies to `enemyBulletUpdate`,
+which source spreads across two full-formation lanes (1+3) but bundles
+into one depleted slot (L2190).
+
+**Counter93 timing.** `enemyFireScanAndSpawn` reads `(counter93 & 1)`
+to choose the firing column. `alienBehaviorUpdate` increments
+`counter93` on lane 1 (and lane 3 when depleted). The port dispatches
+`enemyFireScanAndSpawn` on the same lane right after the increment,
+so it sees the just-incremented value — matching source where L2560
+on lane 2 reads `counter93` after lane-0 behavior runs.
+
+**`L24C4` not ported.** Per §1 it's background-scroll dispatch
+(`level < 8` → `L06F0`, step 3 territory) or mothership-stage glue
+(`level >= 8`, step 11). Stubbed as no-op; revisit when step 3 or
+step 11 lands.
+
 ### 1.1 Functions that affect alien movement
 
 "Movement" here means anything that writes to `alien.x` / `alien.y` or

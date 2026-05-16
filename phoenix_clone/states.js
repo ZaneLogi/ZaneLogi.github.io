@@ -362,6 +362,33 @@ export const states = {
             this.alienBehaviorUpdate();
             this.alienVsPlayerCollision();
         }
+
+        // Step 9 — enemy fire trigger + bullet update lane placement.
+        // Full-formation (L2130): EnemyBulletUpdate fires on source lanes
+        // 1+3 (2 of 4 frames → 30 Hz, 4 px/tick → 120 px/s bullet fall).
+        // L2560 fires on source lane 2 (1 of 4 frames → 15 Hz scan).
+        // Port-swap maps source lane 1 → port lane 0 and source lane 2
+        // stays as port lane 2 (animation moved to lane 0). Source lane 3
+        // stays as port lane 3 (was empty after the swap).
+        //
+        // Depleted (L2146): source's L2190 (bit-0=0 / counters 0+2) bundles
+        // L2560 + EnemyBulletUpdate together with behavior. Port-swap maps
+        // bit-0=0 → port bit-0=1, so port lanes 1+3 host the bundle.
+        //
+        // Counter93 alignment: enemyFireScanAndSpawn reads (counter93 & 1)
+        // to choose the firing column. alienBehaviorUpdate increments
+        // counter93 in lane 1 (and lane 3 when depleted) BEFORE this block,
+        // so enemyFireScanAndSpawn always sees the just-incremented value
+        // — same alignment as source where L2560 reads counter93 after
+        // lane-0 behavior runs.
+        if (!depleted) {
+            if (lane === 0 || lane === 3) this.enemyBulletUpdate();
+            if (lane === 2) this.enemyFireScanAndSpawn();
+        } else if (lane === 1 || lane === 3) {
+            // L2190 bundle (port lanes 1+3): both calls fire together.
+            this.enemyFireScanAndSpawn();
+            this.enemyBulletUpdate();
+        }
     },
 
     // L0DF0 — bullet-vs-alien scan. Called every frame (not lane-gated).
@@ -1006,6 +1033,131 @@ export const states = {
             // TODO: use 0x50 + (b.x & 7) (T1620[X%8]) for correct sub-pixel
             // variant at spawn. Visually negligible (bullet moves too fast).
         }
+    },
+
+    // L0C40 EnemyBulletUpdate — iterate the 5 bullet slots, advance each
+    // active one. Source chain:
+    //   L0C40 → L088B copy current→old   (skip — canvas port has no
+    //                                      double-buffer screen RAM)
+    //         → L0C56 → L0C84 per slot   (movement + animation, ported here)
+    //         → L0C6B screen-ram address (skip — canvas addresses by (x,y))
+    //         → L0CD8 EnemyBulletDataController (replaced by render.js
+    //                                            drawEnemyBullets)
+    //
+    // Per-slot L0C84 (Code.md $0C84):
+    //   - if state & 0x08 == 0: return (inactive slot)
+    //   - shape ^= 0x04                  (animation: $58↔$5C, $59↔$5D, etc.)
+    //   - y += 4                          (fall 4 px/tick — 30 Hz tick gives
+    //                                      120 px/s in source's lane-1+3 cadence)
+    //   - if y >= 0xF9: clear state bit 3 (L096E) — bullet left screen
+    //   - else: L0CB4/L0CC4 player-hit check  (SKIPPED — see note below)
+    //
+    // ⚠ Player-hit path (L0CB4 → L0CC4 → gameState=4) intentionally skipped
+    // per user direction (step 9.2). Bullets fall through the player ship
+    // harmlessly. The full source-faithful collision (with state-4 player
+    // explosion + lives + game-over) is deferred until those pieces exist.
+    enemyBulletUpdate() {
+        for (const b of state.enemyBullets) {
+            if ((b.state & 0x08) === 0) continue;
+            b.shape ^= 0x04;
+            b.y = (b.y + 4) & 0xFF;
+            if (b.y >= 0xF9) {
+                b.state &= ~0x08;
+            }
+            // L0CB4/L0CC4 player-hit path skipped (see comment above).
+        }
+    },
+
+    // L2560 enemy-fire scan + L25B7/L25E0 spawn. Picks a formation column
+    // (Counter93 bit 0 selects aliens 0-7 or 8-15), filters via L2596 for
+    // an alien sitting "above" the player ship and in formation, then
+    // L25B7 finds a free enemy-bullet slot (round-capped) and L25E0
+    // spawns the bullet at the chosen alien's offset.
+    //
+    // Source (Code.md $2560-$25FD):
+    //   L2560: HL=$4B70+(Counter93&1)*$20  ; column start (alien 0 or 8)
+    //          E=8                          ; iterate 8 aliens
+    //          D=$AD + alienPhaseCount*8    ; alien-Y upper bound
+    //          C=$439F + 3                  ; player-right + 3
+    //          B=$439E - $0A                ; player-left - 10
+    //          for 8 aliens: L2596 filter → last match wins (B/C overwritten)
+    //   L2596: alien filter
+    //          controlA bit 3 set         (alive)
+    //          controlB != $08 and < $88   (alive sprite, not explosion)
+    //          B <= x < C                 (x inside player firing band)
+    //          $80 <= y < D                (y inside formation range)
+    //   L25B7: bullet-slot cap by round
+    //          round 0 → cap 3, round 1 → cap 4, round 2+ → cap 5
+    //          find first inactive slot (state & 0x08 == 0); if none, give up
+    //   L25E0: spawn at (chosenAlien.x + 4, chosenAlien.y + 0x0C)
+    //          state := 0x08
+    //          shape := 0x58 + ((x >> 1) & 3) + (y & 4)   ; range $58-$5F
+    enemyFireScanAndSpawn() {
+        // L2560: column + bounds.
+        const colStart = (state.counter93 & 1) ? 8 : 0;
+        const yMax = (0xAD + state.alienPhaseCount * 8) & 0xFF;
+        const { left: playerLeft, right: playerRight } = this.mappedPlayerX();
+        const xMin = (playerLeft  - 0x0A) & 0xFF;
+        const xMax = (playerRight + 0x03) & 0xFF;
+
+        // Scan 8 aliens; last alien passing the filter wins (source's L25B5/B6
+        // re-writes B/C each successful pass before falling into L25B7).
+        let chosenX = -1, chosenY = -1;
+        for (let i = 0; i < 8; i++) {
+            const a = state.aliens[colStart + i];
+            // L2596 filter chain (each line maps to one RET-NZ/C/NC branch).
+            if ((a.controlA & 0x08) === 0) continue;   // not alive
+            if (a.controlB === 0x08) continue;         // controlB = $08 marker
+            if (a.controlB >= 0x88) continue;          // controlB >= $88
+            if (a.x < xMin) continue;                  // x < player band
+            if (a.x >= xMax) continue;                 // x >= player band
+            if (a.y >= yMax) continue;                 // too low (below cap)
+            if (a.y <  0x80) continue;                 // too high (above formation)
+            chosenX = a.x;
+            chosenY = a.y;
+        }
+        if (chosenX < 0) return;   // no firing candidate
+
+        // L25B7: round-based slot cap.
+        const round = (state.levelAndRound >> 4) & 0x0F;
+        const slotCap = round < 1 ? 3 : round < 2 ? 4 : 5;
+
+        // L25CD: first inactive slot within cap (else give up).
+        let slot = -1;
+        for (let i = 0; i < slotCap; i++) {
+            if ((state.enemyBullets[i].state & 0x08) === 0) {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0) return;
+
+        // L25E0: spawn.
+        const bx = (chosenX + 0x04) & 0xFF;
+        const by = (chosenY + 0x0C) & 0xFF;
+        const b  = state.enemyBullets[slot];
+        b.state = 0x08;
+        b.shape = 0x58 + (((bx >> 1) & 0x03) + (by & 0x04));   // 0x58-0x5F
+        b.x = bx;
+        b.y = by;
+    },
+
+    // L097A — port equivalent for $439E/$439F (mapped player left/right
+    // tile columns). Source maintains these as RAM state each frame; this
+    // port computes them on the fly since enemyFireScanAndSpawn is the only
+    // caller (would also be needed for re-enabled L0CB4 player-hit path,
+    // step 9-followup). Promote to state field if more callers appear.
+    //
+    // T0B38 (research_player_movement.md §7): symmetric delta table indexed
+    // by X%8. left = X - leftDelta, right = X + rightDelta = X + leftDelta + 8.
+    mappedPlayerX() {
+        const T0B38_LEFT = [0, 1, 2, 3, 3, 2, 1, 0];
+        const x = state.player.x & 0xFF;
+        const lDelta = T0B38_LEFT[x & 7];
+        return {
+            left:  (x - lDelta) & 0xFF,
+            right: (x + lDelta + 8) & 0xFF,
+        };
     },
 
     // L0AEA — player explosion + respawn. Stub: wait ~128 ticks then respawn.
