@@ -10,6 +10,7 @@ import {
     ALIEN_MOVE_PTR_INIT,  // source T1520
     ALIEN_FORMATIONS,     // source T1540
     ALIEN_BIRD_PARTITION, // source T1760
+    ALIEN_EXPLOSION_ROM,  // source $17B0..$17F5 — T17B0 + frame tiles
     MOTION_PATH_BASE,     // source T1000
     MOTION_DIRECTIONS,    // source T1700
     ANIMATION_TABLE,      // source T16A0
@@ -140,6 +141,23 @@ export const states = {
         state.alienCooldownTimer2 = 0;  // $435A
         state.alienCooldownTimer3 = 0;  // $435B
         state.aliensLeftFlag      = 0;  // $435E — depleted-formation sticky flag
+        // $4370-$437F is also part of the L32B0 zero-fill range. Reset
+        // both the 2 alien-kill explosion slots ($4370/$4374) and the 2
+        // bonus-kill explosion slots ($4378/$437C) so no leftover
+        // explosions carry into the new stage.
+        for (const e of state.explosions) {
+            e.counter  = 0;
+            e.scoreBcd = 0;
+            e.x        = 0;
+            e.y        = 0;
+            e.frameLsb = 0;
+        }
+        for (const e of state.bonusExplosions) {
+            e.counter  = 0;
+            e.scoreBcd = 0;
+            e.x        = 0;
+            e.y        = 0;
+        }
     },
 
     // L0580 InitGlobalLevelData — index STAGE_BLOCK_INDEX (source T0598)
@@ -299,26 +317,39 @@ export const states = {
     // aliens to screen RAM gated by Bit3Controller; here alive=true enables
     // render.js drawAlien for this frame.
     stageAlienCombat() {
-        // Stage-clear check: if no aliens remain, drain the post-clear
-        // counter instead of running normal combat (mirrors L2015 JZ L21BA).
+        // L2000 head — these run every frame regardless of AliensLeft
+        // (matches source order: PlayerUpdate at $2000, L0DF0 at $2003,
+        // L24A0 at $2006 — all before the $435F counter read+increment
+        // and the AliensLeft check at $2011).
+        state.player.alive = true;
+        this.playerUpdate();          // L0876
+        // Bullet-vs-alien scan: source calls L0DF0 before the lane switch
+        // at $200E; runs even during stage clear since the player bullet
+        // can still be in flight.
+        this.playerBulletCollision();
+        // L24A0 stubbed (bird / UFO machinery, step 11).
+
+        // L2009-L2010: read+increment the $435F masked counter. Source
+        // advances this regardless of AliensLeft — the stage-clear path
+        // (L21BA) consumes the SAME counter for its bit-0 dispatch.
+        const lane = state.combatLane & 3;
+        state.combatLane = (state.combatLane + 1) & 0xFF;
+
+        // L2011-L2015: AliensLeft check. Stage-clear path (L21BA) drains
+        // the post-clear countdown + runs residual bullets/explosions
+        // during the pause; see stageClearUpdate.
         if (state.aliensLeft === 0) {
-            this.stageClearUpdate();
+            this.stageClearUpdate(lane);
             return;
         }
 
-        state.player.alive = true;
-        this.playerUpdate();          // L0876 — every frame, not lane-gated
+        // alive=true loop (mirror of AlienDataController $0A50). Runs only
+        // during normal combat; during stage clear no aliens have
+        // controlA bit 3 set, so this would be a no-op anyway.
         for (let i = 0; i < 16; i++) {
             const a = state.aliens[i];
             if ((a.controlA & 0x08) !== 0) a.alive = true;
         }
-
-        // Bullet-vs-alien scan: runs every frame outside the lane router
-        // ($0DF0 in source, called before the lane switch at $200E).
-        this.playerBulletCollision();
-
-        const lane = state.combatLane & 3;
-        state.combatLane = (state.combatLane + 1) & 0xFF;
         // ⚠ PORT-SPECIFIC LANE SWAP — see research_enemy_motion.md §6.10
         // (swoop alignment via lane-order swap):
         //   Source's L2000 has behavior on lane-0 and movement on lane-1,
@@ -358,6 +389,20 @@ export const states = {
         if (lane === 0 || (lane === 2 && depleted)) {
             this.alienMovementUpdate();
             this.alienAnimationUpdate();
+            // Step 10: L0FC0 explosion animation lives alongside movement.
+            // Source full L2130: L0FC0 is on lane 1 (with EnemyBulletUpdate +
+            // AlienMovementUpdate) → port lane 0 after the swap.
+            // Source depleted L21A5 (bit-0=1, counters 1+3) also runs L0FC0
+            // alongside movement+animation → port bit-0=0 lanes 0+2 after
+            // the swap, which matches this branch (lane 0, or lane 2 when
+            // depleted). One additional call for full lane 3 lives below.
+            //
+            // Source L0FC0 processes ALL 4 slots in one call: alien slots
+            // ($4370/$4374) via L0FD8, then bonus slots ($4378/$437C) via
+            // L3758. Port keeps them as separate functions but calls both
+            // together everywhere L0FC0 fires.
+            this.explosionUpdate();
+            this.bonusExplosionUpdate();
         } else if (lane === 1 || (lane === 3 && depleted)) {
             this.alienBehaviorUpdate();
             this.alienVsPlayerCollision();
@@ -371,9 +416,17 @@ export const states = {
         // stays as port lane 2 (animation moved to lane 0). Source lane 3
         // stays as port lane 3 (was empty after the swap).
         //
+        // Step 10: source full lane 3 also has L0FC0 (alongside
+        // EnemyBulletUpdate). Port port-lane 3 in full-formation hosts
+        // both calls; together with the explosionUpdate in the lane-0
+        // movement handler above, this gives the source-faithful 30 Hz
+        // L0FC0 rate (2 of 4 frames).
+        //
         // Depleted (L2146): source's L2190 (bit-0=0 / counters 0+2) bundles
         // L2560 + EnemyBulletUpdate together with behavior. Port-swap maps
         // bit-0=0 → port bit-0=1, so port lanes 1+3 host the bundle.
+        // (L0FC0 in depleted lives on the OTHER bit-0 side via L21A5 —
+        // already handled in the lane-0/lane-2 mvmt handler above.)
         //
         // Counter93 alignment: enemyFireScanAndSpawn reads (counter93 & 1)
         // to choose the firing column. alienBehaviorUpdate increments
@@ -384,6 +437,10 @@ export const states = {
         if (!depleted) {
             if (lane === 0 || lane === 3) this.enemyBulletUpdate();
             if (lane === 2) this.enemyFireScanAndSpawn();
+            if (lane === 3) {
+                this.explosionUpdate();
+                this.bonusExplosionUpdate();
+            }
         } else if (lane === 1 || lane === 3) {
             // L2190 bundle (port lanes 1+3): both calls fire together.
             this.enemyFireScanAndSpawn();
@@ -404,7 +461,7 @@ export const states = {
             const ay = a.y & ~7;
             const { w, h } = alienBox(a.controlA);
             if (aabbHit(ax, ay, w, h, b.x, b.y, 8, 8)) {
-                this.onAlienHit(a);
+                this.onAlienHit(a, i);
                 b.active = false;
                 break;   // one bullet hits one alien (source L0E18 breaks after first hit)
             }
@@ -442,14 +499,127 @@ export const states = {
     },
 
     // Called when a player bullet hits an alien (bullet-vs-alien path).
-    // Clears the alien's draw-enable bit, decrements aliensLeft, adds score.
-    onAlienHit(alien) {
+    // Source path: L0DF0 → L0E10 → (L0E70 → L0EA0) for formation hits, or
+    // (L0E58 → L0C00) for swoop hits → L0EA4 → L0EAD → L38F8-like slot
+    // allocator → L0EE0 decrement AliensLeft.
+    //
+    // Source scoring (Code.md $0EA0 + $0C00):
+    //   - Formation alien (screen tile $60-$67): counter=$0C, scoreBcd=$02
+    //                                            → 20 pts, alien slot
+    //   - Swoop alien, path byte != 7/8:         counter=$0C, scoreBcd=$04
+    //                                            → 40 pts, alien slot
+    //   - Swoop alien, current path byte 7 or 8: counter=$10, scoreBcd=$20
+    //     (alien climbing back up from a dive,   → 200 pts, BONUS slot
+    //      see T1700 idx 7 = X+4 Y-2,             (sprite + popup digits
+    //      idx 8 = X-4 Y-2)                       via T17D0+T17D6+L37B0)
+    //
+    // Path-byte 7/8 appear scattered throughout most swoop patterns
+    // (T1110, T1140, T11E0, T12DA, T1310, T1338, T1374, T13BC, T13E0,
+    // T2C20, T2C80, T2CB0, T2DA0, T2DE0, T2E80, T2EB0, T2EE0, T2F20).
+    // So bonus kills are reachable in regular stage-1 swoops — not
+    // angry-pattern-specific.
+    //
+    // Port detection:
+    //   - Formation hit: alienMovePtr in $1000..$101F (T1000 drift)
+    //   - Bonus hit:    alienMovePtr OUTSIDE that range AND current
+    //                   path byte is 7 or 8
+    //   - Regular swoop hit: everything else
+    onAlienHit(alien, alienIdx) {
         alien.controlA &= ~0x08;   // Bit4Controller delete path clears this in source
         alien.alive = false;
         state.aliensLeft = Math.max(0, state.aliensLeft - 1);
-        // TODO: look up per-alien score from source score table (L0E10 path).
-        // Placeholder: 50 points per kill.
-        scoring.addPoints(50, state.gameAndDemoOrSplash);
+
+        const ptr = state.alienMovePtr[alienIdx];
+        const isFormation = ptr < 0x1020;
+        // Read the alien's CURRENT path byte (the next motion vector it
+        // would take). Source L0C00 dereferences (HL=alienMovePtr) to
+        // get this byte.
+        const pathByte = isFormation ? 0 : getPathByte(ptr);
+        const isBonus  = !isFormation && (pathByte === 0x07 || pathByte === 0x08);
+
+        let scoreBcd, points;
+        if (isBonus) {
+            scoreBcd = 0x20;   // displays "200"
+            points   = 200;
+        } else if (isFormation) {
+            scoreBcd = 0x02;   // displays "020" (but alien slot has no popup)
+            points   = 20;
+        } else {
+            scoreBcd = 0x04;   // displays "040" (but alien slot has no popup)
+            points   = 40;
+        }
+
+        // Center the explosion sprite on the alien's bounding box so the
+        // visual replaces the alien regardless of draw mode.
+        // (Source uses LeftOneColumn + an HL,$FFDF offset to land in
+        // roughly the same place via screen-RAM arithmetic — see L0FE3.)
+        // Alien slot: 24w × 16h sprite → x offset 12. Bonus slot:
+        // 48w × 16h sprite → x offset 24.
+        const { w, h } = alienBox(alien.controlA);
+        const ey = (alien.y + (h >> 1) -  8) & 0xFF;
+        if (isBonus) {
+            const ex = (alien.x + (w >> 1) - 24) & 0xFF;
+            this.spawnBonusExplosion(0x10, scoreBcd, ex, ey);
+        } else {
+            const ex = (alien.x + (w >> 1) - 12) & 0xFF;
+            this.spawnExplosion(0x0C, scoreBcd, ex, ey);
+        }
+
+        scoring.addPoints(points, state.gameAndDemoOrSplash);
+    },
+
+    // L38F8 — find the first free alien-explosion slot ($4370 or $4374)
+    // and populate it with (counter, scoreBcd, screen position). Source
+    // returns silently if both slots are active (slot starvation).
+    //
+    // Source also writes AbovePlayerBulletMSB/LSB ($43E6/$43E7) into the
+    // slot's screen-RAM fields and clears the player bullet's bit 3 — but
+    // those are L38F8's "bird wing" path-specific concerns. Alien hits
+    // come through L0EAD which writes the ALIEN'S screen position to the
+    // slot. The port skips the bullet-deactivate since playerBulletCollision
+    // already does `b.active = false` after a hit.
+    //
+    // Bonus-slot variant (200-pt kills) lives in spawnBonusExplosion below.
+    spawnExplosion(counter, scoreBcd, x, y) {
+        for (const e of state.explosions) {
+            if (e.counter !== 0) continue;
+            e.counter  = counter;
+            e.scoreBcd = scoreBcd;
+            e.x        = x & 0xFF;
+            e.y        = y & 0xFF;
+            // Seed frameLsb from the spawn counter so render is correct
+            // even on the first frame, before explosionUpdate has run.
+            // Source draws on the spawn-tick using the just-written counter
+            // value; this matches that behavior independent of lane ordering.
+            e.frameLsb = ALIEN_EXPLOSION_ROM[(counter & 0x0E) >> 1];
+            return true;
+        }
+        return false;
+    },
+
+    // Bonus-slot variant of L38F8 — allocate one of the 2 bonus slots
+    // ($4378 / $437C). Used for 200-pt kills (alien current path byte 7
+    // or 8 at hit time, see L0C00). Source's actual allocator at L0EC3
+    // walks both bonus slots looking for counter==0; if both are active,
+    // it falls through to L0ED5 and clobbers slot 1 anyway. Port returns
+    // false on starvation to be safe (and to match spawnExplosion's
+    // contract). Slot starvation is rare in practice — bonus kills only
+    // fire on path bytes 7 or 8, which are brief moments in a swoop.
+    //
+    // Source counter for bonus kills is $10 (16 ticks ≈ 0.27 s at 60 Hz
+    // gross, but each tick advances at the L0FC0 cadence so wall-time is
+    // longer); scoreBcd is $20 (= "200" displayed via L37B0's "first two
+    // digits + always-0").
+    spawnBonusExplosion(counter, scoreBcd, x, y) {
+        for (const e of state.bonusExplosions) {
+            if (e.counter !== 0) continue;
+            e.counter  = counter;
+            e.scoreBcd = scoreBcd;
+            e.x        = x & 0xFF;
+            e.y        = y & 0xFF;
+            return true;
+        }
+        return false;
     },
 
     // Called when the player ship is hit (alien body or enemy bullet).
@@ -460,10 +630,40 @@ export const states = {
         state.gameState = 4;
     },
 
-    // L21BA — post-stage-clear countdown. Decrements stageBlock[11] ($43B6)
-    // each tick; when it drops below $A0, advances to the next stage via GameState=2.
+    // L21BA — stage-clear pause handler. Called from stageAlienCombat
+    // when AliensLeft hits 0. Source structure (Code.md $21BA):
+    //   bit-0 = 0 (counters 0, 2): JP L2204         — countdown only
+    //   bit-0 = 1 (counters 1, 3):
+    //       CALL EnemyBulletUpdate $0C40            — residual bullets fall
+    //       CALL L0FC0                              — explosions animate
+    //       CALL L24C4                              — bg scroll / mothership
+    //       IF (LR & 0x0F) >= $0B: reset AliensLeft and reinit aliens
+    //                              (very-late-game wraparound; unreachable
+    //                              here because step-8d wraps LR before $0B)
+    //       ELSE:                  JP L2204         — fall through to countdown
+    //
+    // Port equivalent: receive `lane` from stageAlienCombat (the same
+    // $435F counter source uses), run physics on bit-0=1 frames, then
+    // run the countdown decrement + LR-advance on every frame.
+    //
+    // No lane-swap rationale applies here — the swoop-alignment reason
+    // (research_enemy_motion.md §1.0) is about combat lanes, not stage
+    // clear. Port keeps source's bit-0 mapping unchanged.
+    //
     // research_enemy_motion.md §8.
-    stageClearUpdate() {
+    stageClearUpdate(lane) {
+        // L21BA bit-0 = 1 branch: residual physics during the pause.
+        // Bullets in flight continue to fall; explosions from the final
+        // alien kill keep animating until their counters reach 0.
+        if ((lane & 1) === 1) {
+            this.enemyBulletUpdate();
+            this.explosionUpdate();
+            this.bonusExplosionUpdate();
+            // L24C4 stubbed — bg scroll (step 3) / mothership glue (step 11).
+        }
+
+        // L2204 — countdown. Source's L21CF path jumps here when
+        // (LR & 0x0F) < $0B; the step-8d LR wrap keeps us under that.
         const cnt = (state.stageBlock[11] - 1) & 0xFF;
         state.stageBlock[11] = cnt;
         if (cnt >= 0xA0) return;
@@ -473,11 +673,11 @@ export const states = {
         state.levelAndRound = (state.levelAndRound + 1) & 0xFF;
 
         // ⚠ STEP 8D STOP-GAP: stages 4-A (spiral-fill, bird combat, mothership)
-        // are not implemented yet (step 9 territory). Without this wrap, LR
-        // advances to 4 after the wave-2 combat clear and state3_Gameplay's
+        // are not implemented yet (step 11 territory). Without this wrap,
+        // LR advances to 4 after the wave-2 combat clear and state3_Gameplay's
         // switch falls through with no work → screen "freezes". For now,
         // skip stages 4-F back to stage 0 of the next round so play continues.
-        // Remove this block when step 9 lands.
+        // Remove this block when step 11 lands.
         if ((state.levelAndRound & 0x0F) >= 4) {
             state.levelAndRound = (state.levelAndRound + 0x10) & 0xF0;
         }
@@ -1065,6 +1265,52 @@ export const states = {
                 b.state &= ~0x08;
             }
             // L0CB4/L0CC4 player-hit path skipped (see comment above).
+        }
+    },
+
+    // L0FC0 — Handle animations for killed aliens. Iterate the 2 alien
+    // explosion slots ($4370 / $4374) and animate each non-zero counter
+    // through the T17B0 tile-LSB cycle. Each tick:
+    //   if counter == 0: slot is free, skip.
+    //   else: pick the tile-frame LSB using the PRE-decrement counter
+    //         (matches source L0FDB→L0FE6 ordering: LD B,(HL); DEC (HL);
+    //         use B for tile lookup), then decrement counter.
+    // drawExplosions in render.js consumes frameLsb to look up the 6-tile
+    // 3x2 sprite via ALIEN_EXPLOSION_ROM.
+    //
+    // Source L0FC0 also processes the 2 bonus slots ($4378/$437C) via
+    // L3758 — that path lives in bonusExplosionUpdate below.
+    explosionUpdate() {
+        for (const e of state.explosions) {
+            if (e.counter === 0) continue;
+            // T17B0 lives in the first 8 bytes of ALIEN_EXPLOSION_ROM.
+            const idx = (e.counter & 0x0E) >> 1;
+            e.frameLsb = ALIEN_EXPLOSION_ROM[idx];
+            e.counter = (e.counter - 1) & 0xFF;
+        }
+    },
+
+    // L3758 — bonus-explosion slot animation. Used by 200-pt swoop kills
+    // (alien current path byte 7 or 8 — see L0C00) and by bird wing /
+    // mothership scoring (step 11 territory). Source L3758 splits per
+    // tick:
+    //   counter == 0           → skip (slot free)
+    //   else, post-dec == 0    → erase area via L37CC
+    //   else, bit-0 of post-dec:
+    //       0 → JP L37B0 (draw popup score digits only this frame)
+    //       1 → fall through to draw the 6×2 sprite (L3796 + Draw3x2)
+    //
+    // The source's per-frame alternation between digits and sprite relies
+    // on screen-RAM persistence — both end up visible on the CRT because
+    // each leaves the other in place. Canvas clears per frame, so port
+    // collapses to "draw both every frame for active slots" in
+    // drawBonusExplosions; this update routine just decrements the
+    // counter. The L37CC erase is also a no-op for canvas — counter==0
+    // already gates rendering.
+    bonusExplosionUpdate() {
+        for (const e of state.bonusExplosions) {
+            if (e.counter === 0) continue;
+            e.counter = (e.counter - 1) & 0xFF;
         }
     },
 

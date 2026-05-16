@@ -3,7 +3,7 @@ import { state } from './state.js';
 import { runloop } from './runloop.js';
 import { input } from './input.js';
 import { resource } from './resource.js';
-import { ALIEN_SHAPE_TABLE } from './data.js';   // source T1420
+import { ALIEN_SHAPE_TABLE, ALIEN_EXPLOSION_ROM } from './data.js';   // source T1420 / $17B0+
 
 // research_rendering.md §5 — per-frame: clear → drawBackground → walk objects.
 // Skeleton draws a debug grid in place of the BG tile-grid; per-object draws
@@ -31,6 +31,8 @@ export const render = {
         if (state.player.alive) this.drawPlayer();
         if (state.player.bullet.active) this.drawPlayerBullet();
         this.drawEnemyBullets();
+        this.drawExplosions();
+        this.drawBonusExplosions();
         this.drawHud();
     },
 
@@ -160,6 +162,132 @@ export const render = {
         for (const b of state.enemyBullets) {
             if ((b.state & 0x08) === 0) continue;
             ctx.drawImage(images[b.shape], b.x, b.y);
+        }
+    },
+
+    // Alien-kill explosion sprites — 2 slots, mirror of L0FC0's Draw3x2.
+    // explosionUpdate (states.js) stores the active T17B0 frame LSB on
+    // each slot; this function reads it, walks the 6-byte tile list at
+    // (frameLsb - 0xB0) inside ALIEN_EXPLOSION_ROM, and draws each tile.
+    //
+    // 3x2 column-major layout (consistent with the rotated-CRT tile
+    // ordering documented in research_rendering.md §2.5):
+    //   tiles[0]  → (x,    y)         col1 top
+    //   tiles[1]  → (x,    y+8)       col1 bot
+    //   tiles[2]  → (x+8,  y)         col2 top
+    //   tiles[3]  → (x+8,  y+8)       col2 bot
+    //   tiles[4]  → (x+16, y)         col3 top
+    //   tiles[5]  → (x+16, y+8)       col3 bot
+    //
+    // tile==0 is the blank/empty character; skip its drawImage call so
+    // frame #5 (all zeros) and the sparse cells of frames #3/#4 stay
+    // transparent (canvas already cleared per frame).
+    drawExplosions() {
+        const ctx = gfx.ctx;
+        const images = resource.fgTileImages;
+        for (const e of state.explosions) {
+            if (e.counter === 0) continue;
+            const base = e.frameLsb - 0xB0;
+            for (let c = 0; c < 3; c++) {
+                for (let r = 0; r < 2; r++) {
+                    const tile = ALIEN_EXPLOSION_ROM[base + c * 2 + r];
+                    if (tile === 0) continue;
+                    ctx.drawImage(images[tile], e.x + c * 8, e.y + r * 8);
+                }
+            }
+        }
+    },
+
+    // Bonus-kill explosion sprites — 2 slots, mirror of L3758's combined
+    // 6×2 sprite (T17D0 left half + T17D6 right half = 48w × 16h) with
+    // the BCD score digits overlaid in the middle via L37B0.
+    //
+    // Source layout: 6 columns × 2 rows, column-major (same convention
+    // as alien explosion):
+    //   col 0  C4 D4  ┐
+    //   col 1  C5 D5  ├ left half (T17D0)
+    //   col 2  C3 C3  ┘  ← placeholder
+    //   col 3  C3 C3  ┐  ← placeholder (right half T17D6)
+    //   col 4  C6 D6  ├ right half (T17D6)
+    //   col 5  C7 D7  ┘
+    //
+    // Source L37B0 walks 3 cells writing [hi-digit, lo-digit, '0'] going
+    // left-to-right via LeftOneColumn / RightOneColumn. The middle two
+    // columns of the sprite are dedicated placeholders ($C3); the third
+    // digit ('0') lands one column to the right, overwriting a real
+    // sprite tile (C6/D6 area). Port matches this by drawing digit tiles
+    // at sprite cols 2, 3, 4 on the top row.
+    //
+    // (e.x, e.y) is the top-left pixel of the 48×16 bonus sprite; spawn
+    // centers it on the alien's bounding box (see onAlienHit / step 10.7.4).
+    //
+    // Offsets into ALIEN_EXPLOSION_ROM (slice starts at $17B0):
+    //   $17D0 left half  → offset 32 (= $20)
+    //   $17D6 right half → offset 38 (= $26)
+    drawBonusExplosions() {
+        const ctx = gfx.ctx;
+        const images = resource.fgTileImages;
+        const T17D0_OFFSET = 0x17D0 - 0x17B0;   // 32
+        const T17D6_OFFSET = 0x17D6 - 0x17B0;   // 38
+        for (const e of state.bonusExplosions) {
+            if (e.counter === 0) continue;
+
+            // L3758 spread animation: the two halves move apart over the
+            // 16-tick lifetime, exposing the score digits in the middle.
+            // Source formula (Code.md $3764-$376C):
+            //   A = ($0F - counter) & $0E, then A *= 16
+            // Source draws left half at screen-RAM addr `DE + $60 + A` and
+            // right half at `DE - A`. In source's rotated screen RAM,
+            // LeftOneColumn ($0210) adds 32 to the address (= 1 display
+            // column left = 8 display pixels), so the byte-to-pixel ratio
+            // is A_source / 4. Bigger source-RAM offset → smaller display
+            // X for the left half (moves LEFT), more negative for the
+            // right half → larger display X (moves RIGHT). The base $60
+            // = 24 px = 3 columns maps to the touching-at-spawn position
+            // in the port (left half at e.x, right half at e.x + 24).
+            //
+            // Per-side pixel offset = (($0F - counter) & $0E) * 4:
+            //   walks 0, 0, 8, 8, 16, 16, ..., 56 over the 16 ticks.
+            // Two halves separate from touching to 112 px apart at end.
+            //
+            // Spawn-frame edge case: counter starts at $10. If the very
+            // first drawBonusExplosions happens BEFORE the first
+            // bonusExplosionUpdate (e.g. kill lands on a lane that doesn't
+            // run bonus update this tick), counter is still $10 at render.
+            // The `counter > 0x0F` clamp pins spread to 0 for that frame.
+            const spread = e.counter > 0x0F
+                ? 0
+                : (((0x0F - e.counter) & 0x0E) << 2);
+            const leftX  = (e.x - spread) & 0xFF;
+            const rightX = (e.x + 24 + spread) & 0xFF;
+
+            // Left half — 3 columns × 2 rows at (leftX, e.y).
+            for (let c = 0; c < 3; c++) {
+                for (let r = 0; r < 2; r++) {
+                    const tile = ALIEN_EXPLOSION_ROM[T17D0_OFFSET + c * 2 + r];
+                    if (tile === 0) continue;
+                    ctx.drawImage(images[tile], leftX + c * 8, e.y + r * 8);
+                }
+            }
+            // Right half — 3 columns × 2 rows at (rightX, e.y).
+            for (let c = 0; c < 3; c++) {
+                for (let r = 0; r < 2; r++) {
+                    const tile = ALIEN_EXPLOSION_ROM[T17D6_OFFSET + c * 2 + r];
+                    if (tile === 0) continue;
+                    ctx.drawImage(images[tile], rightX + c * 8, e.y + r * 8);
+                }
+            }
+            // Score digits overlay — STAY at the original middle position
+            // even as the halves spread (matches source L37B0, which reads
+            // the slot's stored screen address — never updated — for the
+            // digit anchor). 3 cells: hi, lo, always-'0'. Top row.
+            // Source L37B0: hi-digit = scoreBcd >> 4, lo-digit = scoreBcd & 0xF.
+            // Tile code = $20 | digit (matches scoring.js printNumber convention).
+            const hi = (e.scoreBcd >> 4) & 0x0F;
+            const lo =  e.scoreBcd       & 0x0F;
+            ctx.drawImage(images[0x20 | hi], e.x + 16, e.y);
+            ctx.drawImage(images[0x20 | lo], e.x + 24, e.y);
+            ctx.drawImage(images[0x20      ], e.x + 32, e.y);
         }
     },
 

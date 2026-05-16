@@ -87,6 +87,47 @@ export const state = {
             y: 0,        // $43CF+i*4
         }));
 
+        // Alien-kill explosion slots — 2 slots, mirror of $4370/$4374
+        // (4 bytes each: counter, score-BCD, MSB, LSB). research note for
+        // step 10. L38F8 allocates the first slot whose counter==0;
+        // L0FC0 / L0FD8 animates each non-zero slot down to 0 (counter--
+        // each tick, tile lookup via T17B0[(counter & 0x0E) >> 1]).
+        // Port maps the MSB/LSB screen-RAM pair to canvas (x, y) of the
+        // sprite top-left, since canvas draws by pixel coords directly.
+        // Bonus explosion slots ($4378/$437C) used by birds and mothership
+        // are intentionally not modeled here — that's step 11 territory.
+        this.explosions = Array.from({ length: 2 }, () => ({
+            counter:  0,  // $4370 / $4374 — 0 = slot free
+            scoreBcd: 0,  // $4371 / $4375 — BCD score (last digit always 0)
+            x: 0,         // port mirror of $4372/$4373 MSB:LSB → canvas X
+            y: 0,         // port mirror of $4372/$4373 MSB:LSB → canvas Y
+            // Frame LSB chosen this tick by explosionUpdate (=T17B0[idx]).
+            // Stored so drawExplosions reads the PRE-decrement tile lookup,
+            // matching source L0FDB→L0FE6 (save counter, then DEC, then use
+            // the saved value for the T17B0 lookup). Not a source-mirrored
+            // field — port-only bookkeeping.
+            frameLsb: 0,
+        }));
+
+        // Bonus explosion slots — 2 slots, mirror of $4378/$437C. Source
+        // routes 200-pt kills here (alien path byte 7 or 8 at hit time,
+        // see L0C00); the bonus slot animates a 6×2 sprite (T17D0 left
+        // half + T17D6 right half) and overlays the BCD score digits in
+        // the middle (T17D6's $C3 placeholder tiles) via L37B0. Counter
+        // starts at $10 (16 ticks vs alien slot's $0C = 12). Step 10.7.
+        //
+        // Same field shape as state.explosions; no `frameLsb` field needed
+        // because the bonus sprite isn't a counter-indexed cycle — the
+        // sprite tiles are constant (T17D0 + T17D6), only the score
+        // digits overlay them. drawBonusExplosions reads scoreBcd
+        // directly each frame.
+        this.bonusExplosions = Array.from({ length: 2 }, () => ({
+            counter:  0,  // $4378 / $437C — 0 = slot free
+            scoreBcd: 0,  // $4379 / $437D — BCD score (last digit always 0)
+            x: 0,         // port mirror of $437A/$437B MSB:LSB → canvas X
+            y: 0,         // port mirror of $437A/$437B MSB:LSB → canvas Y
+        }));
+
         // 16 alien slots, mirror of $4B70-$4BAF (4 bytes per alien:
         // controlA, controlB, X, Y). InitAlienControlStates ($05EC) sets
         // controlA/B from T1500; InitAlienPositions ($0610) sets x/y from

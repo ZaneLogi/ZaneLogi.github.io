@@ -294,6 +294,124 @@ on lane 2 reads `counter93` after lane-0 behavior runs.
 (`level >= 8`, step 11). Stubbed as no-op; revisit when step 3 or
 step 11 lands.
 
+### 1.0.5 Explosion update + stage-clear pause port mapping
+
+`L0FC0` (alien-kill explosion animation) and `L21BA` (stage-clear
+pause) share the combat-lane dispatch with movement, behavior, and
+enemy fire. Both consume the same `$435F` counter that the combat
+lanes use.
+
+**Combat lane placement (during stageAlienCombat):**
+
+Source's `L0FC0` runs on full-formation lanes 1 and 3, and on the
+depleted `L21A5` branch (bit-0 = 1, source counters 1 and 3). Port
+preserves source rates by placing `explosionUpdate` on:
+
+| `combatLane & 3` | Full-formation (≥5)              | Depleted (<5)                   |
+|------|-------------------------------------------|----------------------------------|
+| 0    | + **`explosionUpdate`** (with mvmt+anim)   | + **`explosionUpdate`**          |
+| 1    | (none)                                     | (none)                           |
+| 2    | (none)                                     | + **`explosionUpdate`**          |
+| 3    | + **`explosionUpdate`** (with bullet upd.) | (none)                           |
+
+Rate per 4-frame cycle: 2× in both modes = 30 Hz. Matches source
+(full lanes 1+3, depleted L21A5 on bit-0=1 counters 1+3).
+
+**Stage-clear pause (during stageClearUpdate):**
+
+When `AliensLeft` hits 0, `stageAlienCombat` early-returns to
+`stageClearUpdate(lane)`. Source's `L21BA` does a bit-0 dispatch on
+the same `$435F` counter:
+
+| Source bit-0 | Source work                                              | Port mapping              |
+|------|-----------------------------------------------------------|---------------------------|
+| 0    | `JP L2204` — countdown only                                | bit-0=0 (port lanes 0, 2) |
+| 1    | `EnemyBulletUpdate` + `L0FC0` + `L24C4` → fall through to `L2204` (when LR < $0B) | bit-0=1 (port lanes 1, 3) |
+
+No lane-swap rationale applies here (§1.0's swoop alignment is about
+combat lanes, not the stage-clear pause), so port preserves source's
+bit-0 mapping unchanged. The countdown decrement (`L2204`) runs on
+every frame; the residual physics (`enemyBulletUpdate` +
+`explosionUpdate`) runs on bit-0=1 frames. Step-8d's `LevelAndRound`
+wrap keeps `LR & 0x0F < $0B`, so the very-late-game `L21D2` reset
+path (which would skip the countdown and reinit aliens) is
+unreachable.
+
+**Counter hoist:** matching source `L2000`, `stageAlienCombat` now
+reads + increments `combatLane` BEFORE the `aliensLeft === 0` check.
+This lets `stageClearUpdate` consume the same counter and keeps the
+bit-0 dispatch in sync across the combat → stage-clear transition.
+
+**Score popup applies only to bonus kills.** Source's `L0FD8` draws
+only the 3×2 explosion sprite for regular alien kills (20 / 40 pts)
+— no digits overlaid; the score just rolls into the HUD counter via
+`L2748` when the explosion counter reaches 1. The "score popup"
+mechanism (`L37B0` writing BCD digits onto a 6×2 sprite) is wired
+to the **bonus slots** ($4378 / $437C) and fires for 200-pt kills
+where the alien's current path byte is 7 or 8 (X+4/Y-2 or X-4/Y-2,
+the "climbing back up from a dive" motions, see `L0C00`). These
+appear scattered across most swoop patterns — not angry-pattern-
+specific — so bonus kills are reachable in stage 1 normal play.
+
+### 1.0.6 Bonus explosion port mapping
+
+Source `L3758` (one of L0FC0's per-slot iterators) drives the bonus
+slot animation. Layout:
+
+- **Sprite**: 6 columns × 2 rows, split into `T17D0` left half (cols
+  0-2) and `T17D6` right half (cols 3-5). The middle 2 columns (cols
+  2 + 3) are `$C3` placeholder tiles intended to be overwritten by
+  score digits.
+- **Spread animation**: as `counter` decreases from $0F to $01, source
+  computes `A = (($0F - counter) & $0E) * 16` (walks 0, 0, $20, $20,
+  $40, $40, ..., $E0). The left half is drawn at screen-RAM offset
+  `+$60 + A` from the slot's stored position; the right half at
+  `-A`. `LeftOneColumn` ($0210) maps to +32 bytes / -1 display
+  column (= -8 px), so each $20 of A_source = 8 display pixels. The
+  base `$60` = 24 px = 3 columns is the "touching at spawn" offset
+  between the halves' inner edges. As the counter winds down the
+  halves fly apart, exposing the digits in the middle.
+- **Digit overlay**: `L37B0` writes 3 tiles at the slot's stored
+  position: `[hi-digit, lo-digit, '0']` going left-to-right
+  (LeftOneColumn / RightOneColumn navigation). Tile code = `$20 |
+  digit` (matches `scoring.js printNumber` convention). The digits
+  stay at the original middle position even as the halves spread.
+- **Frame alternation**: source L3758 does bit-0 dispatch on the
+  post-decrement counter:
+  - bit-0 = 0 (8 of 16 ticks): JP L37B0 (draw digits only this tick)
+  - bit-0 = 1 (7 of 16 ticks): fall through (draw both sprite halves)
+  Both end up visible on the CRT due to screen-RAM persistence.
+- **L37CC erase** when counter hits 0: source clears the bonus
+  sprite area in screen RAM.
+
+**Port simplifications:**
+
+- The bit-0 alternation collapses to "draw both sprite halves AND
+  digits every frame for active slots" — canvas clears per frame, so
+  source's persistence-based alternation can't be reproduced
+  literally. Net visual effect on the CRT is identical (both layers
+  visible).
+- `L37CC` erase is a no-op — canvas clear handles it.
+- Per-side pixel spread = `(($0F - counter) & $0E) << 2` (= A_source / 4).
+- Counter starts at $10; the `> 0x0F` clamp in render handles the
+  pre-first-update spawn frame (pins spread to 0 until the first
+  `bonusExplosionUpdate` tick decrements the counter into the
+  $00-$0F range).
+
+**Lane placement.** Source `L0FC0` processes both alien and bonus
+slots in one call: `L0FD8(slot 0)` + `L0FD8(slot 1)` + `L3758(bonus
+0)` + `L3758(bonus 1)`. Port keeps the two routines separate but
+always calls `bonusExplosionUpdate` next to `explosionUpdate` at the
+three dispatch sites — combat lane-0 (with mvmt+anim), combat lane-3
+(with bullet update), and `stageClearUpdate` bit-0=1 (with residual
+physics during the pause).
+
+**Detection in `onAlienHit`.** Read `getPathByte(alienMovePtr[i])`;
+if the current path byte is 7 or 8, take the bonus branch:
+counter=$10, scoreBcd=$20 (= "200"), `spawnBonusExplosion` instead
+of `spawnExplosion`. Centering offset is 24 px left (vs 12 for the
+alien slot) because the bonus sprite is 48 px wide vs 24 px.
+
 ### 1.1 Functions that affect alien movement
 
 "Movement" here means anything that writes to `alien.x` / `alien.y` or

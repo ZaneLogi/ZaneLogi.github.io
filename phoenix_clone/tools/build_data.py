@@ -126,6 +126,24 @@ RAW_SLICES = [
     # AliensLeft = 16, negative byte ($88) sets BirdsLeft = 8. Carried
     # but not consumed until bird-stage step.
     ("ALIEN_BIRD_PARTITION", 0x1760, 8),
+    # source $17B0..$17F5 — alien-kill explosion machinery as one
+    # contiguous 70-byte slice. Layout:
+    #   $17B0..$17B7 — T17B0 (8 LSBs of frame addresses, indexed by
+    #                  (explosionCounter & 0x0E) >> 1)
+    #   $17B8..$17BD — frame #1 tiles (3x2 column-major)
+    #   $17BE..$17C3 — frame #2 tiles
+    #   $17C4..$17C9 — frame #3 tiles
+    #   $17CA..$17CF — frame #4 tiles
+    #   $17D0..$17DB — bonus-explosion tiles (left + right; step 11)
+    #   $17DC..$17EF — padding + CoinChecking code (never indexed)
+    #   $17F0..$17F5 — frame #5 head (FourByFourEmpty: all-zero blank)
+    # Lookup at runtime:
+    #   idx       = (counter & 0x0E) >> 1
+    #   frameLsb  = ROM[idx]                       (= T17B0[idx])
+    #   frameBase = frameLsb - 0xB0                (offset into this slice)
+    #   tiles[k]  = ROM[frameBase + k]             (k = 0..5)
+    # L0FC0 / L0FD8 consume this; step 10.
+    ("ALIEN_EXPLOSION_ROM", 0x17B0, 70),
     # source T3300 — 8-byte table mapping relative alien-X distance
     # (8 distance buckets) to a column index used by T3310.
     # AlienBehaviorUpdate $3000 sub-state 5 ($31B4). §6.4.
