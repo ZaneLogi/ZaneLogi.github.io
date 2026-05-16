@@ -139,6 +139,7 @@ export const states = {
         state.alienCooldownTimer1 = 0;  // $4359
         state.alienCooldownTimer2 = 0;  // $435A
         state.alienCooldownTimer3 = 0;  // $435B
+        state.aliensLeftFlag      = 0;  // $435E — depleted-formation sticky flag
     },
 
     // L0580 InitGlobalLevelData — index STAGE_BLOCK_INDEX (source T0598)
@@ -332,14 +333,35 @@ export const states = {
         //   swoop bytes can advance the ptr naturally. Replaces the
         //   x-snap workaround that was in behaviorCommit; removes the
         //   ±3 pixel jolt + drift-desync side effects.
-        if (lane === 0) {
+
+        // L2017-L202A — depleted-formation flag latch + dispatch select.
+        // Source: when AliensLeft<5 AND masked counter==0, set $435E:=$FF.
+        // Once $435E is non-zero, the router takes the L2146 path (2-state
+        // bit-0 dispatch) instead of L2130 (4-state full lane round-robin).
+        // The flag is sticky for the rest of the stage; cleared by L32B0's
+        // zero-fill at the next state-2 init.
+        if (state.aliensLeft < 5 && lane === 0) {
+            state.aliensLeftFlag = 0xFF;
+        }
+        const depleted = state.aliensLeft < 5 && state.aliensLeftFlag !== 0;
+
+        // Full-formation (L2130, AliensLeft≥5 or 1-frame pre-latch window):
+        //   lane 0: movement + animation
+        //   lane 1: behavior + collision
+        //   lanes 2/3: empty (reserved for enemy fire — L2560/EnemyBulletUpdate)
+        //
+        // Depleted (L2146, AliensLeft<5 after latch): doubles work onto
+        // lanes 2/3 by reusing the lane-0/lane-1 handlers. Preserves the
+        // §1.0.1 invariant that movement fires the frame before behavior.
+        //   counter 0,2 (bit-0=0): movement + animation  (port-swapped from L2190)
+        //   counter 1,3 (bit-0=1): behavior + collision  (port-swapped from L21A5)
+        if (lane === 0 || (lane === 2 && depleted)) {
             this.alienMovementUpdate();
             this.alienAnimationUpdate();
-        } else if (lane === 1) {
+        } else if (lane === 1 || (lane === 3 && depleted)) {
             this.alienBehaviorUpdate();
             this.alienVsPlayerCollision();
         }
-        // Lanes 2 and 3: enemy fire (L2560, EnemyBulletUpdate) deferred.
     },
 
     // L0DF0 — bullet-vs-alien scan. Called every frame (not lane-gated).

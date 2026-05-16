@@ -78,9 +78,13 @@ animation fire — the four lanes are otherwise the same:
 ### 1.0 Port lane assignment — and why we swapped
 
 `stageAlienCombat` in `states.js` only routes work for lanes 0 and 1
-(lanes 2 and 3 are no-op stubs — enemy fire / kill-anim deferred to
-step 9). But the work assigned to each lane is **deliberately swapped
-relative to source**:
+in the full-formation case (lanes 2 and 3 are no-op stubs — enemy fire
+/ kill-anim deferred). In the depleted-formation case (AliensLeft<5,
+once the `$435E` flag latches) lanes 2 and 3 host the same work as
+lanes 0 and 1 respectively — see §1.0.3 below.
+
+The work assigned to each lane is **deliberately swapped relative to
+source**:
 
 | `combatLane & 3` | Source's L2000                                  | Our port's `stageAlienCombat`                       |
 |------|--------------------------------------------------|------------------------------------------------------|
@@ -189,6 +193,46 @@ The three are not orthogonal:
 decisions you'd be touching, and validate the other two still hold
 afterwards. Visual playtest is the only reliable check — these
 failure modes don't surface through unit tests or console output.
+
+### 1.0.3 Depleted-formation (L2146) port mapping
+
+When `AliensLeft < 5`, source switches to a denser swoop dispatch via
+the `L2146` router (see §1 table). Mechanism:
+
+1. Source `L2017-L202A`: when `AliensLeft < 5` AND the masked counter
+   is 0, latch `$435E := $FF` (sticky). Once `$435E` is non-zero, the
+   `L2000` router goes via `L2146` instead of `L2130`. The flag is
+   never explicitly cleared in `Code.md` — `L32B0`'s zero-fill at
+   state-2 init resets it for the next stage.
+2. `L2146` dispatches on **bit 0** of the masked counter:
+   - bit-0 = 0 (counter 0, 2) → `L2190`: behavior + alien-vs-player
+     collision + `L2560` + `EnemyBulletUpdate`
+   - bit-0 = 1 (counter 1, 3) → `L21A5`: movement + animation +
+     `L0A6C` + `L0FC0` + `L24C4`
+
+So movement and behavior each fire **every 2 frames** instead of
+every 4 — twice as often, with the same 1-frame separation between
+them. Path bytes consume at 2× rate; swoops trigger more frequently.
+
+Port mapping (preserves the §1.0 lane swap):
+
+| `combatLane & 3` | Full-formation (≥5) | Depleted (<5, after $435E latch)  |
+|------|-----------------------------|------------------------------------|
+| 0    | movement + animation         | movement + animation               |
+| 1    | behavior + collision         | behavior + collision               |
+| 2    | (empty — future enemy fire)  | movement + animation               |
+| 3    | (empty — future enemy fire)  | behavior + collision               |
+
+Implementation in `stageAlienCombat`: latch `aliensLeftFlag` (mirror
+of `$435E`) when `aliensLeft<5` and `lane===0`, then OR the lane-2/3
+conditions into the existing lane-0/1 handlers gated by the latched
+flag. No changes to `alienMovementUpdate`, `alienAnimationUpdate`,
+`alienBehaviorUpdate`, or `alienVsPlayerCollision`.
+
+§1.0.1 interlock impact: none of the three interlocked knobs (lane
+swap, movement+animation merge, Counter93 phase) are touched. Movement
+still fires the frame before behavior in both 4-state and 2-state
+cycles.
 
 ### 1.1 Functions that affect alien movement
 

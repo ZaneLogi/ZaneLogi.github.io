@@ -133,6 +133,14 @@ export const state = {
         this.alienCooldownTimer2 = 0;   // $435A
         this.alienCooldownTimer3 = 0;   // $435B
 
+        // L2000 depleted-formation sticky flag — mirror of $435E.
+        // Source L2017-L202A: when AliensLeft<5 and the masked counter is 0,
+        // latch $435E := $FF. Once set, dispatch goes via L2146 (2-state
+        // bit-0 cycle) instead of L2130 (4-state full-formation), packing
+        // movement and behavior twice as often. Cleared by L32B0 (state-2
+        // init zero-fills $4350-$437F).
+        this.aliensLeftFlag = 0;        // $435E
+
         // Player-death timer — not a source field; used while state4 is a stub.
         this.playerExplosionTimer = 0;
 
