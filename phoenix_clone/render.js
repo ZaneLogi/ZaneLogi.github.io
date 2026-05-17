@@ -42,6 +42,25 @@ export const render = {
         this.drawExplosions();
         this.drawBonusExplosions();
         this.drawHud();
+        this.drawSpiralOverlay();
+    },
+
+    // $2230 spiral-fill overlay — draws asterisk tiles ($1F) on top of
+    // all other FG content at the canvas positions computed by
+    // states.spiralDrawCells. Empty (deleted) entries are simply not
+    // present in the Map, so phase-2 erases automatically un-draw cells.
+    // Drawn LAST in the frame to match source's "spiral covers score
+    // during transition" overlay behavior.
+    drawSpiralOverlay() {
+        if (state.fgOverlay.size === 0) return;
+        const ctx = gfx.ctx;
+        const images = resource.fgTileImages;
+        for (const [key, tile] of state.fgOverlay) {
+            const sep = key.indexOf(',');
+            const x = +key.slice(0, sep);
+            const y = +key.slice(sep + 1);
+            ctx.drawImage(images[tile], x, y);
+        }
     },
 
     // Mirror of Bit3Controller ($0740) draw-side. controlA bit 3 enables

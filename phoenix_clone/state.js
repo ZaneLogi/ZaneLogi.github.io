@@ -244,6 +244,21 @@ export const state = {
         // Player-death timer — not a source field; used while state4 is a stub.
         this.playerExplosionTimer = 0;
 
+        // $439C — spiral-fill animation counter, ticked by stageSpiralFill
+        // ($2230) at stages 4/6/8. Source uses it as a shared general-purpose
+        // counter elsewhere too; port keeps it dedicated to spiral-fill
+        // since no other ported routine reads/writes it currently. Reset to
+        // 0 on spiral-fill exit (port deviation; source leaves it as-is).
+        this.spiralFillCounter = 0;
+
+        // FG-plane overlay map: "x,y" → tile code. Currently populated only
+        // by spiral-fill's per-position cell writes (asterisk `$1F` during
+        // phase 1, deleted on phase 2 erase). render.drawSpiralOverlay
+        // draws each entry on top of all other FG content. Empty during
+        // normal play; matches source's "spiral overlay covers score
+        // during transition" visual.
+        this.fgOverlay = new Map();
+
         // BG tile plane — 26 cols × 33 rows (1 extra "hidden" row at the
         // top, above the visible area). research_hardware.md §4 describes
         // the source's two independent tile planes (FG and BG each 32×26

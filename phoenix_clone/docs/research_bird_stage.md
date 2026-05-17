@@ -996,27 +996,52 @@ For the port: deferred unless sound lands. The flag stays in
 
 ---
 
-## 7. Spiral-fill intro (`$2230`) — abbreviated
+## 7. Spiral-fill intro (`$2230`) — ported (step 11.10, 2026-05-18)
 
-Stage 4/6/8 dispatch to `$2230`, which draws a center-out spiral wipe
-into background tile RAM. Per-stage variant:
+Stages 4/6/8 dispatch to `$2230`, which draws a center-out spiral
+wipe into the FG tile RAM (~52 frames total). Per-stage variant at
+the exit branch `Code.md:$2295`:
 
-- Stages 4, 6 — wipe to **starfield**: at exit, copies the star tiles
-  from `T1C00`/`T1F00` into the background RAM. Then increments
-  `LevelAndRound` and sets `GameState := 2`.
-- Stage 8 — wipe to **black** (mothership intro): at exit, calls
-  `ClearBackground` instead of copying stars.
+- Stages 4, 6 (LR bit 3 == 0) — JP `$22F0`: `CALL ClearBackground`
+  → BG plane wiped to zeros. CounterB9 = $00. **Birds appear
+  against solid black BG.**
+- Stage 8 (LR bit 3 == 1) — fall through to copy `T1C00` starfield
+  into BG memory. CounterB9 = $71 retained. **Mothership intro
+  appears with stars.**
 
-The branch is `Code.md:$2295` testing bit 3 of `LevelAndRound`
-(stage >= 8 → black). [verified, cross-referenced with
-`research_stage_structure.md §8.1`.]
+[verified `Code.md:$2295-$22F4` walked 2026-05-18. Note: the JP-Z
+branch direction is "jump if bit 3 == 0", so stages 4/6 take the
+ClearBackground path, NOT the star-copy. An earlier note in this
+doc had the direction backwards; corrected during the 11.10 port.]
 
-The spiral itself is animated over ~13 frames — counter at `$439C`
-ticks each frame, controller exits when counter shifted right by 6
-reaches `$0D`. The exact per-frame tile-write order is not walked in
-this pass — it's cosmetic and only matters for visual fidelity, not
-gameplay. Bird init at `$32B0` runs on the very next frame after the
-spiral completes (via the GameState 2 dispatch).
+The spiral itself: counter at `$439C` ticks each frame, controller
+exits when the counter shifted right & masked reaches `$0D`. There
+are two phases — phase 1 writes asterisk tiles (`$1F`) at expanding
+spiral positions, phase 2 writes blank tiles (`$00`) to erase. Each
+phase takes ~13 positions × 2 frames per position = ~26 frames.
+
+### 7.1 Port mapping
+
+`states.stageSpiralFill()` ports `$2230`'s counter advance + phase
+dispatch. `states.spiralDrawCells()` ports `$2260`'s spiral-cell
+write loop (RRCA×3 address math + per-column row loop), writing
+each computed FG-plane cell into `state.fgOverlay` (Map keyed by
+"x,y"). `render.drawSpiralOverlay()` paints those entries over all
+other FG content per frame.
+
+`states.spiralFillExit()` mirrors the `$22F0` ClearBackground path:
+clears `state.bgTiles`, resets `counterB9`/`scrollPixel`, advances
+LR, sets GameState=2. The star-copy branch for stage 8 isn't
+implemented yet — gated by the step-12 mothership wrap.
+
+Per-frame call ordering: state-3 dispatch on (LR & 0xF) ∈ {4, 6}
+routes to `stageSpiralFill` only — no playerUpdate, no aliens, no
+birds. Matches source's `$081C / $0820` JT4 entries which point
+solely at `$2230`.
+
+[verified end-to-end via reload + K-cheat playthrough: stage 1 →
+2 → 3 → 4 plays through with smooth spiral transitions between
+alien and bird waves.]
 
 ---
 
@@ -1259,21 +1284,26 @@ landed independently. Suggested sequence:
   `spawnBonusExplosion()` path (already in step 10.7). Decrement
   `BirdsLeft`; reset `M4368` on each kill.
 
-- **11.5 Stage-clear cleanup** — when `BirdsLeft == 0`, ensure
-  `$3462`-equivalent runs the bullet/explosion tail and the existing
-  `$2204` countdown advances to next stage.
+- **11.5 Stage-clear cleanup** — ✅ landed 2026-05-18 as
+  `stageBirdClear`. Mirrors `$3462`: on even-parity frames runs
+  residual physics (enemy bullets + explosions) then the L2204
+  countdown decrement; on odd parity returns immediately. Does NOT
+  call `bgUpdate` (BG stays black during bird stage). Inline L2204
+  body (not via `stageClearUpdate`) so the stop-gap wrap logic +
+  alien-side `bgUpdateIfAlienStage` don't run for bird stages.
 
-- **11.6 Spiral-fill intro (`$2230`)** — port the spiral wipe
-  minimally (one frame of tile writes per JS frame; correct exit
-  condition; correct wipe-target branch on stage bit 3). Cosmetic, so
-  deferred to last; until landed, stage 4/6 is effectively a black
-  frame transition between waves. Could be permanently stubbed if
-  cosmetic-only is acceptable.
+- **11.6 Spiral-fill intro (`$2230`)** — ✅ landed 2026-05-18. See
+  §7 above for full port mapping. `stageSpiralFill` +
+  `spiralDrawCells` + `spiralFillExit` + `_writeFgCell` (~150 lines
+  total). FG overlay via `state.fgOverlay` Map +
+  `render.drawSpiralOverlay`. Stage 8 spiral exits to ClearBackground
+  only (stage 8 path with star-copy is gated by step-12 mothership
+  wrap until then).
 
 Mothership stages (9/A/B) and GameStates 6/7 are **step 12**, with
 their own research doc `research_mothership.md` (not yet written).
-The 8d wrap stop-gap stays until step 12 lands the full 5-stage
-cycle.
+The 8d wrap stop-gap (narrowed to `>=8` in step 11.10) stays until
+step 12 lands the full 5-stage cycle.
 
 ---
 

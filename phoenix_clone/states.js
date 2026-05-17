@@ -382,7 +382,11 @@ export const states = {
             case 0x7:
                 this.stageBirdCombat();            // L3400 — birds (step 11.2)
                 break;
-            // 0x4 / 0x6 / 0x8 spiral-fill ($2230) → step 11.6
+            case 0x4:
+            case 0x6:
+                this.stageSpiralFill();            // $2230 — bird-stage intro wipe
+                break;
+            // 0x8 spiral-fill ($2230) → step 12 (gated by stop-gap until mothership)
             // 0x9 / 0xA mothership fade-ins      → step 12
         }
     },
@@ -799,6 +803,215 @@ export const states = {
         }
     },
 
+    // $2230 + $2260 + $2292 — spiral-fill stage handler for JT4
+    // stages 4, 6 (and 8 in step 12). Animates a center-out asterisk
+    // spiral wipe over ~52 frames, then advances LevelAndRound to the
+    // next stage and triggers state-2 init via GameState := 2.
+    //
+    // Source flow (`Code.md:$2230`):
+    //   A      = (HL=$439C)            ; A = counter BEFORE increment
+    //   (HL)++ = (HL) + 1               ; tick counter
+    //   A      = (A RRCA) & $3F         ; position advances every 2 frames
+    //   if A == $0D:    JP $2292        ; phase-1 exit (advance LR)
+    //   if A <  $0D:    B = $1F; CALL $2260 (draw asterisks)
+    //   else:           B = $00; A -= $0E
+    //                   if A == $0D: JP $2292   ; phase-2 exit (advance LR)
+    //                   else:        CALL $2260 (erase)
+    //
+    // $2260 walks a spiral path computed from position counter `C`,
+    // writing tile `B` to multiple FG-plane cells per call (count
+    // grows as `C` advances). Each cell write goes to address
+    // HL = $4xxx (FG plane), so the spiral overlays the score / coin
+    // text during the transition.
+    //
+    // $2292 exit (port-simplified):
+    //   Source: if LR bit 3 == 0 (stages 4/6) → ClearBackground +
+    //           CounterB9 = $71; else (stage 8) → copy T1C00 starfield
+    //           + CounterB9 = $00.
+    //   Port: stages 4/6 only — bgTiles is already zeroed by state-2
+    //         init for the next bird stage (matches ClearBackground
+    //         branch). Stage 8 won't be reachable until step 12.
+    //   Both: clear fgOverlay (spiral artifacts erased), reset
+    //         spiralFillCounter, INC LevelAndRound, GameState := 2.
+    stageSpiralFill() {
+        // $2230-$223C — read counter, advance, derive position.
+        const oldCounter = state.spiralFillCounter;
+        state.spiralFillCounter = (state.spiralFillCounter + 1) & 0xFF;
+
+        // RRCA(A) + AND $3F → position halves on each step regardless
+        // of bit 0 (the rotate's bit-7 result is masked off by AND $3F).
+        const aInitial = ((oldCounter >> 1) | ((oldCounter & 1) << 7)) & 0x3F;
+
+        if (aInitial === 0x0D) {
+            return this.spiralFillExit();        // $2239 JP Z,$2292
+        }
+        if (aInitial < 0x0D) {
+            this.spiralDrawCells(aInitial, 0x1F);     // $223E B=$1F, $2240 JP C,$2260
+            return;
+        }
+        // aInitial >= $0E. Phase 2 (erase).
+        const aPhase2 = (aInitial - 0x0E) & 0xFF;
+        if (aPhase2 === 0x0D) {
+            return this.spiralFillExit();        // $2249 fall-through to $224C
+        }
+        this.spiralDrawCells(aPhase2, 0x00);          // $2243 B=$00, $2249 JP NZ,$2260
+    },
+
+    spiralFillExit() {
+        // $2292 — clear spiral, BG-wipe, advance stage, trigger state-2 init.
+        // Source dispatch on LR bit 3:
+        //   bit 3 == 0 (stages 4, 6): JP $22F0 → ClearBackground →
+        //                              CounterB9 = $00
+        //   bit 3 == 1 (stage 8):    fall through to T1C00 star-copy +
+        //                            CounterB9 retained at $71
+        // Port only handles stages 4/6 (stage 8 is gated by stop-gap
+        // until step 12), so the ClearBackground branch always fires:
+        // bgTiles wiped to all zeros = BG snaps to black for the
+        // upcoming bird stage. Without this, leftover stars/planets/
+        // galaxies from the previous alien stage persist into the bird
+        // stage (which doesn't run bgUpdate to refresh them).
+        state.fgOverlay.clear();
+        state.bgTiles.fill(0);                // ← $03A0 ClearBackground
+        state.spiralFillCounter = 0;
+        state.levelAndRound = (state.levelAndRound + 1) & 0xFF;
+        state.gameState = 2;
+        // $22E0 CounterB9 := $00.
+        state.counterB9 = 0;
+        // Smooth-scroll counter is a port-side companion to counterB9
+        // (per render.drawBackground); reset it too so BG-rendering
+        // restarts cleanly with no half-pixel offset carried over from
+        // the previous stage.
+        state.scrollPixel = 0;
+    },
+
+    // $2260 — port of the spiral-cell write loop. Given position `cIn`
+    // (0..$0C) and `tileCode` ($1F asterisk for phase 1, $00 empty for
+    // phase 2), computes a sequence of FG-plane addresses via the
+    // source's RRCA × 3 address math, then walks columns × rows
+    // writing the tile to each cell.
+    //
+    // Cell positions are stored in state.fgOverlay (keyed by "x,y"
+    // canvas coords). Phase 2 deletes entries; phase 1 adds them.
+    // render.drawSpiralOverlay paints them on top of all other FG
+    // content each frame.
+    spiralDrawCells(cIn, tileCode) {
+        // $2261-$2263 — RRCA × 3 (rotate, bit 0 wraps to bit 7).
+        let A = cIn;
+        for (let i = 0; i < 3; i++) {
+            A = ((A >> 1) | ((A & 1) << 7)) & 0xFF;
+        }
+        // $2264-$2271 — split into high-3 + low-5 bits, build HL.
+        const aSaved = A;
+        const lowE = aSaved & 0x1F;
+        const highAndE0 = aSaved & 0xE0;
+        const lSum = highAndE0 + 0xB0;
+        let L = lSum & 0xFF;
+        const carry = lSum > 0xFF ? 1 : 0;
+        let H = (lowE + 0x41 + carry) & 0xFF;
+        // $2272-$2274 — HL = (H, L - cIn).
+        L = (L - cIn) & 0xFF;
+        // $2275-$2279 — C = cIn + 1; E = (cIn + 1) * 2 (column count).
+        let C = (cIn + 1) & 0xFF;
+        let E = (C * 2) & 0xFF;
+
+        // Outer loop: E columns ($227A/$228D-$228E).
+        while (E > 0) {
+            // $227A — D = C (row count for this column).
+            let D = C;
+            // Inner loop: each iteration writes 2 cells ($227B-$2280).
+            while (D > 0) {
+                this._writeFgCell(H, L, tileCode);
+                L = (L + 1) & 0xFF;
+                if (L === 0) H = (H + 1) & 0xFF;
+                this._writeFgCell(H, L, tileCode);
+                L = (L + 1) & 0xFF;
+                if (L === 0) H = (H + 1) & 0xFF;
+                D--;
+            }
+            // $2283-$228C — L -= C; L -= C; L -= $20; H -= borrow.
+            const rawL = L - C - C - 0x20;
+            L = rawL & 0xFF;
+            H = (H - (rawL < 0 ? 1 : 0)) & 0xFF;
+            E--;
+        }
+    },
+
+    // $3462 — bird-stage-clear tail. Runs in place of normal half-flock
+    // dispatch when BirdsLeft hits 0. Source flow:
+    //   3462: A = Counter9A+1; RRCA; RET C    ; odd parity: nothing
+    //   3467: CALL EnemyBulletUpdate           ; residual bullets fall
+    //   346A: CALL L0FC0                       ; explosion anim tick
+    //   346D: JP   L2204                       ; countdown + LR advance
+    //
+    // Note: does NOT call bgUpdate ($06F0) — BG stays black during the
+    // pause, unlike alien-stage-clear which keeps stars scrolling. This
+    // matches arcade behavior; the bird stage's background is black.
+    //
+    // Port note: the L2204 countdown body is inline here rather than
+    // calling stageClearUpdate, because stageClearUpdate runs
+    // bgUpdateIfAlienStage (which would fill bgTiles with stars during
+    // the bird-clear pause — wrong for bird stages). The stop-gap wrap
+    // is duplicated for the same reason.
+    stageBirdClear() {
+        if ((state.counter9a & 1) !== 0) return;   // odd parity: nothing
+
+        // Residual physics during the pause.
+        this.enemyBulletUpdate();
+        this.explosionUpdate();
+        this.bonusExplosionUpdate();
+
+        // L2204 countdown.
+        const cnt = (state.stageBlock[11] - 1) & 0xFF;
+        state.stageBlock[11] = cnt;
+        if (cnt >= 0xA0) return;
+
+        state.gameState = 2;
+        state.player.shieldCount = 0;
+        state.levelAndRound = (state.levelAndRound + 1) & 0xFF;
+
+        // Same stop-gap as stageClearUpdate — keep mothership stages
+        // (8+) wrapping to next round's stage 0 until step 12.
+        if ((state.levelAndRound & 0x0F) >= 8) {
+            state.levelAndRound = (state.levelAndRound + 0x10) & 0xF0;
+        }
+
+        const waveIdx = (state.levelAndRound >> 1) & 7;
+        const waveByte = ALIEN_BIRD_PARTITION[waveIdx];
+        if (waveByte & 0x80) {
+            state.birdsLeft  = waveByte & 0x7F;
+            state.aliensLeft = 0;
+        } else {
+            state.aliensLeft = waveByte;
+            state.birdsLeft  = 0;
+        }
+    },
+
+    // FG-plane address → canvas (x, y) and store tile in fgOverlay.
+    // Source addresses span $4000-$43FF (FG plane = 1024 cells, 32×32
+    // in source coords but only 26 cols × 32 rows visible after the
+    // 90° rotation to portrait). Uses the same `25 - (off >> 5)` /
+    // `off & $1F` decode the static-text parser uses (see
+    // tools/build_data.py parse_text_table). Out-of-range addresses
+    // (would happen if the spiral math overflows past $43FF) are
+    // silently dropped — matches arcade where they'd land in unmapped
+    // RAM.
+    _writeFgCell(H, L, tileCode) {
+        const addr = (H << 8) | L;
+        const planeOff = addr - 0x4000;
+        if (planeOff < 0 || planeOff >= 1024) return;
+        const col = 25 - ((planeOff >> 5) & 0x1F);
+        const row = planeOff & 0x1F;
+        if (col < 0 || col >= 26) return;
+        const x = col * 8;
+        const y = row * 8;
+        const key = `${x},${y}`;
+        if (tileCode === 0) {
+            state.fgOverlay.delete(key);
+        } else {
+            state.fgOverlay.set(key, tileCode);
+        }
+    },
+
     // L3400 — bird-combat handler for JT4 stages 5 and 7.
     // research_bird_stage.md §1 (dispatch structure).
     //
@@ -863,15 +1076,11 @@ export const states = {
         // TODO 11.x: CALL $3980 (bird-vs-player relative position scan —
         //            cosmetic; affects bird color/depth shading).
 
-        // $340F-$3413 — BirdsLeft check.
+        // $340F-$3413 — BirdsLeft check. When all birds are gone, hand
+        // off to the bird-stage-clear tail ($3462) for the post-clear
+        // pause + countdown.
         if (state.birdsLeft === 0) {
-            // TODO 11.5: $3462 stage-clear tail (residual bullets + explosion
-            // animation tick on even-parity frames, then $2204 countdown
-            // decrement and stage advance). Step 11.2 leaves this empty —
-            // BirdsLeft never hits 0 without hit detection (11.4), and
-            // when it eventually does, the 8d wrap stop-gap kicks in via
-            // the alien stage-clear path until 11.5 lands the proper tail.
-            return;
+            return this.stageBirdClear();        // $3462
         }
 
         // $3416-$3418 — fork on BirdsLeft >= 4.
@@ -1832,13 +2041,13 @@ export const states = {
         state.player.shieldCount = 0;
         state.levelAndRound = (state.levelAndRound + 1) & 0xFF;
 
-        // ⚠ STEP 8D STOP-GAP: stages 4-A (spiral-fill, bird combat, mothership)
-        // are not implemented yet (step 11 territory). Without this wrap,
-        // LR advances to 4 after the wave-2 combat clear and state3_Gameplay's
-        // switch falls through with no work → screen "freezes". For now,
-        // skip stages 4-F back to stage 0 of the next round so play continues.
-        // Remove this block when step 11 lands.
-        if ((state.levelAndRound & 0x0F) >= 4) {
+        // ⚠ STOP-GAP (narrowed 2026-05-18): stages 8-A (spiral-fill before
+        // mothership, mothership fade-ins) and B (mothership combat) are
+        // step 12 territory. Stages 4-7 (bird spiral + bird combat) now
+        // play through naturally. Without this wrap, LR advancing to 8
+        // would leave state3_Gameplay with no handler → screen "freezes".
+        // Remove this block entirely when step 12 lands.
+        if ((state.levelAndRound & 0x0F) >= 8) {
             state.levelAndRound = (state.levelAndRound + 0x10) & 0xF0;
         }
 
