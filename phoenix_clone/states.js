@@ -33,6 +33,8 @@ import {
     BIRD_T3E80,           // source T3E80 — bird shape/delta lookup ($3560 + $35E0)
     BIRD_T3F00,           // source T3F00 — per-shape dispatch (motion + maturity)
     BIRD_T3EC0,           // source T3EC0 — shape → draw-entry LSB (encodes column count)
+    BIRD_T3DC0,           // source T3DC0 — bird-fire scan-subset table (16 × 2 bytes)
+    BIRD_T3DB8,           // source T3DB8 — wing-hit shape-swap table (8 bytes)
 } from './data.js';
 
 // Debug knob — when non-null, the first state-0 transition jumps directly
@@ -898,8 +900,9 @@ export const states = {
                 this.explosionUpdate();
                 this.bonusExplosionUpdate();
             } else {
-                // $3431 CALL $3930 + $3434 JP $0C40 — player-relative scan
-                // (11.4) + enemy bullet update on even parity.
+                // $3431 CALL $3930 + $3434 JP $0C40 — bird fire scan
+                // + enemy bullet update on even parity.
+                this.birdFireScanAndSpawn();          // $3930
                 this.enemyBulletUpdate();
             }
         } else {
@@ -916,10 +919,85 @@ export const states = {
             } else {
                 // Even parity: source draws birds 0..3, $3498 dispatch,
                 // CALL $3930, JP $0C40 (enemy bullets).
-                // TODO 11.4: $3930 player-relative scan.
                 this.birdMaturityDispatchFirst4();    // $3498
+                this.birdFireScanAndSpawn();          // $3930
                 this.enemyBulletUpdate();
             }
+        }
+    },
+
+    // $3930 — bird-fire scan and spawn. Picks a subset of birds via T3DC0
+    // (indexed by $4BD2 bits 4..1; port substitutes counter9a), gates by
+    // counter9a bit 1 ($3A00 rate gate = effective 15 Hz fire attempt),
+    // and for each candidate checks shape>=5 (working wings) + gridX
+    // inside a player-relative X-band that widens as BirdsLeft shrinks.
+    // The first eligible bird spawns ONE enemy-bullet into the first-free
+    // slot (round-capped at 3/4/5). Spawn position derives the bullet's
+    // randomized Y from bird.screenLsb + counter — bullets appear at
+    // varied vertical positions, not at the bird's actual Y (source
+    // behavior; documented in research_bird_stage.md §8.4).
+    //
+    // Reuses enemyBullets[] / enemyBulletUpdate() — no separate bird-bullet
+    // pool, just shared bullets ticked at +4 y/tick and deactivated at y>=$F9.
+    // research_bird_stage.md §8.
+    birdFireScanAndSpawn() {
+        // $3A00 — bit-1 gate (every 2nd of 2-frame even-parity windows;
+        // net cadence = once per 4 frames ≈ 15 Hz).
+        if ((state.counter9a & 0x02) === 0) return;
+
+        // $3942-$394B — fire X-band derived from mapped player position.
+        // D = $0C - BirdsLeft → small flock = wider band.
+        const D = (0x0C - state.birdsLeft) & 0xFF;
+        const { left, right } = this.mappedPlayerX();
+        const bandLo = (left  - D) & 0xFF;  // source B = M439E - D
+        const bandHi = (right + D) & 0xFF;  // source C = M439F + D
+
+        // $3933-$393C — T3DC0 entry pick. Source uses $4BD2 & $1E (M4BD0+
+        // state machine not ported — see research §10 item 1). Substitute
+        // with counter9a so the index cycles through all 16 subsets every
+        // 32 frames; visible character (bullets from different birds over
+        // time) is preserved.
+        const idx     = state.counter9a & 0x1E;
+        const loopCnt = BIRD_T3DC0[idx];
+        const startLsb = BIRD_T3DC0[idx + 1];
+        const startBird = (startLsb - 0x70) >> 3;   // bird index 0..7
+
+        // $394C loop — first eligible bird wins (source's $25DD/$25FD
+        // POP+POP+RET unwinds two stack frames after one spawn).
+        const round   = (state.levelAndRound >> 4) & 0x0F;
+        const slotCap = round < 1 ? 3 : round < 2 ? 4 : 5;
+
+        for (let i = 0; i < loopCnt; i++) {
+            const birdIdx = startBird + i;
+            if (birdIdx >= 8) break;
+            const bird = state.birds[birdIdx];
+
+            // $395C filter.
+            if (bird.shape < 5) continue;
+            // gridX in [bandLo, bandHi). Mod-256 compare unwraps cleanly
+            // because the X-band stays in the visible range (~ $09..$C8).
+            if (bird.gridX < bandLo || bird.gridX >= bandHi) continue;
+
+            // $25CD — first-free slot up to round cap.
+            let slot = -1;
+            for (let j = 0; j < slotCap; j++) {
+                if ((state.enemyBullets[j].state & 0x08) === 0) { slot = j; break; }
+            }
+            if (slot < 0) return;   // source POP+POP+RET — no spawn this call
+
+            // $395C / $25E0 — spawn coords. After source's intermediate
+            // -4/+4 trick: bullet.x = bird.gridX, bullet.y = randomized
+            // value spread across most of the visible vertical range.
+            const bulletX = bird.gridX & 0xFF;
+            const randY   = (((state.counter9a + bird.screenLsb) & 0x1F) << 3) + 0x08;
+            const bulletY = (randY + 0x0C) & 0xFF;
+
+            const b = state.enemyBullets[slot];
+            b.state = 0x08;
+            b.shape = 0x58 + (((bulletX >> 1) & 0x03) + (bulletY & 0x04));
+            b.x     = bulletX;
+            b.y     = bulletY;
+            return;   // only ONE bullet per dispatched frame
         }
     },
 
@@ -991,60 +1069,98 @@ export const states = {
         return { x: col * 8, y: ((row * 8) + scrollY) & 0xFF };
     },
 
-    // $38BC / $38E9 wing-hit path — bullet glances bird wing, bird
-    // shrinks but survives. Source:
-    //   - $38BC reads the bird's current tile from BG screen RAM, looks
-    //     up a "no-wings" replacement via T3DB8, and writes that tile
-    //     back (= sprite visually shrinks).
-    //   - $38E9 sets M4366 := $FF (wing-hit flag) + spawnExplosion via
-    //     $38F8 with B=$07, C=$02 (alien-slot, scoreBcd=$02 = 20 pts).
-    //   - BirdsLeft is NOT decremented. Bird stays alive but smaller.
-    //   - Over time, the maturity engine ($36D2/$36EA/$370A via T3F00)
-    //     advances the bird's shape back up — wings regrow.
+    // $38BC / $38E9 wing-hit path — bullet glances bird wing. Source
+    // outcome depends on bird.shape:
+    //   - shape ∈ {$0B, $0C, $0D}: tile-swap via T3DB8 (bird keeps
+    //     flying but its visible sprite changes to a "wing-damaged"
+    //     variant). Source code at $38C7-$38E8:
+    //         side    = (PlayerBulletX < bird.gridX) ? 4 : 0
+    //         newShape = T3DB8[ side | (bird.shape - $0B) ]
+    //         bird.shape = newShape
+    //     Then fall through to $38E9.
+    //   - any other shape ($01-$0A, $0E, $0F): no shape change at all
+    //     ($38CA / $38CF early-exits to $38E9). Bird keeps flying with
+    //     its current sprite unchanged.
+    //   - $38E9 always: set M4366 := $FF (wing-hit sound flag) +
+    //     spawnExplosion (alien-slot, counter=$07, scoreBcd=$02 = 20 pts).
+    //   - BirdsLeft NEVER decremented.
     //
-    // Port: instead of source's tile-level replacement (which requires
-    // a BG-plane mirror and the T3DB8 lookup), downgrade `bird.shape`
-    // to a smaller variant; the existing maturity engine then grows it
-    // back through the usual T3F00 transitions. Effect is the same:
-    // sprite shrinks immediately, then grows back over the next 30-60
-    // ticks as maturity advances.
+    // The previous port behavior — always downgrade to shape 1 — was
+    // too aggressive: source only ever moves shape WITHIN {$0B-$0E},
+    // not all the way back to egg. The 2026-05-17 fix replaces the
+    // shape=1 reset with the source-faithful T3DB8 lookup (gated on
+    // shape ∈ {$0B-$0D}; for other shapes, only the explosion +
+    // 20 pts fire).
+    //
+    // Port deviation (kept): collision detection itself is AABB +
+    // center-distance wing/body split (`birdBulletCollision`), not
+    // source's tile-mask check via T3B60/T3BB0. That deviation only
+    // affects WHICH bullets register as wing-hits — once we're inside
+    // this function, the response now matches source byte-for-byte.
     onBirdWingHit(bird, idx) {
-        // Downgrade shape: pick a smaller variant. Source's T3DB8
-        // lookup produces a specific shape based on the hit tile; port
-        // uses a coarse "drop several shape steps" rule:
-        //   shape >= 5 → 1 (back to small egg-like form)
-        //   shape  < 5 → 1 (already small; reset to egg)
-        // The maturity engine will then walk it back up via $36D2 (1→2
-        // →3→4), $36EA (4→5→6), and $370A (6→7, 7→B, etc.) over
-        // ~30-60 ticks, regrowing wings naturally.
-        bird.shape = 1;
-        // Reset the gate counter and clear field6 so the maturity
-        // routines fire promptly.
-        bird.advanceCtr = BIRD_T3F00[1 << 3];   // T3F00[shape=1][0] = $20
-        bird.field6 = 0;
-        // Source-faithful spawn (alien-slot, scoreBcd=$02, 20 pts).
+        // $38C7-$38D1 — shape-gate for tile swap.
+        if (bird.shape >= 0x0B && bird.shape <= 0x0D) {
+            // $38D8-$38DC — side derived from PlayerBulletX vs gridX
+            // via `CP (HL); RLA`. Carry flag from CP is set when
+            // PlayerBulletX < bird.gridX (bullet hits LEFT side of bird).
+            const side = (state.player.bullet.x < bird.gridX) ? 4 : 0;
+            const idxInTable = side | (bird.shape - 0x0B);
+            const newShape   = BIRD_T3DB8[idxInTable];
+            // T3DB8 only has 6 valid entries ($FF padding at offsets
+            // 3 and 7); the source's early-exits at $38CA/$38CF prevent
+            // those from ever being indexed. Guard anyway.
+            if (newShape !== 0xFF) {
+                bird.shape = newShape;
+            }
+        }
+        // $38E9 — always-on tail: wing-hit explosion + 20 pts.
         const pos = this.birdCanvasPos(bird) || { x: 0, y: 0 };
-        // Alien explosion is 24w × 16h — center it on the bird's
-        // current sprite location (use single-column width assumption
-        // since the bird is now at shape 1 = 2×2 small sprite).
-        const ex = (pos.x + 8 - 12) & 0xFF;
+        // Alien explosion is 24w × 16h — center on the bird's current
+        // sprite. Width derived from the (possibly just-updated) shape
+        // via the same T3EC0 lookup drawBird uses.
+        const lsb = BIRD_T3EC0[bird.shape] ?? 0x40;
+        const widthCols = Math.max(1, Math.min(7, (0x58 - lsb) >> 3));
+        const widthPx = widthCols * 8;
+        const ex = (pos.x + (widthPx >> 1) - 12) & 0xFF;
         const ey = (pos.y + 4 -  8) & 0xFF;
-        this.spawnExplosion(0x0C, 0x02, ex, ey);
+        this.spawnExplosion(0x07, 0x02, ex, ey);
         scoring.addPoints(20, state.gameAndDemoOrSplash);
     },
 
     // $3844 body-hit path — bird killed by player bullet. Source:
     //   - Clear bird tile in BG screen RAM (LD (DE),$00 at $3851)
     //   - DEC BirdsLeft at $385C
-    //   - Compute scoreBcd from bird state E (L385D-L388D scaling)
-    //   - JP $38FB — populate first-free bonus-explosion slot
+    //   - Compute scoreBcd from bird.shape (cached at $3850 before the
+    //     slot is cleared) and bird[+4] (= advanceCtr at $3857). See
+    //     $385D-$388D + $3894 in Code.md.
+    //   - JP $38FB / $38F8 — populate first-free explosion slot
+    //     (bonus-slot for shape >= $0B, alien-slot for shape < $0B)
     //   - On bonus-explosion animation END at $3A37: M4368 := $00,
     //     M4366 := $00 (reset maturity + wing-hit flag)
     //
-    // Port simplifies scoring: fixed scoreBcd = $10 (100 pts), matching
-    // the source's default after the BC=$1010 load at $386B before the
-    // E-dependent dividers. The full per-state scaling lives in
-    // research_bird_stage.md §10 as a follow-up.
+    // Source scoring table (research_bird_stage.md §6.3):
+    //   shape <  $0B → scoreBcd = $05 → 50 pts, alien-slot explosion
+    //                  (no popup; matches "egg / cracking" kill)
+    //   shape == $0F → scoreBcd = $10 → 100 pts, bonus-slot popup
+    //                  (matches "mature bird in formation/drift")
+    //   shape == $0E → scoreBcd = ((advanceCtr >> 1) & $7C) + $30
+    //                  (typically $30-$78 → 300-780 pts), bonus-slot
+    //   shape == $0D → above >> 1 (typically 150-380 pts), bonus-slot
+    //   shape == $0C → above >> 1 (same as $0D — second halving is
+    //                  gated `JP NC,$38FB` on shape >= $0C; only $0B
+    //                  takes the third halving), bonus-slot
+    //   shape == $0B → above >> 2 (typically 75-195 pts), bonus-slot
+    //
+    // The variable shapes ($0B-$0E) cover transient diving/swooping
+    // states; in arcade play, most body kills land on shape $0F (100 pts)
+    // and the egg path (50 pts) with occasional bonus values when you
+    // catch a bird mid-swoop. Some computed scoreBcd values produce
+    // invalid BCD nibbles (e.g. $38 >> 1 = $1C); the popup renders the
+    // raw nibble through the same $20|nibble tile lookup as digit '0'-'9'
+    // (so $0C displays as the tile right after '9'), and addPoints
+    // takes the literal hi*10 + lo decode (matches the L37B0 display
+    // semantics — invalid BCD is a source-side artifact, not corrected
+    // here so the score on display always equals the score awarded).
     //
     // Maturity reset: port does it immediately on kill rather than at
     // bonus-explosion-animation end. Visible difference is ~16 frames
@@ -1052,17 +1168,56 @@ export const states = {
     // right after a kill instead of after a half-second delay. Same
     // net behaviour — surviving birds re-process maturity from $00.
     onBirdHit(bird, idx) {
+        // Cache shape + advanceCtr before clearing the slot ($3850-$3857).
+        const shape  = bird.shape;
+        const advCtr = bird.advanceCtr;
+
         bird.shape = 0;                                // free the slot
         state.birdsLeft = Math.max(0, state.birdsLeft - 1);
         state.maturity = 0;                            // $3A37 cleanup
+
+        // $385D-$388D / $3894 — scoreBcd + slot-type decision.
+        let scoreBcd;
+        let isBonus;
+        if (shape < 0x0B) {
+            // $3894 — egg / cracking / small-bird kill.
+            scoreBcd = 0x05;
+            isBonus  = false;
+        } else if (shape === 0x0F) {
+            // $386F JP Z,$38FB — mature bird, default BC=$1010.
+            scoreBcd = 0x10;
+            isBonus  = true;
+        } else {
+            // $3874-$388D — compute from advanceCtr.
+            let c = (((advCtr >> 1) & 0x7C) + 0x30) & 0xFF;
+            if (shape <= 0x0D) c = (c >> 1) & 0xFF;     // $0B/$0C/$0D — halve once
+            if (shape === 0x0B) c = (c >> 1) & 0xFF;    // $0B — halve again
+            scoreBcd = c;
+            isBonus  = true;
+        }
+
+        // BCD → decimal × 10 (matches L37B0 popup's hi/lo nibble render).
+        const hi = (scoreBcd >> 4) & 0x0F;
+        const lo =  scoreBcd       & 0x0F;
+        const points = (hi * 10 + lo) * 10;
+
         const pos = this.birdCanvasPos(bird) || { x: 0, y: 0 };
-        // Center the 48w × 16h bonus sprite on the placeholder 8×8 bird:
-        //   ex = bird-center - sprite-half-width  = (px+4) - 24
-        //   ey = bird-center - sprite-half-height = (py+4) -  8
-        const ex = (pos.x + 4 - 24) & 0xFF;
-        const ey = (pos.y + 4 -  8) & 0xFF;
-        this.spawnBonusExplosion(0x10, 0x10, ex, ey);  // counter=16, "100"
-        scoring.addPoints(100, state.gameAndDemoOrSplash);
+        if (isBonus) {
+            // 48w × 16h bonus sprite — center on the bird:
+            //   ex = bird-center - sprite-half-width  = (px+4) - 24
+            //   ey = bird-center - sprite-half-height = (py+4) -  8
+            const ex = (pos.x + 4 - 24) & 0xFF;
+            const ey = (pos.y + 4 -  8) & 0xFF;
+            this.spawnBonusExplosion(0x10, scoreBcd, ex, ey);
+        } else {
+            // 24w × 16h alien-slot sprite (no popup), matches $38F8 path.
+            // Source loads B=$0D as the slot counter ($3894 BC=$0D05).
+            const ex = (pos.x + 4 - 12) & 0xFF;
+            const ey = (pos.y + 4 -  8) & 0xFF;
+            this.spawnExplosion(0x0D, scoreBcd, ex, ey);
+        }
+
+        scoring.addPoints(points, state.gameAndDemoOrSplash);
     },
 
     // $3498 — call $35B0 for birds 0..3.

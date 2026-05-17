@@ -404,6 +404,55 @@ bird kill, resetting the flock-wide maturity to "no shapes
 available." Surviving birds re-spawn into the egg shape next time
 they reach the maturity-advance gate. [verified.]
 
+### 4.5 Wing-damage regrowth chain
+
+The maturity machinery has an asymmetric reaction to wing damage
+(`$38BC` wing-hit + T3DB8 shape swap, §6.1):
+
+- **One wing missing** (`$0C` or `$0D`): maturity routine is `$36CC`
+  (no-op). The bird is **stuck permanently** in the wing-damaged
+  state. It keeps flying via the `$35E0` sweep motion, but it can
+  never regrow that wing.
+- **Both wings missing** (`$0E`): maturity routine is `$36EA`. With
+  the same advanceCtr + field6 gates as every other `$36EA`
+  consumer, the bird advances to `T3F00[$0E][2] = $06`. Shape `$06`
+  then enters the normal early-immature chain and the bird
+  regenerates back to a full-wings flier.
+
+Full source-traced regrowth chain (each arrow gated by
+`advanceCtr == 0` plus the `$36EA`/`$370A` field6 sub-gate):
+
+```
+$0E  (no wings)              $36EA → write D=$06   →  $06
+$06  (small bird, "growing") $370A → write D=$07   →  $07
+$07  (slightly larger)       $370A → write D=$0B   →  $0B   (full wings restored)
+$0B  (full wings, immature)  $36EA → write D=$0F   →  $0F   (mature flying)
+```
+
+The `$370A` override (§4.3) can fast-track an in-chain bird directly
+to a different shape via the `E & $0F` write, but only when
+`(M436F & E) & $F0 == 0` — so the chain above is the worst-case path
+and most birds in practice take fewer ticks to recover.
+
+[verified, `Code.md:$36CC` (4-instr no-op), `$36EA → 06`, `$370A`
+chain through `T3F00[$06][2] = $07`, `T3F00[$07][2] = $0B`,
+`T3F00[$0B][2] = $0F` — all walked 2026-05-17.]
+
+**Player-side consequence.** Shooting *one* wing cripples the bird
+forever; shooting *both* wings paradoxically heals it. This is
+unintuitive but consistent with the source — likely an arcade design
+choice to keep wing-damaged birds visible on screen (one-wing state
+acts as a permanent "you injured me" trophy) while preventing the
+both-wings state from being a free-respawn loophole (since the
+regrowth has its own ~5-10 second cost and the bird is vulnerable
+to body kills the whole time).
+
+**Port mapping.** No code changes needed — `birdMaturity36EA` and
+`birdMaturity370A` already implement the chain correctly via the
+T3F00 dispatch in `birdUpdate`. The `$36CC` no-op is also handled
+(switch-statement default branch in `birdUpdate`). The cycle just
+naturally falls out of the existing machinery.
+
 ---
 
 ## 5. T3F00 dispatch and T3E80 shape table
@@ -768,22 +817,83 @@ MOTION PATH OSCILLATION (via $35E0 dispatch):
 
 ## 6. Hit detection — `$3800`, `$38E9`, `$3844`, bonus path
 
-### 6.1 Wing-hit entry (`$38E9`)
+### 6.1 Wing-hit entry (`$38BC` → `$38E9`)
+
+`$3800` reaches `$38BC` either by direct dispatch from `$391C` (when
+the bullet's tile is in the "wing" range, `B = tile − $90 ≥ $20`)
+or after a failed body-hit attempt in `$3844`. `$38BC` then decides
+whether to mutate the bird's shape:
 
 ```
-38E9: LD A,$FF
-38EB: LD ($4366),A             ; M4366 := $FF (mothership/bird-wing-hit flag)
-38EE: LD BC,$0702              ; B=$07 (slot payload), C=$02 (score delta)
-38F1: JP $38F8                 ; → shared explosion-spawn allocator
+38BC: ADD $B0; LD L,A; LD H,$3B  ; T3BB0[bullet sub-cell mask]
+38C1: LD A,(HL); AND C; RET Z    ; if mask doesn't overlap a wing pixel, return
+38C4: CALL $38A1                  ; 4x4 cosmetic erase via T17F0 (anti-piracy)
+38C7: LD A,(DE)                   ; A = bird.shape
+38C8: SUB $0B
+38CA: JP C,$38E9                  ; shape <  $0B → no shape change, JP $38E9
+38CD: CP $03
+38CF: JP NC,$38E9                 ; shape >  $0D → no shape change, JP $38E9
+;     (shape ∈ {$0B, $0C, $0D} falls through)
+38D2: LD B,A                      ; B = bird.shape - $0B  (0..2)
+38D3: LD H,D; LD A,E; ADD $05     ; HL → bird struct + 5 (bird.gridX address)
+38D7: LD L,A
+38D8: LD A,($43C6); CP (HL)       ; A = PlayerBulletX; compare with bird.gridX
+38DC: RLA; RLCA; RLCA             ; carry from CP (set if PlayerBulletX < gridX)
+                                  ; → bit 0 → bit 2 of A
+38DF: AND $04                     ; A = $04 if bullet on left, else 0
+38E1: OR B; ADD $B8; LD L,A       ; HL = $3DB8 + (side | (shape - $0B))
+38E5: LD H,$3D
+38E7: LD A,(HL); LD (DE),A        ; bird.shape := T3DB8[ side | (shape - $0B) ]
+;     fall through to $38E9
+L38E9:
+38E9: LD A,$FF; LD ($4366),A      ; M4366 := $FF (mothership/bird-wing-hit flag)
+38EE: LD BC,$0702                 ; B=$07 (slot counter), C=$02 (scoreBcd = 20 pts)
+38F1: JP $38F8                    ; → shared explosion-spawn allocator
 ```
 
-[verified, `Code.md:$38E9-$38F1`]
+[verified, `Code.md:$38BC-$38F1` walked 2026-05-17]
 
-So a wing-hit raises `M4366` and queues an entry in the alien/bird
-kill-explosion array `$4370-$437F` (see `research_enemy_motion.md
-§1.0.5`). The "200-pt bonus" wiring already in
-`spawnBonusExplosion()` is reused here unchanged — step 11 just
-needs to invoke it from the bird collision code.
+So a wing-hit:
+- Always raises `M4366` and spawns an alien-slot explosion with
+  scoreBcd = `$02` (= 20 pts), regardless of bird state.
+- Mutates `bird.shape` ONLY when shape ∈ `{$0B, $0C, $0D}`, via the
+  T3DB8 lookup. The new shape is determined by which side of the
+  bird the bullet was on:
+
+  | shape before | bullet right (side=0) | bullet left (side=4) |
+  |---|---|---|
+  | `$0B` | `$0C` | `$0D` |
+  | `$0C` | `$0C` (unchanged) | `$0E` |
+  | `$0D` | `$0E` | `$0D` (unchanged) |
+
+  Each transition maps to a "wing-damaged" sprite variant
+  (`bgtiles` labels: "#28/#29/#30 without right wing", "...without
+  left wing and regrowing"). For shapes outside `{$0B-$0D}` no
+  visual change occurs — the bird keeps flying with its current
+  sprite intact and only the 20-pt explosion fires.
+
+- Never decrements `BirdsLeft`. The bird survives.
+
+T3DB8 data (8 bytes at `$3DB8`):
+```
+$3DB8: 0C 0C 0E FF   ; side=0 (bullet from right) → shape map; $FF unused
+$3DBC: 0D 0E 0D FF   ; side=4 (bullet from left)  → shape map; $FF unused
+```
+
+**Port mapping (2026-05-17 follow-up).** `onBirdWingHit` reads
+`state.player.bullet.x` and `bird.gridX` to derive `side`, then
+applies the T3DB8 lookup if shape ∈ `{$0B-$0D}`. The previous port
+behavior (always reset `bird.shape = 1`) was a coarse over-shrink
+that turned every wing hit into a full egg-regrow cycle; the
+source's actual behavior is much subtler and most wing hits don't
+visibly change the bird at all. The 20-pt explosion + score still
+fires unconditionally.
+
+The wing-vs-body discrimination upstream of this function is still
+the port's AABB + center-distance heuristic (not source's tile-mask
+check via T3B60/T3BB0) — that deviation is intentionally kept (see
+§10 item 11), since it only affects WHICH bullets register as
+wing-hits, not what happens once they do.
 
 ### 6.2 Allocator (`$38F8 / $38FB`)
 
@@ -820,15 +930,42 @@ step 10.7 fires:
 3858: POP HL
 3859: LD HL,$43BB
 385C: DEC (HL)                      ; BirdsLeft--
-385D-388D:                          ; score scaling based on (A from tile read)
-                                    ;   < $0B → JP $3894: alien-slot, scoreBcd=$05 (50 pts), M4364 := $FF
+385D-388D:                          ; score scaling based on A (bird.shape from $3850)
+                                    ;   < $0B → JP $3894: alien-slot, BC=$0D05 (50 pts), M4364 := $FF
                                     ;   ≥ $0B → bonus slot, BC=$1010 init then scaled:
                                     ;     == $0F → keep BC=$1010 → 100 pts
                                     ;     == $0E → C = ((D >> 1) & $7C) + $30
-                                    ;     ≥ $0C → C >>= 1
-                                    ;     <  $0C → C >>= 2
+                                    ;     == $0D or $0C → C = above >> 1
+                                    ;     == $0B → C = above >> 2
+                                    ;   (D = bird[+4] = advanceCtr, loaded at $3857)
 388D: JP $38FB                       ; populate first-free slot
 ```
+
+**Port mapping (2026-05-17 follow-up):** `onBirdHit` reads
+`bird.shape` + `bird.advanceCtr` BEFORE clearing the slot (matches
+$3850 caching A, then $3851 zeroing the tile, then $3857 reading
+bird[+4]), then walks the shape branches to produce `scoreBcd`.
+Decimal points = `((scoreBcd >> 4) * 10 + (scoreBcd & 0xF)) * 10`
+which matches L37B0's popup render (high nibble = tens-of-hundreds
+digit, low nibble = hundreds digit, trailing always-'0' tile).
+
+Verified scoring table:
+
+| shape | advCtr | scoreBcd | pts | slot   |
+|-------|--------|----------|-----|--------|
+| < $0B | any    | $05      |  50 | alien  |
+| $0B   | $20    | $10      | 100 | bonus  |
+| $0C   | $20    | $20      | 200 | bonus  |
+| $0D   | $20    | $20      | 200 | bonus  |
+| $0E   | $20    | $40      | 400 | bonus  |
+| $0E   | $40    | $50      | 500 | bonus  |
+| $0F   | any    | $10      | 100 | bonus  |
+
+For some `(shape, advCtr)` combinations the formula produces a
+scoreBcd byte with a nibble > 9 (e.g. shape $0C + advCtr $10 →
+scoreBcd $1C → "1C" displayed → 220 pts awarded). This is a source
+artifact, not corrected by the port — what's awarded always matches
+what's drawn (since both use the same nibble decode).
 
 On the bonus-explosion-animation END (`$3A37`, after the slot counter
 reaches 0 and the explosion sprite has finished playing):
@@ -883,23 +1020,172 @@ spiral completes (via the GameState 2 dispatch).
 
 ---
 
-## 8. Birds do not fire
+## 8. Birds DO fire (via `$3930` → `$25B7`)
 
-Searching for any `EnemyFireScanAndSpawn $2560` invocation from `$3400`
-or its callees: **none**. Birds reuse `EnemyBulletUpdate $0C40` to tick
-the per-bullet position of any aliens that may already have bullets in
-flight (carryover from stage 3 — `BirdsLeft` and `AliensLeft` are
-independent counters), but birds themselves never spawn new bullets.
+**Correction (2026-05-17).** The previous version of this section
+claimed "birds do not fire", based on the absence of a direct
+`$2560 EnemyFireScanAndSpawn` call from `$3400`. That was wrong:
+arcade footage shows birds shooting downward at the player, and a
+re-trace of `$3400` confirms a bird-specific fire path that re-uses
+the alien-fire SPAWN tail (`$25B7`/`$25E0`) but with a different
+SCAN front-end (`$3930` + `$395C`) and a different rate gate
+(`$3A00`). The two missed call sites in `$3400` are at `$3431` and
+`$3448`.
 
-This matches the original arcade behaviour: bird stages are
-fundamentally about dodging swooping birds, not bullet patterns. The
-port should:
+### 8.1 Dispatch wiring
 
-- Keep `enemyBullets[]` allocated and ticked during bird stages (for
-  carryover), but
-- **Skip** the call to `enemyFireScanAndSpawn` during stages 5/7.
+```
+$341B  BirdsLeft < 4         JP C, $0FC0 (odd parity → explosions, RET)
+$342E                        ↓  (even parity)
+$3431                        CALL $3930   ← bird fire
+$3434                        JP   $0C40   ← enemyBulletUpdate
 
-[verified by absence; `Code.md:$3400-$346D` contains no `$2560` call.]
+$3438  BirdsLeft >= 4        JP C, $3452 (odd parity → second-4 + explosions)
+$343C                        ↓  (even parity)
+$3445                        CALL $3498   (first-4 maturity)
+$3448                        CALL $3930   ← bird fire
+$344B                        JP   $0C40   ← enemyBulletUpdate
+```
+
+So `$3930` runs on every **even-parity** frame (i.e. every 2 frames).
+The internal `$3A00` gate halves that further — net cadence is one
+fire attempt every 4 frames.
+
+### 8.2 `$3930` — bird-fire scan
+
+```
+3930  A = M4BD2; A &= $1E              ; bits 4..1 → 16 buckets (32 bytes / 2)
+3935  HL = $3DC0 + A                   ; T3DC0 entry
+393A  E  = (HL+0)                      ; iteration count (1..8)
+393C  L  = (HL+1)                      ; starting LSB of first bird struct
+393D  H  = $4B                         ; bird base $4B70..$4BA8
+393F  CALL $3A00                       ; rate gate (see §8.3)
+3942  D  = $0C - BirdsLeft             ; (set by $3A00, returned in D)
+3945  C  = M439F + D                   ; right edge of fire X-band
+3947  B  = M439E - D                   ; left edge of fire X-band
+394C  loop E times over per-bird slot:
+        CALL $395C                     ; per-bird check + spawn
+        L += 8                         ; next bird struct
+3959  RET
+```
+
+`$4BD2` is part of the M4BD0+ extended bird-storage state machine
+(not ported — see §10 item 1). T3DC0 is a 16-entry × 2-byte table at
+`$3DC0`:
+
+```
+3DC0: 06 70  07 70  08 70  08 70    ; idx 0..6 — loop=6/7/8/8 from bird0
+3DC8: 08 70  07 78  06 80  05 88    ; idx 8..E — narrower windows from later birds
+3DD0: 04 90  03 98  02 A0  01 A8    ; idx 10..16 — single-bird scans
+3DD8: 02 70  03 70  04 70  05 70    ; idx 18..1E — small scans from bird0
+```
+
+Each entry is (`loop`, `startLsb`). `startLsb` is the bird-struct
+LSB (`$70`, `$78`, ..., `$A8` = bird 0..7). `loop` is how many
+sequential birds to test in this call. Spanning these 16 entries
+gives the source ~16 distinct "which subset of birds may fire this
+frame" choices, modulated by `$4BD2`.
+
+### 8.3 `$3A00` — rate gate + `D` setup
+
+```
+3A00  A = BirdsLeft
+3A03  A -= $0C; A = ~A + 1            ; A = $0C - BirdsLeft
+3A07  D = A                            ; returned for $3942 use
+3A08  A = M439B (= Counter9A LSB)
+3A0B  A = (A RRCA RRCA)                ; original bit 1 → carry
+3A0D  RET C                            ; bit 1 set → caller proceeds (fire)
+3A0E  POP HL; RET                      ; bit 1 clear → unwind one stack frame,
+                                       ; bypassing the fire loop entirely
+```
+
+Combined with the every-other-frame dispatch wiring, the effective
+fire-attempt cadence is **once every 4 frames** (≈ 15 Hz).
+
+### 8.4 `$395C` — per-bird candidate test + spawn
+
+```
+395C  A = bird[+0] (shape)             ; current shape
+395D  CP $05; RET C                    ; shape < 5 → not eligible (egg/cracking)
+3960  L += 5                           ; bird[+5] = gridX
+3964  A = bird[+5]
+3965  CP B; RET C                      ; gridX <  B → too far left of player band
+3967  CP C; RET NC                     ; gridX >= C → too far right
+3969  A -= $04                         ; gridX - 4 (becomes spawn X after $25E0 adds 4 back)
+396B  B = A
+396C  L -= 3                           ; L → bird[+2] = screenLsb
+396F  A = M4BD2 + bird[+2]             ; RNG-mix with bird's current screen position
+3973  A &= $1F                         ; 0..31
+3975  A <<= 3                          ; 0/8/16/.../248
+3978  A += 8                           ; 8..256 (wraps to 0 if 256)
+397A  C = A                            ; randomized spawn Y (pre-$25E0 offset)
+397B  JP $25B7                         ; tail-call into alien-fire SPAWN path
+```
+
+So a bird only fires if **all** of:
+- shape ≥ 5 (i.e. has working wings — egg/cracking shapes don't fire)
+- bird's gridX is within `[M439E - D, M439F + D)` where
+  `D = $0C - BirdsLeft` (small flock = wide band)
+
+When eligible, the spawn coords passed to `$25B7` are:
+- B = `gridX - 4`  (becomes `gridX` after `$25E0`'s `B += 4`)
+- C = `((M4BD2 + screenLsb) & $1F) * 8 + 8`  (becomes `+ $0C` more after `$25E0`)
+
+The randomized Y is a port deviation from "spawn at the bird's
+actual Y" — source spreads bullets across the screen vertically,
+relying on the constant downward fall rate to give the impression of
+bullets that "appeared while you were watching the bird". Bullet
+spawn position is otherwise standard ($25E0): state = $08,
+shape = $58 + ((B>>1) & 3) + (C & 4).
+
+### 8.5 First-spawn-wins, not last-match
+
+Unlike `$2560` (the alien-fire scan, which writes B/C in EVERY
+matching alien and lets the LAST match win), `$3930`/`$395C` returns
+through the spawn path immediately after writing one bullet. The
+`POP HL; POP HL; RET` at `$25DD`/`$25FD` unwinds two stack frames —
+the inner `$395C` return AND the outer `$394C` loop return — so the
+caller of `$3930` resumes directly. Net effect: at most ONE
+bird-fired bullet per dispatched frame, taken from the FIRST
+eligible bird in the T3DC0-selected subset.
+
+### 8.6 Port plan (sub-step 11.7)
+
+- Add `T3DC0` (32 bytes at `$3DC0`) to `data.js` as `BIRD_T3DC0`.
+- Add `birdFireScanAndSpawn()` in `states.js`:
+  - Rate gate: `(state.counter9a & 2) !== 0` (matches `$3A00`'s
+    RRCA × 2 on the LSB).
+  - `D = ($0C - state.birdsLeft) & 0xFF`.
+  - `{left, right} = this.mappedPlayerX()`  (M439E/M439F).
+  - `B = (left - D) & 0xFF;  C = (right + D) & 0xFF`.
+  - T3DC0 index = `state.counter9a & 0x1E`  (port-side substitute
+    for `$4BD2` — see below).
+  - Iterate `loop` birds starting at `(startLsb - 0x70) >> 3`:
+    - If `bird.shape < 5` or `bird.gridX < B` or `bird.gridX >= C`,
+      continue.
+    - Compute spawn X = `bird.gridX`,
+      spawn Y = `((state.counter9a + bird.screenLsb) & 0x1F) * 8 + 8 + 0x0C`.
+    - Find first-free `state.enemyBullets[]` slot up to the
+      round-based cap (`3/4/5`).
+    - If no slot, return (matches `POP+POP+RET` in `$25CD` loop).
+    - Spawn the bullet (state=$08, shape = $58 +
+      ((X>>1)&3) + (Y&4), x = X, y = Y); then return (only ONE
+      bullet per call, per §8.5).
+- Wire into `stageBirdCombat`:
+  - `BirdsLeft < 4` + even-parity branch: call before
+    `enemyBulletUpdate()`.
+  - `BirdsLeft >= 4` + even-parity branch: call before
+    `enemyBulletUpdate()`.
+
+**Port deviation — `$4BD2` substitute.** Source maintains `$4BD2`
+via the M4BD0+ extended-bird-storage state machine (`$26D0` /
+`$26AA` / `$2668`), which the port doesn't model (see §10 item 1).
+Using `state.counter9a` instead gives a per-frame-varying index into
+T3DC0 (rotating through all 16 buckets every 32 frames) and a
+per-frame-varying random Y offset, which is enough variability to
+produce visible bullet variety. The source's exact subset cadence is
+not preserved, but the visual character (sporadic bird-fire from
+multiple birds, randomized vertical positions) is.
 
 ---
 
@@ -1129,3 +1415,101 @@ cycle.
       50 pts when read tile A < $0B) is still unreachable. All
       body kills use the bonus slot at 100 pts. Restoring this
       requires the tile-mask collision (= BG-plane mirror).
+
+12. **Full `$2600` BG-scroll state machine — reviewed, not ported
+    (user-confirmed "current port is good enough", 2026-05-17).**
+    Item 6 covers the port-side approximation. This item documents
+    what the FULL source-faithful version would entail, captured
+    here so a future revisit doesn't need to re-trace from scratch.
+
+    **State (7 RAM bytes, all in `$4BD0-$4BD7` extended-bird
+    storage region; RAMUse labels are "Old/MSB/LSB screen ram
+    address alien8/9" but the bird-stage usage is unrelated):**
+
+    | RAM | Role |
+    |---|---|
+    | `CounterB9` (`$43B9`) | Current scroll value, mirrored to hardware `$5800` each call |
+    | `M4BD1` (`$4BD1`) | Direction threshold — compared against `M4BD2` to pick up vs down path |
+    | `M4BD2` (`$4BD2`) | `CounterB9` re-encoded as 0–31 (`CPL + RRCA×3 & $1F`); recomputed each call |
+    | `M4BD3` (`$4BD3`) | Re-arm countdown for `M4BD1` refresh via `$2476` |
+    | `M4BD5` (`$4BD5`) | T3ED0 index modulator, refreshed from `M436E + Counter9A + AliensLeft` |
+    | `M4BD6` (`$4BD6`) | Live-bird-vertical-spread fold (count of live birds × `M4BD2`) |
+    | `M4BD7` (`$4BD7`) | Index delta: last-live-bird − first-live-bird |
+
+    Note: `$4BD2` and `$4BD6` are reused as `state.counter9a` substitutes
+    by the port's `birdFireScanAndSpawn` (§8.6) — those substitutes
+    work fine for fire variety but the source's actual values are
+    position-derived, not time-derived.
+
+    **Three new data tables (~60 bytes):**
+
+    | Table | Bytes | Indexed by | Purpose |
+    |---|---|---|---|
+    | **T3ED0** (`$3ED0..$3EDF`) | 16 | `(M4BD5 & $03) \| (Counter9A+1 << 2 & $0C) + offset` | Per-call scroll-step delta (0–8 px) for both up and down paths |
+    | **T3EE0** (`$3EE0..$3EEB`) | 12 | `M4BD6 + $E0` | Upper cap on `M4BD5` advance, bounded by bird-spread |
+    | **T3EF0+** (`$3EEC..$3EFF`) | 20 | `M4BD7` | Feeds `$26C0` → `$2476` reseed path |
+
+    **Per-`$2600` call flow:**
+
+    ```
+    M4BD2 := (~CounterB9 RRCA×3) & $1F          ; current pos re-encoded
+    IF M4BD1 < M4BD2:
+      alt path ($2650): CounterB9 += T3ED0[idx]   ; SCROLL UP
+    ELSE:
+      main path ($261A): CounterB9 -= T3ED0[idx]  ; SCROLL DOWN
+    write CounterB9 to $43B9 AND hardware $5800
+    IF (Counter9A+1) bit 0 == 0:
+      JP $26D0 — rescan all 8 birds to update M4BD6/M4BD7
+    ELSE:
+      CALL $2668 — re-mix M4BD5 from bird-random + Counter9A + AliensLeft
+      JP $26AA — DEC M4BD3 countdown; if expired, call $2476 to re-arm M4BD1
+    ```
+
+    **Routines to port:** `$2600` dispatcher, `$2668` (M4BD5
+    update), `$26AA`/`$26AE` (M4BD3 countdown), `$26D0` (bird-spread
+    scan), `$2476` (M4BD1 reseed). Estimated ~100 lines + 60-byte
+    data slice.
+
+    **What source-faithful would change visually:**
+
+    | Aspect | Source | Port (current) |
+    |---|---|---|
+    | Step size | 0–8 px/call from T3ED0 lookup | Fixed ±1 px/frame |
+    | Direction switch | When CounterB9 crosses M4BD1 threshold (data-driven) | Bit 6 of Counter9A toggle (~64-frame fixed period) |
+    | Amplitude | Bounded by live-bird vertical spread (`M4BD6`) | Full 0–255 (mod-256 wrap, see item 13) |
+    | Period | Variable (depends on M4BD3 + bird-spread) | Fixed ~2 sec |
+    | Bird-state coupling | Tight — alive-bird positions dictate limits | None |
+
+    Source-trace verified end-to-end against `Code.md:$2600-$26FD`
+    (2026-05-17). User decision: keep the simplified port.
+
+13. **BG-scroll wrap behavior — present but discrete (1-frame seam).**
+    In the arcade, the hardware `$5800` scroll register cyclically
+    re-projects the entire BG plane, so a bird whose drawn position
+    crosses the bottom edge appears split: top half at canvas bottom,
+    bottom half at canvas top, then smoothly slides up as the scroll
+    advances. Visual is continuous.
+
+    In the port, `render.drawBird` computes
+    `baseY = ((row * 8) + scrollY) & 0xFF` (mod-256), then calls
+    `ctx.drawImage` once per tile row at `baseY` and `baseY + 8`.
+    Canvas clips anything off-edge but does NOT wrap automatically.
+    So when `baseY ≈ 248`, the top half of the bird is visible at
+    y=248..255 and the bottom half is clipped. The next frame, with
+    `scrollY` ticked by 1, `baseY` jumps to 0 and the whole bird
+    reappears at the top — a **1-frame discontinuity** where the
+    bottom half briefly disappears.
+
+    Empirically (sampled 2026-05-17): `counterB9` does traverse the
+    full 0–254 range during stage 5, so every bird at every row
+    does eventually cross the wrap point. The visual difference vs
+    arcade is hard to notice because:
+    - Bird sprite is 16 px tall vs 256 px canvas (~6% of frame).
+    - The wrap moment is exactly 1 frame at 60 Hz (~17 ms).
+    - Player attention is on the ship + incoming threats, not
+      background birds at the edges.
+
+    **Fix if ever desired:** in `drawBird`, when `baseY + 16 > 256`,
+    issue extra `drawImage` calls at `baseY - 256` for the wrapped
+    portion. ~10 lines. Currently not implemented; documented here
+    for future reference.

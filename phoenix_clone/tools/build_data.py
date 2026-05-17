@@ -206,6 +206,28 @@ RAW_SLICES = [
     # in source — written to $48XX/$4BXX, not the FG plane).
     # research_bird_stage.md §5.4 (new).
     ("BIRD_TILE_DATA",   0x3C00, 0x01C0),
+    # source T3DB8..$3DBF — 8-byte wing-hit shape-swap table consumed
+    # by $38BC. Indexed by `(side << 2) | (bird.shape - $0B)` where
+    # `side` is 0 if PlayerBulletX >= bird.gridX (bullet on right) and
+    # 1 if PlayerBulletX < bird.gridX (bullet on left). Only valid for
+    # bird.shape ∈ {$0B, $0C, $0D}; other shapes don't tile-swap.
+    # Layout:
+    #   $3DB8: 0C 0C 0E FF   ; right-side hits → shape map
+    #   $3DBC: 0D 0E 0D FF   ; left-side  hits → shape map
+    # The $FF bytes are unused (bird.shape - $0B = 3 would index them,
+    # but shape >= $0E early-exits in $38CD).
+    # research_bird_stage.md §6.1.
+    ("BIRD_T3DB8",       0x3DB8, 8),
+    # source T3DC0..$3DDF — 32-byte bird-fire scan-subset table. 16
+    # entries × 2 bytes: (loopCount, startLsb). Indexed by
+    # `(M4BD2 & $1E)` at $3930 to pick which subset of the 8 birds is
+    # tested for fire eligibility this call. `startLsb` is the LSB of
+    # the bird struct in $4B70..$4BA8 (= $70..$A8 stepping by 8);
+    # `loopCount` is how many sequential bird slots to scan. Port uses
+    # `state.counter9a & 0x1E` as the index since the M4BD0+ state
+    # machine that maintains $4BD2 isn't ported.
+    # research_bird_stage.md §8.2.
+    ("BIRD_T3DC0",       0x3DC0, 32),
     # source $3E00..$3E7F — anim-frame address table (a.k.a. T3E08, label
     # starts 8 bytes into the page). 16 shapes × 4 frames × 2-byte MSB:LSB
     # entries = 128 bytes. Index formula at $34D4-$34D7:
