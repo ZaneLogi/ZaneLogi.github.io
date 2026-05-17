@@ -199,7 +199,33 @@ export const state = {
         // Player-death timer — not a source field; used while state4 is a stub.
         this.playerExplosionTimer = 0;
 
-        this.bgScrollY = 0;           // $5800 scroll register (research_hardware.md §4)
+        // BG tile plane — 26 cols × 33 rows (1 extra "hidden" row at the
+        // top, above the visible area). research_hardware.md §4 describes
+        // the source's two independent tile planes (FG and BG each 32×26
+        // visible tiles). The port adds one extra row at index 0 that
+        // sits at canvas y = -8..-1 + scrollPixel — fully off-screen at
+        // scroll boundary, partially revealed as scroll progresses. The
+        // row-fill in starsScrollDown writes into this hidden row, then
+        // the buffer rotates by one row when scrollPixel crosses 8 → the
+        // fresh content scrolls into view from the top without the user
+        // ever seeing the fill or erase. Port-only design choice (source
+        // uses 32 rows and the user sees the erase artifact briefly at
+        // display row 0).
+        // tile === 0 → transparent (skip drawImage).
+        this.bgTiles = new Uint8Array(26 * 33);
+
+        // $43B9 CounterB9 — 8-bit backwards-counting frame counter,
+        // decremented by StarsScrollDown ($067A) each fade-in frame.
+        // Written verbatim to the BG scroll register ($5800 mirror →
+        // bgScrollY). Wraps freely modulo 256.
+        this.counterB9 = 0;            // $43B9
+        this.bgScrollY = 0;            // $5800 scroll register (legacy mirror; not consumed by drawBackground in the 33-row design)
+
+        // Per-pixel scroll offset within the current 8-pixel tile-row band.
+        // Starts at 0 at the moment a row-shift+refill happens; increments
+        // by 1 each scroll tick; resets to 0 on the next 8-tick boundary.
+        // drawBackground draws bgTiles[r] at canvas y = (r-1)*8 + scrollPixel.
+        this.scrollPixel = 0;
 
         // Cold-init mirror of $0008 → $0050 → $01D0 (research_code_flow.md §1).
         // The 8085 boot sequence clears VRAM/scroll/sound regs (no-op in port —

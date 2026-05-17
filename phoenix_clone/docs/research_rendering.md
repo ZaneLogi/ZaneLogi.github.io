@@ -427,18 +427,84 @@ entries in place. This is how the source's "as the ship loses
 shields, replace shield tiles with damaged versions" effect comes
 through — see §7 for the mothership shield decrement walkthrough.
 
-### 4.2 Background as a small tile-grid
+### 4.2 Background as a 33-row tile-grid (port deviation)
 
-The BG starfield is the **one place** a tile-RAM-style mirror is the
-right shape, because it's a uniform fixed-position scrolling layer:
+The BG starfield is a tile-RAM-style mirror with **one extra hidden row
+above the visible canvas** — a port-side design choice, not a 1:1 port
+of source's plane layout:
 
 ```js
-state.bgTiles  = new Uint8Array(832);    // 32 cols × 26 rows
-state.bgScrollY = 0;                      // 0..255, units = pixels
+state.bgTiles    = new Uint8Array(26 * 33);   // 26 cols × 33 rows = 858 B
+state.scrollPixel = 0;                         // 0..7, per-pixel offset within current row
+state.counterB9  = 0;                          // $43B9 mirror; ticked by starsScrollDown
 ```
 
-`drawBackground()` walks `bgTiles` and `drawImage`s each cell with
-the `scrollY` offset applied via `convertCoords`.
+Display layout: row 0 sits at canvas `y = -8 + scrollPixel` (fully
+off-screen at scrollPixel = 0, gradually revealed up to 7 px at the
+top edge when scrollPixel = 7). Rows 1..32 cover the visible play
+field at `y = (r - 1) * 8 + scrollPixel`. Row 32 sits at the bottom,
+gaining/losing up to 7 px off the bottom edge over an 8-tick cycle.
+
+**Per-frame scroll cycle:**
+1. Each `bgUpdate` tick (= 60 Hz fade-in, ~30 Hz during alien combat
+   via `$24C4`): `counterB9--`; `scrollPixel` derived from the low 3 bits.
+2. On 8-pixel boundaries (`counterB9 & 7 == 0`): rotate the buffer
+   down — `bgTiles[r] := bgTiles[r-1]` for `r = 32..1`. Old row 32
+   is discarded (it scrolled off the bottom). Refill `bgTiles[0]` with
+   26 fresh tiles from the active starfield ROM (`T1C00` or `T1F00`,
+   pointer in `stageBlock[7..8]`).
+
+**Galaxy / planet placement:** both `addGalaxiesToBackground` and
+`addPlanetsToBackground` override the source's row formula and force
+placement at the top of the buffer (column from source addr is kept):
+
+- Galaxy → `bgTiles[1, col]` (top visible row)
+- Planet → UL/UR at `bgTiles[0, col..col+1]` (hidden row above),
+  LL/LR at `bgTiles[1, col..col+1]` (top visible row). At spawn time
+  with `scrollPixel = 0`, only the planet's bottom half is on screen;
+  the top half scrolls in over the next 8 ticks.
+
+Both run **after** `starsScrollDown` in `bgUpdate`, so their writes
+overwrite the freshly-refilled hidden row when they fire on an
+8-boundary tick.
+
+**Why this deviates from source (visual bug fix, not a faithful port):**
+
+In source, `bgTiles` is 832 bytes (26 × 32) with no hidden margin, and
+the scroll register `$5800` cycles modulo 256 px = 32 tile rows. The
+star-fill row formula `R_star = (1 + (counterB9 >> 3)) & $1F` and the
+galaxy/planet row formulas all rely on the wrap to coincidentally
+land new BG content at "display row 1" (`y = 8`) every fill, then
+drift down. As old rows wrap from display y=255 back to y=0, they
+appear briefly at display row 0 before being overwritten by the next
+fill at row 1 — the "appear at top, vanish at second row" artifact.
+
+Arcade footage confirms the same artifact happens on real hardware —
+**the score row is not opaque in the original game either**, and the
+"stars appear at top row then vanish at second row" cycle is present.
+It's just hard to notice unless you're looking for it: CRT phosphor
+decay smears single-frame transitions, the arcade resolution is lower,
+and the eye tracks moving stars away from the top edge faster than it
+processes a 1/60 s erase event there. Verified by Zane via YouTube
+longplay close-inspection (2026-05-17).
+
+The port's pixel-perfect canvas (no decay, no scan-line blur, modern
+displays at native resolution) makes the artifact obvious enough to
+read clearly. Same logic, different rendering substrate — what was a
+near-invisible quirk on a CRT is a distracting flicker on an LCD.
+
+The 33-row design moves the fill + erase fully off-screen at row 0,
+eliminating the artifact. Galaxies + planets are placed at the top
+instead of computed row positions because, without the wrap, the
+source row formula resolves to literal mid-screen positions rather
+than the implicit "always near the top" the wrap was producing.
+
+**Decision criterion for similar future fixes:** source-faithful is the
+default, **but if the artifact is provably an old-era bug that's
+exposed by the port's sharper rendering (no CRT decay, no opaque-
+score masking, etc.), prefer the corrected behavior and document
+the deviation here with the verification trail.** Don't silently
+"fix" arcade behavior we just don't like.
 
 ### 4.3 Static text tables (T1800 / T1860 / T1960 / T19C0 / T1BA0)
 

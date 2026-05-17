@@ -175,6 +175,34 @@ RAW_SLICES = [
     # routine emits one labeled block per pattern in the generated data.js.
     ("PATH_ROM_LOW",  0x1000, 0x0400),
     ("PATH_ROM_HIGH", 0x2C00, 0x0400),
+    # source T1C00 — 256-byte starfield "without planets, used to erase
+    # mothership". Selected by stage init T05A8 ($43B2/$43B3 = $1C/$00)
+    # for stages 0 / 5 / 7 (the "1st alien wave" + bird waves). Walked
+    # by StarsScrollDown $0699 with INC L wrap (low byte only) — so the
+    # 256-byte page is the natural extraction size.
+    ("STARFIELD_T1C00", 0x1C00, 256),
+    # source T1F00 — 256-byte starfield "without planets". Selected by
+    # stage init T05C0 ($43B2/$43B3 = $1F/$00) for stage 2 (2nd alien
+    # wave) and by T05B4 (mothership waves; deferred to step 11).
+    ("STARFIELD_T1F00", 0x1F00, 256),
+    # source T1E00..T1EDF — background-overlay tables for the periodic
+    # planet (2x2) and galaxy (1x1) fills. Each is 32 bytes; layout:
+    #   $1E00 T1E00 — PLANET_TILES   (8 entries × 4-tile 2x2 sprite data)
+    #   $1E20 T1E20 — PLANET_MSB     (screen-RAM MSBs, one per entry)
+    #   $1E40 T1E40 — PLANET_LSB_OFF (screen-RAM LSB offsets within column)
+    #   $1E60 T1E60 — PLANET_COL_LSB (screen-RAM LSBs, per column)
+    #   $1E80 T1E80 — GALAXY_TILES   (16 entries × single 1x1 tile)
+    #   $1EA0 T1EA0 — GALAXY_MSB     (screen-RAM MSBs, one per entry)
+    #   $1EC0 T1EC0 — GALAXY_LSB     (screen-RAM LSBs, one per entry)
+    # AddPlanetsToBackground ($06B0) / AddGalaxiesToBackground ($2040)
+    # index these by counters in stageBlock[0..5]. Step 3.3.
+    ("PLANET_TILES",   0x1E00, 32),
+    ("PLANET_MSB",     0x1E20, 32),
+    ("PLANET_LSB_OFF", 0x1E40, 32),
+    ("PLANET_COL_LSB", 0x1E60, 32),
+    ("GALAXY_TILES",   0x1E80, 32),
+    ("GALAXY_MSB",     0x1EA0, 32),
+    ("GALAXY_LSB",     0x1EC0, 32),
 ]
 
 

@@ -24,6 +24,7 @@ export const render = {
 
     frame() {
         gfx.clear();
+        this.drawBackground();
         this.drawDebugGrid();
         if (this.gridMode !== GRID_OFF) this.drawTileRomOverlay();
         for (const row of state.staticTextRows) gfx.drawObject(row);
@@ -291,6 +292,32 @@ export const render = {
         }
     },
 
+    // BG plane — 26 cols × 33 rows. Row 0 is the "hidden" row above the
+    // visible area (canvas y = -8..-1 + scrollPixel). Rows 1..32 are
+    // visible, each at canvas y = (r-1)*8 + scrollPixel, so they cover
+    // y = 0..255 when scrollPixel = 0 and y = 7..262 when scrollPixel = 7.
+    // The 8th step (scrollPixel == 8) is the rollover: starsScrollDown
+    // shifts the buffer down by one row, refills the new row 0 from ROM,
+    // and resets scrollPixel to 0 — so the fill always lands fully
+    // off-screen, never visible to the player. State.scrollPixel is the
+    // smooth per-pixel scroll offset (0..7) updated each game tick.
+    drawBackground() {
+        const ctx = gfx.ctx;
+        const images = resource.bgTileImages;
+        if (!images) return;
+        const tiles = state.bgTiles;
+        const scrollPixel = state.scrollPixel;
+        for (let r = 0; r <= 32; r++) {
+            const y = (r - 1) * 8 + scrollPixel;
+            if (y >= 256 || y <= -8) continue;
+            for (let c = 0; c < 26; c++) {
+                const tile = tiles[r * 26 + c];
+                if (tile === 0) continue;
+                ctx.drawImage(images[tile], c * 8, y);
+            }
+        }
+    },
+
     drawDebugGrid() {
         const ctx = gfx.ctx;
         ctx.strokeStyle = "#101010";
@@ -335,6 +362,7 @@ export const render = {
             `stage=${stage} round=${round}  ` +
             `counterA5=${state.counterA5}  ` +
             `counterB4=${state.stageBlock[9]}  ` +
+            `counterB9=${state.counterB9.toString(16).padStart(2,'0')}  ` +
             `lane=${state.combatLane & 3}  ` +
             `aliens=${state.aliensLeft}  ` +
             `score=${state.score1[2].toString(16).padStart(2,'0')}${state.score1[1].toString(16).padStart(2,'0')}${state.score1[0].toString(16).padStart(2,'0')}  ` +
