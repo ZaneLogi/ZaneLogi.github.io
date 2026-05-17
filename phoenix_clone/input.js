@@ -13,6 +13,7 @@ export const input = {
     coinPressed: false,
     startPressed: false,
     gridPressed: false,
+    killAllPressed: false,
     prev: null,
 
     init() {
@@ -28,6 +29,7 @@ export const input = {
             coin:    this.coinPressed,
             start:   this.startPressed,
             grid:    this.gridPressed,
+            killAll: this.killAllPressed,
         };
     },
 
@@ -45,6 +47,7 @@ export const input = {
                 case "Digit5":     this.coinPressed    = down; break;
                 case "Digit1":     this.startPressed   = down; break;
                 case "KeyG":       this.gridPressed    = down; break;
+                case "KeyK":       this.killAllPressed = down; break;
             }
         }
         sys_evt.reset();
@@ -55,4 +58,5 @@ export const input = {
     coinEdge()    { return this.coinPressed    && !this.prev.coin; },
     startEdge()   { return this.startPressed   && !this.prev.start; },
     gridEdge()    { return this.gridPressed    && !this.prev.grid; },
+    killAllEdge() { return this.killAllPressed && !this.prev.killAll; },
 };

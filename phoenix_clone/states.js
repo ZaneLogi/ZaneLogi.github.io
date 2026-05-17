@@ -44,7 +44,7 @@ import {
 // skipping the ~30 s of alien combat (player can't die yet, so the cost
 // per iteration is otherwise high). Null disables the override.
 // research_bird_stage.md §9.0.
-const DEBUG_START_LEVEL_AND_ROUND = 0x05;
+const DEBUG_START_LEVEL_AND_ROUND = null;
 
 // L0400 — Code.md:GameStateMachine. JT1 jump table → JS switch
 // (research_code_flow.md §5.1).
@@ -2842,4 +2842,35 @@ export const states = {
 
     // L002D — SplashAndDemo path; stub for skeleton (gameOrAttract forced to 1).
     attractFrame() {},
+
+    // Debug cheat — K-key kills all live enemies in the current stage to
+    // accelerate testing of stage transitions. Detects which kind of
+    // combat is active by LR low nibble:
+    //   1, 3, B  → alien combat: clear all alien slots, set AliensLeft=0
+    //   5, 7     → bird combat:  clear all bird slots,  set BirdsLeft=0
+    // Other stages (fade-in, spiral, mothership): no-op.
+    //
+    // Once the count hits 0, the corresponding stage-clear handler
+    // (stageClearUpdate or stageBirdClear) takes over and drives the
+    // transition to the next stage naturally.
+    //
+    // No scoring, no explosions — purely a developer skip. Not
+    // source-faithful; remove or gate behind a debug flag before ship.
+    cheatKillAll() {
+        const stage = state.levelAndRound & 0x0F;
+        if (stage === 0x1 || stage === 0x3 || stage === 0xB) {
+            // Alien combat — clear all 16 alien slots.
+            for (const a of state.aliens) {
+                a.alive = false;
+                a.controlA &= ~0x08;
+            }
+            state.aliensLeft = 0;
+        } else if (stage === 0x5 || stage === 0x7) {
+            // Bird combat — clear all 8 bird slots.
+            for (const b of state.birds) b.shape = 0;
+            state.birdsLeft = 0;
+            state.maturity = 0;
+        }
+        // Other stages: leave alone.
+    },
 };

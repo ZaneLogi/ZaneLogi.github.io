@@ -34,6 +34,7 @@ const game = {
     tick() {
         input.sample();
         render.checkHotkeys();
+        if (input.killAllEdge()) states.cheatKillAll();
         state.counter9a = (state.counter9a + 1) & 0xFFFF;
 
         if (state.gameOrAttract === 0) {
