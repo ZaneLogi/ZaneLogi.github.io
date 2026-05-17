@@ -217,11 +217,31 @@ export const render = {
 
         const ctx = gfx.ctx;
         const images = resource.bgTileImages;
+        // Split-draw wrap: when a tile's canvas Y reaches the bottom
+        // edge (>= 240, leaving < 16 px on screen), also draw it at
+        // y - 256 (= near the top) so the wrapped portion appears
+        // there. Matches source's cyclic BG-plane scroll where the
+        // hardware scroll register seamlessly cycles tiles bottom →
+        // top. Without this, a bird scrolling past the bottom edge
+        // would visually pop instead of smoothly re-emerging at top.
+        // Activated mainly during the "last bird" continuous-scroll
+        // case in stageBirdCombat (research_bird_stage.md §10 item 13).
+        const yTop = baseY;
+        const yBot = (baseY + 8) & 0xFF;
+        const yTopWrap = yTop >= 240 ? yTop - 256 : null;
+        const yBotWrap = yBot >= 240 ? yBot - 256 : null;
         for (let c = 0; c < width; c++) {
             const t0 = BIRD_TILE_DATA[dataOff + c * 2    ];
             const t1 = BIRD_TILE_DATA[dataOff + c * 2 + 1];
-            if (t0 !== 0) ctx.drawImage(images[t0], baseX + c * 8, baseY);
-            if (t1 !== 0) ctx.drawImage(images[t1], baseX + c * 8, baseY + 8);
+            const x = baseX + c * 8;
+            if (t0 !== 0) {
+                ctx.drawImage(images[t0], x, yTop);
+                if (yTopWrap !== null) ctx.drawImage(images[t0], x, yTopWrap);
+            }
+            if (t1 !== 0) {
+                ctx.drawImage(images[t1], x, yBot);
+                if (yBotWrap !== null) ctx.drawImage(images[t1], x, yBotWrap);
+            }
         }
     },
 

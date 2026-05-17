@@ -1081,8 +1081,37 @@ export const states = {
         // (which would write those into bgTiles). bgTiles stays at the
         // zeros from state-2 init → solid black BG.
         // research_bird_stage.md §10 item 6 (closed, port-side).
-        const scrollDir = (state.counter9a & 0x40) ? +1 : -1;
-        state.counterB9 = (state.counterB9 + scrollDir) & 0xFF;
+        // Bird-count-dependent scroll, mirroring source's $2476 reseed
+        // where M4BD1 grows with `(8 - BirdsLeft)`. Larger M4BD1 →
+        // main path (DOWN/decrement) fires more aggressively → larger
+        // scroll amplitude. So full flock = small bounded oscillation;
+        // last bird = continuous downward drift.
+        //
+        // Port simplification (not the full $2600 state machine — see
+        // research_bird_stage.md §10 item 12):
+        //   BirdsLeft >= 2: counterB9 oscillates in signed [-SCROLL_MAX..0]
+        //                   (downward bob only — render.drawBird handles
+        //                   wrap via split-draw when baseY >= 240).
+        //   BirdsLeft == 1: counterB9 decrements monotonically each
+        //                   frame → continuous downward scroll. The
+        //                   last bird visually exits the bottom edge
+        //                   and re-emerges from the top via split-
+        //                   draw, cycling forever until killed.
+        //
+        // SCROLL_MAX = 100 keeps all 8 birds visible: bird 7 (top row)
+        // baseY ∈ [0..100], bird 0 (bottom row) baseY ∈ [112..212].
+        // No wrap with full flock. Source's bidirectional bob isn't
+        // reproduced exactly, but the visual character (birds bobbing
+        // vertically, last bird wraps around) matches arcade footage.
+        if (state.birdsLeft <= 1) {
+            state.counterB9 = (state.counterB9 - 1) & 0xFF;
+        } else {
+            const SCROLL_MAX = 100;
+            const scrollDir = (state.counter9a & 0x40) ? +1 : -1;
+            let cbSigned = state.counterB9 >= 128 ? state.counterB9 - 256 : state.counterB9;
+            cbSigned = Math.max(-SCROLL_MAX, Math.min(0, cbSigned + scrollDir));
+            state.counterB9 = cbSigned & 0xFF;
+        }
         // TODO 11.x: CALL $3980 (bird-vs-player relative position scan —
         //            cosmetic; affects bird color/depth shading).
 

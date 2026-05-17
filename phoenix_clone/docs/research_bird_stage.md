@@ -1345,29 +1345,34 @@ step 12 lands the full 5-stage cycle.
    hardware shifts the entire BG plane. In source, birds live in BG
    memory so they scroll with it.
 
-   Port-side equivalent in `stageBirdCombat`:
+   Port-side equivalent in `stageBirdCombat` (refined 2026-05-18 to
+   match arcade visual — bird-count-dependent scroll + clamp):
    ```js
-   const scrollDir = (state.counter9a & 0x40) ? +1 : -1;
-   state.counterB9 = (state.counterB9 + scrollDir) & 0xFF;
+   if (state.birdsLeft <= 1) {
+       state.counterB9 = (state.counterB9 - 1) & 0xFF;   // continuous DOWN
+   } else {
+       const SCROLL_MAX = 100;
+       const scrollDir = (state.counter9a & 0x40) ? +1 : -1;
+       let cbSigned = state.counterB9 >= 128 ? state.counterB9 - 256 : state.counterB9;
+       cbSigned = Math.max(-SCROLL_MAX, Math.min(0, cbSigned + scrollDir));
+       state.counterB9 = cbSigned & 0xFF;
+   }
    ```
-   Counter9A's bit-6 flips every 64 frames (~1 sec at 60 Hz), so
-   counterB9 walks ±64 around a center, producing ~2-second
-   up-down-up-down cycles. The exact amplitude / period don't match
-   source's M4BD0+-driven values, but the visual character (bobbing
-   birds) is preserved. `render.drawBird` adds `(-counterB9) & 0xFF`
-   to canvas Y; `birdBulletCollision` uses the same offset so kills
-   land on visible sprites.
+   With ≥2 birds, counterB9 oscillates in signed `[-100..0]`
+   (downward bob only — birds visible across the upper half of the
+   screen without wrap; matches source's "bird 7 at top, bird 0 at
+   middle" formation visual). When only 1 bird remains, scroll goes
+   continuously downward so the last bird visibly exits the bottom
+   and re-emerges at the top via render-side split-draw (see item
+   13). Mirrors source's `(8 - BirdsLeft)` factor in `M4BD1` reseed
+   without porting the full M4BD0+ state machine (still tracked as
+   item 12).
 
    **Confirmed via arcade video**: bird stages have NO visible
    starfield, planets, or galaxies — just black BG + birds + player.
-   So the port deliberately skips `bgUpdateIfAlienStage` here (which
-   would fill bgTiles with stars / planets / galaxies); `bgTiles`
-   stays at the zeros from state-2 init and the BG plane renders
-   solid black.
-
-   The full M4BD0+ extended-bird-storage state machine isn't ported
-   — its effect on the exact scroll-register value is a per-bird
-   jitter invisible at the gameplay level.
+   `bgTiles` is cleared explicitly in `spiralFillExit` (port of
+   `$22F0 ClearBackground`); bird stage handler skips `bgUpdate` so
+   nothing repopulates it.
 7. ✅ **`$35E0` sweep motion + helpers** — landed 2026-05-17. Main
    path (bird[+6] < $10, moves bird right) and alt path (`$3628`,
    bird[+6] >= $10, moves bird left) ported, with all 6 helpers
@@ -1511,35 +1516,28 @@ step 12 lands the full 5-stage cycle.
     | Bird-state coupling | Tight — alive-bird positions dictate limits | None |
 
     Source-trace verified end-to-end against `Code.md:$2600-$26FD`
-    (2026-05-17). User decision: keep the simplified port.
+    (2026-05-17). User decision: keep the simplified port. **Updated
+    2026-05-18** — simplification refined into bird-count-dependent
+    clamp + continuous-downward for last bird (see item 6). Visual
+    character now matches arcade closely enough; full M4BD0+ state
+    machine still deferred.
 
-13. **BG-scroll wrap behavior — present but discrete (1-frame seam).**
+13. ✅ **BG-scroll wrap behavior — split-draw landed 2026-05-18.**
     In the arcade, the hardware `$5800` scroll register cyclically
     re-projects the entire BG plane, so a bird whose drawn position
     crosses the bottom edge appears split: top half at canvas bottom,
     bottom half at canvas top, then smoothly slides up as the scroll
-    advances. Visual is continuous.
+    advances.
 
-    In the port, `render.drawBird` computes
-    `baseY = ((row * 8) + scrollY) & 0xFF` (mod-256), then calls
-    `ctx.drawImage` once per tile row at `baseY` and `baseY + 8`.
-    Canvas clips anything off-edge but does NOT wrap automatically.
-    So when `baseY ≈ 248`, the top half of the bird is visible at
-    y=248..255 and the bottom half is clipped. The next frame, with
-    `scrollY` ticked by 1, `baseY` jumps to 0 and the whole bird
-    reappears at the top — a **1-frame discontinuity** where the
-    bottom half briefly disappears.
+    `render.drawBird` now matches this: when a tile's canvas
+    `y >= 240`, it issues an additional `drawImage` at `y - 256` to
+    paint the wrapped portion at the top. Activates mainly during
+    the "last bird" continuous-scroll case in `stageBirdCombat`
+    (item 6) — the lone surviving bird smoothly exits the bottom
+    and re-emerges at the top with no 1-frame pop.
 
-    Empirically (sampled 2026-05-17): `counterB9` does traverse the
-    full 0–254 range during stage 5, so every bird at every row
-    does eventually cross the wrap point. The visual difference vs
-    arcade is hard to notice because:
-    - Bird sprite is 16 px tall vs 256 px canvas (~6% of frame).
-    - The wrap moment is exactly 1 frame at 60 Hz (~17 ms).
-    - Player attention is on the ship + incoming threats, not
-      background birds at the edges.
-
-    **Fix if ever desired:** in `drawBird`, when `baseY + 16 > 256`,
-    issue extra `drawImage` calls at `baseY - 256` for the wrapped
-    portion. ~10 lines. Currently not implemented; documented here
-    for future reference.
+    With the full flock (≥2 birds), `counterB9` is clamped to signed
+    `[-100..0]` so no bird ever reaches `baseY >= 240` in the first
+    place; the split-draw is a no-op but harmless. Combined effect:
+    visually faithful arcade scroll without porting the M4BD0+ state
+    machine (item 12).
