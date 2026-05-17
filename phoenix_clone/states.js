@@ -303,14 +303,24 @@ export const states = {
         }
     },
 
-    // L0547 InitPlayerDataStructure — source copies all 32 bytes of T0560
-    // (= PLAYER_INIT_BLOCK) into $43C0 (player + bullets). Step 5 only
-    // consumes the player x/y; bullet slots get wired in step 7. alive
-    // stays false here — the ship doesn't appear until a combat-stage
-    // handler runs PlayerUpdate (see state.player comment).
+    // L0547 InitPlayerDataStructure — source copies T0560 into $43C0
+    // (player + bullets) and then ClearBbytesAtHL clears $43E0-$43FF
+    // (the player/bullet screen-RAM address pointers). With those
+    // pointers zeroed, the player ship's per-frame draw stops painting
+    // tiles to FG screen RAM — so the ship visually disappears during
+    // the fade-in stages (0, 2) where PlayerUpdate doesn't run.
+    //
+    // Port equivalent: set `state.player.alive = false`. The canvas-based
+    // renderer in render.drawPlayer is gated by alive, so clearing it
+    // mirrors source's "ship invisible during fade-in" behavior. Combat
+    // handlers (stageAlienCombat at LR=1/3/B, stageBirdCombat at LR=5/7)
+    // re-set alive=true at the top of their handler, so the ship
+    // reappears at the new init position ($64, $D8 = center-bottom) the
+    // moment combat starts.
     initPlayerDataStructure() {
         state.player.x           = PLAYER_INIT_BLOCK[2];   // PlayerShipX = $64 = 100
         state.player.y           = PLAYER_INIT_BLOCK[3];   // PlayerShipY = $D8 = 216
+        state.player.alive       = false;                  // ← mirrors $0552 clear
         state.player.shieldCount = 0;
         state.player.bullet.active = false;
         state.player.bullet.x      = PLAYER_INIT_BLOCK[6]; // $00
