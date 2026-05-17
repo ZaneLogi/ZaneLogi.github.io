@@ -29,7 +29,19 @@ import {
     GALAXY_TILES,         // source T1E80 — 16 galaxies × 1 tile
     GALAXY_MSB,           // source T1EA0 — screen-RAM MSBs per galaxy
     GALAXY_LSB,           // source T1EC0 — screen-RAM LSBs per galaxy
+    BIRD_INIT_TABLE,      // source T3F80 + T3FC0 — bird wave 1 / wave 2 init data
+    BIRD_T3E80,           // source T3E80 — bird shape/delta lookup ($3560 + $35E0)
+    BIRD_T3F00,           // source T3F00 — per-shape dispatch (motion + maturity)
+    BIRD_T3EC0,           // source T3EC0 — shape → draw-entry LSB (encodes column count)
 } from './data.js';
+
+// Debug knob — when non-null, the first state-0 transition jumps directly
+// to this LevelAndRound instead of starting at $00 (stage 0, round 1).
+// Set to $05 (stage 5, round 1) for fast iteration on step 11 birds,
+// skipping the ~30 s of alien combat (player can't die yet, so the cost
+// per iteration is otherwise high). Null disables the override.
+// research_bird_stage.md §9.0.
+const DEBUG_START_LEVEL_AND_ROUND = 0x05;
 
 // L0400 — Code.md:GameStateMachine. JT1 jump table → JS switch
 // (research_code_flow.md §5.1).
@@ -122,6 +134,27 @@ export const states = {
     state0_NewGameInit() {
         state.counterA5 = 0x80;       // 128-frame countdown (research_code_flow.md §5.5)
         state.gameState = 1;
+
+        // Debug-start override (research_bird_stage.md §9.0). Lands at the
+        // chosen stage without going through alien waves. Mirrors what
+        // $2204 would have done at a real stage transition: bumps
+        // LevelAndRound, then reads T1760 to set AliensLeft / BirdsLeft.
+        // Skipped on subsequent state-0 re-entries (game-over → new game)
+        // because the constant is intended for cold-start iteration only;
+        // a stale-state guard isn't needed since state 0 only fires once
+        // per game.
+        if (DEBUG_START_LEVEL_AND_ROUND !== null) {
+            state.levelAndRound = DEBUG_START_LEVEL_AND_ROUND;
+            const waveIdx = (state.levelAndRound >> 1) & 7;
+            const waveByte = ALIEN_BIRD_PARTITION[waveIdx];
+            if (waveByte & 0x80) {
+                state.birdsLeft  = waveByte & 0x7F;
+                state.aliensLeft = 0;
+            } else {
+                state.aliensLeft = waveByte;
+                state.birdsLeft  = 0;
+            }
+        }
     },
 
     // L04AC — score flash for 128 frames (CounterA5 $80 → $00). Per L04BD,
@@ -155,14 +188,18 @@ export const states = {
     //   $0532 init alien data        → control states + move ptrs + positions
     //   $0A6C                        → skipped (alien screen-RAM mirror)
     //   $0506                        → TODO (clears $4392-$4397 scratch)
-    //   $32B0                        → TODO (clears $4350-$437F + bird init)
+    //   $32B0                        → ported below (clears $4350-$437F mirrors
+    //                                  + $439A-$439D + $4B70-$4BAF; copies
+    //                                  T3F80/T3FC0 into bird struct on bird
+    //                                  stages — research_bird_stage.md §2)
     state2_StageInit() {
         state.gameState = 3;
         this.initGlobalLevelData();
         this.initPlayerDataStructure();
         this.initAlienData();
         // L0506 — clear $4392-$4397 and seed ($4394) from $4B50 MSB.
-        // L32B0 — clear $4350-$437F (AlienBehaviorUpdate scratch region).
+        // L32B0 — clear $4350-$437F (AlienBehaviorUpdate scratch region) +
+        // $439A-$439D (Counter9A pair) + $4B70-$4BAF (bird struct).
         // Source zero-fills 48 bytes; port mirrors that for every field it
         // models in this range. Critical: alienPhaseCount ($4357) MUST reset
         // here, otherwise after 3 angry waves on wave-1 the angry gate
@@ -201,6 +238,55 @@ export const states = {
             e.scoreBcd = 0;
             e.x        = 0;
             e.y        = 0;
+        }
+
+        // $32B0 bird-init tail. Source order: clear $4350-$437F (already
+        // done above by the per-field assignments), clear $439A-$439D
+        // (port has only `counter9a` modeled here from that range — left
+        // alone since it's also reset by state-1's L04BD tick), early-return
+        // when BirdsLeft == 0, then zero $4B70-$4BAF and copy the right
+        // table slice into the trailing BirdsLeft slots.
+        this.initBirdData();
+    },
+
+    // $32B0 ports — clears all 8 bird struct slots, then on bird stages
+    // (BirdsLeft > 0) copies the last `birdsLeft` 8-byte rows from the
+    // selected init table into the corresponding bird slots. Selection:
+    //   bit 1 of LevelAndRound == 0 → T3F80 (bird wave 1, stages 4/5)
+    //   bit 1 of LevelAndRound == 1 → T3FC0 (bird wave 2, stages 6/7)
+    // The "trailing slots" behaviour is source-faithful: surviving birds
+    // re-spawn at the table-tail positions, dead birds stay at struct head
+    // as zeros (an edge case in practice — $2204 resets BirdsLeft to 8 at
+    // every transition, so this only matters at cold start with a custom
+    // BirdsLeft, e.g. debug-start). research_bird_stage.md §2.
+    initBirdData() {
+        // Clear all 8 birds and the maturity byte ($4368). Source zeroes
+        // these unconditionally before the BirdsLeft check.
+        for (const b of state.birds) {
+            b.shape = 0; b.screenMsb = 0; b.screenLsb = 0; b.field3 = 0;
+            b.advanceCtr = 0; b.gridX = 0; b.field6 = 0; b.gridY = 0;
+        }
+        state.maturity = 0;
+
+        if (state.birdsLeft === 0) return;
+
+        // Table base: bit 1 of LevelAndRound picks which 64-byte half of
+        // BIRD_INIT_TABLE to copy from (see comment above).
+        const tableBase = (state.levelAndRound & 0x02) ? 64 : 0;
+        // Trailing-slot offset: $4B70 + (8 - birdsLeft)*8 in source; mirror
+        // by indexing into `state.birds` starting at `8 - birdsLeft`.
+        const slotBase  = 8 - state.birdsLeft;
+        for (let i = 0; i < state.birdsLeft; i++) {
+            const b = state.birds[slotBase + i];
+            const off = tableBase + (slotBase + i) * 8;
+            b.shape      = BIRD_INIT_TABLE[off + 0];
+            b.screenMsb  = BIRD_INIT_TABLE[off + 1];
+            b.screenLsb  = BIRD_INIT_TABLE[off + 2];
+            b.field3     = BIRD_INIT_TABLE[off + 3];
+            b.advanceCtr = BIRD_INIT_TABLE[off + 4];
+            b.gridX      = BIRD_INIT_TABLE[off + 5];
+            b.field6     = BIRD_INIT_TABLE[off + 6];
+            b.gridY      = BIRD_INIT_TABLE[off + 7];
         }
     },
 
@@ -290,9 +376,12 @@ export const states = {
             case 0xB:
                 this.stageAlienCombat();           // L2000 — stub
                 break;
-            // 0x4 / 0x6 / 0x8 spiral-fill ($2230) → step 9
-            // 0x5 / 0x7 bird combat ($3400)      → step 9
-            // 0x9 / 0xA mothership fade-ins      → step 9
+            case 0x5:
+            case 0x7:
+                this.stageBirdCombat();            // L3400 — birds (step 11.2)
+                break;
+            // 0x4 / 0x6 / 0x8 spiral-fill ($2230) → step 11.6
+            // 0x9 / 0xA mothership fade-ins      → step 12
         }
     },
 
@@ -706,6 +795,659 @@ export const states = {
             this.enemyFireScanAndSpawn();
             this.enemyBulletUpdate();
         }
+    },
+
+    // L3400 — bird-combat handler for JT4 stages 5 and 7.
+    // research_bird_stage.md §1 (dispatch structure).
+    //
+    // Architectural note: $3400 is NOT a Counter93 lane round-robin like
+    // $2000 (alien combat). It runs a fixed call sequence at the top, then
+    // forks on `BirdsLeft`:
+    //   - == 0  → $3462 stage-clear tail (residual physics + countdown).
+    //              Deferred to step 11.5; for now we just stop work and let
+    //              the global stop-gap wrap LR. With no hit detection yet
+    //              (step 11.4), this branch is unreachable in normal play.
+    //   - <  4  → both half-flock updates every frame (analogue of the alien
+    //              `AliensLeft<5` speed-up, but implicit from the count).
+    //   - >= 4  → split into two halves by `Counter9A+1` bit 0 (= 30 Hz per
+    //              half-flock). Even parity: birds 0..3 + bullets. Odd
+    //              parity: birds 4..7 + explosion animation tick.
+    //
+    // 11.2 scope = dispatch skeleton + player render. The per-bird update
+    // engine (drawFirst4/Second4 bodies, $3560 randomizer, $3498/$34AA
+    // L35B0 dispatch, $3930 player-relative scan, $3800 collision) is
+    // **stubbed** here as TODO comments — birds will appear as static
+    // placeholder tiles via render.drawBirds() until step 11.3 wires up
+    // the movement/animation engine.
+    stageBirdCombat() {
+        // $3400 head — every frame regardless of BirdsLeft.
+        state.player.alive = true;
+        this.playerUpdate();                          // L0876
+        // $3403 / $3409 — bird collision detection (source calls $3800
+        // twice, before and after $2600). The port collapses to a single
+        // call: $2600 is mostly NOP'd in source and the port doesn't
+        // touch the bird positions between the two scans, so the second
+        // call would always re-scan the same positions.
+        this.birdBulletCollision();                   // $3800
+        // $2600 — port-side approximation. Source's `$2600` builds an
+        // adjusted CounterB9 value and writes it to the `$5800` BG
+        // scroll register. The hardware shifts the entire BG plane;
+        // since birds in source are drawn to BG memory, they scroll
+        // with it. Crucially, source has TWO paths:
+        //   - main ($2618-$2649): `CounterB9 -= D` (scroll down)
+        //   - alt  ($2650-$2662): `CounterB9 += T3ED0[...]` (scroll up)
+        // The path is chosen by comparing M4BD1 vs M4BD3 (extended bird
+        // storage maintained by `$26D0`/`$26AA`/`$2668`). The net effect
+        // is a back-and-forth oscillation of the scroll register —
+        // birds visibly bob up AND down, not just descend monotonically.
+        //
+        // Port-side simplification: instead of porting the full M4BD0+
+        // extended-storage state machine (~50 lines), use bit 6 of
+        // Counter9A's low byte as a coarse direction toggle. Bit 6
+        // flips every 64 frames (~1 sec at 60 Hz), so counterB9 walks
+        // ±64 around a center value, producing ~2-second
+        // up-down-up-down cycles that visually approximate the source's
+        // oscillation. With the M4BD0+ state machine, source's exact
+        // amplitude / period differ but the visual character (bobbing
+        // birds) is preserved.
+        //
+        // Bird stages in arcade Phoenix have NO visible starfield, no
+        // planets, no galaxies — so we DON'T call `bgUpdate` here
+        // (which would write those into bgTiles). bgTiles stays at the
+        // zeros from state-2 init → solid black BG.
+        // research_bird_stage.md §10 item 6 (closed, port-side).
+        const scrollDir = (state.counter9a & 0x40) ? +1 : -1;
+        state.counterB9 = (state.counterB9 + scrollDir) & 0xFF;
+        // TODO 11.x: CALL $3980 (bird-vs-player relative position scan —
+        //            cosmetic; affects bird color/depth shading).
+
+        // $340F-$3413 — BirdsLeft check.
+        if (state.birdsLeft === 0) {
+            // TODO 11.5: $3462 stage-clear tail (residual bullets + explosion
+            // animation tick on even-parity frames, then $2204 countdown
+            // decrement and stage advance). Step 11.2 leaves this empty —
+            // BirdsLeft never hits 0 without hit detection (11.4), and
+            // when it eventually does, the 8d wrap stop-gap kicks in via
+            // the alien stage-clear path until 11.5 lands the proper tail.
+            return;
+        }
+
+        // $3416-$3418 — fork on BirdsLeft >= 4.
+        // `Counter9A+1` bit 0 is the parity gate (source $342A/$3438 reads
+        // $439B and RRCAs the bit-0 into carry). $439B is the **LSB** of
+        // the 16-bit Counter9A (per AddOneToMem at $0200: HL=$439B is
+        // incremented first, with carry into $439A). So $439B flips bit 0
+        // every frame, giving smooth per-frame alternation between the
+        // two half-flocks. **Bug fixed 2026-05-17**: my first port read
+        // (counter9a >> 8) & 1 which is the MSB ($439A, flips every 256
+        // frames) — that froze half the flock for ~4 seconds at a time.
+        const counter9bBit0 = state.counter9a & 1;
+
+        if (state.birdsLeft < 4) {
+            // $341B-$3434 — depleted flock: both halves move + dispatch
+            // every frame; bullets fire on even parity, explosions on odd.
+            // TODO 11.3-followup: drawFirst4/Second4 horizontal-movement
+            //   step (separate from $35B0; the source `DrawFirst4BirdObjects
+            //   $3474` body includes its own per-bird X update before the
+            //   draw — that body isn't ported yet).
+            this.birdRandomize();                     // $3560
+            this.birdMaturityDispatchFirst4();        // $3498
+            this.birdMaturityDispatchSecond4();       // $34AA
+            if (counter9bBit0) {
+                // $342E JP C $0FC0 — explosion animation tick on odd parity.
+                this.explosionUpdate();
+                this.bonusExplosionUpdate();
+            } else {
+                // $3431 CALL $3930 + $3434 JP $0C40 — player-relative scan
+                // (11.4) + enemy bullet update on even parity.
+                this.enemyBulletUpdate();
+            }
+        } else {
+            // $3438-$345B — full-flock parity split. Each frame, ONE
+            // half-flock gets updated; over 2 frames, all 8 birds get a
+            // motion step (= 30 Hz per bird).
+            this.birdRandomize();                     // $3560 fires in both halves
+            if (counter9bBit0) {
+                // Odd parity: source draws birds 4..7, $34AA dispatch,
+                // then JP $0FC0 (explosion animation tick).
+                this.birdMaturityDispatchSecond4();   // $34AA
+                this.explosionUpdate();
+                this.bonusExplosionUpdate();
+            } else {
+                // Even parity: source draws birds 0..3, $3498 dispatch,
+                // CALL $3930, JP $0C40 (enemy bullets).
+                // TODO 11.4: $3930 player-relative scan.
+                this.birdMaturityDispatchFirst4();    // $3498
+                this.enemyBulletUpdate();
+            }
+        }
+    },
+
+    // $3800 — bird collision detection (player bullet → bird).
+    //
+    // Source does tile-mask collision via screen RAM: read the BG plane
+    // byte where the bullet currently lives, look up T3B60 mask for that
+    // tile, AND with a bullet-sub-cell mask. If non-zero, the bullet
+    // pixel overlaps the bird sprite → either CALL $3844 (body hit) or
+    // fall through to L38BC → $38E9 (wing hit) depending on which tile
+    // range was hit.
+    //
+    // The port uses a coarser approach: AABB between the player bullet
+    // and each live bird's drawn-sprite bounding box, with a wing-vs-
+    // body split based on bullet distance from the bird's center. Width
+    // is taken from T3EC0[shape] (= draw-routine entry LSB, same lookup
+    // render.drawBird uses), height is always 16 px.
+    //
+    // Wing-vs-body split:
+    //   - Sprite width < 5 cols: no wings (egg/small bird) → any hit is
+    //     a body kill via onBirdHit.
+    //   - Sprite width >= 5 cols: bullet within ±(width/4)*8 px of bird
+    //     center → body kill. Bullet farther out (on either side) →
+    //     wing hit via onBirdWingHit (= bird shrinks, regrows over time
+    //     via the maturity engine).
+    birdBulletCollision() {
+        const b = state.player.bullet;
+        if (!b.active) return;
+        for (let i = 0; i < 8; i++) {
+            const bird = state.birds[i];
+            if (bird.shape === 0) continue;
+            const pos = this.birdCanvasPos(bird);
+            if (!pos) continue;
+            const lsb = BIRD_T3EC0[bird.shape] ?? 0;
+            const widthCols = (0x58 - lsb) >> 3;       // 1..7
+            if (widthCols < 1 || widthCols > 7) continue;
+            const widthPx = widthCols * 8;
+            if (!aabbHit(pos.x, pos.y, widthPx, 16, b.x, b.y, 8, 8)) continue;
+
+            // Bullet overlaps bird bounding box. Pick wing vs body.
+            if (widthCols >= 5) {
+                const birdCenterX = pos.x + (widthPx >> 1);
+                const bulletCenterX = b.x + 4;
+                const distFromCenter = Math.abs(bulletCenterX - birdCenterX);
+                const bodyHalfWidth = widthPx >> 2;     // = widthPx / 4
+                if (distFromCenter > bodyHalfWidth) {
+                    this.onBirdWingHit(bird, i);
+                    b.active = false;
+                    break;                              // one bullet, one bird
+                }
+            }
+            this.onBirdHit(bird, i);
+            b.active = false;
+            break;
+        }
+    },
+
+    // Helper: convert a bird's BG-plane screen-RAM addr ($48xx-$4Bxx) to
+    // its canvas (x, y) — same math drawBird uses, INCLUDING the
+    // CounterB9-driven Y scroll offset, so collision boxes track the
+    // visible sprite (not the unshifted memory position). Returns null
+    // if the address falls outside the 832-byte visible BG plane.
+    birdCanvasPos(bird) {
+        const off = ((bird.screenMsb << 8) | bird.screenLsb) - 0x4800;
+        if (off < 0 || off >= 832) return null;
+        const col = 25 - ((off >> 5) & 0x1F);
+        const row = off & 0x1F;
+        const scrollY = (-state.counterB9) & 0xFF;
+        return { x: col * 8, y: ((row * 8) + scrollY) & 0xFF };
+    },
+
+    // $38BC / $38E9 wing-hit path — bullet glances bird wing, bird
+    // shrinks but survives. Source:
+    //   - $38BC reads the bird's current tile from BG screen RAM, looks
+    //     up a "no-wings" replacement via T3DB8, and writes that tile
+    //     back (= sprite visually shrinks).
+    //   - $38E9 sets M4366 := $FF (wing-hit flag) + spawnExplosion via
+    //     $38F8 with B=$07, C=$02 (alien-slot, scoreBcd=$02 = 20 pts).
+    //   - BirdsLeft is NOT decremented. Bird stays alive but smaller.
+    //   - Over time, the maturity engine ($36D2/$36EA/$370A via T3F00)
+    //     advances the bird's shape back up — wings regrow.
+    //
+    // Port: instead of source's tile-level replacement (which requires
+    // a BG-plane mirror and the T3DB8 lookup), downgrade `bird.shape`
+    // to a smaller variant; the existing maturity engine then grows it
+    // back through the usual T3F00 transitions. Effect is the same:
+    // sprite shrinks immediately, then grows back over the next 30-60
+    // ticks as maturity advances.
+    onBirdWingHit(bird, idx) {
+        // Downgrade shape: pick a smaller variant. Source's T3DB8
+        // lookup produces a specific shape based on the hit tile; port
+        // uses a coarse "drop several shape steps" rule:
+        //   shape >= 5 → 1 (back to small egg-like form)
+        //   shape  < 5 → 1 (already small; reset to egg)
+        // The maturity engine will then walk it back up via $36D2 (1→2
+        // →3→4), $36EA (4→5→6), and $370A (6→7, 7→B, etc.) over
+        // ~30-60 ticks, regrowing wings naturally.
+        bird.shape = 1;
+        // Reset the gate counter and clear field6 so the maturity
+        // routines fire promptly.
+        bird.advanceCtr = BIRD_T3F00[1 << 3];   // T3F00[shape=1][0] = $20
+        bird.field6 = 0;
+        // Source-faithful spawn (alien-slot, scoreBcd=$02, 20 pts).
+        const pos = this.birdCanvasPos(bird) || { x: 0, y: 0 };
+        // Alien explosion is 24w × 16h — center it on the bird's
+        // current sprite location (use single-column width assumption
+        // since the bird is now at shape 1 = 2×2 small sprite).
+        const ex = (pos.x + 8 - 12) & 0xFF;
+        const ey = (pos.y + 4 -  8) & 0xFF;
+        this.spawnExplosion(0x0C, 0x02, ex, ey);
+        scoring.addPoints(20, state.gameAndDemoOrSplash);
+    },
+
+    // $3844 body-hit path — bird killed by player bullet. Source:
+    //   - Clear bird tile in BG screen RAM (LD (DE),$00 at $3851)
+    //   - DEC BirdsLeft at $385C
+    //   - Compute scoreBcd from bird state E (L385D-L388D scaling)
+    //   - JP $38FB — populate first-free bonus-explosion slot
+    //   - On bonus-explosion animation END at $3A37: M4368 := $00,
+    //     M4366 := $00 (reset maturity + wing-hit flag)
+    //
+    // Port simplifies scoring: fixed scoreBcd = $10 (100 pts), matching
+    // the source's default after the BC=$1010 load at $386B before the
+    // E-dependent dividers. The full per-state scaling lives in
+    // research_bird_stage.md §10 as a follow-up.
+    //
+    // Maturity reset: port does it immediately on kill rather than at
+    // bonus-explosion-animation end. Visible difference is ~16 frames
+    // (the bonus sprite's life); the player sees `mat=00` in the HUD
+    // right after a kill instead of after a half-second delay. Same
+    // net behaviour — surviving birds re-process maturity from $00.
+    onBirdHit(bird, idx) {
+        bird.shape = 0;                                // free the slot
+        state.birdsLeft = Math.max(0, state.birdsLeft - 1);
+        state.maturity = 0;                            // $3A37 cleanup
+        const pos = this.birdCanvasPos(bird) || { x: 0, y: 0 };
+        // Center the 48w × 16h bonus sprite on the placeholder 8×8 bird:
+        //   ex = bird-center - sprite-half-width  = (px+4) - 24
+        //   ey = bird-center - sprite-half-height = (py+4) -  8
+        const ex = (pos.x + 4 - 24) & 0xFF;
+        const ey = (pos.y + 4 -  8) & 0xFF;
+        this.spawnBonusExplosion(0x10, 0x10, ex, ey);  // counter=16, "100"
+        scoring.addPoints(100, state.gameAndDemoOrSplash);
+    },
+
+    // $3498 — call $35B0 for birds 0..3.
+    birdMaturityDispatchFirst4() {
+        for (let i = 0; i < 4; i++) this.birdUpdate(state.birds[i]);
+    },
+
+    // $34AA — call $35B0 for birds 4..7.
+    birdMaturityDispatchSecond4() {
+        for (let i = 4; i < 8; i++) this.birdUpdate(state.birds[i]);
+    },
+
+    // $35B0 — per-bird update dispatcher. Walks the T3F00 entry for the
+    // bird's current shape and chains a motion routine then a maturity-
+    // advance routine, both pulled from the entry.
+    //
+    // Source uses a PUSH/RET-as-call trick on the 8085 stack: push 4
+    // payload bytes (B,C,D,E from T3F00[shape] bytes 0..3), then push the
+    // two routine addresses (bytes 4..5 = maturity, bytes 6..7 = motion),
+    // then RET → pops the LAST push (motion). When motion routine RETs,
+    // it pops the NEXT entry (maturity). Maturity routines start with
+    // POP DE / POP BC / POP HL to recover the payloads. Port translates
+    // this to a normal function call sequence: motion(bird, B, C, D, E),
+    // then maturity(bird, B, C, D, E). Same semantic, no stack abuse.
+    //
+    // Per-frame work BEFORE the dispatch:
+    //   - Read bird[+0] = shape. If 0, return (slot empty / dead bird).
+    //   - Read bird[+4] = advanceCtr. If non-zero, DEC it. (If zero,
+    //     don't DEC and don't reset — gates the maturity-advance fire.)
+    //
+    // research_bird_stage.md §5.1 (T3F00), §4 (maturity gates), §1.4
+    // (motion routines).
+    birdUpdate(bird) {
+        const shape = bird.shape;
+        if (shape === 0) return;
+        if (bird.advanceCtr !== 0) {
+            bird.advanceCtr = (bird.advanceCtr - 1) & 0xFF;
+        }
+        const base = shape << 3;                      // T3F00[shape] base
+        const b = BIRD_T3F00[base + 0];
+        const c = BIRD_T3F00[base + 1];
+        const d = BIRD_T3F00[base + 2];
+        const e = BIRD_T3F00[base + 3];
+        // Bytes 4..5 = "first call" address ($35D1-$35D4 PUSH) — the
+        // maturity-advance routine. Bytes 6..7 = "second call" address
+        // ($35D6-$35D9 PUSH) — the motion routine. Source RETs into the
+        // second push first, so MOTION fires first, then maturity when
+        // motion returns and pops the next stack frame.
+        const maturityAddr = (BIRD_T3F00[base + 4] << 8) | BIRD_T3F00[base + 5];
+        const motionAddr   = (BIRD_T3F00[base + 6] << 8) | BIRD_T3F00[base + 7];
+        switch (motionAddr) {
+            case 0x36C0: this.birdMotion36C0(bird); break;
+            case 0x35E0: this.birdMotion35E0(bird); break;
+            // Shape 0 falls through (all $FF — RET Z handled above);
+            // any unknown value silently skipped.
+        }
+        switch (maturityAddr) {
+            case 0x36D2: this.birdMaturity36D2(bird, b, c, d, e); break;
+            case 0x36EA: this.birdMaturity36EA(bird, b, c, d, e); break;
+            case 0x370A: this.birdMaturity370A(bird, b, c, d, e); break;
+            case 0x36CC: /* no-op — shapes C/D, stack-unwind only */    break;
+        }
+    },
+
+    // $36D2 — maturity advance for shapes 1, 2, 3 (OR $01 into M4368).
+    // Gate: bird[+4] (advanceCtr) must be 0 — i.e. countdown finished.
+    // Writes B → bird[+4] (reset countdown), D → bird[+0] (new shape).
+    birdMaturity36D2(bird, b, c, d, e) {
+        if (bird.advanceCtr !== 0) return;
+        bird.advanceCtr = b;
+        bird.shape = d;
+        state.maturity = (state.maturity | 0x01) & 0xFF;
+    },
+
+    // $36EA — maturity advance for shapes 4, 5, 8, 9, B, E (OR $02).
+    // Gates: bird[+4] == 0 AND (bird[+6] & $0F) == 0.
+    birdMaturity36EA(bird, b, c, d, e) {
+        if (bird.advanceCtr !== 0) return;
+        if ((bird.field6 & 0x0F) !== 0) return;
+        bird.advanceCtr = b;
+        bird.shape = d;
+        state.maturity = (state.maturity | 0x02) & 0xFF;
+    },
+
+    // $370A — maturity advance for shapes 6, 7, A, F (OR $04, and
+    // conditionally OR $08 with shape/counter override). Same gate as
+    // $36EA; after the OR $04, an additional gate on (M436F & E) & $F0
+    // decides whether to take the OR $08 override path. With M436F = 0
+    // (cold start, before $3560 has produced randomness), the override
+    // fires unconditionally — but $3560 runs every frame in
+    // stageBirdCombat, so by the time a bird reaches shape 6/7/A/F,
+    // M436F is randomized and the override fires probabilistically.
+    birdMaturity370A(bird, b, c, d, e) {
+        if (bird.advanceCtr !== 0) return;
+        if ((bird.field6 & 0x0F) !== 0) return;
+        bird.advanceCtr = b;
+        bird.shape = d;
+        state.maturity = (state.maturity | 0x04) & 0xFF;
+        // Override gate: (M436F & E) & $F0 must be 0 to fire OR $08.
+        if (((state.m436F & e) & 0xF0) !== 0) return;
+        // Override: install shape = E & $0F, advanceCtr = C, OR $08.
+        bird.shape = e & 0x0F;
+        bird.advanceCtr = c;
+        state.maturity = (state.maturity | 0x08) & 0xFF;
+    },
+
+    // $36C0 — anim-cycle motion for shapes 1, 5, 6, 7, 8, 9, A. Only
+    // ticks bird[+3] (anim phase 0..7) on even-advanceCtr frames.
+    birdMotion36C0(bird) {
+        if ((bird.advanceCtr & 1) !== 0) return;
+        bird.field3 = (bird.field3 + 1) & 0x07;
+    },
+
+    // $35E0 — main sweep motion for shapes 2, 3, 4, B, C, D, E, F.
+    //
+    // Geometry: each bird oscillates horizontally between a current X
+    // (bird[+5]) and a target X (bird[+7]). bird[+6] is the per-tick
+    // step size AND the direction encoding:
+    //   bird[+6] <  $10  → main path: gridX += step, screen moves right
+    //                      (screenLsb -= $20 on anim-overflow)
+    //   bird[+6] >= $10  → alt path:  gridX -= step, screen moves left
+    //                      (screenLsb += $20 on anim-borrow)
+    // When the bird reaches its target (gridY == gridX), $3672 / $3695
+    // pick a new target from `PlayerShipX & $F8` plus randomness via
+    // `M436D` — that's the player-tracking dive that gives Phoenix's
+    // birds their characteristic "swoop toward the ship" behavior.
+    //
+    // bird[+3] (anim phase) is also bumped by step each tick and wraps
+    // at 8 — this drives the egg/wing animation cycle for the static
+    // shapes (the 4-frame T3E08 lookup uses bird[+3] >> 1).
+    //
+    // Screen address (bird[+1]:bird[+2]) updates use source's screen-RAM
+    // semantics: `$20` in screenLsb = high 5 bits = 1 display column.
+    // Subtracting $20 with no borrow = +1 col display (right); with
+    // borrow = +1 col + screenMsb-- (wrap to previous row of cols).
+    // Adding $20 = -1 col display (left); carry → screenMsb++.
+    //
+    // Helpers are split per source label to keep the dispatch readable;
+    // each helper's HL convention is documented in its comment.
+    // research_bird_stage.md §10 item 7.
+    birdMotion35E0(bird) {
+        const f6 = bird.field6;
+        if (f6 >= 0x10) {
+            this._birdMotion3628(bird, f6);
+            return;
+        }
+        // Main path: bird[+6] < $10
+        const b = f6;                          // save step
+        bird.gridX  = (bird.gridX  + b) & 0xFF;  // bird[+5] += b
+        const sum = (bird.field3 + b) & 0xFF;
+        bird.field3 = sum;
+        if (sum < 0x08) {
+            this._birdMotion366A(bird, b);
+            return;
+        }
+        bird.field3 = sum & 0x07;              // wrap anim phase
+        // bird[+2] -= $20  (with borrow → bird[+1]--)
+        let lsbNew = bird.screenLsb - 0x20;
+        if (lsbNew < 0) {
+            bird.screenLsb = (lsbNew + 0x100) & 0xFF;
+            bird.screenMsb = (bird.screenMsb - 1) & 0xFF;
+        } else {
+            bird.screenLsb = lsbNew;
+        }
+        // Fall through to $3604
+        this._birdMotion3604(bird, b);
+    },
+
+    // $3604 — main-path tail. Computes (bird[+7] - bird[+5]) and uses
+    // it (after some bit-shifting) to pick the next bird[+6] step.
+    // bird[+6] is reset to $10 unconditionally first; the subsequent
+    // writes overwrite that based on three conditions:
+    //   - exact target match (a == 0)  → $3672 (pick new target X)
+    //   - bit-shifted diff < B (orig)  → bird[+6] = (diff & $1F) + 1
+    //   - else if M436E == B           → bird[+6] = M436E (no-op write)
+    //   - else                         → bird[+6] = B + 1
+    // The randomization via M436E lets the swoop amplitude wobble each
+    // sweep without becoming pathological.
+    _birdMotion3604(bird, b) {
+        const c = bird.gridX;                  // saved bird[+5]
+        const a0 = bird.gridY;                 // bird[+7] target
+        bird.field6 = 0x10;                    // tentative: switch to alt mode
+        const diff = (a0 - c) & 0xFF;
+        if (diff === 0) {
+            this._birdMotion3672(bird);
+            return;
+        }
+        let a = (diff - 1) & 0xFF;
+        a = ((a >> 3) | (a << 5)) & 0xFF;      // RRCA × 3
+        a &= 0x1F;
+        const cpBorrow = a < b;                // CP B
+        a = (a + 1) & 0xFF;
+        bird.field6 = a;
+        if (cpBorrow) return;
+        a = state.m436E;
+        bird.field6 = a;
+        if (a === b) return;
+        bird.field6 = (b + 1) & 0xFF;
+    },
+
+    // $366A — main-path helper for "anim phase didn't overflow yet."
+    // If bird[+6] was already 0 (step disabled), bump it to 1 to start
+    // motion next frame. Otherwise return — anim phase is still pre-8,
+    // no column step needed.
+    _birdMotion366A(bird, b) {
+        if (b !== 0) return;
+        bird.field6 = (bird.field6 + 1) & 0xFF;
+    },
+
+    // $3672 — pick a new target X (bird[+7]) when the bird has reached
+    // its sweep limit on the main path. Clamps to `min(gridX,
+    // PlayerShipX & $F8)`, then subtracts (M436D pre-add) to seed the
+    // sweep amplitude. M436D advances by $08 each call (source-faithful
+    // — sets up the next bird's sweep with a different starting offset).
+    _birdMotion3672(bird) {
+        let b = bird.gridX;
+        const px = state.player.x & 0xF8;
+        if (px < b) b = px;
+        const cVal = state.m436D;
+        state.m436D = (state.m436D + 0x08) & 0xFF;
+        const a = (b - cVal) & 0xFF;
+        const borrow = b < cVal;
+        bird.gridY = 0x08;                     // unconditional fallback
+        if (borrow) return;
+        if (a < 0x08) return;
+        bird.gridY = a;
+    },
+
+    // $3628 — alt path (bird[+6] >= $10). Mirror of main path but
+    // direction-reversed: screen moves left, anim phase decrements.
+    // Low nibble of bird[+6] = step magnitude; high nibble bit-4 stays
+    // set (so subsequent ticks stay in alt path).
+    _birdMotion3628(bird, f6) {
+        let a = f6 & 0x0F;
+        if (a === 0) {
+            this._birdMotion3744(bird);
+            return;
+        }
+        const b = a;
+        bird.gridX = (bird.gridX - b) & 0xFF;
+        const newAnim = (bird.field3 - b) & 0xFF;
+        const animBorrow = bird.field3 < b;
+        bird.field3 = newAnim;
+        if (!animBorrow) {
+            this._birdMotion3695(bird, b);
+            return;
+        }
+        bird.field3 = newAnim & 0x07;
+        // bird[+2] += $20  (with carry → bird[+1]++)
+        let lsbNew = bird.screenLsb + 0x20;
+        if (lsbNew > 0xFF) {
+            bird.screenLsb = lsbNew & 0xFF;
+            bird.screenMsb = (bird.screenMsb + 1) & 0xFF;
+        } else {
+            bird.screenLsb = lsbNew;
+        }
+        // Fall through to $3648
+        this._birdMotion3648(bird, b);
+    },
+
+    // $3648 — alt-path tail. Computes (bird[+5] - bird[+7]) with the
+    // same bit-shift / CP / M436E logic as $3604, then OR's $10 into
+    // the result so the next tick stays in alt path.
+    _birdMotion3648(bird, b) {
+        const v5 = bird.gridX;
+        let a = (v5 - bird.gridY) & 0xFF;
+        a = ((a >> 3) | (a << 5)) & 0xFF;      // RRCA × 3
+        a &= 0x1F;
+        const cpBorrow = a < b;
+        a = (a + 1) & 0xFF;
+        if (!cpBorrow) {
+            const me = state.m436E;
+            if (me !== b) {
+                a = (b + 1) & 0xFF;
+            } else {
+                a = me;
+            }
+        }
+        bird.field6 = (a | 0x10) & 0xFF;
+    },
+
+    // $3695 — alt-path target-reached check. Only fires when bird[+7]
+    // == bird[+5] (sweep limit). Clears bird[+6] so the next tick exits
+    // alt path naturally, then picks a new bird[+7] target additively
+    // (capped at $C8).
+    //
+    // ⚠ Source reads B = bird[+5] then A = bird[+7] then `CP B; RET NZ`
+    // — comparing gridY against the just-read gridX. (My port previously
+    // compared against the step parameter `b`, which broke the alt→main
+    // transition: 2026-05-17 fix.)
+    //
+    // ⚠ The PlayerShipX clamp uses **max**(playerX, bird[+5]) here, but
+    // $3672's analogous clamp uses **min** — source $3695's `JP C` at
+    // $36A7 skips `B = A` when A < B (so B ends up as max), while
+    // $3672's `JP NC` at $367C skips when A >= B (B ends up as min).
+    // The two routines drive the LEFT and RIGHT sweep targets
+    // respectively.
+    _birdMotion3695(bird, b) {
+        // bird[+7] vs bird[+5] — NOT vs step parameter.
+        if (bird.gridY !== bird.gridX) return;
+        const bx = bird.gridX;                 // captured for downstream
+        bird.field6 = 0;
+        const px = state.player.x & 0xF8;
+        // max(px, bx)
+        let bb = bx;
+        if (px >= bx) bb = px;
+        const cVal = state.m436D;
+        state.m436D = (state.m436D + 0x08) & 0xFF;
+        // Source: A = (m436D pre-add) + $08; then ADD A,B → effective
+        // (m436D + 8 + B). The "$08" is added between the m436D read
+        // and the post-read store, but the value used downstream is
+        // the POST-store one (= pre-add + 8).
+        const sum = (cVal + 0x08 + bb);
+        bird.gridY = 0xC8;                     // unconditional fallback
+        if (sum > 0xFF) return;
+        if ((sum & 0xFF) >= 0xC8) return;
+        bird.gridY = sum & 0xFF;
+    },
+
+    // $3744 — alt-path transition when bird[+6]'s low nibble hits 0.
+    // Resets bird[+6] to $11 (alt path, step 1), bumps bird[+5] DOWN,
+    // resets anim phase to $07, and steps the screen LSB by +$20 (with
+    // carry into MSB). This is the "kick the bird back into motion"
+    // path when the alt-path step magnitude underflows to 0.
+    _birdMotion3744(bird) {
+        bird.field6 = 0x11;
+        bird.gridX = (bird.gridX - 1) & 0xFF;
+        bird.field3 = 0x07;
+        let lsbNew = bird.screenLsb + 0x20;
+        if (lsbNew > 0xFF) {
+            bird.screenLsb = lsbNew & 0xFF;
+            bird.screenMsb = (bird.screenMsb + 1) & 0xFF;
+        } else {
+            bird.screenLsb = lsbNew;
+        }
+    },
+
+    // $3560 — bird randomizer. Picks a T3E80 entry from (LevelAndRound
+    // round bits + BirdsLeft density + Counter9A bit + PRNG byte) and
+    // exposes the entry's (shape, delta) to motion/maturity via M436E/D,
+    // plus a bit-mixed PRNG byte via M436F. Runs once per half-flock
+    // dispatch in stageBirdCombat. research_bird_stage.md §3.
+    birdRandomize() {
+        // 4-bit PRNG output (port's getRandomNumber is masked to $0F —
+        // see comment at $30AA implementation). Source returns a full
+        // byte; the port's narrowing is a pre-existing limitation that
+        // doesn't break maturity/motion gates.
+        const rnd = this.getRandomNumber() & 0xFF;
+        // C = rnd << 2 (after 2 RLCAs on a value with high nibble 0,
+        // this is just shift-left; high bits don't wrap).
+        const c = (rnd << 2) & 0xFF;
+        // 4 RLCAs total: nibble swap. With high nibble = 0, result is
+        // rnd << 4. OR with original rnd → byte with both nibbles = rnd.
+        const m436f = (((rnd << 4) | rnd) & 0xFF);
+        state.m436F = m436f;
+
+        // Round contribution: cap LevelAndRound at $30 if >= $40, mask
+        // to bits 5..4, RRCA once (→ bits 4..3 of B).
+        let lrCapped = state.levelAndRound;
+        if (lrCapped >= 0x40) lrCapped = 0x30;
+        let bAcc = (lrCapped & 0x30) >> 1;            // bits 4..3
+        // Density contribution: min(BirdsLeft - 1, 3) << 1 → bits 3..2.
+        let dens = (state.birdsLeft - 1) & 0xFF;
+        if (dens >= 4) dens = 3;
+        bAcc = ((bAcc << 1) | (dens << 1)) & 0xFF;
+        // Counter9A parity contribution: source reads $439A (= MSB byte
+        // of the 16-bit counter, flips every 256 frames). After RLCA × 2
+        // and AND $20, the resulting bit-5 of the contribution flips
+        // every 8 × 256 = 2048 frames (~34 s) — a long-period jitter on
+        // the T3E80 lookup. **Bug fixed 2026-05-17**: previous port
+        // mistakenly read $439B (LSB, fast); the lookup over-randomized.
+        let c9 = ((state.counter9a >> 8) & 0xFF) << 2;
+        c9 &= 0x20;
+        bAcc = (bAcc | c9) & 0xFF;
+        // Final index: bAcc + $80 → T3E80 entry. Subtract $80 since
+        // BIRD_T3E80 is extracted starting at $3E80 (relative offset 0).
+        const off = ((bAcc + 0x80) - 0x80) & 0xFF;
+        if (off >= BIRD_T3E80.length) {
+            state.m436E = 0;
+            state.m436D = 0;
+            return;
+        }
+        state.m436E = BIRD_T3E80[off];
+        const byte1 = BIRD_T3E80[off + 1] ?? 0;
+        state.m436D = (byte1 + c) & 0xF8;
     },
 
     // L0DF0 — bullet-vs-alien scan. Called every frame (not lane-gated).

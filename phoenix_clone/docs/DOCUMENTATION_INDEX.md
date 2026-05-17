@@ -2,7 +2,7 @@
 
 **Date:** May 2026  
 **Status:** All research documents analyzed and integrated  
-**Total docs:** 7 files + assembly listing (Code.md)
+**Total docs:** 8 files + assembly listing (Code.md)
 
 ---
 
@@ -17,6 +17,7 @@
 | **research_stage_structure.md** | Game states, stages, wave cycles | §1 state machine, §3 JT4 dispatch, §4 per-stage init | 647 lines |
 | **research_enemy_motion.md** | Alien movement, path following, animation | §1 per-frame dispatch, §3 path model, §4 animation | 504 lines |
 | **research_rendering.md** | Sprite decoding, tile rendering, collision | §1 rendering model, §2 tile decode, §6 AABB collision | 794 lines |
+| **research_bird_stage.md** | Bird-combat dispatch ($3400), maturity (M4368), wing hit ($38E9) | §1 $3400 dispatch, §2 $32B0 init + T3F80/T3FC0, §4 maturity, §6 hit detection, §9 sub-step plan | ~400 lines |
 | **Code.md** | 8085 assembly listing, full source truth | Routines at addresses $0000–$3FFF | 8249 lines |
 
 ---
@@ -135,6 +136,21 @@
 | §3 | Path-following motion (T1700 motion table, T1000–T13D0 paths) | coordinate_system.md §4; rendering.md §2 |
 | §4 | Sprite animation (position-keyed, 4-frame cadence) | rendering.md §2; code_flow.md §5 |
 | §5–8 | Swoop attacks, stage-clear, bird behavior, mothership | stage_structure.md §3; rendering.md (collision) |
+
+### Research Bird Stage
+
+| Section | Topic | Cross-refs |
+|---------|-------|-----------|
+| §1 | `$3400` bird-combat dispatch (Counter9A bit-0 parity split; `BirdsLeft<4` runs both halves) | enemy_motion.md §1 (alien `$2000` comparison) |
+| §2 | `$32B0` bird init + T3F80/T3FC0 tables (8 birds × 8 bytes) | stage_structure.md §4 |
+| §3 | `$3560` movement randomizer (T3E80 index from round + density + Counter9A) | stage_structure.md §8.1 |
+| §4 | M4368 maturity bitfield (`$01 → $0F`); 4 advance routines `L36D2/EA/0A/36` | rendering.md §2 (shape table T3EC0) |
+| §5 | T3F00 dispatch + T3E80 shape/motion lookup | rendering.md §2 |
+| §6 | Hit detection: `$38E9` wing → `spawnExplosion`, `$3844` body → `spawnBonusExplosion` | enemy_motion.md §1.0.5, §1.0.6 |
+| §7 | `$2230` spiral-fill intro (abbreviated) | stage_structure.md §3.2, §8.1 |
+| §8 | Birds do not fire (no `$2560` invocation from `$3400`) | enemy_motion.md (alien fire model) |
+| §9 | Implementation hooks — proposed sub-steps 11.1–11.6 | progress.md step 11 |
+| §10 | Open questions parked for impl pass (T3F80/T3FC0 selection, offsets +3/+6, `$2600`) | — |
 
 ### Research Rendering
 
@@ -290,8 +306,9 @@ To implement, start at top, work downward. Each level depends on the previous.
 | research_coordinate_system.md | High–medium | Addressing, rendering | Most items [verified]; scroll pacing ⚠ |
 | research_hardware.md | High | CPU, memory, I/O | Detailed; parts from MAME cross-check |
 | research_stage_structure.md | High | State machine, init, waves | Every claim [verified] with address |
-| research_enemy_motion.md | High | Path-following, animation | Detailed; motion-only (bird/mothership deferred) |
+| research_enemy_motion.md | High | Path-following, animation | Detailed; alien motion + explosion/bonus machinery (bird/mothership covered separately) |
 | research_rendering.md | High | Sprite decode, collision | Detailed; includes optional PROM color check |
+| research_bird_stage.md | Medium–high | Bird `$3400` dispatch, maturity, wing-hit | Verified for dispatch + RAM + hit entry; T3F80/T3FC0 selection + offsets +3/+6 + `$2600` flagged as open (§10) |
 
 ---
 
@@ -317,6 +334,6 @@ No guesswork required. Every section maps to an address in `Code.md` and can be 
 
 ---
 
-**Last updated:** May 14, 2026  
-**Status:** Complete and ready for implementation  
-**Next step:** Begin Phase 1 (infrastructure) per code_flow.md §5.4
+**Last updated:** May 17, 2026  
+**Status:** Bird-stage research added (gates step 11); mothership research pending (gates step 12)  
+**Next step:** Implement step 11.1–11.6 (birds) per research_bird_stage.md §9, then research mothership for step 12

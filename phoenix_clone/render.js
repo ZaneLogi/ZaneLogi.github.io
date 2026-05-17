@@ -3,7 +3,13 @@ import { state } from './state.js';
 import { runloop } from './runloop.js';
 import { input } from './input.js';
 import { resource } from './resource.js';
-import { ALIEN_SHAPE_TABLE, ALIEN_EXPLOSION_ROM } from './data.js';   // source T1420 / $17B0+
+import {
+    ALIEN_SHAPE_TABLE,    // source T1420
+    ALIEN_EXPLOSION_ROM,  // source $17B0+
+    BIRD_T3EC0,           // source T3EC0 — shape → draw-routine entry LSB (= column count)
+    BIRD_T3E08,           // source $3E00..$3E7F — shape×frame → tile-data MSB:LSB
+    BIRD_TILE_DATA,       // source $3C00..$3DBF — actual bird-sprite tile bytes
+} from './data.js';
 
 // research_rendering.md §5 — per-frame: clear → drawBackground → walk objects.
 // Skeleton draws a debug grid in place of the BG tile-grid; per-object draws
@@ -29,6 +35,7 @@ export const render = {
         if (this.gridMode !== GRID_OFF) this.drawTileRomOverlay();
         for (const row of state.staticTextRows) gfx.drawObject(row);
         for (const alien of state.aliens) this.drawAlien(alien);
+        for (const bird of state.birds) this.drawBird(bird);
         if (state.player.alive) this.drawPlayer();
         if (state.player.bullet.active) this.drawPlayerBullet();
         this.drawEnemyBullets();
@@ -130,6 +137,72 @@ export const render = {
                 ctx.drawImage(images[tiles[3]], alien.x + 8, alien.y + 8);
                 break;
             }
+        }
+    },
+
+    // Bird sprite render — ports DrawBirdObject $34C0 + Draw7x2..Draw1x2
+    // entry sequence at $3520+. Source writes bird tiles to BG screen RAM
+    // at the bird's stored MSB:LSB; we draw directly to canvas at the
+    // position that MSB:LSB would have mapped to (same conversion as
+    // states.js bgWrite, minus the bgTiles write).
+    //
+    // Sprite dimensions: ALL bird sprites are 2 rows tall (16 px) and
+    // vary in width from 2 to 7 cols (16-56 px). The column count is
+    // encoded in T3EC0[shape] as the entry-point LSB into $3520+:
+    //   LSB $20 → enter Draw7x2 → 7 cols   LSB $38 → Draw4x2 → 4 cols
+    //   LSB $28 → Draw6x2     → 6 cols     LSB $40 → Draw3x2 → 3 cols
+    //   LSB $30 → Draw5x2     → 5 cols     LSB $48 → Draw2x2 → 2 cols
+    //                                       LSB $50 → Draw1x2 → 1 col
+    // Each entry block is 8 bytes; width = (0x58 - lsb) >> 3.
+    //
+    // Tile-data address: source $34D0-$34D7 computes
+    //   tIdx = ((shape << 3) + bird[+3]) & 0x7E
+    //   addr = (T3E08[tIdx] << 8) | T3E08[tIdx + 1]
+    // Bird[+3] (anim-phase counter, cycled 0..7 by $36C0 motion) varies
+    // the frame within a shape — egg → cracking → wings spread on the
+    // animated shapes. Shapes that use $35E0 motion keep bird[+3]=0 so
+    // they show only frame 0 (matches our $35E0 no-op stub state).
+    //
+    // Tile layout in BIRD_TILE_DATA: column-major pairs,
+    // [col0_row0, col0_row1, col1_row0, col1_row1, ..., colN_row0, colN_row1].
+    // Birds use BG palette → resource.bgTileImages (source writes bird
+    // tiles to the BG plane $48XX-$4BXX, never FG).
+    //
+    // Inactive slots (shape == 0) are skipped — matches $34C0
+    // "LD A,(HL); AND A; RET Z" gate.
+    drawBird(bird) {
+        if (bird.shape === 0) return;
+        const off = ((bird.screenMsb << 8) | bird.screenLsb) - 0x4800;
+        if (off < 0 || off >= 832) return;
+        const baseX = (25 - ((off >> 5) & 0x1F)) * 8;
+        // BG-scroll Y offset (port-side equivalent of source's $5800
+        // scroll register applied to the BG plane). CounterB9 decrements
+        // each frame inside bgUpdateIfAlienStage, so `-counterB9 & 0xFF`
+        // grows linearly per frame; the final canvas Y is wrapped mod
+        // 256 so birds re-enter from the top after passing the bottom,
+        // matching the BG plane's cyclical scroll. Source-level
+        // semantics: source writes adjusted CounterB9 to $5800, BG
+        // hardware shifts both stars + bird tiles together by that
+        // amount.
+        const scrollY = (-state.counterB9) & 0xFF;
+        const baseY = (((off & 0x1F) * 8) + scrollY) & 0xFF;
+
+        const lsb = BIRD_T3EC0[bird.shape] ?? 0;
+        const width = (0x58 - lsb) >> 3;       // 1..7
+        if (width < 1 || width > 7) return;
+
+        const tIdx = ((bird.shape << 3) + bird.field3) & 0x7E;
+        const dataAddr = (BIRD_T3E08[tIdx] << 8) | BIRD_T3E08[tIdx + 1];
+        const dataOff  = dataAddr - 0x3C00;
+        if (dataOff < 0 || dataOff + width * 2 > BIRD_TILE_DATA.length) return;
+
+        const ctx = gfx.ctx;
+        const images = resource.bgTileImages;
+        for (let c = 0; c < width; c++) {
+            const t0 = BIRD_TILE_DATA[dataOff + c * 2    ];
+            const t1 = BIRD_TILE_DATA[dataOff + c * 2 + 1];
+            if (t0 !== 0) ctx.drawImage(images[t0], baseX + c * 8, baseY);
+            if (t1 !== 0) ctx.drawImage(images[t1], baseX + c * 8, baseY + 8);
         }
     },
 
@@ -356,17 +429,14 @@ export const render = {
         const gridLabel = ["off", "fg", "bg"][this.gridMode];
         const stage = state.levelAndRound & 0x0F;
         const round = state.levelAndRound >> 4;
+        const scoreHex =
+            state.score1[2].toString(16).padStart(2,'0') +
+            state.score1[1].toString(16).padStart(2,'0') +
+            state.score1[0].toString(16).padStart(2,'0');
         hud.textContent =
-            `tick=${runloop.tickCount}  ` +
-            `state=${state.gameState}  ` +
-            `stage=${stage} round=${round}  ` +
-            `counterA5=${state.counterA5}  ` +
-            `counterB4=${state.stageBlock[9]}  ` +
-            `counterB9=${state.counterB9.toString(16).padStart(2,'0')}  ` +
-            `lane=${state.combatLane & 3}  ` +
-            `aliens=${state.aliensLeft}  ` +
-            `score=${state.score1[2].toString(16).padStart(2,'0')}${state.score1[1].toString(16).padStart(2,'0')}${state.score1[0].toString(16).padStart(2,'0')}  ` +
-            `grid=${gridLabel}\n` +
+            `tick=${runloop.tickCount}  state=${state.gameState}  stage=${stage} round=${round}\n` +
+            `counterA5=${state.counterA5}  counterB4=${state.stageBlock[9]}  counterB9=${state.counterB9.toString(16).padStart(2,'0')}  lane=${state.combatLane & 3}\n` +
+            `aliens=${state.aliensLeft}  birds=${state.birdsLeft}  mat=${state.maturity.toString(16).padStart(2,'0')}  score=${scoreHex}  grid=${gridLabel}\n` +
             `keys: ←/→ move · space fire · shift barrier · 5 coin · 1 start · g cycle tile-ROM overlay`;
     },
 };

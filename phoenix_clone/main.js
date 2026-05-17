@@ -22,6 +22,11 @@ const game = {
         state.init();
         await resource.init();
 
+        // Expose state for dev / debugger inspection. Several research docs
+        // direct readers to "poll window.state.X after stage Y" — that
+        // requires the binding to actually exist. Cost-free in production.
+        window.state = state;
+
         runloop.start(() => this.tick(), () => this.render());
     },
 

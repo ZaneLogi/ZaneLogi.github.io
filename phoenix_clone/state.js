@@ -188,6 +188,51 @@ export const state = {
         this.alienCooldownTimer2 = 0;   // $435A
         this.alienCooldownTimer3 = 0;   // $435B
 
+        // 8 bird slots, mirror of $4B70-$4BAF (8 bytes per bird). Init'd by
+        // $32B0 at state-2 tail when LevelAndRound bit 2 selects a bird stage
+        // (4-7). Per-byte semantics in research_bird_stage.md §2.3:
+        //   +0 shape       — maturity-payload as shape-index (0 = slot empty,
+        //                    1..F = T3F00-dispatched shape, init from table = $01)
+        //   +1 screenMsb   — MSB of screen-RAM address for top tile
+        //   +2 screenLsb   — LSB of screen-RAM address (advanced when bird scrolls)
+        //   +3 field3      — uncertain; RAMUse marks ?, no writers found in
+        //                    walked paths. Init from table = $00 for all 16 entries.
+        //   +4 advanceCtr  — maturity-advance gate counter ($35B0 decrements;
+        //                    each maturity-advance routine fires when this hits 0
+        //                    AND the relevant preconditions hold)
+        //   +5 gridX       — bird X coord (init from table)
+        //   +6 field6      — uncertain; init from table = $00 or $10 depending
+        //                    on bird index. Possibly a flags / direction byte.
+        //   +7 gridY       — bird Y coord (init from table)
+        // research_bird_stage.md §1 (combat dispatch), §2 (init), §4 (maturity).
+        this.birds = Array.from({ length: 8 }, () => ({
+            shape: 0,
+            screenMsb: 0,
+            screenLsb: 0,
+            field3: 0,
+            advanceCtr: 0,
+            gridX: 0,
+            field6: 0,
+            gridY: 0,
+        }));
+
+        // $4368 M4368 — flock-wide bird-maturity bitfield. Cleared by $32B0
+        // zero-fill of $4350-$437F at state-2 init. OR'd progressively to
+        // $0F by the four maturity-advance routines L36D2/EA/0A
+        // (research_bird_stage.md §4); reset to $00 by $3A37 on every kill.
+        // Stays at 0 outside bird stages (no advance path runs).
+        this.maturity = 0;
+
+        // $4368-$436F port mirrors — shared bird-randomizer outputs from
+        // $3560, consumed by $35E0 motion ($436E used as shape candidate;
+        // $436D used in screen-RAM math) and the $370A maturity-advance
+        // gate ($436F & E mask). Cleared by $32B0's zero-fill. Only the
+        // bird-stage code paths read/write these; alien stages don't run
+        // $3560. research_bird_stage.md §3, §4.
+        this.m436D = 0;   // $436D — (T3E80[idx+1] + (rnd<<2)) & $F8
+        this.m436E = 0;   // $436E — T3E80[idx] (shape candidate)
+        this.m436F = 0;   // $436F — bit-mixed PRNG (gates $370A override)
+
         // L2000 depleted-formation sticky flag — mirror of $435E.
         // Source L2017-L202A: when AliensLeft<5 and the masked counter is 0,
         // latch $435E := $FF. Once set, dispatch goes via L2146 (2-state

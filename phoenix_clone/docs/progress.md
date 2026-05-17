@@ -34,7 +34,8 @@ Sibling docs:
 | 8f | L2146 depleted-formation routing | ✅ | Source-faithful port of the `$435E` sticky flag + L2146 dispatch. When `AliensLeft<5` and the masked counter reaches 0, `aliensLeftFlag` (mirror of `$435E`) latches `$FF`; subsequent frames OR lanes 2 and 3 into the existing lane-0/lane-1 handlers, doubling movement and behavior to every-2-frames instead of every-4. Flag cleared by L32B0 zero-fill at state-2 init. New `state.aliensLeftFlag` field. Lane mapping preserves the §1.0 lane swap and §1.0.1 interlock (none of the three interlocked knobs touched). Port-side detail in `research_enemy_motion.md §1.0.3`. |
 | 9 | Alien bullet (`L2560` / `EnemyBulletUpdate`) | ✅ | `enemyBulletUpdate` ports L0C40 chain (per-slot fall +4 y/tick, shape-bit-2 animation toggle, deactivate at y≥$F9). `enemyFireScanAndSpawn` ports the L2560 → L2596 → L25B7 → L25E0 chain: column-pick via `counter93 & 1`, 8-alien scan with controlA/controlB/y/x filters, round-based slot cap (3/4/5 for rounds 0/1/2+), spawn at `(alienX+4, alienY+0x0C)` with pseudo-random shape in $58-$5F. New `state.enemyBullets[5]` (mirror of $43CC-$43DF), `mappedPlayerX()` helper (L097A inline). Lane dispatch: enemyBulletUpdate on full lanes 0+3 (matches source's 30 Hz cadence from source lanes 1+3), enemyFireScanAndSpawn on full lane 2 (source lane 2); in depleted both bundled onto port lanes 1+3 mirroring source L2190. Port mapping detail in `research_enemy_motion.md §1.0.4`. **Player-hit path NOT ported** (per user direction): L0CB4/L0CC4 skipped, bullets pass through player harmlessly. Re-enabling alien-vs-player collision and the L0CB4 enemy-bullet → player path is deferred to a follow-up alongside lives / proper state-4 explosion. |
 | 10 | Alien-kill explosion + stage-clear pause activity + bonus-kill popup | ✅ | Original framing was "fade-out symmetric to L0834 fade-in"; research showed source has no fade-out — it has per-kill explosions during the pause. Implemented `L0FC0` (`explosionUpdate` — 2 alien-kill slots at $4370/$4374, T17B0-driven 4-frame tile cycle) + `L38F8` (`spawnExplosion` — first-free-slot allocator wired through `onAlienHit`) + restructured `stageClearUpdate(lane)` as a `L21BA` bit-0 dispatch (residual bullets + explosions on bit-0=1 during the pause, countdown on every frame). Hoisted `combatLane` read+increment to BEFORE the `aliensLeft===0` check in `stageAlienCombat`, mirroring source `L2000` order. Fixed `onAlienHit` per-alien-type scoring: 20 pts for formation kills (`alienMovePtr < 0x1020`), 40 pts for swoops, **200 pts for bonus kills** (when alien's current path byte is 7 or 8 — the "climbing back from dive" motions, scattered through most swoop patterns). Sub-step 10.7 also landed the **bonus explosion machinery**: `state.bonusExplosions[2]` (mirror of $4378/$437C), `bonusExplosionUpdate` (port `L3758`), `spawnBonusExplosion`, `drawBonusExplosions` (6×2 sprite T17D0+T17D6 + 3-digit score popup overlay via `L37B0`-equivalent), spreading-halves animation (per-side spread = `((0x0F - counter) & 0x0E) << 2` pixels, walks 0 → 56 over 16 ticks). New `state.explosions[2]` with port-only `frameLsb` field that stores the pre-decrement tile-table lookup so `drawExplosions` matches source's pre-decrement timing despite the update/render split. New `ALIEN_EXPLOSION_ROM` data export (70 bytes at $17B0, covers T17B0 + frame data for alien frames #1-#5 + bonus halves T17D0/T17D6). Port mapping detail in `research_enemy_motion.md §1.0.5` (alien explosion) and `§1.0.6` (bonus explosion). **Player-hit path still skipped** (per step 9 carryover): bullets fall through harmlessly, `alienVsPlayerCollision` still disabled. |
-| 11 | Birds (`$3400`) + mothership (`$22B4`/`$22CA`) + shield-block tile-swapping | ⏳ | Renumbered from old step 9. Pulls in still-open mothership research. Closes out the 5-stage round cycle; remove the 8d wrap stop-gap as part of this. |
+| 11 | Birds (`$3400`) — stages 4-7 | 🚧 | Bird-stage research landed (`research_bird_stage.md`, 2026-05-17) — covers `$3400` dispatch, `$32B0` init, M4368 maturity, T3F80/T3FC0 tables, `$38E9` wing-hit wiring. Sub-steps 11.1–11.6 defined in `research_bird_stage.md §9.1` (bird init → combat dispatch → update engine → hit detection → stage-clear cleanup → spiral-fill intro last). Debug-start affordance at §9.0 (LevelAndRound override) lets iteration jump directly to stage 5, skipping the alien-combat warm-up. Reuses step-10.7 bonus-explosion machinery for wing/body hits. |
+| 12 | Mothership (`$22B4`/`$22CA`) + shield-block tile-swapping + remove 8d wrap stop-gap | ⏳ | Closes out the 5-stage round cycle. Gated by `research_mothership.md` (not yet written). Touches GameStates 6 (`$2400` particle explosion) and 7 (`$244C` score display), plus JT4 stages 9 (mothership fade-in), A (mothership + aliens fade-in), and B (combat). Shield-block tiles are the destructible barrier above the mothership; the tile-swap mechanic is documented at `research_stage_structure.md §3` references. Removing the 8d wrap stop-gap in `stageClearUpdate` belongs here — the full 5-stage cycle only plays through once stage 4+ are all implemented. |
 | – | Sound (MN6221AA bit-field synthesis) | ⏸️ | Per `research_hardware.md` §5; only matters for audio fidelity |
 
 ## Known deferred issues
@@ -66,24 +67,26 @@ cleanup pass.
   once lives / explosion-anim / game-over are in place — likely a
   sub-step before step 11.
 
-- **Bird-wing + mothership bonus scoring routes deferred to step 11.**
-  Step 10.7 landed the bonus-explosion infrastructure (bonus slots
-  $4378/$437C, `bonusExplosionUpdate`, `spawnBonusExplosion`, sprite
-  + digit overlay) and wired it for 200-pt alien-swoop kills on
-  path bytes 7/8. Source uses the same bonus slot path for bird
-  wing hits (`L38E9`) and mothership pilot scoring (`L2552`); those
-  callers come with step 11. The infrastructure is reusable as-is —
-  step 11 just needs to wire the right scoreBcd / counter values
-  into `spawnBonusExplosion` from those new code paths.
+- **Bird-wing bonus scoring deferred to step 11; mothership pilot scoring
+  deferred to step 12.** Step 10.7 landed the bonus-explosion
+  infrastructure (bonus slots $4378/$437C, `bonusExplosionUpdate`,
+  `spawnBonusExplosion`, sprite + digit overlay) and wired it for
+  200-pt alien-swoop kills on path bytes 7/8. Source uses the same
+  bonus slot path for bird wing hits (`L38E9`) and mothership pilot
+  scoring (`L2552`); bird wing hits come with step 11 (already
+  research-confirmed in `research_bird_stage.md §6`), mothership
+  pilot scoring with step 12. The infrastructure is reusable as-is —
+  each new caller just wires the right scoreBcd / counter values
+  into `spawnBonusExplosion`.
 
 - **Stage 4+ stop-gap: LR wraps to next round's stage 0.** Step 8d
   added a wrap in `stageClearUpdate` so when `LevelAndRound`'s stage
-  nibble reaches 4 (spiral-fill, where step 11's stages begin), it
-  resets to 0 and the round nibble bumps. Lets play loop indefinitely
-  through alien waves while bird/mothership stages are unimplemented.
-  **Remove this wrap when step 11 lands** (or when step 10's stage
-  transition cleanly hands off into the unimplemented stages) so the
-  full 5-stage round cycle plays through.
+  nibble reaches 4 (spiral-fill, where bird/mothership stages begin),
+  it resets to 0 and the round nibble bumps. Lets play loop
+  indefinitely through alien waves while bird/mothership stages are
+  unimplemented. Step 11 (birds) will make stages 4-7 reachable; the
+  wrap stays until **step 12 (mothership)** so the full 5-stage round
+  cycle plays through end-to-end.
 
 - **Movement and animation merged into one lane.** Source runs
   movement on lane-1 and animation on lane-2 (1 frame apart in
@@ -105,8 +108,8 @@ cleanup pass.
 
 ## Open research (gating future steps)
 
-- **Bird-stage motion + egg hatching** (`L3400`) — gates step 11 bird stages; the alien-side motion is documented in `research_enemy_motion.md`
-- **Mothership stage** (`$22B4` / `$22CA` fade-ins, `$2400` / `$244C` explosion+score) — gates step 11
+- ✅ **Bird-stage motion + egg hatching** (`L3400`) — landed in `research_bird_stage.md` (2026-05-17). Gates step 11.
+- **Mothership stage** (`$22B4` / `$22CA` fade-ins, `$2400` / `$244C` explosion+score, destructible shield-block layers) — gates step 12. Will live in `research_mothership.md` (not yet written).
 
 ## Conventions for editing this doc
 

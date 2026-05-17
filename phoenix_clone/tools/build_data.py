@@ -196,6 +196,74 @@ RAW_SLICES = [
     #   $1EC0 T1EC0 — GALAXY_LSB     (screen-RAM LSBs, one per entry)
     # AddPlanetsToBackground ($06B0) / AddGalaxiesToBackground ($2040)
     # index these by counters in stageBlock[0..5]. Step 3.3.
+    # source $3C00..$3DBF — bird-sprite tile data, 448 bytes covering all
+    # 16 shapes × up to 4 anim frames each. Layout per sprite is N×2
+    # tiles (N cols, 2 rows), bytes ordered column-major:
+    # [col0_row0, col0_row1, col1_row0, col1_row1, ...]. A given sprite's
+    # base address is read from $3E00+ (BIRD_T3E08); its column count is
+    # derived from T3EC0[shape] (see BIRD_T3EC0).
+    # Tile codes index `resource.bgTileImages` (birds are BG-plane sprites
+    # in source — written to $48XX/$4BXX, not the FG plane).
+    # research_bird_stage.md §5.4 (new).
+    ("BIRD_TILE_DATA",   0x3C00, 0x01C0),
+    # source $3E00..$3E7F — anim-frame address table (a.k.a. T3E08, label
+    # starts 8 bytes into the page). 16 shapes × 4 frames × 2-byte MSB:LSB
+    # entries = 128 bytes. Index formula at $34D4-$34D7:
+    #   tblIdx = ((shape << 3) + bird[+3]) & 0x7E
+    #   addr   = (T3E08[tblIdx] << 8) | T3E08[tblIdx + 1]
+    # So bird[+3] (the anim-cycle counter ticked by $36C0 motion) selects
+    # one of 4 frames per shape — the visible "egg → cracking → wings"
+    # animation. Index 0..7 ($3E00-$3E07) is the bit-mask preamble
+    # `01 02 04 08 10 20 40 80`, unused for bird-shape lookup; preserved
+    # in the extracted slice for offset-faithfulness.
+    # research_bird_stage.md §5.4 (new).
+    ("BIRD_T3E08",       0x3E00, 128),
+    # source T3E80..T3EBF — 32 entries × 2 bytes (shape, delta). Indexed
+    # by $3560 randomizer (bits packed from LevelAndRound + BirdsLeft +
+    # Counter9A + PRNG). Selected entry's bytes get written to M436E
+    # (shape candidate) and M436D (= byte1 + (rnd<<2), masked $F8 — used
+    # by $35E0 motion in some screen-RAM math). Several entries are
+    # marked "not used?" in the source comments; the table is over-
+    # provisioned for the actual reachable index space.
+    # research_bird_stage.md §3, §5.2.
+    ("BIRD_T3E80",        0x3E80, 64),
+    # source T3EC0..T3ECF — 16-byte LSB lookup for the bird-sprite tile
+    # arrays at $3520+. Indexed by `shape + $C0` in `DrawBirdObject
+    # $34C0`. Each LSB points to a 7×N tile group at $3520 + LSB. Source
+    # comment: "for: 7x2, 7x3, 7x3, 7x3, 7x4, 7x5, 7x6, 7x4, 7x5, 7x6,
+    # 7x7, 7x5, 7x7, 7x5, 7x4". Not consumed yet (placeholder render in
+    # step 11.2 uses bird.shape as a raw FG tile index); real bird-tile
+    # render lands in a later sub-step alongside the $3520+ tile-array
+    # extraction.
+    # research_bird_stage.md §5.3.
+    ("BIRD_T3EC0",        0x3EC0, 16),
+    # source T3F00..$3F7F — 16 entries × 8 bytes per shape: register-
+    # values B/C/D/E (bytes 0..3) plus two routine pointers (4..5 = first
+    # maturity-advance routine, 6..7 = motion routine). Walked by
+    # $35B0 dispatcher via PUSH/RET-as-call trick. Maps each bird shape
+    # to its (motion, maturity) pair. Shape 0 = dead/empty slot (all FF).
+    # research_bird_stage.md §5.1.
+    ("BIRD_T3F00",        0x3F00, 128),
+    # source T3F80 + T3FC0 — bird-stage init tables, packed as one 128-byte
+    # slice ($3F80..$3FFF). Two 64-byte sub-blocks of 8 birds × 8 bytes,
+    # selected by bit 1 of LevelAndRound at $32E1-$32E3 (RRCA × 2; branch
+    # on the resulting carry, which after two rotates holds the original
+    # bit 1). Bit 1 == 0 → T3F80 (bird wave 1, stages 4/5); bit 1 == 1 →
+    # T3FC0 (bird wave 2, stages 6/7). Code.md labels them "level 3/8" and
+    # "level 4/9" respectively (Computerarcheology level numbering, offset
+    # from JT4 stage nibble). Per-bird byte layout in
+    # research_bird_stage.md §2.3:
+    #   +0 shape/maturity-payload (= $01 fresh egg)
+    #   +1 screen-RAM MSB
+    #   +2 screen-RAM LSB
+    #   +3 animation-phase counter (cycled 0..7 by $36C0 motion)
+    #   +4 maturity-advance gate counter (init $10)
+    #   +5 grid X
+    #   +6 per-bird movement-step value (modulates $35E0 path branch
+    #     via >= $10 cap; gate for $36EA/$370A maturity advance via
+    #     `& $0F == 0`)
+    #   +7 grid Y
+    ("BIRD_INIT_TABLE", 0x3F80, 128),
     ("PLANET_TILES",   0x1E00, 32),
     ("PLANET_MSB",     0x1E20, 32),
     ("PLANET_LSB_OFF", 0x1E40, 32),
