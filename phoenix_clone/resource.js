@@ -25,8 +25,13 @@ import { fgtilesData, bgtilesData, promsData } from './data.js';
 //   - Per-tile pen = (colorAttr << 2) | pixelValue, where
 //     colorAttr = (tileIdx >> 5) | (isFG ? 0x08 : 0) | (paletteBank << 4).
 //     The tileIdx>>5 mirrors the 32-tile-per-color-group layout (CM0..CM7).
-//   - paletteBank toggles via $5000 video-register bit 1 (Hardware.md);
-//     hardcoded to 0 for now until the register is wired up.
+//   - paletteBank toggles via $5000 video-register bit 1 (Hardware.md):
+//     source's $041E SetBitsVideoRegister writes (LR & $02) | (player & $01)
+//     to $5000. Bit 1 of the result selects between two color banks; bank 0
+//     for LR low-nibble in {0, 1, 4, 5, 8, 9}, bank 1 for {2, 3, 6, 7, A, B}.
+//     Port pre-decodes both banks at init and switches at runtime via
+//     setPaletteBank() — see state2_StageInit in states.js where the
+//     LR-derived bank gets latched.
 
 const TILE_W = 8;
 const TILE_H = 8;
@@ -37,13 +42,29 @@ const CHANNEL_LEVELS = [0x00, 0x55, 0xAA, 0xFF];
 
 export const resource = {
     palette: null,        // Array<[r, g, b]>, length 256
-    fgTileImages: null,   // Array<ImageBitmap>, length 256
-    bgTileImages: null,
+    // Per-bank decoded tile bitmaps. Index 0 = palette bank 0
+    // (LR low-nibble in {0,1,4,5,8,9}), index 1 = palette bank 1
+    // ({2,3,6,7,A,B}). render.js reads via the .fgTileImages /
+    // .bgTileImages getters below, which dispatch to currentBank.
+    _fgTileImagesByBank: [null, null],
+    _bgTileImagesByBank: [null, null],
+    _currentBank: 0,
+
+    get fgTileImages() { return this._fgTileImagesByBank[this._currentBank]; },
+    get bgTileImages() { return this._bgTileImagesByBank[this._currentBank]; },
+
+    // Set active palette bank (0 or 1). Called from state2_StageInit
+    // each time LevelAndRound advances. Source equivalent: $041E.
+    setPaletteBank(bank) {
+        this._currentBank = bank & 1;
+    },
 
     async init() {
         this.palette = this.decodePalette(promsData);
-        this.fgTileImages = await this.decodeTileSet(fgtilesData, true);
-        this.bgTileImages = await this.decodeTileSet(bgtilesData, false);
+        for (let bank = 0; bank < 2; bank++) {
+            this._fgTileImagesByBank[bank] = await this.decodeTileSet(fgtilesData, true,  bank);
+            this._bgTileImagesByBank[bank] = await this.decodeTileSet(bgtilesData, false, bank);
+        }
     },
 
     decodePalette(proms) {
@@ -71,11 +92,11 @@ export const resource = {
         return palette;
     },
 
-    async decodeTileSet(rom, isFG) {
+    async decodeTileSet(rom, isFG, paletteBank) {
         const images = new Array(TILES_PER_ROM);
         for (let t = 0; t < TILES_PER_ROM; t++) {
             const grid = this.decodeTilePixels(rom, t);
-            images[t] = await this.gridToImageBitmap(grid, t, isFG);
+            images[t] = await this.gridToImageBitmap(grid, t, isFG, paletteBank);
         }
         return images;
     },
@@ -96,11 +117,10 @@ export const resource = {
         return grid;
     },
 
-    async gridToImageBitmap(grid, tileIdx, isFG) {
-        const paletteBank = 0;
+    async gridToImageBitmap(grid, tileIdx, isFG, paletteBank) {
         const colorAttr = ((tileIdx >> 5) & 7)
                         | (isFG ? 0x08 : 0x00)
-                        | (paletteBank << 4);
+                        | ((paletteBank & 1) << 4);
         const paletteBase = colorAttr << 2;
 
         const bytes = new Uint8ClampedArray(TILE_W * TILE_H * 4);

@@ -1,6 +1,7 @@
 import { state } from './state.js';
 import { input } from './input.js';
 import { scoring } from './scoring.js';
+import { resource } from './resource.js';
 import {
     PLAYER_INIT_BLOCK,    // source T0560
     STAGE_BLOCK_INDEX,    // source T0598
@@ -196,6 +197,16 @@ export const states = {
     //                                  stages — research_bird_stage.md §2)
     state2_StageInit() {
         state.gameState = 3;
+        // L0515 $041E SetBitsVideoRegister — write (LR & $02) | (player & $01)
+        // to $5000 video register. Bit 1 selects palette bank; bit 0 selects
+        // memory bank (player 1/2 — not modeled in port, single bank).
+        // Bit 1 of LR toggles between two color palettes every 2 stages:
+        //   bank 0: LR low-nibble in {0,1,4,5,8,9} (alien wave 1, bird wave 1, etc.)
+        //   bank 1: LR low-nibble in {2,3,6,7,A,B} (alien wave 2, bird wave 2, etc.)
+        // resource.setPaletteBank flips the active decoded-tile bitmap set;
+        // all subsequent rendering (aliens, birds, score text, player) uses
+        // the new bank's colors.
+        resource.setPaletteBank((state.levelAndRound >> 1) & 1);
         this.initGlobalLevelData();
         this.initPlayerDataStructure();
         this.initAlienData();

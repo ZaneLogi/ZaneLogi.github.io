@@ -26,6 +26,7 @@ const game = {
         // direct readers to "poll window.state.X after stage Y" — that
         // requires the binding to actually exist. Cost-free in production.
         window.state = state;
+        window.resource = resource;
 
         runloop.start(() => this.tick(), () => this.render());
     },
