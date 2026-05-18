@@ -44,6 +44,32 @@ export const mothershipMixin = {
         }
     },
 
+    // L22CA — JT4 stage A: mothership + aliens fade-in. Piggy-backs on
+    // stageAlienFadeIn (L0834) for every frame except the first. On the
+    // first frame (CounterB4 == $C0, the initial value set by stage A's
+    // stage block T05B4 byte 9), runs a one-shot:
+    //   - CounterB4 := $30 (shorter window: 48 frames for aliens to fade)
+    //   - $4367 := $FF (vestigial — no source reader; port omits)
+    //   - $43BC := $3F (vestigial — no source reader; port omits)
+    //
+    // The mothership graphic from stage 9 (currently at rows 1-9) gets
+    // pushed DOWN ~6 more rows during this fade-in window: stage A's
+    // stage block sets starfieldMsb=$1C (T1C00 starfield), so the
+    // bgUpdate calls inside stageAlienFadeIn refill hidden row 0 with
+    // regular stars while shifting the buffer down. Net effect:
+    // mothership ends at rows 7-15 (upper-middle = combat position
+    // matching source's EraseMothership target $4AC6).
+    // research_mothership.md §4.
+    stageMothershipPlusAliensFadeIn() {              // L22CA
+        if (state.stageBlock[9] !== 0xC0) {
+            // $22D0 JP NZ,$0834 — every frame except the first.
+            return this.stageAlienFadeIn();
+        }
+        // $22D3 — first frame one-shot.
+        state.stageBlock[9] = 0x30;
+        // $22D7 / $22DB vestigial flag writes ($4367, $43BC) omitted.
+    },
+
     // L2400 — GameState 6: mothership particle explosion. Triggered by
     // $23C0 (pilot hit). Ports in step 12.7.
     state6_MothershipExplosion() {},

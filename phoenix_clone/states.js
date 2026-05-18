@@ -421,7 +421,9 @@ export const states = {
             case 0x9:
                 this.stageMothershipFadeIn();      // $22B4 — mothership lone fade-in (§3 of research_mothership.md)
                 break;
-            // 0xA mothership + aliens fade-in    → step 12.3
+            case 0xA:
+                this.stageMothershipPlusAliensFadeIn();   // $22CA — mothership + aliens fade-in (§4)
+                break;
             // 0xB mothership combat               → step 12.4
         }
     },
@@ -1014,10 +1016,10 @@ export const states = {
         state.player.shieldCount = 0;
         state.levelAndRound = (state.levelAndRound + 1) & 0xFF;
 
-        // Same stop-gap as stageClearUpdate — narrowed from `>=9` to
-        // `>=0xA` in step 12.2 now that stage 9 mothership lone fade-in
-        // is implemented. Remove when 12.3-12.4 land.
-        if ((state.levelAndRound & 0x0F) >= 0xA) {
+        // Same stop-gap as stageClearUpdate — narrowed from `>=0xA` to
+        // `>=0xB` in step 12.3 now that stage A mothership + aliens
+        // fade-in is implemented. Remove when 12.4 lands.
+        if ((state.levelAndRound & 0x0F) >= 0xB) {
             state.levelAndRound = (state.levelAndRound + 0x10) & 0xF0;
         }
 
@@ -2116,11 +2118,11 @@ export const states = {
         state.player.shieldCount = 0;
         state.levelAndRound = (state.levelAndRound + 1) & 0xFF;
 
-        // ⚠ STOP-GAP (narrowed 2026-05-18 step 12.2): stages A/B
-        // (mothership + aliens fade-in + combat) still step 12.3-12.4
-        // territory. Stage 9 (mothership lone fade-in) is now reachable.
-        // Remove this block entirely once 12.3-12.4 land.
-        if ((state.levelAndRound & 0x0F) >= 0xA) {
+        // ⚠ STOP-GAP (narrowed 2026-05-18 step 12.3): stage B
+        // (mothership combat) is still step 12.4 territory. Stage A
+        // (mothership + aliens fade-in) is now reachable. Remove
+        // this block entirely once 12.4 lands.
+        if ((state.levelAndRound & 0x0F) >= 0xB) {
             state.levelAndRound = (state.levelAndRound + 0x10) & 0xF0;
         }
 
