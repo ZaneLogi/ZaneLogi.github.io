@@ -37,6 +37,7 @@ import {
     BIRD_T3DC0,           // source T3DC0 — bird-fire scan-subset table (16 × 2 bytes)
     BIRD_T3DB8,           // source T3DB8 — wing-hit shape-swap table (8 bytes)
 } from './data.js';
+import { mothershipMixin } from './states_mothership.js';
 
 // Debug knob — when non-null, the first state-0 transition jumps directly
 // to this LevelAndRound instead of starting at $00 (stage 0, round 1).
@@ -120,6 +121,11 @@ function bgWrite(addr, tile) {
 }
 
 export const states = {
+    // Mothership stage handlers (JT4 8/9/A/B + JT1 states 6/7) live in
+    // states_mothership.js. Spread first so any same-name method defined
+    // explicitly below this point wins (left-to-right spread semantics).
+    ...mothershipMixin,
+
     dispatch() {
         switch (state.gameState) {
             case 0: this.state0_NewGameInit(); break;
@@ -2837,8 +2843,9 @@ export const states = {
         }
     },
     state5_GameOver()            {},   // L0B60
-    state6_MothershipExplosion() {},   // L2400
-    state7_MothershipScore()     {},   // L244C
+    // state6_MothershipExplosion / state7_MothershipScore moved to
+    // states_mothership.js (12.0) — spread into `states` via
+    // `...mothershipMixin` above.
 
     // L002D — SplashAndDemo path; stub for skeleton (gameOrAttract forced to 1).
     attractFrame() {},
