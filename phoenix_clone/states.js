@@ -42,11 +42,9 @@ import { mothershipMixin } from './states_mothership.js';
 
 // Debug knob — when non-null, the first state-0 transition jumps directly
 // to this LevelAndRound instead of starting at $00 (stage 0, round 1).
-// Currently $07 (bird stage 7, round 1) for step 12 mothership iteration:
-// one K-press kills the birds, advances LR to 8, lands in the new
-// stage-8 spiral-fill → T1C00 starfield → mothership-area path.
-// Null disables the override.
-const DEBUG_START_LEVEL_AND_ROUND = 0x07;
+// Null disables the override → cold-start runs the full round cycle from
+// stage 0 (alien wave 1).
+const DEBUG_START_LEVEL_AND_ROUND = null;
 
 // L0400 — Code.md:GameStateMachine. JT1 jump table → JS switch
 // (research_code_flow.md §5.1).
