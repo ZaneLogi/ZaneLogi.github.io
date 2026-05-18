@@ -9,7 +9,7 @@
 // (Code.md $22B4 / $22CA / $2000+$24A0 / $2400 / $244C).
 
 import { state } from './state.js';
-import { SHIELD_PROGRESSION } from './data.js';
+import { SHIELD_PROGRESSION, MOTHERSHIP_ANTENNA_ANIM } from './data.js';
 
 // Split the 32-byte SHIELD_PROGRESSION extraction into the two source
 // sub-tables. Indexed by `tile & 0x0F` for tiles in $60..$6F:
@@ -75,7 +75,33 @@ export const mothershipMixin = {
     stageMothershipPlusAliensFadeIn() {              // L22CA
         if (state.stageBlock[9] !== 0xC0) {
             // $22D0 JP NZ,$0834 — every frame except the first.
-            return this.stageAlienFadeIn();
+            const wasOne = state.stageBlock[9] === 1;
+            this.stageAlienFadeIn();
+
+            // Port-only one-time shift at stage A → B transition.
+            // In source, $24E0 (mothership scroll) fires during stage B
+            // shortly after combat starts and shifts the mothership
+            // down by ~1 row, matching arcade visual position. Port
+            // hasn't implemented $24E0's continuous-scroll dynamics yet
+            // (would require dynamic belt/antenna row tracking), so
+            // compensate at the transition: rotate bgTiles down by 1
+            // and refill the new hidden row with starfield. This puts
+            // the mothership at bgTiles[7-15] instead of [6-14], so
+            // belt at row 11 (= canvas y 80-87) matches arcade. The
+            // existing counterB9 isn't touched.
+            if (wasOne) {
+                const tiles = state.bgTiles;
+                for (let r = 32; r >= 1; r--) {
+                    for (let c = 0; c < 26; c++) {
+                        tiles[r * 26 + c] = tiles[(r - 1) * 26 + c];
+                    }
+                }
+                // Fill the new hidden row with 0 (transparent). It scrolls
+                // out-of-view quickly during stage B; the exact content
+                // doesn't matter visually.
+                for (let c = 0; c < 26; c++) tiles[c] = 0;
+            }
+            return;
         }
         // $22D3 — first frame one-shot.
         state.stageBlock[9] = 0x30;
@@ -109,7 +135,50 @@ export const mothershipMixin = {
         if ((state.m43AA & 0x03) === 0) {           // $24D6-$24D8
             this.beltAnimate();                     // $22FA
         } else {
-            // $24DB JP $2322 — antenna/pilot animation, deferred 12.5b.
+            this.motherShipAntennaAnimate();        // $2322
+        }
+    },
+
+    // L2322 — mothership antenna + alien-pilot animation. Increments
+    // $43A7, masks to 0-7 (8-frame cycle), looks up T1BC0 frame data
+    // (8 tiles per frame, 2 cols × 4 rows column-major), draws to
+    // BG cell at $49A6 = (col 12, row 7 in source coords).
+    //
+    // Port equivalent: T1BC0 data lives in MOTHERSHIP_ANTENNA_ANIM
+    // (data.js, 64 bytes). After stages 9+A (15 refills), the antenna
+    // region of T1D00 lands at bgTiles rows 7-10 cols 12-13 — so the
+    // 2x4 image writes to those 8 cells.
+    //
+    // Note: row 10 col 12-13 are on the BELT row. The antenna anim
+    // writes there 3 of every 4 frames; beltAnimate writes there
+    // 1 of every 4 frames. They alternate, producing a composite
+    // visual where the antenna's bottom edge overlays the belt's
+    // pilot-protect area. Source-faithful per Code.md $24C4 dispatch.
+    // research_mothership.md §7 + this method-doc.
+    motherShipAntennaAnimate() {                     // L2322
+        state.m43A7 = (state.m43A7 + 1) & 0xFF;     // $2325-$2326
+        const frame = state.m43A7 & 0x07;           // $2327
+        const off = frame * 8;                       // $2329-$232C
+
+        // T1BC0 layout: 8 bytes per frame, first 4 = col 0 rows 0..3,
+        // next 4 = col 1 rows 0..3. Source uses DrawImageCbyB which
+        // walks down a column with INC L (= INC source-RAM L = +1 row),
+        // then RightOneColumn for the next column.
+        // With the stage A → B one-time shift in place, belt is at
+        // bgTiles[11] = canvas y 80-87 and the mothership graphic
+        // occupies bgTiles[7-15]. Source's $49A6 (col 12, source row 7)
+        // maps to bgTiles[8] post-shift; the 4-row antenna image goes
+        // there + 3 rows below (rows 8-11). But row 11 is the belt!
+        // To match source's "antenna sits above belt" arrangement and
+        // avoid corrupting belt cells, write antenna to bgTiles rows
+        // 7-10 (= antenna at canvas y 48-79, just above belt at 80-87).
+        const ANTENNA_ROW = 7;
+        const ANTENNA_COL = 12;
+        for (let dc = 0; dc < 2; dc++) {            // C=2 cols
+            for (let dr = 0; dr < 4; dr++) {        // B=4 rows
+                const idx = (ANTENNA_ROW + dr) * 26 + (ANTENNA_COL + dc);
+                state.bgTiles[idx] = MOTHERSHIP_ANTENNA_ANIM[off + dc * 4 + dr];
+            }
         }
     },
 
@@ -140,13 +209,12 @@ export const mothershipMixin = {
     // the animation "heals" them. Source-faithful behavior.
     // research_mothership.md §6 + new note in this method-doc.
     beltAnimate() {                                  // L22FA
-        // bgTiles row 10 after stages 9+A: 9 refills (stage 9) + 6
-        // (stage A) = 15 total. The 5th refill (T1D00 row 4 = belt)
-        // ends up at bgTiles[15 - 5] = bgTiles[10]. Cols 4-21 match
-        // T1D00 row 4's belt layout (cols 0-3 = decoration / $5C end
-        // cap, cols 4-21 = $60/$6A alternating belt, cols 22-25 = $5D
-        // end cap + decoration).
-        const BELT_ROW = 10;
+        // bgTiles row 11 after stages 9+A + the port-only one-time shift
+        // at stage A → B transition (see stageMothershipPlusAliensFadeIn).
+        // Without that extra shift, belt would be at bgTiles[10]; with it,
+        // belt at bgTiles[11] = canvas y 80-87, matching arcade visual
+        // position. Cols 4-21 match T1D00 row 4's belt layout.
+        const BELT_ROW = 11;
         const COL_START = 4;
         const COL_END   = 21;
         const SEED_COL  = COL_END;

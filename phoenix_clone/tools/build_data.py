@@ -185,6 +185,12 @@ RAW_SLICES = [
     # stage init T05C0 ($43B2/$43B3 = $1F/$00) for stage 2 (2nd alien
     # wave) and by T05B4 (mothership waves; deferred to step 11).
     ("STARFIELD_T1F00", 0x1F00, 256),
+    # source T1BC0 — 64 bytes for the mothership antenna + alien-pilot
+    # animation (8 frames × 8 tiles each, 2 cols × 4 rows column-major).
+    # Drawn at fixed BG cell $49A6 by $2322 on 3 of every 4 mothership-
+    # stage bgUpdate calls (the other 1 is belt animation). Frame index
+    # cycles via $43A7 (port: state.m43A7). research_mothership.md §7.
+    ("MOTHERSHIP_ANTENNA_ANIM", 0x1BC0, 64),
     # source T1B40 + T1B50 — 32 bytes of "shield-damage progression" tables
     # for the mothership conveyor belt. Indexed by `tile & 0x0F`:
     #   T1B40 (bytes 0..15)  — left-half tile (bullet.x bit 2 == 0)

@@ -244,6 +244,11 @@ export const state = {
         // Player-death timer — not a source field; used while state4 is a stub.
         this.playerExplosionTimer = 0;
 
+        // $43A7 AnimationCounter — used by $2322 mothership antenna/pilot
+        // animation: ticked each call, bits 0-2 select the 8-frame cycle
+        // (frame data at T1BC0 + (m43A7 & 7) * 8). Wraps freely modulo 256.
+        this.m43A7 = 0;
+
         // $43AA M43AA — mothership-stage cadence counter, incremented
         // by motherShipBgUpdate ($24C4) on each call (= 30 Hz from
         // alien-combat lane round-robin during stage B). Drives the
