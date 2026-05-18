@@ -337,5 +337,5 @@ No guesswork required. Every section maps to an address in `Code.md` and can be 
 ---
 
 **Last updated:** May 18, 2026  
-**Status:** Step 11 (birds) done; mothership research added (gates step 12)  
-**Next step:** Implement step 12.0–12.10 per research_mothership.md §11, starting with `states_mothership.js` mixin skeleton
+**Status:** Step 12 (mothership) ✅ done. Full 5-stage round cycle plays end-to-end: alien × 2 → bird × 2 → mothership → next round.  
+**Next step:** Deferred polish — `$24E0` continuous-scroll + dynamic belt/antenna/particle row tracking (would remove the 12.5b one-time stage A→B shift). Then deferred player-death + lives counter (re-enables `alienVsPlayerCollision` and enemy-bullet → player path). Then step 13 sound.

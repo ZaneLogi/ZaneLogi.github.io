@@ -17,6 +17,23 @@ const PARTICLE_T1B60 = 0;   // frame 0 — densest cloud
 const PARTICLE_T1B70 = 16;  // frame 1 — medium
 const PARTICLE_T1B80 = 32;  // frame 2 — sparse
 
+// Scan bgTiles for the belt row — the row in cols 4-21 with the most
+// $60-$6F belt-tile codes. Returns the row index, or -1 if no belt.
+// Cheap (~18 cells × 33 rows = 594 ops) and runs at beltAnimate's 7.5 Hz
+// during stage B + occasional antenna/particle calls; total < 30k ops/s.
+function findBeltRow(state) {
+    let bestRow = -1, bestCount = 0;
+    for (let r = 1; r <= 32; r++) {
+        let count = 0;
+        for (let c = 4; c <= 21; c++) {
+            const t = state.bgTiles[r * 26 + c];
+            if ((t & 0xF0) === 0x60) count++;
+        }
+        if (count > bestCount) { bestCount = count; bestRow = r; }
+    }
+    return bestRow;
+}
+
 // Split the 32-byte SHIELD_PROGRESSION extraction into the two source
 // sub-tables. Indexed by `tile & 0x0F` for tiles in $60..$6F:
 //   T1B40 — left-half belt cells  (bullet.x bit 2 == 0)
@@ -81,32 +98,11 @@ export const mothershipMixin = {
     stageMothershipPlusAliensFadeIn() {              // L22CA
         if (state.stageBlock[9] !== 0xC0) {
             // $22D0 JP NZ,$0834 — every frame except the first.
-            const wasOne = state.stageBlock[9] === 1;
             this.stageAlienFadeIn();
-
-            // Port-only one-time shift at stage A → B transition.
-            // In source, $24E0 (mothership scroll) fires during stage B
-            // shortly after combat starts and shifts the mothership
-            // down by ~1 row, matching arcade visual position. Port
-            // hasn't implemented $24E0's continuous-scroll dynamics yet
-            // (would require dynamic belt/antenna row tracking), so
-            // compensate at the transition: rotate bgTiles down by 1
-            // and refill the new hidden row with starfield. This puts
-            // the mothership at bgTiles[7-15] instead of [6-14], so
-            // belt at row 11 (= canvas y 80-87) matches arcade. The
-            // existing counterB9 isn't touched.
-            if (wasOne) {
-                const tiles = state.bgTiles;
-                for (let r = 32; r >= 1; r--) {
-                    for (let c = 0; c < 26; c++) {
-                        tiles[r * 26 + c] = tiles[(r - 1) * 26 + c];
-                    }
-                }
-                // Fill the new hidden row with 0 (transparent). It scrolls
-                // out-of-view quickly during stage B; the exact content
-                // doesn't matter visually.
-                for (let c = 0; c < 26; c++) tiles[c] = 0;
-            }
+            // (12.5b one-time shift REMOVED in 12.10 — $24E0
+            // continuous-scroll now handles the gradual mothership
+            // drift naturally, and dynamic belt/antenna/particle row
+            // tracking adjusts animations to follow.)
             return;
         }
         // $22D3 — first frame one-shot.
@@ -134,15 +130,30 @@ export const mothershipMixin = {
     // at 30 Hz, and beltAnimate fires at 30/4 = 7.5 Hz.
     // research_mothership.md §7 (touches §6 belt mechanic).
     motherShipBgUpdate() {                          // L24C4 stage>=8 branch
-        // $24E0 mothership scroll — deferred (see method-doc above).
-        // TODO: this.motherShipScroll(); when belt-row tracking added.
-
+        this._motherShipScroll();                   // $24E0
         state.m43AA = (state.m43AA + 1) & 0xFF;     // $24D1-$24D5
         if ((state.m43AA & 0x03) === 0) {           // $24D6-$24D8
             this.beltAnimate();                     // $22FA
         } else {
             this.motherShipAntennaAnimate();        // $2322
         }
+    },
+
+    // $24E0 mothership continuous-scroll. Gated by ($43AA & $0F) == 0
+    // AND counterB9 >= $A0. When both hold, calls StarsScrollDown,
+    // which decrements counterB9 and (on 8-pixel boundary) rotates
+    // bgTiles. This produces the slow downward scroll during stage B
+    // combat — mothership drifts toward the player over time.
+    //
+    // Cadence: motherShipBgUpdate fires twice per 4-frame round-robin
+    // = ~30 Hz. ($43AA & $0F == 0) fires 1 in 16 calls = ~1.875 Hz.
+    // Belt-row shift happens once every 8 fires (= ~4.3 seconds) due
+    // to starsScrollDown's 8-px boundary check. So mothership drifts
+    // ~1 row down per 4 seconds of stage B combat.
+    _motherShipScroll() {                            // L24E0
+        if ((state.m43AA & 0x0F) !== 0) return;     // $24E3-$24E5
+        if (state.counterB9 < 0xA0) return;          // $24E6-$24EB
+        this.starsScrollDown();                      // $24EC
     },
 
     // L2322 — mothership antenna + alien-pilot animation. Increments
@@ -170,15 +181,13 @@ export const mothershipMixin = {
         // next 4 = col 1 rows 0..3. Source uses DrawImageCbyB which
         // walks down a column with INC L (= INC source-RAM L = +1 row),
         // then RightOneColumn for the next column.
-        // With the stage A → B one-time shift in place, belt is at
-        // bgTiles[11] = canvas y 80-87 and the mothership graphic
-        // occupies bgTiles[7-15]. Source's $49A6 (col 12, source row 7)
-        // maps to bgTiles[8] post-shift; the 4-row antenna image goes
-        // there + 3 rows below (rows 8-11). But row 11 is the belt!
-        // To match source's "antenna sits above belt" arrangement and
-        // avoid corrupting belt cells, write antenna to bgTiles rows
-        // 7-10 (= antenna at canvas y 48-79, just above belt at 80-87).
-        const ANTENNA_ROW = 7;
+        // Dynamic antenna-row tracking: derived from the belt row
+        // (antenna sits 4 rows ABOVE the belt — antenna is 4 rows
+        // tall ending one row above the belt). Lets $24E0
+        // continuous-scroll move the antenna with the mothership.
+        const beltRow = findBeltRow(state);
+        if (beltRow < 0) return;
+        const ANTENNA_ROW = beltRow - 4;
         const ANTENNA_COL = 12;
         for (let dc = 0; dc < 2; dc++) {            // C=2 cols
             for (let dr = 0; dr < 4; dr++) {        // B=4 rows
@@ -215,12 +224,11 @@ export const mothershipMixin = {
     // the animation "heals" them. Source-faithful behavior.
     // research_mothership.md §6 + new note in this method-doc.
     beltAnimate() {                                  // L22FA
-        // bgTiles row 11 after stages 9+A + the port-only one-time shift
-        // at stage A → B transition (see stageMothershipPlusAliensFadeIn).
-        // Without that extra shift, belt would be at bgTiles[10]; with it,
-        // belt at bgTiles[11] = canvas y 80-87, matching arcade visual
-        // position. Cols 4-21 match T1D00 row 4's belt layout.
-        const BELT_ROW = 11;
+        // Dynamic belt-row tracking: scan bgTiles for the current belt
+        // position. Allows $24E0 continuous-scroll to drift the
+        // mothership down without breaking the animation target.
+        const BELT_ROW = findBeltRow(state);
+        if (BELT_ROW < 0) return;
         const COL_START = 4;
         const COL_END   = 21;
         const SEED_COL  = COL_END;
@@ -476,17 +484,15 @@ export const mothershipMixin = {
     // visually close enough for the loop-closer.
     // research_mothership.md §7.2.
     _drawParticleFrame(counterA5) {
-        // Fixed mothership-center position. Mothership occupies bgTiles
-        // rows 7-15 cols 3-22; center of belt area = roughly (col 11, row 10).
-        // KNOWN DEVIATION: source's $20E8 computes position from CounterB9
-        // and walks it down each tick (the mothership scrolls down during
-        // the explosion). Port doesn't scroll the mothership in state 6,
-        // so the particle currently appears LOWER than the pilot
-        // (= where it would naturally be after a scroll). Fix is part of
-        // the same dynamic-row-tracking work that'll replace the 12.5b
-        // one-time shift (deferred to 12.10 when $24E0 lands).
+        // Dynamic particle-row tracking: derived from the belt row.
+        // The pilot tile sits one row above the belt (rows beltRow-1
+        // cols 12-13). Particle is 4 tall, centered vertically on
+        // the pilot → particle top row = pilot row - 2 = beltRow - 3.
+        // With $24E0 in place, particle drifts down with the
+        // mothership's continuous scroll.
+        const beltRow = findBeltRow(state);
         const START_COL = 11;
-        const START_ROW = 10;
+        const START_ROW = beltRow > 0 ? beltRow - 3 : 8;
 
         // Clear the previous frame's 4×4 region from fgOverlay.
         for (let dc = 0; dc < 4; dc++) {
@@ -561,6 +567,30 @@ export const mothershipMixin = {
         // Credit the active player.
         const player = state.gameAndDemoOrSplash;
         scoring.addPoints(pts, player);
+
+        // $2540-$254D — popup at mothership position. Source writes
+        // 4 BCD digits to FG plane via PrintNumber at a position derived
+        // from DE (which was set up earlier in $242C). Port places the
+        // 4 digits at the mothership center via fgOverlay; persists
+        // until state7 ends and fgOverlay.clear() fires.
+        //
+        // Digit tile codes: 0x20 | digit_value (per scoring.js — same
+        // as the top-scoreboard digits). Display format: "HHLL" where
+        // HH = BCD-decoded result, LL = "00" (matches source's
+        // $439D = BCD result, $439E = $00).
+        const digits = [
+            Math.floor(bcdDecimal / 10) % 10,        // high tens
+            bcdDecimal % 10,                          // high ones
+            0,                                        // low tens (always 0)
+            0,                                        // low ones (always 0)
+        ];
+        // Center the 4-digit popup at cols 11-14 row 9 (canvas
+        // x=88..119, y=72). Sits at the top of the mothership area,
+        // visible against the erase-mothership starfield that
+        // appears in the next state6 ticks.
+        for (let i = 0; i < 4; i++) {
+            state.fgOverlay.set(`${(11 + i) * 8},${9 * 8}`, 0x20 | digits[i]);
+        }
     },
 
     // $2552 — transition from GameState 6 to 7.

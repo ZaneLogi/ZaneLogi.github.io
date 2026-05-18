@@ -1017,13 +1017,7 @@ export const states = {
         state.gameState = 2;
         state.player.shieldCount = 0;
         state.levelAndRound = (state.levelAndRound + 1) & 0xFF;
-
-        // Same stop-gap as stageClearUpdate — narrowed from `>=0xA` to
-        // `>=0xB` in step 12.3 now that stage A mothership + aliens
-        // fade-in is implemented. Remove when 12.4 lands.
-        if ((state.levelAndRound & 0x0F) >= 0xB) {
-            state.levelAndRound = (state.levelAndRound + 0x10) & 0xF0;
-        }
+        // (Stop-gap removed in 12.10 — stages 8-B are all reachable now.)
 
         const waveIdx = (state.levelAndRound >> 1) & 7;
         const waveByte = ALIEN_BIRD_PARTITION[waveIdx];
@@ -2104,14 +2098,22 @@ export const states = {
             this.enemyBulletUpdate();
             this.explosionUpdate();
             this.bonusExplosionUpdate();
-            // L24C4 — bg scroll during the post-clear pause too. Stars
-            // keep moving while the explosions wind down + countdown
-            // drains. Mothership glue (L24E0 branch) still step 11.
             this.bgUpdateIfAlienStage();
         }
 
-        // L2204 — countdown. Source's L21CF path jumps here when
-        // (LR & 0x0F) < $0B; the step-8d LR wrap keeps us under that.
+        // L21CD-L21D7 — stage B special case: respawn aliens, NEVER
+        // auto-advance LR. Stage B can only exit via pilot kill →
+        // GameState 6 → 7 → 2 (next round). If the player happens to
+        // clear all 16 aliens, source's $21D2 path resets AliensLeft
+        // to 16 and re-inits alien data so combat continues until the
+        // mothership is killed.
+        if ((state.levelAndRound & 0x0F) === 0x0B) {
+            state.aliensLeft = 0x10;
+            this.initAlienData();        // L0526
+            return;
+        }
+
+        // L2204 — countdown for stages 1, 3 (alien combat, non-mothership).
         const cnt = (state.stageBlock[11] - 1) & 0xFF;
         state.stageBlock[11] = cnt;
         if (cnt >= 0xA0) return;
@@ -2119,14 +2121,8 @@ export const states = {
         state.gameState = 2;
         state.player.shieldCount = 0;
         state.levelAndRound = (state.levelAndRound + 1) & 0xFF;
-
-        // ⚠ STOP-GAP (narrowed 2026-05-18 step 12.3): stage B
-        // (mothership combat) is still step 12.4 territory. Stage A
-        // (mothership + aliens fade-in) is now reachable. Remove
-        // this block entirely once 12.4 lands.
-        if ((state.levelAndRound & 0x0F) >= 0xB) {
-            state.levelAndRound = (state.levelAndRound + 0x10) & 0xF0;
-        }
+        // (No stop-gap needed — stage B respawn above prevents LR
+        // from ever advancing past $0B via this path.)
 
         // T1760[(LevelAndRound >> 1) & 7]: positive → alien count; bit 7 set → bird count.
         const waveIdx = (state.levelAndRound >> 1) & 7;
