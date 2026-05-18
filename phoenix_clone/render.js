@@ -23,15 +23,17 @@ const GRID_BG  = 2;
 
 export const render = {
     gridMode: GRID_OFF,   // Default OFF so first boot no shows the decoded tiles.
+    gridLinesOn: false,   // Press H to show the 8-px debug grid lines.
 
     checkHotkeys() {
-        if (input.gridEdge()) this.gridMode = (this.gridMode + 1) % 3;
+        if (input.gridEdge())     this.gridMode = (this.gridMode + 1) % 3;
+        if (input.hideGridEdge()) this.gridLinesOn = !this.gridLinesOn;
     },
 
     frame() {
         gfx.clear();
         this.drawBackground();
-        this.drawDebugGrid();
+        if (this.gridLinesOn) this.drawDebugGrid();
         if (this.gridMode !== GRID_OFF) this.drawTileRomOverlay();
         for (const row of state.staticTextRows) gfx.drawObject(row);
         for (const alien of state.aliens) this.drawAlien(alien);
@@ -476,6 +478,6 @@ export const render = {
             `tick=${runloop.tickCount}  state=${state.gameState}  stage=${stage} round=${round}\n` +
             `counterA5=${state.counterA5}  counterB4=${state.stageBlock[9]}  counterB9=${state.counterB9.toString(16).padStart(2,'0')}  lane=${state.combatLane & 3}\n` +
             `aliens=${state.aliensLeft}  birds=${state.birdsLeft}  mat=${state.maturity.toString(16).padStart(2,'0')}  score=${scoreHex}  grid=${gridLabel}\n` +
-            `keys: ←/→ move · space fire · shift barrier · 5 coin · 1 start · g cycle tile-ROM overlay`;
+            `keys: ←/→ move · space fire · shift barrier · 5 coin · 1 start · g cycle tile-ROM overlay · h toggle grid lines · k kill-all (debug)`;
     },
 };
