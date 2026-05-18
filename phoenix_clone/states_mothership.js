@@ -82,6 +82,88 @@ export const mothershipMixin = {
         // $22D7 / $22DB vestigial flag writes ($4367, $43BC) omitted.
     },
 
+    // L24C4 — mothership-stage replacement for the alien-stage bgUpdate.
+    // Routed through bgUpdateIfAlienStage when (LR & 0x0F) >= 8.
+    //
+    // Per-call work:
+    //   - $24CE CALL $24E0 — mothership-side scroll (gated: only fires
+    //     when (m43AA & 0x0F) == 0 AND counterB9 >= $A0; deferred —
+    //     scroll would shift the belt off bgTiles row 11, which would
+    //     break beltAnimate's hardcoded row index. Re-enable as a
+    //     follow-up that tracks belt-row position dynamically).
+    //   - $24D1 INC (HL=$43AA) — bump the cadence counter
+    //   - $24D6 AND $03 → $24D8 JP Z,$22FA — every 4th call: belt anim
+    //   - $24DB JP $2322 — other 3 of 4: antenna/pilot anim (deferred
+    //     to 12.5b; antenna draw at fixed BG cell needs the rotated
+    //     bgTiles to keep the antenna position stable).
+    //
+    // Cadence: bgUpdateIfAlienStage fires on lanes 0 + 3 of the 4-lane
+    // round-robin = 30 Hz during stage B alien-combat. So m43AA ticks
+    // at 30 Hz, and beltAnimate fires at 30/4 = 7.5 Hz.
+    // research_mothership.md §7 (touches §6 belt mechanic).
+    motherShipBgUpdate() {                          // L24C4 stage>=8 branch
+        // $24E0 mothership scroll — deferred (see method-doc above).
+        // TODO: this.motherShipScroll(); when belt-row tracking added.
+
+        state.m43AA = (state.m43AA + 1) & 0xFF;     // $24D1-$24D5
+        if ((state.m43AA & 0x03) === 0) {           // $24D6-$24D8
+            this.beltAnimate();                     // $22FA
+        } else {
+            // $24DB JP $2322 — antenna/pilot animation, deferred 12.5b.
+        }
+    },
+
+    // L22FA — belt animation. Walks 18 belt cells left-to-right,
+    // applying a 2-bit shift-register transform that propagates each
+    // cell's low 2 bits into the next cell's high 2 bits (within the
+    // low nibble). Forces all output cells into $60-$6F range via
+    // OR $60. Visual effect: belt patterns "scroll" horizontally.
+    //
+    // Source addresses (in BG memory): walks $4AAA → $488A in $20
+    // strides, which maps to display (col 4..21, row 11). Seed value
+    // for the shift register comes from the rightmost cell ($488A =
+    // col 21, row 11). Port hardcodes the same row + col range.
+    //
+    // Bit ops (Code.md $2303-$2312):
+    //   D = (oldC & 0x03) << 2           ; low 2 bits → bits 2,3
+    //   newC = cell at HL                ; overwrites oldC
+    //   A = ((newC & 0x0C) >> 2) | D | $60
+    //   write A to cell at HL
+    //   continue with C = old A (= the cell just written) for next iter
+    //
+    // So each iteration: cell's new low nibble = (own bits 2,3) at
+    // bits 0,1 + (previous cell's bits 0,1) at bits 2,3 + high nibble 6.
+    //
+    // Important: this rewrites ALL 18 cells unconditionally, including
+    // damaged ones. So damage states ($6C, $64, etc.) get cycled away
+    // as the animation propagates — player must land hits faster than
+    // the animation "heals" them. Source-faithful behavior.
+    // research_mothership.md §6 + new note in this method-doc.
+    beltAnimate() {                                  // L22FA
+        // bgTiles row 10 after stages 9+A: 9 refills (stage 9) + 6
+        // (stage A) = 15 total. The 5th refill (T1D00 row 4 = belt)
+        // ends up at bgTiles[15 - 5] = bgTiles[10]. Cols 4-21 match
+        // T1D00 row 4's belt layout (cols 0-3 = decoration / $5C end
+        // cap, cols 4-21 = $60/$6A alternating belt, cols 22-25 = $5D
+        // end cap + decoration).
+        const BELT_ROW = 10;
+        const COL_START = 4;
+        const COL_END   = 21;
+        const SEED_COL  = COL_END;
+
+        // $22FF/$2302 — seed C from rightmost belt cell.
+        let C = state.bgTiles[BELT_ROW * 26 + SEED_COL];
+
+        // $2303-$231F walk — 18 iterations, left-to-right.
+        for (let c = COL_START; c <= COL_END; c++) {
+            const idx = BELT_ROW * 26 + c;
+            const D = (C & 0x03) << 2;              // $2304-$2308
+            C = state.bgTiles[idx];                 // $2309 LD C,(HL)
+            const newCell = ((C & 0x0C) >> 2) | D | 0x60;  // $230A-$2310
+            state.bgTiles[idx] = newCell;           // $2312 LD (HL),A
+        }
+    },
+
     // L24A0 — mothership hook injected into L2000 alien-combat per-frame.
     // For stage < 8: returns immediately (no-op for normal alien combat
     // at stages 1, 3). For stage >= 8: runs shield-block collision and

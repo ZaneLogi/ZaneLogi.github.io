@@ -244,6 +244,15 @@ export const state = {
         // Player-death timer — not a source field; used while state4 is a stub.
         this.playerExplosionTimer = 0;
 
+        // $43AA M43AA — mothership-stage cadence counter, incremented
+        // by motherShipBgUpdate ($24C4) on each call (= 30 Hz from
+        // alien-combat lane round-robin during stage B). Drives the
+        // 4-frame split between belt animation (when m43AA & 3 == 0)
+        // and antenna/pilot animation (other 3 frames). Also gates the
+        // mothership scroll inside $24E0 by (m43AA & $0F) == 0.
+        // Cleared at cold-start ($0154 init range).
+        this.m43AA = 0;
+
         // $439C — spiral-fill animation counter, ticked by stageSpiralFill
         // ($2230) at stages 4/6/8. Source uses it as a shared general-purpose
         // counter elsewhere too; port keeps it dedicated to spiral-fill

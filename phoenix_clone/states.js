@@ -673,7 +673,7 @@ export const states = {
     bgUpdateIfAlienStage() {
         const stage = state.levelAndRound & 0x0F;
         if (stage < 8) this.bgUpdate();
-        // else L24E0 — mothership BG, step 11.
+        else           this.motherShipBgUpdate();   // $24C4 stage>=8 branch
     },
 
     // L2000 — combat handler for stages 1/3/B.
