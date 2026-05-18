@@ -1,5 +1,13 @@
 # Phoenix Mothership Stage — Fade-In, Combat, Shield Blocks, Destruction
 
+> **Status note (2026-05-18):** This doc was written at the START of
+> step 12 to plan the work. Sections §1-§9 are research-time notes —
+> kept as-is (still accurate as source citations). Sections §10
+> (Open questions) and §11 (Sub-step plan) have been updated
+> post-step-12 to reflect what was resolved, what deviated from the
+> plan, and what was deferred. Live "what's missing" doc:
+> `progress.md` § "What's missing (post-step-12)".
+
 Source-of-truth: a local clone of the computerarcheology.com Phoenix
 project (8085 disassembly produced from the original ROM).
 
@@ -926,84 +934,121 @@ explosion"]
 
 ---
 
-## 10. Open questions / port-side decisions
+## 10. Open questions — resolutions (post-step-12)
 
-Items the port will need to resolve when implementing step 12:
+Original open questions and what was resolved:
 
-1. **`$4367` consumer not located.** Set as one-shot flag during
-   fade-in (§3.1, §4). Find what consumes it (probably draws the
-   mothership tile graphic to BG). Required before §3 / §4 will look
-   right.
+1. ✅ **`$4367` consumer.** Confirmed vestigial via grep — only writers
+   at `$22C3` / `$22D7`, no readers in any source routine. Port omits
+   the writes. Mothership graphic appears via T1D00 scrolled into BG
+   by existing `starsScrollDown` path (§3 / §3.2), not by a separate
+   `$4367`-triggered draw.
 
-2. **`$43BC := $3F` purpose in stage A.** Unknown side-effect of the
-   stage-A initial frame (§4). Likely a per-stage palette or
-   variant-index byte. Trace consumers.
+2. ✅ **`$43BC := $3F` purpose.** Confirmed vestigial — only writer at
+   `$22DB`, no source readers. Port omits.
 
-3. **`$439E` / `$439F` mothership X bounds.** Referenced in mothership
-   fire (`$24F2`) as the gates for valid X positions of return-fire
-   bullets. Need to find where these are set (likely during fade-in or
-   by the mothership-draw code triggered by `$4367`).
+3. ✅ **`$439E` / `$439F` correction.** These are **player ship**
+   mapped X bounds, not mothership bounds. Source uses them in
+   `$24F2` so mothership fire **tracks the player** (only fires when
+   random X lands in [PlayerLeft, PlayerRight]). Original research
+   doc §5.2 misread the comment. Port computes via existing
+   `mappedPlayerX` helper.
 
-4. **T1B40 progression table interpretation.** The damage-progression
-   table at `$1B40` is dense and the index math at `$23AF` masks only
-   the low 4 bits of the original tile. Need to read `bgtiles.md` for
-   the actual graphics of tiles `$4C..$4F`, `$60..$6F`, `$70..$7F`
-   (alien pilot) before building the JS table. Arcade footage helps
-   confirm the visual progression matches.
+4. ✅ **T1B40 progression table.** Extracted as `SHIELD_PROGRESSION`
+   (32 bytes = T1B40 left-half + T1B50 right-half). Port splits into
+   `SHIELD_T1B40` / `SHIELD_T1B50` arrays; bullet.x bit 2 selects
+   which half. `$FF` entries correspond to indices the pilot-check
+   intercepts. See states_mothership.js + 12.5 commit.
 
-5. **Scroll-aware tile lookup in port-side BG buffer.** The port's
-   33-row buffer with `scrollPixel` differs from source's modulo-256
-   scroll register (`research_rendering.md §4.2`). The shield-block
-   collision (`$2351`) does `(L + CounterB9 >> 3) & 0x1F` to compute
-   the cell to test; the port equivalent needs a clean mapping that
-   accounts for the hidden row-0 and the smooth pixel scroll. **Sketch
-   the mapping before writing the collision code.**
+5. ✅ **Scroll-aware tile lookup.** Simpler than feared — port can
+   compute directly from `bullet.x >> 3` (col) and
+   `floor((bullet.y - 8 - scrollPixel) / 8) + 1` (row) using the
+   render-time scrollPixel. No additional scroll math needed at lookup
+   time because port's bgTiles is "live" (no separate scroll register
+   to invert).
 
-6. **Mothership graphic data extraction.** The mothership sprite is
-   drawn from BG-tile codes (paint at `$4AC6`, area $0914 = 20×9).
-   Need to extract the tile pattern that gets written and verify the
-   build pipeline produces matching output. The tile graphics are in
-   `bgtiles.md` — codes `$60..$6F` (belt segments), `$70..$7F` (pilot
-   region), `$4C..$4F` (corner pieces).
+6. ✅ **Mothership graphic data.** T1D00 (256-byte extraction = 234
+   bytes mothership + 22 FF padding) added to `data.js`. Renders via
+   existing `starsScrollDown` mechanism when stage block sets
+   `$43B2 = $1D`. No separate "mothership-draw" routine needed.
 
-7. **Particle sprite data.** T2A00 (FG tile data) and T2B00 (control
-   data) for the explosion particles; T1B60..T1B80 + T1B90 (selector)
-   for the 4-frame particle animation. Verify these are in `data.js`
-   from the build pipeline.
+7. ⚠ **Particle sprite data — partial.** PARTICLE_SPRITES (T1B60+
+   T1B70 + T1B80, 48 bytes for central particle) extracted. T1B90
+   selector inlined as a JS lookup table (4 entries effective).
+   **T2A00 + T2B00 NOT extracted** — odd-CounterA5 particle path
+   uses a visual-effect port instead (see §11 "Port deviations").
 
-8. **Stage-block CounterB4 initial values.** Stage 9 needs a CounterB4
-   start value that produces a reasonable fade-in window. Stage A
-   needs CounterB4 entry value of exactly `$C0` for the one-shot
-   trigger to fire. Verify the `STAGE_BLOCKS` data has these.
+8. ✅ **Stage-block CounterB4 values.** Verified via STAGE_BLOCKS
+   data: stage 9 byte 9 = $48 (72 frames lone fade-in), stage A
+   byte 9 = $C0 (one-shot trigger reset to $30).
 
-9. **Sound is deferred** per project policy. The `$4366`
-   ("Mothership/bird/alien hit detected") flag-set sites at `$2381`,
-   `$23B8` are sound-only; can be skipped or left as a no-op write to
-   `state.hitFlag` for future audio work.
+9. ⏸ **Sound deferred** — still correct. `$4366` flag-set sites
+   remain no-ops in port. Step 13.
+
+### New port-side decisions discovered during impl
+
+- **Port deviation: 12.5b one-time stage A→B shift REMOVED in 12.10**
+  after porting `$24E0` continuous-scroll + dynamic row tracking via
+  `findBeltRow` scan. Belt/antenna/particle positions now derive from
+  current belt row instead of hardcoded constants.
+
+- **Directional gotcha (12.5):** source's `DEC L` in `$237B` corner-cap
+  retile and `$23C0` pilot check is canvas row-UP (`idx-26` in port's
+  row-major bgTiles), not col-LEFT (`idx-1`). Initial port had this
+  wrong and corrupted body-cap destruction visually. Fixed via user-
+  caught bug report.
+
+- **state7 freeze bug (12.x):** source's `$2451 RRCA` checks NEW
+  counterA5's bit 0, not OLD. Initial port used OLD parity which made
+  counterA5 = 1 → 0 take the bgUpdate path forever (never advanced).
+  Fixed via user-caught bug report.
 
 ---
 
-## 11. Proposed sub-step plan for step 12
+## 11. Sub-step plan — outcome
 
-Sub-steps follow the established pattern: one cohesive piece per
-commit, code-review in VSCode between each, visual playtest as final
-gate. Following the user's preference for incremental port + per-step
-mixin file (see decision 2026-05-18 to start using mixin pattern for
-step 12 — new code lands in `states_mothership.js`).
+All sub-steps ✅ delivered across 16 commits on 2026-05-18. Final
+git log: `git log --grep="step 12" --oneline`.
 
-| Sub-step | Scope | Risk | Verification |
-|----------|-------|------|--------------|
-| **12.0** | Create `states_mothership.js` mixin skeleton; spread into `states` in `states.js`; delete the two existing `state6/7` stubs at `states.js:2840-2841`. Wire `case 0x8/0x9/0xA/0xB` in `state3_Gameplay` to the new mixin methods (as stubs). Remove or narrow the `>=8` stop-gap in `stageClearUpdate` and `stageBirdClear` so stages 8-B become reachable. | Low | Stages 8-B no longer wrap to next round — but mixin methods are stubs, so stage 8 still spiral-fills (existing code) then sits on a black stage 9. Visual = "wraps were keeping play looping; now play freezes after bird stage 2." Expected. |
-| **12.1** | Stage 8 spiral-fill exit: add bit-3 branch to `spiralFillExit` so stage 8 copies T1C00 starfield to BG plane (vs. ClearBackground for stages 4/6). Wire stage-8 case in `state3_Gameplay` to existing `stageSpiralFill`. | Low | After bird stage 7 clears, screen wipes via spiral-fill, lands on the mothership-era starfield. No mothership yet; just stars. |
-| **12.2** | Stage 9 mothership lone fade-in: port `$22B4` as `stageMothershipFadeIn`. Locate and port the `$4367` consumer (mothership-graphic draw); add mothership tile data to `data.js` if needed. | Medium (`$4367` consumer unknown — see §10.1) | Stars scroll, mothership graphic fades into top portion of screen over ~N frames. |
-| **12.3** | Stage A mothership + aliens fade-in: port `$22CA` as `stageMothershipPlusAliensFadeIn`. Reuses `stageAlienFadeIn` for non-first frames. Verify `$43BC := $3F` doesn't break alien rendering. | Medium | After mothership fade-in, 16 aliens also fade in above the mothership. |
-| **12.4** | ~~Stage B base combat: wire JT4 case B to call existing `stageAlienCombat`~~ — **already done in earlier work** (`state3_Gameplay` `case 0xB:` was added when alien combat landed, since source's JT4 dispatches stages 1/3/B all to the same `$2000` handler). Confirmed working during 12.3 verification (after stage A advances to B, aliens swoop normally against the mothership backdrop). **No separate commit for 12.4.** | — | Already verified during 12.3 testing. |
-| **12.5** | Shield-block collision: port `$2351` / `$237B` / `$2398` as `shieldBlockCollision`. Build `SHIELD_T1B40` table from `Code.md:$1B40-$1B5F` + `bgtiles.md`. Wire `motherShipHook` into stage-B per-frame, call `shieldBlockCollision` from it. | High (scroll-aware tile lookup is delicate — see §10.5) | Player bullets passing through the belt area swap tiles to progressively-damaged variants. Belt segments accumulate damage. |
-| **12.6** | Mothership return fire: port `$24F2` as `motherShipFire`. Wire into `motherShipHook` with the `Counter9A+1 & 0x03 == 0x03` gate. Reuse `enemyFireScanAndSpawn` spawn tail. | Low (mostly arithmetic) | Mothership occasionally fires a bullet downward at the player. |
-| **12.7** | Pilot hit → GameState 6 → particle explosion: port `$23C0` (pilot hit branch), `state6_MothershipExplosion`, `motherShipExplosionTick`, `eraseMothership`. Hook GameState 6 into JT1 (already in the `dispatch` switch as a stub). Extract T2A00/T2B00/T1B60-90 particle sprites in `data.js`. | High (most new code) | Hitting the pilot through a gap triggers ~1.6s particle explosion that erases the mothership. |
-| **12.8** | Bonus scoring: port `$2520` (BCD score calc + DAA + PrintNumber). Build CounterA5-based dispatch in `state6_MothershipExplosion` so score displays at frame $20. | Low (mostly BCD math) | Score appears overlaid on mothership remnant at the right moment of the explosion. |
-| **12.9** | GameState 7 score display: port `$244C` + `$2552` (transition). Hook into JT1 (already stubbed). Verify round advance and AliensLeft reset on timer expiry. | Low | Score holds on screen for ~1.1s, then play advances to next round's stage 0 alien wave. |
-| **12.10** | Polish + cleanup: remove the JT4 `>=8` stop-gap fully. Visual playtest a full round cycle (stages 0-B). Update progress.md to mark step 12 done. | Low | Full 5-stage round (aliens × 2 + birds × 2 + mothership) plays end-to-end, advances to round 2, repeats. |
+| Sub-step | Outcome |
+|----------|---------|
+| 12.0 ✅ | Mixin skeleton landed; state6/7 stubs moved out of states.js |
+| 12.1 ✅ | Stage 8 spiral-fill exit → T1C00 starfield bit-3 branch |
+| 12.2 ✅ | Stage 9 `$22B4` lone fade-in (T1D00 via existing starsScrollDown) |
+| 12.3 ✅ | Stage A `$22CA` + aliens fade-in (one-shot + L0834 piggyback) |
+| 12.4 ✅ | Skipped — already wired in earlier alien-combat work |
+| 12.5 ✅ | Shield-block collision (`$2351`/`$237B`/`$2398`); directional bug fixed via user catch |
+| 12.5a ✅ | Belt animation `$22FA` via m43AA cadence |
+| 12.5b ✅ | Antenna animation `$2322` from T1BC0 + (temp) one-time stage A→B shift |
+| 12.6 ✅ | Mothership return fire `$24F2` (player-tracking) |
+| 12.7 ✅ | Pilot kill `$23C7` → GameState 6 / 7 loop-closer (minimum) |
+| 12.8 ✅ | Bonus score `$2520` (top scoreboard) + K cheat polish |
+| 12.9 ✅ | Particle explosion central path (T1B60/70/80 + T1B90) |
+| 12.10 ✅ | `$21D2` stage-B respawn + `$24E0` continuous-scroll + dynamic row tracking (removes 12.5b temp shift) + bonus popup at mothership + JT4 stop-gap removed |
+| 12.x ✅ | Scattered explosion particles (visual-effect port) + state7 freeze fix |
+
+### Port deviations from the planned sub-steps
+
+- **12.5b stage A→B one-time shift** added (then removed in 12.10
+  when `$24E0` landed): mid-step compensation for unported scroll.
+
+- **Visual-effect port of `$2085` odd-CounterA5 scattered particles**
+  in 12.x: source's `$2085 + T2A00/T2B00` (serpentine 2D-blit with
+  control-byte-gated cell writes) replaced with angle/radius scatter
+  of T2A00-sampled tile codes. Captures chaotic-explosion visual
+  without ~100 lines of source-faithful address math. **User-flagged
+  topic for post-project discussion: faithful port vs visual-effect
+  port trade-off.**
+
+- **No on-screen popup for `$2520` bonus score in 12.8** (deferred
+  to 12.10) — caught up via fgOverlay popup using digit tiles.
+
+- **Mothership-pilot-kill scoring does NOT reuse the 200-pt
+  bonus-explosion infrastructure** (despite the original §9.2
+  speculation). `$2520` uses direct `PrintNumber` (= port:
+  `scoring.addPoints` + fgOverlay digit popup) with a BCD formula
+  yielding $00..$9000 range — completely independent of the
+  alien-swoop / bird-wing bonus-explosion pipeline.
 
 ---
 

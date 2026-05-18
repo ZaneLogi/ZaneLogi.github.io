@@ -38,78 +38,97 @@ Sibling docs:
 | 12 | Mothership (`$22B4`/`$22CA`) + shield-block tile-swapping + remove 8d wrap stop-gap | ✅ | Closes out the 5-stage round cycle. Research in `research_mothership.md`. Landed across 11 commits 2026-05-18: **12.0** mixin skeleton (`states_mothership.js`, first use of mixin pattern). **12.1** stage 8 spiral-fill → T1C00 mothership-era starfield. **12.2** stage 9 `$22B4` lone fade-in (T1D00 mothership graphic scrolls in via existing starsScrollDown — `$4367` flag confirmed vestigial / no source readers). **12.3** stage A `$22CA` mothership + aliens fade-in (one-shot first frame + piggy-back on stageAlienFadeIn). **12.4 skipped** (case B already wired by earlier alien-combat work). **12.5** shield-block collision (`$2351`/`$237B`/`$2398`) with SHIELD_T1B40/T1B50 progression tables; key bug fix during testing: source's `DEC L` is row-up in canvas (`idx-26`), not col-left. **12.5a** belt animation `$22FA` driven by m43AA cadence. **12.5b** antenna/pilot animation `$2322` from T1BC0 (8-frame cycle) + port-only one-time bgTiles shift at stage A→B (compensates for the missing `$24E0` continuous-scroll so mothership lands at arcade-faithful position). **12.6** mothership return fire `$24F2` (player-tracking via mappedPlayerX, shared `spawnEnemyBulletAtXY` helper). **12.7** pilot kill `$23C7` → GameState 6 `$2400` (particle explosion + EraseMothership) → GameState 7 `$244C` (score-display timer + next-round advance). **12.8** mothership bonus score `$2520` (BCD-decoded ((LR>>4)*16 + (counterB9+$60)/2) × 100, capped at $9000, credited to player) + K cheat triggers pilot kill on stage B. **12.9** particle explosion animation (T1B60/70/80 sprites + T1B90 selector). **12.10** ported `$21D2` stage-B respawn (mothership combat never auto-clears by alien kills); removed JT4 stop-gap entirely from both `stageClearUpdate` and `stageBirdClear`; ported `$24E0` mothership continuous-scroll + dynamic belt/antenna/particle row tracking via `findBeltRow` scan (replaces 12.5b one-time shift); particle position centered on pilot; bonus-score popup at mothership position via fgOverlay (4 BCD digits, persists through state6+7 until ClearForeground at state7 tail). **Remaining port deviations** (documented at `research_mothership.md §10`): second particle-draw path (`$2085` + T2A00/T2B00 on odd-CounterA5 ticks) deferred — explosion uses single-particle pipeline instead of source's denser dual-particle visual. |
 | – | Sound (MN6221AA bit-field synthesis) | ⏸️ | Per `research_hardware.md` §5; only matters for audio fidelity |
 
-## Known deferred issues
+## What's missing (post-step-12)
 
-Items where the port currently deviates from source behavior in a way
-the user can observe at runtime. Listed here (not buried in step rows)
-so they don't get lost. Resolve in a follow-up sub-step or dedicated
-cleanup pass.
+All 12 step rows above are ✅ done — full 5-stage round cycle plays
+through end-to-end (alien × 2 → bird × 2 → mothership → next round).
+What's listed below is what the arcade does that this port doesn't
+yet (or does differently). Status as of 2026-05-18.
+
+### Cross-cutting (affects all stages)
+
+- **Player can't die.** `alienVsPlayerCollision` returns at the top
+  (disabled since step 8); `enemyBulletUpdate` skips the L0CB4 → L0CC4
+  player-hit check (since step 9). Net: alien bodies pass through the
+  player, alien + mothership bullets fly through the player, the
+  player is invincible everywhere. Re-enabling both is gated by:
+  - **State 4 player-explosion animation** — currently a stub
+    (`playerExplosionTimer` ticks but no visual)
+  - **State 5 game over** — currently empty
+  - **Lives counter** — `state.player1Lives` initialized to 3 but
+    never decremented; lives icons drawn but static
+  - **Bonus life at score threshold** — source awards an extra life
+    at a certain score; not ported
+
+- **Sound (entire MN6221AA bit-field synthesis)** — `research_hardware.md §5`
+  documents the chip; nothing connected. Hit flags (`$4366`,
+  `$4364`) are set by various paths but no audio system reads them.
+  Step 13.
+
+- **Attract mode / splash screen / coin-up flow.** Cold-start jumps
+  straight to game mode (`state.gameOrAttract = 1` hardcoded). Coin
+  input wired (Digit 5 key) and starts a game; no attract loop.
+
+- **2-player mode.** Only P1 is the active player; P2's score row is
+  drawn but inert. `state.gameAndDemoOrSplash` flag exists but no
+  player-switch logic.
+
+- **Round-difficulty scaling beyond round 2.** Most round-based scaling
+  (alien speed, fire rate, swoop count) is hooked via `LR` reads in
+  the existing code, but only rounds 0-2 have been exercised under
+  test. Higher rounds may surface latent bugs.
+
+### Per-system port deviations (intentional, documented)
 
 - **Lane swap: movement+animation on lane-0, behavior on lane-1.**
-  Source has behavior on lane-0 and movement+animation on lanes 1+2.
-  Our port runs movement+animation on lane-0 and behavior on lane-1
-  (a 1-frame shift). This is **required for swoop alignment**: it
-  puts alien grid-crossings one frame before `behaviorCommit` reads
-  the alien's position, so dx=±4 swoop pattern bytes land on aligned
-  `x%8 ∈ {0, 4}`. Documented at `states.js:stageAlienCombat` and
-  `research_enemy_motion.md §1.0`. Why source's lane order works in
-  arcade Phoenix without this swap is an open question (likely
-  source's much longer `L30E4`-seeded cooldown shifts the phase
-  before commits start firing).
-
-- **`alienVsPlayerCollision` disabled + enemy-bullet → player path
-  skipped.** Both routes go through `gameState=4` (player explosion),
-  which is still a stub: no lives counter, no explosion sprite, no
-  game-over. `alienVsPlayerCollision` returns at the top;
-  `enemyBulletUpdate` does not run the L0CB4 → L0CC4 player-hit check
-  per user direction during step 9 (bullets fall through harmlessly).
-  Net effect: the player cannot die. Re-enable both as a follow-up
-  once lives / explosion-anim / game-over are in place — likely a
-  sub-step before step 11.
-
-- **Bird-wing bonus scoring deferred to step 11; mothership pilot scoring
-  deferred to step 12.** Step 10.7 landed the bonus-explosion
-  infrastructure (bonus slots $4378/$437C, `bonusExplosionUpdate`,
-  `spawnBonusExplosion`, sprite + digit overlay) and wired it for
-  200-pt alien-swoop kills on path bytes 7/8. Source uses the same
-  bonus slot path for bird wing hits (`L38E9`) and mothership pilot
-  scoring (`L2552`); bird wing hits come with step 11 (already
-  research-confirmed in `research_bird_stage.md §6`), mothership
-  pilot scoring with step 12. The infrastructure is reusable as-is —
-  each new caller just wires the right scoreBcd / counter values
-  into `spawnBonusExplosion`.
-
-- **Stage 8+ stop-gap (narrowed in 11.10).** Originally `>=4` (step
-  8d), narrowed to `>=8` in step 11.10 when spiral-fill (4, 6) and
-  bird combat (5, 7) became playable. Currently keeps stages 8-B
-  (mothership spiral, mothership stages, mothership combat) wrapping
-  to next round's stage 0 so play loops through alien + bird waves
-  while mothership isn't implemented. Fully remove in **step 12
-  (mothership)** so the full 5-stage round cycle plays through
-  end-to-end.
+  Source has behavior on lane-0 and movement+animation on lane-1.
+  Port swaps them — required for swoop alignment so dx=±4 pattern
+  bytes land at aligned `x%8 ∈ {0, 4}`. See
+  `states.js:stageAlienCombat` + `research_enemy_motion.md §1.0`.
+  Why source's lane order works in arcade without the swap is an
+  open question.
 
 - **Movement and animation merged into one lane.** Source runs
-  movement on lane-1 and animation on lane-2 (1 frame apart in
-  source's lane numbering); port runs both back-to-back inside
-  `stageAlienCombat`'s lane-0 handler (which is the post-swap lane —
-  see first item). Documented decision
-  (`research_rendering.md §9.2`) — listed here for visibility, not
-  for fixing.
+  them on separate lanes (1 frame apart); port runs them back-to-back
+  in lane-0. See `research_rendering.md §9.2`.
 
-- **2×2 sprite rendering deviation.** Source's `SHAPE_LSB_TABLE`
-  cycle includes "partial" variants (some tiles = 0) that rely on
-  tile persistence in screen RAM to complete the sprite from the
-  previous frame's tiles. Our canvas clears per frame, so partial
-  variants render with missing halves. Port-side fix: keep each
-  alien's last-known FULL `controlB` and substitute it when current
-  controlB is partial; draw at exact `(x, y)` instead of source's
-  snap-draw + pre-shifted tiles. See `render.js drawAlien` case 4
-  and `research_rendering.md §2.5`.
+- **2×2 sprite rendering deviation.** Source uses tile persistence in
+  screen RAM to complete sprites across frames (its `SHAPE_LSB_TABLE`
+  cycle includes "partial" variants); port has no screen-RAM buffer
+  so partial variants would render with missing halves. Port keeps
+  each alien's last-known full `controlB` and substitutes. See
+  `render.js drawAlien` + `research_rendering.md §2.5`.
 
-## Open research (gating future steps)
+- **33-row BG buffer with smooth `scrollPixel`.** Source has a 32-row
+  BG plane + hardware scroll register; port adds a hidden row 0 +
+  smooth per-pixel scroll. Hides a wrap-and-erase artifact the
+  arcade's CRT decay masked. See `research_rendering.md §4.2`.
 
-- ✅ **Bird-stage motion + egg hatching** (`L3400`) — landed in `research_bird_stage.md` (2026-05-17). Gates step 11.
-- **Mothership stage** (`$22B4` / `$22CA` fade-ins, `$2400` / `$244C` explosion+score, destructible shield-block layers) — gates step 12. Will live in `research_mothership.md` (not yet written).
+- **Mothership scattered-particle explosion is visual-effect, not
+  source-faithful.** Source's `$2085 + T2A00/T2B00` is a serpentine
+  2D-blit with control-byte gating; port uses an angle/radius
+  scatter at varying offsets for similar chaotic look. See
+  `research_mothership.md §10` and the 12.x commit. **User-flagged
+  topic for post-project discussion: faithful port vs visual-effect
+  port trade-off.**
+
+- **Mothership bonus-score popup at mothership position.** Done via
+  fgOverlay digit tiles (12.10 piece C). Source uses PrintNumber to
+  FG screen-RAM at exact source position; port places at a fixed
+  mothership-center position. Functionally equivalent.
+
+### Vestigial source flags (no readers, port skips)
+
+These are set by source code at various points but no source routine
+reads them. Port omits the writes. Listed for traceability:
+
+- **`$4367`** "Mothership partially faded in" — set in `$22C3` / `$22D7`
+- **`$43BC := $3F`** — set in `$22DB` (stage A first frame)
+- **`$4363`** "Particle explosion start" — set in `$23D1`
+- **`$436B`** "Mothership score display" — set in `$255B`
+
+Not bugs — confirmed via grep that no other source code reads these
+addresses (per research_mothership.md §3.1, §4, §7).
 
 ## Conventions for editing this doc
 

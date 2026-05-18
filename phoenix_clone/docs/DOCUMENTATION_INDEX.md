@@ -310,7 +310,7 @@ To implement, start at top, work downward. Each level depends on the previous.
 | research_enemy_motion.md | High | Path-following, animation | Detailed; alien motion + explosion/bonus machinery (bird/mothership covered separately) |
 | research_rendering.md | High | Sprite decode, collision | Detailed; includes optional PROM color check |
 | research_bird_stage.md | Medium–high | Bird `$3400` dispatch, maturity, wing-hit | Verified for dispatch + RAM + hit entry; T3F80/T3FC0 selection + offsets +3/+6 + `$2600` flagged as open (§10) |
-| research_mothership.md | Medium–high | JT4 stages 8/9/A/B, GameStates 6/7, shield-block + pilot kill | Disassembly verified for all entry points; `$4367` consumer + `$43BC` purpose + scroll-aware tile lookup flagged as open (§10) |
+| research_mothership.md | High | JT4 stages 8/9/A/B, GameStates 6/7, shield-block + pilot kill + explosion + score | All open questions resolved post-step-12 (§10 has resolution notes). §11 sub-step plan collapsed to outcomes + 4 port deviations. §1-§9 preserved as research-time notes. |
 
 ---
 
