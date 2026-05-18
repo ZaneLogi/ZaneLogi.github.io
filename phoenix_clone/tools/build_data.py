@@ -185,6 +185,19 @@ RAW_SLICES = [
     # stage init T05C0 ($43B2/$43B3 = $1F/$00) for stage 2 (2nd alien
     # wave) and by T05B4 (mothership waves; deferred to step 11).
     ("STARFIELD_T1F00", 0x1F00, 256),
+    # source T1D00 — 234 bytes of "Mothership object 26x9 tiles (upside
+    # down)" + 22 bytes of FF padding to round up to 256. Comment at
+    # Code.md $1D00: "Maybe these are upside down because the mother
+    # ship scrolls down from the top". Selected by T05CC (stage 9 init,
+    # $43B2/$43B3 = $1D/$00) — the existing StarsScrollDown $067A path
+    # walks this exactly like a starfield, so the mothership fades down
+    # from the top in 9 row-refills (8-px boundaries) = 72 frames,
+    # matching counterB4=$48 timing. The trailing FF padding never gets
+    # read during the fade-in window (9 rows × 26 bytes = 234, exactly
+    # the mothership-graphic size). 256-byte extraction matches the
+    # T1C00/T1F00 pattern so readStarfield can use a uniform `lo & $FF`
+    # wrap. research_mothership.md §3.
+    ("STARFIELD_T1D00", 0x1D00, 256),
     # source T1E00..T1EDF — background-overlay tables for the periodic
     # planet (2x2) and galaxy (1x1) fills. Each is 32 bytes; layout:
     #   $1E00 T1E00 — PLANET_TILES   (8 entries × 4-tile 2x2 sprite data)

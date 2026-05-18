@@ -23,6 +23,7 @@ import {
     PATH_ROM_HIGH,        // 0x2C00-0x2FFF — late swoops + angry patterns
     STARFIELD_T1C00,      // source T1C00 — starfield used by stages 0/5/7
     STARFIELD_T1F00,      // source T1F00 — starfield used by stage 2
+    STARFIELD_T1D00,      // source T1D00 — mothership graphic (26x9 upside-down) used by stage 9
     PLANET_TILES,         // source T1E00 — 8 planets × 4 tiles (2x2 col-major)
     PLANET_MSB,           // source T1E20 — screen-RAM MSBs per planet entry
     PLANET_LSB_OFF,       // source T1E40 — within-column LSB offsets per entry
@@ -87,11 +88,14 @@ function s8(b) {
 
 // Read a byte from the current starfield ROM page. Source uses
 // HL = ($43B2 << 8) | $43B3, with INC L wrapping at the 256-byte page
-// boundary (low byte only). Only $1C and $1F bases are reachable from
-// alien/bird stage init; $1D (mothership upside-down image) lands here
-// during step 11 — return 0 for now so a mis-init can't crash.
+// boundary (low byte only). $1C and $1F are starfields (stages 0/5/7
+// and 2). $1D is the upside-down mothership graphic — selected by
+// stage 9's stage block (T05CC byte 7 = $1D) so $22B4 / starsScrollDown
+// scrolls the mothership down from the top during the fade-in window
+// (9 row-refills = 72 frames = counterB4=$48 to 0). research_mothership.md §3.
 function readStarfield(hi, lo) {
     if (hi === 0x1C) return STARFIELD_T1C00[lo & 0xFF];
+    if (hi === 0x1D) return STARFIELD_T1D00[lo & 0xFF];
     if (hi === 0x1F) return STARFIELD_T1F00[lo & 0xFF];
     return 0;
 }
@@ -414,7 +418,10 @@ export const states = {
             case 0x8:
                 this.stageSpiralFill();            // $2230 — case 8 exits to T1C00 mothership starfield (§2 of research_mothership.md)
                 break;
-            // 0x9 / 0xA mothership fade-ins      → step 12.2 / 12.3
+            case 0x9:
+                this.stageMothershipFadeIn();      // $22B4 — mothership lone fade-in (§3 of research_mothership.md)
+                break;
+            // 0xA mothership + aliens fade-in    → step 12.3
             // 0xB mothership combat               → step 12.4
         }
     },
@@ -1007,10 +1014,10 @@ export const states = {
         state.player.shieldCount = 0;
         state.levelAndRound = (state.levelAndRound + 1) & 0xFF;
 
-        // Same stop-gap as stageClearUpdate — narrowed from `>=8` to
-        // `>=9` in step 12.1 now that stage 8 spiral-fill → mothership
-        // starfield is implemented. Remove when 12.2-12.4 land.
-        if ((state.levelAndRound & 0x0F) >= 9) {
+        // Same stop-gap as stageClearUpdate — narrowed from `>=9` to
+        // `>=0xA` in step 12.2 now that stage 9 mothership lone fade-in
+        // is implemented. Remove when 12.3-12.4 land.
+        if ((state.levelAndRound & 0x0F) >= 0xA) {
             state.levelAndRound = (state.levelAndRound + 0x10) & 0xF0;
         }
 
@@ -2109,13 +2116,11 @@ export const states = {
         state.player.shieldCount = 0;
         state.levelAndRound = (state.levelAndRound + 1) & 0xFF;
 
-        // ⚠ STOP-GAP (narrowed 2026-05-18 step 12.1): stages 9/A/B
-        // (mothership fade-ins + combat) are still step 12.2-12.4 territory.
-        // Stage 8 (spiral-fill into mothership starfield) is now reachable —
-        // it advances LR to 9, then this wrap kicks in to skip past the
-        // unimplemented mothership stages back to next round's stage 0.
-        // Remove this block entirely once 12.2-12.4 land.
-        if ((state.levelAndRound & 0x0F) >= 9) {
+        // ⚠ STOP-GAP (narrowed 2026-05-18 step 12.2): stages A/B
+        // (mothership + aliens fade-in + combat) still step 12.3-12.4
+        // territory. Stage 9 (mothership lone fade-in) is now reachable.
+        // Remove this block entirely once 12.3-12.4 land.
+        if ((state.levelAndRound & 0x0F) >= 0xA) {
             state.levelAndRound = (state.levelAndRound + 0x10) & 0xF0;
         }
 
