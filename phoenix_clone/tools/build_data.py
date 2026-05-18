@@ -185,6 +185,15 @@ RAW_SLICES = [
     # stage init T05C0 ($43B2/$43B3 = $1F/$00) for stage 2 (2nd alien
     # wave) and by T05B4 (mothership waves; deferred to step 11).
     ("STARFIELD_T1F00", 0x1F00, 256),
+    # source T1B60 + T1B70 + T1B80 — 48 bytes of mothership-explosion
+    # particle sprites. Three 4×4 tile frames (16 tiles each, column-major
+    # in source DrawImageCbyB convention). Frame 0 = T1B60 (densest cloud),
+    # Frame 1 = T1B70 (medium), Frame 2 = T1B80 (sparse). FG tile codes
+    # ($80-$8D range) so render via fgOverlay path. Selector table T1B90
+    # maps (CounterA5 >> 2) & $0E to one of these 3 frames or a deletion
+    # frame; port inlines the selector logic rather than extracting T1B90.
+    # research_mothership.md §7.2.
+    ("PARTICLE_SPRITES", 0x1B60, 48),
     # source T1BC0 — 64 bytes for the mothership antenna + alien-pilot
     # animation (8 frames × 8 tiles each, 2 cols × 4 rows column-major).
     # Drawn at fixed BG cell $49A6 by $2322 on 3 of every 4 mothership-

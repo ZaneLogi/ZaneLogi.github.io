@@ -10,7 +10,12 @@
 
 import { state } from './state.js';
 import { scoring } from './scoring.js';
-import { SHIELD_PROGRESSION, MOTHERSHIP_ANTENNA_ANIM, STARFIELD_T1C00 } from './data.js';
+import { SHIELD_PROGRESSION, MOTHERSHIP_ANTENNA_ANIM, STARFIELD_T1C00, PARTICLE_SPRITES } from './data.js';
+
+// Particle explosion frame offsets within PARTICLE_SPRITES (3 frames × 16 tiles).
+const PARTICLE_T1B60 = 0;   // frame 0 — densest cloud
+const PARTICLE_T1B70 = 16;  // frame 1 — medium
+const PARTICLE_T1B80 = 32;  // frame 2 — sparse
 
 // Split the 32-byte SHIELD_PROGRESSION extraction into the two source
 // sub-tables. Indexed by `tile & 0x0F` for tiles in $60..$6F:
@@ -439,7 +444,74 @@ export const mothershipMixin = {
             // $2408 JP C,$246A — erase the mothership progressively.
             return this._eraseMothership();
         }
-        // $20E8 / $2085 particle animation deferred (12.9).
+        // a5 in $21..$5F: particle animation. Source dispatches to
+        // $20E8 on EVEN ticks (T1B90-selected sprite) and $2085 on
+        // ODD ticks (T2A00/T2B00 position-table draw). Port: even ticks
+        // only for now (position-table draw deferred — visual is fine
+        // with just the central particle frame cycling).
+        if ((a5 & 1) === 0) {
+            this._drawParticleFrame(a5);
+        }
+    },
+
+    // $20E8 + T1B90 selector — particle frame draw (even-CounterA5 path).
+    //
+    // Source's T1B90 selector indexes by (CounterA5 >> 2) & $0E to pick
+    // one of three particle frames (T1B60/T1B70/T1B80) or a deletion
+    // image (T17F0, treated as "no draw" here):
+    //   index 0 → T1B80 (frame 2 — sparse)
+    //   index 2 → T1B70 (frame 1)
+    //   index 4 → T1B60 (frame 0 — densest)
+    //   index 6 → T1B70 (frame 1)
+    //   index 8..E → deletion (skip draw)
+    //
+    // The sprite is 4×4 FG tiles drawn via fgOverlay (= render.drawSpiral
+    // Overlay path) at a fixed mothership-center position. Each call
+    // first clears the previous frame's overlay entries from the 4×4
+    // region, then writes the new frame's non-zero tiles.
+    //
+    // Port simplification: source's $20E8 also walks the position via
+    // CounterB9 (D += 8, scroll math) — port draws at a fixed center
+    // position. Result: particle pulses in place rather than drifting,
+    // visually close enough for the loop-closer.
+    // research_mothership.md §7.2.
+    _drawParticleFrame(counterA5) {
+        // Fixed mothership-center position. Mothership occupies bgTiles
+        // rows 7-15 cols 3-22; center of belt area = roughly (col 11, row 10).
+        // KNOWN DEVIATION: source's $20E8 computes position from CounterB9
+        // and walks it down each tick (the mothership scrolls down during
+        // the explosion). Port doesn't scroll the mothership in state 6,
+        // so the particle currently appears LOWER than the pilot
+        // (= where it would naturally be after a scroll). Fix is part of
+        // the same dynamic-row-tracking work that'll replace the 12.5b
+        // one-time shift (deferred to 12.10 when $24E0 lands).
+        const START_COL = 11;
+        const START_ROW = 10;
+
+        // Clear the previous frame's 4×4 region from fgOverlay.
+        for (let dc = 0; dc < 4; dc++) {
+            for (let dr = 0; dr < 4; dr++) {
+                state.fgOverlay.delete(`${(START_COL + dc) * 8},${(START_ROW + dr) * 8}`);
+            }
+        }
+
+        // T1B90 selector — map (CounterA5 >> 2) & $0E to frame offset.
+        const tableIdx = (counterA5 >> 2) & 0x0E;
+        let frameOff;
+        if      (tableIdx === 0) frameOff = PARTICLE_T1B80;
+        else if (tableIdx === 2) frameOff = PARTICLE_T1B70;
+        else if (tableIdx === 4) frameOff = PARTICLE_T1B60;
+        else if (tableIdx === 6) frameOff = PARTICLE_T1B70;
+        else                     return;     // 8..E → deletion (skip)
+
+        // Draw 4×4 column-major (matches source DrawImageCbyB).
+        for (let dc = 0; dc < 4; dc++) {
+            for (let dr = 0; dr < 4; dr++) {
+                const tile = PARTICLE_SPRITES[frameOff + dc * 4 + dr];
+                if (tile === 0) continue;    // transparent — skip
+                state.fgOverlay.set(`${(START_COL + dc) * 8},${(START_ROW + dr) * 8}`, tile);
+            }
+        }
     },
 
     // $2520 — bonus score calc + ClearForeground at CounterA5 == $20.
