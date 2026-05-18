@@ -240,7 +240,53 @@ export const mothershipMixin = {
     motherShipHook() {                              // L24A0
         if ((state.levelAndRound & 0x0F) < 8) return;
         this.shieldBlockCollision();                // L2351
-        // L24B1-L24B9 mothership return fire — step 12.6 TODO.
+        // L24B1-L24B9 — mothership return fire on (Counter9A+1 & 3) == 3.
+        // Source's "Counter9A+1" = $439B = port's `state.counter9a & 0xFF`
+        // (see getRandomNumber comment for the byte mapping).
+        if (((state.counter9a & 0xFF) & 0x03) === 0x03) {
+            this.motherShipFire();                  // L24F2
+        }
+    },
+
+    // L24F2 — mothership return fire. Picks a random X in $60..$6F (via
+    // getRandomNumber + $60); rate-gates via (X & $0E) AND Counter9A+1
+    // (must be 0); accepts only when X is in [PlayerLeft, PlayerRight]
+    // so the mothership's fire tracks the player; computes bullet
+    // Y from CounterB9; spawns through the shared enemy-bullet pipeline.
+    //
+    // Net firing rate: low. The random byte is 4 bits (port's
+    // getRandomNumber returns 0..15), so X is always in $60..$6F (= canvas
+    // x 96..111 — narrow center band). Player must be in that band AND
+    // the bit-AND gate must pass. Source-faithful behavior — mothership
+    // only fires when player is roughly under the center of its body.
+    //
+    // Bullet Y formula: $48 + ((-CounterB9) & $F8). With CounterB9=$F9
+    // (post-stage-A), -$F9 = $07, $07 & $F8 = 0, so bullet Y = $48 = 72
+    // (= just below the belt at canvas y 80-87 with the 12.5b shift). As
+    // $24E0 (deferred) shifts the mothership down over time, bullet Y
+    // will track naturally via this formula.
+    // research_mothership.md §5.2.
+    motherShipFire() {                              // L24F2
+        // $30AA + $24F5: random + $60.
+        const B = (this.getRandomNumber() + 0x60) & 0xFF;
+
+        // $24FC-$24FF: rate gate.
+        const counter9aP1 = state.counter9a & 0xFF;
+        if (((B & 0x0E) & counter9aP1) !== 0) return;
+
+        // $2500-$2509: player-tracking X bounds.
+        const { left: playerLeft, right: playerRight } = this.mappedPlayerX();
+        if (playerLeft >= B) return;            // $2504 RET NC
+        if (playerRight < B) return;            // $2509 RET C
+
+        // $250A-$250D: bullet X = candidate - 4.
+        const bulletX = (B - 4) & 0xFF;
+
+        // $250E-$2515: bullet Y = $48 + ((-CounterB9) & $F8).
+        const bulletY = (0x48 + ((-state.counterB9) & 0xF8)) & 0xFF;
+
+        // $251A → $25B7: spawn via shared enemy-bullet pipeline.
+        this.spawnEnemyBulletAtXY(bulletX, bulletY);
     },
 
     // L2351 / L237B / L2398 — shield-block collision. Checks the BG tile

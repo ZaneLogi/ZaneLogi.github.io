@@ -2824,14 +2824,33 @@ export const states = {
         }
         if (slot < 0) return;
 
-        // L25E0: spawn.
-        const bx = (chosenX + 0x04) & 0xFF;
-        const by = (chosenY + 0x0C) & 0xFF;
-        const b  = state.enemyBullets[slot];
+        // L25E0: spawn at alien's offset (x+4, y+0xC).
+        this.spawnEnemyBulletAtXY((chosenX + 0x04) & 0xFF, (chosenY + 0x0C) & 0xFF);
+    },
+
+    // L25B7-L25E0 spawn-tail (factored out so motherShipFire ($24F2) can
+    // also reuse it). Caller is responsible for the offset math (alien-fire
+    // adds +4/+C; mothership-fire passes coords directly).
+    //
+    // L25B7: round-based slot cap — round 0 → 3 slots, round 1 → 4, round 2+ → 5.
+    // L25CD: first inactive slot within cap (else give up).
+    // L25E0: spawn at (x, y), state := $08, shape := $58 + ((x>>1)&3) + (y&4).
+    spawnEnemyBulletAtXY(x, y) {
+        const round = (state.levelAndRound >> 4) & 0x0F;
+        const slotCap = round < 1 ? 3 : round < 2 ? 4 : 5;
+        let slot = -1;
+        for (let i = 0; i < slotCap; i++) {
+            if ((state.enemyBullets[i].state & 0x08) === 0) {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0) return;
+        const b = state.enemyBullets[slot];
         b.state = 0x08;
-        b.shape = 0x58 + (((bx >> 1) & 0x03) + (by & 0x04));   // 0x58-0x5F
-        b.x = bx;
-        b.y = by;
+        b.shape = 0x58 + (((x >> 1) & 0x03) + (y & 0x04));   // 0x58-0x5F
+        b.x = x;
+        b.y = y;
     },
 
     // L097A — port equivalent for $439E/$439F (mapped player left/right
