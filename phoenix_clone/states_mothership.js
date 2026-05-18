@@ -453,12 +453,67 @@ export const mothershipMixin = {
             return this._eraseMothership();
         }
         // a5 in $21..$5F: particle animation. Source dispatches to
-        // $20E8 on EVEN ticks (T1B90-selected sprite) and $2085 on
-        // ODD ticks (T2A00/T2B00 position-table draw). Port: even ticks
-        // only for now (position-table draw deferred — visual is fine
-        // with just the central particle frame cycling).
+        // $20E8 on EVEN ticks (T1B90-selected central sprite) and
+        // $2085 on ODD ticks (T2A00/T2B00 position-table draw —
+        // visual-effect port adds scattered particles around the
+        // mothership center, accumulating over the explosion window).
         if ((a5 & 1) === 0) {
-            this._drawParticleFrame(a5);
+            this._drawParticleFrame(a5);                 // $20E8
+        } else {
+            this._drawScatteredParticles(a5);            // $2085 — visual-effect port
+        }
+    },
+
+    // $2085 + T2A00/T2B00 — visual-effect port (NOT source-faithful).
+    // Source's odd-CounterA5 path draws a second set of particles via
+    // a serpentine 2D-blit with control-byte-gated cell writes, using
+    // T2A00 (FG tile data, 256 bytes) + T2B00 (control bits, 256 bytes).
+    // Source-faithful port deferred — see research_mothership.md §10
+    // for the deferral note.
+    //
+    // This port renders the visual essence: each odd-A5 tick adds a
+    // small ring of particle tiles at varying radii around the mother-
+    // ship center. Particles accumulate in fgOverlay (no per-tick
+    // clear), building up density over the explosion window
+    // ($5F → $21). Cleared by _motherShipBonusScore's fgOverlay.clear()
+    // at A5=$20 (= source's $2520 ClearForeground equivalent).
+    _drawScatteredParticles(counterA5) {
+        const beltRow = findBeltRow(state);
+        if (beltRow < 0) return;
+        const centerRow = beltRow - 2;   // pilot-area row
+        const centerCol = 12;
+
+        // Tile-code pool sampled from T2A00 (mostly $CE..$E3 range).
+        const TILES = [0xCE, 0xCF, 0xD0, 0xD1, 0xD2, 0xD3, 0xDE, 0xDF, 0xE0, 0xE1, 0xE2, 0xE3];
+
+        // Phase 0..30 across the explosion window ($5F → $21).
+        const phase = (0x5F - counterA5) >> 1;
+
+        // Spawn 8 particles per tick at varying angles + radii.
+        // Each particle's position derived from a per-particle pseudo-
+        // random seed (deterministic, reproducible). Particles avoid
+        // the central 4×4 region (cols 11-14, rows 8-11) where the
+        // _drawParticleFrame clear-and-write would wipe them.
+        for (let i = 0; i < 8; i++) {
+            // Per-particle seed: mixed from counterA5 + index. The
+            // multiplicative constants are chosen for low-period mixing
+            // (cheap PRNG with no Math.random determinism worry).
+            const s1 = (counterA5 * 13 + i * 41 + 0x5A) & 0xFF;
+            const s2 = (counterA5 * 17 + i * 71 + 0xA5) & 0xFF;
+            // Angle in 0..2π via s1; radius 3..5 per particle (keeps
+            // particles inside the mothership area, not over the score
+            // row at top or below the player ship).
+            const angle = (s1 / 256) * Math.PI * 2;
+            const radius = 3 + ((s2 + phase) & 0x03);   // 3..6
+            const dx = Math.round(Math.cos(angle) * radius);
+            const dy = Math.round(Math.sin(angle) * radius);
+            const col = centerCol + dx;
+            const row = centerRow + dy;
+            // Clamp to mothership area (rows 5-16 = canvas y 32-127).
+            if (col < 3 || col > 22 || row < 5 || row > 16) continue;
+            // Skip if inside the central 4×4 region (would be wiped).
+            if (col >= 11 && col <= 14 && row >= 8 && row <= 11) continue;
+            state.fgOverlay.set(`${col * 8},${row * 8}`, TILES[s2 % TILES.length]);
         }
     },
 
@@ -634,13 +689,17 @@ export const mothershipMixin = {
     // research_mothership.md §8.
     state7_MothershipScore() {                      // L244C
         state.counterA5 = (state.counterA5 - 1) & 0xFF;
-        const oddTick = ((state.counterA5 + 1) & 0x01) === 0x01;   // low bit of OLD counterA5
-        if (oddTick) {
+        // $2451 RRCA + $2452 JP C: source checks NEW counterA5's bit 0.
+        // (Earlier port used OLD counterA5's parity which made
+        // counterA5 = 1 → 0 take the bgUpdate path and miss the advance
+        // check, freezing the game in state 7 with stars scrolling
+        // forever — bug found via user test 2026-05-18.)
+        if ((state.counterA5 & 0x01) !== 0) {
             this.bgUpdate();                         // $06F0
             return;
         }
         if (state.counterA5 !== 0) return;
-        // Timer expired: advance to next round.
+        // $2455-$2457 — timer expired: advance to next round.
         state.gameState = 2;
         state.levelAndRound = ((state.levelAndRound & 0xF0) + 0x10) & 0xFF;
         state.aliensLeft = 0x10;
