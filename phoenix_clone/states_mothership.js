@@ -9,7 +9,7 @@
 // (Code.md $22B4 / $22CA / $2000+$24A0 / $2400 / $244C).
 
 import { state } from './state.js';
-import { SHIELD_PROGRESSION, MOTHERSHIP_ANTENNA_ANIM } from './data.js';
+import { SHIELD_PROGRESSION, MOTHERSHIP_ANTENNA_ANIM, STARFIELD_T1C00 } from './data.js';
 
 // Split the 32-byte SHIELD_PROGRESSION extraction into the two source
 // sub-tables. Indexed by `tile & 0x0F` for tiles in $60..$6F:
@@ -377,15 +377,18 @@ export const mothershipMixin = {
             }
 
             if (pilotCheckFires) {
-                // $23AC JP Z,$23C0 — pilot-kill branch. Source's
-                // $23C0 DEC L checks the BG tile ONE ROW UP in canvas
-                // (source-RAM L decrement = -1 row). If it's in the
-                // $70..$7F pilot range, set GameState=6 + CounterA5=$60.
-                // Port: pilot kill deferred to step 12.7. Return without
-                // damaging the tile (matches source's $23C6 RET NZ when
-                // pilot isn't actually exposed).
-                // TODO 12.7: if bgTiles[idx - 26] & $F0 == $70 →
-                //   state.gameState = 6; state.counterA5 = 0x60;
+                // $23AC JP Z,$23C0 — pilot-kill branch. Check the BG
+                // tile one row UP (idx - 26 in port's row-major bgTiles)
+                // for $70..$7F pilot range. If present, trigger
+                // GameState 6 (particle explosion) per source $23C7.
+                const above = idx - 26;
+                if (above >= 0 && (state.bgTiles[above] & 0xF0) === 0x70) {
+                    state.gameState = 6;                 // $23CA
+                    state.counterA5 = 0x60;              // $23CD
+                    // $23D1 vestigial flag write ($4363 particle-start) omitted.
+                }
+                // Pilot kill OR pilot not exposed: don't damage the tile
+                // (matches source's $23C6 RET NZ + no $23B5 write).
                 return;
             }
 
@@ -399,11 +402,95 @@ export const mothershipMixin = {
         }
     },
 
-    // L2400 — GameState 6: mothership particle explosion. Triggered by
-    // $23C0 (pilot hit). Ports in step 12.7.
-    state6_MothershipExplosion() {},
+    // L2400 — GameState 6: mothership particle explosion.
+    // Triggered by $23C0 (pilot hit) which sets GameState=6 + CounterA5=$60.
+    //
+    // Source's per-frame work (Code.md $2400-$2426):
+    //   - $242C (tick): snap counterB9 to 8-px boundary, derive particle
+    //     anchor, decrement CounterA5. Returns A = new CounterA5.
+    //   - if A == 0  → $2552 (transition to GameState 7)
+    //   - if A < $20 → $246A (EraseMothership — paint T1C00 stars over
+    //                  the mothership area)
+    //   - if A == $20 → $2520 (bonus score calc + display)
+    //   - else (A in $21..$5F) → animate particles via $20E8 or position
+    //                            table draw
+    //
+    // Port simplification (12.7 minimum): omit particle animation +
+    // bonus score popup (visual polish, not loop-closure). Keep CounterA5
+    // tick, EraseMothership when A < $20, transition to state 7 at 0.
+    // research_mothership.md §7.
+    state6_MothershipExplosion() {                  // L2400
+        // $242C — tick CounterA5 (+ scroll snap; port omits the scroll
+        // register write since rendering uses scrollPixel directly).
+        state.counterB9 = state.counterB9 & 0xF8;
+        state.counterA5 = (state.counterA5 - 1) & 0xFF;
+        const a5 = state.counterA5;
 
-    // L244C — GameState 7: mothership score display. Triggered by $2552.
-    // Ports in step 12.9.
-    state7_MothershipScore() {},
+        if (a5 === 0) {
+            // $2403 JP Z,$2552 — transition to GameState 7.
+            return this._gameState6To7();
+        }
+        if (a5 < 0x20) {
+            // $2408 JP C,$246A — erase the mothership progressively.
+            return this._eraseMothership();
+        }
+        // $20E8 / $2085 particle animation deferred — for the minimum
+        // 12.7 loop-closer, the mothership just sits visible until
+        // CounterA5 drops below $20, then gets erased.
+    },
+
+    // $2552 — transition from GameState 6 to 7.
+    _gameState6To7() {
+        state.gameState = 7;
+        state.counterA5 = 0x40;
+        // $4363/$436B vestigial flag writes omitted.
+    },
+
+    // $246A EraseMothership — overlays a 20×9 T1C00 starfield image at
+    // the mothership area. Source dest = $4AC6 = port (col 3, row 7) per
+    // bgWrite. With the 12.5b one-time shift, port's mothership graphic
+    // occupies bgTiles rows 7-15. Erase span: rows 7-15 cols 3-22.
+    //
+    // Source uses DrawImageCbyB column-major (9 tiles down per column,
+    // 20 columns wide); port replicates the same byte-walk order so the
+    // resulting starfield pattern matches source.
+    _eraseMothership() {                            // L246A
+        let off = 0;
+        for (let dc = 0; dc < 20; dc++) {
+            for (let dr = 0; dr < 9; dr++) {
+                const idx = (7 + dr) * 26 + (3 + dc);
+                state.bgTiles[idx] = STARFIELD_T1C00[off++ & 0xFF];
+            }
+        }
+    },
+
+    // L244C — GameState 7: mothership score display.
+    // Triggered by $2552 with CounterA5 = $40 (~64 frames at 60Hz).
+    //
+    // Source per-frame work (Code.md $244C-$2466):
+    //   - DEC CounterA5
+    //   - if low bit was 1 → $06F0 (bgUpdate — keep stars scrolling)
+    //   - if CounterA5 != 0 → return
+    //   - CounterA5 hit 0: advance to next round.
+    //     - GameState := 2
+    //     - LR := (LR & $F0) + $10 (next round, stage 0)
+    //     - AliensLeft := 16
+    //     - ClearForeground
+    //
+    // research_mothership.md §8.
+    state7_MothershipScore() {                      // L244C
+        state.counterA5 = (state.counterA5 - 1) & 0xFF;
+        const oddTick = ((state.counterA5 + 1) & 0x01) === 0x01;   // low bit of OLD counterA5
+        if (oddTick) {
+            this.bgUpdate();                         // $06F0
+            return;
+        }
+        if (state.counterA5 !== 0) return;
+        // Timer expired: advance to next round.
+        state.gameState = 2;
+        state.levelAndRound = ((state.levelAndRound & 0xF0) + 0x10) & 0xFF;
+        state.aliensLeft = 0x10;
+        // $0380 ClearForeground — port: drop the FG overlay map.
+        state.fgOverlay.clear();
+    },
 };
