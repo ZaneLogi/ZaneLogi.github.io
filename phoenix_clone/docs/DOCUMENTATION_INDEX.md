@@ -18,6 +18,7 @@
 | **research_enemy_motion.md** | Alien movement, path following, animation | §1 per-frame dispatch, §3 path model, §4 animation | 504 lines |
 | **research_rendering.md** | Sprite decoding, tile rendering, collision | §1 rendering model, §2 tile decode, §6 AABB collision | 794 lines |
 | **research_bird_stage.md** | Bird-combat dispatch ($3400), maturity (M4368), wing hit ($38E9) | §1 $3400 dispatch, §2 $32B0 init + T3F80/T3FC0, §4 maturity, §6 hit detection, §9 sub-step plan | ~400 lines |
+| **research_mothership.md** | JT4 stages 8/9/A/B, GameStates 6/7, shield-block barrier (T1B40), pilot kill, bonus scoring | §2 stage 8 starfield exit, §3 $22B4 lone fade-in, §4 $22CA aliens fade-in, §5 $24A0 combat hook, §6 shield-block $2351/$2398/$23C0, §7 $2400 particle explosion, §8 $244C score display, §11 sub-step 12.0-12.10 plan | ~500 lines |
 | **Code.md** | 8085 assembly listing, full source truth | Routines at addresses $0000–$3FFF | 8249 lines |
 
 ---
@@ -309,6 +310,7 @@ To implement, start at top, work downward. Each level depends on the previous.
 | research_enemy_motion.md | High | Path-following, animation | Detailed; alien motion + explosion/bonus machinery (bird/mothership covered separately) |
 | research_rendering.md | High | Sprite decode, collision | Detailed; includes optional PROM color check |
 | research_bird_stage.md | Medium–high | Bird `$3400` dispatch, maturity, wing-hit | Verified for dispatch + RAM + hit entry; T3F80/T3FC0 selection + offsets +3/+6 + `$2600` flagged as open (§10) |
+| research_mothership.md | Medium–high | JT4 stages 8/9/A/B, GameStates 6/7, shield-block + pilot kill | Disassembly verified for all entry points; `$4367` consumer + `$43BC` purpose + scroll-aware tile lookup flagged as open (§10) |
 
 ---
 
@@ -334,6 +336,6 @@ No guesswork required. Every section maps to an address in `Code.md` and can be 
 
 ---
 
-**Last updated:** May 17, 2026  
-**Status:** Bird-stage research added (gates step 11); mothership research pending (gates step 12)  
-**Next step:** Implement step 11.1–11.6 (birds) per research_bird_stage.md §9, then research mothership for step 12
+**Last updated:** May 18, 2026  
+**Status:** Step 11 (birds) done; mothership research added (gates step 12)  
+**Next step:** Implement step 12.0–12.10 per research_mothership.md §11, starting with `states_mothership.js` mixin skeleton
