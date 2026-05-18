@@ -708,7 +708,9 @@ export const states = {
         // at $200E; runs even during stage clear since the player bullet
         // can still be in flight.
         this.playerBulletCollision();
-        // L24A0 stubbed (bird / UFO machinery, step 11).
+        // L24A0 mothership hook ($2006) — no-op for stages 1/3; runs
+        // shield-block collision (+ return fire in 12.6) for stage B.
+        this.motherShipHook();
 
         // L2009-L2010: read+increment the $435F masked counter. Source
         // advances this regardless of AliensLeft — the stage-clear path

@@ -9,6 +9,18 @@
 // (Code.md $22B4 / $22CA / $2000+$24A0 / $2400 / $244C).
 
 import { state } from './state.js';
+import { SHIELD_PROGRESSION } from './data.js';
+
+// Split the 32-byte SHIELD_PROGRESSION extraction into the two source
+// sub-tables. Indexed by `tile & 0x0F` for tiles in $60..$6F:
+//   T1B40 — left-half belt cells  (bullet.x bit 2 == 0)
+//   T1B50 — right-half belt cells (bullet.x bit 2 == 1, via L2030 path)
+// 0xFF entries correspond to indices intercepted by the pilot-check
+// branch ($23AC JP Z,$23C0) — those tiles never get damaged via the
+// progression lookup; they either kill the pilot or no-op.
+// research_mothership.md §6.3 / §6.4.
+const SHIELD_T1B40 = SHIELD_PROGRESSION.slice(0,  16);
+const SHIELD_T1B50 = SHIELD_PROGRESSION.slice(16, 32);
 
 export const mothershipMixin = {
     // L22B4 — JT4 stage 9: mothership lone fade-in. Stars scroll
@@ -68,6 +80,127 @@ export const mothershipMixin = {
         // $22D3 — first frame one-shot.
         state.stageBlock[9] = 0x30;
         // $22D7 / $22DB vestigial flag writes ($4367, $43BC) omitted.
+    },
+
+    // L24A0 — mothership hook injected into L2000 alien-combat per-frame.
+    // For stage < 8: returns immediately (no-op for normal alien combat
+    // at stages 1, 3). For stage >= 8: runs shield-block collision and
+    // (in 12.6) mothership return fire.
+    // research_mothership.md §5.1.
+    motherShipHook() {                              // L24A0
+        if ((state.levelAndRound & 0x0F) < 8) return;
+        this.shieldBlockCollision();                // L2351
+        // L24B1-L24B9 mothership return fire — step 12.6 TODO.
+    },
+
+    // L2351 / L237B / L2398 — shield-block collision. Checks the BG tile
+    // at the position one tile above the player bullet; damages the
+    // tile or (in 12.7) triggers pilot kill.
+    //
+    // Source's address math (Code.md $2355-$2369):
+    //   HL_FG = ($43E6, $43E7) = FG screen-RAM addr "above player bullet"
+    //   HL_BG = HL_FG + $0800 (MSB+8) — FG plane ($40xx) → BG plane ($48xx)
+    //           same display position
+    //   HL_BG.L = (HL_BG.L + CounterB9>>3) & $1F  — scroll-row adjustment
+    //
+    // Port equivalent: derive the BG-tile cell from the bullet's canvas
+    // (x, y - 8) using the port's `(r - 1) * 8 + scrollPixel` row math
+    // (see render.drawBackground). The port's bgTiles buffer is already
+    // "live" — scroll is baked in by render-time shift, no separate
+    // CounterB9 wrap needed at lookup time.
+    //
+    // Tile dispatch:
+    //   $4C..$4F (corner pieces) → $237B path: tile -= 1; if becomes
+    //     $4B, clear to 0 + retile left neighbor's $5E → $4F
+    //   $60..$6F (belt segments) → $2398 path: pick T1B40 or T1B50 by
+    //     bullet.x bit 2, run pilot-check gate, otherwise look up next
+    //     progressively-damaged tile. Pilot-kill path → GameState 6
+    //     stubbed (12.7).
+    //   anything else (including $7X pilot tile direct) → no-op
+    //
+    // The bullet is deactivated on any hit (bit 3 of bullet state cleared
+    // in source; `state.player.bullet.active = false` here).
+    // research_mothership.md §6.
+    shieldBlockCollision() {                        // L2351
+        const bullet = state.player.bullet;
+        if (!bullet.active) return;
+
+        // BG-cell column from bullet X (each tile = 8 px).
+        const col = (bullet.x >> 3) & 0x1F;
+        if (col >= 26) return;
+
+        // BG-cell row at canvas y = bullet.y - 8. Inverse of
+        // drawBackground's `y = (r - 1) * 8 + scrollPixel`.
+        const yCanvas = bullet.y - 8;
+        const r = Math.floor((yCanvas - state.scrollPixel) / 8) + 1;
+        if (r < 1 || r >= 33) return;
+
+        const idx = r * 26 + col;
+        const tile = state.bgTiles[idx];
+
+        // $236C-$2370 — corner-piece dispatch (tiles $4C-$4F). These
+        // are the "yellow" body corner caps. Damaged by decrement; when
+        // a $4C decrements past $4B to 0, the body shrinks upward by
+        // one row, with the cell ABOVE re-tiled to a new corner cap.
+        if ((tile & 0xFC) === 0x4C) {
+            bullet.active = false;                  // $237C AND $F7 / $237E LD (DE),A
+            const dec = (tile - 1) & 0xFF;          // $2385 DEC A
+            if (dec === 0x4B) {                     // $2387 CP $4B
+                // $238A: clear tile + retile the row ABOVE (source's
+                // $238C DEC L = decrement source-RAM L = move one row
+                // UP in canvas. Port's bgTiles row stride is 26).
+                state.bgTiles[idx] = 0;
+                const above = idx - 26;
+                if (above >= 0 && state.bgTiles[above] === 0x5E) {
+                    state.bgTiles[above] = 0x4F;
+                }
+            } else {
+                state.bgTiles[idx] = dec;           // $2386 LD (HL),A
+            }
+            return;
+        }
+
+        // $2373-$2377 — belt dispatch (tiles $60-$6F).
+        if ((tile & 0xF0) === 0x60) {
+            bullet.active = false;                  // $2399 AND $F7 / $239B LD (DE),A
+
+            // $239F-$23A2 — bullet.x bit 2 selects which T1Bxx table /
+            // pilot-check gate. Bit 0 → L2030 path (right-half tile).
+            const rightHalf = (bullet.x & 0x04) !== 0;
+
+            let progTable;
+            let pilotCheckFires;
+            if (rightHalf) {
+                // L2030: AND $03 / CP $01 / DE := T1B50 / JP $23AC.
+                progTable = SHIELD_T1B50;
+                pilotCheckFires = ((tile & 0x03) === 0x01);
+            } else {
+                // Direct $23A5-$23A9: AND $0C / CP $04 / DE := T1B40.
+                progTable = SHIELD_T1B40;
+                pilotCheckFires = ((tile & 0x0C) === 0x04);
+            }
+
+            if (pilotCheckFires) {
+                // $23AC JP Z,$23C0 — pilot-kill branch. Source's
+                // $23C0 DEC L checks the BG tile ONE ROW UP in canvas
+                // (source-RAM L decrement = -1 row). If it's in the
+                // $70..$7F pilot range, set GameState=6 + CounterA5=$60.
+                // Port: pilot kill deferred to step 12.7. Return without
+                // damaging the tile (matches source's $23C6 RET NZ when
+                // pilot isn't actually exposed).
+                // TODO 12.7: if bgTiles[idx - 26] & $F0 == $70 →
+                //   state.gameState = 6; state.counterA5 = 0x60;
+                return;
+            }
+
+            // $23AF-$23B5 — normal damage: tile & $0F indexes the picked
+            // progression table; write the next tile back to BG.
+            const next = progTable[tile & 0x0F];
+            if (next !== 0xFF) {
+                state.bgTiles[idx] = next;
+            }
+            // $23B6-$23B8 vestigial $4366 sound flag write — port omits.
+        }
     },
 
     // L2400 — GameState 6: mothership particle explosion. Triggered by

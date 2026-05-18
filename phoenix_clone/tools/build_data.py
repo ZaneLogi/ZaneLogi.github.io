@@ -185,6 +185,15 @@ RAW_SLICES = [
     # stage init T05C0 ($43B2/$43B3 = $1F/$00) for stage 2 (2nd alien
     # wave) and by T05B4 (mothership waves; deferred to step 11).
     ("STARFIELD_T1F00", 0x1F00, 256),
+    # source T1B40 + T1B50 — 32 bytes of "shield-damage progression" tables
+    # for the mothership conveyor belt. Indexed by `tile & 0x0F`:
+    #   T1B40 (bytes 0..15)  — left-half tile (bullet.x bit 2 == 0)
+    #   T1B50 (bytes 16..31) — right-half tile (bullet.x bit 2 == 1, via L2030)
+    # FF entries are "intercepted by pilot-check branch" — those indices
+    # never fall through to the progression lookup (see research_mothership.md
+    # §6.3 / §6.4). Damage chain (left half): $60 → $6C → $64 (pilot exposed).
+    # Both tables extracted as one slice; split in states_mothership.js.
+    ("SHIELD_PROGRESSION", 0x1B40, 32),
     # source T1D00 — 234 bytes of "Mothership object 26x9 tiles (upside
     # down)" + 22 bytes of FF padding to round up to 256. Comment at
     # Code.md $1D00: "Maybe these are upside down because the mother
