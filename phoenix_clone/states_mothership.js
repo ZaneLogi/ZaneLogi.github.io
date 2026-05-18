@@ -9,6 +9,7 @@
 // (Code.md $22B4 / $22CA / $2000+$24A0 / $2400 / $244C).
 
 import { state } from './state.js';
+import { scoring } from './scoring.js';
 import { SHIELD_PROGRESSION, MOTHERSHIP_ANTENNA_ANIM, STARFIELD_T1C00 } from './data.js';
 
 // Split the 32-byte SHIELD_PROGRESSION extraction into the two source
@@ -430,13 +431,64 @@ export const mothershipMixin = {
             // $2403 JP Z,$2552 — transition to GameState 7.
             return this._gameState6To7();
         }
+        if (a5 === 0x20) {
+            // $240B JP Z,$2520 — bonus score calc + ClearForeground.
+            return this._motherShipBonusScore();
+        }
         if (a5 < 0x20) {
             // $2408 JP C,$246A — erase the mothership progressively.
             return this._eraseMothership();
         }
-        // $20E8 / $2085 particle animation deferred — for the minimum
-        // 12.7 loop-closer, the mothership just sits visible until
-        // CounterA5 drops below $20, then gets erased.
+        // $20E8 / $2085 particle animation deferred (12.9).
+    },
+
+    // $2520 — bonus score calc + ClearForeground at CounterA5 == $20.
+    //
+    // Source flow ($2520-$254D):
+    //   - PUSH DE / CALL ClearForeground / POP DE
+    //   - skillBonus = (CounterB9 + $60) >> 1
+    //   - roundContrib = LR & $F0
+    //   - combined = roundContrib + skillBonus (capped at $90)
+    //   - DAA → BCD
+    //   - Store at $439D ($00), $439E (00)
+    //   - PrintNumber 4 digits at screen pos derived from DE
+    //
+    // Port simplification (12.8):
+    //   - ClearForeground: hide aliens (clear alive + controlA bit 3),
+    //     deactivate bullets, clear fgOverlay. Aliens render directly
+    //     from state.aliens each frame in port (no FG-buffer), so
+    //     "clearing" means marking them invisible.
+    //   - Bonus score: compute combined value, interpret as BCD
+    //     (high nibble × 10 + low nibble), multiply by 100 (the
+    //     two trailing "00" digits), add to player score via
+    //     scoring.addPoints. The popup at the mothership position
+    //     deferred (12.9) — score still increments at the top.
+    // research_mothership.md §9.
+    _motherShipBonusScore() {                       // L2520
+        // ClearForeground equivalent (port).
+        for (const a of state.aliens) {
+            a.alive = false;
+            a.controlA &= ~0x08;
+        }
+        state.player.bullet.active = false;
+        for (const b of state.enemyBullets) b.state = 0;
+        state.fgOverlay.clear();
+
+        // Compute bonus score per $2525-$253C.
+        const skillBonus = (((state.counterB9 + 0x60) & 0xFF) >> 1) & 0xFF;
+        const rawAdd = (state.levelAndRound & 0xF0) + skillBonus;
+        const combined = rawAdd > 0xFF || rawAdd >= 0x90 ? 0x90 : rawAdd;
+        // DAA-equivalent: treat high nibble as tens digit, low nibble
+        // as ones digit (BCD interpretation). For our value range
+        // ($00..$90) the low nibble is rarely in $A-$F (only on
+        // un-normalized binary sums), so this approximates source's
+        // DAA without explicit BCD-correction.
+        const bcdDecimal = ((combined >> 4) * 10) + (combined & 0x0F);
+        const pts = bcdDecimal * 100;     // "$XX 00" 4-digit BCD = XX × 100
+
+        // Credit the active player.
+        const player = state.gameAndDemoOrSplash;
+        scoring.addPoints(pts, player);
     },
 
     // $2552 — transition from GameState 6 to 7.

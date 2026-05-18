@@ -2893,19 +2893,24 @@ export const states = {
     // Debug cheat — K-key kills all live enemies in the current stage to
     // accelerate testing of stage transitions. Detects which kind of
     // combat is active by LR low nibble:
-    //   1, 3, B  → alien combat: clear all alien slots, set AliensLeft=0
+    //   1, 3     → alien combat: clear all alien slots, set AliensLeft=0
     //   5, 7     → bird combat:  clear all bird slots,  set BirdsLeft=0
-    // Other stages (fade-in, spiral, mothership): no-op.
+    //   B        → mothership combat: trigger pilot kill directly
+    //              (GameState=6, CounterA5=$60) — same effect as a
+    //              player bullet hitting the exposed pilot, runs the
+    //              full GameState 6→7→2 explosion+score+next-round path.
+    // Other stages (fade-in, spiral, intro): no-op.
     //
-    // Once the count hits 0, the corresponding stage-clear handler
-    // (stageClearUpdate or stageBirdClear) takes over and drives the
-    // transition to the next stage naturally.
+    // For 1/3/5/7: once the count hits 0, the corresponding stage-clear
+    // handler takes over and drives the transition naturally.
     //
-    // No scoring, no explosions — purely a developer skip. Not
-    // source-faithful; remove or gate behind a debug flag before ship.
+    // No scoring on the alien/bird paths, no explosions — purely a
+    // developer skip. The mothership path uses real GameState 6/7 so
+    // the bonus score IS credited; useful for testing score-popup
+    // and round advance. Remove or gate behind a debug flag before ship.
     cheatKillAll() {
         const stage = state.levelAndRound & 0x0F;
-        if (stage === 0x1 || stage === 0x3 || stage === 0xB) {
+        if (stage === 0x1 || stage === 0x3) {
             // Alien combat — clear all 16 alien slots.
             for (const a of state.aliens) {
                 a.alive = false;
@@ -2917,6 +2922,13 @@ export const states = {
             for (const b of state.birds) b.shape = 0;
             state.birdsLeft = 0;
             state.maturity = 0;
+        } else if (stage === 0xB) {
+            // Mothership combat — trigger pilot kill directly. Mirrors
+            // what shieldBlockCollision's $23C7 branch sets when a real
+            // bullet hits the pilot. state6/7 handlers then run the full
+            // explosion + bonus-score + next-round path.
+            state.gameState = 6;
+            state.counterA5 = 0x60;
         }
         // Other stages: leave alone.
     },
