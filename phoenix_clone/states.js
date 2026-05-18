@@ -41,11 +41,11 @@ import { mothershipMixin } from './states_mothership.js';
 
 // Debug knob — when non-null, the first state-0 transition jumps directly
 // to this LevelAndRound instead of starting at $00 (stage 0, round 1).
-// Set to $05 (stage 5, round 1) for fast iteration on step 11 birds,
-// skipping the ~30 s of alien combat (player can't die yet, so the cost
-// per iteration is otherwise high). Null disables the override.
-// research_bird_stage.md §9.0.
-const DEBUG_START_LEVEL_AND_ROUND = null;
+// Currently $07 (bird stage 7, round 1) for step 12 mothership iteration:
+// one K-press kills the birds, advances LR to 8, lands in the new
+// stage-8 spiral-fill → T1C00 starfield → mothership-area path.
+// Null disables the override.
+const DEBUG_START_LEVEL_AND_ROUND = 0x07;
 
 // L0400 — Code.md:GameStateMachine. JT1 jump table → JS switch
 // (research_code_flow.md §5.1).
@@ -411,10 +411,11 @@ export const states = {
                 break;
             case 0x4:
             case 0x6:
-                this.stageSpiralFill();            // $2230 — bird-stage intro wipe
+            case 0x8:
+                this.stageSpiralFill();            // $2230 — case 8 exits to T1C00 mothership starfield (§2 of research_mothership.md)
                 break;
-            // 0x8 spiral-fill ($2230) → step 12 (gated by stop-gap until mothership)
-            // 0x9 / 0xA mothership fade-ins      → step 12
+            // 0x9 / 0xA mothership fade-ins      → step 12.2 / 12.3
+            // 0xB mothership combat               → step 12.4
         }
     },
 
@@ -831,9 +832,9 @@ export const states = {
     },
 
     // $2230 + $2260 + $2292 — spiral-fill stage handler for JT4
-    // stages 4, 6 (and 8 in step 12). Animates a center-out asterisk
-    // spiral wipe over ~52 frames, then advances LevelAndRound to the
-    // next stage and triggers state-2 init via GameState := 2.
+    // stages 4, 6, 8. Animates a center-out asterisk spiral wipe over
+    // ~52 frames, then advances LevelAndRound to the next stage and
+    // triggers state-2 init via GameState := 2.
     //
     // Source flow (`Code.md:$2230`):
     //   A      = (HL=$439C)            ; A = counter BEFORE increment
@@ -885,30 +886,40 @@ export const states = {
     },
 
     spiralFillExit() {
-        // $2292 — clear spiral, BG-wipe, advance stage, trigger state-2 init.
-        // Source dispatch on LR bit 3:
+        // $2292 — clear spiral, BG-fill, advance stage, trigger state-2 init.
+        // Source dispatch on LR bit 3 (research_mothership.md §2):
         //   bit 3 == 0 (stages 4, 6): JP $22F0 → ClearBackground →
-        //                              CounterB9 = $00
-        //   bit 3 == 1 (stage 8):    fall through to T1C00 star-copy +
-        //                            CounterB9 retained at $71
-        // Port only handles stages 4/6 (stage 8 is gated by stop-gap
-        // until step 12), so the ClearBackground branch always fires:
-        // bgTiles wiped to all zeros = BG snaps to black for the
-        // upcoming bird stage. Without this, leftover stars/planets/
-        // galaxies from the previous alien stage persist into the bird
-        // stage (which doesn't run bgUpdate to refresh them).
+        //                              CounterB9 = $00. Birds appear
+        //                              against solid black BG.
+        //   bit 3 == 1 (stage 8):    fall through to copy T1C00 starfield
+        //                              into BG plane + CounterB9 retained
+        //                              at $71. Mothership intro appears
+        //                              against dense starfield.
         state.fgOverlay.clear();
-        state.bgTiles.fill(0);                // ← $03A0 ClearBackground
+        if ((state.levelAndRound & 0x08) === 0) {
+            // $22F0 — ClearBackground (stages 4, 6 → upcoming bird stage)
+            state.bgTiles.fill(0);
+            state.counterB9 = 0;
+            state.scrollPixel = 0;
+        } else {
+            // $229B — copy T1C00 starfield into BG plane (stage 8 → upcoming
+            // mothership intro). Source's $229B loop walks DE backward from
+            // $4B3F with INC L on HL (= $1Cxx page), reading T1C00 cyclically
+            // and writing to BG memory until D reaches $47 — covering the
+            // full visible BG region $4800-$4B3F (832 bytes) and then some.
+            // Port equivalent: fill all 33 rows × 26 cols (858 bytes) of
+            // bgTiles cyclically from STARFIELD_T1C00 (256 bytes).
+            const tiles = state.bgTiles;
+            for (let i = 0; i < tiles.length; i++) {
+                tiles[i] = STARFIELD_T1C00[i & 0xFF];
+            }
+            // $22E0 tail leaves CounterB9 at $71 (mid-scroll-band position).
+            state.counterB9 = 0x71;
+            state.scrollPixel = (8 - (state.counterB9 & 7)) & 7;
+        }
         state.spiralFillCounter = 0;
         state.levelAndRound = (state.levelAndRound + 1) & 0xFF;
         state.gameState = 2;
-        // $22E0 CounterB9 := $00.
-        state.counterB9 = 0;
-        // Smooth-scroll counter is a port-side companion to counterB9
-        // (per render.drawBackground); reset it too so BG-rendering
-        // restarts cleanly with no half-pixel offset carried over from
-        // the previous stage.
-        state.scrollPixel = 0;
     },
 
     // $2260 — port of the spiral-cell write loop. Given position `cIn`
@@ -996,9 +1007,10 @@ export const states = {
         state.player.shieldCount = 0;
         state.levelAndRound = (state.levelAndRound + 1) & 0xFF;
 
-        // Same stop-gap as stageClearUpdate — keep mothership stages
-        // (8+) wrapping to next round's stage 0 until step 12.
-        if ((state.levelAndRound & 0x0F) >= 8) {
+        // Same stop-gap as stageClearUpdate — narrowed from `>=8` to
+        // `>=9` in step 12.1 now that stage 8 spiral-fill → mothership
+        // starfield is implemented. Remove when 12.2-12.4 land.
+        if ((state.levelAndRound & 0x0F) >= 9) {
             state.levelAndRound = (state.levelAndRound + 0x10) & 0xF0;
         }
 
@@ -2097,13 +2109,13 @@ export const states = {
         state.player.shieldCount = 0;
         state.levelAndRound = (state.levelAndRound + 1) & 0xFF;
 
-        // ⚠ STOP-GAP (narrowed 2026-05-18): stages 8-A (spiral-fill before
-        // mothership, mothership fade-ins) and B (mothership combat) are
-        // step 12 territory. Stages 4-7 (bird spiral + bird combat) now
-        // play through naturally. Without this wrap, LR advancing to 8
-        // would leave state3_Gameplay with no handler → screen "freezes".
-        // Remove this block entirely when step 12 lands.
-        if ((state.levelAndRound & 0x0F) >= 8) {
+        // ⚠ STOP-GAP (narrowed 2026-05-18 step 12.1): stages 9/A/B
+        // (mothership fade-ins + combat) are still step 12.2-12.4 territory.
+        // Stage 8 (spiral-fill into mothership starfield) is now reachable —
+        // it advances LR to 9, then this wrap kicks in to skip past the
+        // unimplemented mothership stages back to next round's stage 0.
+        // Remove this block entirely once 12.2-12.4 land.
+        if ((state.levelAndRound & 0x0F) >= 9) {
             state.levelAndRound = (state.levelAndRound + 0x10) & 0xF0;
         }
 
