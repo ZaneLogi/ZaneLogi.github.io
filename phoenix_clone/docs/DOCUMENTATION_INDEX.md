@@ -20,6 +20,7 @@
 | **research_bird_stage.md** | Bird-combat dispatch ($3400), maturity (M4368), wing hit ($38E9) | §1 $3400 dispatch, §2 $32B0 init + T3F80/T3FC0, §4 maturity, §6 hit detection, §9 sub-step plan | ~400 lines |
 | **research_mothership.md** | JT4 stages 8/9/A/B, GameStates 6/7, shield-block barrier (T1B40), pilot kill, bonus scoring | §2 stage 8 starfield exit, §3 $22B4 lone fade-in, §4 $22CA aliens fade-in, §5 $24A0 combat hook, §6 shield-block $2351/$2398/$23C0, §7 $2400 particle explosion, §8 $244C score display, §11 sub-step 12.0-12.10 plan | ~500 lines |
 | **research_player_ship.md** | Player death cycle: GameState 4 explosion ($0AEA), L0B15 respawn/game-over decision, GameState 5 GAME OVER ($0B60), T1A00 text, L0CB4/L0CC4 hit path, shield port-deviation | §2 $0AEA dispatch, §3 $0B15 decision, §4 $0B60 + T1A00 bytes, §5 $0CB4/L0CC4 + §5.1 shield faithful-vs-visual-effect trade-off, §6 port mapping plan, §7 open reads | ~250 lines |
+| **research_splash_attract.md** | Splash + attract: Counter98 timeline ($0001..$03E6+), L002D entry, PrintCopyright (T1960), SlowPrintScoreAverageTable (T1860), score-icon tiles ($0BCA), bird animation ($21DC), GameDemo + GetPlayerInputsForDemo, CoinChecking + PromptForStartGame | §1 timeline, §2 Counter98 lifecycle, §3 splash phases, §4 GameDemo, §5 demo input table, §6 coin/start path, §7 port-mapping plan | ~500 lines |
 | **Code.md** | 8085 assembly listing, full source truth | Routines at addresses $0000–$3FFF | 8249 lines |
 
 ---
@@ -338,5 +339,5 @@ No guesswork required. Every section maps to an address in `Code.md` and can be 
 ---
 
 **Last updated:** May 19, 2026  
-**Status:** Step 13 (player death + lives + GAME OVER) ✅ done. Player can now die, decrement lives, and reach GAME OVER → fresh restart. Full 5-stage round cycle still plays end-to-end.  
-**Next step:** Step 14 sound (MN6221AA bit-field synthesis — `research_hardware.md §5`). Lower-priority gaps: bonus-life-at-threshold, attract mode, 2-player swap.
+**Status:** Step 14 (splash screen) 🚧 in progress — sub-steps A-E ✅ landed (skeleton + Counter98 dispatch + PrintCopyright + slow-print score table + sprite icons + BG scroll). Sub-steps F-I ⏳ remaining (intro bird animation + splash-loop + CoinChecking/PromptForStartGame + remove state5 lives deviation).  
+**Next step:** 14.F intro bird animation (`$21DC DrawIntroBirdAnimationFrame`). After step 14 closes, step 15 attract-mode demo, then step 16 sound. Lower-priority gaps: bonus-life-at-threshold, 2-player swap, round-difficulty scaling beyond round 2.

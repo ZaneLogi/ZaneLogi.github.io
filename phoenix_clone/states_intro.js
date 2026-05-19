@@ -32,6 +32,8 @@ export const introMixin = {
         if (c98 === 0x0001 || c98 === 0x01B0) this._printCopyright();   // $01E1
         if (c98 >= 0x0002 && c98 <= 0x00FF) this._slowPrintScoreTable(c98); // $0196 (T1860 only)
         if (c98 === 0x0120) this._drawScoreIcons();                        // $0BCA
+        if (c98 === 0x01B8) this.initGlobalLevelData();                    // $0580 — set up stageBlock for BG fill
+        if (c98 >= 0x01C0 && c98 <= 0x049F) this.bgUpdate();               // $0078 → $06F0 (scroll + paint)
 
         // Skeleton bridge — Digit-1 (start) skips the splash and jumps to
         // game mode. 14.H replaces this with the proper $17E0 CoinChecking
