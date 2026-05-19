@@ -37,6 +37,9 @@ export const render = {
         if (this.gridMode !== GRID_OFF) this.drawTileRomOverlay();
         for (const row of state.staticTextRows) gfx.drawObject(row);
         if (state.gameState === 5) gfx.drawObject(state.gameOverRow);   // L0B95 PrintTextLines(T1A00)
+        if (state.gameOrIntro === 0) {                                  // $01E1 PrintCopyright(T1960, 3)
+            for (const row of state.copyrightRows) gfx.drawObject(row);
+        }
         for (const alien of state.aliens) this.drawAlien(alien);
         for (const bird of state.birds) this.drawBird(bird);
         if (state.player.alive) this.drawPlayer();

@@ -42,14 +42,15 @@ MAINCPU_SIZE = 16384
 #
 # Known $01D0 call sites in Code.md (add to TEXT_TABLES as the port grows):
 #     $0017 (cold-init):           T1800, 3 rows  ← extracted here
-#     $01E1 (PrintCopyright):      T1960, 3 rows
+#     $01E1 (PrintCopyright):      T1960, 3 rows  ← extracted here (step 14.B)
 #     $0290 (PromptForStartGame):  T19C0, 2 rows
 #     $02A2 (PromptForStartGame):  T1BA0, 1 row
 #     $06ED:                       T1800, 1 row (reuses first T1800 entry)
 #     $0B95 (GAME OVER banner):    T1A00, 1 row  ← extracted here (step 13.C)
 TEXT_TABLES = [
-    ("STATIC_TEXT_ROWS", 0x1800, 3),     # source label T1800
-    ("GAME_OVER_TEXT",   0x1A00, 1),     # source label T1A00 — state 5 GAME OVER row
+    ("STATIC_TEXT_ROWS",  0x1800, 3),    # source label T1800
+    ("GAME_OVER_TEXT",    0x1A00, 1),    # source label T1A00 — state 5 GAME OVER row
+    ("COPYRIGHT_TEXT",    0x1960, 3),    # source label T1960 — intro PrintCopyright rows
 ]
 
 # Raw byte-array slices from maincpu.bin used by the per-stage init

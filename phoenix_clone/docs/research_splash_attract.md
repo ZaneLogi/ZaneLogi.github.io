@@ -137,11 +137,16 @@ port already understands via `tools/build_data.py`.
 Decoded text content (using the existing port's char map: 00=space,
 01-1A=A-Z, 20-29=digits 0-9, 2A=`.`, 7E=copyright-symbol `©`):
 
-- **T1960** → `4A 30` (screen-RAM dest `$4A30`):
+- **T1960** → `43 3C` (FG-plane dest `$433C` → display row 28, full width):
   `10 08 0F 05 0E 09 18 7E 00 03 0F 10 19 12 09 07 08 14 00 21 29 28 20 00 00 00`
-  → "PHOENIX © COPYRIGHT 1980   " [verified]
-- **T1980** → `4A 31`: "  AMSTAR ELECTRONICS CORP " [verified]
-- **T19A0** → `4A 32`: "  PHOENIX AZ. U.S.A.       " [verified]
+  → "PHOENIX © COPYRIGHT 1980   " [verified — `Code.md:$1960`]
+- **T1980** → `43 3D` (FG dest `$433D` → display row 29): "  AMSTAR ELECTRONICS CORP " [verified]
+- **T19A0** → `43 3E` (FG dest `$433E` → display row 30): "  PHOENIX AZ. U.S.A.       " [verified]
+
+All three rows land in the FG plane at the bottom of the display
+(rows 28-30, y = 224 / 232 / 240). 26 tiles wide — full screen width.
+Existing `tools/build_data.py` `parse_text_table` decodes these
+correctly without modification (same FG-plane format as T1800 / T1A00).
 
 (Exact rendering depends on the `7E` glyph in the FG tile-ROM —
 displayed as a © symbol in the arcade. Verify by visual inspection

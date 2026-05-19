@@ -8,18 +8,27 @@
 
 import { state } from './state.js';
 import { input } from './input.js';
+import { COPYRIGHT_TEXT } from './data.js';
 
 export const introMixin = {
     // L002D + L00E3 entry — called by main.tick() each frame while
-    // state.gameOrIntro === 0. 14.A skeleton: tick Counter98 and bridge
-    // to game mode on start-edge. 14.B+ will fill out the SplashAndDemo
-    // threshold dispatch (PrintCopyright, SlowPrintScoreAverageTable,
-    // DrawScoreAverageTableTiles, DrawIntroBirdAnimationFrame, BG scroll).
+    // state.gameOrIntro === 0. Source L00E3 increments Counter98 then
+    // runs a dispatch chain against threshold values (research_splash_attract.md §1).
+    // 14.B wires the first phase (PrintCopyright at $0001 and $01B0);
+    // 14.C-F will fill in SlowPrintScoreAverageTable, score-icon tiles,
+    // intro bird animation, and BG scroll.
     introFrame() {
         // L00E6 — AddOneToMem on Counter98+1. Source treats $4398:$4399
         // as a 16-bit MSB:LSB counter; AddOneToMem advances the 16-bit
         // value across the byte boundary.
         state.counter98 = (state.counter98 + 1) & 0xFFFF;
+
+        // L00E9-L010C — splash dispatch by Counter98 threshold. Each phase
+        // tested in source-order; multiple can fire per frame (range checks
+        // overlap). Z-checks fire on a single specific frame, NC-checks
+        // fire whenever Counter98 falls within the range.
+        const c98 = state.counter98;
+        if (c98 === 0x0001 || c98 === 0x01B0) this._printCopyright();   // $01E1
 
         // Skeleton bridge — Digit-1 (start) skips the splash and jumps to
         // game mode. 14.H replaces this with the proper $17E0 CoinChecking
@@ -32,6 +41,16 @@ export const introMixin = {
             // at game-over in $0B7F-$0B84). Leave it ticking; once back in
             // intro mode after game-over, state5_GameOver will zero it.
         }
+    },
+
+    // $01E1 PrintCopyright — call ClearForeAndBackground ($0140), then
+    // PrintTextLines(T1960, 3 rows). For 14.B the port only needs to
+    // populate state.copyrightRows; ClearForeAndBackground's broader
+    // effects (FG/BG plane wipe + per-stage counter resets) are no-ops
+    // at this point (nothing else paints intro content yet — landed in
+    // 14.C-F).
+    _printCopyright() {
+        state.copyrightRows = COPYRIGHT_TEXT.map(r => ({ ...r, w: 208, h: 8 }));
     },
 
     // Port-side helper — called by state5_GameOver when game-over completes

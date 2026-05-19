@@ -2,7 +2,7 @@
 // possible (research_code_flow.md §5.3, RAMUse.md). Game-object data lives
 // on the objects themselves (research_rendering.md §4).
 
-import { STATIC_TEXT_ROWS, GAME_OVER_TEXT } from './data.js';
+import { STATIC_TEXT_ROWS, GAME_OVER_TEXT, COPYRIGHT_TEXT } from './data.js';
 
 export const state = {
     init() {
@@ -314,5 +314,12 @@ export const state = {
         // gameState === 5 (per source $0B95 PrintTextLines inside L0B60).
         // Single row (GAME_OVER_TEXT is a 1-element array from build_data.py).
         this.gameOverRow = { ...GAME_OVER_TEXT[0], w: 208, h: 8 };
+
+        // T1960 — three copyright rows painted at the bottom of the screen
+        // by $01E1 PrintCopyright during intro (counter98 == $0001 and
+        // == $01B0 — see states_intro.js). Empty until the first dispatch
+        // fires; populated by introMixin._printCopyright. Drawn by
+        // render.frame() while gameOrIntro === 0.
+        this.copyrightRows = [];
     },
 };
