@@ -516,67 +516,74 @@ clean. [verified — `Code.md:$001D-$0043`, control-flow analysis]
 
 ---
 
-## 7. Port-mapping plan (summary)
+## 7. Port mapping — landed (step 14 ✅)
 
-Implementation rolls out across phases 14.A → 14.F (see `progress.md`
-step 14 row once it's added):
+The forward-looking plan in earlier drafts used `attract.*` helpers;
+the actual port consolidates the work into a single `states_intro.js`
+mixin (`introFrame` plus private helpers) — same shape source uses
+(no separate `attract` module).
 
-| Source                              | Port location (target)                                  |
-|-------------------------------------|---------------------------------------------------------|
-| `GameOrAttract $43A2` default       | `state.gameOrAttract = 0` (currently hardcoded to 1)    |
-| L001D dispatch                      | `main.tick()` — branch on `gameOrAttract`               |
-| Counter98 tick + 16-bit field       | `state.counter98` (16-bit), tick at top of attract path |
-| `L002D` attract entry               | new `attract.frame()` (replaces stub `attractFrame()`)  |
-| `SplashAndDemo $00E3`               | `attract.splashAndDemo()` — threshold dispatch          |
-| `PrintCopyright $01E1`              | reuses existing `staticTextRows` path (T1960 / T1980 / T19A0 via build_data.py) |
-| `SlowPrintScoreAverageTable $0196`  | `attract.slowPrintTable()` — sub-frame state machine    |
-| T1860 row data                      | new `SCORE_TABLE_ROWS` export from `tools/build_data.py`|
-| `DrawScoreAverageTableTiles $0BCA`  | `attract.drawScoreIcons()` — 4 sprite blits via fgOverlay |
-| `DrawIntroBirdAnimationFrame $21DC` | `attract.drawIntroBird()` — T233A frame walk            |
-| T233A bird-frame table              | new export from build_data.py                           |
-| `GameDemo $03B0`                    | `attract.gameDemo()` — input inject + GameStateMachine  |
-| `GetPlayerInputsForDemo $0173`      | `attract.demoInputByte(counter98)` (pure function)      |
-| Input-injection plumbing            | new `input.applyDemoByte(byte)` to override actuals     |
-| `CoinChecking $17E0`                | new `attract.creditCount()` (reads CoinCount)           |
-| `PromptForStartGame $0288`          | new `attract.promptStart()` — handles the start-press  |
-| `GetPlayerLivesFromDip $0350`       | new lives-init helper; **supersedes step 13 deviation** |
-| `DecrementCoins $02CB`              | new `attract.decrementCoins()` (sets gameOrAttract = 1) |
+| Source                              | Port location (landed)                                            |
+|-------------------------------------|-------------------------------------------------------------------|
+| `GameOrAttract $43A2` default       | `state.gameOrIntro = 0` (renamed from `gameOrAttract` in 14.A)    |
+| `L001D` dispatch                    | `main.tick()` — branch on `state.gameOrIntro`                     |
+| Counter98 tick + 16-bit field       | `state.counter98` (16-bit), ticked at top of `introFrame`         |
+| `L002D` attract entry               | `introMixin.introFrame()`                                         |
+| `SplashAndDemo $00E3`               | inside `introFrame` — threshold dispatch on `state.counter98`     |
+| `PrintCopyright $01E1`              | `_printCopyright()` (also clears `scoreTableRows`/`scoreIconSprites`, mirroring `$0140`) |
+| `T1960`                             | `COPYRIGHT_TEXT` export from `tools/build_data.py`                |
+| `SlowPrintScoreAverageTable $0196`  | `_slowPrintScoreTable(counter98)` — sub-frame state machine       |
+| `T1860`                             | `SCORE_TABLE_ROWS` export                                         |
+| `DrawScoreAverageTableTiles $0BCA`  | `_drawScoreIcons()` — 5 sprite groups into `state.scoreIconSprites` (mixed FG/BG planes) |
+| `T0A40` / `T0A48` / `T3C00`         | `SCORE_ICON_T0A40` / `SCORE_ICON_T0A48` / `SCORE_ICON_T3C00`      |
+| `$0078 SlowPrintScrollRegisterUpdate` | reuses step-3 `bgUpdate()` from `$01C0..$049F`                  |
+| `DrawIntroBirdAnimationFrame $21DC` | `_drawIntroBird(counter98)` writing `state.introBird`; render via `render.drawIntroBird()` (layered between BG and FG so it sits behind score text) |
+| `T233A`                             | `INTRO_BIRD_FRAMES` (32-byte extract: 23 documented + 9 code-byte tail; render bounds-check drops the invalid ones, producing the source-faithful "blink") |
+| `DrawBirdObject $34C0`              | `render.drawIntroBird` — reuses `BIRD_T3EC0` / `BIRD_T3E08` / `BIRD_TILE_DATA` from step 11.3; skips `counterB9` scroll offset and the screen-RAM top-clip (fixed canvas position $49EF → (80, 120)) |
+| Splash-loop wrap ($1510)            | `_loopBackToSplashStart()` — zeros Counter98, clears `bgTiles` + `scoreIconSprites` + `introBird`. Placeholder shortcut at $06B0 (bird-end + 1) for step 14; $1510 takes over when step 15 lands `GameDemo` |
+| `CoinChecking $17E0`                | inline coin-edge handler in `introFrame` (no halving — 1c = 1cr)  |
+| `PromptForStartGame $0288`          | `_promptForStartGame()` + `_enterPromptMode()` (clears splash state once on coin 0→1; renders T19C0 prompt instead of splash while `coinCount > 0`) |
+| `T19C0`                             | `PROMPT_TEXT` export                                              |
+| `GetPlayerLivesFromDip $0350`       | hard-coded `state.player1Lives = 3` on start press; DIP modelling still deferred |
+| `DecrementCoins $02CB`              | inline in `_promptForStartGame` start-edge branch                 |
 
-Visible side-effects of step 14 once it lands:
+Visible side-effects now live:
 
-- Cold-start opens in attract mode, not gameplay. (Step-7-era debug
-  shortcuts like `DEBUG_START_LEVEL_AND_ROUND` still work but go via
-  attract → coin → game.)
-- `state5_GameOver` reverts to source-faithful behaviour — sets
-  `GameOrAttract := 0` and zeroes Counter98 at counterA5==$80, instead
-  of the current `player1Lives = 3` workaround.
-- Coin keys (Digit 5) and Start (Digit 1) become functionally
-  meaningful for the first time.
+- Cold-start opens in intro mode, not gameplay.
+- `state5_GameOver` at counterA5 == $80 sets `gameOrIntro = 0` + zeros
+  Counter98 via `_enterIntroMode` (the `player1Lives = 3` direct write
+  was removed in 14.I; 14.H's coin-up path is the lives-init source).
+- Coin (Digit 5) and Start (Digit 1) are functionally meaningful.
 
 ---
 
 ## 8. Open questions / port-time follow-ups
 
-- **T1860 row count + total size**: how many score-table rows? Up to
-  Counter98 LSB `$11F` and MSB up to `$01` means the row pointer at
-  `$43A8` spans `$1860..$197F`-ish. Confirm at port time by dumping
-  `Code.md:$1860-$19xx`.
-- **T233A length + content**: dump the 32 bytes at `Code.md:$233A`
-  to enumerate the bird animation frames.
+Resolved during step 14 (left here as a trail for diff readers):
+
+- ~~T1860 row count + total size~~: 8 rows × 32 bytes = $1860..$195F.
+- ~~T233A length + content~~: 32-byte extract; first 23 bytes are
+  documented bird-shape values, trailing 9 bytes are code at
+  `$2351-$2359` that land as invalid shape indices for high LSBs
+  (`render.drawIntroBird` bounds-check skips those → bird "blinks").
+- ~~`$06F0` reuse from intro path~~: works as-is; intro `bgUpdate`
+  dispatch in counter98 `$01C0..$049F` calls it without state-3 guards.
+- ~~Sprite tile data for `T0A40`, `T0A48`, `T3C00`~~: extracted as
+  `SCORE_ICON_T0A40` / `_T0A48` / `_T3C00` (column-major arrays).
+
+Still open (step 15 territory or beyond):
+
 - **`L03E2` / `L03EB` (demo level swaps)**: what specifically do they
   change (LevelAndRound, gameState reset)? Read at port time —
   matters only for matching exact demo behaviour, not for any
   visible attract feature.
 - **Counter98 `$1510` upper limit**: confirm the wrap / demo-end path.
-- **`$06F0 L06F0` (called from `SlowPrintScrollRegisterUpdate`)**:
-  already partially ported as `bgUpdate` (step 3). Confirm it can be
-  reused from the attract path verbatim or if it has state-3-specific
-  guards to bypass.
+  Port currently uses a `$06B0` placeholder shortcut (bird-end + 1)
+  to wrap the cycle while GameDemo is unported; step 15 removes that
+  line and `$1510` becomes the active trigger.
 - **`DSW0 $7800` modelling**: source reads it for coinage (`$17E3`)
-  and bonus-life threshold (`$0163`). Port has no DIP model. For
-  step 14 we can default to "1 coin = 1 credit" (DSW0 bit 4 clear)
-  and `BonusLivesAt = $30` per existing step-13 plan; a real DIP
-  modelling layer is a separate concern.
-- **Sprite tile data for `T0A40`, `T0A48`, `T3C00`** (used by
-  `DrawScoreAverageTableTiles`): identify the bytes and add to
-  `tools/build_data.py` extraction.
+  and bonus-life threshold (`$0163`). Port has no DIP model. Step 14
+  defaulted to "1 coin = 1 credit" (DSW0 bit 4 clear) and lives = 3.
+  A real DIP modelling layer is a separate concern; would touch
+  `$0350 GetPlayerLivesFromDip` so the hard-coded `player1Lives = 3`
+  in `_promptForStartGame` can be removed.

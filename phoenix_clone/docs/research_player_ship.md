@@ -174,14 +174,27 @@ explosion in the port (step 12.9 — see `progress.md` step 12 row).
 ### 2.3 `ClearForeground` checkpoint — `$0380`
 
 At exactly `CounterA5 == $20`, `L0AEA` jumps to `ClearForeground`
-($0380) instead of drawing. This wipes the FG plane (where the player
-sprite + bullets + score live) once, mid-explosion. After this single
-frame, the late phase takes over. [verified — `Code.md:$0AEA:$0B0A`]
+($0380) instead of drawing. This wipes the FG plane — everything
+that paints there: player sprite, player + enemy bullets, alien
+formation tiles, bird sprites, in-flight explosions, particle
+overlay. After this single frame, the late phase takes over.
+[verified — `Code.md:$0AEA:$0B0A`]
 
-In the canvas port, FG is redrawn every frame from `state` anyway —
-the equivalent action is to clear `state.player.alive = false` so the
-ship stops drawing for the late phase. The `playerBullet` should also
-be deactivated.
+In the canvas port, FG is redrawn every frame from `state` —
+`state4_PlayerExplosion` mirrors the wipe at `a5 === 0x20` by
+clearing each field that contributes to FG-plane rendering:
+
+- `state.fgOverlay.clear()` — particle overlay accumulated by
+  `_drawPlayerParticleFrame`
+- `state.aliens[*]`: `controlA &= ~0x08` + `alive = false`
+- `state.birds[*]`: `shape = 0`
+- `state.enemyBullets[*]`: `state &= ~0x08`
+- `state.player.bullet.active = false`
+- `state.explosions[*]` + `state.bonusExplosions[*]`: `counter = 0`
+
+Source-faithful effect: by the time state 5 GAME OVER fires (32 frames
+later, when `CounterA5` ticks from $20 → 0), the FG plane has been
+clean for half a second — banner sits on a clear screen.
 
 ### 2.4 Late phase — `L0BA0`
 
@@ -270,6 +283,26 @@ the player waits through state 0 (game-start init, 1 frame) → state 1
 3 (gameplay). Total: ~130 frames (~2.2 s) between explosion-end and
 regained control. [verified — `research_code_flow.md §3`]
 
+**State-2 init wipes leftover combat state** — both source and port
+take this path on respawn (not just on new-stage entry). Two clears
+matter for respawn correctness:
+
+- `$0547 InitPlayerDataStructure` copies T0560 (32 bytes) into
+  `$43C0..$43DF`. Bytes 12..31 cover the 5 enemy-bullet slots
+  (`$43CC..$43DF`); the T0560 template has every State byte = 0, so
+  the copy deactivates them. Port `initPlayerDataStructure` now mirrors
+  this with `for (const b of state.enemyBullets) b.state = 0;`.
+  Without this, bullets that were close to the ship at the moment of
+  death stay in flight and re-kill the respawning ship.
+- `$0532 L0532` head: `ClearBbytesAtHL $4B50, $A0` wipes all 16 alien
+  slots' data ($4B50-$4BEF). The per-slot writes ($05EC / $0650 /
+  $0610) only touch slots `0..aliensLeft-1`, so slots beyond that
+  range stay zero. Port `initAlienData` now pre-clears all 16 slots
+  before the formation writes. Without this, an alien left swooping
+  in slot N ≥ `aliensLeft` keeps its bit-3-alive `controlA` and swoop
+  `alienMovePtr` and continues the swoop from its (untouched)
+  pre-death position.
+
 **Two zero-checks** — one pre-decrement (handles the impossible-in-game
 case of state-4 being entered with lives already 0, defensive) and one
 post-decrement (the actual "you died with your last life" case). Both
@@ -320,6 +353,33 @@ reset to 0 (drops back into attract mode). Otherwise control returns
 to the caller leaving GameState=0; the next frame state 0 runs and
 the surviving player takes the next turn. (2P mode handles the swap
 via `CopyMemoryBank` paths not covered here — port has only 1P.)
+
+**Cross-cutting reset for the next game** — source's $0140
+ClearForeAndBackground (called by attract-mode PrintCopyright at
+counter98 $0001/$01B0 and by PromptForStartGame at coin-up) includes
+a $0154 chunk that zeroes 8 bytes at $43B8 onwards (LevelAndRound,
+CounterB9, AliensLeft, BirdsLeft, …) and re-seeds AliensLeft to $10.
+By the time the player coins up and presses start, that reset has
+already fired, so the next game always opens on stage 0 (alien wave
+1 fade-in) with 16 aliens. Port mirrors the chunk inside
+`_enterIntroMode` (`states_intro.js`) — without it, post-game-over
+coin+start would resume on the death-stage with the death-time alien
+count, leaving the player facing a depleted formation (possibly
+mid-mothership or mid-bird wave).
+
+**Score reset + hi-score capture at start-press** — source's start-press
+chain inside PromptForStartGame is `$02B0 UpdateHiScore → $02B3
+ClearAndPrintScores`. UpdateHiScore reads Score1/Score2 and bumps
+HiScore ($438B-$438D) if either exceeds it, then ClearAndPrintScores
+zeroes the player scores and repaints. Port's `_promptForStartGame`
+start-edge mirrors this order: `scoring.updateHiScore()` first
+(capture peak), then zero `state.score1`/`state.score2` and repaint
+via `scoring.printNumber`. UpdateHiScore also repaints the 6 HI-SCORE
+digits at `staticTextRows[1].tiles[10..15]` (= source $4141), so the
+header column stays in sync with `state.hiScore` across the cycle.
+Without the UpdateHiScore call the HI-SCORE column would show
+"000000" forever; without the score-zero step the previous game's
+final score would carry forward.
 
 ### 4.1 T1A00 text-table bytes
 
@@ -436,7 +496,7 @@ tile grid and is disproportionate work for one collision case.
 | `L20E8` particle blit | reuse existing T1B90 / 4×4 particle path from step 12.9   |
 | `L2070` serpentine    | **skipped** — see §2.5 port deviation                     |
 | `L0BA0` late phase    | inside `state4_PlayerExplosion`                           |
-| `ClearForeground`     | `state.player.alive = false` (+ deactivate bullet)        |
+| `ClearForeground`     | state-4 `a5==$20` branch: clear `fgOverlay`, all alien `controlA & 0x08`, bird `shape`, `enemyBullets[*].state & 0x08`, `player.bullet.active`, explosion + bonusExplosion counters — see §2.3 |
 | `L0B15` decision      | inside `state4_PlayerExplosion`, at CounterA5==0          |
 | `UpdateLivesScreen`   | `scoring.updateLivesScreen()` — **landed in step 13.A**   |
 | `L0B60` state 5       | `states.js:state5_GameOver` (replaces stub)               |

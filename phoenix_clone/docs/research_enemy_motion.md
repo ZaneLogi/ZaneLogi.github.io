@@ -790,6 +790,16 @@ all of the above. Quick reference, by data table:
 
 [verified, `Code.md:$05EC-$066F`, `$1500-$153F`]
 
+**Pre-clear step (`L0532` head)** — `ClearBbytesAtHL $4B50, $A0`
+zeroes 160 bytes covering all 16 alien slots' data + move-ptrs before
+the per-slot writes above. This matters because the per-slot routines
+loop `AliensLeft` times from slot 0 — slots `AliensLeft..15` are
+intentionally left at zero so dead aliens don't accidentally retain
+`controlA & 0x08` and a stale `alienMovePtr` from before. Port
+`initAlienData` mirrors the pre-clear (without it, an alien swooping
+in a high slot when the player dies would keep its swoop pattern and
+continue from its newly-reset formation position after respawn).
+
 Plus the global path-reset seed:
 
 | Source addr | Init routine | Field         | Stage 1 value |

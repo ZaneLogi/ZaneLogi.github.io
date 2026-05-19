@@ -45,7 +45,7 @@ Sibling docs:
 Steps 1-14 are ✅ done. Step 15 will add the attract-mode demo
 (remove the `$06B0` placeholder shortcut in `introFrame` and port
 `$03B0 GameDemo` + `$0173 GetPlayerInputsForDemo`), then step 16
-sound, then the smaller residual gaps below. Status as of 2026-05-19.
+sound, then the smaller residual gaps below. Status as of 2026-05-20.
 
 ### Cross-cutting (affects all stages)
 
@@ -55,14 +55,31 @@ sound, then the smaller residual gaps below. Status as of 2026-05-19.
   death + lives + game over otherwise complete (step 13).
 
 - **Attract-mode demo (`$03B0 GameDemo` + `$0173 GetPlayerInputsForDemo`)**
-  — splash visuals + coin-up are step 14 (in progress). The demo gameplay
-  that source runs once counter98 ≥ $03E6 is a separate milestone (step
-  15) per `research_splash_attract.md §4-§5`.
+  — splash visuals + coin-up landed in step 14. The scripted gameplay
+  that source runs once counter98 ≥ $03E6 is step 15, per
+  `research_splash_attract.md §4-§5`. While that's pending, `introFrame`
+  short-circuits at counter98 == $06B0 (bird-end + 1) to wrap back to
+  $0001 instead of freezing during the would-be demo window; one-line
+  removal closes the shortcut when step 15 lands.
 
 - **Sound (entire MN6221AA bit-field synthesis)** — `research_hardware.md §5`
   documents the chip; nothing connected. Hit flags (`$4366`,
   `$4364`) are set by various paths but no audio system reads them.
   Sequenced as step 16 (after splash + attract demo).
+
+- **Player-shield visual (`DrawShields $0AA0`)** — the shield gate is
+  wired (barrier edge → `state.player.shieldCount = 0xFF`, decrements
+  per frame, `onPlayerHit` returns when non-zero) so the player CAN
+  shield and survive. But source's `DrawShields $0AA0` overlay (a
+  bubble drawn around the ship while active) is not ported — see the
+  `// DrawShields visual deferred` block in `states.js:playerUpdate`.
+  Player gets no on-screen feedback that the shield is active. Reading
+  `$0AA0` would also resolve the open "can the player move while
+  shielded" question — source's `MovePlayer $08C4` routes through
+  `$0AA0` when shield is active (PlayerState bit-3 cleared), so
+  whether `$0AA0` re-runs `L0900` movement determines that. Port
+  currently keeps `L0900` unconditional, which matches arcade
+  behaviour but isn't formally verified.
 
 - **2-player mode.** Only P1 is the active player; P2's score row is
   drawn but inert. `state.gameAndDemoOrSplash` flag exists but no
@@ -125,13 +142,6 @@ sound, then the smaller residual gaps below. Status as of 2026-05-19.
   fgOverlay digit tiles (12.10 piece C). Source uses PrintNumber to
   FG screen-RAM at exact source position; port places at a fixed
   mothership-center position. Functionally equivalent.
-
-- **Game-over → new-game uses direct lives reset (no attract).** Source
-  drops into attract mode on game over (`Counter98 := 0` at `$0B7F`),
-  and the eventual coin-up reads DIP for fresh lives via `$0350`. Port
-  has no attract loop (gap above), so `state5_GameOver` at CounterA5
-  == $80 sets `state.player1Lives = 3` directly before returning to
-  state 0. Removed when attract / DIP-stub model lands.
 
 ### Vestigial source flags (no readers, port skips)
 
