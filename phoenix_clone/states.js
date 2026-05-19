@@ -47,6 +47,7 @@ const PARTICLE_T1B60 = 0;    // frame 0 — densest cloud
 const PARTICLE_T1B70 = 16;   // frame 1 — medium
 const PARTICLE_T1B80 = 32;   // frame 2 — sparse
 import { mothershipMixin } from './states_mothership.js';
+import { introMixin }      from './states_intro.js';
 
 // Debug knob — when non-null, the first state-0 transition jumps directly
 // to this LevelAndRound instead of starting at $00 (stage 0, round 1).
@@ -135,6 +136,9 @@ export const states = {
     // states_mothership.js. Spread first so any same-name method defined
     // explicitly below this point wins (left-to-right spread semantics).
     ...mothershipMixin,
+    // L002D attract path (splash + demo) lives in states_intro.js — port-side
+    // umbrella name for what source calls "Attract mode". Step 14.
+    ...introMixin,
 
     dispatch() {
         switch (state.gameState) {
@@ -2995,19 +2999,16 @@ export const states = {
     // L0B60 — GAME OVER banner state. CounterA5 enters at 0 (carried
     // from L0AEA's final tick) and increments UP each frame.
     //   == $40 → ClearBackground (one-shot wipe of the BG plane)
-    //   == $80 → GameState := 0 + lives refresh (see port deviation below)
+    //   == $80 → drop back into intro mode + reset Counter98 (mirrors
+    //            source $0B7F-$0B84). The lives-reset workaround below is
+    //            still needed until 14.H ports PromptForStartGame +
+    //            GetPlayerLivesFromDip — at that point lives reset moves
+    //            to coin-up handling and is removed from here.
     //   else   → repaint the GAME OVER banner row (port: nothing to do
     //            since render.frame draws state.gameOverRow each tick
     //            while gameState === 5).
     // Banner is drawn between entry and $80 (~2.1 s).
-    //
-    // Source's $0B7F-$0B84 zeros Counter98 (= drop into attract mode)
-    // when both P1 and P2 lives are 0. The port has no attract loop
-    // (state.gameOrAttract hardcoded to 1, per progress.md cross-cutting
-    // gaps), so we instead refresh P1Lives to the DIP-stub value here
-    // — letting state-0 → state-1 → state-2 → state-3 restart a fresh
-    // 3-life game. Two-player swap-bank path at $0B7E is also a no-op
-    // in this 1P-only port (P2Lives always 0).
+    // Two-player swap-bank path at $0B7E is a no-op in this 1P-only port.
     state5_GameOver() {
         state.counterA5 = (state.counterA5 + 1) & 0xFF;
         const a5 = state.counterA5;
@@ -3017,18 +3018,17 @@ export const states = {
             return;
         }
         if (a5 === 0x80) {
-            state.gameState    = 0;
-            state.player1Lives = 3;             // port deviation — see header
-            state.fgOverlay.clear();            // wipe any banner residue
+            state.gameState = 0;                // $0B77 — GameState := 0
+            this._enterIntroMode();             // $0B7F-$0B87 + port-side game-object clears
         }
         // a5 in (0,$40) ∪ ($40,$80): render.frame() repaints gameOverRow.
     },
     // state6_MothershipExplosion / state7_MothershipScore moved to
     // states_mothership.js (12.0) — spread into `states` via
     // `...mothershipMixin` above.
-
-    // L002D — SplashAndDemo path; stub for skeleton (gameOrAttract forced to 1).
-    attractFrame() {},
+    //
+    // introFrame (L002D attract path) moved to states_intro.js (14.A) —
+    // spread into `states` via `...introMixin` above.
 
     // Debug cheat — K-key kills all live enemies in the current stage to
     // accelerate testing of stage transitions. Detects which kind of

@@ -37,8 +37,8 @@ const game = {
         if (input.killAllEdge()) states.cheatKillAll();
         state.counter9a = (state.counter9a + 1) & 0xFFFF;
 
-        if (state.gameOrAttract === 0) {
-            states.attractFrame();
+        if (state.gameOrIntro === 0) {
+            states.introFrame();
         } else {
             states.dispatch();
             scoring.update();        // L2700 UpdateScoresAndSound

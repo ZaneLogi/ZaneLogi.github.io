@@ -7,11 +7,12 @@ import { STATIC_TEXT_ROWS, GAME_OVER_TEXT } from './data.js';
 export const state = {
     init() {
         // RAM-labeled fields ($43xx region)
-        this.gameOrAttract        = 1;  // $43A2 — 0=attract, 1=game; force game for skeleton
+        this.gameOrIntro          = 0;  // $43A2 — 0=intro (splash + attract demo), 1=P1 game, 2=P2 game; source label "GameOrAttract"
         this.gameAndDemoOrSplash  = 0;  // $43A3 — 0=P1, 1=P2 (selects active score row in state 1)
         this.gameState            = 0;  // $43A4 — 8-state machine
         this.counterA5            = 0;  // $43A5 — state-1 frame countdown
         this.counter9a            = 0;  // $439A — free-running frame counter
+        this.counter98            = 0;  // $4398:$4399 — 16-bit free-running splash/attract-mode counter
         this.levelAndRound        = 0;  // $43B8 — low nibble = JT4 stage index
 
         // Source `$0350 GetPlayerLivesFromDip` reads DSW0 and picks one
