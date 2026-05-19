@@ -19,6 +19,7 @@
 | **research_rendering.md** | Sprite decoding, tile rendering, collision | §1 rendering model, §2 tile decode, §6 AABB collision | 794 lines |
 | **research_bird_stage.md** | Bird-combat dispatch ($3400), maturity (M4368), wing hit ($38E9) | §1 $3400 dispatch, §2 $32B0 init + T3F80/T3FC0, §4 maturity, §6 hit detection, §9 sub-step plan | ~400 lines |
 | **research_mothership.md** | JT4 stages 8/9/A/B, GameStates 6/7, shield-block barrier (T1B40), pilot kill, bonus scoring | §2 stage 8 starfield exit, §3 $22B4 lone fade-in, §4 $22CA aliens fade-in, §5 $24A0 combat hook, §6 shield-block $2351/$2398/$23C0, §7 $2400 particle explosion, §8 $244C score display, §11 sub-step 12.0-12.10 plan | ~500 lines |
+| **research_player_ship.md** | Player death cycle: GameState 4 explosion ($0AEA), L0B15 respawn/game-over decision, GameState 5 GAME OVER ($0B60), T1A00 text, L0CB4/L0CC4 hit path, shield port-deviation | §2 $0AEA dispatch, §3 $0B15 decision, §4 $0B60 + T1A00 bytes, §5 $0CB4/L0CC4 + §5.1 shield faithful-vs-visual-effect trade-off, §6 port mapping plan, §7 open reads | ~250 lines |
 | **Code.md** | 8085 assembly listing, full source truth | Routines at addresses $0000–$3FFF | 8249 lines |
 
 ---

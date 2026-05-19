@@ -47,10 +47,28 @@ function addPoints(pts, player) {
     printNumber(player);
 }
 
+// L0367 UpdateLivesScreen. Source writes a single character tile at
+// $42A2 (P1) and $4062 (P2) where tile = lives | $20 (so lives=3 → tile
+// $23 = digit "3"). The pre-shifted ship icon ($7F) is laid down once
+// by T1800 row 2 at the adjacent cell and never overwritten.
+//
+// Port cell mapping (display_col = 25 - source_col, row stays):
+//   source $42A2 (col 21, row 2) → STATIC_TEXT_ROWS[2].tiles[4]   (P1)
+//   source $4062 (col  3, row 2) → STATIC_TEXT_ROWS[2].tiles[22]  (P2)
+// Adjacent $7F ship icons already live at tiles[3] / tiles[21].
+function updateLivesScreen() {
+    const tiles = state.staticTextRows[LIVES_ROW].tiles;
+    tiles[LIVES_COL_P1] = 0x20 | (state.player1Lives & 0x0F);
+    tiles[LIVES_COL_P2] = 0x20 | (state.player2Lives & 0x0F);
+}
+const LIVES_ROW    = 2;     // staticTextRows[2] = T1800 row 3 (y=16)
+const LIVES_COL_P1 = 4;
+const LIVES_COL_P2 = 22;
+
 // L2700 UpdateScoresAndSound. Drains the per-enemy score-pending buffer at
 // $4370-$437F into Score1/Score2, then UpdateSoundControlHW + UpdateSounds.
 // Buffer model and sound deferred per research_hardware.md §5.
 function update() {
 }
 
-export const scoring = { printNumber, eraseDigits, addPoints, update };
+export const scoring = { printNumber, eraseDigits, addPoints, updateLivesScreen, update };

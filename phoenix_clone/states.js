@@ -142,9 +142,14 @@ export const states = {
     },
 
     // L0430 — one-shot seed; arms CounterA5 and routes to state 1.
+    // Source path also runs L0350 GetPlayerLivesFromDip → L0367 UpdateLivesScreen
+    // here (the DIP read is stubbed in the port — state.player1Lives is
+    // hardcoded; see state.js). We still need the L0367 call to paint the
+    // initial lives count over the T1800 row-2 placeholder $20 tiles.
     state0_NewGameInit() {
         state.counterA5 = 0x80;       // 128-frame countdown (research_code_flow.md §5.5)
         state.gameState = 1;
+        scoring.updateLivesScreen();  // L0367 — paint $42A2 (P1) / $4062 (P2)
 
         // Debug-start override (research_bird_stage.md §9.0). Lands at the
         // chosen stage without going through alien waves. Mirrors what

@@ -14,8 +14,10 @@ export const state = {
         this.counter9a            = 0;  // $439A — free-running frame counter
         this.levelAndRound        = 0;  // $43B8 — low nibble = JT4 stage index
 
+        // Source `$0350 GetPlayerLivesFromDip` reads DSW0 and picks one
+        // of 3/4/5/6 lives. Port hardcodes 3 until DIP modeling lands.
         this.player1Lives = 3;          // $4390
-        this.player2Lives = 0;          // $4391
+        this.player2Lives = 0;          // $4391  (1P mode; P2 stays 0)
 
         // $4383-$4385 / $4387-$4389 — 3-byte packed BCD (low, mid, high).
         // Each byte holds two digits; PrintNumber ($00C4) draws low-nibble
