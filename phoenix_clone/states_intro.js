@@ -21,6 +21,16 @@ export const introMixin = {
     // 14.C-F will fill in SlowPrintScoreAverageTable, score-icon tiles,
     // intro bird animation, and BG scroll.
     introFrame() {
+        // Source main loop ($0039-$0043): when CoinChecking returns > 0
+        // credits, the main loop dispatches PromptForStartGame ($0288)
+        // INSTEAD OF SplashAndDemo ($00E3). Counter98 doesn't tick during
+        // prompt — splash freezes at whatever counter98 was when the coin
+        // came in. Match that here with a top-level branch on coinCount.
+        if (state.coinCount > 0) {
+            this._promptForStartGame();
+            return;
+        }
+
         // L00E6 — AddOneToMem on Counter98+1. Source treats $4398:$4399
         // as a 16-bit MSB:LSB counter; AddOneToMem advances the 16-bit
         // value across the byte boundary.
@@ -48,23 +58,45 @@ export const introMixin = {
         if (c98 === 0x06B0) this._loopBackToSplashStart();
         if (c98 === 0x1510) this._loopBackToSplashStart();  // source-faithful trigger; reached only after step 15 removes the $06B0 shortcut
 
-        // 14.H — 1-player coin + start path (simplified from source's
-        // $17E0 CoinChecking + $0288 PromptForStartGame). No DIP/coinage
-        // halving, no 2P-start prompt, no "PUSH" text rows. Digit-5
-        // increments coinCount (cap 99); Digit-1 starts only when at
-        // least one coin is credited (decrements then sets gameOrIntro=1).
-        // Counter98 is NOT reset on coin-up in source either (it's only
-        // zeroed at game-over $0B7F-$0B84); leave it ticking.
+        // 14.H — coin input is handled here only when STILL in splash
+        // mode (coinCount == 0). The 0→1 transition switches us into
+        // prompt mode for subsequent frames (top of introFrame branches
+        // to _promptForStartGame). Start input is meaningless here
+        // (coinCount == 0 means no credit), so no start handling.
+        if (input.coinEdge()) {
+            state.coinCount = 1;
+            scoring.updateCoinScreen();
+            this._enterPromptMode();
+        }
+    },
+
+    // $0288 PromptForStartGame (simplified for 1P-only). Dispatched from
+    // introFrame each frame while state.coinCount > 0. Polls coin (more
+    // credit) and start (decrement + boot game) edges; no per-frame
+    // ClearForeAndBackground since _enterPromptMode already cleared on
+    // the coinCount 0→1 transition.
+    _promptForStartGame() {
         if (input.coinEdge()) {
             state.coinCount = Math.min(state.coinCount + 1, 99);
             scoring.updateCoinScreen();
         }
-        if (input.startEdge() && state.coinCount > 0) {
+        if (input.startEdge()) {
             state.coinCount -= 1;
             scoring.updateCoinScreen();
             state.player1Lives = 3;          // port: hard-coded lives until $0350 DIP-read lands
             state.gameOrIntro  = 1;
         }
+    },
+
+    // Source $0288 entry → $0140 ClearForeAndBackground + PrintTextLines
+    // (T19C0). Port equivalent: wipe the splash visual state (bird,
+    // score-table tiles, sprite icons, bgTiles). promptRows stays
+    // populated from state.init (rendered once we enter prompt mode).
+    _enterPromptMode() {
+        for (const row of state.scoreTableRows) row.tiles.fill(0);
+        state.scoreIconSprites.length = 0;
+        state.bgTiles.fill(0);
+        state.introBird.shape = 0;
     },
 
     // $01E1 PrintCopyright — call ClearForeAndBackground ($0140), then
@@ -193,6 +225,15 @@ export const introMixin = {
         // next cycle; clear here so it doesn't draw at counter98 in
         // [$0000, $02FF].
         state.introBird.shape = 0;
+        // Clear BG plane so the prompt screen (if coinCount > 0 after
+        // game-over) doesn't show the previous game's starfield/planets
+        // behind the T19C0 rows. In splash mode bgUpdate ($01C0..$049F)
+        // repopulates the BG; in prompt mode it stays black.
+        state.bgTiles.fill(0);
+        // Safety net: repaint the COIN nn tiles so the header always
+        // matches state.coinCount on intro entry (covers direct state
+        // mutation paths that bypass the coin/start input handlers).
+        scoring.updateCoinScreen();
     },
 };
 

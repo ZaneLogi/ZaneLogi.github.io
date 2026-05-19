@@ -33,12 +33,16 @@ export const render = {
     frame() {
         gfx.clear();
         this.drawBackground();
-        if (state.gameOrIntro === 0) this.drawIntroBird();              // $21DC bird (BG plane — behind FG text)
+        const intro = (state.gameOrIntro === 0);
+        const prompt = intro && state.coinCount > 0;
+        if (intro && !prompt) this.drawIntroBird();                     // $21DC bird (BG plane — behind FG text); not in prompt mode
         if (this.gridLinesOn) this.drawDebugGrid();
         if (this.gridMode !== GRID_OFF) this.drawTileRomOverlay();
         for (const row of state.staticTextRows) gfx.drawObject(row);
         if (state.gameState === 5) gfx.drawObject(state.gameOverRow);   // L0B95 PrintTextLines(T1A00)
-        if (state.gameOrIntro === 0) {                                  // $01E1 PrintCopyright(T1960, 3)
+        if (prompt) {                                                   // $0288 PromptForStartGame — T19C0 rows
+            for (const row of state.promptRows) gfx.drawObject(row);
+        } else if (intro) {                                             // $01E1 PrintCopyright(T1960, 3) + splash content
             for (const row of state.copyrightRows)  gfx.drawObject(row);
             for (const row of state.scoreTableRows) gfx.drawObject(row);  // $0196 slow-print
             this.drawScoreIcons();                                        // $0BCA sprite icons

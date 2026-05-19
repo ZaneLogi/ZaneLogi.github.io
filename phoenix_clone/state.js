@@ -2,7 +2,7 @@
 // possible (research_code_flow.md §5.3, RAMUse.md). Game-object data lives
 // on the objects themselves (research_rendering.md §4).
 
-import { STATIC_TEXT_ROWS, GAME_OVER_TEXT, COPYRIGHT_TEXT, SCORE_TABLE_ROWS } from './data.js';
+import { STATIC_TEXT_ROWS, GAME_OVER_TEXT, COPYRIGHT_TEXT, SCORE_TABLE_ROWS, PROMPT_TEXT } from './data.js';
 
 export const state = {
     init() {
@@ -345,6 +345,13 @@ export const state = {
         // since source draws from both FG and BG tile sets. Populated by
         // introMixin._drawScoreIcons; cleared by _enterIntroMode.
         this.scoreIconSprites = [];
+
+        // T19C0 — "PUSH" + "ONLY 1PLAYER BUTTON" prompt (step 14.H).
+        // Drawn by render.frame when gameOrIntro==0 && coinCount>0 (mirror
+        // of source's main-loop branch at $0040 calling PromptForStartGame
+        // instead of SplashAndDemo when CoinChecking returns > 0). Static
+        // — no slow-print; both rows appear together once a coin is in.
+        this.promptRows = PROMPT_TEXT.map(r => ({ ...r, w: 208, h: 8 }));
 
         // Intro splash bird — source $4B70..$4B73 mirror, populated by
         // $21DC DrawIntroBirdAnimationFrame each frame in counter98

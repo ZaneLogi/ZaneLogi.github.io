@@ -52,6 +52,7 @@ TEXT_TABLES = [
     ("GAME_OVER_TEXT",    0x1A00, 1),    # source label T1A00 — state 5 GAME OVER row
     ("COPYRIGHT_TEXT",    0x1960, 3),    # source label T1960 — intro PrintCopyright rows
     ("SCORE_TABLE_ROWS",  0x1860, 8),    # source label T1860 — intro SlowPrint rows (INSERT COIN / scoring table)
+    ("PROMPT_TEXT",       0x19C0, 2),    # source label T19C0 — "PUSH" + "ONLY 1PLAYER BUTTON" (step 14.H prompt). T1BA0 ("1 OR 2PLAYERS BUTTON") skipped — port is 1P-only.
 ]
 
 # Raw byte-array slices from maincpu.bin used by the per-stage init
