@@ -65,10 +65,25 @@ const LIVES_ROW    = 2;     // staticTextRows[2] = T1800 row 3 (y=16)
 const LIVES_COL_P1 = 4;
 const LIVES_COL_P2 = 22;
 
+// 14.H — repaint the "COIN nn" digits in the T1800 row-2 baseline. The
+// "COIN" label is hardcoded at tiles[10..13]; tiles[14]/[15] are the
+// two-digit count (tens / ones), tile = digit | $20. Source equivalent
+// is CoinDisplayUpdate inside $0080 WaitVBlankCoin (writes screen RAM
+// at the COIN cells each frame); port repaints on coin/start edges.
+function updateCoinScreen() {
+    const tiles = state.staticTextRows[COIN_ROW].tiles;
+    const c = state.coinCount & 0xFF;
+    tiles[COIN_COL_TENS] = 0x20 | (Math.floor(c / 10) % 10);
+    tiles[COIN_COL_ONES] = 0x20 | (c % 10);
+}
+const COIN_ROW       = 2;
+const COIN_COL_TENS  = 14;
+const COIN_COL_ONES  = 15;
+
 // L2700 UpdateScoresAndSound. Drains the per-enemy score-pending buffer at
 // $4370-$437F into Score1/Score2, then UpdateSoundControlHW + UpdateSounds.
 // Buffer model and sound deferred per research_hardware.md §5.
 function update() {
 }
 
-export const scoring = { printNumber, eraseDigits, addPoints, updateLivesScreen, update };
+export const scoring = { printNumber, eraseDigits, addPoints, updateLivesScreen, updateCoinScreen, update };

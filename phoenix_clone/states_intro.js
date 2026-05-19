@@ -8,6 +8,7 @@
 
 import { state } from './state.js';
 import { input } from './input.js';
+import { scoring } from './scoring.js';
 import { COPYRIGHT_TEXT, SCORE_TABLE_ROWS,
          SCORE_ICON_T0A40, SCORE_ICON_T0A48, SCORE_ICON_T3C00,
          INTRO_BIRD_FRAMES } from './data.js';
@@ -47,16 +48,22 @@ export const introMixin = {
         if (c98 === 0x06B0) this._loopBackToSplashStart();
         if (c98 === 0x1510) this._loopBackToSplashStart();  // source-faithful trigger; reached only after step 15 removes the $06B0 shortcut
 
-        // Skeleton bridge — Digit-1 (start) skips the splash and jumps to
-        // game mode. 14.H replaces this with the proper $17E0 CoinChecking
-        // + $0288 PromptForStartGame chain (insert coin → "PUSH 1PLAYER"
-        // prompt → press start → DecrementCoins sets gameOrIntro := 1 +
-        // GetPlayerLivesFromDip seeds player1Lives).
-        if (input.startEdge()) {
-            state.gameOrIntro = 1;
-            // Counter98 is NOT reset on coin-up in source (it's only zeroed
-            // at game-over in $0B7F-$0B84). Leave it ticking; once back in
-            // intro mode after game-over, state5_GameOver will zero it.
+        // 14.H — 1-player coin + start path (simplified from source's
+        // $17E0 CoinChecking + $0288 PromptForStartGame). No DIP/coinage
+        // halving, no 2P-start prompt, no "PUSH" text rows. Digit-5
+        // increments coinCount (cap 99); Digit-1 starts only when at
+        // least one coin is credited (decrements then sets gameOrIntro=1).
+        // Counter98 is NOT reset on coin-up in source either (it's only
+        // zeroed at game-over $0B7F-$0B84); leave it ticking.
+        if (input.coinEdge()) {
+            state.coinCount = Math.min(state.coinCount + 1, 99);
+            scoring.updateCoinScreen();
+        }
+        if (input.startEdge() && state.coinCount > 0) {
+            state.coinCount -= 1;
+            scoring.updateCoinScreen();
+            state.player1Lives = 3;          // port: hard-coded lives until $0350 DIP-read lands
+            state.gameOrIntro  = 1;
         }
     },
 
@@ -162,8 +169,10 @@ export const introMixin = {
     _enterIntroMode() {
         state.gameOrIntro  = 0;
         state.counter98    = 0;
-        state.player1Lives = 3;                 // port deviation — removed in 14.H
         state.fgOverlay.clear();
+        // 14.I — `player1Lives = 3` workaround dropped: the coin/start
+        // path (14.H) now resets lives at game-start, mirroring source's
+        // $02B6 CALL $0350 GetPlayerLivesFromDip inside PromptForStartGame.
 
         // Clear active flags on all game objects so render skips them.
         state.player.alive         = false;

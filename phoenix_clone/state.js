@@ -20,6 +20,14 @@ export const state = {
         this.player1Lives = 3;          // $4390
         this.player2Lives = 0;          // $4391  (1P mode; P2 stays 0)
 
+        // $438F CoinCount — debounced coin input. Source's WaitVBlankCoin
+        // increments via IN0 bit 0 edge; $17E0 CoinChecking applies the
+        // DSW0 bit 4 coinage halving and returns the credit count.
+        // Port deviation (14.H): 1-player-only — no DIP modeling, no
+        // P2-start path, no halving. Digit-5 edge increments; Digit-1
+        // edge decrements + sets gameOrIntro = 1.
+        this.coinCount = 0;
+
         // $4383-$4385 / $4387-$4389 — 3-byte packed BCD (low, mid, high).
         // Each byte holds two digits; PrintNumber ($00C4) draws low-nibble
         // first then high-nibble, walking screen-RAM left.
