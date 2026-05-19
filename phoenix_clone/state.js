@@ -337,5 +337,15 @@ export const state = {
         // since source draws from both FG and BG tile sets. Populated by
         // introMixin._drawScoreIcons; cleared by _enterIntroMode.
         this.scoreIconSprites = [];
+
+        // Intro splash bird — source $4B70..$4B73 mirror, populated by
+        // $21DC DrawIntroBirdAnimationFrame each frame in counter98
+        // [$0300, $06AF]. shape walks T233A as Counter98 LSB scans (gives
+        // egg → cracking → wings spread); field3 is the per-frame sub-cycle
+        // (Counter98 LSB & 7) used by DrawBirdObject for the wing-flap
+        // variant. Fixed canvas position decoded from screen-RAM $49EF
+        // (BG plane). shape=0 → render skips (matches source $34C0 RET Z).
+        // research_splash_attract.md §3.4.
+        this.introBird = { shape: 0, field3: 0, x: 80, y: 120 };
     },
 };

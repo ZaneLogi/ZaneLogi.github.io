@@ -9,7 +9,8 @@
 import { state } from './state.js';
 import { input } from './input.js';
 import { COPYRIGHT_TEXT, SCORE_TABLE_ROWS,
-         SCORE_ICON_T0A40, SCORE_ICON_T0A48, SCORE_ICON_T3C00 } from './data.js';
+         SCORE_ICON_T0A40, SCORE_ICON_T0A48, SCORE_ICON_T3C00,
+         INTRO_BIRD_FRAMES } from './data.js';
 
 export const introMixin = {
     // L002D + L00E3 entry — called by main.tick() each frame while
@@ -34,6 +35,17 @@ export const introMixin = {
         if (c98 === 0x0120) this._drawScoreIcons();                        // $0BCA
         if (c98 === 0x01B8) this.initGlobalLevelData();                    // $0580 — set up stageBlock for BG fill
         if (c98 >= 0x01C0 && c98 <= 0x049F) this.bgUpdate();               // $0078 → $06F0 (scroll + paint)
+        if (c98 >= 0x0300 && c98 <= 0x06AF) this._drawIntroBird(c98);      // $21DC — animated bird, fixed center
+        else state.introBird.shape = 0;                                    // port: source only calls DrawBirdObject from $21DC, so outside the range no bird draws
+        // 14.G — Source dispatches GameDemo $03B0 from $03E6 to $1510
+        // (three back-to-back attract demos, see Code.md $0798-$0805).
+        // Step 15 will port it; until then the proper $1510 loop point
+        // sits at the end of a ~62 s blank window after bird ends.
+        // **Placeholder shortcut**: loop back at $06B0 (= bird end + 1)
+        // so the cycle is ~28 s instead of ~90 s. Step 15 removes this
+        // line and $1510 becomes the active trigger again.
+        if (c98 === 0x06B0) this._loopBackToSplashStart();
+        if (c98 === 0x1510) this._loopBackToSplashStart();  // source-faithful trigger; reached only after step 15 removes the $06B0 shortcut
 
         // Skeleton bridge — Digit-1 (start) skips the splash and jumps to
         // game mode. 14.H replaces this with the proper $17E0 CoinChecking
@@ -49,13 +61,23 @@ export const introMixin = {
     },
 
     // $01E1 PrintCopyright — call ClearForeAndBackground ($0140), then
-    // PrintTextLines(T1960, 3 rows). For 14.B the port only needs to
-    // populate state.copyrightRows; ClearForeAndBackground's broader
-    // effects (FG/BG plane wipe + per-stage counter resets) are no-ops
-    // at this point (nothing else paints intro content yet — landed in
-    // 14.C-F).
+    // PrintTextLines(T1960, 3 rows). Fires twice: at counter98 == $0001
+    // (one-shot at attract entry) and == $01B0 (between score-table phase
+    // and BG-scroll/bird phase). The second call's ClearForeAndBackground
+    // wipes the score-average table + sprite icons so the bird phase
+    // ($0300-$06AF) doesn't show them — matches arcade behavior.
+    //
+    // Port deviation: source's ClearForeAndBackground wipes BOTH FG and BG
+    // planes; the port leaves state.staticTextRows (score header) and
+    // state.bgTiles intact since the staticTextRows are draw-unconditional
+    // in render.frame (source re-paints them each frame via $06ED inside
+    // $06F0), and bgTiles get repainted by bgUpdate at counter98 >= $01C0.
+    // The cleared content (scoreTableRows + scoreIconSprites) is intro-
+    // only, never re-painted in source after $01B0.
     _printCopyright() {
         state.copyrightRows = COPYRIGHT_TEXT.map(r => ({ ...r, w: 208, h: 8 }));
+        for (const row of state.scoreTableRows) row.tiles.fill(0);
+        state.scoreIconSprites.length = 0;
     },
 
     // $0196 SlowPrintScoreAverageTable — one char per frame. Each frame:
@@ -98,6 +120,37 @@ export const introMixin = {
         _blitColumnMajor(sprites, SCORE_ICON_T0A48, 24, 192, 'bg');
     },
 
+    // $21DC DrawIntroBirdAnimationFrame — animated bird at fixed screen
+    // position $49EF (= canvas (80, 120)). Two superimposed cadences from
+    // Counter98 LSB:
+    //   field3 = LSB & 0x07         → per-frame wing-flap sub-cycle
+    //   shape  = T233A[(LSB & 0xF8) >> 3]  → updates every 8 frames
+    // T233A walks egg ($01) → cracking ($02..$06) → first wing ($07) →
+    // wing-flap cycle ($07/$0A × 4) → mature shapes ($09/$08) → walk
+    // back down → $FF sentinel. The 32-byte extraction includes 9
+    // trailing code bytes ($2351-$2359) that produce invalid shape
+    // indices; render.drawIntroBird's bounds check skips those frames
+    // (matches source — the bird briefly "blinks" at high LSB values).
+    _drawIntroBird(counter98) {
+        const lsb = counter98 & 0xFF;
+        state.introBird.field3 = lsb & 0x07;
+        state.introBird.shape  = INTRO_BIRD_FRAMES[(lsb & 0xF8) >> 3];
+    },
+
+    // 14.G splash-loop wrap. Source dispatches three attract-demo runs
+    // ($03E6-$07A0, $0800-$0B60, $0C00-$1510) via GameDemo $03B0 — step
+    // 15 territory. Until that lands, the splash cycle ends here: zero
+    // Counter98 so the next tick re-enters at $0001 (PrintCopyright +
+    // slow-print), and clear BG + introBird + scoreIcons so the new
+    // cycle types out fresh. scoreTableRows + copyrightRows are
+    // re-painted by the next $0001/$0002+ dispatch so no clear needed.
+    _loopBackToSplashStart() {
+        state.counter98 = 0;
+        state.bgTiles.fill(0);
+        state.scoreIconSprites.length = 0;
+        state.introBird.shape = 0;
+    },
+
     // Port-side helper — called by state5_GameOver when game-over completes
     // and we drop back into intro mode (mirrors source's $0B7F-$0B87 path:
     // Counter98 := 0, GameOrAttract := 0). Source needs no game-object
@@ -127,6 +180,10 @@ export const introMixin = {
         for (const row of state.scoreTableRows) row.tiles.fill(0);
         // Sprite icons re-populated by _drawScoreIcons at $0120 next cycle.
         state.scoreIconSprites.length = 0;
+        // Intro bird re-populated by _drawIntroBird at counter98 >= $0300
+        // next cycle; clear here so it doesn't draw at counter98 in
+        // [$0000, $02FF].
+        state.introBird.shape = 0;
     },
 };
 

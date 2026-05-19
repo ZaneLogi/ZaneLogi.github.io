@@ -345,6 +345,18 @@ RAW_SLICES = [
     ("SCORE_ICON_T0A40", 0x0A40, 8),
     ("SCORE_ICON_T0A48", 0x0A48, 4),
     ("SCORE_ICON_T3C00", 0x3C00, 12),
+    # source T233A — 32-byte bird-shape lookup for the intro splash bird
+    # animation (step 14.F, $21DC DrawIntroBirdAnimationFrame). The shape
+    # is indexed by `(counter98 LSB & 0xF8) >> 3` (0..31). Documented
+    # bytes at $233A-$2350 are 23 bird-shape values: the maturity walk
+    # (01..07) → wing-flap cycle (07/0A) → mature shapes (09/08) → walk
+    # back down (04/03/02/01) → $FF sentinel. The trailing 9 bytes at
+    # $2351-$2359 are code (1A E6 08 C8 7E 2C 6E C6 08) — the source
+    # lookup falls into them at high LSBs, producing invalid shape
+    # indices that drawIntroBird's bounds check rejects. Extracting 32
+    # bytes verbatim preserves source-faithful timing of when the bird
+    # is "between frames" (invisible). research_splash_attract.md §3.4.
+    ("INTRO_BIRD_FRAMES", 0x233A, 32),
 ]
 
 

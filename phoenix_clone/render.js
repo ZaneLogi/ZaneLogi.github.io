@@ -33,6 +33,7 @@ export const render = {
     frame() {
         gfx.clear();
         this.drawBackground();
+        if (state.gameOrIntro === 0) this.drawIntroBird();              // $21DC bird (BG plane — behind FG text)
         if (this.gridLinesOn) this.drawDebugGrid();
         if (this.gridMode !== GRID_OFF) this.drawTileRomOverlay();
         for (const row of state.staticTextRows) gfx.drawObject(row);
@@ -263,6 +264,37 @@ export const render = {
                 ctx.drawImage(images[t1], x, yBot);
                 if (yBotWrap !== null) ctx.drawImage(images[t1], x, yBotWrap);
             }
+        }
+    },
+
+    // $21DC + $34C0 DrawBirdObject — intro splash bird at a fixed canvas
+    // position (state.introBird.x, .y). Uses the same shape/field3 lookup
+    // chain as drawBird (T3EC0 → width, T3E08 → tile-data base, BIRD_TILE_DATA
+    // → tiles) but skips the BG scroll Y offset and the screen-RAM top-clip
+    // logic since the intro bird is drawn at a fixed position well within
+    // bounds. Shape == 0 (set by introMixin._drawIntroBird outside the
+    // counter98 [$0300, $06AF] range) → no draw, matching source's
+    // "AND A; RET Z" gate at $34C1.
+    drawIntroBird() {
+        const b = state.introBird;
+        if (b.shape === 0) return;
+        const lsb = BIRD_T3EC0[b.shape] ?? 0;
+        const width = (0x58 - lsb) >> 3;       // 1..7
+        if (width < 1 || width > 7) return;    // skip shapes outside T3EC0's valid range (FF + code-byte entries from T233A)
+
+        const tIdx = ((b.shape << 3) + b.field3) & 0x7E;
+        const dataAddr = (BIRD_T3E08[tIdx] << 8) | BIRD_T3E08[tIdx + 1];
+        const dataOff  = dataAddr - 0x3C00;
+        if (dataOff < 0 || dataOff + width * 2 > BIRD_TILE_DATA.length) return;
+
+        const ctx = gfx.ctx;
+        const images = resource.bgTileImages;
+        for (let c = 0; c < width; c++) {
+            const t0 = BIRD_TILE_DATA[dataOff + c * 2    ];
+            const t1 = BIRD_TILE_DATA[dataOff + c * 2 + 1];
+            const x = b.x + c * 8;
+            if (t0 !== 0) ctx.drawImage(images[t0], x, b.y);
+            if (t1 !== 0) ctx.drawImage(images[t1], x, b.y + 8);
         }
     },
 
