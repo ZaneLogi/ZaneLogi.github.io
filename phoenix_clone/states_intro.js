@@ -8,7 +8,7 @@
 
 import { state } from './state.js';
 import { input } from './input.js';
-import { COPYRIGHT_TEXT } from './data.js';
+import { COPYRIGHT_TEXT, SCORE_TABLE_ROWS } from './data.js';
 
 export const introMixin = {
     // L002D + L00E3 entry — called by main.tick() each frame while
@@ -29,6 +29,7 @@ export const introMixin = {
         // fire whenever Counter98 falls within the range.
         const c98 = state.counter98;
         if (c98 === 0x0001 || c98 === 0x01B0) this._printCopyright();   // $01E1
+        if (c98 >= 0x0002 && c98 <= 0x00FF) this._slowPrintScoreTable(c98); // $0196 (T1860 only)
 
         // Skeleton bridge — Digit-1 (start) skips the splash and jumps to
         // game mode. 14.H replaces this with the proper $17E0 CoinChecking
@@ -53,6 +54,27 @@ export const introMixin = {
         state.copyrightRows = COPYRIGHT_TEXT.map(r => ({ ...r, w: 208, h: 8 }));
     },
 
+    // $0196 SlowPrintScoreAverageTable — one char per frame. Each frame:
+    //   state := Counter98 LSB & $1F   (0..31)
+    //   bail if state < 6              (source skips the first 6 frames of
+    //                                    each 32-frame row sub-cycle)
+    //   row   := (Counter98 LSB >> 5) & 7   (0..7 — selects T1860 + N*32)
+    //   col   := state - 6                  (0..25 — index into row tiles)
+    //   paint SCORE_TABLE_ROWS[row].tiles[col] into state.scoreTableRows[row]
+    //
+    // Source's full range is [$0002, $011F] which also covers T1960 (the
+    // first copyright row) at $0100..$011F. Port skips that range — those
+    // chars are already painted by PrintCopyright at $0001, so re-walking
+    // them is a no-op visually. Dispatch in introFrame guards against it
+    // by limiting to counter98 <= $00FF.
+    _slowPrintScoreTable(counter98) {
+        const stateInRow = counter98 & 0x1F;
+        if (stateInRow < 6) return;
+        const row = (counter98 >> 5) & 0x07;
+        const col = stateInRow - 6;
+        state.scoreTableRows[row].tiles[col] = SCORE_TABLE_ROWS[row].tiles[col];
+    },
+
     // Port-side helper — called by state5_GameOver when game-over completes
     // and we drop back into intro mode (mirrors source's $0B7F-$0B87 path:
     // Counter98 := 0, GameOrAttract := 0). Source needs no game-object
@@ -75,5 +97,10 @@ export const introMixin = {
         for (const b of state.enemyBullets)   b.state   &= ~0x08;
         for (const e of state.explosions)     e.counter  = 0;
         for (const e of state.bonusExplosions) e.counter = 0;
+
+        // Reset slow-print rows so the next intro cycle types them out
+        // fresh. (Copyright rows get re-populated by _printCopyright at
+        // counter98 == $0001 next frame, so they're self-healing.)
+        for (const row of state.scoreTableRows) row.tiles.fill(0);
     },
 };

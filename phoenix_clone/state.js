@@ -2,7 +2,7 @@
 // possible (research_code_flow.md §5.3, RAMUse.md). Game-object data lives
 // on the objects themselves (research_rendering.md §4).
 
-import { STATIC_TEXT_ROWS, GAME_OVER_TEXT, COPYRIGHT_TEXT } from './data.js';
+import { STATIC_TEXT_ROWS, GAME_OVER_TEXT, COPYRIGHT_TEXT, SCORE_TABLE_ROWS } from './data.js';
 
 export const state = {
     init() {
@@ -321,5 +321,15 @@ export const state = {
         // fires; populated by introMixin._printCopyright. Drawn by
         // render.frame() while gameOrIntro === 0.
         this.copyrightRows = [];
+
+        // T1860 — 8 score-table rows slow-printed by $0196 during intro
+        // (one char per frame, counter98 in [$0002, $00FF]). Tiles start
+        // all-zero (invisible) and get filled in column-by-column by
+        // introMixin._slowPrintScoreTable. _enterIntroMode resets the
+        // tile arrays so the next intro cycle types out fresh.
+        this.scoreTableRows = SCORE_TABLE_ROWS.map(r => ({
+            x: r.x, y: r.y, w: 208, h: 8,
+            tiles: new Uint8Array(26),   // all zeros — render skips tile=0
+        }));
     },
 };
