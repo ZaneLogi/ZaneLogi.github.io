@@ -40,6 +40,7 @@ export const render = {
         if (state.gameOrIntro === 0) {                                  // $01E1 PrintCopyright(T1960, 3)
             for (const row of state.copyrightRows)  gfx.drawObject(row);
             for (const row of state.scoreTableRows) gfx.drawObject(row);  // $0196 slow-print
+            this.drawScoreIcons();                                        // $0BCA sprite icons
         }
         for (const alien of state.aliens) this.drawAlien(alien);
         for (const bird of state.birds) this.drawBird(bird);
@@ -58,6 +59,19 @@ export const render = {
     // present in the Map, so phase-2 erases automatically un-draw cells.
     // Drawn LAST in the frame to match source's "spiral covers score
     // during transition" overlay behavior.
+    // $0BCA DrawScoreAverageTableTiles — paint mixed FG/BG sprite icons
+    // populated by introMixin._drawScoreIcons. Each entry carries its
+    // own plane since source spans both tile sets.
+    drawScoreIcons() {
+        const ctx = gfx.ctx;
+        const fg = resource.fgTileImages;
+        const bg = resource.bgTileImages;
+        for (const s of state.scoreIconSprites) {
+            const images = s.plane === 'fg' ? fg : bg;
+            ctx.drawImage(images[s.tile], s.x, s.y);
+        }
+    },
+
     drawSpiralOverlay() {
         if (state.fgOverlay.size === 0) return;
         const ctx = gfx.ctx;

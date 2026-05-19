@@ -334,6 +334,17 @@ RAW_SLICES = [
     ("GALAXY_TILES",   0x1E80, 32),
     ("GALAXY_MSB",     0x1EA0, 32),
     ("GALAXY_LSB",     0x1EC0, 32),
+    # Score-table sprite blocks painted by $0BCA DrawScoreAverageTableTiles
+    # (step 14.D) at counter98 == $0120. Three column-major tile arrays
+    # consumed by Draw4x2/Draw6x2/Draw2x2 ($3528/$3538/$3548). Source
+    # comments:
+    #   T0A40 — "alien shapes #37, #34" — 4×2 FG block at $42F2 (= canvas 16,144)
+    #   T0A48 — "alien pilot shape"     — 2×2 BG block at $4AD8 (= canvas 24,192)
+    #   T3C00 — "bird shape #24"        — 6×2 BG block at $4B15 (= canvas 8,168)
+    # Plus the two raw FG tile codes ($64, $65) hardcoded in _drawScoreIcons.
+    ("SCORE_ICON_T0A40", 0x0A40, 8),
+    ("SCORE_ICON_T0A48", 0x0A48, 4),
+    ("SCORE_ICON_T3C00", 0x3C00, 12),
 ]
 
 

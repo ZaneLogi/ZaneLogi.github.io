@@ -8,7 +8,8 @@
 
 import { state } from './state.js';
 import { input } from './input.js';
-import { COPYRIGHT_TEXT, SCORE_TABLE_ROWS } from './data.js';
+import { COPYRIGHT_TEXT, SCORE_TABLE_ROWS,
+         SCORE_ICON_T0A40, SCORE_ICON_T0A48, SCORE_ICON_T3C00 } from './data.js';
 
 export const introMixin = {
     // L002D + L00E3 entry — called by main.tick() each frame while
@@ -30,6 +31,7 @@ export const introMixin = {
         const c98 = state.counter98;
         if (c98 === 0x0001 || c98 === 0x01B0) this._printCopyright();   // $01E1
         if (c98 >= 0x0002 && c98 <= 0x00FF) this._slowPrintScoreTable(c98); // $0196 (T1860 only)
+        if (c98 === 0x0120) this._drawScoreIcons();                        // $0BCA
 
         // Skeleton bridge — Digit-1 (start) skips the splash and jumps to
         // game mode. 14.H replaces this with the proper $17E0 CoinChecking
@@ -75,6 +77,25 @@ export const introMixin = {
         state.scoreTableRows[row].tiles[col] = SCORE_TABLE_ROWS[row].tiles[col];
     },
 
+    // $0BCA DrawScoreAverageTableTiles — one-shot at counter98 == $0120.
+    // Paints 5 sprite groups at fixed canvas positions:
+    //   alien #3 left/right halves at (24,128)/(32,128)         FG tiles $64/$65
+    //   T0A40 4×2 alien block at anchor (16,144)                FG plane
+    //   T3C00 6×2 bird block at anchor (8,168)                  BG plane
+    //   T0A48 2×2 alien pilot at anchor (24,192)                BG plane
+    // Tile data is column-major in source (Draw4x2/Draw6x2/Draw2x2 walk
+    // [c0r0, c0r1, c1r0, c1r1, ...]), so the index → (col, row) mapping is
+    // col = i >> 1, row = i & 1.
+    _drawScoreIcons() {
+        const sprites = state.scoreIconSprites;
+        sprites.length = 0;
+        sprites.push({ x: 24, y: 128, tile: 0x64, plane: 'fg' });
+        sprites.push({ x: 32, y: 128, tile: 0x65, plane: 'fg' });
+        _blitColumnMajor(sprites, SCORE_ICON_T0A40, 16, 144, 'fg');
+        _blitColumnMajor(sprites, SCORE_ICON_T3C00,  8, 168, 'bg');
+        _blitColumnMajor(sprites, SCORE_ICON_T0A48, 24, 192, 'bg');
+    },
+
     // Port-side helper — called by state5_GameOver when game-over completes
     // and we drop back into intro mode (mirrors source's $0B7F-$0B87 path:
     // Counter98 := 0, GameOrAttract := 0). Source needs no game-object
@@ -102,5 +123,20 @@ export const introMixin = {
         // fresh. (Copyright rows get re-populated by _printCopyright at
         // counter98 == $0001 next frame, so they're self-healing.)
         for (const row of state.scoreTableRows) row.tiles.fill(0);
+        // Sprite icons re-populated by _drawScoreIcons at $0120 next cycle.
+        state.scoreIconSprites.length = 0;
     },
 };
+
+// Helper — push column-major tile bytes as (x, y, tile, plane) sprite
+// entries onto `out`. Layout: arr[i] at (anchorX + (i>>1)*8, anchorY + (i&1)*8).
+function _blitColumnMajor(out, arr, anchorX, anchorY, plane) {
+    for (let i = 0; i < arr.length; i++) {
+        out.push({
+            x: anchorX + (i >> 1) * 8,
+            y: anchorY + (i & 1) * 8,
+            tile: arr[i],
+            plane,
+        });
+    }
+}

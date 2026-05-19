@@ -331,5 +331,11 @@ export const state = {
             x: r.x, y: r.y, w: 208, h: 8,
             tiles: new Uint8Array(26),   // all zeros — render skips tile=0
         }));
+
+        // Score-table sprite icons painted by $0BCA at counter98 == $0120
+        // (step 14.D). Each entry is { x, y, tile, plane: 'fg' | 'bg' }
+        // since source draws from both FG and BG tile sets. Populated by
+        // introMixin._drawScoreIcons; cleared by _enterIntroMode.
+        this.scoreIconSprites = [];
     },
 };
