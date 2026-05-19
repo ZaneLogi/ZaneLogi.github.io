@@ -84,6 +84,16 @@ export const introMixin = {
             state.coinCount -= 1;
             scoring.updateCoinScreen();
             state.player1Lives = 3;          // port: hard-coded lives until $0350 DIP-read lands
+            // Source $02B3 CALL $032E ClearAndPrintScores — zero
+            // $4380-$4387 (covers Score1 + Score2 BCD memory) then
+            // re-paint both player score rows. Port zeroes the BCD
+            // arrays and repaints via scoring.printNumber so the
+            // header "000000 ... 000000" shows fresh for the new game.
+            // UpdateHiScore ($02F0) is skipped — port doesn't model hi-score.
+            state.score1[0] = state.score1[1] = state.score1[2] = 0;
+            state.score2[0] = state.score2[1] = state.score2[2] = 0;
+            scoring.printNumber(0);
+            scoring.printNumber(1);
             state.gameOrIntro  = 1;
         }
     },
@@ -205,6 +215,20 @@ export const introMixin = {
         // 14.I — `player1Lives = 3` workaround dropped: the coin/start
         // path (14.H) now resets lives at game-start, mirroring source's
         // $02B6 CALL $0350 GetPlayerLivesFromDip inside PromptForStartGame.
+
+        // Mirror of source's $0154 chunk inside ClearForeAndBackground —
+        // zeros LevelAndRound / CounterB9 / AliensLeft / BirdsLeft then
+        // re-seeds AliensLeft = 16. Source runs this every time $0140
+        // fires (PrintCopyright at counter98 $0001/$01B0 in attract, and
+        // PromptForStartGame at coin-up). Without it the next game would
+        // resume on the death-stage with the death-time alien count, so
+        // state-2 init would re-position only the surviving aliens and
+        // the player would face a depleted formation (possibly on a bird
+        // or mothership stage).
+        state.levelAndRound = 0;
+        state.counterB9     = 0;
+        state.aliensLeft    = 16;
+        state.birdsLeft     = 0;
 
         // Clear active flags on all game objects so render skips them.
         state.player.alive         = false;

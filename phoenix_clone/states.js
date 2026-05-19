@@ -339,12 +339,15 @@ export const states = {
         }
     },
 
-    // L0547 InitPlayerDataStructure — source copies T0560 into $43C0
-    // (player + bullets) and then ClearBbytesAtHL clears $43E0-$43FF
-    // (the player/bullet screen-RAM address pointers). With those
-    // pointers zeroed, the player ship's per-frame draw stops painting
-    // tiles to FG screen RAM — so the ship visually disappears during
-    // the fade-in stages (0, 2) where PlayerUpdate doesn't run.
+    // L0547 InitPlayerDataStructure — source copies T0560 (32 bytes) into
+    // $43C0..$43DF, covering PlayerState/Shape/X/Y, PlayerBullet 0/1, AND
+    // all five EnemyBullet slots ($43CC..$43DF, each State=0/Shape=$58/
+    // X=0/Y=$20 in T0560). The enemy-bullet state byte goes to 0 which
+    // deactivates them. Then $0552 ClearBbytesAtHL clears $43E0-$43FF
+    // (player + bullet old-position pointers). With those pointers zeroed,
+    // the player ship's per-frame draw stops painting tiles to FG screen
+    // RAM — so the ship visually disappears during the fade-in stages
+    // (0, 2) where PlayerUpdate doesn't run.
     //
     // Port equivalent: set `state.player.alive = false`. The canvas-based
     // renderer in render.drawPlayer is gated by alive, so clearing it
@@ -352,7 +355,10 @@ export const states = {
     // handlers (stageAlienCombat at LR=1/3/B, stageBirdCombat at LR=5/7)
     // re-set alive=true at the top of their handler, so the ship
     // reappears at the new init position ($64, $D8 = center-bottom) the
-    // moment combat starts.
+    // moment combat starts. Clearing enemyBullets[*].state mirrors the
+    // T0560[12..31] portion of the source copy — without this, surviving
+    // bullets from before the player died would still be in flight when
+    // state-3 gameplay resumes and instantly re-kill the respawning ship.
     initPlayerDataStructure() {
         state.player.x           = PLAYER_INIT_BLOCK[2];   // PlayerShipX = $64 = 100
         state.player.y           = PLAYER_INIT_BLOCK[3];   // PlayerShipY = $D8 = 216
@@ -361,6 +367,7 @@ export const states = {
         state.player.bullet.active = false;
         state.player.bullet.x      = PLAYER_INIT_BLOCK[6]; // $00
         state.player.bullet.y      = PLAYER_INIT_BLOCK[7]; // $D0
+        for (const b of state.enemyBullets) b.state = 0;   // T0560[12..31] EnemyBullet state bytes
     },
 
     // L0532 init alien data — three sub-routines:
@@ -372,6 +379,27 @@ export const states = {
     //                                  slots (source T1520; unused yet)
     //   $0610 InitAlienPositions     → formation table → x,y per alien
     initAlienData() {
+        // Source L0532 head: `ClearBbytesAtHL $4B50, $A0` wipes all 16
+        // alien slots ($4B50-$4BEF: 32 bytes move-ptrs + 64 bytes alien
+        // data + bird/mothership reuse region) BEFORE the per-slot writes
+        // below. The port keeps aliens/birds in separate arrays, so the
+        // bird region of the clear is a no-op here — but the alien clear
+        // is load-bearing: the per-slot writes below only touch slots
+        // 0..aliensLeft-1, so any alien data left in slots aliensLeft..15
+        // from prior combat (e.g. a swooping alien when player died)
+        // would carry into the next state-3 with its controlA bit-3 still
+        // set and alienMovePtr still pointing at a swoop pattern,
+        // producing the "alien keeps swooping after respawn" bug.
+        for (let i = 0; i < 16; i++) {
+            const a = state.aliens[i];
+            a.controlA = 0;
+            a.controlB = 0;
+            a.x = 0;
+            a.y = 0;
+            a.alive = false;
+            state.alienMovePtr[i] = 0;
+        }
+
         const stage = state.levelAndRound & 0x0F;
         const controlA = ALIEN_CONTROL_INIT[stage * 2];
         const controlB = ALIEN_CONTROL_INIT[stage * 2 + 1];
@@ -2920,8 +2948,25 @@ export const states = {
             return this._playerRespawnDecision();   // L0B15
         }
         if (a5 === 0x20) {
-            // $0B0A — ClearForeground. Wipe any accumulated particle overlay.
+            // $0B0A — $0380 ClearForeground wipes the FG screen RAM
+            // ($4200-$433F). Port has no FG screen RAM mirror so we
+            // clear every state.* field that contributes to FG-plane
+            // rendering: aliens, birds, enemy bullets, player bullet,
+            // accumulated particle overlay, plus the alien-kill /
+            // bonus-kill explosion slots ($4370-$437F mirrors). Without
+            // this, alien sprites stay visible all the way into state 5
+            // "GAME OVER" — source wipes them here so the game-over
+            // banner sits on a (mostly) clean screen.
             state.fgOverlay.clear();
+            for (const a of state.aliens) {
+                a.controlA &= ~0x08;
+                a.alive = false;
+            }
+            for (const b of state.birds) b.shape = 0;
+            for (const b of state.enemyBullets) b.state &= ~0x08;
+            state.player.bullet.active = false;
+            for (const e of state.explosions)      e.counter = 0;
+            for (const e of state.bonusExplosions) e.counter = 0;
             return;
         }
         if (a5 < 0x20) {
