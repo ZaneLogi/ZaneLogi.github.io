@@ -80,10 +80,37 @@ const COIN_ROW       = 2;
 const COIN_COL_TENS  = 14;
 const COIN_COL_ONES  = 15;
 
+// L02F0 UpdateHiScore — called from PromptForStartGame ($02B0) on every
+// start-press, before ClearAndPrintScores zeroes the player scores.
+// Source flow: compare Score1 to HiScore (via $0314 multi-byte subtract);
+// if HiScore <= Score1, copy Score1 → HiScore (via $0320). Same for
+// Score2. Then PrintNumber the 6-digit HiScore at $4141. Port mirrors
+// this: BCD bytes are ordered low/mid/high so a high→low byte compare
+// works directly; copy the larger into hiScore; repaint tiles[10..15]
+// of staticTextRows[1] (= HI-SCORE column on the score header row).
+function updateHiScore() {
+    if (bcdCompare(state.score1, state.hiScore) > 0) copyScore(state.score1, state.hiScore);
+    if (bcdCompare(state.score2, state.hiScore) > 0) copyScore(state.score2, state.hiScore);
+    const tiles = state.staticTextRows[SCORE_ROW].tiles;
+    for (let i = 0; i < 3; i++) {
+        tiles[HISCORE_RIGHT - 2 * i    ] = 0x20 |  (state.hiScore[i]       & 0x0F);
+        tiles[HISCORE_RIGHT - 2 * i - 1] = 0x20 | ((state.hiScore[i] >> 4) & 0x0F);
+    }
+}
+function bcdCompare(a, b) {
+    if (a[2] !== b[2]) return a[2] - b[2];
+    if (a[1] !== b[1]) return a[1] - b[1];
+    return a[0] - b[0];
+}
+function copyScore(src, dst) {
+    dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2];
+}
+const HISCORE_RIGHT = 15;   // tiles[10..15] of staticTextRows[1] — see $4141 in source
+
 // L2700 UpdateScoresAndSound. Drains the per-enemy score-pending buffer at
 // $4370-$437F into Score1/Score2, then UpdateSoundControlHW + UpdateSounds.
 // Buffer model and sound deferred per research_hardware.md §5.
 function update() {
 }
 
-export const scoring = { printNumber, eraseDigits, addPoints, updateLivesScreen, updateCoinScreen, update };
+export const scoring = { printNumber, eraseDigits, addPoints, updateLivesScreen, updateCoinScreen, updateHiScore, update };

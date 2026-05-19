@@ -84,12 +84,11 @@ export const introMixin = {
             state.coinCount -= 1;
             scoring.updateCoinScreen();
             state.player1Lives = 3;          // port: hard-coded lives until $0350 DIP-read lands
-            // Source $02B3 CALL $032E ClearAndPrintScores — zero
-            // $4380-$4387 (covers Score1 + Score2 BCD memory) then
-            // re-paint both player score rows. Port zeroes the BCD
-            // arrays and repaints via scoring.printNumber so the
-            // header "000000 ... 000000" shows fresh for the new game.
-            // UpdateHiScore ($02F0) is skipped — port doesn't model hi-score.
+            // Order mirrors source $02B0 → $02B3 inside PromptForStartGame:
+            // UpdateHiScore reads Score1/Score2 BEFORE ClearAndPrintScores
+            // zeros them, so the previous game's final score gets a chance
+            // to bump the hi-score record.
+            scoring.updateHiScore();         // $02F0 — captures max(score1, score2, hiScore)
             state.score1[0] = state.score1[1] = state.score1[2] = 0;
             state.score2[0] = state.score2[1] = state.score2[2] = 0;
             scoring.printNumber(0);

@@ -34,6 +34,15 @@ export const state = {
         this.score1 = [0, 0, 0];
         this.score2 = [0, 0, 0];
 
+        // $438B-$438D — HiScore (3-byte packed BCD, same layout as
+        // score1/score2). Source's $02F0 UpdateHiScore (called inside
+        // PromptForStartGame after the start press) copies max(score1,
+        // score2, hiScore) into here, then paints the 6 digits at $4141
+        // (= port staticTextRows[1].tiles[10..15]). Persists across
+        // games within a session (source clears it at cold start;
+        // port matches via state.init).
+        this.hiScore = [0, 0, 0];
+
         // Per-stage block — mirror of $43AB-$43B6 (12 bytes), populated by
         // InitGlobalLevelData ($0580) on each state-2 entry. Decoded byte
         // roles in research_stage_structure.md §4.1; index 9 = CounterB4
