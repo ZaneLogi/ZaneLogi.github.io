@@ -37,7 +37,15 @@ import {
     BIRD_T3EC0,           // source T3EC0 — shape → draw-entry LSB (encodes column count)
     BIRD_T3DC0,           // source T3DC0 — bird-fire scan-subset table (16 × 2 bytes)
     BIRD_T3DB8,           // source T3DB8 — wing-hit shape-swap table (8 bytes)
+    PARTICLE_SPRITES,     // source T1B60/T1B70/T1B80 — particle frames (3 × 16 tiles)
 } from './data.js';
+
+// Particle frame offsets within PARTICLE_SPRITES (mirrors the private
+// constants in states_mothership.js — kept local to each consumer to
+// avoid a data.js manual edit; data.js is auto-generated).
+const PARTICLE_T1B60 = 0;    // frame 0 — densest cloud
+const PARTICLE_T1B70 = 16;   // frame 1 — medium
+const PARTICLE_T1B80 = 32;   // frame 2 — sparse
 import { mothershipMixin } from './states_mothership.js';
 
 // Debug knob — when non-null, the first state-0 transition jumps directly
@@ -1912,18 +1920,11 @@ export const states = {
 
     // L0CF4 — alien-body-vs-player collision. Runs in lane-1 of the
     // port (paired with behaviorUpdate; lane-0 in the source, but
-    // lane-swapped here — see stageAlienCombat).
-    //
-    // ⚠ DISABLED: when this fires, `onPlayerHit` routes to gameState=4
-    // (player-explosion), but our state-4 handler is just a stub that
-    // re-spawns after 128 frames — there's no lives counter, no
-    // explosion sprite, no proper game-over. Visually the player just
-    // briefly vanishes and reappears, which is confusing while
-    // observing swoop trajectories. Re-enable when step 9 lands the
-    // lives / explosion-anim / game-over pieces.
+    // lane-swapped here — see stageAlienCombat). Re-enabled in step
+    // 13.D now that state-4 explosion + L0B15 lives decision + state-5
+    // GAME OVER all exist (research_player_ship.md §2-§4). Shield gate
+    // lives at onPlayerHit (§5.1 port deviation).
     alienVsPlayerCollision() {
-        return;
-        // eslint-disable-next-line no-unreachable
         if (!state.player.alive) return;
         const px = state.player.x & ~7;
         const py = state.player.y;
@@ -2065,11 +2066,24 @@ export const states = {
     },
 
     // Called when the player ship is hit (alien body or enemy bullet).
-    // Minimal stub: hide ship, arm explosion timer, route to state 4.
+    // Mirrors source $0CC4: GameState := 4, CounterA5 := $60, hide ship.
+    //
+    // Port-deviation §5.1 shield gate: source uses tile-level absorption
+    // (bullet's screen-RAM read at $0CA8 sees shield tile $E8 → JP L096E)
+    // before ever reaching $0CB4. The canvas port has no FG screen RAM, so
+    // we add an explicit flag check here. Side-effect: in the port the
+    // shield ALSO blocks alien-body hits (where source does not) — both
+    // collision callers go through this one entry. Documented in
+    // research_player_ship.md §5.1.
     onPlayerHit() {
-        state.player.alive = false;
-        state.playerExplosionTimer = 128;   // ~2 s at 60 Hz
-        state.gameState = 4;
+        if (state.player.shieldCount > 0) return;
+
+        state.player.alive         = false;
+        state.player.bullet.active = false;   // freeze the in-flight bullet
+        state.counterA5            = 0x60;    // 96-frame explosion window
+        state.gameState            = 4;
+        // $4363 ParticleExplosion := $10 — port skips (L2070 deferred,
+        // and CounterA5 alone drives the L20E8 frame selector).
     },
 
     // L21BA — stage-clear pause handler. Called from stageAlienCombat
@@ -2697,19 +2711,29 @@ export const states = {
     //   - if y >= 0xF9: clear state bit 3 (L096E) — bullet left screen
     //   - else: L0CB4/L0CC4 player-hit check  (SKIPPED — see note below)
     //
-    // ⚠ Player-hit path (L0CB4 → L0CC4 → gameState=4) intentionally skipped
-    // per user direction (step 9.2). Bullets fall through the player ship
-    // harmlessly. The full source-faithful collision (with state-4 player
-    // explosion + lives + game-over) is deferred until those pieces exist.
+    // Player-hit path (L0CB4 → L0CC4) enabled in step 13.D: when a bullet
+    // overlaps the mapped player X range and is in the player row
+    // ($DC ≤ y < $E9), call onPlayerHit (which handles the shield gate
+    // and state transition). Source's pre-L0CB4 tile-level shield-absorption
+    // ($0CA8 sees shield tile $E8 → L096E) is replaced by the explicit
+    // flag check at onPlayerHit entry — research_player_ship.md §5.1.
     enemyBulletUpdate() {
+        const px = this.mappedPlayerX();
         for (const b of state.enemyBullets) {
             if ((b.state & 0x08) === 0) continue;
             b.shape ^= 0x04;
             b.y = (b.y + 4) & 0xFF;
             if (b.y >= 0xF9) {
                 b.state &= ~0x08;
+                continue;
             }
-            // L0CB4/L0CC4 player-hit path skipped (see comment above).
+            // L0CB4 — player-row Y range + mapped-X overlap.
+            // Source: RET C at right-CP-bullet means HIT requires right >= b.x;
+            // RET NC at left-CP-bullet means HIT requires left < b.x.
+            if (b.y >= 0xDC && b.y < 0xE9 && b.x <= px.right && b.x > px.left) {
+                b.state &= ~0x08;          // deactivate the bullet
+                this.onPlayerHit();
+            }
         }
     },
 
@@ -2870,18 +2894,135 @@ export const states = {
         };
     },
 
-    // L0AEA — player explosion + respawn. Stub: wait ~128 ticks then respawn.
-    // Real source: plays explosion animation, decrements lives, game-over if 0.
+    // L0AEA — player explosion + L0B15 respawn/game-over decision.
+    // CounterA5 ticks $60 → $00 (96 frames, ~1.6 s). Phase dispatch:
+    //   == 0     → L0B15 (respawn or game over)
+    //   == $20   → ClearForeground equivalent (one-shot mid-explosion wipe)
+    //   <  $20   → L0BA0 late phase (stages 4-8 only: scroll reset + clear BG)
+    //   >  $20   → L0BBA early phase: particle frame draw on bit-0 odd, bit-1 clear ticks
+    //
+    // Source's L0BBA alternates between L0FC0 (alien-kill anims) on bit-0
+    // even, L2070 (T2800/T2900 serpentine) on bit-1 set, L20E8 (T1B90 4×4
+    // particle) on bit-1 clear. Port reuses only the L20E8 path; the
+    // serpentine scatter is the second instance of the
+    // research_mothership.md §10 deviation (also documented at
+    // research_player_ship.md §2.5). L0FC0 already ticks via stageClearUpdate
+    // when relevant, so we don't drive it from here.
     state4_PlayerExplosion() {
-        state.playerExplosionTimer--;
-        if (state.playerExplosionTimer <= 0) {
-            state.player.x     = PLAYER_INIT_BLOCK[2];
-            state.player.y     = PLAYER_INIT_BLOCK[3];
-            state.player.alive = true;
-            state.gameState    = 3;
+        state.counterA5 = (state.counterA5 - 1) & 0xFF;
+        const a5 = state.counterA5;
+
+        if (a5 === 0) {
+            return this._playerRespawnDecision();   // L0B15
+        }
+        if (a5 === 0x20) {
+            // $0B0A — ClearForeground. Wipe any accumulated particle overlay.
+            state.fgOverlay.clear();
+            return;
+        }
+        if (a5 < 0x20) {
+            // L0BA0 — late phase. Only acts on intro stages (4-8); on
+            // combat stages (0-3, A-B) returns early so the starfield
+            // and existing state survive.
+            const stage = state.levelAndRound & 0x0F;
+            if (stage >= 4 && stage < 9) {
+                state.counterB9 = 0;
+                state.bgTiles.fill(0);   // $03A0 ClearBackground
+            }
+            return;
+        }
+        // a5 in $21..$5F — L0BBA early phase. L20E8-only (see header).
+        if ((a5 & 0x03) === 0x01) {           // bit-0 odd AND bit-1 clear
+            this._drawPlayerParticleFrame(a5);
         }
     },
-    state5_GameOver()            {},   // L0B60
+
+    // $20E8 + T1B90 selector port — particle frame at player's hit position.
+    // Sibling of states_mothership.js _drawParticleFrame; anchor differs
+    // (player.x/y at hit time vs mothership belt-row). Player.x/y are
+    // never overwritten during state 4, so they still hold the pre-hit
+    // values even though .alive is false.
+    _drawPlayerParticleFrame(counterA5) {
+        // 4×4 sprite (32×32 px) centered on the 16×16 player ship.
+        const cx = state.player.x & ~7;
+        const cy = state.player.y & ~7;
+        const START_COL = (cx >> 3) - 1;
+        const START_ROW = (cy >> 3) - 1;
+
+        // T1B90 selector — (CounterA5 >> 2) & $0E maps to a frame:
+        //   0 → T1B80 sparse, 2 → T1B70, 4 → T1B60 densest, 6 → T1B70.
+        // 8..E → source's "deletion" path; in port we clear the 4×4
+        // region (functionally equivalent to source's screen-RAM erase).
+        const tableIdx = (counterA5 >> 2) & 0x0E;
+        let frameOff;
+        if      (tableIdx === 0) frameOff = PARTICLE_T1B80;
+        else if (tableIdx === 2) frameOff = PARTICLE_T1B70;
+        else if (tableIdx === 4) frameOff = PARTICLE_T1B60;
+        else if (tableIdx === 6) frameOff = PARTICLE_T1B70;
+        else {
+            for (let dc = 0; dc < 4; dc++) {
+                for (let dr = 0; dr < 4; dr++) {
+                    state.fgOverlay.delete(`${(START_COL + dc) * 8},${(START_ROW + dr) * 8}`);
+                }
+            }
+            return;
+        }
+
+        // 4×4 column-major (DrawImageCbyB layout).
+        for (let dc = 0; dc < 4; dc++) {
+            for (let dr = 0; dr < 4; dr++) {
+                const tile = PARTICLE_SPRITES[frameOff + dc * 4 + dr];
+                if (tile === 0) continue;
+                state.fgOverlay.set(`${(START_COL + dc) * 8},${(START_ROW + dr) * 8}`, tile);
+            }
+        }
+    },
+
+    // L0B15 — respawn-vs-game-over decision (fires at CounterA5 == 0).
+    // Speculatively writes GameState := 5 (GAME OVER); if lives remain
+    // after decrement, overwrites with GameState := 0 (cold-path respawn
+    // through 0 → 1 → 2 → 3, ~130 frames before regaining control).
+    _playerRespawnDecision() {
+        state.gameState = 5;                              // speculative
+        if (state.player1Lives === 0) return;             // pre-decrement zero (defensive)
+        state.player1Lives--;
+        scoring.updateLivesScreen();
+        if (state.player1Lives === 0) return;             // last life lost → GAME OVER
+        state.gameState = 0;                              // respawn via cold path
+        state.fgOverlay.clear();
+    },
+
+    // L0B60 — GAME OVER banner state. CounterA5 enters at 0 (carried
+    // from L0AEA's final tick) and increments UP each frame.
+    //   == $40 → ClearBackground (one-shot wipe of the BG plane)
+    //   == $80 → GameState := 0 + lives refresh (see port deviation below)
+    //   else   → repaint the GAME OVER banner row (port: nothing to do
+    //            since render.frame draws state.gameOverRow each tick
+    //            while gameState === 5).
+    // Banner is drawn between entry and $80 (~2.1 s).
+    //
+    // Source's $0B7F-$0B84 zeros Counter98 (= drop into attract mode)
+    // when both P1 and P2 lives are 0. The port has no attract loop
+    // (state.gameOrAttract hardcoded to 1, per progress.md cross-cutting
+    // gaps), so we instead refresh P1Lives to the DIP-stub value here
+    // — letting state-0 → state-1 → state-2 → state-3 restart a fresh
+    // 3-life game. Two-player swap-bank path at $0B7E is also a no-op
+    // in this 1P-only port (P2Lives always 0).
+    state5_GameOver() {
+        state.counterA5 = (state.counterA5 + 1) & 0xFF;
+        const a5 = state.counterA5;
+
+        if (a5 === 0x40) {
+            state.bgTiles.fill(0);              // $03A0 ClearBackground
+            return;
+        }
+        if (a5 === 0x80) {
+            state.gameState    = 0;
+            state.player1Lives = 3;             // port deviation — see header
+            state.fgOverlay.clear();            // wipe any banner residue
+        }
+        // a5 in (0,$40) ∪ ($40,$80): render.frame() repaints gameOverRow.
+    },
     // state6_MothershipExplosion / state7_MothershipScore moved to
     // states_mothership.js (12.0) — spread into `states` via
     // `...mothershipMixin` above.

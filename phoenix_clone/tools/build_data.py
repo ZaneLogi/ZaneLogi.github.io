@@ -46,8 +46,10 @@ MAINCPU_SIZE = 16384
 #     $0290 (PromptForStartGame):  T19C0, 2 rows
 #     $02A2 (PromptForStartGame):  T1BA0, 1 row
 #     $06ED:                       T1800, 1 row (reuses first T1800 entry)
+#     $0B95 (GAME OVER banner):    T1A00, 1 row  ← extracted here (step 13.C)
 TEXT_TABLES = [
     ("STATIC_TEXT_ROWS", 0x1800, 3),     # source label T1800
+    ("GAME_OVER_TEXT",   0x1A00, 1),     # source label T1A00 — state 5 GAME OVER row
 ]
 
 # Raw byte-array slices from maincpu.bin used by the per-stage init

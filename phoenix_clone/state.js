@@ -2,7 +2,7 @@
 // possible (research_code_flow.md §5.3, RAMUse.md). Game-object data lives
 // on the objects themselves (research_rendering.md §4).
 
-import { STATIC_TEXT_ROWS } from './data.js';
+import { STATIC_TEXT_ROWS, GAME_OVER_TEXT } from './data.js';
 
 export const state = {
     init() {
@@ -243,9 +243,6 @@ export const state = {
         // init zero-fills $4350-$437F).
         this.aliensLeftFlag = 0;        // $435E
 
-        // Player-death timer — not a source field; used while state4 is a stub.
-        this.playerExplosionTimer = 0;
-
         // $43A7 AnimationCounter — used by $2322 mothership antenna/pilot
         // animation: ticked each call, bits 0-2 select the 8-frame cycle
         // (frame data at T1BC0 + (m43A7 & 7) * 8). Wraps freely modulo 256.
@@ -311,5 +308,10 @@ export const state = {
         // the parsed records (STATIC_TEXT_ROWS in data.js, T1800 in source)
         // into the object-list as static FG rows. See research_rendering.md §4.3.
         this.staticTextRows = STATIC_TEXT_ROWS.map(r => ({ ...r, w: 208, h: 8 }));
+
+        // T1A00 — "GAME OVER" row, drawn by render.frame() only while
+        // gameState === 5 (per source $0B95 PrintTextLines inside L0B60).
+        // Single row (GAME_OVER_TEXT is a 1-element array from build_data.py).
+        this.gameOverRow = { ...GAME_OVER_TEXT[0], w: 208, h: 8 };
     },
 };

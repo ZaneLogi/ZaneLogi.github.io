@@ -36,34 +36,28 @@ Sibling docs:
 | 10 | Alien-kill explosion + stage-clear pause activity + bonus-kill popup | ✅ | Original framing was "fade-out symmetric to L0834 fade-in"; research showed source has no fade-out — it has per-kill explosions during the pause. Implemented `L0FC0` (`explosionUpdate` — 2 alien-kill slots at $4370/$4374, T17B0-driven 4-frame tile cycle) + `L38F8` (`spawnExplosion` — first-free-slot allocator wired through `onAlienHit`) + restructured `stageClearUpdate(lane)` as a `L21BA` bit-0 dispatch (residual bullets + explosions on bit-0=1 during the pause, countdown on every frame). Hoisted `combatLane` read+increment to BEFORE the `aliensLeft===0` check in `stageAlienCombat`, mirroring source `L2000` order. Fixed `onAlienHit` per-alien-type scoring: 20 pts for formation kills (`alienMovePtr < 0x1020`), 40 pts for swoops, **200 pts for bonus kills** (when alien's current path byte is 7 or 8 — the "climbing back from dive" motions, scattered through most swoop patterns). Sub-step 10.7 also landed the **bonus explosion machinery**: `state.bonusExplosions[2]` (mirror of $4378/$437C), `bonusExplosionUpdate` (port `L3758`), `spawnBonusExplosion`, `drawBonusExplosions` (6×2 sprite T17D0+T17D6 + 3-digit score popup overlay via `L37B0`-equivalent), spreading-halves animation (per-side spread = `((0x0F - counter) & 0x0E) << 2` pixels, walks 0 → 56 over 16 ticks). New `state.explosions[2]` with port-only `frameLsb` field that stores the pre-decrement tile-table lookup so `drawExplosions` matches source's pre-decrement timing despite the update/render split. New `ALIEN_EXPLOSION_ROM` data export (70 bytes at $17B0, covers T17B0 + frame data for alien frames #1-#5 + bonus halves T17D0/T17D6). Port mapping detail in `research_enemy_motion.md §1.0.5` (alien explosion) and `§1.0.6` (bonus explosion). **Player-hit path still skipped** (per step 9 carryover): bullets fall through harmlessly, `alienVsPlayerCollision` still disabled. |
 | 11 | Birds (`$3400`) — stages 4-7 | ✅ | Bird-stage research in `research_bird_stage.md`. Sub-step landings: **11.1** init (`$32B0`), **11.2** dispatch (`$3400`), **11.3** update engine (`$35B0` + T3F00 + T3E80), **11.4** hit detection (`$3800`/`$38E9`/`$3844`) all landed in initial step-11 commit. **11.5 stage-clear cleanup (2026-05-18):** `stageBirdClear` ports `$3462` even-parity countdown + residual physics tail; without it the bird stage would freeze when BirdsLeft hit 0. **11.6 spiral-fill intro (2026-05-18):** `stageSpiralFill` + `spiralDrawCells` + `spiralFillExit` port `$2230` / `$2260` / `$2292` end-to-end (asterisk wipe over ~52 frames, BG cleared via `$22F0 ClearBackground` at exit, state advances). New `state.fgOverlay` Map renders overlay tiles on top of FG. **11.7 bird-fire bullets** (`$3930`/`$25B7`), **11.8 per-shape body-hit scoring** (`$385D-$388D` + `$3894`), **11.9 wing-hit T3DB8 shape swap** (`$38BC`) all landed in commit `9f53abb` (2026-05-17). **11.10 stage transitions + polish (2026-05-18):** spiral-fill + bird-clear + JT4 cases 4/6 + stop-gap narrowed `>=4` → `>=8`; player visibility fix (`initPlayerDataStructure` clears `player.alive`, mirroring source `$0552` clearing `$43E0-$43FF`); bird vertical-movement polish (bird-count-dependent counterB9 clamp + split-draw wrap in `drawBird`); palette switching wired (`$041E SetBitsVideoRegister` mirror in `state2_StageInit` writes LR bit 1 to `resource.setPaletteBank`, two pre-decoded tile-bitmap sets at init). Debug `K` cheat-key kills all live enemies in current combat stage; `DEBUG_START_LEVEL_AND_ROUND` reset to `null` for cold-start play-through. |
 | 12 | Mothership (`$22B4`/`$22CA`) + shield-block tile-swapping + remove 8d wrap stop-gap | ✅ | Closes out the 5-stage round cycle. Research in `research_mothership.md`. Landed across 11 commits 2026-05-18: **12.0** mixin skeleton (`states_mothership.js`, first use of mixin pattern). **12.1** stage 8 spiral-fill → T1C00 mothership-era starfield. **12.2** stage 9 `$22B4` lone fade-in (T1D00 mothership graphic scrolls in via existing starsScrollDown — `$4367` flag confirmed vestigial / no source readers). **12.3** stage A `$22CA` mothership + aliens fade-in (one-shot first frame + piggy-back on stageAlienFadeIn). **12.4 skipped** (case B already wired by earlier alien-combat work). **12.5** shield-block collision (`$2351`/`$237B`/`$2398`) with SHIELD_T1B40/T1B50 progression tables; key bug fix during testing: source's `DEC L` is row-up in canvas (`idx-26`), not col-left. **12.5a** belt animation `$22FA` driven by m43AA cadence. **12.5b** antenna/pilot animation `$2322` from T1BC0 (8-frame cycle) + port-only one-time bgTiles shift at stage A→B (compensates for the missing `$24E0` continuous-scroll so mothership lands at arcade-faithful position). **12.6** mothership return fire `$24F2` (player-tracking via mappedPlayerX, shared `spawnEnemyBulletAtXY` helper). **12.7** pilot kill `$23C7` → GameState 6 `$2400` (particle explosion + EraseMothership) → GameState 7 `$244C` (score-display timer + next-round advance). **12.8** mothership bonus score `$2520` (BCD-decoded ((LR>>4)*16 + (counterB9+$60)/2) × 100, capped at $9000, credited to player) + K cheat triggers pilot kill on stage B. **12.9** particle explosion animation (T1B60/70/80 sprites + T1B90 selector). **12.10** ported `$21D2` stage-B respawn (mothership combat never auto-clears by alien kills); removed JT4 stop-gap entirely from both `stageClearUpdate` and `stageBirdClear`; ported `$24E0` mothership continuous-scroll + dynamic belt/antenna/particle row tracking via `findBeltRow` scan (replaces 12.5b one-time shift); particle position centered on pilot; bonus-score popup at mothership position via fgOverlay (4 BCD digits, persists through state6+7 until ClearForeground at state7 tail). **Remaining port deviations** (documented at `research_mothership.md §10`): second particle-draw path (`$2085` + T2A00/T2B00 on odd-CounterA5 ticks) deferred — explosion uses single-particle pipeline instead of source's denser dual-particle visual. |
+| 13 | Player death + lives + GAME OVER (`$0AEA` / `$0B15` / `$0B60`) | ✅ | Closes out the "Player can't die" cross-cutting gap. Research in `research_player_ship.md`. Landed across 2 commits: **13.A** (research doc + `scoring.updateLivesScreen` L0367 port wired from `state0_NewGameInit` so lives count is visible on screen). **13.B+C+D** (bundled — state-4 player explosion via L20E8 / T1B90 4×4 particle cycle reusing step-12.9 pipeline; L0B15 respawn-vs-game-over decision; state-5 GAME OVER banner via new `T1A00` text export from `tools/build_data.py`; re-enabled `alienVsPlayerCollision` (removed step-8-era `return;` early-out); ported L0CB4/L0CC4 enemy-bullet → player hit check inside `enemyBulletUpdate`; explicit shield-flag gate at `onPlayerHit` entry — port deviation §5.1 since canvas has no FG screen-RAM to host source's tile-`$E8` absorption). **Port deviations**: L2070 / T2800 / T2900 serpentine particle scatter skipped (same medium-gap rationale as mothership L2426/T2A00/T2B00 in research_mothership.md §10 — `research_player_ship.md §2.5`). State-5 game-over reset writes `player1Lives = 3` directly (port lacks attract-mode DIP-read path — `state5_GameOver` header). |
 | – | Sound (MN6221AA bit-field synthesis) | ⏸️ | Per `research_hardware.md` §5; only matters for audio fidelity |
 
 ## What's missing (post-step-12)
 
-All 12 step rows above are ✅ done — full 5-stage round cycle plays
-through end-to-end (alien × 2 → bird × 2 → mothership → next round).
-What's listed below is what the arcade does that this port doesn't
-yet (or does differently). Status as of 2026-05-18.
+All 13 step rows above are ✅ done — full 5-stage round cycle plays
+through end-to-end (alien × 2 → bird × 2 → mothership → next round)
+AND the player can die / respawn / hit game over / restart. What's
+listed below is what the arcade does that this port doesn't yet (or
+does differently). Status as of 2026-05-19.
 
 ### Cross-cutting (affects all stages)
 
-- **Player can't die.** `alienVsPlayerCollision` returns at the top
-  (disabled since step 8); `enemyBulletUpdate` skips the L0CB4 → L0CC4
-  player-hit check (since step 9). Net: alien bodies pass through the
-  player, alien + mothership bullets fly through the player, the
-  player is invincible everywhere. Re-enabling both is gated by:
-  - **State 4 player-explosion animation** — currently a stub
-    (`playerExplosionTimer` ticks but no visual)
-  - **State 5 game over** — currently empty
-  - **Lives counter** — `state.player1Lives` initialized to 3 but
-    never decremented; lives icons drawn but static
-  - **Bonus life at score threshold** — source awards an extra life
-    at a certain score; not ported
+- **Bonus life at score threshold** — source awards an extra life at
+  a DIP-configured score (`$015F`/`$278F`/`$2799`/`$279C`/`$27A2`).
+  Not ported; the lives counter goes 3 → 0 with no top-up. Player
+  death + lives + game over otherwise complete (step 13).
 
 - **Sound (entire MN6221AA bit-field synthesis)** — `research_hardware.md §5`
   documents the chip; nothing connected. Hit flags (`$4366`,
   `$4364`) are set by various paths but no audio system reads them.
-  Step 13.
+  Step 14.
 
 - **Attract mode / splash screen / coin-up flow.** Cold-start jumps
   straight to game mode (`state.gameOrAttract = 1` hardcoded). Coin
@@ -112,10 +106,31 @@ yet (or does differently). Status as of 2026-05-18.
   topic for post-project discussion: faithful port vs visual-effect
   port trade-off.**
 
+- **Player explosion: L2070 serpentine scatter skipped.** Same medium
+  gap as the mothership deviation above — `L2085` is screen-RAM-native
+  (clear-cell-and-replace semantics). Port uses only the L20E8 / T1B90
+  4×4 particle cycle (same pipeline as step 12.9 mothership). See
+  `research_player_ship.md §2.5` and the step 13 commit.
+
+- **Player shield: explicit flag check at `onPlayerHit` (no tile-level
+  absorption).** Source blocks bullets at the screen-RAM tile lookup
+  (`$0CA8` sees shield tile `$E8` → `L096E`) before ever reaching the
+  `L0CB4` hit path. Canvas port has no FG screen-RAM, so we gate at
+  the collision callback instead. Side-effect: port shield also blocks
+  alien bodies, where source does not. See `research_player_ship.md
+  §5.1` and the step 13 commit.
+
 - **Mothership bonus-score popup at mothership position.** Done via
   fgOverlay digit tiles (12.10 piece C). Source uses PrintNumber to
   FG screen-RAM at exact source position; port places at a fixed
   mothership-center position. Functionally equivalent.
+
+- **Game-over → new-game uses direct lives reset (no attract).** Source
+  drops into attract mode on game over (`Counter98 := 0` at `$0B7F`),
+  and the eventual coin-up reads DIP for fresh lives via `$0350`. Port
+  has no attract loop (gap above), so `state5_GameOver` at CounterA5
+  == $80 sets `state.player1Lives = 3` directly before returning to
+  state 0. Removed when attract / DIP-stub model lands.
 
 ### Vestigial source flags (no readers, port skips)
 

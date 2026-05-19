@@ -337,6 +337,6 @@ No guesswork required. Every section maps to an address in `Code.md` and can be 
 
 ---
 
-**Last updated:** May 18, 2026  
-**Status:** Step 12 (mothership) ✅ done. Full 5-stage round cycle plays end-to-end: alien × 2 → bird × 2 → mothership → next round.  
-**Next step:** Deferred polish — `$24E0` continuous-scroll + dynamic belt/antenna/particle row tracking (would remove the 12.5b one-time stage A→B shift). Then deferred player-death + lives counter (re-enables `alienVsPlayerCollision` and enemy-bullet → player path). Then step 13 sound.
+**Last updated:** May 19, 2026  
+**Status:** Step 13 (player death + lives + GAME OVER) ✅ done. Player can now die, decrement lives, and reach GAME OVER → fresh restart. Full 5-stage round cycle still plays end-to-end.  
+**Next step:** Step 14 sound (MN6221AA bit-field synthesis — `research_hardware.md §5`). Lower-priority gaps: bonus-life-at-threshold, attract mode, 2-player swap.

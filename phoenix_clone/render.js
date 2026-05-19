@@ -36,6 +36,7 @@ export const render = {
         if (this.gridLinesOn) this.drawDebugGrid();
         if (this.gridMode !== GRID_OFF) this.drawTileRomOverlay();
         for (const row of state.staticTextRows) gfx.drawObject(row);
+        if (state.gameState === 5) gfx.drawObject(state.gameOverRow);   // L0B95 PrintTextLines(T1A00)
         for (const alien of state.aliens) this.drawAlien(alien);
         for (const bird of state.birds) this.drawBird(bird);
         if (state.player.alive) this.drawPlayer();

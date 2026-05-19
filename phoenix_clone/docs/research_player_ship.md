@@ -125,13 +125,51 @@ player was hit — same routine `stageClearUpdate` uses) and one of the
 two player-explosion draws. Among the odd-bit-0 frames, bit-1 of the
 counter picks between `L2070` and `L20E8`.
 
-**`L2070` and `L20E8` body content** — sprite tables and draw shape:
-not quoted by the research pass; verify when porting. Best-guess based
-on adjacency (`T2800` / `T2900` are player-region tile tables; `T1B00`
-family is the particle sprite shared with the mothership explosion at
-step 12.9) is that one of the two is a ship-frame sprite redraw and
-the other is the particle blit via `DrawImageCbyB`. **[inferred —
-verify at port time, read `Code.md:$2070` and `$20E8`]**
+**`L2070` body** — entry point to the shared particle-blit engine at
+`L2085`:
+
+```
+2070-2079:                                ; arithmetic on screen-RAM ptr
+207A: 7E              LD   A,(HL)         ; A := control byte at HL
+207B: 11 00 28        LD   DE,$2800       ; T2800 — fragment tile data (256 B)
+207E: 21 00 29        LD   HL,$2900       ; T2900 — bitmask control data (256 B)
+2081: C3 85 20        JP   $2085          ; tail to particle engine
+```
+
+`L2085` (the engine, ~64 bytes at `$2085-$20E2`) walks an 8-cell-wide ×
+N-row screen-RAM region: at each cell, ALWAYS writes 0 (clear), then if
+the corresponding control bit in T2900 is set, overwrites with the
+parallel-indexed fragment tile from T2800. 256 bytes of control × 8
+bits → 2048 scanned cells. Result: dense scatter of small debris
+fragments replacing the ship sprite. [verified — `Code.md:$2070`,
+`$2085-$20E2`]
+
+The mothership explosion uses the same `L2085` engine via `L2426`
+(supplies T2A00 / T2B00 instead). One engine, two callers, two data
+sets. [verified — `Code.md:$2426`]
+
+**`L20E8` body** — 4×4-tile sprite blit via `DrawImageCbyB`:
+
+```
+20E8-20FB:                                ; screen-ptr arithmetic
+20FC: 78              LD   A,B            ; B := CounterA5
+20FD-20FE:            RRCA / RRCA         ; A >>= 2
+20FF: E6 0E           AND  $0E            ; (CounterA5 >> 2) & 0x0E → 0..14
+2101: C6 90           ADD  $90
+2103-2104:                                ; HL := $1B90 + offset
+2106-2109:            (HL) → real ptr     ; deref T1B90 pointer table
+210A: 01 04 04        LD   BC,$0404       ; image is 4 cols × 4 rows
+210D: C3 D6 0A        JP   $0AD6          ; tail DrawImageCbyB
+```
+
+`T1B90` is a pointer table indexed by `(CounterA5 >> 2) & 0x0E`,
+returning a pointer to a 4×4 = 16-tile sprite drawn at the
+pre-computed screen position. As CounterA5 ticks $60 → $20, the index
+walks 0, 2, 4, 6, 8, A, C, E (with collisions from the `>>2` truncation),
+cycling 8 different particle frames. [verified — `Code.md:$20E8`]
+
+The same `T1B90` pipeline already drives the mothership particle
+explosion in the port (step 12.9 — see `progress.md` step 12 row).
 
 ### 2.3 `ClearForeground` checkpoint — `$0380`
 
@@ -168,6 +206,34 @@ Only runs on stages 4-8 (intro stages — spiral-fill / bird / mothership
 intros). Resets scroll + clears the background plane on each late-phase
 frame. On the alien combat stages (0-3, A-B) this is a return, so the
 starfield + game state survive the player explosion intact.
+
+### 2.5 Port deviation — skip `L2070` serpentine scatter
+
+The port reuses the `L20E8` / `T1B90` 4×4-tile particle cycle (already
+wired for the mothership explosion at step 12.9) and **skips the
+`L2070` / `T2800` / `T2900` serpentine scatter entirely**.
+
+Reason — same medium-gap as the mothership deviation in
+`research_mothership.md §10`. `L2085` is screen-RAM-native: its
+"clear-cell, optionally overwrite with fragment tile" semantics depend
+on tile cells persisting across frames, which the canvas port has no
+analog for. Replicating it faithfully would require:
+
+1. Decoding T2900 (256 B bitmask) + T2800 (256 B fragment tiles) into
+   an explicit `(canvas_x, canvas_y, tileId)` set at build time.
+2. Tracking which fragments are visible on each of the ~48 early-phase
+   frames (source's per-frame `L0BBA` bit-0 / bit-1 alternation
+   between `L0FC0`, `L2070`, `L20E8` modulates what's drawn).
+3. Adding a new render path (`state.playerExplosion[]` + canvas blit)
+   for one explosion.
+
+vs. the visual-effect approach: reuse the existing 4×4 particle
+cycle, get a perceptually-similar "debris" look in ~10 lines of code.
+
+**Decision (2026-05-19):** visual-effect approach. This extends the
+mothership scatter deviation (already documented at
+`research_mothership.md §10`) to also cover the player explosion. One
+trade-off pattern, two applications. Parked for post-project review.
 
 ---
 
@@ -347,11 +413,12 @@ inspects a tile). One observable consequence: in the port the shield
 also blocks alien-body hits, where source does not — this is a
 side-effect of the port unifying both collision paths under one flag.
 
-This is flagged as a **faithful-vs-visual-effect trade-off**, the
-second such trade-off in the port. The first was the mothership
-scattered-particle explosion (`research_mothership.md §10` — port uses
-angle/radius scatter instead of source's serpentine `T2A00/T2B00`
-control-byte blit). Both are parked for post-project discussion.
+This is flagged as a **faithful-vs-visual-effect trade-off** — the
+same pattern the port already applies to the mothership particle
+explosion (`research_mothership.md §10`, and again here at §2.5 for
+the player explosion). The port replaces screen-RAM-native source
+mechanisms with state-driven canvas equivalents whenever the medium
+gap is large. All such deviations are parked for post-project review.
 
 **Resolution decided 2026-05-19:** keep the explicit flag check. The
 alternative — modeling FG screen RAM purely so bullets can collide
@@ -366,10 +433,12 @@ tile grid and is disproportionate work for one collision case.
 |-----------------------|-----------------------------------------------------------|
 | `L0AEA` state 4       | `states.js:state4_PlayerExplosion` (replaces stub)        |
 | `L0BBA` early phase   | inside `state4_PlayerExplosion`                           |
+| `L20E8` particle blit | reuse existing T1B90 / 4×4 particle path from step 12.9   |
+| `L2070` serpentine    | **skipped** — see §2.5 port deviation                     |
 | `L0BA0` late phase    | inside `state4_PlayerExplosion`                           |
 | `ClearForeground`     | `state.player.alive = false` (+ deactivate bullet)        |
 | `L0B15` decision      | inside `state4_PlayerExplosion`, at CounterA5==0          |
-| `UpdateLivesScreen`   | new `render.updateLivesScreen()` (called from L0B15 port) |
+| `UpdateLivesScreen`   | `scoring.updateLivesScreen()` — **landed in step 13.A**   |
 | `L0B60` state 5       | `states.js:state5_GameOver` (replaces stub)               |
 | `T1A00` GAME OVER     | new export from `tools/build_data.py` → consumed by render|
 | `L0CC4` hit-write     | `onPlayerHit()` already does this — re-enable callers     |
@@ -388,13 +457,6 @@ field initialized to 3. Bonus-life-at-threshold (`$015F`, `$278F`,
 These are deferrable to port-time but each touches one source routine
 that the research pass did not quote:
 
-- `Code.md:$0367 UpdateLivesScreen` — exact screen-RAM write pattern
-  for the lives icons (matters only if we mirror the source's clear-
-  and-redraw timing; not needed for a simpler canvas redraw).
-- `Code.md:$2070` and `Code.md:$20E8` — actual sprite/particle data
-  tables used by the player explosion. Best guess `T2800/T2900` (ship
-  frame) and `T1B00` family (particles, shared with mothership step
-  12.9), but unverified.
 - `Code.md:$01D0 PrintTextLines` — confirm the T1A00 row header
   (`43 28 FF FF FF FF` then chars) decodes the same way as the
   existing T1800 score rows; if so, `tools/build_data.py` extension
@@ -402,5 +464,5 @@ that the research pass did not quote:
 - `Code.md:$0CA8` — quote the tile-absorption check that diverts
   shield-blocked bullets to `L096E`, for completeness in §5.
 
-None of these are blockers for the Phase A-D implementation plan in
+None of these are blockers for the Phase B-D implementation plan in
 `progress.md` follow-up — they are read-once-while-porting items.
