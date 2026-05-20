@@ -10,7 +10,6 @@ import {
     ALIEN_MOVE_PTR_INIT,  // source T1520
     ALIEN_FORMATIONS,     // source T1540
     ALIEN_BIRD_PARTITION, // source T1760
-    ALIEN_EXPLOSION_ROM,  // source $17B0..$17F5 — T17B0 + frame tiles
     MOTION_PATH_BASE,     // source T1000
     MOTION_DIRECTIONS,    // source T1700
     ANIMATION_TABLE,      // source T16A0
@@ -41,6 +40,7 @@ import {
 import { mothershipMixin } from './states_mothership.js';
 import { introMixin }      from './states_intro.js';
 import { playerMixin }     from './states_player.js';
+import { explosionMixin }  from './states_explosion.js';
 
 // Debug knob — when non-null, the first state-0 transition jumps directly
 // to this LevelAndRound instead of starting at $00 (stage 0, round 1).
@@ -136,6 +136,11 @@ export const states = {
     // states_player.js. Bundled together because all eight methods cite
     // research_player_movement.md / research_player_ship.md.
     ...playerMixin,
+    // L38F8 / L0EC3 spawn + L0FC0 / L3758 update live in
+    // states_explosion.js. Shared by alien-kill, bird-kill, and
+    // mothership-pilot-kill paths; carved out ahead of the L2085
+    // visual-effect port (research_explosion_visual.md).
+    ...explosionMixin,
 
     dispatch() {
         switch (state.gameState) {
@@ -2173,59 +2178,8 @@ export const states = {
         scoring.addPoints(points, state.gameAndDemoOrSplash);
     },
 
-    // L38F8 — find the first free alien-explosion slot ($4370 or $4374)
-    // and populate it with (counter, scoreBcd, screen position). Source
-    // returns silently if both slots are active (slot starvation).
-    //
-    // Source also writes AbovePlayerBulletMSB/LSB ($43E6/$43E7) into the
-    // slot's screen-RAM fields and clears the player bullet's bit 3 — but
-    // those are L38F8's "bird wing" path-specific concerns. Alien hits
-    // come through L0EAD which writes the ALIEN'S screen position to the
-    // slot. The port skips the bullet-deactivate since playerBulletCollision
-    // already does `b.active = false` after a hit.
-    //
-    // Bonus-slot variant (200-pt kills) lives in spawnBonusExplosion below.
-    spawnExplosion(counter, scoreBcd, x, y) {
-        for (const e of state.explosions) {
-            if (e.counter !== 0) continue;
-            e.counter  = counter;
-            e.scoreBcd = scoreBcd;
-            e.x        = x & 0xFF;
-            e.y        = y & 0xFF;
-            // Seed frameLsb from the spawn counter so render is correct
-            // even on the first frame, before explosionUpdate has run.
-            // Source draws on the spawn-tick using the just-written counter
-            // value; this matches that behavior independent of lane ordering.
-            e.frameLsb = ALIEN_EXPLOSION_ROM[(counter & 0x0E) >> 1];
-            return true;
-        }
-        return false;
-    },
-
-    // Bonus-slot variant of L38F8 — allocate one of the 2 bonus slots
-    // ($4378 / $437C). Used for 200-pt kills (alien current path byte 7
-    // or 8 at hit time, see L0C00). Source's actual allocator at L0EC3
-    // walks both bonus slots looking for counter==0; if both are active,
-    // it falls through to L0ED5 and clobbers slot 1 anyway. Port returns
-    // false on starvation to be safe (and to match spawnExplosion's
-    // contract). Slot starvation is rare in practice — bonus kills only
-    // fire on path bytes 7 or 8, which are brief moments in a swoop.
-    //
-    // Source counter for bonus kills is $10 (16 ticks ≈ 0.27 s at 60 Hz
-    // gross, but each tick advances at the L0FC0 cadence so wall-time is
-    // longer); scoreBcd is $20 (= "200" displayed via L37B0's "first two
-    // digits + always-0").
-    spawnBonusExplosion(counter, scoreBcd, x, y) {
-        for (const e of state.bonusExplosions) {
-            if (e.counter !== 0) continue;
-            e.counter  = counter;
-            e.scoreBcd = scoreBcd;
-            e.x        = x & 0xFF;
-            e.y        = y & 0xFF;
-            return true;
-        }
-        return false;
-    },
+    // spawnExplosion / spawnBonusExplosion moved to states_explosion.js —
+    // spread into `states` via `...explosionMixin` above.
 
     // L21BA — stage-clear pause handler. Called from stageAlienCombat
     // when AliensLeft hits 0. Source structure (Code.md $21BA):
@@ -2810,51 +2764,8 @@ export const states = {
         }
     },
 
-    // L0FC0 — Handle animations for killed aliens. Iterate the 2 alien
-    // explosion slots ($4370 / $4374) and animate each non-zero counter
-    // through the T17B0 tile-LSB cycle. Each tick:
-    //   if counter == 0: slot is free, skip.
-    //   else: pick the tile-frame LSB using the PRE-decrement counter
-    //         (matches source L0FDB→L0FE6 ordering: LD B,(HL); DEC (HL);
-    //         use B for tile lookup), then decrement counter.
-    // drawExplosions in render.js consumes frameLsb to look up the 6-tile
-    // 3x2 sprite via ALIEN_EXPLOSION_ROM.
-    //
-    // Source L0FC0 also processes the 2 bonus slots ($4378/$437C) via
-    // L3758 — that path lives in bonusExplosionUpdate below.
-    explosionUpdate() {
-        for (const e of state.explosions) {
-            if (e.counter === 0) continue;
-            // T17B0 lives in the first 8 bytes of ALIEN_EXPLOSION_ROM.
-            const idx = (e.counter & 0x0E) >> 1;
-            e.frameLsb = ALIEN_EXPLOSION_ROM[idx];
-            e.counter = (e.counter - 1) & 0xFF;
-        }
-    },
-
-    // L3758 — bonus-explosion slot animation. Used by 200-pt swoop kills
-    // (alien current path byte 7 or 8 — see L0C00) and by bird wing /
-    // mothership scoring (step 11 territory). Source L3758 splits per
-    // tick:
-    //   counter == 0           → skip (slot free)
-    //   else, post-dec == 0    → erase area via L37CC
-    //   else, bit-0 of post-dec:
-    //       0 → JP L37B0 (draw popup score digits only this frame)
-    //       1 → fall through to draw the 6×2 sprite (L3796 + Draw3x2)
-    //
-    // The source's per-frame alternation between digits and sprite relies
-    // on screen-RAM persistence — both end up visible on the CRT because
-    // each leaves the other in place. Canvas clears per frame, so port
-    // collapses to "draw both every frame for active slots" in
-    // drawBonusExplosions; this update routine just decrements the
-    // counter. The L37CC erase is also a no-op for canvas — counter==0
-    // already gates rendering.
-    bonusExplosionUpdate() {
-        for (const e of state.bonusExplosions) {
-            if (e.counter === 0) continue;
-            e.counter = (e.counter - 1) & 0xFF;
-        }
-    },
+    // explosionUpdate / bonusExplosionUpdate moved to states_explosion.js —
+    // spread into `states` via `...explosionMixin` above.
 
     // L2560 enemy-fire scan + L25B7/L25E0 spawn. Picks a formation column
     // (Counter93 bit 0 selects aliens 0-7 or 8-15), filters via L2596 for
@@ -2960,6 +2871,10 @@ export const states = {
     // state4_PlayerExplosion / _drawPlayerParticleFrame /
     // _playerRespawnDecision / state5_GameOver moved to states_player.js —
     // spread into `states` via `...playerMixin` above.
+    //
+    // spawnExplosion / spawnBonusExplosion / explosionUpdate /
+    // bonusExplosionUpdate moved to states_explosion.js — spread into
+    // `states` via `...explosionMixin` above.
 
     // Debug cheat — K-key kills all live enemies in the current stage to
     // accelerate testing of stage transitions. Detects which kind of
