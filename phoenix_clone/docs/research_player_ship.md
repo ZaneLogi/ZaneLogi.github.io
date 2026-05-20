@@ -120,10 +120,18 @@ screen RAM, so these are no-ops in the port.
 [verified — `Code.md:$0BBA-$0BC4`]
 
 Bit-0 of `CounterA5` alternates each frame between **L0FC0** (continue
-animating any still-running dead-alien explosions from before the
-player was hit — same routine `stageClearUpdate` uses) and one of the
-two player-explosion draws. Among the odd-bit-0 frames, bit-1 of the
-counter picks between `L2070` and `L20E8`.
+animating any still-running alien-kill and bonus explosions — same
+routine `stageClearUpdate` uses) and one of the two player-explosion
+draws. Among the odd-bit-0 frames, bit-1 of the counter picks between
+`L2070` and `L20E8`.
+
+`L0FC0` ticks across **both** the regular-explosion slots (`$4370` /
+`$4374` via `$0FD8`) and the bonus-explosion slots (`$4378` / `$437C`
+via `$3758`), so explosions spawned by the same-frame alien/bird kill
+(when a collision called `killAlienRegular` or `onBirdHit` alongside
+the player death) animate to completion across the ~32 even-bit-0
+frames inside the early phase. Without this, the explosion sprite
+would freeze on its spawn frame for ~1 s until the `$20` wipe.
 
 **`L2070` body** — entry point to the shared particle-blit engine at
 `L2085`:
@@ -452,10 +460,68 @@ the bullet's `state & 0x08` (deactivate) without ever reaching
 play-field that absorbs them — a screen-RAM side effect, not a flag
 check. **[verified — agent quoted the `$0CA8` branch path during R2]**
 
-The same is true for alien-body collision (`L0CF4` family) — also no
-flag check; the alien sprite isn't blocked by the shield tile because
-the shield is a screen-RAM artifact, not a hitbox. So even in source,
-shielded players are vulnerable to alien *bodies* during swoop dives.
+Alien-body collision (`$0F00 AlienVsPlayerCollision` — `L0CF4` is the
+no-collision tail) is **different**: it has an explicit `ShieldCount`
+flag check at `$0F04` (`CP $C0 / JP NC,$0F74`).
+
+**Normal-phase outcome** (sc < $C0) is **both die** — the source's
+`$0F46 CALL $0CC4` (player dies) is immediately followed by
+`$0F4E JP $0EAD` (alien dies via the standard alien-kill handler,
+no points, no explosion). Port matches this in
+`states.js:alienVsPlayerCollision` by calling both `onAlienHit` and
+`onPlayerHit` on overlap.
+
+**Shield-phase outcome** (sc >= $C0) routes to `$0F74` — a parallel
+collision check using the **shield bubble's bounds**, not the ship's:
+
+```
+0F74-0F7D: set up 4×4 shield-area scan ptr
+0F86-0F8E: compute alien-X range [PlayerX - $0E, PlayerX + $1F)
+0F8F-0FA2: walk all 16 alien slots ($4B70..$4BAF); for each with
+           bit-3 (alive) set, call $0FA6.
+0FA6-0FB3: per-alien check — alien.y in [$CA, $EF) AND
+           alien.x in [B, C)?
+0FB4:      LD DE,$0D02       ; D=$0D (regular slot), E=$02 (BCD 20 pts)
+0FB7-0FB8: DEC HL twice      ; point back at alien controlA
+0FB9:      JP $0EAD          ; standard alien-killed handler
+```
+
+[verified — `Code.md:$0F00-$0FB9`]
+
+So in source, an alien that swoops into a shielded player **dies**
+instead of killing the player — the shield acts as a damage zone, not
+just protection. The damage-zone bounds are slightly wider than the
+visual 4×4 shield bubble (45 px wide × 37 px tall, vs the 32×32 visual),
+and source scans all 16 alien slots per frame, so multiple aliens can
+die from one shield activation.
+
+#### Shield-kill score is FIXED at 20 pts (regular explosion, never bonus)
+
+The `LD DE,$0D02` at `$0FB4` is critical: source uses a **fixed** (counter,
+BCD) pair for every shield-kill — D=$0D selects the regular-explosion
+slot at `$4370` (NOT the bonus slot at `$4378`), E=$02 awards 20 points.
+This is **independent of the alien's current path byte** — a swooping
+alien on path byte 7/8 (the "climbing back from dive" trajectory that
+normally awards 200 pts via the bonus popup when killed by a bullet)
+still gives only 20 pts with regular explosion when killed by the shield.
+
+The 200-pt bonus path is reserved for `$0C1B LD DE,$1020 → $0EAD` (D=$10
+selects bonus slot, E=$20 awards 200 pts), which is only reached from
+the bullet-vs-alien dispatch (`$0DF0` → `$0E58` → `$0C00`). Body-
+collision and shield-kill never set D=$10.
+
+Same fixed-score pattern for `$0F49 LD DE,$0D04 → $0EAD` (normal body
+collision) — 40 pts regular explosion regardless of path byte.
+
+Port mirrors this with a dedicated `killAlienRegular(alien, scoreBcd,
+points)` helper that bypasses `onAlienHit`'s path-byte bonus check.
+`alienVsPlayerCollision` uses `(scoreBcd=$04, 40)` for body collision
+and `(scoreBcd=$02, 20)` for shield kills.
+
+[Previous research wrongly claimed source had no shield gate for alien
+bodies. The mistake was reading the `L0CF4` tail (no-collision exit
+path) as the entry point and missing `$0F00`'s top-of-routine `CP $C0`
+dispatch. Corrected 2026-05-20 when porting DrawShields.]
 
 ### 5.1 Port deviation — shield absorption via explicit flag check
 
@@ -464,14 +530,31 @@ to canvas pixels each frame, and bullets exist only as `state.enemyBullets[]`
 entries. There is no tile to inspect at the bullet's position, so the
 source's tile-`$E8`-absorption mechanism doesn't translate.
 
-The port chose to add an explicit shield-flag check at
-`onPlayerHit()`: when the hit fires, consult `state.player.shield`
-(the existing shield-counter ported in step 7); if active, suppress
-the hit. This is **functionally close to source** (shielded player
-survives bullets) but **mechanism differs** (port reads a flag, source
-inspects a tile). One observable consequence: in the port the shield
-also blocks alien-body hits, where source does not — this is a
-side-effect of the port unifying both collision paths under one flag.
+The port adds an explicit shield-active check at `onPlayerHit()`: when
+the hit fires, consult `state.player.shieldCount`; if in the ACTIVE
+phase, suppress the hit. This is **functionally close to source**
+(shielded player survives bullets) but **mechanism differs** (port reads
+a counter, source inspects a tile).
+
+#### Gate threshold matches the ACTIVE phase only
+
+The gate is `shieldCount > 0xC0`, not `shieldCount > 0`. The source's
+tile-absorption window is exactly the ACTIVE phase (when DrawShields
+keeps painting shield tiles in the bullet's path); during COOLDOWN
+(`0 < sc ≤ $C0`, ~3.2 s) ShieldsExpired has already wiped the shield
+tiles, so source bullets land normally on the player again. Port matches
+that here. See `research_player_movement.md §3.4` for the two-phase
+state machine.
+
+Alien-body collisions are NOT routed through `onPlayerHit` during
+ACTIVE shield — they get their own branch in `states.js:alienVsPlayerCollision`
+that mirrors source's `$0F74` damage-zone scan: walk all 16 alien slots,
+kill (via `onAlienHit`) any alien whose anchor falls inside the source-
+faithful damage-zone bounds (X ∈ [PlayerX-$0E, PlayerX+$1F), Y ∈ [$CA, $EF)).
+Functionally matches source's `$0F00 → $0F74 → $0FA6 → $0EAD` chain.
+Outside the ACTIVE window the alien-body path uses the normal 2×2 ship
+hitbox + `onPlayerHit` (which the `> 0xC0` gate also catches if shield
+just expired this frame, ensuring no inconsistency in the transition).
 
 This is flagged as a **faithful-vs-visual-effect trade-off** — the
 same pattern the port already applies to the mothership particle
@@ -480,10 +563,17 @@ the player explosion). The port replaces screen-RAM-native source
 mechanisms with state-driven canvas equivalents whenever the medium
 gap is large. All such deviations are parked for post-project review.
 
-**Resolution decided 2026-05-19:** keep the explicit flag check. The
+**Resolution decided 2026-05-19:** keep the explicit counter check. The
 alternative — modeling FG screen RAM purely so bullets can collide
 with shield tiles — would require shadowing every sprite blit into a
 tile grid and is disproportionate work for one collision case.
+
+**Refined 2026-05-20:** threshold tightened from `> 0` to `> 0xC0`
+when the DrawShields visual landed and the two-phase ACTIVE/COOLDOWN
+semantics replaced the prior single-phase `shieldCount` countdown.
+PlayerState bit-3 is not modeled — the ShieldCount value alone encodes
+the active phase via the `> 0xC0` predicate (see
+`research_player_movement.md §3.4` shield state-machine table).
 
 ---
 
@@ -503,7 +593,12 @@ tile grid and is disproportionate work for one collision case.
 | `T1A00` GAME OVER     | new export from `tools/build_data.py` → consumed by render|
 | `L0CC4` hit-write     | `onPlayerHit()` already does this — re-enable callers     |
 | `L0CB4` AABB          | inline inside re-enabled `enemyBulletUpdate` player path  |
-| Shield flag gate      | new — `if (state.player.shield > 0) return` at hit entry  |
+| Shield gate           | `if (state.player.shieldCount > 0xC0) return` at hit entry (ACTIVE phase only) |
+| `L0AA0` DrawShields   | `render.drawPlayerShielded` — 4×4 T1770 blit at (X&~7-8, Y-8) |
+| `L0B48` ShieldsExpired | inside `playerUpdate` ACTIVE branch at the `next === 0xC0` transition: snap PlayerShipX to `(X & ~7) | 3` |
+| `L0F00` / `L0F74`     | `alienVsPlayerCollision` ACTIVE branch: walk 16 alien slots, point-in-range vs source damage-zone bounds, kill via `killAlienRegular(a, $02, 20)` |
+| `L0F46` / `L0F4E`     | `alienVsPlayerCollision` normal branch: 2×2 ship hitbox; both die via `killAlienRegular(a, $04, 40)` + `onPlayerHit()` |
+| `L0FB4` / `L0F49` DE setup | `killAlienRegular(alien, scoreBcd, points)` — fixed regular-slot explosion, bypasses `onAlienHit`'s path-byte bonus check |
 
 Lives counter (`Player1Lives` `$4390`) is already a `state.player1Lives`
 field initialized to 3. Bonus-life-at-threshold (`$015F`, `$278F`,

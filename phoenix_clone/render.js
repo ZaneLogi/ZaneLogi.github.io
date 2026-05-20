@@ -9,6 +9,7 @@ import {
     BIRD_T3EC0,           // source T3EC0 — shape → draw-routine entry LSB (= column count)
     BIRD_T3E08,           // source $3E00..$3E7F — shape×frame → tile-data MSB:LSB
     BIRD_TILE_DATA,       // source $3C00..$3DBF — actual bird-sprite tile bytes
+    SHIP_SHIELD_SPRITES,  // source T1770 — 4 ship+shield 4×4 frames (DrawShields)
 } from './data.js';
 
 // research_rendering.md §5 — per-frame: clear → drawBackground → walk objects.
@@ -304,8 +305,17 @@ export const render = {
 
     // 2×2 ship drawn at (X & ~7, Y). T1600 variant selected in playerUpdate
     // encodes the sub-pixel X offset; snapping to tile boundary lets it work.
+    //
+    // ACTIVE-shield phase (shieldCount > 0xC0) routes to drawPlayerShielded
+    // instead — source $08C4 → $0AA0 DrawShields replaces the normal 2×2
+    // ship blit with a 4×4 T1770 sprite that contains both the ship body
+    // (centre 2×2) and the shield bubble (surrounding 12 tiles).
     drawPlayer() {
         const p = state.player;
+        if (p.shieldCount > 0xC0) {
+            this.drawPlayerShielded();
+            return;
+        }
         const ctx = gfx.ctx;
         const images = resource.fgTileImages;
         const tx = p.x & ~7;
@@ -314,6 +324,33 @@ export const render = {
         ctx.drawImage(images[p.tiles[1]], tx + 8, ty);
         ctx.drawImage(images[p.tiles[2]], tx,     ty + 8);
         ctx.drawImage(images[p.tiles[3]], tx + 8, ty + 8);
+    },
+
+    // L0AA0 DrawShields — 4×4 ship+shield sprite blitted at (player - 1col,
+    // player - 1row), so the centre 2×2 of the sprite covers the player
+    // position. Frame selector ($0ABB-$0ABE): (ShieldCount & 0x0C) >> 2 →
+    // 0..3, cycles every 4 ShieldCount ticks (~67 ms at 60 Hz). Layout
+    // inside SHIP_SHIELD_SPRITES (column-major, same as PARTICLE_SPRITES):
+    //   frame 0 (offset  0): T1770 — ship + large white shield bubble
+    //   frame 1 (offset 16): T1780 — ship + small white shield bubble
+    //   frame 2 (offset 32): T1790 — green ship + large shield bubble
+    //   frame 3 (offset 48): T17A0 — green ship, no shield (blink frame,
+    //                                12 of 16 cells are 0x00 transparent)
+    // research_coordinate_system.md §4.3.
+    drawPlayerShielded() {
+        const p = state.player;
+        const ctx = gfx.ctx;
+        const images = resource.fgTileImages;
+        const tx = (p.x & ~7) - 8;
+        const ty = p.y - 8;
+        const frameOff = ((p.shieldCount & 0x0C) >> 2) * 16;
+        for (let dc = 0; dc < 4; dc++) {
+            for (let dr = 0; dr < 4; dr++) {
+                const tile = SHIP_SHIELD_SPRITES[frameOff + dc * 4 + dr];
+                if (tile === 0) continue;   // T17A0 blink frame transparency
+                ctx.drawImage(images[tile], tx + dc * 8, ty + dr * 8);
+            }
+        }
     },
 
     // L0930 / L07D2 — single 8×8 tile at bullet (x, y).

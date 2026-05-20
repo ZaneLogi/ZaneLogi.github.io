@@ -994,6 +994,78 @@ port deviation.]
 For the port: deferred unless sound lands. The flag stays in
 `M4366`, but no visible game state hinges on the feedback timer.
 
+### 6.5 Bird-body-vs-player (`$3980` + `$39F0`)
+
+Source has a per-frame collision scan between birds and the player ship
+dispatched from `$340C CALL $3980` (inside `L3400` bird-stage main).
+The scan reuses the bird-vs-player-bullet collision routine `$3800` as
+the detection engine by temporarily repurposing the player bullet as a
+"probe" placed at the ship position:
+
+```
+3980: LD A,($4BD2)         ; bird-row offset state
+3983: SUB $0C
+3985: RET C                ; M4BD2 < $0C → skip scan
+3986: CP $10
+3988: RET NC               ; M4BD2 >= $1C → skip scan
+3989-3998: backup PlayerBulletState (4 B) + AbovePlayerBullet (2 B) to $4BC0+
+399B-39A2: copy PlayerShipMSB/LSB → AbovePlayerBulletMSB/LSB (probe position)
+39A5: write $08 to PlayerBulletState (force-activate the probe)
+39AC-39C0: PlayerBulletX := mapped player X (left/right by Counter9A bit 0)
+39C3: CALL $3800           ; bird-vs-probe scan
+39C6-39CA: re-read PlayerBulletState
+39CC: JP Z,$39F0           ; bullet now inactive (= bird was hit) → shield dispatch
+39CF-39D8: advance probe up one row, loop back to $39C3
+39DB-39EA: post-loop — restore real PlayerBullet state from $4BC0+
+```
+
+`$3800` does the actual work: scans the screen-RAM tile at the probe
+position, and if it's a bird tile (>= $90 after offset arithmetic) it
+**always kills the bird** ($3851 `LD (HL),$00` zeroes the bird's shape
+byte) + `$385C DEC (HL)` decrements `BirdsLeft` + awards points
+(typically a bonus explosion if shape >= $0B).
+
+Then `$39F0` dispatches on ShieldCount:
+
+```
+39F0: LD L,$A6              ; ShieldCount
+39F2: LD A,(HL)
+39F3: CP $C0
+39F5: JP C,$0CC4             ; sc < $C0 → player dies
+39F8-39FA: SUB $01 / write back  ; sc >= $C0 → drain 1 frame of shield
+39FB: JP $39DB                ; restore bullet state, continue
+```
+
+[verified, `Code.md:$3980-$39FB`]
+
+**Both outcomes kill the bird first**, then either kill the player (no
+shield) or drain one extra frame of shield duration (shield active).
+
+The `M4BD2 in [$0C, $1C)` gate at `$3980` is a frame-timing filter — it
+restricts the scan window to a specific phase of the bird-state cycle.
+M4BD2 is part of the extended bird storage maintained by `$26D0` /
+`$26AA` / `$2668`; in the port, this timing is implicitly approximated
+by AABB-only collision (a bird outside the player's column never AABBs
+with the player anyway, so the gate's intent — "only check when birds
+are near the player" — is satisfied by geometry).
+
+#### Port mapping
+
+`states.js:birdVsPlayerCollision` (called from `stageBirdCombat` on
+every bird-stage frame). Direct AABB between each bird's bounding box
+(width from `BIRD_T3EC0`, height 16) and the player's 2×2 ship hitbox
+(16×16 at `(X & ~7, Y)`). On overlap: `onBirdHit(bird, idx)` always
+fires (matches source's bird-dies-regardless behavior), then
+`shieldCount > 0xC0` dispatches: drain one extra shield frame, OR call
+`onPlayerHit()`. The screen-RAM tile-probe mechanism is replaced by
+direct AABB — same trade-off as `enemyBulletUpdate` and
+`alienVsPlayerCollision` (port has no FG screen RAM).
+
+This path was missing in the port through step 14 — birds could swoop
+through the player ship with no consequence. Discovered during a
+collision-detection audit alongside the DrawShields work (2026-05-20)
+and ported in the same commit.
+
 ---
 
 ## 7. Spiral-fill intro (`$2230`) — ported (step 11.10, 2026-05-18)

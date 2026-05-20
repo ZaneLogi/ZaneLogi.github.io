@@ -26,50 +26,90 @@ const PARTICLE_T1B80 = 32;   // frame 2 — sparse
 export const playerMixin = {
     // L0876 — PlayerUpdate. Called every combat frame (not lane-gated).
     // research_player_movement.md §3.
+    //
+    // Source $08C4 MovePlayer dispatches on PlayerState bit-3:
+    //   bit-3 CLEAR ($08CA JP Z,$0AA0): jump straight to DrawShields,
+    //     which decrements ShieldCount and paints the 4×4 T1770 sprite.
+    //     L0900 movement + L0926 animation are SKIPPED — $0AA0's body
+    //     ($0AA0-$0AC1) never calls them. Player is frozen.
+    //   bit-3 SET: fall through $08CD-$08E8 (ShieldCount nonzero → DEC
+    //     only; ShieldCount zero + button pressed → activate, write $FF,
+    //     immediate DEC to $FE), then $08EB CALL L0900 + $08F3 JP L0926.
+    //
+    // Bullet update ($0930) lives in L08A0 just after MovePlayer returns
+    // ($08A6 CALL $0930), independent of which branch ran — so bullets
+    // are fired/advanced during shield too.
+    //
+    // Port models PlayerState bit-3 implicitly via ShieldCount value:
+    //   ACTIVE   sc > $C0  — bit-3 clear in source; skip move + anim
+    //   COOLDOWN $C0 ≥ sc > 0 — bit-3 set; ShieldCount decrements but
+    //                         button gate at $08D1 JP NZ,$08EA blocks
+    //                         re-activation
+    //   READY    sc == 0   — button check armed
     playerUpdate() {
-        // L0900 — left/right movement. Level-checked (held = continuous).
-        // Boundaries from source: DEC when X >= $0D (min reachable = $0C);
-        //                         INC when X <  $C0 (max reachable = $C0).
-        // Note: research doc listed $0D–$BF as valid range but the assembly
-        // allows one step past each: min=$0C, max=$C0. Verify if collision
-        // detection cares about the extra pixel at each edge.
-        if (input.leftPressed && state.player.x >= 0x0D) {
-            state.player.x = (state.player.x - 1) & 0xFF;
-        } else if (input.rightPressed && state.player.x < 0xC0) {
-            state.player.x = (state.player.x + 1) & 0xFF;
+        const sc = state.player.shieldCount;
+
+        if (sc > 0xC0) {
+            // ACTIVE phase: skip L0900 + L0926. Decrement ShieldCount;
+            // on expire ($C0 transition) run ShieldsExpired ($0B48)
+            // side effects.
+            const next = (sc - 1) & 0xFF;
+            if (next === 0xC0) {
+                // $0B57-$0B59 ShieldsExpired: PlayerShipX := (X & ~7) | 3.
+                // PlayerState/Shape resets at $0B4E/$0B51 — port doesn't
+                // track those (research_player_ship.md §5.1 explains why
+                // bit-3 PlayerState isn't modeled; the ShieldCount value
+                // alone encodes the active/cooldown phase).
+                state.player.x = ((state.player.x & ~7) | 3) & 0xFF;
+            }
+            state.player.shieldCount = next;
+        } else {
+            // COOLDOWN or READY — bit-3 set in source. L0900 + L0926 run.
+            //
+            // L0900 — left/right movement. Level-checked (held = continuous).
+            // Boundaries from source: DEC when X >= $0D (min reachable = $0C);
+            //                         INC when X <  $C0 (max reachable = $C0).
+            // Note: research doc listed $0D–$BF as valid range but the assembly
+            // allows one step past each: min=$0C, max=$C0. Verify if collision
+            // detection cares about the extra pixel at each edge.
+            if (input.leftPressed && state.player.x >= 0x0D) {
+                state.player.x = (state.player.x - 1) & 0xFF;
+            } else if (input.rightPressed && state.player.x < 0xC0) {
+                state.player.x = (state.player.x + 1) & 0xFF;
+            }
+
+            // L0926 + T1600 — select pre-shifted tile variant. T1600 is a non-linear
+            // lookup: X%8=0→frame5, X%8=4→frame1, etc. tileBase = 0x30+(T1600[v]>>1).
+            // Draw at (X & ~7, Y) so the tile content provides the sub-pixel offset.
+            // Same pattern as drawAlien: snap-draw + variant content = exact pixel pos.
+            const T1600 = [0x10, 0x14, 0x18, 0x1C, 0x00, 0x04, 0x08, 0x0C];
+            const shape = T1600[state.player.x & 7];
+            const tileBase = 0x30 + (shape >> 1);
+            const p = state.player;
+            p.tiles[0] = tileBase;
+            p.tiles[1] = tileBase + 1;
+            p.tiles[2] = tileBase + 0x10;
+            p.tiles[3] = tileBase + 0x11;
+
+            // Shield button — only checked in READY (sc == 0). In COOLDOWN
+            // (0 < sc ≤ $C0) source's $08D1 JP NZ,$08EA bypasses the
+            // button check and just decrements.
+            if (sc > 0) {
+                state.player.shieldCount = (sc - 1) & 0xFF;
+            } else if (input.barrierEdge()) {
+                // $08DC-$08E8 activate path: clear PlayerState bit-3, write
+                // ShieldCount := $FF, fall through to $08EA DEC (HL) →
+                // $FE. Port writes the post-DEC value $FE so the very next
+                // frame enters the ACTIVE branch at sc = $FE (frame
+                // selector ($FE & $0C) >> 2 = 3 → T17A0 blink, matches
+                // source's first DrawShields frame after activation).
+                state.player.shieldCount = 0xFE;
+            }
         }
 
-        // L0926 + T1600 — select pre-shifted tile variant. T1600 is a non-linear
-        // lookup: X%8=0→frame5, X%8=4→frame1, etc. tileBase = 0x30+(T1600[v]>>1).
-        // Draw at (X & ~7, Y) so the tile content provides the sub-pixel offset.
-        // Same pattern as drawAlien: snap-draw + variant content = exact pixel pos.
-        const T1600 = [0x10, 0x14, 0x18, 0x1C, 0x00, 0x04, 0x08, 0x0C];
-        const shape = T1600[state.player.x & 7];
-        const tileBase = 0x30 + (shape >> 1);
-        const p = state.player;
-        p.tiles[0] = tileBase;
-        p.tiles[1] = tileBase + 1;
-        p.tiles[2] = tileBase + 0x10;
-        p.tiles[3] = tileBase + 0x11;
-
-        // Shield — MovePlayer ($08C4) $08D4–$08E8.
-        // Source activates on CheckInputBits 1→0 transition (= barrierEdge()).
-        // On activation, source CLEARS bit3 of PlayerState, routing MovePlayer
-        // to DrawShields ($0AA0) on subsequent frames — skipping L0900 above.
-        // ⚠ STOP: DrawShields ($0AA0) is not traced. Whether the player can
-        // move while shielded depends on its internals. In the real game the
-        // player CAN move during shield, so $0AA0 likely re-runs its own
-        // movement. Keeping L0900 active during shield as a placeholder;
-        // check DrawShields before step 9.
-        if (state.player.shieldCount > 0) {
-            state.player.shieldCount--;
-            // DrawShields visual deferred (step 9 / mothership research).
-        } else if (input.barrierEdge()) {
-            state.player.shieldCount = 0xFF;   // ~4.25 s at 60 Hz
-        }
-
-        // L0930 — bullet update (runs every frame regardless of shield state;
-        // called from L08A0 after MovePlayer returns, so shield doesn't gate it).
+        // L0930 — bullet update. Source $08A6 calls $0930 unconditionally
+        // after MovePlayer ($08C4) returns, so bullets fire/advance during
+        // both ACTIVE and COOLDOWN/READY phases.
         this.playerBulletUpdate();
     },
 
@@ -116,12 +156,20 @@ export const playerMixin = {
     // Port-deviation §5.1 shield gate: source uses tile-level absorption
     // (bullet's screen-RAM read at $0CA8 sees shield tile $E8 → JP L096E)
     // before ever reaching $0CB4. The canvas port has no FG screen RAM, so
-    // we add an explicit flag check here. Side-effect: in the port the
-    // shield ALSO blocks alien-body hits (where source does not) — both
-    // collision callers go through this one entry. Documented in
-    // research_player_ship.md §5.1.
+    // we add an explicit flag check here.
+    //
+    // Gate is `shieldCount > 0xC0` (ACTIVE phase only) — matches source's
+    // "shield tile is on screen" window. During COOLDOWN (0 < sc ≤ $C0)
+    // the source's tile-absorption stops working (ShieldsExpired wiped
+    // the shield tiles) and the player is vulnerable again. Port matches
+    // that here by treating only ACTIVE as protective. Side-effect: in
+    // the port the shield ALSO blocks alien-body hits during ACTIVE (where
+    // source does not, since alien sprites overwrite the shield tile and
+    // the alien-body check at $0CF4 doesn't read tiles); the simpler
+    // single-gate semantics are an acceptable trade for the ~1 s active
+    // window. Documented in research_player_ship.md §5.1.
     onPlayerHit() {
-        if (state.player.shieldCount > 0) return;
+        if (state.player.shieldCount > 0xC0) return;
 
         state.player.alive         = false;
         state.player.bullet.active = false;   // freeze the in-flight bullet
@@ -138,13 +186,12 @@ export const playerMixin = {
     //   <  $20   → L0BA0 late phase (stages 4-8 only: scroll reset + clear BG)
     //   >  $20   → L0BBA early phase: particle frame draw on bit-0 odd, bit-1 clear ticks
     //
-    // Source's L0BBA alternates between L0FC0 (alien-kill anims) on bit-0
-    // even, L2070 (T2800/T2900 serpentine) on bit-1 set, L20E8 (T1B90 4×4
-    // particle) on bit-1 clear. Port reuses only the L20E8 path; the
-    // serpentine scatter is the second instance of the
-    // research_mothership.md §10 deviation (also documented at
-    // research_player_ship.md §2.5). L0FC0 already ticks via stageClearUpdate
-    // when relevant, so we don't drive it from here.
+    // Source's L0BBA alternates between L0FC0 (alien + bonus explosion
+    // anims) on bit-0 even, L2070 (T2800/T2900 serpentine) on bit-0 odd
+    // + bit-1 set, and L20E8 (T1B90 4×4 particle) on bit-0 odd + bit-1
+    // clear. Port reuses L0FC0 and L20E8; the serpentine scatter is the
+    // second instance of the research_mothership.md §10 deviation (also
+    // documented at research_player_ship.md §2.5).
     state4_PlayerExplosion() {
         state.counterA5 = (state.counterA5 - 1) & 0xFF;
         const a5 = state.counterA5;
@@ -185,10 +232,21 @@ export const playerMixin = {
             }
             return;
         }
-        // a5 in $21..$5F — L0BBA early phase. L20E8-only (see header).
-        if ((a5 & 0x03) === 0x01) {           // bit-0 odd AND bit-1 clear
+        // a5 in $21..$5F — L0BBA early phase.
+        if ((a5 & 0x01) === 0) {
+            // L0FC0 — alien-kill + bonus explosion animations. Source
+            // ticks these every other frame so the explosion the alien
+            // or bird spawned at the moment of the player death (when
+            // the collision called killAlienRegular or onBirdHit) plays
+            // out its ~12-16-frame animation. Without this, the sprite
+            // freezes on the spawn frame for ~1 s until the $20 wipe.
+            this.explosionUpdate();
+            this.bonusExplosionUpdate();
+        } else if ((a5 & 0x02) === 0) {
+            // bit-0 odd AND bit-1 clear → L20E8 player particle frame.
             this._drawPlayerParticleFrame(a5);
         }
+        // bit-0 odd AND bit-1 set → L2070 serpentine scatter (port skipped).
     },
 
     // $20E8 + T1B90 selector port — particle frame at player's hit position.

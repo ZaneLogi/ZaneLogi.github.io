@@ -67,20 +67,6 @@ sound, then the smaller residual gaps below. Status as of 2026-05-20.
   `$4364`) are set by various paths but no audio system reads them.
   Sequenced as step 16 (after splash + attract demo).
 
-- **Player-shield visual (`DrawShields $0AA0`)** — the shield gate is
-  wired (barrier edge → `state.player.shieldCount = 0xFF`, decrements
-  per frame, `onPlayerHit` returns when non-zero) so the player CAN
-  shield and survive. But source's `DrawShields $0AA0` overlay (a
-  bubble drawn around the ship while active) is not ported — see the
-  `// DrawShields visual deferred` block in `states.js:playerUpdate`.
-  Player gets no on-screen feedback that the shield is active. Reading
-  `$0AA0` would also resolve the open "can the player move while
-  shielded" question — source's `MovePlayer $08C4` routes through
-  `$0AA0` when shield is active (PlayerState bit-3 cleared), so
-  whether `$0AA0` re-runs `L0900` movement determines that. Port
-  currently keeps `L0900` unconditional, which matches arcade
-  behaviour but isn't formally verified.
-
 - **2-player mode.** Only P1 is the active player; P2's score row is
   drawn but inert. `state.gameAndDemoOrSplash` flag exists but no
   player-switch logic.
@@ -130,13 +116,19 @@ sound, then the smaller residual gaps below. Status as of 2026-05-20.
   4×4 particle cycle (same pipeline as step 12.9 mothership). See
   `research_player_ship.md §2.5` and the step 13 commit.
 
-- **Player shield: explicit flag check at `onPlayerHit` (no tile-level
-  absorption).** Source blocks bullets at the screen-RAM tile lookup
-  (`$0CA8` sees shield tile `$E8` → `L096E`) before ever reaching the
-  `L0CB4` hit path. Canvas port has no FG screen-RAM, so we gate at
-  the collision callback instead. Side-effect: port shield also blocks
-  alien bodies, where source does not. See `research_player_ship.md
-  §5.1` and the step 13 commit.
+- **Player shield: explicit counter check, no tile-level absorption.**
+  Source has two collision paths and they handle shield differently:
+  enemy-bullet path (`L0CB4`/`L0CC4`) relies on screen-RAM tile lookup
+  at `$0CA8` (sees shield tile `$E8` → deactivates bullet) and has no
+  flag check; alien-body path (`$0F00`) DOES check `ShieldCount >= $C0`
+  explicitly and routes to `$0F74` which kills any alien intersecting
+  the damage zone. Canvas port has no FG screen-RAM, so it mirrors
+  source's intent with explicit counter checks on `shieldCount > 0xC0`:
+  `onPlayerHit` early-returns for enemy bullets (matches source's
+  tile-absorption effect), `alienVsPlayerCollision` runs a parallel
+  damage-zone scan during ACTIVE that calls `onAlienHit` (matches
+  source's `$0F74`-style alien kills). Functionally equivalent to
+  source. See `research_player_ship.md §5/§5.1` and the DrawShields commit.
 
 - **Mothership bonus-score popup at mothership position.** Done via
   fgOverlay digit tiles (12.10 piece C). Source uses PrintNumber to

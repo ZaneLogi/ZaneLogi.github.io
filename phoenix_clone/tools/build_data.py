@@ -131,6 +131,22 @@ RAW_SLICES = [
     # AliensLeft = 16, negative byte ($88) sets BirdsLeft = 8. Carried
     # but not consumed until bird-stage step.
     ("ALIEN_BIRD_PARTITION", 0x1760, 8),
+    # source T1770 — 4 ship+shield 4×4 sprite frames (64 bytes total).
+    # Drawn by DrawShields ($0AA0) when the player's shield is active.
+    # Each frame is 16 tile codes in column-major DrawImageCbyB layout
+    # (same as PARTICLE_SPRITES / MOTHERSHIP_ANTENNA_ANIM):
+    #   T1770[0..15]  — ship + large shields  (white frame)
+    #   T1780[16..31] — ship + small shields  (smaller bubble)
+    #   T1790[32..47] — green ship + large shields  (color cycle)
+    #   T17A0[48..63] — green ship, no shields  (the "blink" frame —
+    #                  shield decoration is all 0x00 transparent here;
+    #                  only the 2x2 ship body in the centre 4 cells)
+    # Frame selector: (ShieldCount & 0x0C) >> 2 → 0..3, cycles every 4
+    # ShieldCount ticks (~67 ms per frame at 60 Hz).
+    # research_coordinate_system.md §4.3 documents the byte layout.
+    # T17F0 FourByFourEmpty (all-$FF blank, used by ShieldsExpired $0B48
+    # for the screen-RAM erase) is skipped — canvas clears each frame.
+    ("SHIP_SHIELD_SPRITES", 0x1770, 64),
     # source $17B0..$17F5 — alien-kill explosion machinery as one
     # contiguous 70-byte slice. Layout:
     #   $17B0..$17B7 — T17B0 (8 LSBs of frame addresses, indexed by

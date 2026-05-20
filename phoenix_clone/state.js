@@ -83,7 +83,14 @@ export const state = {
             w: 16,
             h: 16,
             tiles: [0x30, 0x31, 0x40, 0x41],
-            // $43A6 ShieldCount — 255 frames (~4.25 s) when shield is active.
+            // $43A6 ShieldCount — two-phase decrementing counter (source
+            // $0AA0 DrawShields + $08C4 MovePlayer). After barrierEdge
+            // activation: $FE → $C1 = ACTIVE (~63 frames, ~1.05 s) —
+            // player frozen, shield sprite visible, hits absorbed. $C0
+            // → $01 = COOLDOWN (~192 frames, ~3.2 s) — normal movement,
+            // no shield, button can't re-fire ($08D1 JP NZ,$08EA). $00
+            // = READY for next activation. See research_player_movement.md
+            // §3.4 and research_player_ship.md §5.1.
             shieldCount: 0,
             // Mirror of $43C4-$43C7 PlayerBulletState/Shape/X/Y.
             // active mirrors bit3 of PlayerBulletState; tile is fixed $50

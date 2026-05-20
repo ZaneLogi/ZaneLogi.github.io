@@ -1186,8 +1186,11 @@ export const states = {
             cbSigned = Math.max(-SCROLL_MAX, Math.min(0, cbSigned + scrollDir));
             state.counterB9 = cbSigned & 0xFF;
         }
-        // TODO 11.x: CALL $3980 (bird-vs-player relative position scan —
-        //            cosmetic; affects bird color/depth shading).
+        // $3980 — bird-body-vs-player collision (shield-aware). Source
+        // calls this once per bird-stage frame from $340C. The prior
+        // TODO marked this "cosmetic" — wrong; this is the actual
+        // bird-kills-player path. See birdVsPlayerCollision.
+        this.birdVsPlayerCollision();
 
         // $340F-$3413 — BirdsLeft check. When all birds are gone, hand
         // off to the bird-stage-clear tail ($3462) for the post-clear
@@ -1947,14 +1950,61 @@ export const states = {
         }
     },
 
-    // L0CF4 — alien-body-vs-player collision. Runs in lane-1 of the
+    // L0F00 — alien-body-vs-player collision (source's `AlienVsPlayerCollision`
+    // entry; L0CF4 is the no-collision tail). Runs in lane-1 of the
     // port (paired with behaviorUpdate; lane-0 in the source, but
     // lane-swapped here — see stageAlienCombat). Re-enabled in step
     // 13.D now that state-4 explosion + L0B15 lives decision + state-5
-    // GAME OVER all exist (research_player_ship.md §2-§4). Shield gate
-    // lives at onPlayerHit (§5.1 port deviation).
+    // GAME OVER all exist (research_player_ship.md §2-§4).
+    //
+    // Source $0F00 dispatches on ShieldCount:
+    //   sc >= $C0 → $0F74 SHIELD path: alien anchor inside the shield
+    //               damage zone gets killed via $0EAD (standard alien-
+    //               kill — awards points, spawns explosion, decrements
+    //               AliensLeft). Player survives.
+    //   sc <  $C0 → 2×2 ship hit scan; alien overlap → $0CC4 (player dies).
+    //
+    // Port mirrors both branches here; the original research_player_ship.md
+    // §5/§5.1 claim that "source doesn't block alien-body hits via shield"
+    // was wrong — it missed the $0F00 dispatch at $0F04 CP $C0.
     alienVsPlayerCollision() {
         if (!state.player.alive) return;
+
+        if (state.player.shieldCount > 0xC0) {
+            // $0F74 SHIELD path. Source's damage-zone bounds (source
+            // $0F89-$0FAE):
+            //   X in [PlayerX - $0E, PlayerX + $1F)   — 45 px wide,
+            //     a bit wider than the 32-px visual shield bubble
+            //   Y in [$CA, $EF)                       — 37 px tall,
+            //     asymmetric around the fixed PlayerY = $D8
+            // Source scans all 16 slots ($0F92 loop) so multiple aliens
+            // overlapping in one frame all die — no early return.
+            // Point-in-range, not AABB: source reads alien.x / alien.y
+            // and tests bounds directly ($0FA9-$0FB3).
+            //
+            // Source $0FB4 sets `LD DE,$0D02` before `JP $0EAD` — that's
+            // a FIXED 20-pt regular explosion (counter=$0D, BCD=$02),
+            // not the path-byte-driven onAlienHit bonus check. Shield-
+            // kills NEVER award the 200-pt bonus, even when the alien
+            // is mid-climb (path byte 7/8).
+            const px = state.player.x;
+            const xLow  = (px - 0x0E) & 0xFF;
+            const xHigh = (px + 0x1F) & 0xFF;
+            for (let i = 0; i < 16; i++) {
+                const a = state.aliens[i];
+                if ((a.controlA & 0x08) === 0) continue;
+                if (a.y < 0xCA || a.y >= 0xEF) continue;
+                if (a.x < xLow || a.x >= xHigh) continue;
+                this.killAlienRegular(a, 0x02, 20);   // $0FB4 → $0EAD
+            }
+            return;
+        }
+
+        // Normal path: 2×2 ship hitbox at (X & ~7, Y), 16×16. Source
+        // $0F46-$0F4E kills BOTH player ($0CC4) AND alien ($0EAD) on
+        // overlap. Source $0F49 sets `LD DE,$0D04` before $0EAD — 40 pt
+        // regular explosion, no bonus check (same reason as the shield
+        // branch above).
         const px = state.player.x & ~7;
         const py = state.player.y;
         for (let i = 0; i < 16; i++) {
@@ -1964,9 +2014,92 @@ export const states = {
             const ay = a.y & ~7;
             const { w, h } = alienBox(a.controlA);
             if (aabbHit(ax, ay, w, h, px, py, 16, 16)) {
-                this.onPlayerHit();
-                return;   // one hit per lane-0 tick is enough
+                this.killAlienRegular(a, 0x04, 40);   // $0F4E → $0EAD
+                this.onPlayerHit();                    // $0F46 CALL $0CC4
+                return;
             }
+        }
+    },
+
+    // Helper for the alien-vs-player collision paths ($0F00 normal +
+    // $0F74 shield). Both source callers use a fixed (counter, BCD,
+    // slot=regular) explosion irrespective of the alien's path state —
+    // they `LD DE,$0Dnn` then `JP $0EAD`. Bullet-vs-alien (`onAlienHit`)
+    // is the only path that path-byte-checks for the 200-pt bonus.
+    //
+    // scoreBcd: $02 for shield-kill (= 20 pts), $04 for body-collision
+    // (= 40 pts). Counter is fixed at $0D (= 13 anim frames, matches
+    // source's $0Dnn DE value high byte).
+    killAlienRegular(alien, scoreBcd, points) {
+        alien.controlA &= ~0x08;
+        alien.alive = false;
+        state.aliensLeft = Math.max(0, state.aliensLeft - 1);
+
+        const { w, h } = alienBox(alien.controlA);
+        const ex = (alien.x + (w >> 1) - 12) & 0xFF;
+        const ey = (alien.y + (h >> 1) -  8) & 0xFF;
+        this.spawnExplosion(0x0D, scoreBcd, ex, ey);
+        scoring.addPoints(points, state.gameAndDemoOrSplash);
+    },
+
+    // $3980 — bird-body-vs-player collision (source's "scan upward from
+    // player using PlayerBullet position as a probe" trick). Source flow:
+    //   - $3980 gates the scan on M4BD2 in [$0C, $1C) (port skips this
+    //     timing gate — bird positions themselves provide the natural
+    //     "near player" filter via AABB).
+    //   - Backs up PlayerBulletState to $4BC0+ ($3989-$3998), then sets
+    //     PlayerBullet position = PlayerShip position ($399B-$39A7),
+    //     activates the bullet bit-3, and runs $3800 in a loop walking
+    //     up one row per iteration ($39C3 loop).
+    //   - $3800 detects bird sprites by reading the tile at the probe
+    //     position; on hit, $3851 zeroes the bird's shape (kills it) +
+    //     $385C decrements BirdsLeft + awards points/bonus explosion.
+    //   - When the bullet gets deactivated by a kill ($39CC JP Z,$39F0),
+    //     dispatches on ShieldCount: sc >= $C0 → SUB $01 (extra shield
+    //     dec, bird kill cost), continue; sc < $C0 → JP $0CC4 player dies.
+    //
+    // Port simplification: direct AABB between each bird's bounding box
+    // and the player's 2×2 ship hitbox. Faithful in OUTCOME (bird dies,
+    // shield-aware player fate) but skips the screen-RAM tile-probe
+    // mechanism — same trade-off as enemyBulletUpdate and
+    // alienVsPlayerCollision use elsewhere (port has no FG screen RAM).
+    //
+    // Wired in stageBirdCombat after birdBulletCollision, replacing the
+    // prior "cosmetic TODO" stub. Source's $3980 fires from $340C inside
+    // L3400 each bird-stage frame; port matches by calling once per
+    // bird-stage tick.
+    birdVsPlayerCollision() {
+        if (!state.player.alive) return;
+        const px = state.player.x & ~7;
+        const py = state.player.y;
+        for (let i = 0; i < 8; i++) {
+            const bird = state.birds[i];
+            if (bird.shape === 0) continue;
+            const pos = this.birdCanvasPos(bird);
+            if (!pos) continue;
+            const lsb = BIRD_T3EC0[bird.shape] ?? 0;
+            const widthCols = (0x58 - lsb) >> 3;
+            if (widthCols < 1 || widthCols > 7) continue;
+            const widthPx = widthCols * 8;
+            if (!aabbHit(pos.x, pos.y, widthPx, 16, px, py, 16, 16)) continue;
+
+            // Hit. Kill the bird via the standard onBirdHit path ($3851
+            // zeroes shape + $385C decrements BirdsLeft + awards points
+            // + spawns bonus explosion when shape >= $0B). This fires
+            // even on shielded hits — source $3800 always kills the
+            // bird before $39F0 dispatches on shield.
+            this.onBirdHit(bird, i);
+
+            if (state.player.shieldCount > 0xC0) {
+                // $39F8-$39FA — extra shield-counter decrement. The
+                // bird kill "costs" one frame of shield duration on top
+                // of the per-frame DrawShields dec.
+                state.player.shieldCount = (state.player.shieldCount - 1) & 0xFF;
+            } else {
+                // $39F5 JP C,$0CC4 — no shield, player dies.
+                this.onPlayerHit();
+            }
+            return;
         }
     },
 

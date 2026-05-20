@@ -213,15 +213,15 @@ Result:
 
 ### 3.4 `MovePlayer` ($08C4) — Shield + Movement Dispatch
 
-Entry point for player logic. Also dispatches to shield drawing if player
-is inactive:
+Entry point for player logic. Dispatches between shield-drawing and
+normal movement+animation based on **PlayerState bit-3**:
 
 ```asm
 MovePlayer:
 08C4: 21 C0 43 LD  HL,$43C0    ; PlayerState
 08C7: 7E       LD  A,(HL)
-08C8: E6 08    AND $08         ; is bit3 set (draw flag)?
-08CA: CA A0 0A JP  Z,$0AA0     ; no: jump to DrawShields instead
+08C8: E6 08    AND $08         ; is bit3 set?
+08CA: CA A0 0A JP  Z,$0AA0     ; bit3 CLEAR → DrawShields (skips L0900+L0926)
 08CD: 2E A6    LD  L,$A6       ; ShieldCount ($43A6)
 08CF: 7E       LD  A,(HL)
 08D0: A7       AND A           ; is ShieldCount nonzero?
@@ -233,12 +233,12 @@ MovePlayer:
 08DE: 36 40    LD  (HL),$40    ; set bit6 (bird-maturity / shield flag)
 08E0: 2E C0    LD  L,$C0       ; PlayerState ($43C0)
 08E2: 7E       LD  A,(HL)
-08E3: E6 F7    AND $F7         ; clear bit3 (stop drawing player ship)
+08E3: E6 F7    AND $F7         ; clear bit3 — route MovePlayer through $0AA0 next frame
 08E5: 77       LD  (HL),A
 08E6: 2E A6    LD  L,$A6       ; ShieldCount
-08E8: 36 FF    LD  (HL),$FF    ; activate shield (255 frames ≈ 4.25 s at 60 Hz)
+08E8: 36 FF    LD  (HL),$FF    ; activate shield: ShieldCount := $FF
 L08EA:
-08EA: 35       DEC (HL)        ; decrement ShieldCount every frame while active
+08EA: 35       DEC (HL)        ; decrement ShieldCount (also runs on the activation frame: $FF → $FE)
 L08EB:
 08EB: 2E C2    LD  L,$C2       ; PlayerShipX ($43C2)
 08ED: CD 00 09 CALL $0900      ; L0900 — update X from left/right input
@@ -247,6 +247,50 @@ L08EB:
 ```
 
 [verified, Code.md:$08C4–$08F3]
+
+#### Shield state machine — two phases, not one
+
+The shield mechanic has two **separate** phases that share `ShieldCount`
+as their counter. `$0AA0` DrawShields is responsible for both ending
+the ACTIVE phase and the visual:
+
+```asm
+DrawShields:
+0AA0: ... (compute screen-RAM target at player - 1col - 1row)
+0AAE: 35    DEC (HL)         ; ShieldCount-- (this is the dec for ACTIVE phase)
+0AAF: 7E    LD  A,(HL)       ; A := post-dec ShieldCount
+0AB0: 21 F0 17 LD HL,$17F0   ; default to FourByFourEmpty (blank 4×4)
+0AB3: FE C0 CP  $C0          ; ShieldCount == $C0 now?
+0AB5: CA 48 0B JP Z,$0B48    ; yes → ShieldsExpired (draw blank + reset PlayerState)
+0AB8: 21 70 17 LD HL,$1770   ; T1770 — 4 ship+shield 4×4 frames
+0ABB-0AC0: HL += (ShieldCount & $0C) << 2   ; frame selector: ($0C & sc) ×4
+0AC1: C3 D6 0A JP $0AD6      ; DrawImageCbyB → blit 4×4
+```
+
+[verified, Code.md:$0AA0–$0AC1]
+
+Combined with `$08C4` + `$0B48 ShieldsExpired` (which re-sets PlayerState
+bit-3 and snaps PlayerShipX to `(X & ~7) | 3`), the lifecycle is:
+
+| Phase    | ShieldCount       | PlayerState bit-3 | What runs each frame                             | Approx. duration |
+|----------|-------------------|-------------------|--------------------------------------------------|------------------|
+| READY    | `$00`             | set               | `$08D4-$08D9` checks shield button               | —                |
+| ACTIVE   | `$FE → $C1`       | clear             | `$0AA0` decrements + draws 4×4 T1770 sprite; L0900 + L0926 SKIPPED — **player is frozen** | ~63 frames ≈ 1.05 s |
+| COOLDOWN | `$C0 → $01`       | set               | `$08D1 JP NZ,$08EA` bypasses button check → just decrements; L0900 + L0926 run normally | ~192 frames ≈ 3.2 s |
+
+The total `$FF → $00` cycle is ~255 frames ≈ 4.25 s before the button is
+armed again, but the **shield-on visual + invulnerability window is only
+~1 s** — much shorter than the round-trip suggests.
+
+The "can the player move while shielded?" question (an open `⚠ STOP`
+in port `states.js` through step 14) is answered conclusively by the
+`$0AA0` body above: it has zero calls into `L0900` or `L0926`, so the
+player is locked in place for the ~63-frame active window. The
+arcade-memory-says-yes intuition is wrong.
+
+`$08A6 CALL $0930` (bullet update) runs **after** MovePlayer returns
+regardless of which branch was taken, so the player can still fire
+during shield. [verified, Code.md:$08A0-$08A6]
 
 ---
 
@@ -514,11 +558,15 @@ GameStateMachine → state 3 → L0800
   │    └─ copy $43E2:$43E3 → $43E0:$43E1 (and same for bullets)
   ├─ L08A0 ($08A0)
   │    ├─ MovePlayer ($08C4)
-  │    │    ├─ if bit3 clear → DrawShields ($0AA0)
-  │    │    ├─ if ShieldCount > 0 → decrement ShieldCount
-  │    │    ├─ else check shield button (edge) → activate if pressed
-  │    │    ├─ L0900 → read left/right (level) → update PlayerShipX ±1
-  │    │    └─ L0926 → PlayerShape = T1600[X % 8]
+  │    │    ├─ if PlayerState bit3 CLEAR (ACTIVE shield):
+  │    │    │       → DrawShields ($0AA0): dec ShieldCount, draw T1770;
+  │    │    │         L0900 + L0926 SKIPPED (player frozen). Returns.
+  │    │    │         At sc → $C0 → ShieldsExpired ($0B48) sets bit3 back.
+  │    │    └─ else (bit3 SET, normal):
+  │    │           ├─ if ShieldCount > 0 (COOLDOWN) → just decrement
+  │    │           ├─ else (READY) → shield button edge → activate
+  │    │           ├─ L0900 → read left/right (level) → update PlayerShipX ±1
+  │    │           └─ L0926 → PlayerShape = T1600[X % 8]
   │    ├─ L0930 ($0930) for PlayerBullet
   │    │    ├─ if bit3 set → move bullet up 8 units; deactivate at $1F
   │    │    └─ else check fire button (edge) → spawn at (PlayerX+4, PlayerY-8)
@@ -540,7 +588,9 @@ UpdateScoresAndSound ($2700)
 | X range | $0D–$BF (13–191) | L0900 boundary checks |
 | Y | $D8 = 216, constant | `InitPlayerDataStructure` |
 | Move rate | ±1 per frame (60 Hz) | L0900, one INC/DEC |
-| Shield duration | 255 frames ≈ 4.25 s | L08C4, ShieldCount=$FF |
+| Shield ACTIVE duration | ~63 frames ≈ 1.05 s | L0AA0, sc cycles $FE→$C1 |
+| Shield COOLDOWN duration | ~192 frames ≈ 3.2 s | L08D1 JP NZ,$08EA gates re-fire |
+| Shield full re-fire cycle | ~255 frames ≈ 4.25 s | ACTIVE + COOLDOWN, see §3.4 |
 | Bullet speed | −8 Y per frame | L0964 SUB $08 |
 | Bullet top limit | $1F (31) | L0964 CP $1F |
 | Animation frames | 8 (T1600[X%8]) | L0926 + T1600 |
