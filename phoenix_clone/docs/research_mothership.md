@@ -972,11 +972,14 @@ Original open questions and what was resolved:
    existing `starsScrollDown` mechanism when stage block sets
    `$43B2 = $1D`. No separate "mothership-draw" routine needed.
 
-7. ⚠ **Particle sprite data — partial.** PARTICLE_SPRITES (T1B60+
-   T1B70 + T1B80, 48 bytes for central particle) extracted. T1B90
-   selector inlined as a JS lookup table (4 entries effective).
-   **T2A00 + T2B00 NOT extracted** — odd-CounterA5 particle path
-   uses a visual-effect port instead (see §11 "Port deviations").
+7. ✅ **Particle sprite data — complete (2026-05-20).** PARTICLE_SPRITES
+   (T1B60+T1B70+T1B80, 48 bytes for central particle) extracted at
+   step 12.9. T1B90 selector inlined as a JS lookup table (4 entries
+   effective). T2A00 + T2B00 (mothership scatter) and T2800 + T2900
+   (player scatter) documented in `research_explosion_visual.md`;
+   extraction plan in §9.1 of that doc. The visual-effect port of
+   odd-CounterA5 in `_drawScatteredParticles` is now unblocked for
+   replacement with a source-faithful walk-decoder.
 
 8. ✅ **Stage-block CounterB4 values.** Verified via STAGE_BLOCKS
    data: stage 9 byte 9 = $48 (72 frames lone fade-in), stage A
@@ -1039,6 +1042,14 @@ git log: `git log --grep="step 12" --oneline`.
   without ~100 lines of source-faithful address math. **User-flagged
   topic for post-project discussion: faithful port vs visual-effect
   port trade-off.**
+
+  **Update (2026-05-20):** ✅ Research deferral resolved by
+  `research_explosion_visual.md`. L2085 turned out to be write-only
+  (no screen-RAM persistence dependency), so a source-faithful port
+  is ~20 lines of JS — not 100. The walk-math also revealed the
+  scatter is a center-out shockwave (expands as CounterA5 ticks
+  down), not random noise. Replacement of `_drawScatteredParticles`
+  unblocked; pending implementation.
 
 - **No on-screen popup for `$2520` bonus score in 12.8** (deferred
   to 12.10) — caught up via fgOverlay popup using digit tiles.

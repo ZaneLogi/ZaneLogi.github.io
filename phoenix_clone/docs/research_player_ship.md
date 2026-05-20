@@ -256,6 +256,17 @@ mothership scatter deviation (already documented at
 `research_mothership.md §10`) to also cover the player explosion. One
 trade-off pattern, two applications. Parked for post-project review.
 
+**Update (2026-05-20):** ✅ Research deferral resolved by
+`research_explosion_visual.md`. Key finding: L2085 is write-only
+against screen RAM (the persistence concern that drove this
+deferral was a misreading) — a source-faithful port is ~20 lines of
+JS per strategy 1, not the "100+ lines of address math" originally
+estimated. The visual-effect deviation in
+`states_mothership.js:_drawScatteredParticles` and the unported
+L2070 path in `state4_PlayerExplosion` can be replaced with a
+walk-decoder against extracted T2800/T2900/T2A00/T2B00 byte arrays.
+Port implementation pending; see `research_explosion_visual.md §9`.
+
 ---
 
 ## 3. `L0B15` — respawn vs game over
