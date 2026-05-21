@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Phoenix</title>
+  <style>
+    body {
+      background-color: black;
+      color: #888;
+      font: 12px monospace;
+      margin: 0;
+    }
+    canvas {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      image-rendering: pixelated;
+      outline: darkgreen 1px solid;
+    }
+    #hud {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      z-index: 1;
+      white-space: pre;
+    }
+  </style>
+  <script type="module" src="./main.js"></script>
+</head>
+<body>
+  <canvas width="208" height="256"></canvas>
+  <div id="hud"></div>
+</body>
+</html>

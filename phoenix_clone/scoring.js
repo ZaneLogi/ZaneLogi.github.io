@@ -1,0 +1,116 @@
+import { state } from './state.js';
+
+// L00C4 PrintNumber + L04F4 erase. Source writes tiles into screen-RAM at
+// the active player's lowest-digit address (P1 $4261, P2 $4021), walking
+// left via LeftOneColumn ($0210 — `E += 32` = one display column left).
+// In the JS port the same cells live in T1800 row 2 (y=8): col 6 / col 24
+// for the P1 / P2 lowest digit respectively.
+
+const SCORE_ROW = 1;                // staticTextRows[1] = T1800 row 2 (y=8)
+const RIGHTMOST_COL = [6, 24];      // P1=$4261 → col 6; P2=$4021 → col 24
+
+// L00C4 — paint 6 BCD digits (low → high, walking left).
+function printNumber(player) {
+    const tiles = state.staticTextRows[SCORE_ROW].tiles;
+    const right = RIGHTMOST_COL[player];
+    const score = (player === 0) ? state.score1 : state.score2;
+    for (let i = 0; i < 3; i++) {
+        tiles[right - 2 * i    ] = 0x20 |  (score[i]       & 0x0F);
+        tiles[right - 2 * i - 1] = 0x20 | ((score[i] >> 4) & 0x0F);
+    }
+}
+
+// L04F4-$0505 — write 0x00 to 6 cells walking left.
+function eraseDigits(player) {
+    const tiles = state.staticTextRows[SCORE_ROW].tiles;
+    const right = RIGHTMOST_COL[player];
+    for (let i = 0; i < 6; i++) tiles[right - i] = 0;
+}
+
+// Add `pts` (decimal) to the BCD score for `player` (0 or 1), then repaint.
+// Source routes kills through a $4370-$437F buffer drained by L2700; for
+// step 8 we add directly (buffer model lands with sound support).
+// TODO: replace placeholder 50-point kill with per-alien score from source.
+function addPoints(pts, player) {
+    const score = player === 0 ? state.score1 : state.score2;
+    // BCD → integer → add → BCD
+    let val = (score[0] & 0x0F)
+            + ((score[0] >> 4) & 0x0F) * 10
+            + (score[1] & 0x0F) * 100
+            + ((score[1] >> 4) & 0x0F) * 1000
+            + (score[2] & 0x0F) * 10000
+            + ((score[2] >> 4) & 0x0F) * 100000;
+    val = Math.min(val + pts, 999999);
+    score[0] = ((Math.floor(val / 10) % 10) << 4) | (val % 10);
+    score[1] = ((Math.floor(val / 1000) % 10) << 4) | (Math.floor(val / 100) % 10);
+    score[2] = ((Math.floor(val / 100000) % 10) << 4) | (Math.floor(val / 10000) % 10);
+    printNumber(player);
+}
+
+// L0367 UpdateLivesScreen. Source writes a single character tile at
+// $42A2 (P1) and $4062 (P2) where tile = lives | $20 (so lives=3 → tile
+// $23 = digit "3"). The pre-shifted ship icon ($7F) is laid down once
+// by T1800 row 2 at the adjacent cell and never overwritten.
+//
+// Port cell mapping (display_col = 25 - source_col, row stays):
+//   source $42A2 (col 21, row 2) → STATIC_TEXT_ROWS[2].tiles[4]   (P1)
+//   source $4062 (col  3, row 2) → STATIC_TEXT_ROWS[2].tiles[22]  (P2)
+// Adjacent $7F ship icons already live at tiles[3] / tiles[21].
+function updateLivesScreen() {
+    const tiles = state.staticTextRows[LIVES_ROW].tiles;
+    tiles[LIVES_COL_P1] = 0x20 | (state.player1Lives & 0x0F);
+    tiles[LIVES_COL_P2] = 0x20 | (state.player2Lives & 0x0F);
+}
+const LIVES_ROW    = 2;     // staticTextRows[2] = T1800 row 3 (y=16)
+const LIVES_COL_P1 = 4;
+const LIVES_COL_P2 = 22;
+
+// 14.H — repaint the "COIN nn" digits in the T1800 row-2 baseline. The
+// "COIN" label is hardcoded at tiles[10..13]; tiles[14]/[15] are the
+// two-digit count (tens / ones), tile = digit | $20. Source equivalent
+// is CoinDisplayUpdate inside $0080 WaitVBlankCoin (writes screen RAM
+// at the COIN cells each frame); port repaints on coin/start edges.
+function updateCoinScreen() {
+    const tiles = state.staticTextRows[COIN_ROW].tiles;
+    const c = state.coinCount & 0xFF;
+    tiles[COIN_COL_TENS] = 0x20 | (Math.floor(c / 10) % 10);
+    tiles[COIN_COL_ONES] = 0x20 | (c % 10);
+}
+const COIN_ROW       = 2;
+const COIN_COL_TENS  = 14;
+const COIN_COL_ONES  = 15;
+
+// L02F0 UpdateHiScore — called from PromptForStartGame ($02B0) on every
+// start-press, before ClearAndPrintScores zeroes the player scores.
+// Source flow: compare Score1 to HiScore (via $0314 multi-byte subtract);
+// if HiScore <= Score1, copy Score1 → HiScore (via $0320). Same for
+// Score2. Then PrintNumber the 6-digit HiScore at $4141. Port mirrors
+// this: BCD bytes are ordered low/mid/high so a high→low byte compare
+// works directly; copy the larger into hiScore; repaint tiles[10..15]
+// of staticTextRows[1] (= HI-SCORE column on the score header row).
+function updateHiScore() {
+    if (bcdCompare(state.score1, state.hiScore) > 0) copyScore(state.score1, state.hiScore);
+    if (bcdCompare(state.score2, state.hiScore) > 0) copyScore(state.score2, state.hiScore);
+    const tiles = state.staticTextRows[SCORE_ROW].tiles;
+    for (let i = 0; i < 3; i++) {
+        tiles[HISCORE_RIGHT - 2 * i    ] = 0x20 |  (state.hiScore[i]       & 0x0F);
+        tiles[HISCORE_RIGHT - 2 * i - 1] = 0x20 | ((state.hiScore[i] >> 4) & 0x0F);
+    }
+}
+function bcdCompare(a, b) {
+    if (a[2] !== b[2]) return a[2] - b[2];
+    if (a[1] !== b[1]) return a[1] - b[1];
+    return a[0] - b[0];
+}
+function copyScore(src, dst) {
+    dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2];
+}
+const HISCORE_RIGHT = 15;   // tiles[10..15] of staticTextRows[1] — see $4141 in source
+
+// L2700 UpdateScoresAndSound. Drains the per-enemy score-pending buffer at
+// $4370-$437F into Score1/Score2, then UpdateSoundControlHW + UpdateSounds.
+// Buffer model and sound deferred per research_hardware.md §5.
+function update() {
+}
+
+export const scoring = { printNumber, eraseDigits, addPoints, updateLivesScreen, updateCoinScreen, updateHiScore, update };
