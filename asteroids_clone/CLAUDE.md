@@ -116,13 +116,15 @@ working hypotheses — replace with cited facts in the research docs.
 - **DVG** has 7 opcodes (VEC, LABS, SVEC, HALT, JSR, RTS, JMP),
   brightness 0-15, global+local scale, 4-deep call stack. See
   `DVG.md`.
-- **Two-player RAM banking** via `$3200` bit 2 — swaps the
-  $0200-$03FF region between players. Port as two state objects +
-  active pointer (no need to literally bank memory).
-- **250 Hz interrupt** is not vsync — likely handles coin/timer/sound
-  polling. Main game loop runs at vector-refresh rate. Interrupt-vs-
-  main-loop split needs to be characterized in `research_main_loop.md`
-  before tying anything to `requestAnimationFrame`.
+- **Two-player RAM banking** via `$3200` bit 3 (mask `$04`) — swaps
+  the $0200-$03FF region between players. Port as two state objects +
+  active pointer (no need to literally bank memory). See
+  `docs/research_hardware.md §2 + §6`.
+- **250 Hz NMI** at `$7B65` (not `$7CF3` — that's RESET): does
+  stack-sanity, counter ticks (`$5E`, `$5B`), lamp output, and one
+  sound channel. Game logic runs in the main loop at **~62.5 Hz**,
+  gated by `$5B` via `LSR/BCC` at `$6811`. See
+  `docs/research_hardware.md §3-§4`.
 - **Sound is 8 hardware-generated channels** at $3600-$3E00, not
   samples. Faithful path is Web Audio synthesis; visual-effect path
   is sampled playback. Defer until silent game runs end-to-end.
@@ -135,15 +137,19 @@ DVG prototype (R-B) is the first runnable artifact.
 | # | Doc                            | Focus                                                       |
 |---|--------------------------------|-------------------------------------------------------------|
 | R-A | `research_hardware.md`       | 6502 model, memory map, 250 Hz interrupt vs frame rate      |
-| R-B | `research_dvg.md`            | All 7 opcodes, canvas mapping, scale/brightness, stack — paired with a standalone DVG prototype |
+| R-B | `research_dvg.md`            | All 7 opcodes, canvas mapping, scale/brightness, stack — research-only (interpreter implementation deferred to implementation phase) |
 | R-C | `research_position_math.md`  | 16-bit position + 8-bit velocity carry-propagation, sub-pixel motion, toroidal screen wrap |
 | R-D | `research_main_loop.md`      | $6800 dispatch, 6-step task sequence, ship/saucer state machines, NMI handler $7CF3 (in the missing 20%) |
 | R-E | `research_collisions.md`     | Distance-threshold geometry, asteroid-size encoding, fragmentation dispatch |
 | R-F | `research_vector_rom.md`     | Port the 2 KB vector ROM as JS draw subroutines              |
 | R-G | `research_sound.md`          | Deferred — characterize 8-channel synthesis model after silent game runs |
 
-After R-A + R-B + the DVG prototype, the architectural choice is
-end-to-end validated and gameplay-code phases can begin.
+All R-* docs are paper-only — the DVG prototype originally planned
+for R-B was dropped 2026-05-22 (architecture validation already done
+by root CLAUDE.md framework reasoning; DVG.md fully specifies the
+opcode set; canvas mapping is mechanical). The first runnable
+artifact lands as the first commit of the implementation phase
+(DVG interpreter, working from R-B's spec).
 
 ## Documentation
 
