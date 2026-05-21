@@ -4,19 +4,23 @@
 import { getObjectIdForSlot } from './paths.js';
 
 // ── Formation home-position tables (db_fmtn_hpos_orig, gg1-2.s:949) ──────────
-// The Z80 sprite hardware has a 10 px horizontal offset from our canvas:
-//   canvas_X = sprite_X - 10
-// Column sprite X from ROM: [0x31,0x41,...,0xC1] = [49,65,...,193]
-// Column canvas X after offset: sprite_X - 10.
-// Row pixel Y: derived via pixel_Y = 2 × (~(rawY + 0x4F) & 0xFF).
-const _COL_X = [39, 55, 71, 87, 103, 119, 135, 151, 167, 183];
+// X conversion (verified against harbaum/galagino): canvas_X = sprite_X − 16.
+//   Column sprite X from ROM: [0x31,0x41,...,0xC1] = [49,65,...,193]
+//   Column canvas X after −16 offset: [33, 49, 65, 81, 97, 113, 129, 145, 161, 177].
+//
+// Y conversion (also harbaum/galagino — see paths.js rawYToCanvasY):
+// canvas_Y = sprite_Y_byte − 40 (formation has bit 8 = 0).
+//   Row sprite_Y from c_12C3 conversion: ~(rawY+0x4F) & 0xFF, then ×2.
+//   Row sprite_Y values: 60, 76, 92, 104, 116, 128 (one per row 0-5).
+//   Row canvas_Y after −40 offset: 20, 36, 52, 64, 76, 88.
+const _COL_X = [33, 49, 65, 81, 97, 113, 129, 145, 161, 177];
 const _ROWS = [
-    { y:  60, type: 'boss',      cols: [3,4,5,6]              },
-    { y:  76, type: 'boss',      cols: [3,4,5,6]              },
-    { y:  92, type: 'butterfly', cols: [0,1,2,3,4,5,6,7,8,9] },
-    { y: 104, type: 'butterfly', cols: [0,1,2,3,4,5,6,7,8,9] },
-    { y: 116, type: 'wasp',      cols: [0,1,2,3,4,5,6,7,8,9] },
-    { y: 128, type: 'wasp',      cols: [0,1,2,3,4,5,6,7,8,9] },
+    { y: 20, type: 'boss',      cols: [3,4,5,6]              },
+    { y: 36, type: 'boss',      cols: [3,4,5,6]              },
+    { y: 52, type: 'butterfly', cols: [0,1,2,3,4,5,6,7,8,9] },
+    { y: 64, type: 'butterfly', cols: [0,1,2,3,4,5,6,7,8,9] },
+    { y: 76, type: 'wasp',      cols: [0,1,2,3,4,5,6,7,8,9] },
+    { y: 88, type: 'wasp',      cols: [0,1,2,3,4,5,6,7,8,9] },
 ];
 
 function buildEnemies() {
@@ -34,17 +38,26 @@ function buildEnemies() {
                 rowIdx:   ri,
                 objectId: getObjectIdForSlot(ri, ci),  // Z80 sprt_fmtn_hpos byte offset
 
-                // ── Motion state (step 7+, 'pending' added INT-3a) ──────
+                // ── Motion state (step 7+, 'pending' added INT-3a,
+                //                  'homing' added INT-7) ──────────────────
                 // 'pending'   = alive but not yet on screen (Z80 status 0x80
                 //               equivalent — enemy is "in the roster" but
                 //               hasn't been spawned via fly-in yet)
-                // 'formation' = sit at homeX/Y + offsets (post-fly-in resting)
                 // 'flying'    = follow path bytecode; render at (x, y)
+                // 'homing'    = post-FB guided approach to formation slot.
+                //               Path bytecode exhausted; angle is fixed
+                //               (set once at FB by atan2 to home), motion
+                //               continues with last vx/vy until within
+                //               HOME_THRESHOLD px of (homeX, homeY), then
+                //               snaps to 'formation'. Z80 case_0AA0
+                //               (gg1-5.s:1768-1846).
+                // 'formation' = sit at homeX/Y + offsets (post-fly-in resting)
                 // 'dead'      = no render, no logic
                 //
                 // Initial state is 'pending' — enemies become visible only
                 // when launchEnemy (fly-in) transitions them to 'flying',
-                // and then to 'formation' when the path's END/FB fires.
+                // then to 'homing' when the path's FB fires (or directly
+                // to 'formation' on FF / instant-snap edge cases).
                 // Matches the Z80 model: stage starts with formation empty,
                 // fly-in fills it pair-by-pair.
                 state:      'pending',
@@ -65,6 +78,15 @@ function buildEnemies() {
                 // arms them via bugMotion's loadSegment.
                 bombCounter: 0,
                 bombEnable:  0,
+
+                // ── Pair-mirror flag (step 9 phase INT-2c, launcher rewrite) ──
+                // Mirror of Z80 0x13(ix) bit 7 — set by launchAttackWave
+                // when wave-byte bit 6 is set. Consumed by bugMotion when
+                // loading each segment's rotRate (negate if true) — see
+                // gg1-5.s:2014-2018. Produces mirrored arcs for pair
+                // partners. NOT YET READ (bugMotion rewrite is the next
+                // phase); set here so the data plumbing is correct.
+                negateRotation: false,
             });
         }
     }
@@ -84,31 +106,104 @@ export const state = {
     // 'attract' and 'playing'; other states defined for future INT phases.
     gameState: 'attract',
 
-    // ── Stage / wave table (step 9 phase INT-2a) ──────────────────────────
-    // stage     = current stage number (Z80 _b_stgctr, mirror at 0x9881).
-    //             Starts at 1 — Z80 also bumps from 0 to 1 on first stage init.
-    // waveTable = per-stage fly-in wave entries; populated by gameController on
-    //             transition to 'playing' via paths.js buildWaveTable(stage).
-    //             Consumed by launchAttackWave.runFlyInWave.
+    // ── Stage counter + difficulty rank ───────────────────────────────────
+    // stage = current stage number (Z80 _b_stgctr, mirror at 0x9881).
+    //         Starts at 1 — Z80 also bumps from 0 to 1 on first stage init.
+    //         Stage cycling (++ on stage clear) is wired in INT-5.
     //             INT-2a: builder returns the same 3-pair wave for any stage.
     //             INT-2b: real per-stage variation from d_combat_stg_dat.
+    // rank  = difficulty rank (Z80 b_mchn_cfg_rank, 0-3 from DIP switches).
+    //         Default 3 = rank A (easiest, the typical Galaga DIP default).
+    //         Per bmbr_stg_cfg_lut: rank 3 → sub-table 0, rank 0 → 1, etc.
+    //         TODO: connect to a DIP-switch UI (step 11+).
     stage:     1,
-    waveTable: [],
+    rank:      3,
 
-    // ── Wave-launcher state (step 9 phases INT-2b + INT-3b) ───────────────
-    // INT-2b: waveLauncherFlyInDone — set true when wave-cursor exhausts.
-    //         gameController polls this to transition 'stageStart'→'playing'.
-    // INT-3b: cursors and timers moved here from launchAttackWave's module
-    //         scope so they reset cleanly per stage (resetWaveState helper).
-    //   flyInCursor   — index of next pair to launch in state.waveTable
-    //   flyInCooldown — frames to wait after current pair lands (pull-based)
-    //   attackTimers  — per-type countdown for continuous-attack mode
-    //                   (yellow / red / boss reload values come from
-    //                    launchAttackWave constants — see resetWaveState)
+    // ── Per-stage difficulty params (Z80 ds_new_stage_parms) ──────────────
+    // 11-element Uint8Array populated by gameController.stgInitEnv via
+    // paths.loadStageParms(state.stage, state.rank). Mirrors Z80 c_2C00.
+    //   [0]    bomb-drop enable flags
+    //   [1..3] bomber-type {0=boss, 1=red, 2=yellow} launch counter init
+    //   [4]    max_bombers (initial cap — read by f_1B65 / runAttackMode)
+    //   [5]    max_bombers_increase
+    //   [6]    captured_boss flag init
+    //   [7]    continuous_bomb_threshold
+    //   [8]    stage 8+ attack-wave reload flag
+    //   [9]    stage 8+ bombing reload flag
+    //   [10]   clone-attack alien count (computed)
+    newStageParms: new Uint8Array(11),
+
+    // ── Wave-launcher state (Z80-faithful) ───────────────────────────────
+    // Per research_stage_init.md §13. All naming mirrors the Z80 source
+    // so the JS code reads as a port of f_2916 + l_2953_next_pair.
+    //
+    //   waveStream         ⇔ ds_8920 — flat byte stream built by
+    //                                  buildWaveStream(stage). 0x7E
+    //                                  marks wave start, 0x7F = end.
+    //   waveStreamCursor   ⇔ _p_atkwav_tbl — current byte offset
+    //                                        into waveStream that
+    //                                        f_2916 will read next.
+    //   atkWvEnbl          ⇔ _b_atk_wv_enbl — gates the launcher.
+    //                                         Set true by gameController
+    //                                         AFTER stage init settles
+    //                                         (Z80 sets it in
+    //                                         plyr_respawn_rdy, gg1-2_fx.s
+    //                                         and game_ctrl.s:876).
+    //   attkwvCtr          ⇔ _b_attkwv_ctr — current wave 0..4. Bumped
+    //                                        each time the launcher
+    //                                        consumes a 0x7E marker.
+    //   bugsFlying         ⇔ b_bugs_flying_nbr — count of in-flight
+    //                                            enemies. Cached here
+    //                                            (recomputed by
+    //                                            bugMotion each tick,
+    //                                            mirroring f_08D3 at
+    //                                            gg1-5.s:1428-1432).
+    //                                            Used by the launcher's
+    //                                            inter-wave gate.
+    //   waveLauncherFlyInDone — JS-only signal for gameController to
+    //                           transition stageStart → playing.
+    //                           No direct Z80 counterpart; Z80's
+    //                           equivalent is f_2916 disabling itself
+    //                           on hitting 0x7F (gg1-3.s:1665).
+    waveStream:            new Uint8Array(0),
+    waveStreamCursor:      0,
+    atkWvEnbl:             false,
+    attkwvCtr:             0,
+    bugsFlying:            0,
     waveLauncherFlyInDone: false,
-    flyInCursor:           0,
-    flyInCooldown:         0,
-    attackTimers:          { yellow: 180, red: 240, boss: 360 },
+
+    // ── Continuous-bombing flag (Z80 b_92A0[0x0A]) ────────────────────────
+    // Set true when the alive-on-screen enemy count drops below the
+    // per-stage threshold (newStageParms[7]) AND the player-fire task is
+    // active. Z80 sets this in the VBL interrupt handler (gg1-5.s:480-489).
+    // We compute it once per frame in launchAttackWave.update() — the
+    // 1-frame stale read by bugMotion's FA handler is acceptable for a
+    // ≤5-enemies threshold check.
+    //
+    // FA LOOP_TOP token (case_0BD1, gg1-5.s:1984) gates on this:
+    //   contBmb=false → FA jumps to embedded address (= "go home" target)
+    //   contBmb=true  → FA falls through (path continues, eventually
+    //                   reaching FD JUMP that loops attack pass)
+    contBmbFlag:           false,
+
+    // ── Bomber-type timers and reloads (Z80 b_92C0[0..7]) ─────────────────
+    // attackTimers: per-type countdown that fires the attack when reaching 0.
+    //   Initial values set by resetWaveState from c_2C00 hardcoded constants.
+    //   Indexing matches Z80 b_92C0[0..2] semantics: [0]=boss, [1]=red, [2]=yellow.
+    //   Phase B+C: stored in 16-frame ticks (Z80 only DECs on frame mod 16).
+    //
+    // attackReloads: per-type reload value that gets copied into attackTimers
+    //   each time an attack fires. Recomputed every frame by f_0857
+    //   (bomberConfig task) via c_08AD/c_08BE lookups against the per-stage
+    //   data + current bug count + elapsed stage time.
+    //   Mirrors Z80 b_92C0[4..6].
+    //
+    // bombDropFlags: bomb-drop enable bitmask, recomputed by f_0857 from
+    //   newStageParms[0] + bug count via c_08BE. Read by bombUpdate.
+    //   Mirrors Z80 b_92C0[8].
+    attackTimers:          { boss: 0, red: 0, yellow: 0 },
+    attackReloads:         { boss: 2, red: 2, yellow: 2 },
+    bombDropFlags:         0,
 
     // ── Game timers ────────────────────────────────────────────────────────
     // Mirrors ds4_game_tmrs — 4 countdown bytes decremented at 2 Hz by the
@@ -133,6 +228,7 @@ export const state = {
         objectStates:        true,   // f_23DD     ★ always on
         enemyStatus:         true,   // f_1DB3     — on when stage is active
         bombUpdate:          true,   // f_1EA4     ★ always on
+        bomberConfig:        false,  // f_0857     — recomputes reload values; on during 'playing'
         launchAttackWave:    true,   // f_2916     — on when stage is active
         playerMove:          true,   // f_1F85     — on during gameplay
         playerFire:          true,   // f_1F04     — on during gameplay
@@ -154,11 +250,18 @@ export const state = {
 
     // ── Player ship ────────────────────────────────────────────────────────
     // Mirrors ds_sprite_posn[$62] / ds_plyr_actv in the Z80 source.
-    // Spawn sprite X = 0x7A = 122 (c_133A, gg1-2.s:1058); canvas X = 122 - 10 = 112.
+    // Spawn sprite X = 0x7A = 122 (c_133A, gg1-2.s:1058); canvas X = 122 − 16 = 106.
     // dxFlag mirrors b_92A0[3]: toggles each held frame → alternates 1/2 px step.
     player: {
-        x:      112,   // canvas X (sprite 0x7A=122 minus 10 px hardware offset)
-        y:      208,   // fixed canvas Y (near bottom of 256 px playfield)
+        x:      106,   // canvas X = sprite_X 0x7A (=122) − 16 (hardware offset,
+                       // verified against harbaum/galagino).
+        y:      257,   // canvas Y derived from Z80 sprite_Y (gg1-2.s:1051-1062):
+                       //   sprite_Y_byte = 0x29 = 41, sprite_ctrl bit 0 = 1
+                       //   full sprite_Y = 256 + 41 = 297
+                       //   canvas_Y = 297 − 40 = 257 (per harbaum formula
+                       //   verified by ESP32 Galaga emulator gameplay)
+                       // Player center at 257 → sprite (16×16) spans 249-265,
+                       // 7-px gap above lives icons at canvas Y 272-288. ✓
         dxFlag: 0,     // toggles each held frame: first=1 px, then 1/2 px alternating
         alive:  true,
     },

@@ -1,5 +1,17 @@
 import { state }    from './state.js';
 import { init as initDevPanel } from './devPanel.js';
+import { dumpStageLaunches, buildWaveStream } from './paths.js';
+
+// Dev/debug helpers exposed on `window` so they can be invoked from the
+// browser console without importing modules manually. NOT a faithful
+// port — purely a JS-side workaround for the fact that we're verifying
+// data correctness in isolation from runtime behaviour.
+//   dumpStage(1)       → console.table of every expected enemy launch
+//   waveStream(1)      → raw Uint8Array as the launcher would walk it
+window.dumpStage  = (s = 1) => { console.table(dumpStageLaunches(s)); return dumpStageLaunches(s); };
+window.waveStream = (s = 1) => buildWaveStream(s);
+// Expose state for ad-hoc inspection: `state.attackTimers`, etc.
+window.state      = state;
 
 import * as gameController     from './tasks/gameController.js';
 import * as starfield          from './tasks/starfield.js';
@@ -9,6 +21,7 @@ import * as objectStates       from './tasks/objectStates.js';
 import * as bugMotion          from './tasks/bugMotion.js';
 import * as enemyStatus        from './tasks/enemyStatus.js';
 import * as bombUpdate         from './tasks/bombUpdate.js';
+import * as bomberConfig       from './tasks/bomberConfig.js';
 import * as launchAttackWave   from './tasks/launchAttackWave.js';
 import * as playerMove         from './tasks/playerMove.js';
 import * as playerFire         from './tasks/playerFire.js';
@@ -38,6 +51,7 @@ const TASK_TABLE = [
     { flag: 'bugMotion',          module: bugMotion,          ref: 'CPU1 f_08D3' },
     { flag: 'enemyStatus',        module: enemyStatus,        ref: 'f_1DB3'    },
     { flag: 'bombUpdate',         module: bombUpdate,         ref: 'f_1EA4'    },
+    { flag: 'bomberConfig',       module: bomberConfig,       ref: 'f_0857'    },
     { flag: 'launchAttackWave',   module: launchAttackWave,   ref: 'f_2916'    },
     { flag: 'playerMove',         module: playerMove,         ref: 'f_1F85'    },
     { flag: 'playerFire',         module: playerFire,         ref: 'f_1F04'    },
@@ -100,7 +114,7 @@ function update() {
 
 function render() {
     ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, 224, 256);
+    ctx.fillRect(0, 0, 224, 288);
 
     // Each task module can expose a render() — called unconditionally
     // (rendering is always active even if the logic task is disabled).

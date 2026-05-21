@@ -342,7 +342,7 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
 <!-- ══════════════════════════════════════════════════════════
      3. FORMATION GRID
      ══════════════════════════════════════════════════════════ -->
-<h3>3 · Formation Grid  <span style="color:#555;font-weight:normal;font-size:10px">(48 slots · ROM X: 0x31–0xC1 → canvas 39–183 after −10 px hardware offset · 10 cols · 16 px apart · 6 rows)</span></h3>
+<h3>3 · Formation Grid  <span style="color:#555;font-weight:normal;font-size:10px">(48 slots · ROM X: 0x31–0xC1 → canvas 33–177 after −16 px hardware offset · 10 cols · 16 px apart · 6 rows)</span></h3>
 <div class="section">
 
 <div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap">
@@ -744,7 +744,7 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
     <div style="color:#888;font-size:11px;line-height:1.7">
       <b style="color:#aaa">Y_code</b> = <span style="color:#7af">0x14 + 2*rowIdx</span> &nbsp;→ <span style="color:#7af">0x14, 0x16, 0x18, 0x1A, 0x1C, 0x1E</span> for rows 0–5 (boss / boss / butterfly / butterfly / wasp / wasp).<br>
       <b style="color:#aaa">X_code</b> = <span style="color:#7af">2*colIdx</span> &nbsp;→ <span style="color:#7af">0x00, 0x02, … , 0x12</span> for cols 0–9.<br>
-      Canvas pixel position is derived later via state.js's existing transforms (Y formula + −10 px X offset).
+      Canvas pixel position is derived later via state.js's existing transforms (Y formula + −16 px X offset — see <code>research_coordinate_system.md</code> for the verified sprite-chip formulas).
     </div>
   </div>
 
@@ -1106,6 +1106,20 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
      ══════════════════════════════════════════════════════════ -->
 <h3>5c · Game Integration  <span style="color:#555;font-weight:normal;font-size:10px">(step 9 research)</span></h3>
 <div class="section">
+
+<!-- INT-2c implementation closure — cross-reference to research docs -->
+<div style="width:100%;margin-bottom:20px;padding:12px 16px;background:#0a1a0e;border:1px solid #264;border-radius:2px">
+  <div style="color:#5d9;font-size:11px;font-weight:bold;margin-bottom:10px;letter-spacing:0.5px">📖 LIVING RESEARCH DOCS &nbsp;·&nbsp; INT-2c implementation closed</div>
+  <div style="color:#888;font-size:11px;line-height:1.7">
+    The blocks below capture the original step-9 up-front research. During INT-2c implementation we verified, refined, and in some places <b>corrected</b> these findings. The authoritative current spec lives in three living research docs in <code>galaga_clone/</code>:
+    <br>&nbsp;
+    <br>&nbsp;• <span style="color:#7af"><b>research_stage_init.md</b></span> &nbsp;— stage data layout, wave-byte decoder (every bit's effect), variant-pair indexing math, c_25A2 byte-stream layout, full stg_init_env chain, JS state-layer mapping (§13).
+    <br>&nbsp;• <span style="color:#7af"><b>research_path_data.md</b></span> &nbsp;— bug_motion_que struct (every byte 0x00-0x13), all path bytecode tokens with full semantics, per-tick interpreter cycle, motion equation (both axes update per frame).
+    <br>&nbsp;• <span style="color:#7af"><b>research_coordinate_system.md</b></span> &nbsp;— the journey from "wave 2 in wrong area" through canvas → 224×288 → harbaum/galagino verification → final formulas (canvas_X = sprite_X − 16, canvas_Y = sprite_Y_byte + 256×bit_8 − 40). Documents the Z80-ROM-vs-sprite-chip distinction.
+    <br>&nbsp;
+    <br>The blocks below remain useful as the original research outline; <b>read the .md docs first</b> for the verified end-state and the WHY behind it. Where this section's text disagrees with the .md docs, the .md docs win.
+  </div>
+</div>
 
 <!-- Game state machine — verified from game_ctrl.s + mrw.s -->
 <div style="width:100%;margin-bottom:20px;padding:12px 16px;background:#0d1418;border:1px solid #1f2a30;border-radius:2px">
@@ -1601,7 +1615,7 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
     <br>&nbsp;<b>INT-4</b> &nbsp;Lifecycle bug fixes — bullet→flying-enemy collision (latent step 6), player respawn at stageStart
     <br>&nbsp;<b>INT-5</b> &nbsp;Stage-clear detection + cycling (uses bugsActive, transitions to stageClear → stageStart)
     <br>&nbsp;<b>INT-6</b> &nbsp;Minimal HUD — score / stage / "GAME OVER" via browser <code>ctx.fillText()</code>; lives row uses the existing decoded <code>sprites.ship[6]</code> at small scale (proper Z80 character tileset rendering is deferred to step 11)
-    <br>&nbsp;<b>INT-7</b> &nbsp;Polish — TURN_HOME smoothing, F6 spawn-arming removal (needs FD JUMP), explosion sub-state
+    <br>&nbsp;<b>INT-7</b> &nbsp;Polish — TURN_HOME smoothing ✓ (guided <code>'homing'</code> state via Math.atan2), F6 spawn-arming removal (needs FD JUMP), sprite-frame from angle, explosion sub-state
   </div>
 </div>
 
@@ -1714,7 +1728,7 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
 </div>
 
 <div style="margin-top:16px;color:#555;font-size:11px">
-  Screen: 224×256 px · Tile: 8×8 px · Sprite: 16×16 px (4× 8×8 tiles) · Colors: 32 master · Sprite palettes: 16 · Char palettes: 32
+  Screen: 224×288 px · Tile: 8×8 px · Sprite: 16×16 px (4× 8×8 tiles) · Colors: 32 master · Sprite palettes: 16 · Char palettes: 32
 </div>
 </div>
 

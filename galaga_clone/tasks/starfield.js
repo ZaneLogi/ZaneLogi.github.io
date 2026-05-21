@@ -37,7 +37,7 @@ function createLayer(count, colors) {
     for (let i = 0; i < count; i++) {
         stars.push({
             x:     Math.random() * 224,
-            y:     Math.random() * 256,
+            y:     Math.random() * 288,
             color: colors[Math.floor(Math.random() * colors.length)],
         });
     }
@@ -65,11 +65,11 @@ export function update(state) {
 
     for (const s of slowStars) {
         s.y += SPEED_SLOW * speed;
-        if (s.y >= 256) s.y -= 256;
+        if (s.y >= 288) s.y -= 288;
     }
     for (const s of fastStars) {
         s.y += SPEED_FAST * speed;
-        if (s.y >= 256) s.y -= 256;
+        if (s.y >= 288) s.y -= 288;
     }
 }
 

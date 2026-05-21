@@ -85,24 +85,49 @@ We mirror this exactly:
 
 ## Coordinate system (very easy to get wrong)
 
-The Z80 sprite hardware applies a **10-pixel horizontal offset** when
-drawing. ROM stores sprite-X; we draw at canvas-X. The conversion is
-applied **once** when copying values out of the ROM:
+Galaga's screen is **224 × 288** (canvas matches). The Z80 ROM writes
+sprite registers; the actual canvas position depends on the sprite-chip
+hardware. Both the Y and X formulas were verified against the
+**harbaum/galagino** ESP32 emulator (community-validated by playing
+real Galaga) and match MAME's draw_sprites. See `paths.js`
+`rawXToCanvasX` / `rawYToCanvasY` for the implementation with full
+citations.
 
+**X conversion:**
 ```
-canvas_X = sprite_X - 10
+canvas_X = sprite_X − 16
 ```
 
-So:
+For the variant table (db_2A6C), sprite_X = rawX × 2 (the sprite chip
+shifts the high byte left 1, gg1-5.s:2287-2288), so for variants:
+```
+canvas_X = rawX × 2 − 16
+```
 
-- Z80 ship spawn `0x7A = 122` → `state.player.x = 112`
-- Z80 ship limits `0x12 / 0xE1 = 18 / 225` → canvas `8 / 215`
-- Z80 formation column X `[0x31..0xC1] = [49..193]` → canvas `[39..183]`
+Worked examples:
+- Z80 ship spawn `0x7A = 122` → `state.player.x = 106`
+- Z80 ship limits `0x12 / 0xE1 = 18 / 225` → canvas `2 / 209`
+- Z80 formation column X `[0x31..0xC1] = [49..193]` → canvas `[33..177]`
 
-Y has no offset.
+**Y conversion:**
+```
+canvas_Y = sprite_Y_byte + 256 × bit_8 − 40
+```
 
-When reading a Z80 X value or porting a new feature: **subtract 10
-immediately** so the rest of the JS stays in canvas coordinates.
+bit 8 lives in `ds_sprite_ctrl[n + 1] bit 0` (the Z80 author's
+"sy<8>" comment). For the bug-render path, sprite_Y is derived via
+gg1-5.s:2305-2321 (`(~(rawY+0x4F)) & 0xFF) × 2 + 1`); for formation
+positions, via c_12C3 with no `+1`.
+
+Worked examples:
+- Player ship sprite_Y full = 297 → canvas Y = 257
+- Variant 0 (rawY=0x9B): sprite_Y = 43, bit_8 = 0 → canvas Y = 3
+- Variant 2 (rawY=0x23): sprite_Y full = 283 → canvas Y = 243
+- Formation row 0 (rawY=0x92): sprite_Y = 60 → canvas Y = 20
+
+When reading a Z80 X/Y value or porting a new feature: **apply the
+canvas conversion immediately** so the rest of the JS stays in canvas
+coordinates.
 
 ## Fidelity patterns to preserve
 

@@ -89,8 +89,9 @@ export function update(state) {
         b.x += b.vx;
         b.y += yStep;
 
-        // Despawn off-screen bottom (canvas height = 256).
-        if (b.y > 256) { b.alive = false; continue; }
+        // Despawn off-screen bottom (canvas height = 288, matches Galaga's
+        // actual 224×288 hardware screen).
+        if (b.y > 288) { b.alive = false; continue; }
 
         // AABB collision vs player ship.
         if (player.alive &&

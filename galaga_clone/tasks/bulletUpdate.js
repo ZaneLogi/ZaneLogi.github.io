@@ -43,7 +43,9 @@ export function update(state) {
             if (!e.alive || e.hitFlag) continue;
 
             let ex, ey;
-            if (e.state === 'flying') {
+            if (e.state === 'flying' || e.state === 'homing') {
+                // Both 'flying' and 'homing' use the enemy's free position.
+                // 'homing' is the post-FB guided approach to formation.
                 ex = e.x;
                 ey = e.y;
             } else {
