@@ -104,6 +104,73 @@ When a project has no local `CLAUDE.md`, default to:
 - Sprites are BMP files; `0xFF00FF` is the colorkey transparent color
 - Canvas resolution matches the original arcade / console where relevant
 
+## Delegating to sub-agents
+
+Sub-agents (Explore, general-purpose, etc.) are good for **bounded
+breadth-first scans** of source material — "find every collision routine",
+"list all callers of `$0CC4`", "audit which `Lxxxx` paths are ported."
+They are **not reliable for depth** — synthesis, judgment calls, or
+anything that needs context from the conversation. Use them as
+research instruments, not decision-makers.
+
+The address-citation convention (every claim cites a source line or
+label, e.g. `Lxxxx` for assembly-derived ports) is what makes sub-agent
+output recoverable. Always demand it in the prompt:
+
+> "Cite addresses for every claim. Group findings by source label.
+> Quote the relevant bytes when the claim is non-obvious."
+
+After the agent returns, **re-grep each cited region before relying
+on the claim**. A 5-second grep falsifies a wrong claim cheaply; a
+wrong claim that lands in code or docs is much more expensive to
+remove later.
+
+### Trip-wire moments
+
+When a sub-agent's claim feels too clean and you can't immediately
+see why it's true, **re-derive it from the primary source**.
+
+Example from phoenix_clone (DrawShields + collision audit, 2026-05-20):
+an audit agent flagged `$39F0` as the bird-vs-player path. Reading
+`$39F0` alone showed only a ShieldCount check + JP to `$0CC4` — no
+obvious collision detection. The trip-wire was correct: the actual
+trick is 100 bytes earlier at `$3980`, which repurposes the player
+bullet as a screen-RAM probe via `$3800`. Agent was right, but its
+pointer was off — re-deriving from the source listing found the real
+mechanism. Without the dig, the port would have copied the agent's
+pointer-only framing into the doc, propagating the gap.
+
+### Agents can write confidently wrong research docs
+
+The most expensive failure mode is a research doc claim that passes
+review at the time, lands in a `docs/research_*.md`, and only gets
+falsified when a later port step actually depends on it.
+
+From phoenix_clone, three such claims surfaced only when DrawShields
+was being implemented and the doc claims got tested against real
+gameplay:
+- `research_player_movement.md §3.4` carried "Shield duration: 255
+  frames ≈ 4.25 s" for weeks; correct figure is ~63 frames active
+  (the 255 figure is the full re-fire cycle).
+- `research_player_ship.md §5` claimed "source has no shield gate
+  for alien-body collisions" — wrong; `$0F00` dispatches on
+  ShieldCount before any tile scan.
+- A code comment carried `// TODO: $3980 (cosmetic)` for weeks;
+  `$3980` is the actual bird-kills-player path, not cosmetic.
+
+**The defense is the address-citation rule plus this skepticism: if a
+doc says something happens "always" or "never" in source, demand the
+address it doesn't happen at and re-check.**
+
+### Cheap-recovery commit hygiene
+
+When sub-agent output influences a code change, keep the commits
+small enough that a wrong-agent revert costs one commit, not a
+session of work. For example, in phoenix_clone, DrawShields landed
+as two commits (mixin-refactor, then feature+audit) — if the audit
+had revealed DrawShields was fundamentally broken, the refactor
+would survive the revert.
+
 ## mini_mario (`mario_physics/`) — quick reference
 
 Fixed-timestep accumulator (1/60 s physics ticks) with render
