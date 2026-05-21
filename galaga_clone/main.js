@@ -38,6 +38,13 @@ const canvas = document.getElementById('screen');
 const ctx    = canvas.getContext('2d');
 state.ctx    = ctx;
 
+// ── Keyboard input ─────────────────────────────────────────────────────────
+// Raw key state — sampled once per logic tick in update() so all tasks see a
+// consistent snapshot (mirrors the Z80's io_input[] polled at the top of the frame).
+const _keys = new Set();
+window.addEventListener('keydown', e => { _keys.add(e.code);    e.preventDefault(); });
+window.addEventListener('keyup',   e => { _keys.delete(e.code);                    });
+
 // ── Dev panel ─────────────────────────────────────────────────────────────
 initDevPanel(state, TASK_TABLE);
 
@@ -57,6 +64,11 @@ function tickGameTimers() {
 }
 
 function update() {
+    // Sample raw input once per tick — consistent snapshot for all tasks.
+    state.input.left  = _keys.has('ArrowLeft');
+    state.input.right = _keys.has('ArrowRight');
+    state.input.fire  = _keys.has('Space');
+
     tickGameTimers();
 
     // Dispatch all enabled tasks — mirrors the Z80 scheduler iterating

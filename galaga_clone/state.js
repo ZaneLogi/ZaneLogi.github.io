@@ -2,9 +2,12 @@
 // All tasks read and write from this object.
 
 // ── Formation home-position tables (db_fmtn_hpos_orig, gg1-2.s:949) ──────────
-// Column pixel X: stored directly in ROM.
+// The Z80 sprite hardware has a 10 px horizontal offset from our canvas:
+//   canvas_X = sprite_X - 10
+// Column sprite X from ROM: [0x31,0x41,...,0xC1] = [49,65,...,193]
+// Column canvas X after offset: sprite_X - 10.
 // Row pixel Y: derived via pixel_Y = 2 × (~(rawY + 0x4F) & 0xFF).
-const _COL_X = [49, 65, 81, 97, 113, 129, 145, 161, 177, 193];
+const _COL_X = [39, 55, 71, 87, 103, 119, 135, 151, 167, 183];
 const _ROWS = [
     { y:  60, type: 'boss',      cols: [3,4,5,6]              },
     { y:  76, type: 'boss',      cols: [3,4,5,6]              },
@@ -57,7 +60,7 @@ export const state = {
         enemyStatus:         false,  // f_1DB3  — on when stage is active
         bombUpdate:          true,   // f_1EA4  ★ always on
         launchAttackWave:    false,  // f_2916  — on when stage is active
-        playerMove:          false,  // f_1F85  — on during gameplay
+        playerMove:          true,   // f_1F85  — on during gameplay
         playerFire:          false,  // f_1F04  — on during gameplay
         captorDive:          false,  // f_21CB  — enabled when boss initiates capture
         tractorBeam:         false,  // f_2222  — enabled when boss reaches player Y
@@ -71,6 +74,24 @@ export const state = {
     starCtrl: {
         scrollEnable: false,
         speed:        1,
+    },
+
+    // ── Player ship ────────────────────────────────────────────────────────
+    // Mirrors ds_sprite_posn[$62] / ds_plyr_actv in the Z80 source.
+    // Spawn sprite X = 0x7A = 122 (c_133A, gg1-2.s:1058); canvas X = 122 - 10 = 112.
+    // dxFlag mirrors b_92A0[3]: toggles each held frame → alternates 1/2 px step.
+    player: {
+        x:      112,   // canvas X (sprite 0x7A=122 minus 10 px hardware offset)
+        y:      208,   // fixed canvas Y (near bottom of 256 px playfield)
+        dxFlag: 0,     // toggles each held frame: first=1 px, then 1/2 px alternating
+        alive:  true,
+    },
+
+    // ── Raw input state (updated by main.js before each update tick) ───────
+    input: {
+        left:  false,
+        right: false,
+        fire:  false,
     },
 
     // ── Enemy objects ──────────────────────────────────────────────────────
