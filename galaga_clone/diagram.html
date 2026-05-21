@@ -390,30 +390,33 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
     <div class="box yellow">c_25A2 build wave table</div>
     <div class="down">↓</div>
     <div class="box yellow">f_2916 launch wave</div>
-    <div class="down">↓  <span style="color:#555;font-size:10px">24 path patterns (db_2A3C)</span></div>
+    <div class="down">↓  <span style="color:#555;font-size:10px">24 path patterns (db_2A3C) · lefty/righty pairs</span></div>
     <div class="box yellow">Path bytecode interpreter</div>
-    <div class="down">↓  <span style="color:#555;font-size:10px">vel + rotation + duration segments</span></div>
-    <div class="box yellow">token 0xE1 → home reached</div>
+    <div class="down">↓  <span style="color:#555;font-size:10px">f_2A90 already running — formation drifts L/R during fly-in</span></div>
+    <div class="box yellow">token 0xE1 → home reached<br><span style="color:#555;font-size:10px">case_0968 · snaps to formation slot</span></div>
+    <div class="down">↓  <span style="color:#555;font-size:10px">last enemy homes AND f_2916 idle?</span></div>
+    <div class="box green">f_2A90 drifts back to centre<br>→ disables self → enables f_1DE6</div>
     <div class="down">↓</div>
-    <div class="box green">IN FORMATION</div>
-    <div class="down" style="color:#555;font-size:10px">formation oscillates via f_2A90 · f_1DE6</div>
+    <div class="box green">IN FORMATION (steady state)</div>
   </div>
 
   <!-- ATTACK -->
   <div class="flow-col">
     <h4>During Play — Attack Wave</h4>
     <div class="box green">IN FORMATION</div>
-    <div class="down">↓  <span style="color:#555;font-size:10px">f_2916 selects group</span></div>
+    <div class="down">↓  <span style="color:#555;font-size:10px">f_2916 selects group · f_2A90 re-activates</span></div>
     <div class="box blue">token 0xE3 (bee/butterfly)<br>token 0xE4 (boss)</div>
-    <div class="down">↓  <span style="color:#555;font-size:10px">select path by player X pos</span></div>
-    <div class="box blue">DIVING  (path bytecode)</div>
-    <div class="down">↓  <span style="color:#555;font-size:10px">f_1EA4 drops bombs every N frames</span></div>
-    <div class="box blue">token 0xEB → turn for home</div>
-    <div class="down">↓</div>
-    <div class="box blue">token 0xEC → loop up from top</div>
-    <div class="down">↓</div>
+    <div class="down">↓  <span style="color:#555;font-size:10px">path selected by player X pos</span></div>
+    <div class="box blue">DIVING  (path bytecode)<br><span style="color:#555;font-size:10px">f_1EA4 drops bombs every N frames</span></div>
+    <div class="down" style="color:#555;font-size:11px">↙ bee &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; butterfly/boss ↘</div>
+    <div style="display:flex;gap:6px;margin:2px 0">
+      <div class="box blue" style="font-size:10px;padding:4px 6px">exits bottom edge<br>case_0B4E → loopback<br>reappears at top<br>case_0BD1/0B5F</div>
+      <div class="box blue" style="font-size:10px;padding:4px 6px">turns mid-dive<br>does NOT exit<br>arcs back from above<br>case_0B46</div>
+    </div>
+    <div class="down">↓  <span style="color:#555;font-size:10px">both approach slot from above</span></div>
     <div class="box green">IN FORMATION</div>
-    <div style="margin-top:8px;color:#844;font-size:11px">if hit by bullet → f_1DB3<br>sets state=exploding → removed</div>
+    <div style="margin-top:8px;color:#555;font-size:11px">f_2A90 disables when bugs=0 &amp; f_2916=0<br>f_1DE6 (expand/contract) resumes</div>
+    <div style="margin-top:6px;color:#844;font-size:11px">if hit by bullet → f_1DB3<br>sets state=exploding → removed</div>
   </div>
 
   <!-- BOSS CAPTURE -->
@@ -432,6 +435,53 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
     <div class="box red">ship captured → spins · wings close</div>
     <div class="down">↓  <span style="color:#555;font-size:10px">boss killed during beam?</span></div>
     <div class="box green">f_2000: rescued ship lands → 2-ship mode</div>
+  </div>
+
+</div>
+
+<!-- ── Formation movement detail ── -->
+<h4 style="color:#555;font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:24px;margin-bottom:10px;border-bottom:1px solid #1a1a1a;padding-bottom:4px">4b · Formation Movement — Two Separate Systems (verified from Z80 source)</h4>
+<div style="display:flex;gap:32px;flex-wrap:wrap;align-items:flex-start">
+
+  <div class="bytecode" style="max-width:480px">
+    <div class="hdr">Task</div><div class="hdr">Motion</div><div class="hdr">Active when</div>
+    <div class="val">f_2A90</div>
+    <div class="lbl">±32 px left/right · 1 px per 4 frames (15 Hz)<br><span style="color:#444">moves all 10 column coords in ds_hpos_spcoords</span></div>
+    <div class="lbl">bugs in flight OR f_2916 active<br><span style="color:#444">(fly-in phase AND during dive attacks)</span></div>
+    <div class="val">f_1DE6</div>
+    <div class="lbl">expand/contract "breathing" · 15 Hz (% 4)<br><span style="color:#444">bitmap table d_1E64 selects which cols/rows move · direction flips at ±0x1F count</span></div>
+    <div class="lbl">steady-state only — enabled by f_2A90 when formation completes and returns to centre<br><span style="color:#444">(disabled during dive attacks)</span></div>
+  </div>
+
+  <div>
+    <div style="color:#777;font-size:11px;margin-bottom:8px">f_2A90 → f_1DE6 hand-off (from gg1-3.s l_2ADA_done)</div>
+    <div class="hflow" style="flex-direction:column;align-items:flex-start;gap:4px">
+      <div class="box gray" style="font-size:11px">bugs_actv_nbr == 0 AND f_2916 inactive</div>
+      <div class="down" style="text-align:left">↓</div>
+      <div class="box gray" style="font-size:11px">f_2A90: drift back to centre (offset → 0)</div>
+      <div class="down" style="text-align:left">↓</div>
+      <div class="box gray" style="font-size:11px">task_actv[0x0A] = 0  (disable f_2A90)</div>
+      <div class="down" style="text-align:left">↓</div>
+      <div class="box gray" style="font-size:11px">task_actv[0x09] = 1  (enable f_1DE6)</div>
+      <div class="down" style="text-align:left">↓</div>
+      <div class="box green" style="font-size:11px">pulsing formation sound effect triggered</div>
+    </div>
+  </div>
+
+  <div>
+    <div style="color:#777;font-size:11px;margin-bottom:8px">Dive return path — by enemy type (case labels from gg1-5.s)</div>
+    <div class="bytecode" style="max-width:420px">
+      <div class="hdr">Type</div><div class="hdr">Dive exit</div><div class="hdr">Return path</div>
+      <div class="val">Bee</div>
+      <div class="lbl">exits <span style="color:#fc6">bottom</span> edge of screen</div>
+      <div class="lbl">reappears at <span style="color:#5d9">top</span> · loops to slot<br><span style="color:#444">case_0B4E → case_0BD1/0B5F → case_0B46</span></div>
+      <div class="val">Butterfly</div>
+      <div class="lbl">turns <span style="color:#fc6">mid-dive</span> · does NOT exit screen</div>
+      <div class="lbl">arcs back from <span style="color:#5d9">above</span> to slot<br><span style="color:#444">case_0B46 · "moths from top of screen"</span></div>
+      <div class="val">Boss</div>
+      <div class="lbl">turns <span style="color:#fc6">mid-dive</span> · does NOT exit screen</div>
+      <div class="lbl">arcs back from <span style="color:#5d9">above</span> to slot<br><span style="color:#444">case_0B46 · same handler as butterfly</span></div>
+    </div>
   </div>
 
 </div>

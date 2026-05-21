@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Galaga Clone — Progress</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0e0e0e;
+    color: #ccc;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 24px;
+    line-height: 1.6;
+  }
+
+  h1 { color: #fff; font-size: 16px; margin-bottom: 4px; }
+  h2 { color: #555; font-size: 11px; font-weight: normal; margin-bottom: 32px; }
+
+  /* ── Step card ── */
+  .step {
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    gap: 0 16px;
+    margin-bottom: 2px;
+    align-items: stretch;
+  }
+
+  /* Left gutter: number + connector line */
+  .step-gutter {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .step-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: bold;
+    flex-shrink: 0;
+    border: 1px solid #333;
+    background: #151515;
+    color: #555;
+  }
+  .step.done   .step-num { background: #0d1f0d; border-color: #3a6; color: #5d9; }
+  .step.active .step-num { background: #1a150a; border-color: #a80; color: #fc6; }
+  .step.todo   .step-num { background: #151515; border-color: #333; color: #444; }
+
+  .step-line {
+    flex: 1;
+    width: 1px;
+    background: #222;
+    margin: 4px 0;
+    min-height: 12px;
+  }
+  .step:last-child .step-line { display: none; }
+
+  /* Right body */
+  .step-body {
+    padding: 6px 0 20px;
+  }
+
+  .step-title {
+    font-size: 13px;
+    font-weight: bold;
+    margin-bottom: 6px;
+  }
+  .step.done   .step-title { color: #5d9; }
+  .step.active .step-title { color: #fc6; }
+  .step.todo   .step-title { color: #555; }
+
+  .step-desc {
+    color: #777;
+    margin-bottom: 8px;
+    max-width: 680px;
+  }
+  .step.todo .step-desc { color: #3a3a3a; }
+
+  /* File list */
+  .files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+  .file {
+    padding: 1px 8px;
+    border-radius: 2px;
+    font-size: 11px;
+    border: 1px solid #2a2a2a;
+    background: #141414;
+    color: #555;
+  }
+  .file.new      { border-color: #264; color: #4a8; }
+  .file.modified { border-color: #443; color: #aa7; }
+  .file.ref      { border-color: #334; color: #669; font-style: italic; }
+
+  /* Notes / log entries */
+  .notes {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 4px;
+  }
+  .note {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+  .note-tag {
+    font-size: 10px;
+    padding: 0 5px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .note-tag.fix    { background: #2a1010; color: #f88; border: 1px solid #633; }
+  .note-tag.decide { background: #101828; color: #7af; border: 1px solid #346; }
+  .note-tag.verify { background: #121a12; color: #6a9; border: 1px solid #264; }
+  .note-tag.note   { background: #1a1a1a; color: #777; border: 1px solid #333; }
+  .note-text { color: #666; }
+  .step.todo .note-text { color: #2a2a2a; }
+
+  /* Status badge */
+  .badge {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 7px;
+    border-radius: 2px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  .badge.done   { background: #0d2a0d; color: #5d9; border: 1px solid #3a6; }
+  .badge.active { background: #2a1a00; color: #fc6; border: 1px solid #a80; }
+  .badge.todo   { background: #1a1a1a; color: #444; border: 1px solid #2a2a2a; }
+
+  /* Summary bar */
+  .summary {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 32px;
+    padding: 10px 14px;
+    border: 1px solid #222;
+    background: #111;
+    border-radius: 2px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .summary-item { font-size: 11px; color: #555; }
+  .summary-item span { font-size: 13px; font-weight: bold; }
+  .summary-item .done-count   { color: #5d9; }
+  .summary-item .active-count { color: #fc6; }
+  .summary-item .todo-count   { color: #444; }
+
+  .progress-bar {
+    flex: 1;
+    min-width: 120px;
+    height: 6px;
+    background: #1e1e1e;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: #3a6;
+    border-radius: 3px;
+    transition: width 0.3s;
+  }
+
+  a { color: #446; text-decoration: none; }
+  a:hover { color: #7af; }
+</style>
+</head>
+<body>
+
+<h1>Galaga Clone — Implementation Progress</h1>
+<h2>Branch: galaga_clone &nbsp;·&nbsp; Ref: <a href="diagram.html">diagram.html</a> &nbsp;·&nbsp; Z80: C:\Z_Temp\hackbar_galaga\rom0\</h2>
+
+<div class="summary">
+  <div class="summary-item"><span class="done-count">5</span> done</div>
+  <div class="summary-item"><span class="active-count">0</span> in progress</div>
+  <div class="summary-item"><span class="todo-count">6</span> todo</div>
+  <div class="progress-bar"><div class="progress-fill" style="width: 45%"></div></div>
+  <div class="summary-item" style="color:#333">5 / 11 steps</div>
+</div>
+
+
+<!-- ── Step 0 ── -->
+<div class="step done">
+  <div class="step-gutter">
+    <div class="step-num">0</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Project foundation — skeleton + tooling <span class="badge done">done</span></div>
+    <div class="step-desc">CLAUDE.md repo guidance. Fixed-timestep runloop (1/60 s physics ticks) with 32-slot task scheduler mirroring the Z80 task_man.s. Shared mutable state, Proxy-based dev panel overlay with always-on toggle protection. Working parallax starfield (32 slow + 31 fast stars). Stubs for all major task modules. Code-flow analysis page.</div>
+    <div class="files">
+      <span class="file new">CLAUDE.md</span>
+      <span class="file new">index.html</span>
+      <span class="file new">main.js</span>
+      <span class="file new">state.js</span>
+      <span class="file new">devPanel.js</span>
+      <span class="file new">tasks/starfield.js</span>
+      <span class="file new">tasks/formationOscillate.js</span>
+      <span class="file new">tasks/formationPulse.js</span>
+      <span class="file new">tasks/objectStates.js</span>
+      <span class="file new">tasks/enemyStatus.js</span>
+      <span class="file new">tasks/bombUpdate.js</span>
+      <span class="file new">tasks/launchAttackWave.js</span>
+      <span class="file new">tasks/playerMove.js</span>
+      <span class="file new">tasks/playerFire.js</span>
+      <span class="file new">tasks/captorDive.js</span>
+      <span class="file new">tasks/tractorBeam.js</span>
+      <span class="file new">tasks/pullShip.js</span>
+      <span class="file new">diagram.html</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Fixed-timestep accumulator (1/60 s) — physics is frame-rate independent, render interpolates between ticks.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Task table ordered to match Z80 d_cpu0_task_table slot numbering; f_1DD2 (timer decrement) runs unconditionally outside the panel as tickGameTimers().</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Dev panel uses Proxy-based reactivity; always-on tasks are checkbox-disabled so they can't be toggled off.</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 1 ── -->
+<div class="step done">
+  <div class="step-gutter">
+    <div class="step-num">1</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">ROM data files <span class="badge done">done</span></div>
+    <div class="step-desc">Port all ROM data from galaga/ to ES6 export const modules under galaga_clone/gfx/. One file per ROM region.</div>
+    <div class="files">
+      <span class="file new">gfx/dat_colors.js</span>
+      <span class="file new">gfx/dat_paletteSprite.js</span>
+      <span class="file new">gfx/dat_paletteChar.js</span>
+      <span class="file new">gfx/dat_sprite1.js</span>
+      <span class="file new">gfx/dat_sprite2.js</span>
+      <span class="file new">gfx/dat_character.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">All ROM data in gfx/ subdirectory — mirrors hardware boundary (ROM data + GFX chip).</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Each file uses <code>export const</code> (no wrapper object) for clean ES6 module imports.</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 2 ── -->
+<div class="step done">
+  <div class="step-gutter">
+    <div class="step-num">2</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">gfx/resource.js — sprite decoder <span class="badge done">done</span></div>
+    <div class="step-desc">ES6 decoder module: decodes color PROM → RGBA, builds 16-entry sprite palettes, decodes 16×16 tiles from both sprite ROMs, exports named sprite groups (ship, boss, butterfly, wasp) as HTMLCanvasElement arrays. Runs once at import time — no init() call needed.</div>
+    <div class="files">
+      <span class="file new">gfx/resource.js</span>
+      <span class="file new">gfx/sprite_viewer.html</span>
+      <span class="file modified">galaga/resource.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text">Blue channel decode bug in galaga/resource.js: <code>(c>>5)&0x6/7</code> (max 219) → <code>(c>>6)&0x3/3</code> (max 255). Applied to both galaga/ and galaga_clone/.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Palette indices verified against Z80 source (gg1-2_fx.s): ship=9, boss=0, butterfly=2, wasp=3.</span></div>
+      <div class="note"><span class="note-tag verify">verify</span><span class="note-text">Visual check via sprite_viewer.html confirmed correct colors and shapes for all four groups.</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 3 ── -->
+<div class="step done">
+  <div class="step-gutter">
+    <div class="step-num">3</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Formation rendering <span class="badge done">done</span></div>
+    <div class="step-desc">48 enemy objects in state.js (8 boss + 20 butterfly + 20 wasp). Rendered each frame by objectStates.js using the correct formation-idle sprite frame and a 6↔7 animation at ~2 Hz.</div>
+    <div class="files">
+      <span class="file modified">state.js</span>
+      <span class="file modified">tasks/objectStates.js</span>
+      <span class="file ref">gfx/resource.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">48 slots (not 40): boss rows only fill cols 3–6 (4 enemies each); butterfly and wasp rows fill all 10 cols. Source: db_obj_home_posn_rc in task_man.s.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Column X from db_fmtn_hpos_orig (gg1-2.s:949): [49,65,81,97,113,129,145,161,177,193]. Row pixel Y via formula: pixel_Y = 2×(~(rawY+0x4F)&0xFF) → boss 60/76, butterfly 92/104, wasp 116/128.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text">Initial render used sprites[type][0] (facing left). Z80 case_245F/case_2488 (gg1-3.s) shows home pose is sprite code 6, alternating 6↔7 in formation. Corrected to frame = 6 + ((frameCount >> 5) &amp; 1).</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 4 ── -->
+<div class="step done">
+  <div class="step-gutter">
+    <div class="step-num">4</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Formation movement — oscillate + pulse <span class="badge done">done</span></div>
+    <div class="step-desc">Faithful ports of both Z80 formation movement tasks. f_2A90: whole formation drifts ±32 px L/R at 15 Hz (1 px/4 frames). f_1DE6: per-column and per-row pixel offsets driven by d_1E64 bitmap table; rrc rotation; expand/contract counter gives ~4.2 s full cycle.</div>
+    <div class="files">
+      <span class="file modified">tasks/formationOscillate.js</span>
+      <span class="file modified">tasks/formationPulse.js</span>
+      <span class="file modified">state.js</span>
+      <span class="file modified">tasks/starfield.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">f_2A90 and f_1DE6 are mutually exclusive: f_2A90 runs during fly-in and attack; f_1DE6 takes over at steady state (all enemies homed, launchAttackWave off). Hand-off not yet wired — toggled manually via dev panel for now.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">f_1DE6 bitmap (d_1E64_bitmap_tables, gg1-2_fx.s:1721): 4 rows × 16 bytes. rrc each byte each tick; carry → update offset. Left cols 0–4 invert direction (expand leftward); right cols 5–9 and all 6 rows use positive direction. Counter: 0x00→0x1F expanding, jumps to 0xA0; 0xA0→0x81 contracting, jumps to 0x00.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text">Starfield invisible despite task being enabled: main.js never calls task init(). Fixed by lazy-calling init() at top of starfield.update() when !ready. scrollEnable=true set there is a dev scaffold — in the real game flow game_ctrl.s sets it when the ship enters the playfield.</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 5 ── -->
+<div class="step todo">
+  <div class="step-gutter">
+    <div class="step-num">5</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Player ship <span class="badge todo">todo</span></div>
+    <div class="step-desc">Render ship sprite at bottom-center. Keyboard left/right movement with bounds clamping (X: 0x36–0xE6, ±1 px/frame). Respawn at X=0x80.</div>
+    <div class="files">
+      <span class="file modified">tasks/playerMove.js</span>
+      <span class="file modified">state.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Z80 ref: f_1F85. Ship Y is fixed at ~0xB8. Sprite: sprites.ship[frame].</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 6 ── -->
+<div class="step todo">
+  <div class="step-gutter">
+    <div class="step-num">6</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Player bullets + collision <span class="badge todo">todo</span></div>
+    <div class="step-desc">Fire on Space (up to 2 bullets on screen, original allows 1). Bullets move upward each tick. AABB collision vs enemy bounding boxes → mark enemy dead, update score.</div>
+    <div class="files">
+      <span class="file modified">tasks/playerFire.js</span>
+      <span class="file modified">tasks/enemyStatus.js</span>
+      <span class="file modified">state.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Z80 ref: f_1F04 (fire) · f_1DB3 (enemy hit → exploding state) · f_23DD (object states).</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 7 ── -->
+<div class="step todo">
+  <div class="step-gutter">
+    <div class="step-num">7</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Fly-in sequence <span class="badge todo">todo</span></div>
+    <div class="step-desc">Enemies enter from off-screen following path bytecode (velocity + rotation segments). Path interpreter reads from Z80 path tables (db_2A3C, 24 patterns). Enemies snap to formation slot on token 0xE1 (HOME).</div>
+    <div class="files">
+      <span class="file modified">tasks/launchAttackWave.js</span>
+      <span class="file new">paths.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Z80 ref: c_25A2 (build wave table) · f_2916 (launch wave) · db_2A3C (24 path patterns).</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Path segment: byte0=vel XY nibbles, byte1=rotation increment, byte2=frame duration. Rotation is 24-step circle (15°/step).</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 8 ── -->
+<div class="step todo">
+  <div class="step-gutter">
+    <div class="step-num">8</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Attack waves + bombs <span class="badge todo">todo</span></div>
+    <div class="step-desc">Enemies break formation and dive toward player using path bytecode. Boss uses token 0xE4 (BOSS_DIVE). Bees/butterflies use 0xE3 (BREAK_LEFT). Enemies drop bombs (vector-targeted at player) during dive. 8 bomb slots total, collision at Y&gt;0xA5.</div>
+    <div class="files">
+      <span class="file modified">tasks/captorDive.js</span>
+      <span class="file modified">tasks/bombUpdate.js</span>
+      <span class="file modified">tasks/launchAttackWave.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Z80 ref: f_1B65 (bomber attack manager) · f_1EA4 (bomb update + collision) · f_21CB (capt dive).</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 9 ── -->
+<div class="step todo">
+  <div class="step-gutter">
+    <div class="step-num">9</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Boss capture mechanic <span class="badge todo">todo</span></div>
+    <div class="step-desc">Boss fires tractor beam (6-wide, 24-row, 15 Hz animation) → pulls player ship upward (±1 px/frame). Captured ship joins formation as a slave. If boss killed during beam, rescued ship lands and enables 2-ship mode.</div>
+    <div class="files">
+      <span class="file modified">tasks/tractorBeam.js</span>
+      <span class="file modified">tasks/pullShip.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Z80 ref: f_2222 (tractor beam draw) · f_20F2 (pull ship) · f_2000 (rescued ship landing).</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 10 ── -->
+<div class="step todo">
+  <div class="step-gutter">
+    <div class="step-num">10</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">HUD / scoring <span class="badge todo">todo</span></div>
+    <div class="step-desc">Score display, lives, stage number using character tileset (dat_character.js + dat_paletteChar.js). High score tracking in localStorage.</div>
+    <div class="files">
+      <span class="file new">tasks/hud.js</span>
+      <span class="file modified">gfx/resource.js</span>
+      <span class="file modified">state.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Character tileset: 8×8 px tiles, 32×28 tile grid, 32 char palettes. Tile RAM at Z80 0x8000.</span></div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

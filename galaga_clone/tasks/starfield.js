@@ -58,6 +58,7 @@ export function init(state) {
 }
 
 export function update(state) {
+    if (!ready) init(state);  // lazy init on first enabled tick
     if (!state.starCtrl.scrollEnable) return;  // frozen when ship off screen
 
     const speed = state.starCtrl.speed;
@@ -73,7 +74,7 @@ export function update(state) {
 }
 
 export function render(state) {
-    if (!state.tasks.starfield) return;
+    if (!state.tasks.starfield || !ready) return;
 
     const ctx = state.ctx;
 
