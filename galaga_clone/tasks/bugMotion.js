@@ -39,13 +39,36 @@ function byteSigned(b) {
 // past so we don't mis-read the args as segment data. Defaults to 0
 // (the token byte alone) for unlisted opcodes.
 //
-//   0xFD JUMP         · 2-byte address      (case_0B46, gg1-5.s:1885)
-//   0xF7 ATTACK_TURN  · 2-byte sub address  (case_0B98, gg1-5.s:1947)
-//   0xF0 ATTACK_WAVE  · 2-byte sub address  (case_0955, gg1-5.s:1529)
+//   0xFD JUMP            · 2-byte address  (case_0B46, gg1-5.s:1885)
+//   0xFC RTN_FMTN/DIVE   · 1-byte origin Y (case_0B4E, gg1-5.s:1896)
+//   0xFA LOOP_TOP        · 2-byte alt addr (case_0BD1, gg1-5.s:1984)
+//   0xF8 BEAM_ON         · 1-byte Y value  (case_0B87, gg1-5.s:1935)
+//   0xF7 ATTACK_TURN     · 2-byte sub addr (case_0B98, gg1-5.s:1947)
+//   0xF6 FREE_FLIGHT     · 1-byte velocity (case_0BA8, gg1-5.s:1963)
+//   0xF3 BREAK_TARGETED  · 2-byte sub addr (case_0A01, gg1-5.s:1661)
+//   0xF0 ATTACK_WAVE     · 2-byte sub addr (case_0955, gg1-5.s:1529)
+//   0xEF BOMB_MODE       · 2-byte alt addr (case_094E, gg1-5.s:1523)
+//
+// Step 8 phase 8a additions: FC, F8, F6, F3, EF — these only appear in
+// attack-context paths (db_flv_atk_yllw / _red); fly-in paths don't use
+// them, so the bug was latent. See architecture.html §5b research item [2].
+//
+// Step 8 phase 8c addition: FA — research had it as "0-byte / conditional"
+// but the path bytes always have a 2-byte address after FA (the alt-pattern
+// pointer). Handler conditionally loads it; either way, 2 path bytes are
+// consumed. Caught when phase 8c test mis-read 0x9E as a segment opcode
+// at offset 18 of ATTACK_PATH_YELLOW, producing vy=-7 (strong upward) and
+// flying the enemy off-screen instead of snapping to formation at FB.
 const TOKEN_ARG_BYTES = {
     0xFD: 2,
+    0xFC: 1,
+    0xFA: 2,
+    0xF8: 1,
     0xF7: 2,
+    0xF6: 1,
+    0xF3: 2,
     0xF0: 2,
+    0xEF: 2,
 };
 
 // Read next segment (or dispatch token) at e.pathOffset.
@@ -73,6 +96,23 @@ function loadSegment(e) {
                 return;
             }
 
+            // Behavioural token for attack-dive bombing.
+            //   0xF6 FREE_FLIGHT · case_0BA8 — arms the bomb-drop counter
+            //                       and per-enemy enable bits. Z80 also
+            //                       sets a 2-byte angle from the arg byte;
+            //                       step 8 phase 8d/e simplifies that to
+            //                       just bomb-state initialisation —
+            //                       motion redirect is polish for later.
+            //                       The 1-byte arg (rot/velocity hint) is
+            //                       consumed but ignored. bombUpdate.js
+            //                       reads bombCounter / bombEnable.
+            if (b0 === 0xF6) {
+                e.bombCounter = 0x1E;     // 30 frames to first drop attempt
+                e.bombEnable  = 0xFF;     // all 8 enable bits set (aggressive)
+                e.pathOffset += 2;        // skip token + 1 arg
+                continue;
+            }
+
             // Everything else: no-op for now, but skip past any argument
             // bytes so .dw addresses don't get mis-read as segments.
             // Full semantics for the remaining 14 tokens come later.
@@ -93,14 +133,13 @@ function loadSegment(e) {
     e.state = 'dead';
 }
 
-// ── Public launch helper ──────────────────────────────────────────────
+// ── Public launch helper (fly-in) ─────────────────────────────────────
 // Put a formation enemy into a fly-in path. Looks up the enemy by its
 // objectId (Z80 sprt_fmtn_hpos byte offset) and configures the flight
 // state from the chosen path's variant.
 //
 // Will be called by:
-//   - spawnTestEnemy() below (phase 3b test harness)
-//   - launchAttackWave (phase 3c, when wave-launcher is wired)
+//   - launchAttackWave fly-in entries (phase 3c)
 //
 // Returns the enemy object on success, or null if the ID isn't found,
 // the enemy is already flying, or the path index isn't ported.
@@ -121,6 +160,50 @@ export function launchEnemy(state, objectId, pathIndex) {
     e.pathBase   = path.bytes;
     e.pathOffset = 0;
     e.segTimer   = 0;             // 0 → load first segment on tick 0
+    return e;
+}
+
+// ── Public launch helper (attack-dive) ────────────────────────────────
+// Put a formation enemy into an attack-dive path. Like launchEnemy()
+// but uses the enemy's current visible formation position as the start
+// point — attack dives spawn from the enemy's slot, not from a variant
+// table off-screen position.
+//
+// Will be called by:
+//   - launchAttackWave attack entries (phase 8c test, phase 8e real launcher)
+//
+// Returns the enemy on success, or null if not found / already flying /
+// attackBytes missing.
+export function launchEnemyAttack(state, objectId, attackBytes) {
+    if (!attackBytes) return null;
+
+    const e = state.enemies.find(en => en.objectId === objectId);
+    if (!e || e.state === 'flying') return null;
+
+    // Snapshot the enemy's current visible formation position so the
+    // attack starts where the player saw it (no jump-to-home).
+    const f = state.formation;
+    e.state      = 'flying';
+    e.x          = e.homeX + f.oscillateX + (f.pulseOffsets[e.colIdx] ?? 0);
+    e.y          = e.homeY +                (f.pulseOffsets[10 + e.rowIdx] ?? 0);
+    e.vx         = 0;
+    e.vy         = 0;
+    e.angle      = 0;
+    e.rotRate    = 0;
+    e.pathBase   = attackBytes;
+    e.pathOffset = 0;
+    e.segTimer   = 0;             // 0 → load first segment on tick 0
+
+    // Phase 8e simplification: arm bomb-drop state at spawn instead of
+    // waiting for the F6 FREE_FLIGHT token. The Z80 path is structured
+    // to FD JUMP back to an inner loop early, keeping the enemy on-screen
+    // until F6 eventually fires. We don't implement FD JUMP yet, so the
+    // path runs linearly past F6's offset (34) only after the enemy has
+    // already left the screen — bombs would drop into the void.
+    // TODO: remove this when FD JUMP is wired (F6 will fire on time).
+    e.bombCounter = 0x1E;
+    e.bombEnable  = 0xFF;
+
     return e;
 }
 

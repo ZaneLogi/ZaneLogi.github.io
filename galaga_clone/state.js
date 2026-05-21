@@ -48,6 +48,14 @@ function buildEnemies() {
                 pathBase:   null,          // Uint8Array of current path bytecode
                 pathOffset: 0,             // current byte offset into pathBase
                 segTimer:   0,             // frames until next segment load (0 = load now)
+
+                // ── Bomb-drop state (step 8 phase 8d/e) ────────────────
+                // Mirror of Z80 0x0E (bomb-drop counter) and 0x0F
+                // (per-enemy enable bits, srl'd each cycle). Both 0 means
+                // "not bombing" — F6 FREE_FLIGHT token in attack paths
+                // arms them via bugMotion's loadSegment.
+                bombCounter: 0,
+                bombEnable:  0,
             });
         }
     }
@@ -122,6 +130,13 @@ export const state = {
         { x: 0, y: 0, alive: false },
         { x: 0, y: 0, alive: false },
     ],
+
+    // ── Enemy bombs ───────────────────────────────────────────────────────
+    // Galaga has 8 bomb slots (b_8800 + 0x68..0x7F). Vector frozen at drop
+    // (NOT homing). Y velocity is constant 2/3 px/frame down (so vy is
+    // implicit, not stored). Pre-allocated; alive=false means slot is free.
+    // See architecture.html §5b "BOMB SUBSYSTEM" for f_1EA4 details.
+    bombs: Array.from({ length: 8 }, () => ({ x: 0, y: 0, vx: 0, alive: false })),
 
     // ── Raw input state (updated by main.js before each update tick) ───────
     // fireEdge is true on the rising edge of fire (mirrors hardware debounce

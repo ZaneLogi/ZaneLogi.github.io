@@ -181,11 +181,11 @@
 <h2>Branch: galaga_clone &nbsp;·&nbsp; Ref: <a href="architecture.html">architecture.html</a> &nbsp;·&nbsp; Z80: C:\Z_Temp\hackbar_galaga\rom0\</h2>
 
 <div class="summary">
-  <div class="summary-item"><span class="done-count">8</span> done</div>
+  <div class="summary-item"><span class="done-count">9</span> done</div>
   <div class="summary-item"><span class="active-count">0</span> in progress</div>
-  <div class="summary-item"><span class="todo-count">3</span> todo</div>
-  <div class="progress-bar"><div class="progress-fill" style="width: 73%"></div></div>
-  <div class="summary-item" style="color:#333">8 / 11 steps</div>
+  <div class="summary-item"><span class="todo-count">2</span> todo</div>
+  <div class="progress-bar"><div class="progress-fill" style="width: 82%"></div></div>
+  <div class="summary-item" style="color:#333">9 / 11 steps</div>
 </div>
 
 
@@ -413,21 +413,30 @@
 
 
 <!-- ── Step 8 ── -->
-<div class="step todo">
+<div class="step done">
   <div class="step-gutter">
     <div class="step-num">8</div>
     <div class="step-line"></div>
   </div>
   <div class="step-body">
-    <div class="step-title">Attack waves + bombs <span class="badge todo">todo</span></div>
-    <div class="step-desc">Enemies break formation and dive toward player using path bytecode. Boss uses token 0xE4 (BOSS_DIVE). Bees/butterflies use 0xE3 (BREAK_LEFT). Enemies drop bombs (vector-targeted at player) during dive. 8 bomb slots total, collision at Y&gt;0xA5.</div>
+    <div class="step-title">Attack waves + bombs <span class="badge done">done</span></div>
+    <div class="step-desc">Continuous attack-dive combat with bombs raining down. Built on step 7's path interpreter — yellow / red / boss enemies break formation per timer dispatch, run real Z80 attack bytecode (db_flv_atk_yllw / _red), drop bombs vector-aimed at the player, and snap back to formation. Same pattern as step 7: research first, phased implementation, integration deferred. 6 phases over 7 commits.</div>
     <div class="files">
-      <span class="file modified">tasks/captorDive.js</span>
-      <span class="file modified">tasks/bombUpdate.js</span>
-      <span class="file modified">tasks/launchAttackWave.js</span>
+      <span class="file new">paths.js (attack tables)</span>
+      <span class="file new">tasks/bombUpdate.js</span>
+      <span class="file modified">tasks/bugMotion.js (F6 + FA fix)</span>
+      <span class="file modified">tasks/launchAttackWave.js (continuous mode)</span>
+      <span class="file modified">state.js (bombs[8] + bombCounter / bombEnable)</span>
+      <span class="file modified">architecture.html §5b</span>
     </div>
     <div class="notes">
-      <div class="note"><span class="note-tag note">note</span><span class="note-text">Z80 ref: f_1B65 (bomber attack manager) · f_1EA4 (bomb update + collision) · f_21CB (capt dive).</span></div>
+      <div class="note"><span class="note-tag verify">verify</span><span class="note-text">Z80 sources: <code>db_flv_atk_yllw</code> (gg1-5.s:285, 90 B) and <code>db_flv_atk_red</code> (311, 104 B) — flat single blocks, not pointer indices · <code>f_1B65</code> (gg1-2_fx.s:857) bomber-attack manager · <code>f_1EA4</code> (gg1-2_fx.s:1729) bomb update · <code>case_0DF5</code> (gg1-5.s:2343) drop logic · token handlers in <code>d_0920_jp_tbl</code> (gg1-5.s:1494). 4/5 research items verified; item [5] (convoy / capture squad) deliberately deferred to step 9. Full findings in §5b.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>Latent bugfix during 8a:</b> bugMotion's <code>TOKEN_ARG_BYTES</code> map was missing arg counts for FC, F8, F6, F3, EF — fly-in paths didn't use them so the bug was latent until step 8 attack paths exercised them. Caught in research item [2].</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>Research correction during 8c:</b> token <code>0xFA LOOP_TOP</code> documented as "0-byte / conditional" — wrong. Path bytes always have 2 args after FA. Caught when phase 8c attack-path test mis-read the .dw address as a segment opcode and flew the test enemy off-screen instead of snapping home at FB. Architecture.html §5b updated with before/after.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Attack-dive launcher uses <b>timer-based</b> per-type dispatch (yellow / red / boss timers in module-scope <code>_attackTimers</code>), <b>not</b> pull-based like fly-in. Mirrors Z80 <code>b_92C0[0..2]</code>. Selection is slot-position priority (first STAND_BY in formation order). Reuses existing <code>launchEnemy</code> / new <code>launchEnemyAttack</code> APIs — same path interpreter handles both fly-in and attack bytecode.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Bomb subsystem: 8 slots in <code>state.bombs[]</code>, vector frozen at drop (NOT homing), Y velocity constant 2/3 px/frame, X velocity from snapshot of player position. AABB collision sets <code>state.player.alive = false</code> on hit. F6 FREE_FLIGHT token arms the bomb counter; <code>launchEnemyAttack</code> also arms at spawn as a phase 8e simplification (because FD JUMP isn't yet implemented, F6 fires too late in the path otherwise).</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Phased delivery (mirrors step 7): 8a (TOKEN_ARG_BYTES gap fix) → 8b (port attack tables) → 8c (hardcoded test + FA fix) → 8d/e (bombs + F6, combined) → 8f (continuous attack launcher). Each phase its own commit.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Known gaps for integration (all in architecture.html §5b callouts): (1) bomb angle math approximate — c_0EAA divide undecoded · (2) F6 spawn-arming workaround for FD JUMP not yet implemented · (3) bullet→enemy collision uses formation position not <code>e.x/e.y</code> — flying enemies immune to bullets · (4) formation depletion is terminal — no stage-clear / next-stage transition · (5) per-type reload values hardcoded — Z80 reads from ds_new_stage_parms · (6) boss escort orchestration deferred to step 9 with item [5].</span></div>
     </div>
   </div>
 </div>

@@ -1,69 +1,141 @@
-// f_2916 — pull from runtime wave table, launch enemy pairs.
+// f_2916 + f_1B65 — wave launcher (fly-in) + bomber attack manager.
 //
-// Z80 model (gg1-3.s:1658): c_25A2 builds the per-stage wave table at
-// ds_8920 once at stage start; f_2916 then walks it pair-by-pair,
-// pull-based — only advancing when b_bugs_flying_nbr reaches 0 (every
-// previously-launched enemy has reached HOME) plus a 2-frame gap via
-// ds4_game_tmrs[0]. When the final-wave token (0x7F) is reached, f_2916
-// disables itself in the task table.
+// Two phases run sequentially after page load:
 //
-// Phase 3c implements the cursor + pull-based timing only — wave table
-// is hardcoded inline. Real stage data + the c_25A2 builder come in
-// phase 3d (or step 7 phase 4 if it grows).
+//   Phase 1 (fly-in)  — runs once. Walks FLYIN_WAVE pull-based, same as
+//                       step 7 phase 3c. When done, transitions to phase 2.
+//   Phase 2 (attack)  — continuous. Mirrors Z80 f_1B65 (gg1-2_fx.s:857):
+//                       per-type timers decide when wasp / butterfly / boss
+//                       breaks formation to dive at the player.
 //
-// The "pair" is two enemies launched on the same tick with different
-// IDs and (in the original) variant-mirrored paths. For phase 3c we
-// only have 3 ported paths so each pair member uses the same path
-// index — the proper variant pairing is a follow-up tweak.
+// Z80 reference for phase 2: see architecture.html §5b "ATTACK-DIVE
+// LAUNCHER" research block. Several inputs are FAKED here (see TODO list
+// below) — replace during the integration phase when stage data + game
+// state machine exist.
 
-import { launchEnemy } from './bugMotion.js';
+import { launchEnemy, launchEnemyAttack } from './bugMotion.js';
+import { ATTACK_PATH_YELLOW, ATTACK_PATH_RED } from '../paths.js';
 
-// ── Hardcoded test wave (phase 3c, pair-mirroring updated in 3d-A) ────
-// Each entry = one pair = two simultaneously-launched enemies.
-// Object IDs from getObjectIdForSlot — see paths.js SPRT_FMTN_HPOS:
-//   slot (row 0, col 3) → ID 0x00 (boss)
-//   slot (row 0, col 6) → ID 0x02 (boss)
-//   slot (row 0, col 4) → ID 0x04 (boss)
-//   slot (row 0, col 5) → ID 0x06 (boss)
-//   slot (row 2, col 0) → ID 0x38 (butterfly corner)
-//   slot (row 2, col 9) → ID 0x3A (butterfly corner)
-//
-// Pair 1 demonstrates real Galaga variant-mirroring: PATH_INDEX entries
-// 10 and 22 both reference path 0x022B but with variants 4 and 5 — same
-// bytecode, start positions 32 px apart (canvas X=34 vs 66). Pairs 2 and
-// 3 remain single-variant (both members on the same PATH_INDEX entry,
-// so they overlap visually) — left as A/B contrast against pair 1.
-const TEST_WAVE = [
+// ── Phase 1: fly-in wave (unchanged from step 7 phase 3c) ────────────
+// 3 pairs demonstrating the variant-mirror pair, token-bearing path with
+// FB termination, and a long-tail single-variant path.
+const FLYIN_WAVE = [
     { id1: 0x00, path1: 10, id2: 0x02, path2: 22 },   // ★ real pair: 0x022B var 4/5
-    { id1: 0x04, path1: 0,  id2: 0x06, path2: 0  },   // ★ token-bearing: 0x001D (FB → snap home ~1.4 s)
-    { id1: 0x38, path1: 6,  id2: 0x3A, path2: 6  },   // single-variant: 0x01E8 (long ~6 s tail)
+    { id1: 0x04, path1: 0,  id2: 0x06, path2: 0  },   // ★ token-bearing: 0x001D (FB → snap home)
+    { id1: 0x38, path1: 6,  id2: 0x3A, path2: 6  },   // single-variant: 0x01E8 (long tail)
 ];
 
-// ── Cursor state (module-scoped for phase 3c) ─────────────────────────
-// Z80 keeps cursor + counter in ds_plyr_actv. We'll move to state.* in
-// phase 3d when stage data drives multiple waves and the cursor needs
-// to reset per stage.
-let _cursor    = 0;     // index of next pair to launch
-let _cooldown  = 0;     // frames to wait after current pair lands
+// ── Phase 2: continuous attack mode (f_1B65 stand-in) ────────────────
+// PHASE 8f FAKES — replace during integration:
+//   TODO (1): gate flags (glbl_enemy_enbl, fire-button, captured-boss)
+//             hardcoded "always-on". Z80 skips f_1B65 in demo mode etc.
+//   TODO (2): per-type reload values are constants. Z80 reads them from
+//             ds_new_stage_parms[1..3] (per-stage difficulty scaling).
+//   TODO (3): MAX_BOMBERS cap is constant. Z80 reads ds_new_stage_parms[4].
+//   TODO (4): boss attacks use the yellow path solo. Z80 has 3-pass
+//             wingman-escort selection (capture squad). Step 9 territory
+//             when integrated with tractor-beam.
+//   TODO (5): module-scoped cursor/timers — should live on state.* so
+//             stage transitions reset cleanly.
 
+const ATTACK_RATE_GATE     = 16;     // Z80: frame counter 0x0F mask, ~3.75 Hz max
+const ATTACK_RELOAD_YELLOW = 180;    // ~3 s between yellow launches
+const ATTACK_RELOAD_RED    = 240;    // ~4 s between red launches
+const ATTACK_RELOAD_BOSS   = 360;    // ~6 s between boss launches
+const MAX_BOMBERS          = 4;      // active-diver cap
+
+// Z80 b_8800 ID ranges per type:
+//   Yellow (capture-capable bee — wasp rows 4-5 in our table): 0x08–0x2E
+//   Red    (free-flight bomber moth — butterfly rows 2-3):     0x40–0x5E
+//   Boss:                                                      0x00–0x06 + 0x30–0x36
+const BOSS_IDS = [0x00, 0x02, 0x04, 0x06, 0x30, 0x32, 0x34, 0x36];
+
+// ── Module state ─────────────────────────────────────────────────────
+let _flyInCursor    = 0;
+let _flyInCooldown  = 0;
+let _flyInDone      = false;
+const _attackTimers = {
+    yellow: ATTACK_RELOAD_YELLOW,
+    red:    ATTACK_RELOAD_RED,
+    boss:   ATTACK_RELOAD_BOSS,
+};
+
+// ── Per-tick dispatch ────────────────────────────────────────────────
 export function update(state) {
-    if (_cursor >= TEST_WAVE.length) return;       // wave complete
-
-    // Pull-based: don't advance while any enemy is mid-flight.
-    if (countFlying(state) > 0) {
-        _cooldown = 30;                            // refresh post-land delay
+    if (!_flyInDone) {
+        runFlyInWave(state);
         return;
     }
-    if (_cooldown > 0) {
-        _cooldown -= 1;
+    runAttackMode(state);
+}
+
+function runFlyInWave(state) {
+    if (_flyInCursor >= FLYIN_WAVE.length) {
+        _flyInDone = true;
         return;
     }
+    if (countFlying(state) > 0) { _flyInCooldown = 30; return; }
+    if (_flyInCooldown > 0)     { _flyInCooldown -= 1; return; }
 
-    // Launch the next pair.
-    const pair = TEST_WAVE[_cursor];
-    launchEnemy(state, pair.id1, pair.path1);
-    launchEnemy(state, pair.id2, pair.path2);
-    _cursor += 1;
+    const entry = FLYIN_WAVE[_flyInCursor];
+    launchEnemy(state, entry.id1, entry.path1);
+    launchEnemy(state, entry.id2, entry.path2);
+    _flyInCursor += 1;
+}
+
+function runAttackMode(state) {
+    // Decrement timers every tick (Z80 decrements per-vblank).
+    for (const type of ['yellow', 'red', 'boss']) {
+        if (_attackTimers[type] > 0) _attackTimers[type] -= 1;
+    }
+
+    // Rate gate: only attempt dispatch every 16 frames.
+    if ((state.frameCount & (ATTACK_RATE_GATE - 1)) !== 0) return;
+
+    // Active-diver cap (Z80 b_bugs_flying_nbr >= max_bombers).
+    if (countFlying(state) >= MAX_BOMBERS) return;
+
+    // Dispatch first type whose timer is ready (Z80 djnz over 3 timers).
+    for (const type of ['yellow', 'red', 'boss']) {
+        if (_attackTimers[type] > 0) continue;
+        if (tryLaunchAttack(state, type)) {
+            _attackTimers[type] = reloadFor(type);
+        } else {
+            _attackTimers[type] = ATTACK_RATE_GATE;     // retry next gate
+        }
+        return;     // one launch per gate (Z80 returns after one fire)
+    }
+}
+
+function reloadFor(type) {
+    if (type === 'yellow') return ATTACK_RELOAD_YELLOW;
+    if (type === 'red')    return ATTACK_RELOAD_RED;
+    return ATTACK_RELOAD_BOSS;
+}
+
+function tryLaunchAttack(state, type) {
+    let pathBytes, candidate;
+
+    if (type === 'boss') {
+        // Boss IDs are two ranges — scan the explicit list.
+        pathBytes = ATTACK_PATH_YELLOW;     // capture-capable path
+        candidate = state.enemies.find(e =>
+            BOSS_IDS.includes(e.objectId) &&
+            e.state === 'formation' && e.alive
+        );
+    } else {
+        const [idMin, idMax] = (type === 'yellow') ? [0x08, 0x2E] : [0x40, 0x5E];
+        pathBytes = (type === 'yellow') ? ATTACK_PATH_YELLOW : ATTACK_PATH_RED;
+        // Z80 picks first STAND_BY in slot order — first-found = first
+        // available in formation order.
+        candidate = state.enemies.find(e =>
+            e.objectId >= idMin && e.objectId <= idMax &&
+            e.state === 'formation' && e.alive
+        );
+    }
+
+    if (!candidate) return false;
+    return !!launchEnemyAttack(state, candidate.objectId, pathBytes);
 }
 
 function countFlying(state) {

@@ -508,6 +508,19 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
 <h3>5 · Path Bytecode Format  <span style="color:#555;font-weight:normal;font-size:10px">(shared bytecode; separate tables for fly-in vs. attack dives)</span></h3>
 <div class="section" style="display:flex;gap:32px;flex-wrap:wrap;align-items:flex-start">
 
+<!-- Code-pointer — bridges research findings below to JS implementation -->
+<div style="width:100%;padding:10px 14px;background:#0e1218;border:1px solid #2a2a3a;border-radius:2px">
+  <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px;letter-spacing:0.5px">WHERE THE CODE LIVES &nbsp;·&nbsp; quick map from this section's research findings to the JS implementation</div>
+  <div style="color:#888;font-size:11px;line-height:1.7">
+    &nbsp;• <span style="color:#7af">paths.js</span> — all 22 ported <span style="color:#7af">db_flv_XXXX</span> data blocks, the 24-entry <span style="color:#7af">PATH_INDEX</span> (db_2A3C), the 8-entry <span style="color:#7af">VARIANTS</span> table (db_2A6C), the 96-byte <span style="color:#7af">SPRT_FMTN_HPOS</span> + <code>getObjectIdForSlot()</code>, and <code>getPathByIndex()</code>.<br>
+    &nbsp;• <span style="color:#7af">tasks/bugMotion.js</span> — per-tick interpreter (CPU1 f_08D3 stand-in): segment loop, token dispatch (<code>0xFF</code> END / <code>0xFB</code> TURN_HOME / <code>0xFD/0xF7/0xF0</code> 2-byte arg skip), X/Y alternation. Exports <code>launchEnemy(state, objectId, pathIndex)</code> — the public API for "put this enemy into flight".<br>
+    &nbsp;• <span style="color:#7af">tasks/launchAttackWave.js</span> — wave runner (f_2916 stand-in). Currently walks a hardcoded <code>TEST_WAVE</code>; the integration pass (after step 8) replaces this with a stage-data-driven <code>state.waveTable</code>.<br>
+    &nbsp;• <span style="color:#7af">tasks/objectStates.js</span> — render dispatch by enemy <code>state</code> ('formation' uses homeX/Y + offsets, 'flying' uses live x/y, 'dead' is skipped).<br>
+    &nbsp;• <span style="color:#7af">state.js</span> — per-enemy schema includes <code>objectId</code>, <code>state</code>, motion fields (<code>x,y,vx,vy,angle,rotRate,pathBase,pathOffset,segTimer</code>), and the <code>bugMotion</code> task flag.<br>
+    &nbsp;• <span style="color:#7af">main.js</span> — TASK_TABLE slot order: <code>objectStates → bugMotion → enemyStatus → … → playerFire → bulletUpdate → launchAttackWave</code>. <code>launchAttackWave</code> sits after <code>bugMotion</code> for natural 1-tick lag on newly-spawned enemies.
+  </div>
+</div>
+
 <!-- Path table hierarchy — verified from gg1-3.s:1918, gg1-5.s:82+ -->
 <div style="width:100%;padding:12px 16px;background:#0d1418;border:1px solid #1f2a30;border-radius:2px">
   <div style="color:#7af;font-size:11px;font-weight:bold;margin-bottom:8px;letter-spacing:0.5px">PATH TABLE HIERARCHY &nbsp;·&nbsp; fly-in vs. attack are separate tables</div>
@@ -742,6 +755,336 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
     <li><span style="color:#5d9;font-weight:bold">[4] ☑</span> &nbsp;<b style="color:#5d9">Wave builder</b> &nbsp;<span style="color:#666">— done. <span style="color:#7af">c_25A2</span> at gg1-3.s:1168 builds the runtime wave table at <span style="color:#7af">ds_8920</span> from a tiny per-stage config (13 combat + 8 challenge). Each stage = 2-byte header + 5 wave triplets. Stages cycle mod-4 after 23. Full layout in wave-builder block above. Escort logic is <i>elsewhere</i> (step 9, gg1-2_fx.s:1045).</span></li>
     <li><span style="color:#5d9;font-weight:bold">[5] ☑</span> &nbsp;<b style="color:#5d9">Wave launch timing</b> &nbsp;<span style="color:#666">— done. <span style="color:#7af">f_2916</span> at gg1-3.s:1658 launches enemy <b>pairs</b> (two-by-two with mirrored variants from db_2A6C). Timing is <b>pull-based</b>: next pair waits for <span style="color:#7af">b_bugs_flying_nbr == 0</span> + 2-frame gap. 12-slot active flight queue (not 48). Home position pre-stored at launch via sprt_fmtn_hpos. Stage end on 0x7F → task self-disables. Full details in wave-launcher block above.</span></li>
   </ul>
+</div>
+
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     5b. ATTACK & BOMB SYSTEM (step 8 research)
+     ══════════════════════════════════════════════════════════ -->
+<h3>5b · Attack &amp; Bomb System  <span style="color:#555;font-weight:normal;font-size:10px">(step 8 research)</span></h3>
+<div class="section">
+
+<!-- Attack-path tables — verified from gg1-5.s:285, 311 -->
+<div style="width:100%;margin-bottom:20px;padding:12px 16px;background:#0d1418;border:1px solid #1f2a30;border-radius:2px">
+  <div style="color:#7af;font-size:11px;font-weight:bold;margin-bottom:10px;letter-spacing:0.5px">ATTACK-PATH TABLES &nbsp;·&nbsp; flat single blocks, not a pointer index</div>
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-bottom:10px">
+    Unlike fly-in (which uses a 24-entry index <span style="color:#7af">db_2A3C</span> → separate <span style="color:#7af">db_flv_XXXX</span> blocks), attack dives have <i>one self-contained block per enemy class</i>. Each block embeds its sub-paths inline rather than using the F7 sub-call mechanism (one exception in yellow). No variant table either — start position is just the enemy's current location when it breaks formation.
+  </div>
+
+  <div style="display:flex;gap:24px;flex-wrap:wrap">
+  <div style="flex:1;min-width:280px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Yellow alien (db_flv_atk_yllw, gg1-5.s:285)</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <b style="color:#aaa">Total:</b> 90 bytes<br>
+      <b style="color:#aaa">Header:</b> <span style="color:#7af">0x12, 0x18, 0x1E</span> (3 bytes)<br>
+      <b style="color:#aaa">Sub-paths:</b> 4 named blocks + shared return — <span style="color:#7af">p_flv_0352, _0358, _0363, _036C, _037C, _039E</span><br>
+      <b style="color:#aaa">Terminator:</b> <span style="color:#7af">0xFF 0xFF</span><br>
+      <b style="color:#aaa">Used by:</b> capture-capable bee enemies (20 of them, <span style="color:#7af">b_8800 + 0x08</span>)
+    </div>
+  </div>
+
+  <div style="flex:1;min-width:280px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Red moth (db_flv_atk_red, gg1-5.s:311)</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <b style="color:#aaa">Total:</b> 104 bytes<br>
+      <b style="color:#aaa">Header:</b> <span style="color:#7af">0x12, 0x18, 0x1D</span> (3 bytes)<br>
+      <b style="color:#aaa">Sub-paths:</b> 3 named blocks + shared return — <span style="color:#7af">p_flv_03AC, _03CC, _03D7, _040C</span><br>
+      <b style="color:#aaa">Terminator:</b> <span style="color:#7af">0xFF 0xFF</span><br>
+      <b style="color:#aaa">Used by:</b> free-flight bomber moths (16 of them, <span style="color:#7af">b_8800 + 0x40</span>)
+    </div>
+  </div>
+  </div>
+
+  <div style="margin-top:12px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Tokens observed</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      &nbsp;• <span style="color:#7af">0xF3 BREAK_TARGETED</span> — red moth targeting burst (red ×2, yellow ×0)<br>
+      &nbsp;• <span style="color:#7af">0xF6 FREE_FLIGHT</span> — continuous motion mode (red ×3, yellow ×1)<br>
+      &nbsp;• <span style="color:#7af">0xF7 ATTACK_TURN</span> — sub-path call (yellow ×1, red ×0)<br>
+      &nbsp;• <span style="color:#7af">0xEF BOMB_MODE</span> — bomb-drop state change (each ×1)<br>
+      &nbsp;• <span style="color:#7af">0xF8–0xFA, 0xFB, 0xFC–0xFD</span> — flow-control / segment-end opcodes throughout<br>
+      &nbsp;• <span style="color:#7af">0xFF 0xFF</span> — paired block terminator
+    </div>
+  </div>
+
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px;padding:6px 10px;background:#1a1408;border-left:2px solid #c93;border-radius:2px">
+    <b style="color:#fc6">Notable absences:</b> <span style="color:#7af">0xF4 BOSS_DIVE</span>, <span style="color:#7af">0xF2 SPAWN_BEE</span>, and <span style="color:#7af">0xFE BREAK_ATTACK</span> are NOT in either attack table. Earlier doc placed F4 here — wrong. BOSS_DIVE / SPAWN_BEE are likely triggered by direct code logic during boss capture (step 9), not by attack-path bytecode. Flag as a step 9 research touch-point.
+  </div>
+
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px">
+    <b style="color:#aaa">Callers (gg1-2_fx.s):</b><br>
+    &nbsp;• <span style="color:#7af">case_bmbr_yellow</span> (line 973) — 20 yellow aliens, loads <span style="color:#7af">db_flv_atk_yllw</span><br>
+    &nbsp;• <span style="color:#7af">case_bmbr_red</span> (line 1004) — 16 red moths, loads <span style="color:#7af">db_flv_atk_red</span><br>
+    Both route through <span style="color:#7af">l_1BDF</span> → <span style="color:#7af">c_1083</span> (bomber setup) — entry point for step 8's launcher work.
+  </div>
+
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px;padding:6px 10px;background:#0a1a0e;border-left:2px solid #5d9;border-radius:2px">
+    <b style="color:#5d9">Port implication:</b> simpler than fly-in. Two flat byte arrays + a "which class is this enemy" check. No PATH_INDEX equivalent needed, no variant table, no spawn-position lookup. The existing path interpreter (<span style="color:#7af">bugMotion.js</span>) should consume these blocks once the new tokens (especially <span style="color:#7af">0xF6 FREE_FLIGHT</span> and <span style="color:#7af">0xEF BOMB_MODE</span>) are wired — research item [2].
+  </div>
+</div>
+
+<!-- Attack-context token handlers — verified from gg1-5.s handlers -->
+<div style="width:100%;margin-bottom:20px;padding:12px 16px;background:#0d1418;border:1px solid #1f2a30;border-radius:2px">
+  <div style="color:#7af;font-size:11px;font-weight:bold;margin-bottom:10px;letter-spacing:0.5px">ATTACK-CONTEXT TOKEN HANDLERS &nbsp;·&nbsp; what each token does to the enemy struct</div>
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-bottom:12px">
+    The four primary tokens used in attack tables (plus F7 from item [1]) — each with arg-byte count, struct fields touched, and behaviour. Step 7's interpreter knows the dispatch threshold (0xEF) but only handles FF/FB behaviourally and FD/F7/F0 as 2-byte-arg skips. Step 8 needs to extend that with the entries below.
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:10px">
+
+  <div style="padding:8px 12px;background:#0a1018;border-left:2px solid #7af;border-radius:2px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:4px">0xF6 FREE_FLIGHT &nbsp;·&nbsp; case_0BA8 (gg1-5.s:1963)</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <b>Arg bytes:</b> 1 (rotational-velocity / direction value, sign-checked at bit 7).<br>
+      <b>State writes:</b> <span style="color:#7af">0x04(ix), 0x05(ix)</span> ← 2-byte velocity (left-shifted ×2, conditionally negated); <span style="color:#7af">0x0E(ix)</span> ← <code>0x1E</code> (bomb-drop counter); <span style="color:#7af">0x0F(ix)</span> ← global bomb-enable flag from <span style="color:#7af">b_92C0+0x08</span>.<br>
+      <b>Behaviour:</b> Solitary red moth enters "free flight" — straight-line motion at the given heading, with bombing capability armed. The signature "free-flight bomber" mode.
+    </div>
+  </div>
+
+  <div style="padding:8px 12px;background:#0a1018;border-left:2px solid #7af;border-radius:2px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:4px">0xEF BOMB_MODE &nbsp;·&nbsp; case_094E (gg1-5.s:1523)</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <b>Arg bytes:</b> 2 (LE pointer to alt-attack table — only consumed on stage ≥ 8).<br>
+      <b>State writes:</b> if <span style="color:#7af">ds_new_stage_parms+0x09 ≥ 8</span> → <span style="color:#7af">0x08(ix), 0x09(ix)</span> ← new path pointer from arg; otherwise no state change, just advance past arg.<br>
+      <b>Behaviour:</b> Stage-gated — activates continuous-bombing mode by switching the enemy's path pointer to an alternate, more aggressive table. <b>No-op on stages 1–7</b>, which is why early Galaga feels gentler than later stages.
+    </div>
+  </div>
+
+  <div style="padding:8px 12px;background:#0a1018;border-left:2px solid #7af;border-radius:2px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:4px">0xF3 BREAK_TARGETED &nbsp;·&nbsp; case_0A01 (gg1-5.s:1661)</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <b>Arg bytes:</b> 2 (LE pointer to follow-up path). Handler then does target-acquisition math with ~7 more bytes of internal computation (not from path stream).<br>
+      <b>State writes:</b> <span style="color:#7af">0x0D(ix)</span> ← rotation index (computed from delta-X to ship via div-by-6 lookup, clamped at screen edges); <span style="color:#7af">0x08(ix), 0x09(ix)</span> ← new path pointer from arg.<br>
+      <b>Reads:</b> ship X at <span style="color:#7af">ds_sprite_posn+0x62</span>; flip-screen flag at <span style="color:#7af">b_9215</span>; orientation bit 7 of <span style="color:#7af">0x13(ix)</span>.<br>
+      <b>Behaviour:</b> Red moth acquires lock on ship — computes the angle needed to dive at the player's current X, sets rotation, then jumps to a "now diving at player" follow-up path.
+    </div>
+  </div>
+
+  <div style="padding:8px 12px;background:#0a1018;border-left:2px solid #7af;border-radius:2px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:4px">0xF7 ATTACK_TURN &nbsp;·&nbsp; case_0B98 (gg1-5.s:1947) — already in step 7 interpreter</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <b>Arg bytes:</b> 2 (LE pointer); skipped via <code>hl += 3</code> if enemy is "transient" (0x10(ix) bits 0x38 set), else loaded as new path pointer.<br>
+      <b>Behaviour:</b> Routing token for attack convoys. Decides whether this enemy follows the convoy's directional change or peels off based on its disposition byte. Our existing 2-byte-arg skip is correct for the no-op branch; the load-pointer branch is unimplemented but not needed for basic attack-dive porting.
+    </div>
+  </div>
+
+  </div>
+
+  <div style="margin-top:14px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Flow-control tokens (also in attack tables, simpler)</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      &nbsp;• <span style="color:#7af">0xF8 BEAM_ON</span> (case_0B87, gg1-5.s:1935) — <b>1-byte arg</b>; sets <span style="color:#7af">0x01(ix) = 0x9C</span> (screen-bottom Y). Used by both attack and step 9 tractor beam.<br>
+      &nbsp;• <span style="color:#7af">0xF9 LOOP_HOME</span> (case_0B5F, gg1-5.s:1907) — <b>0-byte arg</b>; sets <span style="color:#7af">0x03(ix)</span> from formation home column; conditionally fires dive-attack SFX.<br>
+      &nbsp;• <span style="color:#7af">0xFA LOOP_TOP</span> (case_0BD1, gg1-5.s:1984) — <b>2-byte arg</b> (alt-pattern pointer; handler conditionally loads it but the path bytes always reserve 2 bytes for the address). <i>Corrected from "0-byte / conditional" — caught when phase 8c attack-path test mis-read the .dw address as a segment opcode and flew the enemy off-screen.</i><br>
+      &nbsp;• <span style="color:#7af">0xFC RTN_FMTN / DIVE_START</span> (case_0B4E, gg1-5.s:1896) — <b>1-byte arg</b> (origin Y); sets <span style="color:#7af">0x06(ix)</span>, zeroes <span style="color:#7af">0x07(ix)</span>, sets dive-flag bit 5 in <span style="color:#7af">0x13(ix)</span>.<br>
+      &nbsp;• <span style="color:#7af">0xFD JUMP</span> (case_0B46, gg1-5.s:1885) — <b>2-byte arg</b> (LE pointer); already in step 7 interpreter.
+    </div>
+  </div>
+
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:14px;padding:6px 10px;background:#1a1408;border-left:2px solid #c93;border-radius:2px">
+    <b style="color:#fc6">Important fix needed for existing TOKEN_ARG_BYTES (bugMotion.js):</b> our current map has only FD/F7/F0 = 2 bytes; everything else defaults to 0. Step 8 needs these added (otherwise their args get mis-read as segment opcodes):
+    <br>&nbsp;&nbsp;0xF8 BEAM_ON: <b>1</b> · 0xFC RTN_FMTN: <b>1</b> · 0xF6 FREE_FLIGHT: <b>1</b> · 0xF3 BREAK_TARGETED: <b>2</b> · 0xEF BOMB_MODE: <b>2</b>
+    <br>The 0-arg tokens (F9 LOOP_HOME, FA LOOP_TOP) need behaviour wiring but no arg-byte change. Not visible today because fly-in paths don't use these — bug latent until step 8.
+  </div>
+
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px;padding:6px 10px;background:#0a1a0e;border-left:2px solid #5d9;border-radius:2px">
+    <b style="color:#5d9">Confirmed step 9 territory:</b> <span style="color:#7af">0xF4 BOSS_DIVE</span> (case_0A53), <span style="color:#7af">0xF2 SPAWN_BEE</span> (case_097B), <span style="color:#7af">0xFE BREAK_ATTACK</span> (case_0B16). None appear in <span style="color:#7af">db_flv_atk_yllw / db_flv_atk_red</span>; these belong to boss capture (F4/F2) and special formation-break (FE) phases. Step 8 can ignore them.
+  </div>
+</div>
+
+<!-- Attack-dive launcher f_1B65 — verified from gg1-2_fx.s:857+ -->
+<div style="width:100%;margin-bottom:20px;padding:12px 16px;background:#0d1418;border:1px solid #1f2a30;border-radius:2px">
+  <div style="color:#7af;font-size:11px;font-weight:bold;margin-bottom:10px;letter-spacing:0.5px">ATTACK-DIVE LAUNCHER &nbsp;·&nbsp; f_1B65 (gg1-2_fx.s:857) &nbsp;·&nbsp; the orchestrator</div>
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-bottom:10px">
+    The bomber attack manager. Per-tick task that decides when a formation enemy breaks ranks to dive at the player, picks which type (yellow / red / boss), selects the specific enemy, and configures its motion-queue slot to start running an attack path. Analog of step 7's <span style="color:#7af">f_2916</span> wave launcher but with <b>timer-based pacing</b> instead of pull-based.
+  </div>
+
+  <div style="display:flex;gap:24px;flex-wrap:wrap">
+
+  <div style="flex:1;min-width:300px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Per-tick sequence</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <b>1. Gate check</b> (859-869) — skip if <span style="color:#7af">glbl_enemy_enbl == 0</span> (demo mode), or <span style="color:#7af">f_1F04 == 0</span> (no fire button), or <span style="color:#7af">f_2000 != 0</span> (captured-boss destroyed → suppress).<br>
+      <b>2. Boss queue drain</b> (872-888) — check 4 slots in <span style="color:#7af">bmbr_boss_pool</span>; launch any pre-queued boss + escorts.<br>
+      <b>3. Rate gate</b> (885-887) — only proceeds when frame counter <span style="color:#7af">0x0F</span> pattern fires (≈ 1/16 frame = ~3.75 Hz max).<br>
+      <b>4. Type-selector loop</b> (925-932) — decrement 3 timers at <span style="color:#7af">b_92C0[0..2]</span>; whichever hits 0 first → dispatch via jump table.
+    </div>
+  </div>
+
+  <div style="flex:1;min-width:300px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Type-selection (b_92C0 timer table)</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <span style="color:#7af">b_92C0[0]</span> = yellow timer<br>
+      <span style="color:#7af">b_92C0[1]</span> = red timer<br>
+      <span style="color:#7af">b_92C0[2]</span> = boss timer<br>
+      <span style="color:#7af">b_92C0[4..6]</span> = stage-dependent reload values<br><br>
+      Loaded at stage start from <span style="color:#7af">ds_new_stage_parms[1..3]</span> (game_ctrl.s:1422-1436). <b>No random</b> — earliest expiring timer wins. Stage difficulty scales the reload values via <span style="color:#7af">c_08AD / c_08BE</span>.
+    </div>
+  </div>
+
+  </div>
+
+  <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:12px">
+
+  <div style="flex:1;min-width:300px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Per-type selection logic</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <b style="color:#aaa">case_bmbr_yellow</b> (973-1001) — scan <span style="color:#7af">b_8800 + 0x08…0x2E</span> (20 IDs); pick first <span style="color:#7af">STAND_BY</span>; skip if it's the active bonus-bee.<br>
+      <b style="color:#aaa">case_bmbr_red</b> (1004) — same scan over <span style="color:#7af">b_8800 + 0x40…0x5E</span> (16 IDs).<br>
+      <b style="color:#aaa">case_bmbr_boss</b> (1011-1095) — pick first STAND_BY boss + 3-pass escort search (see right).<br><br>
+      <b style="color:#fc6">Selection is slot-position priority</b>, not random. First available in formation order goes.
+    </div>
+  </div>
+
+  <div style="flex:1;min-width:300px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Boss escort (capture squad)</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      Wingman pool <span style="color:#7af">d_1D2C_wingmen</span> (gg1-2_fx.s:1333) = 6 red IDs <span style="color:#7af">[0x4A, 0x52, 0x5A, 0x58, 0x50, 0x48]</span>.<br>
+      Three-pass selection (1C4F-1C95):<br>
+      &nbsp;1. Look for 2+ adjacent wingmen<br>
+      &nbsp;2. Look for 1 solo wingman<br>
+      &nbsp;3. Any available / fallback (else boss launches solo)<br><br>
+      Capture-mode toggle alternates capture-boss (with escorts) vs wingman-only per stage. Escort orchestration is part of f_1B65 — <i>not</i> a separate task.
+    </div>
+  </div>
+
+  </div>
+
+  <div style="margin-top:12px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">State transition: formation → attack-flying</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      In <span style="color:#7af">j_108A</span> via <span style="color:#7af">c_1083</span> (gg1-2.s:206-263). Same slot-allocation as fly-in (scan 12-slot <span style="color:#7af">ds_bug_motion_que</span>):<br>
+      &nbsp;• <span style="color:#7af">0x08(ix), 0x09(ix)</span> ← attack-table address (yellow or red)<br>
+      &nbsp;• <span style="color:#7af">0x0D(ix)</span> ← <code>1</code> (segment timer; loads first segment on next tick)<br>
+      &nbsp;• <span style="color:#7af">obj_status[L]</span> ← <code>0x09</code> (state marker = "diving attack" — distinct from fly-in's marker)
+    </div>
+  </div>
+
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px;padding:6px 10px;background:#0a1a0e;border-left:2px solid #5d9;border-radius:2px">
+    <b style="color:#5d9">Port implications:</b> three concrete differences from step 7's launcher to wire:
+    <br>&nbsp;• <b>Per-type timers</b> — add <code>state.attackTimers[3]</code> (yellow/red/boss) + reload values; decrement at ~16-frame rate.
+    <br>&nbsp;• <b>Slot scan over <code>state.enemies</code></b> — pick first <code>state==='formation'</code> in object-ID range per type. Use the existing <code>objectId</code> field.
+    <br>&nbsp;• <b>Reuse <code>launchEnemy()</code></b> — same API works (it sets path + state); just pass the attack-table bytes instead of a fly-in path.
+    <br>&nbsp;• <b>Escort orchestration</b> bundled with boss launch — multi-pass wingman selection. Hand-off to step 9 happens later (boss reaches tractor-beam Y).
+  </div>
+</div>
+
+<!-- Bomb subsystem f_1EA4 — verified from gg1-2_fx.s:1729+ -->
+<div style="width:100%;margin-bottom:20px;padding:12px 16px;background:#0d1418;border:1px solid #1f2a30;border-radius:2px">
+  <div style="color:#7af;font-size:11px;font-weight:bold;margin-bottom:10px;letter-spacing:0.5px">BOMB SUBSYSTEM &nbsp;·&nbsp; f_1EA4 (gg1-2_fx.s:1729) &nbsp;·&nbsp; the projectile system</div>
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-bottom:10px">
+    Inverse of the player-bullet system: dropped from diving enemies, vector-targeted at the player <b>once at drop time</b> (frozen target — not homing), constant downward Y motion, AABB collision vs ship. <span style="color:#7af">f_1EA4</span> is the always-on per-tick mover; the drop decision is in <span style="color:#7af">case_0DF5</span> (gg1-5.s:2343).
+  </div>
+
+  <div style="display:flex;gap:24px;flex-wrap:wrap">
+
+  <div style="flex:1;min-width:300px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Slots &amp; storage</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <b style="color:#aaa">Max simultaneous:</b> <span style="color:#7af">8 bombs</span><br>
+      <b style="color:#aaa">Object status:</b> <span style="color:#7af">b_8800 + 0x68…0x7F</span> (8 × 2 bytes; status byte + motion-queue idx)<br>
+      <b style="color:#aaa">X-rate accumulator:</b> <span style="color:#7af">b_92B0 + 0x00…0x0F</span> (8 × 2 bytes; rate + sub-pixel accumulator)<br>
+      <b style="color:#aaa">Sprite code:</b> <span style="color:#7af">0x30</span> &mdash; shared with player rockets in Z80 sprite RAM, distinguished by object status byte (<code>0x06</code> = bomb). In JS we just have a separate <code>state.bombs[]</code> array.
+    </div>
+  </div>
+
+  <div style="flex:1;min-width:300px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Per-tick movement (f_1EA4)</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      Iterate 8 slots; for each with sprite code 0x30 and X != 0:<br>
+      &nbsp;• <b>Y velocity:</b> <span style="color:#7af">2 or 3 px/frame</span> down, alternating by frame parity (line 1740)<br>
+      &nbsp;• <b>X velocity:</b> from <span style="color:#7af">b_92B0[idx]</span> (frozen at drop)<br>
+      &nbsp;• <b>Math:</b> 9.7 fixed-point, sign-extended; sub-pixel accumulator handles fractional rates<br>
+      &nbsp;• <b>Average speed:</b> ~2.5 px/frame downward; X depends on dX/dY ratio at drop
+    </div>
+  </div>
+
+  </div>
+
+  <div style="margin-top:12px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Drop logic (case_0DF5, gg1-5.s:2343) — multi-layer gating</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      Per enemy in flying state, each tick:<br>
+      &nbsp;1. <b>Counter decrement</b> <span style="color:#7af">dec 0x0E(ix)</span>; skip if non-zero (initialised to 0x1E by F6 FREE_FLIGHT, reloads ~0x14 = 20 frames per stage)<br>
+      &nbsp;2. <b>Enable-bit shift</b> <span style="color:#7af">srl 0x0F(ix)</span>; only fire if carry set (per-enemy bitwise fairness — staggers drops)<br>
+      &nbsp;3. <b>Y-position gate</b> — enemy must be below Y=152 (<span style="color:#7af">cp #152&gt;&gt;1</span>); no drops from up-screen<br>
+      &nbsp;4. <b>Fire-button check</b> — skip if <span style="color:#7af">ds_cpu0_task_actv[0x15]</span> off (game-paused / menu)<br>
+      &nbsp;5. <b>Global fairness timer</b> — <span style="color:#7af">ds4_game_tmrs[1]</span> must be 0<br>
+      &nbsp;6. <b>Counter reload</b> from <span style="color:#7af">b_92E2[0]</span> (per-stage parameter)
+    </div>
+  </div>
+
+  <div style="margin-top:12px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Vector math (gg1-5.s:2402-2434) — frozen at drop</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      &nbsp;• <span style="color:#7af">dX = fighter.X - bomber.X</span> &nbsp;(fighter X at <span style="color:#7af">ds_sprite_posn + 0x62</span>)<br>
+      &nbsp;• <span style="color:#7af">dY = fighter.Y - bomber.Y</span> &nbsp;(constant ≈ 0x95 = 149, screen-flip aware)<br>
+      &nbsp;• Normalise via fixed-point divide <span style="color:#7af">c_0EAA</span> (HL / A) → scale down by 7 right-shifts → store at <span style="color:#7af">b_92B0[bomb_idx]</span><br>
+      &nbsp;• <b>Y velocity is NOT computed from this</b> — Y is always the fixed 2/3 px/frame parity. Only X is targeted.<br>
+      &nbsp;• <b>Frozen at drop</b> — no homing; bomb commits to its initial vector.
+    </div>
+  </div>
+
+  <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:12px">
+
+  <div style="flex:1;min-width:300px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Collision vs player (gg1-3.s:1090-1130)</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <b>Type:</b> AABB<br>
+      <b>Y range:</b> <span style="color:#7af">22 ≤ Y ≤ 330</span> (mid-playfield active zone — not a despawn limit)<br>
+      <b>On hit:</b> bomb sprite zeroed, status → <span style="color:#7af">0x80</span> (inactive); CPU1's <span style="color:#7af">f_05EE</span> updates player state.
+    </div>
+  </div>
+
+  <div style="flex:1;min-width:300px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Despawn</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      No explicit off-screen Y check in f_1EA4. Bombs naturally move off-screen and become "inactive" via slot-X = 0. Hit confirmation also sets status 0x80. JS port should add an explicit off-screen check (Y &gt; canvas-height) to keep <code>state.bombs[]</code> tidy.
+    </div>
+  </div>
+
+  </div>
+
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:12px;padding:6px 10px;background:#1a1408;border-left:2px solid #c93;border-radius:2px">
+    <b style="color:#fc6">Stage-gating clarification:</b> the <span style="color:#7af">EF BOMB_MODE</span> token (item [2]) gates <i>continuous bombing mode</i> (more aggressive path-pointer swap), <b>not bombs in general</b>. Basic bomb-on-dive happens every stage via the F6 FREE_FLIGHT path setting up counter + enable bits. Stage 8+ adds the EF augmentation.
+  </div>
+
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px;padding:6px 10px;background:#0a1a0e;border-left:2px solid #5d9;border-radius:2px">
+    <b style="color:#5d9">Port implications:</b>
+    <br>&nbsp;• Add <code>state.bombs[]</code> (8 slots): <code>{ x, y, vx, alive }</code>. Y velocity is implicit (2/3 alternating). No need to store vy.
+    <br>&nbsp;• New task <span style="color:#7af">tasks/bombUpdate.js</span> (already a stub) — runs the per-tick mover + drop-decision + AABB collision.
+    <br>&nbsp;• Reuse the X/Y alternation pattern from <code>bugMotion</code> for the Y motion.
+    <br>&nbsp;• Add <code>e.bombCounter</code> and <code>e.bombEnable</code> to enemy struct (mirror Z80 0x0E / 0x0F). F6 FREE_FLIGHT handler initialises them; bombUpdate decrements + tests.
+    <br>&nbsp;• AABB collision: same shape as bullet-vs-enemy (AABB ±a / &lt;b) but inverted (bomb vs player). Set <code>state.player.alive = false</code> on hit.
+    <br>&nbsp;• Drop-vector math: snapshot <code>state.player.x - enemy.x</code>, scale appropriately.
+  </div>
+
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px;padding:6px 10px;background:#1a1408;border-left:2px solid #c93;border-radius:2px">
+    <b style="color:#fc6">Known gap (added phase 8e):</b> the precise angle math depends on the body of <span style="color:#7af">c_0EAA</span> (fixed-point divide subroutine) which the research didn't decode — we know it's called as <span style="color:#7af">HL / A</span> followed by 7 right-shifts, then ÷32 in the per-tick mover, but operand sign handling, overflow, and exact result format are unknown. Z80 also uses a <b>hardcoded dy ≈ 149</b> (gg1-5.s:2415) instead of actual player-Y distance, which makes the slope denominator constant and thus all angles shallower than a "true geometric" calculation. The current <code>VX_GAIN</code> / <code>VX_CAP</code> in bombUpdate.js are visual placeholders awaiting that research pass — bombs reach the player but feel more aggressive than Z80. Refine during integration phase or with a dedicated bomb-math research item.
+  </div>
+
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px;padding:6px 10px;background:#1a1408;border-left:2px solid #c93;border-radius:2px">
+    <b style="color:#fc6">Known gap (added phase 8f):</b> bullet→enemy collision in <span style="color:#7af">tasks/bulletUpdate.js</span> uses <code>homeX + offsets</code> for the enemy's collision position — i.e. checks against the formation slot, not the enemy's actual <code>(x, y)</code> while flying. Effect: <b>flying enemies are immune to bullets</b>. Hidden until step 8 because step 6 only had formation enemies as targets. Once attack dives appear, divers should be hittable. Small fix during integration: route by <code>e.state</code> the same way <code>objectStates.render</code> does. Also note: <b>formation depletion is currently terminal</b> — no stage-clear / next-stage transition exists yet, so once a type's slots are all dead, that type can never dive again. Integration phase wires the stage-flow controller and handles this naturally.
+  </div>
+</div>
+
+<!-- Step 8 research checklist — 4 done, 1 deliberately deferred to step 9 -->
+<div style="width:100%;padding:14px 18px;border-left:3px solid #5d9;background:#0d1f0d;border-radius:2px">
+  <div style="color:#5d9;font-size:11px;font-weight:bold;margin-bottom:10px;letter-spacing:0.5px">STEP 8 RESEARCH &nbsp;·&nbsp; attack waves + bombs &nbsp;·&nbsp; <span style="color:#aaa;font-weight:normal">complete (4/5; item [5] deferred — see decision below)</span></div>
+  <div style="color:#999;font-size:11px;margin-bottom:12px">Same up-front-research pattern as step 7. Each item verified against the Z80 source, then captured here as a frozen-in-time block before any code lands. Items ordered by dependency — earlier ones are foundations later ones build on.</div>
+  <ul style="color:#888;font-size:11px;line-height:1.8;padding-left:0;margin:0;list-style:none">
+    <li><span style="color:#5d9;font-weight:bold">[1] ☑</span> &nbsp;<b style="color:#5d9">Attack-path tables</b> &nbsp;<span style="color:#666">— done. Yellow (90 B) and red (104 B) are <i>flat single blocks</i>, not pointer indices. Sub-paths embedded inline. Both terminate <span style="color:#7af">0xFF 0xFF</span>. Tokens: F3, F6, F7, EF + flow-control. <b style="color:#fc6">F4 / F2 / FE absent</b> — they're step 9 territory. Full block in §5b above.</span></li>
+    <li><span style="color:#5d9;font-weight:bold">[2] ☑</span> &nbsp;<b style="color:#5d9">Attack-token semantics</b> &nbsp;<span style="color:#666">— done. F6 FREE_FLIGHT (1-arg), EF BOMB_MODE (2-arg, stage-gated to ≥8), F3 BREAK_TARGETED (2-arg + ship-X math), F7 ATTACK_TURN (2-arg, conditional). Flow tokens F8/FC=1-arg, F9/FA=0/conditional. <b style="color:#fc6">Latent bug found:</b> bugMotion's TOKEN_ARG_BYTES is missing FC/F8/F6/F3/EF — fix needed for step 8. F4/F2/FE confirmed step 9. Full table in §5b above.</span></li>
+    <li><span style="color:#5d9;font-weight:bold">[3] ☑</span> &nbsp;<b style="color:#5d9">Attack-dive launcher</b> &nbsp;<span style="color:#666">— done. <span style="color:#7af">f_1B65</span> at gg1-2_fx.s:857. <b>Timer-based</b> pacing (3 per-type timers in b_92C0, stage-loaded), <b>slot-position priority</b> selection (not random), 16-frame rate gate. Boss + 2-escort capture squad bundled inline. State marker 0x09 = "diving attack". Full block in §5b above.</span></li>
+    <li><span style="color:#5d9;font-weight:bold">[4] ☑</span> &nbsp;<b style="color:#5d9">Bomb system</b> &nbsp;<span style="color:#666">— done. <span style="color:#7af">f_1EA4</span> at gg1-2_fx.s:1729. <b>8 bomb slots</b> (b_8800+0x68..0x7F). Vector frozen at drop (NOT homing) — <code>dX = player.X - bomber.X</code>; Y constant 2/3 px/frame down. Multi-layer drop gating: counter + enable-bits + Y&gt;152 + global timer. AABB collision Y∈[22,330]. EF BOMB_MODE gates <i>continuous</i> bombing only — basic drops happen every stage. Full block in §5b above.</span></li>
+    <li><span style="color:#fc6;font-weight:bold">[5] ⏸</span> &nbsp;<b style="color:#fc6">Convoy / capture squad</b> &nbsp;<span style="color:#666">— <b>deferred to step 9 research</b>. Item [3] already covered the launcher-side coordination (3-pass wingman selection from <span style="color:#7af">d_1D2C_wingmen</span>, capture-mode toggle). The remaining open questions — convoy mid-flight sync, when the boss decides to fire the tractor beam, what state-marker change triggers the hand-off — are inherently <i>step 9 questions</i> (boss capture mechanic). Researching them now would mean re-reading the same code in step 9 with better context. Decision logged below.</span></li>
+  </ul>
+
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:14px;padding:8px 12px;background:#0a1418;border-left:2px solid #5d9;border-radius:2px">
+    <b style="color:#5d9">Decision (2026-04-26):</b> pause step 8 research at 4/5. Item [5] is the convoy hand-off to the tractor-beam phase, which is the <b>defining mechanic of step 9</b>. The launcher-side coordination is already documented (item [3]); what remains is essentially "how does step 9's boss-capture state machine consume what step 8's launcher produces?" — easier to answer with the rest of step 9's pieces in hand. The 4 verified items give complete coverage for implementing step 8's attack-dive + bomb behaviour without escort-aware logic; escort coordination can be wired when step 9 lands. <b style="color:#fc6">Risk:</b> if step 9 research reveals that escort coordination needs to start during the dive (not just at beam-fire), some step 8 implementation may need a small revision. Acceptable trade — same risk we accepted on step 7's deferred-integration decision (option B).
+  </div>
 </div>
 
 </div>
