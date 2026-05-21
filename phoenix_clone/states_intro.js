@@ -27,9 +27,17 @@ export const introMixin = {
         // prompt — splash freezes at whatever counter98 was when the coin
         // came in. Match that here with a top-level branch on coinCount.
         if (state.coinCount > 0) {
+            // 0→1 transition: clear splash visuals (port-only; source's
+            // FG screen-RAM lets bird/score-table stay drawn under the
+            // prompt overlay).
+            if (!state.promptModeActive) {
+                this._enterPromptMode();
+                state.promptModeActive = true;
+            }
             this._promptForStartGame();
             return;
         }
+        state.promptModeActive = false;
 
         // L00E6 — AddOneToMem on Counter98+1. Source treats $4398:$4399
         // as a 16-bit MSB:LSB counter; AddOneToMem advances the 16-bit
@@ -58,28 +66,18 @@ export const introMixin = {
         if (c98 === 0x06B0) this._loopBackToSplashStart();
         if (c98 === 0x1510) this._loopBackToSplashStart();  // source-faithful trigger; reached only after step 15 removes the $06B0 shortcut
 
-        // 14.H — coin input is handled here only when STILL in splash
-        // mode (coinCount == 0). The 0→1 transition switches us into
-        // prompt mode for subsequent frames (top of introFrame branches
-        // to _promptForStartGame). Start input is meaningless here
-        // (coinCount == 0 means no credit), so no start handling.
-        if (input.coinEdge()) {
-            state.coinCount = 1;
-            scoring.updateCoinScreen();
-            this._enterPromptMode();
-        }
+        // Coin input is handled in main.js:tick() — Code.md $008E-$00AB
+        // runs the coin-bit edge check in WaitVBlankCoin's tail, before
+        // the game-vs-attract branch. The 0→1 transition naturally
+        // routes the NEXT frame to _promptForStartGame via the
+        // `coinCount > 0` branch above.
     },
 
     // $0288 PromptForStartGame (simplified for 1P-only). Dispatched from
-    // introFrame each frame while state.coinCount > 0. Polls coin (more
-    // credit) and start (decrement + boot game) edges; no per-frame
-    // ClearForeAndBackground since _enterPromptMode already cleared on
-    // the coinCount 0→1 transition.
+    // introFrame each frame while state.coinCount > 0. Polls start edge
+    // (decrement + boot game). Coin input is handled in main.js:tick()
+    // so it works in every state — see WaitVBlankCoin comment there.
     _promptForStartGame() {
-        if (input.coinEdge()) {
-            state.coinCount = Math.min(state.coinCount + 1, 99);
-            scoring.updateCoinScreen();
-        }
         if (input.startEdge()) {
             state.coinCount -= 1;
             scoring.updateCoinScreen();

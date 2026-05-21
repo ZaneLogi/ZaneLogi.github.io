@@ -541,8 +541,8 @@ mixin (`introFrame` plus private helpers) — same shape source uses
 | `T233A`                             | `INTRO_BIRD_FRAMES` (32-byte extract: 23 documented + 9 code-byte tail; render bounds-check drops the invalid ones, producing the source-faithful "blink") |
 | `DrawBirdObject $34C0`              | `render.drawIntroBird` — reuses `BIRD_T3EC0` / `BIRD_T3E08` / `BIRD_TILE_DATA` from step 11.3; skips `counterB9` scroll offset and the screen-RAM top-clip (fixed canvas position $49EF → (80, 120)) |
 | Splash-loop wrap ($1510)            | `_loopBackToSplashStart()` — zeros Counter98, clears `bgTiles` + `scoreIconSprites` + `introBird`. Placeholder shortcut at $06B0 (bird-end + 1) for step 14; $1510 takes over when step 15 lands `GameDemo` |
-| `CoinChecking $17E0`                | inline coin-edge handler in `introFrame` (no halving — 1c = 1cr)  |
-| `PromptForStartGame $0288`          | `_promptForStartGame()` + `_enterPromptMode()` (clears splash state once on coin 0→1; renders T19C0 prompt instead of splash while `coinCount > 0`) |
+| `CoinChecking $17E0` / `WaitVBlankCoin` tail ($008E-$00AB) | coin-edge handler in `main.js:tick()` — runs every frame in ALL states (matches source's pre-`GameOrAttract`-branch position), increments `state.coinCount` (cap 99, port deviation from source's $09). Coins inserted during gameplay bank credits used at the next prompt entry. |
+| `PromptForStartGame $0288`          | `_promptForStartGame()` (start-edge handler only — coins handled in `main.js`) + `_enterPromptMode()` fires once when `introFrame` first observes `coinCount > 0` (tracked via `state.promptModeActive`; clears splash state) |
 | `T19C0`                             | `PROMPT_TEXT` export                                              |
 | `GetPlayerLivesFromDip $0350`       | hard-coded `state.player1Lives = 3` on start press; DIP modelling still deferred |
 | `DecrementCoins $02CB`              | inline in `_promptForStartGame` start-edge branch                 |

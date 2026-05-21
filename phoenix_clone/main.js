@@ -37,6 +37,17 @@ const game = {
         if (input.killAllEdge()) states.cheatKillAll();
         state.counter9a = (state.counter9a + 1) & 0xFFFF;
 
+        // L0080 WaitVBlankCoin tail — Code.md $008E-$00AB. Coin-bit edge
+        // check runs every frame regardless of GameOrAttract, BEFORE the
+        // game-vs-attract branch at $001D-$0021. Effect: coins inserted
+        // during gameplay bank credits that the next game-over → prompt
+        // transition can spend. Cap matches source's $00A0 (`CP $09;
+        // RET Z`), widened to 99 to fit the two-digit COIN nn display.
+        if (input.coinEdge() && state.coinCount < 99) {
+            state.coinCount++;
+            scoring.updateCoinScreen();
+        }
+
         if (state.gameOrIntro === 0) {
             states.introFrame();
         } else {

@@ -28,6 +28,14 @@ export const state = {
         // edge decrements + sets gameOrIntro = 1.
         this.coinCount = 0;
 
+        // Port-only one-shot flag: set when introFrame first observes
+        // coinCount > 0 (= "entered prompt mode this attract cycle"),
+        // cleared when coinCount returns to 0. Used to fire
+        // _enterPromptMode exactly once on the 0→1 transition rather
+        // than every frame. Source has no analog — its FG screen-RAM
+        // makes the splash-overlay-prompt composition automatic.
+        this.promptModeActive = false;
+
         // $4383-$4385 / $4387-$4389 — 3-byte packed BCD (low, mid, high).
         // Each byte holds two digits; PrintNumber ($00C4) draws low-nibble
         // first then high-nibble, walking screen-RAM left.
