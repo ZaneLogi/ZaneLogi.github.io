@@ -104,6 +104,134 @@ When a project has no local `CLAUDE.md`, default to:
 - Sprites are BMP files; `0xFF00FF` is the colorkey transparent color
 - Canvas resolution matches the original arcade / console where relevant
 
+## Architecture principle for retro ports
+
+A retro-game port from arcade/console source has **two viable
+architectures**. The choice should be made during the **research
+stage**, before coding starts — based on what the disassembly reveals
+about the original game's mechanism dependencies. Picking implicitly
+("I'll just draw to canvas and figure out problems as they come")
+leads to ad-hoc deviations that accumulate, and some end up
+wrong-direction.
+
+### The two viable architectures
+
+| Architecture | What it models | When it's right |
+|---|---|---|
+| **Routine-level translation** | Each source routine → JS function with citation. ROM data extracted verbatim. Hardware abstractions NOT modeled — screen-RAM-readback sites get small per-site state-driven substitutes. | Source's gameplay mechanics live mostly in routines; screen-RAM-readback is rare or peripheral. |
+| **Screen-RAM mapping** | A dedicated buffer mirrors source's video memory. Draw routines write to the buffer; collision-style routines read from it. Specific flavor depends on source's display type. | Multiple gameplay mechanics depend on screen-RAM readback. |
+
+Both are legitimate. The choice is about matching the architecture to
+the source's mechanism profile.
+
+### Routine-level translation in practice
+
+Source routines port as JS functions with `// Lxxxx — RoutineName`
+citations. ROM data tables are extracted verbatim. The few sites
+where source uses screen-RAM readback get small per-site state-driven
+substitutes (e.g. a counter check instead of a tile read).
+
+**Deviations are load-bearing under this architecture, not
+compromises.** Every state-driven substitute keeps the project on
+the "translation" side of the line. If you chose source-faithful for
+ALL screen-RAM-readback sites under routine-level translation, you'd
+model enough hardware that the project becomes a slow hand-written
+emulator — no gain over MAME.
+
+### Screen-RAM mapping in practice
+
+The buffer's representation matches source's display type:
+
+- **Tile-buffered source** (Pac-Man, Phoenix, Galaga era): two byte
+  buffers (FG / BG) carry tile IDs at fixed (col, row) positions.
+  Source's draw routines port as tile-buffer writes; render iterates
+  the buffers and `drawImage` per cell.
+- **Pixel-buffered source** (Space Invaders era and earlier): the
+  canvas itself IS the screen-RAM buffer. Draw routines paint to
+  canvas; collision-style routines use `getImageData()` to read
+  pixels back. The canvas-as-VRAM equivalence is exact for pixel-
+  packed source video memory.
+
+Either flavor lets source's screen-RAM-readback mechanisms port
+directly with no per-site substitutes. Upfront cost (~1-2 weeks of
+infrastructure before visible gameplay) is recovered if the source
+has many screen-RAM-dependent mechanics.
+
+### Research-stage decision criteria
+
+Before any code, the research docs should answer:
+
+1. **How many gameplay mechanics depend on screen-RAM readback?**
+   Count specifically: tile-collision lookups, pixel-collision
+   lookups, region-clear-then-write patterns, tile-persistence
+   sprite cycles, tile-state-driven AI. The exact threshold depends
+   on what the count breakdown reveals — a single load-bearing
+   mechanic (e.g. all collision is tile/pixel-based) outweighs many
+   peripheral ones.
+2. **Does any core mechanic (scoring, win-condition, collision)
+   hinge on screen-RAM state?** If yes, screen-RAM mapping —
+   regardless of count.
+3. **Is screen-RAM the design's mechanism, or its coincidence?**
+   Some games use screen-RAM reads because the hardware *is* the
+   game state (Space Invaders pixel collision; Pac-Man dot eating).
+   Others use it as a side-effect of having a buffered display
+   (Phoenix shield is at this tile because DrawShields drew it
+   there). The first is mechanism; the second is coincidence.
+   Coincidence-style usage is fine to substitute with state-driven
+   equivalents.
+4. **Is source pixel-buffered or tile-buffered?** Determines which
+   flavor of screen-RAM mapping applies if you go that route.
+
+### Worked examples
+
+**phoenix_clone — routine-level translation.** Phoenix has 3
+screen-RAM-readback mechanisms: shield bullet-absorption (`L0CB4`),
+L2085 explosion region pre-clear, alien partial-sprite tile-
+persistence cycle. All three are coincidence-style, not mechanism-
+style — source uses screen-RAM readback because the display happens
+to be tile-buffered, not because gameplay logic *requires* tile-
+buffer state. State-driven substitutes (counter check, separate
+`scatteredDebris` Map, last-known-full `controlB` substitution) are
+small, local, and preserve visible behavior. **If upfront research
+had quantified this** (count = 3, all coincidence-style, no core
+mechanic depends on tile state), routine-level was the clear right
+call.
+
+**galaga_clone — routine-level translation**, similar deviation
+profile to phoenix_clone.
+
+**space_invaders — screen-RAM mapping (canvas-pixel-buffer flavor).**
+Source's collision detection is *literally* a video-RAM pixel read —
+the 8080 checks the 1bpp video memory to see if a player shot hit
+something or if an alien shot hit a shield. This is mechanism, not
+coincidence: the pixel buffer IS the collision geometry. The port
+uses the canvas as the screen-RAM analog: draw everything to canvas,
+then `getImageData()` at shot positions to detect collisions. No
+per-site state-driven substitutes needed — source's pixel-read
+semantics port directly to canvas pixel-read semantics. Routine-
+level translation would have required maintaining a parallel
+collision-geometry buffer mirroring every sprite blit; canvas-as-
+VRAM is free. See `space_invaders/game.js:handlePlayerShot` and
+`handleAlienShot`. Reference: <https://www.computerarcheology.com/Arcade/SpaceInvaders/>.
+
+### The payoff: smoother coding from upfront investigation
+
+The shared lesson across all three projects: **the more thoroughly
+the research stage characterizes the source's mechanism profile, the
+fewer architectural surprises during coding.** Each gameplay
+subsystem ports without friction when the chosen architecture
+already fits — no mid-project rewrites, no accumulating deviations,
+no wrong-direction substitutes that later need to be undone.
+
+In phoenix_clone, the L2085 explosion scatter was deferred for ~6
+weeks under the (incorrect) assumption that source's mechanism
+required screen-RAM persistence; a deeper upfront read of `Code.md
+$2085-$20E2` would have shown L2085 is write-only (reads target ROM
+tables, writes target screen RAM) and unblocked the port
+immediately. The cost of skimping on research is paid in
+implementation drift. Time spent on research docs before coding is
+the cheapest time in the project.
+
 ## Delegating to sub-agents
 
 Sub-agents (Explore, general-purpose, etc.) are good for **bounded
