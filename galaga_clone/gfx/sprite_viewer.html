@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Galaga sprite viewer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #111;
+      color: #ccc;
+      font-family: monospace;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    h1 { font-size: 14px; color: #777; letter-spacing: 2px; text-transform: uppercase; }
+    .group { display: flex; flex-direction: column; gap: 8px; }
+    .group-label { font-size: 11px; color: #555; letter-spacing: 1px; text-transform: uppercase; }
+    .row { display: flex; gap: 6px; align-items: flex-end; }
+    canvas {
+      image-rendering: pixelated;
+      background: #000;
+      border: 1px solid #222;
+    }
+    .tile-label { font-size: 9px; color: #444; text-align: center; }
+    .tile-wrap { display: flex; flex-direction: column; gap: 2px; align-items: center; }
+
+    #scale-bar { display: flex; gap: 6px; align-items: center; font-size: 12px; color: #555; }
+    .sbtn {
+      background: #1a1a1a; color: #888; border: 1px solid #333;
+      padding: 3px 10px; cursor: pointer; font-family: monospace; font-size: 12px;
+    }
+    .sbtn:hover { border-color: #777; color: #fff; }
+    .sbtn.active { background: #2a2a2a; border-color: #aaa; color: #fff; }
+  </style>
+</head>
+<body>
+
+<h1>Galaga sprite viewer</h1>
+
+<div id="scale-bar">
+  <span>Zoom:</span>
+  <button class="sbtn active" data-scale="2">2x</button>
+  <button class="sbtn" data-scale="4">4x</button>
+  <button class="sbtn" data-scale="8">8x</button>
+</div>
+
+<div id="viewer"></div>
+
+<script type="module">
+import { sprites, colorPalettes } from './resource.js';
+
+let currentScale = 2;
+const viewer = document.getElementById('viewer');
+
+function buildViewer(scale) {
+  viewer.innerHTML = '';
+
+  const groups = [
+    { name: 'ship',      tiles: sprites.ship },
+    { name: 'boss',      tiles: sprites.boss },
+    { name: 'butterfly', tiles: sprites.butterfly },
+    { name: 'wasp',      tiles: sprites.wasp },
+  ];
+
+  for (const { name, tiles } of groups) {
+    const groupEl = document.createElement('div');
+    groupEl.className = 'group';
+
+    const label = document.createElement('div');
+    label.className = 'group-label';
+    label.textContent = `${name} (${tiles.length} frames)`;
+    groupEl.appendChild(label);
+
+    const row = document.createElement('div');
+    row.className = 'row';
+
+    tiles.forEach((src, i) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'tile-wrap';
+
+      const canvas = document.createElement('canvas');
+      canvas.width  = 16 * scale;
+      canvas.height = 16 * scale;
+      canvas.style.width  = (16 * scale) + 'px';
+      canvas.style.height = (16 * scale) + 'px';
+
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(src, 0, 0, 16 * scale, 16 * scale);
+
+      const tileLabel = document.createElement('div');
+      tileLabel.className = 'tile-label';
+      tileLabel.textContent = i;
+
+      wrap.appendChild(canvas);
+      wrap.appendChild(tileLabel);
+      row.appendChild(wrap);
+    });
+
+    groupEl.appendChild(row);
+    viewer.appendChild(groupEl);
+  }
+}
+
+buildViewer(currentScale);
+
+document.querySelectorAll('.sbtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.sbtn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentScale = Number(btn.dataset.scale);
+    buildViewer(currentScale);
+  });
+});
+</script>
+
+</body>
+</html>
