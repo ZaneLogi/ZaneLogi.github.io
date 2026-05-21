@@ -38,6 +38,7 @@ const TASK_GROUPS = [
             { flag: 'bombUpdate',         label: 'Bomb Update',        ref: 'f_1EA4', alwaysOn: true },
             { flag: 'playerMove',         label: 'Player Move',        ref: 'f_1F85' },
             { flag: 'playerFire',         label: 'Player Fire',        ref: 'f_1F04' },
+            { flag: 'bulletUpdate',       label: 'Bullet Update',      ref: 'CPU1'   },
         ]
     },
     {

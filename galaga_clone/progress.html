@@ -181,11 +181,11 @@
 <h2>Branch: galaga_clone &nbsp;·&nbsp; Ref: <a href="diagram.html">diagram.html</a> &nbsp;·&nbsp; Z80: C:\Z_Temp\hackbar_galaga\rom0\</h2>
 
 <div class="summary">
-  <div class="summary-item"><span class="done-count">5</span> done</div>
+  <div class="summary-item"><span class="done-count">7</span> done</div>
   <div class="summary-item"><span class="active-count">0</span> in progress</div>
-  <div class="summary-item"><span class="todo-count">6</span> todo</div>
-  <div class="progress-bar"><div class="progress-fill" style="width: 45%"></div></div>
-  <div class="summary-item" style="color:#333">5 / 11 steps</div>
+  <div class="summary-item"><span class="todo-count">4</span> todo</div>
+  <div class="progress-bar"><div class="progress-fill" style="width: 64%"></div></div>
+  <div class="summary-item" style="color:#333">7 / 11 steps</div>
 </div>
 
 
@@ -323,41 +323,57 @@
 
 
 <!-- ── Step 5 ── -->
-<div class="step todo">
+<div class="step done">
   <div class="step-gutter">
     <div class="step-num">5</div>
     <div class="step-line"></div>
   </div>
   <div class="step-body">
-    <div class="step-title">Player ship <span class="badge todo">todo</span></div>
-    <div class="step-desc">Render ship sprite at bottom-center. Keyboard left/right movement with bounds clamping (X: 0x36–0xE6, ±1 px/frame). Respawn at X=0x80.</div>
+    <div class="step-title">Player ship <span class="badge done">done</span></div>
+    <div class="step-desc">Faithful port of f_1F85 / c_1F92. Ship rendered at bottom-center using sprite code 6 (wings-open upright pose). Arrow-key left/right movement with Z80-accurate bounds and dxFlag-toggled 1/2 px alternating speed. Keyboard sampling in main.js feeds state.input each tick.</div>
     <div class="files">
       <span class="file modified">tasks/playerMove.js</span>
       <span class="file modified">state.js</span>
+      <span class="file modified">main.js</span>
     </div>
     <div class="notes">
-      <div class="note"><span class="note-tag note">note</span><span class="note-text">Z80 ref: f_1F85. Ship Y is fixed at ~0xB8. Sprite: sprites.ship[frame].</span></div>
+      <div class="note"><span class="note-tag verify">verify</span><span class="note-text">Z80 ref: f_1F85 (gg1-2_fx.s:2071) → c_1F92 reads io_input, branches to add/sub on right/left, with pre-move <code>cp limit / ret c</code> bounds check. b_92A0[3] toggles each held frame to alternate 1/2 px steps.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text">Right boundary exceeded the 224 px canvas. Root cause: Z80 sprite hardware adds a 10 px X offset when drawing — ROM sprite-X is 10 greater than canvas-X. Fixed globally: <code>canvas_X = sprite_X − 10</code>. Player spawn 0x7A=122 → 112; limits 0x12/0xE1=18/225 → 8/215. Same offset re-applied to formation column X table (now [39..183]).</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Pre-move check, not post-move clamp — mirrors Z80 exactly. Right: move only when canvas_X &lt; 215. Left: move only when canvas_X ≥ 8. Means the ship may stop one step short of the wall depending on dxFlag phase. Don't refactor to a clamp.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">dxFlag persists in state.player and clears to 0 on key release, so the next press starts at dx=1 (slow first step). Mirrors b_92A0[3] reset behaviour.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Ship Y fixed at canvas 208 (no Y offset). Render uses <code>drawImage(sprites.ship[6], p.x − 8, p.y − 8)</code> to centre the 16×16 sprite on (p.x, p.y).</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Tooling: added <code>galaga_clone/CLAUDE.md</code> capturing Z80 source path, task-table architecture, the 10 px offset rule, and the fidelity patterns to preserve. Root <code>CLAUDE.md</code> reframed as a multi-project retro-game repo.</span></div>
     </div>
   </div>
 </div>
 
 
 <!-- ── Step 6 ── -->
-<div class="step todo">
+<div class="step done">
   <div class="step-gutter">
     <div class="step-num">6</div>
     <div class="step-line"></div>
   </div>
   <div class="step-body">
-    <div class="step-title">Player bullets + collision <span class="badge todo">todo</span></div>
-    <div class="step-desc">Fire on Space (up to 2 bullets on screen, original allows 1). Bullets move upward each tick. AABB collision vs enemy bounding boxes → mark enemy dead, update score.</div>
+    <div class="step-title">Player bullets + collision <span class="badge done">done</span></div>
+    <div class="step-desc">Faithful port of the Galaga bullet system. Space fires (max 2 bullets, edge-triggered — no auto-repeat). Bullets travel up at dY=6 px/frame, despawn at canvas Y &lt; 40. AABB collision (|dY| ≤ 3, |dX| &lt; 6) marks enemy hit; enemyStatus reads the flag next tick and removes the enemy.</div>
     <div class="files">
       <span class="file modified">tasks/playerFire.js</span>
+      <span class="file new">tasks/bulletUpdate.js</span>
       <span class="file modified">tasks/enemyStatus.js</span>
       <span class="file modified">state.js</span>
+      <span class="file modified">main.js</span>
+      <span class="file modified">devPanel.js</span>
     </div>
     <div class="notes">
-      <div class="note"><span class="note-tag note">note</span><span class="note-text">Z80 ref: f_1F04 (fire) · f_1DB3 (enemy hit → exploding state) · f_23DD (object states).</span></div>
+      <div class="note"><span class="note-tag verify">verify</span><span class="note-text">Z80 sources: <code>f_1F04 / c_1F0F</code> (gg1-2_fx.s:1850) for fire + slot scan · <code>rckt_man / hitd_det_rckt</code> (gg1-5.s:917, 1094) on CPU1 for movement + AABB · <code>f_1DB3</code> (gg1-2_fx.s:1500) for hit → dead transition. Constants confirmed: max 2 bullets, dY=6, despawn Y&lt;40, AABB ±3 Y / &lt;6 X (1-ship mode).</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">New <code>bulletUpdate</code> task — no Z80 task counterpart. Stands in for CPU1's <code>rckt_man + hitd_det_rckt</code>, which ran in parallel on a second processor. Slotted right after <code>playerFire</code> so a freshly spawned bullet does not move on the same tick — preserves the natural CPU0/CPU1 1-frame lag.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Hit signalling kept indirect: <code>bulletUpdate</code> sets <code>enemy.hitFlag</code>; <code>enemyStatus</code> (slot 4, runs before <code>bulletUpdate</code> at slot 9) reads it the following tick. Mirrors the CPU0 polling CPU1's collision flag with ~1 frame latency. Don't refactor to direct kill.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text">Step description had said "original allows 1" — wrong. Z80 hardcodes 2 slots: <code>sprite_posn[0x64]</code> and <code>sprite_posn[0x66]</code>; if both X coords are nonzero the fire returns without spawning (gg1-2_fx.s:1873–1884).</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text">Fire button in JS needs a software edge: keyboard <code>keydown</code> stays "down" until release, which would auto-repeat every frame. Added <code>state.input.fireEdge</code> in main.js (rising edge of <code>state.input.fire</code>) — reproduces the Z80 IO chip's hardware debounce.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Bullet sprite is a placeholder 2 × 6 white <code>fillRect</code>. Galaga's actual rocket sprite is code 0x30 (gg1-2_fx.s:1941–1951); wire it up when the resource decoder exposes the missile / explosion tile groups (~step 8).</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Explosion + scoring deferred. <code>enemyStatus</code> currently jumps straight from alive → dead (no exploding state, no 0x40 → 0x45 counter). Score wiring belongs in step 10 (HUD).</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Collision recomputes enemy live position inline (homeX + oscillateX + pulseOffsets[colIdx]) — same formula as <code>objectStates.render</code>. Extract to a shared helper when fly-in / attack states give enemies their own <code>x,y</code> fields (steps 7–8).</span></div>
     </div>
   </div>
 </div>

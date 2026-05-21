@@ -10,27 +10,34 @@ import * as bombUpdate         from './tasks/bombUpdate.js';
 import * as launchAttackWave   from './tasks/launchAttackWave.js';
 import * as playerMove         from './tasks/playerMove.js';
 import * as playerFire         from './tasks/playerFire.js';
+import * as bulletUpdate       from './tasks/bulletUpdate.js';
 import * as captorDive         from './tasks/captorDive.js';
 import * as tractorBeam        from './tasks/tractorBeam.js';
 import * as pullShip           from './tasks/pullShip.js';
 
 // ── Task dispatch table ────────────────────────────────────────────────────
-// Ordered to match the Z80 task table (d_cpu0_task_table).
+// Ordered to match the Z80 task table (d_cpu0_task_table). bulletUpdate has
+// no Z80 task counterpart — it stands in for CPU1's rckt_man + hitd_det_rckt
+// (the original ran bullet move/collision on a second processor in parallel).
+// Slotted right after playerFire so a freshly spawned bullet doesn't move
+// on the same tick — matches the natural CPU0/CPU1 1-frame lag.
+//
 // Note: f_1DD2 (game timer decrement) is NOT here — it runs unconditionally
 // as tickGameTimers() below, mirroring its always-on status in the original.
 const TASK_TABLE = [
-    { flag: 'starfield',          module: starfield,          ref: 'f_1D76' },
-    { flag: 'formationOscillate', module: formationOscillate, ref: 'f_2A90' },
-    { flag: 'formationPulse',     module: formationPulse,     ref: 'f_1DE6' },
-    { flag: 'objectStates',       module: objectStates,       ref: 'f_23DD' },
-    { flag: 'enemyStatus',        module: enemyStatus,        ref: 'f_1DB3' },
-    { flag: 'bombUpdate',         module: bombUpdate,         ref: 'f_1EA4' },
-    { flag: 'launchAttackWave',   module: launchAttackWave,   ref: 'f_2916' },
-    { flag: 'playerMove',         module: playerMove,         ref: 'f_1F85' },
-    { flag: 'playerFire',         module: playerFire,         ref: 'f_1F04' },
-    { flag: 'captorDive',         module: captorDive,         ref: 'f_21CB' },
-    { flag: 'tractorBeam',        module: tractorBeam,        ref: 'f_2222' },
-    { flag: 'pullShip',           module: pullShip,           ref: 'f_20F2' },
+    { flag: 'starfield',          module: starfield,          ref: 'f_1D76'    },
+    { flag: 'formationOscillate', module: formationOscillate, ref: 'f_2A90'    },
+    { flag: 'formationPulse',     module: formationPulse,     ref: 'f_1DE6'    },
+    { flag: 'objectStates',       module: objectStates,       ref: 'f_23DD'    },
+    { flag: 'enemyStatus',        module: enemyStatus,        ref: 'f_1DB3'    },
+    { flag: 'bombUpdate',         module: bombUpdate,         ref: 'f_1EA4'    },
+    { flag: 'launchAttackWave',   module: launchAttackWave,   ref: 'f_2916'    },
+    { flag: 'playerMove',         module: playerMove,         ref: 'f_1F85'    },
+    { flag: 'playerFire',         module: playerFire,         ref: 'f_1F04'    },
+    { flag: 'bulletUpdate',       module: bulletUpdate,       ref: 'CPU1 rckt' },
+    { flag: 'captorDive',         module: captorDive,         ref: 'f_21CB'    },
+    { flag: 'tractorBeam',        module: tractorBeam,        ref: 'f_2222'    },
+    { flag: 'pullShip',           module: pullShip,           ref: 'f_20F2'    },
 ];
 
 // ── Canvas setup ───────────────────────────────────────────────────────────
@@ -65,9 +72,13 @@ function tickGameTimers() {
 
 function update() {
     // Sample raw input once per tick — consistent snapshot for all tasks.
-    state.input.left  = _keys.has('ArrowLeft');
-    state.input.right = _keys.has('ArrowRight');
-    state.input.fire  = _keys.has('Space');
+    // fireEdge is true only on the rising edge (was up, now down) so holding
+    // Space doesn't auto-repeat — reproduces the Z80 IO chip's hardware debounce.
+    const firePrev       = state.input.fire;
+    state.input.left     = _keys.has('ArrowLeft');
+    state.input.right    = _keys.has('ArrowRight');
+    state.input.fire     = _keys.has('Space');
+    state.input.fireEdge = state.input.fire && !firePrev;
 
     tickGameTimers();
 

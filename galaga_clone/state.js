@@ -22,7 +22,15 @@ function buildEnemies() {
     for (let ri = 0; ri < _ROWS.length; ri++) {
         const row = _ROWS[ri];
         for (const ci of row.cols) {
-            list.push({ type: row.type, alive: true, homeX: _COL_X[ci], homeY: row.y, colIdx: ci, rowIdx: ri });
+            list.push({
+                type:    row.type,
+                alive:   true,
+                hitFlag: false,            // set by bulletUpdate, read by enemyStatus (f_1DB3)
+                homeX:   _COL_X[ci],
+                homeY:   row.y,
+                colIdx:  ci,
+                rowIdx:  ri,
+            });
         }
     }
     return list;
@@ -53,18 +61,19 @@ export const state = {
     //
     // ★ = always-on in the original (task_enable_tbl_def = 0x01)
     tasks: {
-        starfield:           true,   // f_1D76  — on during gameplay only
-        formationOscillate:  true,   // f_2A90  — on when stage is active
-        formationPulse:      false,  // f_1DE6  — on when stage is active
-        objectStates:        true,   // f_23DD  ★ always on
-        enemyStatus:         false,  // f_1DB3  — on when stage is active
-        bombUpdate:          true,   // f_1EA4  ★ always on
-        launchAttackWave:    false,  // f_2916  — on when stage is active
-        playerMove:          true,   // f_1F85  — on during gameplay
-        playerFire:          false,  // f_1F04  — on during gameplay
-        captorDive:          false,  // f_21CB  — enabled when boss initiates capture
-        tractorBeam:         false,  // f_2222  — enabled when boss reaches player Y
-        pullShip:            false,  // f_20F2  — enabled when beam locks on ship
+        starfield:           true,   // f_1D76     — on during gameplay only
+        formationOscillate:  true,   // f_2A90     — on when stage is active
+        formationPulse:      false,  // f_1DE6     — on when stage is active
+        objectStates:        true,   // f_23DD     ★ always on
+        enemyStatus:         true,   // f_1DB3     — on when stage is active
+        bombUpdate:          true,   // f_1EA4     ★ always on
+        launchAttackWave:    false,  // f_2916     — on when stage is active
+        playerMove:          true,   // f_1F85     — on during gameplay
+        playerFire:          true,   // f_1F04     — on during gameplay
+        bulletUpdate:        true,   // CPU1 rckt  — on during gameplay (no CPU0 counterpart)
+        captorDive:          false,  // f_21CB     — enabled when boss initiates capture
+        tractorBeam:         false,  // f_2222     — enabled when boss reaches player Y
+        pullShip:            false,  // f_20F2     — enabled when beam locks on ship
     },
 
     // ── Starfield control ──────────────────────────────────────────────────
@@ -87,16 +96,28 @@ export const state = {
         alive:  true,
     },
 
+    // ── Player bullets ────────────────────────────────────────────────────
+    // Galaga limits to 2 simultaneous bullets — slot scan in c_1F0F
+    // (gg1-2_fx.s:1873–1884). Pre-allocated; alive=false means slot is free.
+    bullets: [
+        { x: 0, y: 0, alive: false },
+        { x: 0, y: 0, alive: false },
+    ],
+
     // ── Raw input state (updated by main.js before each update tick) ───────
+    // fireEdge is true on the rising edge of fire (mirrors hardware debounce
+    // in the Z80 IO chip); playerFire reads it so holding Space doesn't
+    // auto-repeat.
     input: {
-        left:  false,
-        right: false,
-        fire:  false,
+        left:     false,
+        right:    false,
+        fire:     false,
+        fireEdge: false,
     },
 
     // ── Enemy objects ──────────────────────────────────────────────────────
     // 48 enemies: 8 boss + 20 butterfly + 20 wasp.
-    // Each: { type, alive, homeX, homeY, colIdx, rowIdx }
+    // Each: { type, alive, hitFlag, homeX, homeY, colIdx, rowIdx }
     enemies: buildEnemies(),
 
     // ── Formation movement state ───────────────────────────────────────────

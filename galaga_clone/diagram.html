@@ -317,7 +317,7 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
 <!-- ══════════════════════════════════════════════════════════
      3. FORMATION GRID
      ══════════════════════════════════════════════════════════ -->
-<h3>3 · Formation Grid  <span style="color:#555;font-weight:normal;font-size:10px">(40 slots · X: 0x31–0xC1 · 10 cols · 16 px apart · Y: 0x70–0x92 · 6 rows · 8–10 px apart)</span></h3>
+<h3>3 · Formation Grid  <span style="color:#555;font-weight:normal;font-size:10px">(48 slots · ROM X: 0x31–0xC1 → canvas 39–183 after −10 px hardware offset · 10 cols · 16 px apart · 6 rows)</span></h3>
 <div class="section">
 
 <div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap">
@@ -338,16 +338,16 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
 </div>
 <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
   <span style="color:#555;font-size:10px;width:82px;text-align:right">Y=0x7C  row 2</span>
-  <div class="fmtn" style="grid-template-columns:repeat(8,22px);margin-left:24px">
-    <div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div>
-    <div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div>
+  <div class="fmtn">
+    <div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div>
+    <div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div>
   </div>
 </div>
 <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
   <span style="color:#555;font-size:10px;width:82px;text-align:right">Y=0x82  row 3</span>
-  <div class="fmtn" style="grid-template-columns:repeat(8,22px);margin-left:24px">
-    <div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div>
-    <div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div>
+  <div class="fmtn">
+    <div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div>
+    <div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div><div class="cell butterfly">M</div>
   </div>
 </div>
 <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
@@ -368,7 +368,7 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
 
 <div style="font-size:11px;color:#666;line-height:2">
   <div><span class="cell boss" style="display:inline-flex;width:22px;height:18px;margin-right:6px">B</span> Boss Bomber ×8 &nbsp; sprite base <span style="color:#7af">0x08</span> &nbsp; IDs <span style="color:#7af">0x30–0x3E</span></div>
-  <div style="margin-top:6px"><span class="cell butterfly" style="display:inline-flex;width:22px;height:18px;margin-right:6px">M</span> Butterfly (Moth) ×16 &nbsp; sprite base <span style="color:#7af">0x18</span> &nbsp; IDs <span style="color:#7af">0x40–0x5E</span></div>
+  <div style="margin-top:6px"><span class="cell butterfly" style="display:inline-flex;width:22px;height:18px;margin-right:6px">M</span> Butterfly (Moth) ×20 &nbsp; sprite base <span style="color:#7af">0x18</span> &nbsp; IDs <span style="color:#7af">0x40–0x5E</span></div>
   <div style="margin-top:6px"><span class="cell bee" style="display:inline-flex;width:22px;height:18px;margin-right:6px">W</span> Bee (Wasp) ×20 &nbsp;&nbsp;&nbsp;&nbsp; sprite base <span style="color:#7af">0x10</span> &nbsp; IDs <span style="color:#7af">0x08–0x2E</span></div>
   <div style="margin-top:12px;color:#555">Formation oscillates ±32 px L/R · 1 px per 4 frames<br>Pulses expand/contract continuously at ~15 Hz</div>
 </div>
@@ -551,15 +551,17 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
 <div>
 <div style="color:#777;font-size:11px;margin-bottom:8px">Input → movement</div>
 <div class="hflow">
-  <div class="box green">Joystick L/R<br><span style="color:#555;font-size:10px">f_1F85</span></div>
+  <div class="box green">Joystick L/R<br><span style="color:#555;font-size:10px">f_1F85 / c_1F92</span></div>
   <span class="arrow">→</span>
-  <div class="box green">Ship X ± 1 px/frame<br><span style="color:#555;font-size:10px">bounds 0x36–0xE6</span></div>
+  <div class="box green">Ship X 1/2 px alternating<br><span style="color:#555;font-size:10px">dxFlag toggle (b_92A0[3])</span></div>
+  <span class="arrow">→</span>
+  <div class="box green">Pre-move bounds check<br><span style="color:#555;font-size:10px">ROM 0x12–0xE1 → canvas 8–215</span></div>
 </div>
 <div class="down">  </div>
 <div class="hflow">
   <div class="box green">Fire button<br><span style="color:#555;font-size:10px">f_1F04</span></div>
   <span class="arrow">→</span>
-  <div class="box green">Spawn bullet<br><span style="color:#555;font-size:10px">max 10 simultaneous</span></div>
+  <div class="box green">Spawn bullet<br><span style="color:#555;font-size:10px">max 2 simultaneous</span></div>
   <span class="arrow">→</span>
   <div class="box green">Move up · hit detection<br><span style="color:#555;font-size:10px">f_23DD (objectStates)</span></div>
 </div>
@@ -587,7 +589,7 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
 </div>
 <div class="down">↓ yes &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↓ no</div>
 <div class="hflow">
-  <div class="box yellow">Respawn X=0x80</div>
+  <div class="box yellow">Respawn ROM X=0x7A → canvas 112</div>
   <span style="margin:0 40px"></span>
   <div class="box red">GAME OVER</div>
 </div>
