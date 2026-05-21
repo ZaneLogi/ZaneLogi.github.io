@@ -382,6 +382,30 @@ export function getObjectIdForSlot(rowIdx, colIdx) {
     return _SLOT_TO_ID.get(rowIdx * 10 + colIdx) ?? null;
 }
 
+// ── Wave-table builder (step 9 phase INT-2a) ──────────────────────────
+// JS-port equivalent of Z80 c_25A2 (gg1-3.s:1168) — builds the per-stage
+// fly-in wave table that launchAttackWave's runFlyInWave consumes.
+//
+// INT-2a status: returns a fixed 3-pair wave regardless of stage —
+// architectural seam only, same visible behaviour as the previous
+// hardcoded FLYIN_WAVE in launchAttackWave.js. INT-2b will read actual
+// d_combat_stg_dat entries (gg1-3.s:1461) and produce per-stage variation.
+//
+// Output format: array of pair entries
+//   { id1, path1, id2, path2 }  — fly-in pair (variant-mirrored)
+//
+// (Continuous attack-dive mode is a separate path in launchAttackWave —
+// it scans state.enemies live and doesn't use this table. A future INT
+// phase may unify the two.)
+export function buildWaveTable(stage) {
+    // INT-2a: ignore stage, return the previously-hardcoded test wave.
+    return [
+        { id1: 0x00, path1: 10, id2: 0x02, path2: 22 },   // real pair: 0x022B var 4/5
+        { id1: 0x04, path1: 0,  id2: 0x06, path2: 0  },   // token-bearing: 0x001D
+        { id1: 0x38, path1: 6,  id2: 0x3A, path2: 6  },   // single-variant: 0x01E8
+    ];
+}
+
 // ── Convenience accessor ──────────────────────────────────────────────
 // Returns { bytes, startX (canvas), startY (canvas), startAngle (10-bit) }
 // for the given index 0–23, or null if the path isn't ported yet.

@@ -32,14 +32,25 @@ export function update(state) {
             continue;
         }
 
-        // AABB vs every active enemy. Live position recomputed inline
-        // — same formula as objectStates.render. Extract to a helper
-        // later when fly-in / attack states give enemies their own x,y.
+        // AABB vs every active enemy. Position routed by enemy state:
+        //   'flying'    → use e.x, e.y (live position from path interpreter)
+        //   'formation' → use homeX/Y + oscillation + pulse offsets
+        // Step 9 phase INT-4 fix: previously only checked the formation slot,
+        // so flying enemies were immune to bullets (latent step 6 bug surfaced
+        // in step 8 phase 8f). Now bullets correctly hit enemies wherever
+        // they actually are on screen.
         for (const e of state.enemies) {
             if (!e.alive || e.hitFlag) continue;
 
-            const ex = e.homeX + f.oscillateX + f.pulseOffsets[e.colIdx];
-            const ey = e.homeY +                f.pulseOffsets[10 + e.rowIdx];
+            let ex, ey;
+            if (e.state === 'flying') {
+                ex = e.x;
+                ey = e.y;
+            } else {
+                // 'formation' (default for enemies sitting in their slot)
+                ex = e.homeX + f.oscillateX + f.pulseOffsets[e.colIdx];
+                ey = e.homeY +                f.pulseOffsets[10 + e.rowIdx];
+            }
 
             if (Math.abs(ex - b.x) < COLL_DX && Math.abs(ey - b.y) <= COLL_DY) {
                 e.hitFlag = true;

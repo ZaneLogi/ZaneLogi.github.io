@@ -134,21 +134,25 @@ function loadSegment(e) {
 }
 
 // ── Public launch helper (fly-in) ─────────────────────────────────────
-// Put a formation enemy into a fly-in path. Looks up the enemy by its
+// Put a 'pending' enemy into a fly-in path. Looks up the enemy by its
 // objectId (Z80 sprt_fmtn_hpos byte offset) and configures the flight
 // state from the chosen path's variant.
 //
 // Will be called by:
 //   - launchAttackWave fly-in entries (phase 3c)
 //
+// INT-3a: only accepts enemies in 'pending' state — fly-in is the
+// "first appearance" path. Enemies that have already landed are in
+// 'formation'; those use launchEnemyAttack to break formation and dive.
+//
 // Returns the enemy object on success, or null if the ID isn't found,
-// the enemy is already flying, or the path index isn't ported.
+// not in 'pending' state, or the path index isn't ported.
 export function launchEnemy(state, objectId, pathIndex) {
     const path = getPathByIndex(pathIndex);
     if (!path) return null;
 
     const e = state.enemies.find(en => en.objectId === objectId);
-    if (!e || e.state === 'flying') return null;
+    if (!e || e.state !== 'pending') return null;
 
     e.state      = 'flying';
     e.x          = path.startX;
@@ -172,13 +176,16 @@ export function launchEnemy(state, objectId, pathIndex) {
 // Will be called by:
 //   - launchAttackWave attack entries (phase 8c test, phase 8e real launcher)
 //
-// Returns the enemy on success, or null if not found / already flying /
-// attackBytes missing.
+// INT-3a: only accepts enemies in 'formation' state — attacks pull from
+// landed enemies. Pending enemies (haven't flown in yet) are excluded.
+//
+// Returns the enemy on success, or null if not found, not in 'formation'
+// state, or attackBytes missing.
 export function launchEnemyAttack(state, objectId, attackBytes) {
     if (!attackBytes) return null;
 
     const e = state.enemies.find(en => en.objectId === objectId);
-    if (!e || e.state === 'flying') return null;
+    if (!e || e.state !== 'formation') return null;
 
     // Snapshot the enemy's current visible formation position so the
     // attack starts where the player saw it (no jump-to-home).

@@ -1,6 +1,7 @@
 import { state }    from './state.js';
 import { init as initDevPanel } from './devPanel.js';
 
+import * as gameController     from './tasks/gameController.js';
 import * as starfield          from './tasks/starfield.js';
 import * as formationOscillate from './tasks/formationOscillate.js';
 import * as formationPulse     from './tasks/formationPulse.js';
@@ -26,6 +27,10 @@ import * as pullShip           from './tasks/pullShip.js';
 // Note: f_1DD2 (game timer decrement) is NOT here — it runs unconditionally
 // as tickGameTimers() below, mirroring its always-on status in the original.
 const TASK_TABLE = [
+    // gameController is the JS-port state-machine driver — no Z80 task
+    // counterpart (see file header for why). Slotted FIRST so its task-flag
+    // toggles take effect this tick, not next.
+    { flag: 'gameController',     module: gameController,     ref: 'JS port'   },
     { flag: 'starfield',          module: starfield,          ref: 'f_1D76'    },
     { flag: 'formationOscillate', module: formationOscillate, ref: 'f_2A90'    },
     { flag: 'formationPulse',     module: formationPulse,     ref: 'f_1DE6'    },

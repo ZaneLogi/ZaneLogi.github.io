@@ -183,9 +183,9 @@
 <div class="summary">
   <div class="summary-item"><span class="done-count">9</span> done</div>
   <div class="summary-item"><span class="active-count">0</span> in progress</div>
-  <div class="summary-item"><span class="todo-count">2</span> todo</div>
-  <div class="progress-bar"><div class="progress-fill" style="width: 82%"></div></div>
-  <div class="summary-item" style="color:#333">9 / 11 steps</div>
+  <div class="summary-item"><span class="todo-count">3</span> todo</div>
+  <div class="progress-bar"><div class="progress-fill" style="width: 75%"></div></div>
+  <div class="summary-item" style="color:#333">9 / 12 steps &nbsp;<span style="color:#555">(plan resequenced — integration moved before boss capture)</span></div>
 </div>
 
 
@@ -449,14 +449,21 @@
     <div class="step-line"></div>
   </div>
   <div class="step-body">
-    <div class="step-title">Boss capture mechanic <span class="badge todo">todo</span></div>
-    <div class="step-desc">Boss fires tractor beam (6-wide, 24-row, 15 Hz animation) → pulls player ship upward (±1 px/frame). Captured ship joins formation as a slave. If boss killed during beam, rescued ship lands and enables 2-ship mode.</div>
+    <div class="step-title">Game integration — turn the machinery into a runnable game <span class="badge todo">todo</span></div>
+    <div class="step-desc">Wires steps 7+8 machinery into a real Galaga game loop: state machine (attract → ready → playing → gameover), per-stage data driving fly-in waves and attack timing, stage cycling, player respawn / lives, basic HUD (score / lives / stage), and the latent-bug fixes captured during step 8 (bullet→flying-enemy collision, formation depletion handling, etc.). After this step the game is <i>actually playable</i>; step 10 (boss capture) becomes a feature commit on top.</div>
     <div class="files">
-      <span class="file modified">tasks/tractorBeam.js</span>
-      <span class="file modified">tasks/pullShip.js</span>
+      <span class="file new">tasks/gameController.js</span>
+      <span class="file modified">tasks/launchAttackWave.js (cursor → state.*, real stage data)</span>
+      <span class="file modified">tasks/bulletUpdate.js (collide vs flying enemies)</span>
+      <span class="file modified">tasks/playerMove.js (respawn)</span>
+      <span class="file modified">state.js (gameState transitions, lives, score, stage)</span>
+      <span class="file modified">main.js (state-driven task enables)</span>
     </div>
     <div class="notes">
-      <div class="note"><span class="note-tag note">note</span><span class="note-text">Z80 ref: f_2222 (tractor beam draw) · f_20F2 (pull ship) · f_2000 (rescued ship landing).</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text"><b>Resequenced 2026-04-26:</b> originally step 9 was boss-capture and integration was implicit / "later". Reordered to make integration the explicit next step. Boss capture (now step 10) is a feature on top of a working game, not foundational. Reasoning: getting a runnable game sooner gives a baseline to dogfood and iterate; step 9 (boss capture) integrates cleanly as additive feature rather than mid-flight integration concern.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Z80 ref for integration backbone: <code>game_ctrl.s</code> (game state transitions, stage flow), <code>new_stage.s</code> (per-stage init), <code>c_25A2</code> (gg1-3.s:1168, wave builder from stage data), <code>d_combat_stg_dat</code> (gg1-3.s:1461, 13 combat stage configs), <code>d_challg_stg_data</code> (8 challenge stage configs).</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Known gaps to fix during this step (all listed in architecture.html §5b callouts): bullet→flying-enemy collision uses formation position not e.x/e.y · F6 spawn-arming workaround can be removed once FD JUMP is wired · per-type attack reload values currently hardcoded · TURN_HOME teleport snap → smooth approach. Each gap has a TODO comment in the code pointing back here.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Same up-front-research pattern as steps 7 & 8 — start with focused Explore agents on game_ctrl.s and stage data layouts, capture findings as a §6 (or §5c) block in architecture.html, then phased implementation (INT-1 game state, INT-2 stage data, INT-3 cursors-into-state, INT-4 lifecycle bug fixes, INT-5 stage cycling, INT-6 basic HUD, INT-7 polish). Each phase its own commit.</span></div>
     </div>
   </div>
 </div>
@@ -469,15 +476,38 @@
     <div class="step-line"></div>
   </div>
   <div class="step-body">
-    <div class="step-title">HUD / scoring <span class="badge todo">todo</span></div>
-    <div class="step-desc">Score display, lives, stage number using character tileset (dat_character.js + dat_paletteChar.js). High score tracking in localStorage.</div>
+    <div class="step-title">Boss capture mechanic <span class="badge todo">todo</span></div>
+    <div class="step-desc">Boss fires tractor beam (6-wide, 24-row, 15 Hz animation) → pulls player ship upward (±1 px/frame). Captured ship joins formation as a slave. If boss killed during beam, rescued ship lands and enables 2-ship mode. Also wires the F4 BOSS_DIVE / F2 SPAWN_BEE / FE BREAK_ATTACK tokens that step 8 research deferred here. Convoy / capture squad orchestration (boss + 2 wingmen, partly documented in step 8 research item [3]) gets fleshed out.</div>
     <div class="files">
-      <span class="file new">tasks/hud.js</span>
-      <span class="file modified">gfx/resource.js</span>
-      <span class="file modified">state.js</span>
+      <span class="file modified">tasks/tractorBeam.js</span>
+      <span class="file modified">tasks/pullShip.js</span>
+      <span class="file modified">tasks/captorDive.js</span>
+      <span class="file modified">tasks/launchAttackWave.js (capture-squad bundling)</span>
+      <span class="file modified">tasks/bugMotion.js (F4 / F2 / FE token behaviour)</span>
     </div>
     <div class="notes">
-      <div class="note"><span class="note-tag note">note</span><span class="note-text">Character tileset: 8×8 px tiles, 32×28 tile grid, 32 char palettes. Tile RAM at Z80 0x8000.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Z80 ref: <code>f_2222</code> (tractor beam draw) · <code>f_20F2</code> (pull ship) · <code>f_2000</code> (rescued ship landing — also referenced as gate flag in f_1B65) · <code>case_0A53 F4 BOSS_DIVE</code> · <code>case_097B F2 SPAWN_BEE</code> · <code>case_0B16 FE BREAK_ATTACK</code> · <code>d_1D2C_wingmen</code> (gg1-2_fx.s:1333) wingman pool. Step 8 research item [5] (deferred) becomes the seed for this step's research.</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 11 ── -->
+<div class="step todo">
+  <div class="step-gutter">
+    <div class="step-num">11</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">HUD polish — character tileset + high-score persistence <span class="badge todo">todo</span></div>
+    <div class="step-desc">Replaces the basic HUD from step 9's integration (score / lives / stage rendered in a quick fallback style) with the proper Galaga HUD using the character tileset (<code>dat_character.js</code> + <code>dat_paletteChar.js</code>). Adds high-score persistence in localStorage. This is polish — the game is fully playable after step 9.</div>
+    <div class="files">
+      <span class="file new">tasks/hud.js</span>
+      <span class="file modified">gfx/resource.js (char decoder + sprite group)</span>
+      <span class="file modified">state.js (highScore from localStorage)</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Character tileset: 8×8 px tiles, 32×28 tile grid, 32 char palettes. Tile RAM at Z80 0x8000. Z80 ref: <code>dat_character.js</code> already ported (step 1); needs decoder counterpart in <code>gfx/resource.js</code> alongside existing sprite decoder.</span></div>
     </div>
   </div>
 </div>

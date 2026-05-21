@@ -12,6 +12,12 @@
 
 const TASK_GROUPS = [
     {
+        group: 'System',
+        tasks: [
+            { flag: 'gameController',     label: 'Game Controller',    ref: 'JS port' },
+        ]
+    },
+    {
         group: 'Background',
         tasks: [
             { flag: 'starfield',          label: 'Starfield',          ref: 'f_1D76' },

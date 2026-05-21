@@ -34,11 +34,20 @@ function buildEnemies() {
                 rowIdx:   ri,
                 objectId: getObjectIdForSlot(ri, ci),  // Z80 sprt_fmtn_hpos byte offset
 
-                // ── Motion state (step 7+) ──────────────────────────────
-                // 'formation' = sit at homeX/Y + offsets (default)
+                // ── Motion state (step 7+, 'pending' added INT-3a) ──────
+                // 'pending'   = alive but not yet on screen (Z80 status 0x80
+                //               equivalent — enemy is "in the roster" but
+                //               hasn't been spawned via fly-in yet)
+                // 'formation' = sit at homeX/Y + offsets (post-fly-in resting)
                 // 'flying'    = follow path bytecode; render at (x, y)
                 // 'dead'      = no render, no logic
-                state:      'formation',
+                //
+                // Initial state is 'pending' — enemies become visible only
+                // when launchEnemy (fly-in) transitions them to 'flying',
+                // and then to 'formation' when the path's END/FB fires.
+                // Matches the Z80 model: stage starts with formation empty,
+                // fly-in fills it pair-by-pair.
+                state:      'pending',
                 x:          0,
                 y:          0,
                 vx:         0,             // signed px/frame, lo-nibble of segment byte0
@@ -69,7 +78,37 @@ export const state = {
     // Tasks use (frameCount % N) to run at sub-rates (e.g. % 4 = 15 Hz).
     frameCount: 0,
 
-    gameState: 'attract',  // 'attract' | 'ready' | 'playing' | 'gameover'
+    // 'attract' | 'stageStart' | 'playing' | 'playerDying' | 'stageClear' | 'gameOver'
+    // Driven by tasks/gameController.js (the JS-port state machine driver —
+    // see architecture.html §5c "JS port state diagram"). INT-1 wires only
+    // 'attract' and 'playing'; other states defined for future INT phases.
+    gameState: 'attract',
+
+    // ── Stage / wave table (step 9 phase INT-2a) ──────────────────────────
+    // stage     = current stage number (Z80 _b_stgctr, mirror at 0x9881).
+    //             Starts at 1 — Z80 also bumps from 0 to 1 on first stage init.
+    // waveTable = per-stage fly-in wave entries; populated by gameController on
+    //             transition to 'playing' via paths.js buildWaveTable(stage).
+    //             Consumed by launchAttackWave.runFlyInWave.
+    //             INT-2a: builder returns the same 3-pair wave for any stage.
+    //             INT-2b: real per-stage variation from d_combat_stg_dat.
+    stage:     1,
+    waveTable: [],
+
+    // ── Wave-launcher state (step 9 phases INT-2b + INT-3b) ───────────────
+    // INT-2b: waveLauncherFlyInDone — set true when wave-cursor exhausts.
+    //         gameController polls this to transition 'stageStart'→'playing'.
+    // INT-3b: cursors and timers moved here from launchAttackWave's module
+    //         scope so they reset cleanly per stage (resetWaveState helper).
+    //   flyInCursor   — index of next pair to launch in state.waveTable
+    //   flyInCooldown — frames to wait after current pair lands (pull-based)
+    //   attackTimers  — per-type countdown for continuous-attack mode
+    //                   (yellow / red / boss reload values come from
+    //                    launchAttackWave constants — see resetWaveState)
+    waveLauncherFlyInDone: false,
+    flyInCursor:           0,
+    flyInCooldown:         0,
+    attackTimers:          { yellow: 180, red: 240, boss: 360 },
 
     // ── Game timers ────────────────────────────────────────────────────────
     // Mirrors ds4_game_tmrs — 4 countdown bytes decremented at 2 Hz by the
@@ -87,6 +126,7 @@ export const state = {
     //
     // ★ = always-on in the original (task_enable_tbl_def = 0x01)
     tasks: {
+        gameController:      true,   // JS-port state machine driver (no Z80 counterpart) — see tasks/gameController.js
         starfield:           true,   // f_1D76     — on during gameplay only
         formationOscillate:  true,   // f_2A90     — on when stage is active
         formationPulse:      false,  // f_1DE6     — on when stage is active

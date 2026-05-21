@@ -2,8 +2,8 @@
 //
 // Two phases run sequentially after page load:
 //
-//   Phase 1 (fly-in)  — runs once. Walks FLYIN_WAVE pull-based, same as
-//                       step 7 phase 3c. When done, transitions to phase 2.
+//   Phase 1 (fly-in)  — runs once. Walks state.waveTable pull-based, same
+//                       as step 7 phase 3c. When done, transitions to phase 2.
 //   Phase 2 (attack)  — continuous. Mirrors Z80 f_1B65 (gg1-2_fx.s:857):
 //                       per-type timers decide when wasp / butterfly / boss
 //                       breaks formation to dive at the player.
@@ -12,18 +12,14 @@
 // LAUNCHER" research block. Several inputs are FAKED here (see TODO list
 // below) — replace during the integration phase when stage data + game
 // state machine exist.
+//
+// Step 9 phase INT-2a: state.waveTable is now built by gameController on
+// transition to 'playing' (via paths.js buildWaveTable(state.stage)).
+// INT-2a's builder returns the same 3-pair test wave for any stage; INT-2b
+// will add real per-stage variation from d_combat_stg_dat.
 
 import { launchEnemy, launchEnemyAttack } from './bugMotion.js';
 import { ATTACK_PATH_YELLOW, ATTACK_PATH_RED } from '../paths.js';
-
-// ── Phase 1: fly-in wave (unchanged from step 7 phase 3c) ────────────
-// 3 pairs demonstrating the variant-mirror pair, token-bearing path with
-// FB termination, and a long-tail single-variant path.
-const FLYIN_WAVE = [
-    { id1: 0x00, path1: 10, id2: 0x02, path2: 22 },   // ★ real pair: 0x022B var 4/5
-    { id1: 0x04, path1: 0,  id2: 0x06, path2: 0  },   // ★ token-bearing: 0x001D (FB → snap home)
-    { id1: 0x38, path1: 6,  id2: 0x3A, path2: 6  },   // single-variant: 0x01E8 (long tail)
-];
 
 // ── Phase 2: continuous attack mode (f_1B65 stand-in) ────────────────
 // PHASE 8f FAKES — replace during integration:
@@ -50,19 +46,22 @@ const MAX_BOMBERS          = 4;      // active-diver cap
 //   Boss:                                                      0x00–0x06 + 0x30–0x36
 const BOSS_IDS = [0x00, 0x02, 0x04, 0x06, 0x30, 0x32, 0x34, 0x36];
 
-// ── Module state ─────────────────────────────────────────────────────
-let _flyInCursor    = 0;
-let _flyInCooldown  = 0;
-let _flyInDone      = false;
-const _attackTimers = {
-    yellow: ATTACK_RELOAD_YELLOW,
-    red:    ATTACK_RELOAD_RED,
-    boss:   ATTACK_RELOAD_BOSS,
-};
+// ── State reset (step 9 phase INT-3b) ─────────────────────────────────
+// Called by gameController on transition into 'stageStart' so cursors and
+// timers are fresh per stage. (Previously these were module-scope vars; INT-3b
+// moved them into state.* so per-stage resets work cleanly for INT-5 cycling.)
+export function resetWaveState(state) {
+    state.flyInCursor           = 0;
+    state.flyInCooldown         = 0;
+    state.waveLauncherFlyInDone = false;
+    state.attackTimers.yellow   = ATTACK_RELOAD_YELLOW;
+    state.attackTimers.red      = ATTACK_RELOAD_RED;
+    state.attackTimers.boss     = ATTACK_RELOAD_BOSS;
+}
 
 // ── Per-tick dispatch ────────────────────────────────────────────────
 export function update(state) {
-    if (!_flyInDone) {
+    if (!state.waveLauncherFlyInDone) {
         runFlyInWave(state);
         return;
     }
@@ -70,23 +69,23 @@ export function update(state) {
 }
 
 function runFlyInWave(state) {
-    if (_flyInCursor >= FLYIN_WAVE.length) {
-        _flyInDone = true;
+    if (state.flyInCursor >= state.waveTable.length) {
+        state.waveLauncherFlyInDone = true;   // signal to gameController
         return;
     }
-    if (countFlying(state) > 0) { _flyInCooldown = 30; return; }
-    if (_flyInCooldown > 0)     { _flyInCooldown -= 1; return; }
+    if (countFlying(state) > 0) { state.flyInCooldown = 30; return; }
+    if (state.flyInCooldown > 0) { state.flyInCooldown -= 1; return; }
 
-    const entry = FLYIN_WAVE[_flyInCursor];
+    const entry = state.waveTable[state.flyInCursor];
     launchEnemy(state, entry.id1, entry.path1);
     launchEnemy(state, entry.id2, entry.path2);
-    _flyInCursor += 1;
+    state.flyInCursor += 1;
 }
 
 function runAttackMode(state) {
     // Decrement timers every tick (Z80 decrements per-vblank).
     for (const type of ['yellow', 'red', 'boss']) {
-        if (_attackTimers[type] > 0) _attackTimers[type] -= 1;
+        if (state.attackTimers[type] > 0) state.attackTimers[type] -= 1;
     }
 
     // Rate gate: only attempt dispatch every 16 frames.
@@ -97,11 +96,11 @@ function runAttackMode(state) {
 
     // Dispatch first type whose timer is ready (Z80 djnz over 3 timers).
     for (const type of ['yellow', 'red', 'boss']) {
-        if (_attackTimers[type] > 0) continue;
+        if (state.attackTimers[type] > 0) continue;
         if (tryLaunchAttack(state, type)) {
-            _attackTimers[type] = reloadFor(type);
+            state.attackTimers[type] = reloadFor(type);
         } else {
-            _attackTimers[type] = ATTACK_RATE_GATE;     // retry next gate
+            state.attackTimers[type] = ATTACK_RATE_GATE;   // retry next gate
         }
         return;     // one launch per gate (Z80 returns after one fire)
     }
