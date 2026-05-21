@@ -5,6 +5,7 @@ import * as starfield          from './tasks/starfield.js';
 import * as formationOscillate from './tasks/formationOscillate.js';
 import * as formationPulse     from './tasks/formationPulse.js';
 import * as objectStates       from './tasks/objectStates.js';
+import * as bugMotion          from './tasks/bugMotion.js';
 import * as enemyStatus        from './tasks/enemyStatus.js';
 import * as bombUpdate         from './tasks/bombUpdate.js';
 import * as launchAttackWave   from './tasks/launchAttackWave.js';
@@ -29,6 +30,7 @@ const TASK_TABLE = [
     { flag: 'formationOscillate', module: formationOscillate, ref: 'f_2A90'    },
     { flag: 'formationPulse',     module: formationPulse,     ref: 'f_1DE6'    },
     { flag: 'objectStates',       module: objectStates,       ref: 'f_23DD'    },
+    { flag: 'bugMotion',          module: bugMotion,          ref: 'CPU1 f_08D3' },
     { flag: 'enemyStatus',        module: enemyStatus,        ref: 'f_1DB3'    },
     { flag: 'bombUpdate',         module: bombUpdate,         ref: 'f_1EA4'    },
     { flag: 'launchAttackWave',   module: launchAttackWave,   ref: 'f_2916'    },

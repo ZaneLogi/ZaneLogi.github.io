@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Galaga Clone — Code Flow Diagram</title>
+<title>Galaga Clone — Architecture</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -168,7 +168,7 @@
 </head>
 <body>
 
-<h1>Galaga Clone — Code Flow Diagram</h1>
+<h1>Galaga Clone — Architecture</h1>
 <h2>Derived from hackbar/galaga Z80 source · computerarcheology.com</h2>
 
 <!-- ══════════════════════════════════════════════════════════
@@ -272,6 +272,20 @@
   <div class="legend-item"><div class="legend-dot" style="background:#1a1a1a;border:1px solid #444"></div> key gameplay task (⚡)</div>
   <div class="legend-item"><div class="legend-dot" style="background:#151515;border:1px solid #2a2a2a"></div> support task</div>
   <div class="legend-item"><div class="legend-dot" style="background:#111;border:1px solid #1a1a1a;opacity:.4"></div> NOP / unused slot</div>
+</div>
+
+<!-- Design rationale callout — why we mirror this scheduler 1:1 in JS -->
+<div style="margin-top:24px;padding:14px 18px;border-left:3px solid #346;background:#0e1218;border-radius:2px">
+  <div style="color:#7af;font-size:11px;font-weight:bold;margin-bottom:10px;letter-spacing:0.5px">DESIGN RATIONALE &nbsp;·&nbsp; why the JS port mirrors this scheduler 1:1</div>
+  <ul style="color:#888;font-size:11px;line-height:1.7;padding-left:18px;margin:0">
+    <li><b style="color:#aaa">1:1 mapping to Z80 functions</b> — each <span style="color:#7af">f_xxxx</span> in the original becomes one JS module under <span style="color:#7af">tasks/</span>. Verification is mechanical: read the Z80, port the logic, cite the source line. Diverging from this mapping makes faithfulness impossible to check.</li>
+    <li><b style="color:#aaa">Tasks without Z80 counterparts (CPU1 stand-ins)</b> — the original Galaga ran on two Z80s; CPU1 handled bullet movement (<span style="color:#7af">rckt_man</span>) and collision (<span style="color:#7af">hitd_det_rckt</span>) in parallel with CPU0's task scheduler. Our single-threaded JS port folds that work into new tasks (e.g. <span style="color:#7af">bulletUpdate</span>) that have <i>no</i> <span style="color:#7af">f_xxxx</span> slot in the Z80 task table. These are the <b>only</b> acceptable deviations from the 1:1 rule above — each one is labeled with a comment naming the CPU1 function it represents, and slotted in dispatch order to reproduce the natural CPU0/CPU1 lag.</li>
+    <li><b style="color:#aaa">Per-task enable flag</b> — every task can be toggled live in the dev panel. Invaluable for isolating bugs: "disable formation pulse and see if collision still works", "turn everything off except player move and starfield", etc. Mirrors the Z80's <span style="color:#7af">ds_cpu0_task_actv</span> bitmap.</li>
+    <li><b style="color:#aaa">Deterministic dispatch order</b> — same sequence every tick, so ordering-dependent bugs reproduce across runs. The Z80 walks <span style="color:#7af">d_cpu0_task_table</span> in fixed slot order; our <span style="color:#7af">TASK_TABLE</span> follows the same order.</li>
+    <li><b style="color:#aaa">Self-throttling via frame counter</b> — tasks gate themselves with <span style="color:#7af">frameCount % N</span> to run at sub-rates (15 Hz formation drift, 2 Hz game timers). One scheduler at 60 Hz, no separate timer infrastructure — exactly how the Z80 handles it.</li>
+    <li><b style="color:#aaa">Slot ordering matters in single-threaded JS</b> — the original ran CPU0 and CPU1 in parallel; we're sequential. Position in the table becomes load-bearing. Example: <span style="color:#7af">bulletUpdate</span> (CPU1 stand-in) sits right after <span style="color:#7af">playerFire</span> so a freshly spawned bullet doesn't move on the same tick — preserving the natural CPU0/CPU1 1-frame lag instead of accidentally collapsing it.</li>
+    <li><b style="color:#aaa">Shared mutable state</b> — all tasks read/write a single global <span style="color:#7af">state</span> object. No encapsulation, no message passing — exactly like Z80 RAM. The dev panel + the discipline of citing Z80 sources are what keep this from devolving into spaghetti.</li>
+  </ul>
 </div>
 </div>
 
@@ -491,31 +505,54 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
 <!-- ══════════════════════════════════════════════════════════
      5. PATH BYTECODE FORMAT
      ══════════════════════════════════════════════════════════ -->
-<h3>5 · Path Bytecode Format  <span style="color:#555;font-weight:normal;font-size:10px">(used for both fly-in and attack dive paths)</span></h3>
+<h3>5 · Path Bytecode Format  <span style="color:#555;font-weight:normal;font-size:10px">(shared bytecode; separate tables for fly-in vs. attack dives)</span></h3>
 <div class="section" style="display:flex;gap:32px;flex-wrap:wrap;align-items:flex-start">
+
+<!-- Path table hierarchy — verified from gg1-3.s:1918, gg1-5.s:82+ -->
+<div style="width:100%;padding:12px 16px;background:#0d1418;border:1px solid #1f2a30;border-radius:2px">
+  <div style="color:#7af;font-size:11px;font-weight:bold;margin-bottom:8px;letter-spacing:0.5px">PATH TABLE HIERARCHY &nbsp;·&nbsp; fly-in vs. attack are separate tables</div>
+  <div style="color:#888;font-size:11px;line-height:1.7">
+    <b style="color:#aaa">Fly-in</b>: <span style="color:#7af">db_2A3C</span> is a 24-entry <i>pointer index</i>, not raw path data. Each entry packs a 13-bit address pointing into the <span style="color:#7af">db_flv_XXXX</span> path-data blocks plus a 3-bit variant flag (bits 13–15) that selects a transform from <span style="color:#7af">db_2A6C</span> — variants flip / mirror a single block so one definition can serve symmetric entrance patterns. Pattern blocks are ~25–54 bytes each and terminate with <span style="color:#7af">0xFF 0xFF</span>.<br>
+    <span style="color:#666">Source: gg1-3.s:1918–1928 (index + variant table) · gg1-5.s:82–2893 (data blocks).</span>
+  </div>
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:8px">
+    <b style="color:#aaa">Attack dives</b>: <span style="color:#7af">db_flv_atk_yllw</span> and <span style="color:#7af">db_flv_atk_red</span> — completely separate tables for yellow / red alien dive sequences, with attack-specific opcodes (0xF2–0xF4) layered on top of the shared 3-byte segment format.<br>
+    <span style="color:#666">Source: gg1-5.s:285, 311 · referenced from gg1-2_fx.s:976, 1007.</span>
+  </div>
+</div>
 
 <div>
 <div style="color:#777;margin-bottom:8px;font-size:11px">Normal segment (3 bytes, repeated until timer expires):</div>
 <div class="bytecode">
   <div class="hdr">Byte</div><div class="hdr">Value</div><div class="hdr">Meaning</div>
   <div class="val">0</div><div class="val">0xXY</div><div class="lbl">hi-nibble Y = Y velocity, lo-nibble X = X velocity (signed −8..+7)</div>
-  <div class="val">1</div><div class="val">signed</div><div class="lbl">Rotation increment per frame (24-step circle = 15°/step)</div>
+  <div class="val">1</div><div class="val">signed</div><div class="lbl">Rotation increment per frame (added to 10-bit angle; 1024 steps / circle)</div>
   <div class="val">2</div><div class="val">N frames</div><div class="lbl">Segment duration; next segment loaded when counter hits 0</div>
 </div>
 
-<div style="color:#777;margin-top:16px;margin-bottom:8px;font-size:11px">Special tokens (single-byte, trigger state transition):</div>
+<div style="color:#777;margin-top:16px;margin-bottom:8px;font-size:11px">Token dispatch &nbsp;<span style="color:#555">(any byte ≥ 0xEF — gg1-5.s:1475 <code>cp #0xEF; jp c</code> — indexed via CPL into d_0920_jp_tbl, gg1-5.s:1494)</span>:</div>
 <div class="bytecode">
-  <div class="hdr">Token</div><div class="hdr">Name</div><div class="hdr">Action</div>
-  <div class="tok">0xE1</div><div class="tok">HOME</div><div class="tok-d">Stop dive, return to formation slot</div>
-  <div class="tok">0xE2</div><div class="tok">SPAWN_BEE</div><div class="tok-d">Spawn bonus bee from parent</div>
-  <div class="tok">0xE3</div><div class="tok">BREAK_LEFT</div><div class="tok-d">Bee/butterfly breaks formation, selects path by player X</div>
-  <div class="tok">0xE4</div><div class="tok">BOSS_DIVE</div><div class="tok-d">Boss computes heading to player, begins capture dive</div>
-  <div class="tok">0xEB</div><div class="tok">TURN_HOME</div><div class="tok-d">Reached turn-around point, head back to formation</div>
-  <div class="tok">0xEC</div><div class="tok">LOOP_TOP</div><div class="tok-d">Flew off bottom, re-enter from top, loop back</div>
-  <div class="tok">0xFB</div><div class="tok">BEAM_ON</div><div class="tok-d">Tractor beam phase — track ship position</div>
-  <div class="tok">0xFC</div><div class="tok">RTN_FMTN</div><div class="tok-d">Return to formation (snap to home)</div>
-  <div class="tok">0xFD</div><div class="tok">JUMP</div><div class="tok-d">Load new path pointer from following 2-byte address</div>
-  <div class="tok">0xFF</div><div class="tok">END</div><div class="tok-d">End of path data</div>
+  <div class="hdr">Token</div><div class="hdr">Name · handler</div><div class="hdr">Action · scope</div>
+  <div class="tok">0xFF</div><div class="tok">END · case_0E49</div><div class="tok-d">Make creature inactive · doesn't read more bytes <span style="color:#666">— both</span></div>
+  <div class="tok">0xFE</div><div class="tok">BREAK_ATTACK · case_0B16</div><div class="tok-d">Break formation, target ship <span style="color:#fa8">— attack</span></div>
+  <div class="tok">0xFD</div><div class="tok">JUMP · case_0B46</div><div class="tok-d">Load new path pointer (reads next 2 bytes) <span style="color:#666">— both</span></div>
+  <div class="tok">0xFC</div><div class="tok">RTN_FMTN / DIVE_START · case_0B4E</div><div class="tok-d">Bee / boss dive + loop init <span style="color:#666">— both</span></div>
+  <div class="tok">0xFB</div><div class="tok">TURN_HOME · case_0AA0</div><div class="tok-d">Attack wave reaches pivot, head home <span style="color:#666">— both</span></div>
+  <div class="tok">0xFA</div><div class="tok">LOOP_TOP · case_0BD1</div><div class="tok-d">Cycled off-screen, reload or continue <span style="color:#666">— both</span></div>
+  <div class="tok">0xF9</div><div class="tok">LOOP_HOME · case_0B5F</div><div class="tok-d">Off-screen cycle, head to home <span style="color:#666">— both</span></div>
+  <div class="tok">0xF8</div><div class="tok">BEAM_ON · case_0B87</div><div class="tok-d">Tractor beam activated; set Y origin <span style="color:#666">— both</span></div>
+  <div class="tok">0xF7</div><div class="tok">ATTACK_TURN · case_0B98</div><div class="tok-d">Direction change in convoy <span style="color:#666">— both</span></div>
+  <div class="tok">0xF6</div><div class="tok">FREE_FLIGHT · case_0BA8</div><div class="tok-d">Red moth free-flight bomb mode <span style="color:#fa8">— attack</span></div>
+  <div class="tok">0xF5</div><div class="tok">STATE_3 · case_0942</div><div class="tok-d">Transition to state 3 <span style="color:#666">— both</span></div>
+  <div class="tok">0xF4</div><div class="tok">BOSS_DIVE · case_0A53</div><div class="tok-d">Capture boss computes heading, dives <span style="color:#666">— both</span></div>
+  <div class="tok">0xF3</div><div class="tok">BREAK_TARGETED · case_0A01</div><div class="tok-d">Red alien targets ship by X delta <span style="color:#fa8">— attack</span></div>
+  <div class="tok">0xF2</div><div class="tok">SPAWN_BEE · case_097B</div><div class="tok-d">Yellow alien spawns bonus bee <span style="color:#fa8">— attack</span></div>
+  <div class="tok">0xF1</div><div class="tok">HOME · case_0968</div><div class="tok-d">End attack — all creatures return home <span style="color:#fa8">— attack</span></div>
+  <div class="tok">0xF0</div><div class="tok">ATTACK_WAVE · case_0955</div><div class="tok-d">Stage-conditional wave trigger <span style="color:#fa8">— attack</span></div>
+  <div class="tok">0xEF</div><div class="tok">BOMB_MODE · case_094E</div><div class="tok-d">Continuous bombing — stage 8+ only <span style="color:#fa8">— attack</span></div>
+</div>
+<div style="color:#888;font-size:10px;margin-top:10px;line-height:1.6;padding:8px 12px;background:#1a1408;border-left:2px solid #c93;border-radius:2px">
+  <b style="color:#fc6">Correction (verified):</b> bytes <span style="color:#7af">0xE0–0xEE</span> are NOT tokens — they're normal path-segment bytes. The real dispatch threshold is <span style="color:#7af">0xEF</span>, not <span style="color:#7af">0xE0</span>; total 17 tokens (0xEF–0xFF). The doubled <span style="color:#7af">0xFF 0xFF</span> at pattern end is just safety padding — case_0E49 deactivates and doesn't consume the second byte. Earlier doc had guessed 10 tokens at wrong addresses (0xE1 HOME, 0xE2 SPAWN_BEE, etc.); all replaced.
 </div>
 </div>
 
@@ -524,7 +561,7 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
 <div class="struct">
   <div class="struct-row"><div>0x00–01</div><div>Y position &nbsp;<span style="color:#555">(9.7 fixed-point: frac · int)</span></div></div>
   <div class="struct-row"><div>0x02–03</div><div>X position &nbsp;<span style="color:#555">(9.7 fixed-point)</span></div></div>
-  <div class="struct-row hi"><div>0x04–05</div><div>Rotation angle &nbsp;<span style="color:#555">(24 steps/circle)</span></div></div>
+  <div class="struct-row hi"><div>0x04–05</div><div>Rotation angle &nbsp;<span style="color:#555">(10-bit, 1024/circle; mapped to 8 sprite frames)</span></div></div>
   <div class="struct-row"><div>0x06–07</div><div>Home Y / X target</div></div>
   <div class="struct-row hi"><div>0x08–09</div><div>Path data pointer</div></div>
   <div class="struct-row hi"><div>0x0A</div><div>X velocity</div></div>
@@ -536,6 +573,175 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
   <div class="struct-row"><div>0x10</div><div>Formation slot index &nbsp;<span style="color:#555">(0–35)</span></div></div>
   <div class="struct-row"><div>0x13</div><div>Control flags &nbsp;<span style="color:#555">(bit5=dive · bit6=home · bit7=flip)</span></div></div>
 </div>
+</div>
+
+<!-- Path interpreter — verified from gg1-5.s:1422+ -->
+<div style="width:100%;margin-top:20px;padding:12px 16px;background:#0d1418;border:1px solid #1f2a30;border-radius:2px">
+  <div style="color:#7af;font-size:11px;font-weight:bold;margin-bottom:10px;letter-spacing:0.5px">PATH INTERPRETER &nbsp;·&nbsp; per-tick advance</div>
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-bottom:10px">
+    Driver task <span style="color:#7af">f_08D3</span> (gg1-5.s:1422) iterates <span style="color:#7af">ds_bug_motion_que</span> each tick. For each active enemy, dispatch enters at <span style="color:#7af">mctl_fltpn_dspchr</span> (gg1-5.s:1459) and runs:
+  </div>
+  <ol style="color:#888;font-size:11px;line-height:1.7;padding-left:24px;margin:0">
+    <li><b style="color:#aaa">Decrement segment timer</b> (<span style="color:#7af">dec 0x0D(ix)</span>). If non-zero, skip to step 3.</li>
+    <li><b style="color:#aaa">Load next 3-byte segment</b> from path pointer <span style="color:#7af">0x08-09</span> (gg1-5.s:1996–2025). Byte0 lo-nibble → X vel (<span style="color:#7af">0x0A</span>), hi-nibble → Y vel (<span style="color:#7af">0x0B</span>); byte1 → rotation rate (<span style="color:#7af">0x0C</span>); byte2 → new timer (<span style="color:#7af">0x0D</span>). Pointer always advances 3 bytes; tokens (≥ 0xEF) are dispatched via <span style="color:#7af">d_0920_jp_tbl</span> instead of being treated as segment data.</li>
+    <li><b style="color:#aaa">Add rotation rate to angle</b> (<span style="color:#7af">0x0C</span> → <span style="color:#7af">0x04-05</span>; gg1-5.s:2080–2102). Angle is a 10-bit value (1024/circle).</li>
+    <li><b style="color:#aaa">Pick sprite frame</b> from angle: 10-bit angle → 8 wing-pose frames via quadrant bits + divide-by-~42 (gg1-5.s:2104–2148). Flip flags in <span style="color:#7af">0x13</span> mirror frames horizontally / vertically.</li>
+    <li><b style="color:#aaa">Apply velocity</b> to position (gg1-5.s:2150–2234). Velocity nibbles are signed 4-bit (<span style="color:#7af">−8..+7</span>); sign-extended via <span style="color:#7af">sra</span> + <span style="color:#7af">adc</span> when added to the 9.7 fixed-point position word. <b style="color:#fc6">Note:</b> X and Y are applied on alternate frames (not both each tick), driven by frame-counter parity — same trick as the player <span style="color:#7af">dxFlag</span> 1/2 px alternation.</li>
+  </ol>
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px;padding:6px 10px;background:#0a1a0e;border-left:2px solid #5d9;border-radius:2px">
+    <b style="color:#5d9">Key finding:</b> X/Y velocity is <b>independent</b> of the heading — rotation only affects which sprite is drawn, not the direction of motion. Enemies can drift sideways while visually pointing forward. Our JS port doesn't need a sin/cos lookup; just apply the segment's velocity bytes directly.
+  </div>
+</div>
+
+<!-- Wave builder — verified from gg1-3.s:1168+ -->
+<div style="width:100%;margin-top:20px;padding:12px 16px;background:#0d1418;border:1px solid #1f2a30;border-radius:2px">
+  <div style="color:#7af;font-size:11px;font-weight:bold;margin-bottom:10px;letter-spacing:0.5px">WAVE BUILDER &nbsp;·&nbsp; c_25A2 (gg1-3.s:1168) &nbsp;·&nbsp; runs once at stage start</div>
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-bottom:10px">
+    Called from <span style="color:#7af">gctl_stg_new_atk_wavs_init()</span> (game_ctrl.s:768) when a stage begins. Reads the per-stage config, expands it into the runtime wave table at <span style="color:#7af">ds_8920</span>, which <span style="color:#7af">f_2916</span> later consumes to actually launch enemies.
+  </div>
+
+  <div style="display:flex;gap:24px;flex-wrap:wrap">
+
+  <div style="flex:1;min-width:300px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Stage data (small, hand-authored)</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <b style="color:#aaa">Combat:</b> <span style="color:#7af">d_combat_stg_dat</span> &nbsp;<span style="color:#666">(13 configs, gg1-3.s:1461)</span><br>
+      <b style="color:#aaa">Challenge:</b> <span style="color:#7af">d_challg_stg_dat</span> &nbsp;<span style="color:#666">(8 configs, gg1-3.s:1477)</span><br>
+      <b style="color:#aaa">Indexes:</b> <span style="color:#7af">d_combat_stg_dat_idx</span> &nbsp;<span style="color:#666">(4 ranks × 17 entries)</span>
+    </div>
+    <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px">
+      <b style="color:#aaa">Per-stage entry:</b><br>
+      &nbsp;• 2-byte header → bomb-control (<span style="color:#7af">b_92E2</span>)<br>
+      &nbsp;• 5 × 3-byte triplets (one per wave):<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;byte0: transient count (bits 0-3)<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;bytes 1-2: path selector — bits 0-5 index into <span style="color:#7af">db_2A3C</span>, bit 6 = alternate path set, bit 7 byte-2 = trailing delay
+    </div>
+  </div>
+
+  <div style="flex:1;min-width:300px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Output ds_8920 (5 waves × 17 bytes = 0x56)</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <b style="color:#aaa">Per wave:</b> [start-token][4 pairs (B, U, C, V)][end-token]<br>
+      &nbsp;• start-token = <span style="color:#7af">0x7E</span> (last wave: <span style="color:#7af">0x7F</span>)<br>
+      &nbsp;• B, C = motion selectors (path indices, 0–4)<br>
+      &nbsp;• U, V = object IDs from <span style="color:#7af">db_attk_wav_IDs</span> (5 groups × 8 IDs: boss + 2 butterfly + 2 wasp groups, gg1-3.s:1489)<br>
+      &nbsp;• end-token = <span style="color:#7af">0xFF</span>
+    </div>
+    <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px">
+      <b style="color:#aaa">Stage cycling:</b> <span style="color:#7af">if (stage > 23) sub 4</span> repeatedly &mdash; the last 4 configs cycle for stages 24+ indefinitely (no explicit 256-wrap). Total unique stages: 23.
+    </div>
+  </div>
+
+  </div>
+
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px;padding:6px 10px;background:#0a1a0e;border-left:2px solid #5d9;border-radius:2px">
+    <b style="color:#5d9">Note for the JS port:</b> stage data is tiny (~20 bytes per stage). We can either inline the 13+8 stage configs directly as a JS array, or use a simple ROM-byte literal. <b style="color:#fc6">Heads-up:</b> escort/capture-squad logic (boss + 2 butterflies) is <i>not</i> in c_25A2 — that lives at <span style="color:#7af">gg1-2_fx.s:1045</span> (<span style="color:#7af">d_1D2C_wingmen</span>) and comes up in step 9.
+  </div>
+</div>
+
+<!-- Wave launcher — verified from gg1-3.s:1658+ -->
+<div style="width:100%;margin-top:20px;padding:12px 16px;background:#0d1418;border:1px solid #1f2a30;border-radius:2px">
+  <div style="color:#7af;font-size:11px;font-weight:bold;margin-bottom:10px;letter-spacing:0.5px">WAVE LAUNCHER &nbsp;·&nbsp; f_2916 (gg1-3.s:1658) &nbsp;·&nbsp; per-tick task slot 0x08</div>
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-bottom:10px">
+    Reads pairs sequentially from <span style="color:#7af">ds_8920</span> and spawns enemies into the active flight queue. Pure state machine — no scripted timing; advances when the queue drains.
+  </div>
+
+  <div style="display:flex;gap:24px;flex-wrap:wrap">
+
+  <div style="flex:1;min-width:280px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Pair launch — two enemies, mirrored paths</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      Each "pair" in <span style="color:#7af">ds_8920</span> is <i>actually two 4-byte tokens</i>: <span style="color:#7af">[B1, U1, B2, U2]</span>. Both enemies launch simultaneously; the second uses a flipped variant from <span style="color:#7af">db_2A6C</span> — same path data, different mirror / rotation flags. This is what produces Galaga's iconic two-by-two arc entrance.<br>
+      <span style="color:#666">Source: gg1-3.s:1749, 1881; variants gg1-3.s:1928.</span>
+    </div>
+  </div>
+
+  <div style="flex:1;min-width:280px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Launch timing — pull-based, not scripted</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <b style="color:#aaa">Normal stages:</b> next pair launches when <span style="color:#7af">b_bugs_flying_nbr == 0</span> (wait for current pair to reach HOME) + 2-frame gap via <span style="color:#7af">ds4_game_tmrs[0]</span>.<br>
+      <b style="color:#aaa">Wave transition:</b> 0xFF end-token → wait for all flying bugs to land → advance cursor to next wave (0x7E start-token).<br>
+      <b style="color:#aaa">Stage end:</b> 0x7F final-wave token → f_2916 disables itself in the task table.<br>
+      <span style="color:#666">Source: gg1-3.s:1662–1695, l_2A29.</span>
+    </div>
+  </div>
+
+  </div>
+
+  <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:12px">
+
+  <div style="flex:1;min-width:280px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Active flight queue</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <span style="color:#7af">ds_bug_motion_que</span>: 12 slots × 0x14 bytes. f_2916 scans for first inactive (bit 0 of 0x13 == 0); if full, aborts launch this tick.<br>
+      <b style="color:#fc6">Heads-up:</b> only 12 enemies in flight at once — not all 48. Pair launching works because pairs share two slots; the queue is bounded.<br>
+      <span style="color:#666">Source: gg1-3.s:1736–1745.</span>
+    </div>
+  </div>
+
+  <div style="flex:1;min-width:280px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Formation slot assignment</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      Pre-stored at launch (not computed later). Object ID (struct byte <span style="color:#7af">0x10</span>) indexes into <span style="color:#7af">sprt_fmtn_hpos</span> lookup; home Y / X copied to enemy struct at launch time. So when the path interpreter hits HOME (0xF1) or END (0xFF), the destination is already known.<br>
+      <span style="color:#666">Source: gg1-3.s:1552–1556, 1761; lookup gg1-5.s:185.</span>
+    </div>
+  </div>
+
+  </div>
+
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px;padding:6px 10px;background:#0a1a0e;border-left:2px solid #5d9;border-radius:2px">
+    <b style="color:#5d9">Key port implication:</b> wave progression is <b>pull-based</b>, gated on the in-flight count rather than a frame counter. Our JS port should mirror this: increment <code>flyingCount</code> when launching, decrement when reaching HOME, only advance the cursor when count == 0 (+ small frame gap). This naturally produces the right pacing without per-stage timing data.
+  </div>
+</div>
+
+<!-- Object ID ↔ formation slot — verified from gg1-5.s:185 -->
+<div style="width:100%;margin-top:20px;padding:12px 16px;background:#0d1418;border:1px solid #1f2a30;border-radius:2px">
+  <div style="color:#7af;font-size:11px;font-weight:bold;margin-bottom:10px;letter-spacing:0.5px">OBJECT ID &harr; FORMATION SLOT &nbsp;·&nbsp; sprt_fmtn_hpos lookup (gg1-5.s:185)</div>
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-bottom:10px">
+    The 96-byte table at <span style="color:#7af">sprt_fmtn_hpos</span> is the single source of truth for "which formation slot does this object go to?". Used by the wave launcher to set <span style="color:#7af">homeX / homeY</span> at launch, and by the path interpreter when HOME tokens fire.
+  </div>
+
+  <div style="display:flex;gap:24px;flex-wrap:wrap">
+
+  <div style="flex:1;min-width:300px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Indexing scheme</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      Object IDs are <b>byte offsets</b> into the table (not entry indices). All IDs are even — entry N occupies bytes <span style="color:#7af">2N, 2N+1</span>.<br>
+      &nbsp;• ID range: <span style="color:#7af">0x08</span> – <span style="color:#7af">0x5E</span> (48 IDs, all even)<br>
+      &nbsp;• Table size: 96 bytes = 48 entries × 2<br>
+      &nbsp;• Each entry: <span style="color:#7af">(Y_code, X_code)</span><br>
+      &nbsp;• Lookup: <span style="color:#7af">a = sprt_fmtn_hpos[ID]</span> reads Y; next byte reads X.<br>
+      &nbsp;• Source: <span style="color:#7af">gg1-5.s:1553</span> — <code>ld e,0x10(ix); ld a,(de)</code>
+    </div>
+  </div>
+
+  <div style="flex:1;min-width:300px">
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Y / X codes (NOT pixels)</div>
+    <div style="color:#888;font-size:11px;line-height:1.7">
+      <b style="color:#aaa">Y_code</b> = <span style="color:#7af">0x14 + 2*rowIdx</span> &nbsp;→ <span style="color:#7af">0x14, 0x16, 0x18, 0x1A, 0x1C, 0x1E</span> for rows 0–5 (boss / boss / butterfly / butterfly / wasp / wasp).<br>
+      <b style="color:#aaa">X_code</b> = <span style="color:#7af">2*colIdx</span> &nbsp;→ <span style="color:#7af">0x00, 0x02, … , 0x12</span> for cols 0–9.<br>
+      Canvas pixel position is derived later via state.js's existing transforms (Y formula + −10 px X offset).
+    </div>
+  </div>
+
+  </div>
+
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px;padding:6px 10px;background:#0a1a0e;border-left:2px solid #5d9;border-radius:2px">
+    <b style="color:#5d9">JS port plan:</b> add an <code>objectId</code> field on each enemy in state.js. Either (a) inline the full 96-byte <code>sprt_fmtn_hpos</code> as a JS <code>Uint8Array</code> and use ID-as-byte-offset, or (b) compute <code>id</code> from <code>(rowIdx, colIdx)</code> via a small reverse lookup since entries are scattered (NOT just <code>row*10+col</code>) to optimise fly-in pairing. <b style="color:#fc6">Recommend (a)</b> — tiny constant, exact Z80 fidelity, no risk of mis-deriving the scatter order. Verified examples: boss row 0 entries 0–3 = <code>(0x14, 0x06) (0x14, 0x0C) (0x14, 0x08) (0x14, 0x0A)</code> → row 0 cols 3, 6, 4, 5 (paired ordering).
+  </div>
+</div>
+
+<!-- Step 7 research checklist — verify before porting -->
+<div style="width:100%;margin-top:24px;padding:14px 18px;border-left:3px solid #5d9;background:#0d1f0d;border-radius:2px">
+  <div style="color:#5d9;font-size:11px;font-weight:bold;margin-bottom:10px;letter-spacing:0.5px">STEP 7 RESEARCH &nbsp;·&nbsp; fly-in path system &nbsp;·&nbsp; <span style="color:#aaa;font-weight:normal">complete &mdash; ready to port</span></div>
+  <div style="color:#999;font-size:11px;margin-bottom:12px">All five items verified against the Z80 source. The data blocks above capture the confirmed facts. <b style="color:#5d9">Status:</b> all corrections applied; the previous token list (0xE1 HOME etc.) was wrong and has been replaced with the verified 17-token table at 0xEF–0xFF. <b style="color:#fc6">Fallback plan</b> (hardcode one known path to prove the interpreter end-to-end) was not needed but remains available if the port runs into surprises.</div>
+  <ul style="color:#888;font-size:11px;line-height:1.8;padding-left:0;margin:0;list-style:none">
+    <li><span style="color:#5d9;font-weight:bold">[1] ☑</span> &nbsp;<b style="color:#5d9">Path table layout</b> &nbsp;<span style="color:#666">— done. <span style="color:#7af">db_2A3C</span> = 24 × 2-byte pointer index into <span style="color:#7af">db_flv_XXXX</span> blocks (3-bit variant flag picks mirror/flip from <span style="color:#7af">db_2A6C</span>). Attack uses separate tables. Captured in hierarchy block above.</span></li>
+    <li><span style="color:#5d9;font-weight:bold">[2] ☑</span> &nbsp;<b style="color:#5d9">Special tokens</b> &nbsp;<span style="color:#666">— done. <b style="color:#fc6">Major correction:</b> dispatch threshold is <span style="color:#7af">0xEF</span> not 0xE0, only 17 tokens (0xEF–0xFF), all handlers in <span style="color:#7af">d_0920_jp_tbl</span>. Earlier list was completely wrong (0xE1 HOME etc. don't exist — those are just normal path bytes). Full verified table in §5.</span></li>
+    <li><span style="color:#5d9;font-weight:bold">[3] ☑</span> &nbsp;<b style="color:#5d9">Path interpreter</b> &nbsp;<span style="color:#666">— done. Driver <span style="color:#7af">f_08D3</span> → dispatch <span style="color:#7af">mctl_fltpn_dspchr</span> → 5-step per-tick sequence (timer → load → rotate → frame → velocity). Rotation is <b>decoupled</b> from velocity (no sin/cos needed). X/Y alternate per frame. Full sequence in interpreter block above.</span></li>
+    <li><span style="color:#5d9;font-weight:bold">[4] ☑</span> &nbsp;<b style="color:#5d9">Wave builder</b> &nbsp;<span style="color:#666">— done. <span style="color:#7af">c_25A2</span> at gg1-3.s:1168 builds the runtime wave table at <span style="color:#7af">ds_8920</span> from a tiny per-stage config (13 combat + 8 challenge). Each stage = 2-byte header + 5 wave triplets. Stages cycle mod-4 after 23. Full layout in wave-builder block above. Escort logic is <i>elsewhere</i> (step 9, gg1-2_fx.s:1045).</span></li>
+    <li><span style="color:#5d9;font-weight:bold">[5] ☑</span> &nbsp;<b style="color:#5d9">Wave launch timing</b> &nbsp;<span style="color:#666">— done. <span style="color:#7af">f_2916</span> at gg1-3.s:1658 launches enemy <b>pairs</b> (two-by-two with mirrored variants from db_2A6C). Timing is <b>pull-based</b>: next pair waits for <span style="color:#7af">b_bugs_flying_nbr == 0</span> + 2-frame gap. 12-slot active flight queue (not 48). Home position pre-stored at launch via sprt_fmtn_hpos. Stage end on 0x7F → task self-disables. Full details in wave-launcher block above.</span></li>
+  </ul>
 </div>
 
 </div>

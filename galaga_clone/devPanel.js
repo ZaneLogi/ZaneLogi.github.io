@@ -28,6 +28,7 @@ const TASK_GROUPS = [
         group: 'Enemies',
         tasks: [
             { flag: 'objectStates',       label: 'Object States',      ref: 'f_23DD', alwaysOn: true },
+            { flag: 'bugMotion',          label: 'Bug Motion (paths)', ref: 'CPU1'   },
             { flag: 'enemyStatus',        label: 'Enemy Status',       ref: 'f_1DB3' },
             { flag: 'launchAttackWave',   label: 'Launch Attack Wave', ref: 'f_2916' },
         ]

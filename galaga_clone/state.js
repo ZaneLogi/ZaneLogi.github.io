@@ -1,6 +1,8 @@
 // Shared mutable game state — analogous to Galaga's shared RAM.
 // All tasks read and write from this object.
 
+import { getObjectIdForSlot } from './paths.js';
+
 // ── Formation home-position tables (db_fmtn_hpos_orig, gg1-2.s:949) ──────────
 // The Z80 sprite hardware has a 10 px horizontal offset from our canvas:
 //   canvas_X = sprite_X - 10
@@ -23,13 +25,29 @@ function buildEnemies() {
         const row = _ROWS[ri];
         for (const ci of row.cols) {
             list.push({
-                type:    row.type,
-                alive:   true,
-                hitFlag: false,            // set by bulletUpdate, read by enemyStatus (f_1DB3)
-                homeX:   _COL_X[ci],
-                homeY:   row.y,
-                colIdx:  ci,
-                rowIdx:  ri,
+                type:     row.type,
+                alive:    true,
+                hitFlag:  false,            // set by bulletUpdate, read by enemyStatus (f_1DB3)
+                homeX:    _COL_X[ci],
+                homeY:    row.y,
+                colIdx:   ci,
+                rowIdx:   ri,
+                objectId: getObjectIdForSlot(ri, ci),  // Z80 sprt_fmtn_hpos byte offset
+
+                // ── Motion state (step 7+) ──────────────────────────────
+                // 'formation' = sit at homeX/Y + offsets (default)
+                // 'flying'    = follow path bytecode; render at (x, y)
+                // 'dead'      = no render, no logic
+                state:      'formation',
+                x:          0,
+                y:          0,
+                vx:         0,             // signed px/frame, lo-nibble of segment byte0
+                vy:         0,             // signed px/frame, hi-nibble of segment byte0
+                angle:      0,             // 10-bit (0–1023), 1024/circle
+                rotRate:    0,             // signed, added to angle each frame
+                pathBase:   null,          // Uint8Array of current path bytecode
+                pathOffset: 0,             // current byte offset into pathBase
+                segTimer:   0,             // frames until next segment load (0 = load now)
             });
         }
     }
@@ -67,10 +85,11 @@ export const state = {
         objectStates:        true,   // f_23DD     ★ always on
         enemyStatus:         true,   // f_1DB3     — on when stage is active
         bombUpdate:          true,   // f_1EA4     ★ always on
-        launchAttackWave:    false,  // f_2916     — on when stage is active
+        launchAttackWave:    true,   // f_2916     — on when stage is active
         playerMove:          true,   // f_1F85     — on during gameplay
         playerFire:          true,   // f_1F04     — on during gameplay
         bulletUpdate:        true,   // CPU1 rckt  — on during gameplay (no CPU0 counterpart)
+        bugMotion:           true,   // CPU1 f_08D3 — path interpreter for flying enemies (no CPU0 counterpart)
         captorDive:          false,  // f_21CB     — enabled when boss initiates capture
         tractorBeam:         false,  // f_2222     — enabled when boss reaches player Y
         pullShip:            false,  // f_20F2     — enabled when beam locks on ship

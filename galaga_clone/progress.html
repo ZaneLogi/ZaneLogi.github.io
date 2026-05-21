@@ -178,14 +178,14 @@
 <body>
 
 <h1>Galaga Clone — Implementation Progress</h1>
-<h2>Branch: galaga_clone &nbsp;·&nbsp; Ref: <a href="diagram.html">diagram.html</a> &nbsp;·&nbsp; Z80: C:\Z_Temp\hackbar_galaga\rom0\</h2>
+<h2>Branch: galaga_clone &nbsp;·&nbsp; Ref: <a href="architecture.html">architecture.html</a> &nbsp;·&nbsp; Z80: C:\Z_Temp\hackbar_galaga\rom0\</h2>
 
 <div class="summary">
-  <div class="summary-item"><span class="done-count">7</span> done</div>
+  <div class="summary-item"><span class="done-count">8</span> done</div>
   <div class="summary-item"><span class="active-count">0</span> in progress</div>
-  <div class="summary-item"><span class="todo-count">4</span> todo</div>
-  <div class="progress-bar"><div class="progress-fill" style="width: 64%"></div></div>
-  <div class="summary-item" style="color:#333">7 / 11 steps</div>
+  <div class="summary-item"><span class="todo-count">3</span> todo</div>
+  <div class="progress-bar"><div class="progress-fill" style="width: 73%"></div></div>
+  <div class="summary-item" style="color:#333">8 / 11 steps</div>
 </div>
 
 
@@ -216,7 +216,7 @@
       <span class="file new">tasks/captorDive.js</span>
       <span class="file new">tasks/tractorBeam.js</span>
       <span class="file new">tasks/pullShip.js</span>
-      <span class="file new">diagram.html</span>
+      <span class="file new">architecture.html</span>
     </div>
     <div class="notes">
       <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Fixed-timestep accumulator (1/60 s) — physics is frame-rate independent, render interpolates between ticks.</span></div>
@@ -380,21 +380,33 @@
 
 
 <!-- ── Step 7 ── -->
-<div class="step todo">
+<div class="step done">
   <div class="step-gutter">
     <div class="step-num">7</div>
     <div class="step-line"></div>
   </div>
   <div class="step-body">
-    <div class="step-title">Fly-in sequence <span class="badge todo">todo</span></div>
-    <div class="step-desc">Enemies enter from off-screen following path bytecode (velocity + rotation segments). Path interpreter reads from Z80 path tables (db_2A3C, 24 patterns). Enemies snap to formation slot on token 0xE1 (HOME).</div>
+    <div class="step-title">Fly-in sequence <span class="badge done">done</span></div>
+    <div class="step-desc">Real Galaga ROM path bytecode now drives enemy fly-ins. Pull-based wave launcher (f_2916 stand-in) walks a hardcoded test wave; per-tick interpreter (CPU1 f_08D3 stand-in) reads 3-byte segments from real db_flv_XXXX blocks; enemies launch in mirror-paired groups, follow the path, and return to formation on END or TURN_HOME. Did this in 7 phases, each its own commit, with up-front Z80 research before any code.</div>
     <div class="files">
-      <span class="file modified">tasks/launchAttackWave.js</span>
       <span class="file new">paths.js</span>
+      <span class="file new">tasks/bugMotion.js</span>
+      <span class="file modified">tasks/launchAttackWave.js</span>
+      <span class="file modified">tasks/objectStates.js</span>
+      <span class="file modified">state.js</span>
+      <span class="file modified">main.js</span>
+      <span class="file modified">devPanel.js</span>
+      <span class="file modified">architecture.html</span>
     </div>
     <div class="notes">
-      <div class="note"><span class="note-tag note">note</span><span class="note-text">Z80 ref: c_25A2 (build wave table) · f_2916 (launch wave) · db_2A3C (24 path patterns).</span></div>
-      <div class="note"><span class="note-tag note">note</span><span class="note-text">Path segment: byte0=vel XY nibbles, byte1=rotation increment, byte2=frame duration. Rotation is 24-step circle (15°/step).</span></div>
+      <div class="note"><span class="note-tag verify">verify</span><span class="note-text">Z80 sources: <code>db_2A3C</code> (gg1-3.s:1918) — 24-entry pointer index · <code>db_2A6C</code> (gg1-3.s:1928) — variant table · <code>db_flv_XXXX</code> (gg1-5.s:82+) — 22 path-data blocks · <code>sprt_fmtn_hpos</code> (gg1-5.s:185) — 96-byte ID→slot lookup · <code>f_08D3</code> (gg1-5.s:1422) — per-tick interpreter · <code>f_2916</code> (gg1-3.s:1658) — wave launcher · <code>c_25A2</code> (gg1-3.s:1168) — wave builder. All findings captured in §5 of architecture.html.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>Major correction</b> caught in research before porting: dispatch threshold is 0xEF, not 0xE0. Real tokens are 0xEF–0xFF (17 of them), not the 10 0xE0+ entries the diagram had. Earlier list had wrong values (0xE1 HOME etc.) that would have caused the interpreter to mis-treat normal segment data as commands.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Rotation is <b>decoupled</b> from velocity in Galaga — segment XY nibbles are direct pixel deltas, not "speed in heading direction". Means our JS port doesn't need any sin/cos / lookup table; just <code>e.x += e.vx</code>. X and Y applied on alternate frames (matching Z80 frame-parity trick), giving effective ½-rate per axis.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Wave timing is <b>pull-based</b>, not scripted — next pair only launches when no enemies are still flying. Mirrors Z80 <code>b_bugs_flying_nbr == 0</code> check. New <code>bugMotion</code> task (CPU1 stand-in) sits between <code>objectStates</code> and <code>enemyStatus</code> in TASK_TABLE; <code>launchAttackWave</code> later, giving newly-spawned enemies a 1-tick lag (same pattern as <code>playerFire</code> → <code>bulletUpdate</code>).</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Object IDs match Z80 byte-offset scheme — each formation enemy gets an <code>objectId</code> from the 96-byte <code>SPRT_FMTN_HPOS</code> table (range 0x00–0x5E, all even). Inlined verbatim instead of computed from row/col, since the Z80 ordering is scattered for fly-in pairing optimisation.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Token handling is minimal so far — 0xFF END and 0xFB TURN_HOME both snap the enemy back to formation; 0xFD/0xF7/0xF0 skip past their 2-byte arg correctly so .dw addresses don't get mis-read as segments. The other 12 tokens still no-op (1-byte skip). Smoothed TURN_HOME and the 0xF7/0xF0 sub-call semantics are future polish.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Phased delivery: 1 (interpreter) → 2 (real data) → 3a (END→formation) → 3b (object IDs) → 3c (launcher) → 3d-A (variant pair) → 3d-B (port all paths) → 3e (token handling). Each phase its own commit; if implementation later corrects research, the affected architecture.html block is updated to show before/after.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Known limitations: TEST_WAVE is hardcoded (real <code>c_25A2</code> stage-data builder is deferred — phase 4 territory); cursor lives in module-scope (not <code>state.*</code>); paths with long final-segment durations (~0xFF) still run for a few seconds before END since natural HOME-proximity termination isn't wired. Visually fine; documented for future polish.</span></div>
     </div>
   </div>
 </div>

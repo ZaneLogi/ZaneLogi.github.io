@@ -140,23 +140,25 @@ them up":
 - **`progress.html`** — implementation step tracker (11 steps total).
   Update the matching step when finishing meaningful work; add fix /
   decide / verify notes inline.
-- **`diagram.html`** — **the project's code-flow / architecture map**.
+- **`architecture.html`** — **the project's design + code-flow map**.
   Visual reference for: game state machine, the 60 Hz task scheduler
-  and slot ordering, the two timing systems (frame counter vs game
-  timers), formation grid layout, enemy lifecycle (fly-in → home →
-  attack → exploding → respawn), path bytecode format, player /
-  bullet / bomb flow, and the rendering pipeline. **Read this first**
-  when picking up new work — it shows how the pieces connect.
+  (with a DESIGN RATIONALE callout explaining why the JS port mirrors
+  it 1:1 and where CPU1 stand-ins fit), the two timing systems (frame
+  counter vs game timers), formation grid layout, enemy lifecycle
+  (fly-in → home → attack → exploding → respawn), path bytecode format,
+  player / bullet / bomb flow, and the rendering pipeline. **Read this
+  first** when picking up new work — it shows how the pieces connect
+  and why they're structured the way they are.
 
 These are the project's living docs. Keep them current; they're what
 makes resuming work in a later session cheap.
 
 **When you discover something** — a wrong slot count, a corrected
-coordinate value, a Z80 behaviour the diagram glossed over, a fixed
-data table — **update diagram.html in the same change**. Stale
-diagrams are worse than missing ones because they get trusted. If a
-section's data is invalidated by a finding, fix the section, don't
-just add a footnote.
+coordinate value, a Z80 behaviour the doc glossed over, a fixed data
+table — **update architecture.html in the same change**. Stale diagrams
+are worse than missing ones because they get trusted. If a section's
+data is invalidated by a finding, fix the section, don't just add a
+footnote.
 
 ## Things that will trip you up
 
