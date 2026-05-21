@@ -215,6 +215,21 @@ RAW_SLICES = [
     # frame; port inlines the selector logic rather than extracting T1B90.
     # research_mothership.md §7.2.
     ("PARTICLE_SPRITES", 0x1B60, 48),
+    # source T2800/T2900/T2A00/T2B00 — 1 KB total of L2085 scattered-debris
+    # engine data. Two pairs (one per killed object):
+    #   T2800 (256 B)  — player-explosion tile data    (FG tile codes)
+    #   T2900 (256 B)  — player-explosion control bits (sparse, ~4% set)
+    #   T2A00 (256 B)  — mothership-explosion tile data
+    #   T2B00 (256 B)  — mothership-explosion control bits (~7% set)
+    # Walked by the L2085 engine: 32-byte sliding control-table window
+    # selected from CounterA5 (see research_explosion_visual.md §5.2),
+    # 16 column-pairs × 16 rows = 256 cells scanned per frame, ~10
+    # (player) / ~20 (mothership) cells actually written.
+    # research_explosion_visual.md §6.
+    ("PLAYER_EXPLOSION_TILES",       0x2800, 256),
+    ("PLAYER_EXPLOSION_CONTROL",     0x2900, 256),
+    ("MOTHERSHIP_EXPLOSION_TILES",   0x2A00, 256),
+    ("MOTHERSHIP_EXPLOSION_CONTROL", 0x2B00, 256),
     # source T1BC0 — 64 bytes for the mothership antenna + alien-pilot
     # animation (8 frames × 8 tiles each, 2 cols × 4 rows column-major).
     # Drawn at fixed BG cell $49A6 by $2322 on 3 of every 4 mothership-

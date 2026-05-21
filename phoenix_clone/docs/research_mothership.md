@@ -1028,28 +1028,25 @@ git log: `git log --grep="step 12" --oneline`.
 | 12.8 ✅ | Bonus score `$2520` (top scoreboard) + K cheat polish |
 | 12.9 ✅ | Particle explosion central path (T1B60/70/80 + T1B90) |
 | 12.10 ✅ | `$21D2` stage-B respawn + `$24E0` continuous-scroll + dynamic row tracking (removes 12.5b temp shift) + bonus popup at mothership + JT4 stop-gap removed |
-| 12.x ✅ | Scattered explosion particles (visual-effect port) + state7 freeze fix |
+| 12.x ✅ | Source-faithful `$2085` scattered explosion particles + state7 freeze fix |
 
 ### Port deviations from the planned sub-steps
 
 - **12.5b stage A→B one-time shift** added (then removed in 12.10
   when `$24E0` landed): mid-step compensation for unported scroll.
 
-- **Visual-effect port of `$2085` odd-CounterA5 scattered particles**
-  in 12.x: source's `$2085 + T2A00/T2B00` (serpentine 2D-blit with
-  control-byte-gated cell writes) replaced with angle/radius scatter
-  of T2A00-sampled tile codes. Captures chaotic-explosion visual
-  without ~100 lines of source-faithful address math. **User-flagged
-  topic for post-project discussion: faithful port vs visual-effect
-  port trade-off.**
-
-  **Update (2026-05-20):** ✅ Research deferral resolved by
-  `research_explosion_visual.md`. L2085 turned out to be write-only
-  (no screen-RAM persistence dependency), so a source-faithful port
-  is ~20 lines of JS — not 100. The walk-math also revealed the
-  scatter is a center-out shockwave (expands as CounterA5 ticks
-  down), not random noise. Replacement of `_drawScatteredParticles`
-  unblocked; pending implementation.
+- **Source-faithful `$2085` odd-CounterA5 scattered particles** —
+  earlier port iteration used an angle/radius visual-effect scatter
+  to avoid the (then-unanalyzed) screen-RAM-native walk. Replaced
+  2026-05-21 with the actual `$2085` engine driving T2A00/T2B00,
+  per `research_explosion_visual.md §5` and §9.2 Strategy 1.
+  Implemented as `_drawScatteredParticles` → `_walkL2085` writing
+  into `state.scatteredDebris` (separate Map so the per-call region
+  wipe doesn't clobber the central particle or bonus-popup). Anchored
+  at the pilot (col 12, row beltRow-2) so the simulation's window-0
+  centroid lands on the mothership cockpit; verified at runtime:
+  CounterA5 $41 (window 4) produces 21 cells, matching research §6.1's
+  expected T2B00 L=$60 density.
 
 - **No on-screen popup for `$2520` bonus score in 12.8** (deferred
   to 12.10) — caught up via fgOverlay popup using digit tiles.

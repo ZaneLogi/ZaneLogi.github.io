@@ -102,25 +102,6 @@ sound, then the smaller residual gaps below. Status as of 2026-05-20.
   smooth per-pixel scroll. Hides a wrap-and-erase artifact the
   arcade's CRT decay masked. See `research_rendering.md §4.2`.
 
-- **Mothership scattered-particle explosion is visual-effect, not
-  source-faithful.** Source's `$2085 + T2A00/T2B00` is a serpentine
-  2D-blit with control-byte gating; port uses an angle/radius
-  scatter at varying offsets for similar chaotic look. See
-  `research_mothership.md §10` and the 12.x commit. Research
-  deferral closed 2026-05-20 by `research_explosion_visual.md` —
-  source-faithful replacement is unblocked (~20 lines of JS, not
-  ~100 as originally estimated). Implementation pending.
-
-- **Player explosion: L2070 serpentine scatter skipped.** Same medium
-  gap as the mothership deviation above — `L2085` was assumed
-  screen-RAM-native (clear-cell-and-replace semantics). Port uses
-  only the L20E8 / T1B90 4×4 particle cycle (same pipeline as step
-  12.9 mothership). See `research_player_ship.md §2.5` and the step
-  13 commit. Research deferral closed 2026-05-20 by
-  `research_explosion_visual.md` — the persistence concern was
-  misframed (L2085 is write-only); a source-faithful port is
-  unblocked. Implementation pending.
-
 - **Player shield: explicit counter check, no tile-level absorption.**
   Source has two collision paths and they handle shield differently:
   enemy-bullet path (`L0CB4`/`L0CC4`) relies on screen-RAM tile lookup

@@ -57,6 +57,7 @@ export const render = {
         this.drawBonusExplosions();
         this.drawHud();
         this.drawSpiralOverlay();
+        this.drawScatteredDebris();
     },
 
     // $2230 spiral-fill overlay — draws asterisk tiles ($1F) on top of
@@ -83,6 +84,24 @@ export const render = {
         const ctx = gfx.ctx;
         const images = resource.fgTileImages;
         for (const [key, tile] of state.fgOverlay) {
+            const sep = key.indexOf(',');
+            const x = +key.slice(0, sep);
+            const y = +key.slice(sep + 1);
+            ctx.drawImage(images[tile], x, y);
+        }
+    },
+
+    // L2085 scattered-debris overlay — written to state.scatteredDebris by
+    // states_player.js:_drawPlayerScatteredFrame and
+    // states_mothership.js:_drawScatteredParticles. Drawn LAST (above
+    // central particle and bonus-popup) since the source's L2085 writes
+    // happen at the tail of its per-frame dispatch.
+    // research_explosion_visual.md §5/§9.
+    drawScatteredDebris() {
+        if (state.scatteredDebris.size === 0) return;
+        const ctx = gfx.ctx;
+        const images = resource.fgTileImages;
+        for (const [key, tile] of state.scatteredDebris) {
             const sep = key.indexOf(',');
             const x = +key.slice(0, sep);
             const y = +key.slice(sep + 1);

@@ -228,44 +228,39 @@ intros). Resets scroll + clears the background plane on each late-phase
 frame. On the alien combat stages (0-3, A-B) this is a return, so the
 starfield + game state survive the player explosion intact.
 
-### 2.5 Port deviation — skip `L2070` serpentine scatter
+### 2.5 `L2070` serpentine scatter — source-faithful walk
 
-The port reuses the `L20E8` / `T1B90` 4×4-tile particle cycle (already
-wired for the mothership explosion at step 12.9) and **skips the
-`L2070` / `T2800` / `T2900` serpentine scatter entirely**.
+State-4's `L0BBA` early phase dispatches on `(CounterA5 & 3)`:
 
-Reason — same medium-gap as the mothership deviation in
-`research_mothership.md §10`. `L2085` is screen-RAM-native: its
-"clear-cell, optionally overwrite with fragment tile" semantics depend
-on tile cells persisting across frames, which the canvas port has no
-analog for. Replicating it faithfully would require:
+| `A5 & 3` | Path           | Visual                                |
+|----------|----------------|---------------------------------------|
+| 0, 2     | `L0FC0`        | Alien-kill / bonus explosion anim tick |
+| 1        | `L20E8` →T1B90 | Central 4×4 particle sprite at player |
+| 3        | `L2070` →T2085 | Scattered debris (this section)        |
 
-1. Decoding T2900 (256 B bitmask) + T2800 (256 B fragment tiles) into
-   an explicit `(canvas_x, canvas_y, tileId)` set at build time.
-2. Tracking which fragments are visible on each of the ~48 early-phase
-   frames (source's per-frame `L0BBA` bit-0 / bit-1 alternation
-   between `L0FC0`, `L2070`, `L20E8` modulates what's drawn).
-3. Adding a new render path (`state.playerExplosion[]` + canvas blit)
-   for one explosion.
+`L2070` falls through to the shared `L2085` engine described in
+`research_explosion_visual.md §5`. The player branch uses T2900
+(256 B control bits, ~4% set) for cell gating and T2800 (256 B FG
+tile codes) for the fragment palette. Each frame the engine selects
+a 32-byte control-window via `L = $E0 - ((CounterA5 - $20) << 2 & $E0)`,
+then walks 16 column-pairs × 16 rows = 256 cells, writing ~10 cells
+on average — debris that expands from a tight cluster at the player
+position (window 0, CounterA5 `$58-$5F`) outward to a full 16×16
+spread (window 7, CounterA5 `$20-$27`).
 
-vs. the visual-effect approach: reuse the existing 4×4 particle
-cycle, get a perceptually-similar "debris" look in ~10 lines of code.
+`L2085` is write-only against screen RAM (research §5.1 dispels the
+"persistence" concern that drove the original deferral here), so the
+port can recompute each frame's debris set from scratch.
 
-**Decision (2026-05-19):** visual-effect approach. This extends the
-mothership scatter deviation (already documented at
-`research_mothership.md §10`) to also cover the player explosion. One
-trade-off pattern, two applications. Parked for post-project review.
-
-**Update (2026-05-20):** ✅ Research deferral resolved by
-`research_explosion_visual.md`. Key finding: L2085 is write-only
-against screen RAM (the persistence concern that drove this
-deferral was a misreading) — a source-faithful port is ~20 lines of
-JS per strategy 1, not the "100+ lines of address math" originally
-estimated. The visual-effect deviation in
-`states_mothership.js:_drawScatteredParticles` and the unported
-L2070 path in `state4_PlayerExplosion` can be replaced with a
-walk-decoder against extracted T2800/T2900/T2A00/T2B00 byte arrays.
-Port implementation pending; see `research_explosion_visual.md §9`.
+**Port — `_drawPlayerScatteredFrame`:** see `states_player.js`. Walks
+T2900 + T2800 directly per `research_explosion_visual.md §9.2`
+Strategy 1; writes into `state.scatteredDebris` (separate from
+`state.fgOverlay` so the per-call region wipe doesn't clobber the
+central particle drawn on alternate frames). Anchored at
+`(player.x - 56, player.y - 88)` so the simulation's window-0
+centroid lands on the player; verified byte-for-byte against the
+research doc's expected window-7 cell list. Calibration is the
+research's §10 best-guess and may want a tweak after MAME comparison.
 
 ---
 
@@ -595,7 +590,7 @@ the active phase via the `> 0xC0` predicate (see
 | `L0AEA` state 4       | `states.js:state4_PlayerExplosion` (replaces stub)        |
 | `L0BBA` early phase   | inside `state4_PlayerExplosion`                           |
 | `L20E8` particle blit | reuse existing T1B90 / 4×4 particle path from step 12.9   |
-| `L2070` serpentine    | **skipped** — see §2.5 port deviation                     |
+| `L2070` → `L2085`     | `_drawPlayerScatteredFrame` (T2800/T2900 walk via `state.scatteredDebris`) — see §2.5 |
 | `L0BA0` late phase    | inside `state4_PlayerExplosion`                           |
 | `ClearForeground`     | state-4 `a5==$20` branch: clear `fgOverlay`, all alien `controlA & 0x08`, bird `shape`, `enemyBullets[*].state & 0x08`, `player.bullet.active`, explosion + bonusExplosion counters — see §2.3 |
 | `L0B15` decision      | inside `state4_PlayerExplosion`, at CounterA5==0          |

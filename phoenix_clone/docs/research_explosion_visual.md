@@ -20,11 +20,11 @@ State-machine dispatch lives in `research_player_ship.md §2` and
 share — the two render paths (central sprite + scattered debris) and
 their ROM data tables.
 
-The scattered-debris path was deferred at port-time (see the deferral
-notes in the two state-machine docs). This research pass exists to
-characterize the engine precisely enough that the port can either land
-a source-faithful implementation or commit to the visual-effect
-approximation already in place for the mothership.
+This doc characterizes the engine to the byte level. The port lands a
+source-faithful walk for both render paths — central sprite and
+scattered debris — driven directly by the four ROM tables described
+in §6. §9 covers the implementation; §10 records the calibration
+choices.
 
 ---
 
@@ -176,6 +176,19 @@ The port renders into `fgOverlay` rather than screen-RAM, with a 4×4
 delete-region pass on the "deletion" branches. Visually equivalent
 to source.
 
+**Pre-clear on every frame (not just the deletion branches).** Source's
+`DrawImageCbyB` unconditionally writes all 16 cells, so `$00` bytes
+inside T1B70 (4 zeros) and T1B80 (12 zeros) erase the previous frame's
+tiles at those positions. The port skips `$00` cells (canvas
+transparency convention), so it must explicitly clear the 4×4 region
+before drawing — otherwise dense-frame tiles linger at the `$00` slots
+of subsequent medium/sparse frames and build up across the pulse
+cycle instead of cleanly transitioning M→D→M→S→erase. Both
+`_drawParticleFrame` (mothership) and `_drawPlayerParticleFrame`
+(player) do this pre-clear; the player version was missed when first
+ported in step 13 and fixed alongside the §5 scatter work
+(2026-05-21).
+
 `research_player_ship.md §2.2` and `research_mothership.md §7.2`
 cover the per-call sprite positioning in more detail.
 
@@ -183,7 +196,7 @@ cover the per-call sprite positioning in more detail.
 
 ## 5. Tier 2 — scattered debris engine (`L2085`)
 
-The deferred path. Source byte-level:
+Source byte-level:
 
 ```
 2085: SUB $20            ; A := CounterA5 - $20    (range $00..$3F during early phase)
@@ -392,8 +405,7 @@ So per-frame: ~10 cells for player, ~20 for mothership. Far sparser
 than the central 4×4 sprite (16 cells). The scatter is **smaller in
 total cell count** than the central pulse — its visual contribution
 is "a few stray fragments scattered around" rather than "a debris
-cloud." This explains why the deferral wasn't immediately visually
-obvious during smoke tests.
+cloud."
 
 ### 6.2 T2800 (player tile data, 256 B)
 
@@ -525,10 +537,9 @@ explosion, but the windows are walked in L_initial-decreasing order
   the full 16×16 area
 
 So the explosion **starts as a pinpoint and expands outward** as the
-animation progresses. That's the opposite of what I'd assumed from
-the deferral notes (which suggested "chaotic scatter from the start").
-The expansion gives the explosion a natural "shockwave" feel — debris
-appears to fly outward from the impact point over the ~1 second window.
+animation progresses. The expansion gives the explosion a natural
+"shockwave" feel — debris appears to fly outward from the impact
+point over the ~1 second window.
 
 The mothership explosion has the same expanding shape but ~2× denser
 (~20 cells per frame instead of ~10), making the visual punchier.
@@ -578,11 +589,12 @@ total for player, ~150 for mothership.)
 
 ---
 
-## 9. Port mapping plan
+## 9. Port implementation
 
 ### 9.1 Data extraction
 
-Add four entries to `tools/build_data.py`:
+`tools/build_data.py` extracts the four ROM tables as separate
+256-byte Uint8Arrays:
 
 ```python
 ("PLAYER_EXPLOSION_TILES",       0x2800, 256),  # T2800
@@ -591,159 +603,105 @@ Add four entries to `tools/build_data.py`:
 ("MOTHERSHIP_EXPLOSION_CONTROL", 0x2B00, 256),  # T2B00
 ```
 
-Or alternatively two consolidated 512-byte slices with offset
-constants. Either way: ~1 KB of `data.js` growth.
+1 KB total of `data.js` growth.
 
-### 9.2 Strategy 1 — live decoder
+### 9.2 Walk implementation
 
-Replicate the walk math in `states_player.js:_drawPlayerScatteredFrame`
-and `states_mothership.js:_drawScatteredParticles`. Each frame:
+Both `states_player.js:_drawPlayerScatteredFrame` and
+`states_mothership.js:_drawScatteredParticles` walk the L2085 algorithm
+live each frame. The mothership version factors out `_walkL2085(...)`
+as a shared helper; the player version inlines the same loop. Walk
+math:
 
 ```js
 const L_initial = (0xE0 - (((counterA5 - 0x20) << 2) & 0xE0)) & 0xFF;
 state.scatteredDebris.clear();
-let deOff = 0;
-for (let i = 0; i < 32; i++) {
-    const controlByte = CONTROL_TABLE[(L_initial + i) & 0xFF];
-    // Each pair-of-bytes covers one canvas column-pair (16 rows tall):
-    //   byte 0 (i=0,2,4,...) → rows 0..7 of column pair
-    //   byte 1 (i=1,3,5,...) → rows 8..15 of column pair
-    const col = i >> 1;                    // 0..15 (column index)
-    const rowBase = (i & 1) ? 8 : 0;
+let L = L_initial, deOff = 0;
+for (let pair = 0; pair < 16; pair++) {
+    // Byte 0: bits 0..7 walk DOWN rows 0..7 of column `pair`.
+    let controlByte = CONTROL_TABLE[L];
     for (let bit = 0; bit < 8; bit++) {
         if (controlByte & (1 << bit)) {
-            const tile = TILES_TABLE[deOff];
+            const tile = TILE_TABLE[deOff];
             if (tile !== 0) {
-                const row = rowBase + bit;
-                state.scatteredDebris.set(
-                    `${baseX + col * 8},${baseY + row * 8}`, tile);
+                const x = baseX + pair * 8, y = baseY + bit * 8;
+                if (x >= 0 && x < 208 && y >= 0 && y < 256) {
+                    state.scatteredDebris.set(`${x},${y}`, tile);
+                }
             }
         }
         deOff++;
     }
+    L = (L + 1) & 0xFF;
+    // Byte 1: bits 0..7 walk DOWN rows 8..15 of same column.
+    // (same body as above, with row = (8 + bit) * 8)
+    ...
+    L = (L + 1) & 0xFF;
 }
 ```
 
 (`col`/`row` derivation verified empirically by the §7 simulation —
 e.g. window 7 has cells at `(0, 1, $32)` and `(0, 15, $42)` because
 T2900[$E0]=$02 (bit 1) and T2900[$E1]=$80 (bit 7), which the
-formula above produces for i=0/bit=1 and i=1/bit=7 respectively.)
+formula produces for pair=0/bit=1 and pair=0(byte1)/bit=7 respectively.)
 
-Pros: walk math is in the JS — easy to audit against this doc. ~20
-lines total. No build-time machinery.
-Cons: 32-iteration inner-outer loop runs each frame (~256 op count).
-Negligible at 60 Hz on modern hardware.
+Runtime cost: 32-iteration outer loop × 8 inner bits = 256 ops per
+frame, only during the ~16 L2085-firing frames of each explosion.
+Negligible at 60 Hz.
 
-### 9.3 Strategy 2 — build-time unrolling
+### 9.3 Per-explosion integration
 
-Run the §7 simulation in Python (live inside `build_data.py`) and
-emit precomputed per-window arrays:
+| Site | Implementation |
+|---|---|
+| `states_mothership.js:_drawScatteredParticles` | Calls `this._walkL2085(counterA5, baseX, baseY, MOTHERSHIP_EXPLOSION_CONTROL, MOTHERSHIP_EXPLOSION_TILES)`. Driven from `state6_MothershipExplosion`'s `(a5 & 1) === 1` branch. |
+| `states_player.js:_drawPlayerScatteredFrame` | Inlined walk against `PLAYER_EXPLOSION_CONTROL` + `PLAYER_EXPLOSION_TILES`. Driven from `state4_PlayerExplosion`'s `(a5 & 3) === 3` branch. |
 
-```js
-export const PLAYER_EXPLOSION_FRAMES = [
-    // Window 0 (L=$00, CounterA5 $58-$5F): [[col, row, tile], ...]
-    [[6, 13, 0x40], [7, 11, 0x3E], [7, 12, 0xC8], ...],
-    // ...
-    // Window 7 (L=$E0, CounterA5 $20-$27):
-    [[0, 1, 0x32], [0, 15, 0x42], [1, 10, 0xE1], ...],
-];
-```
+Both write into `state.scatteredDebris` (a Map separate from
+`state.fgOverlay` so the per-call region wipe doesn't clobber the
+L20E8 central particle drawn on alternate frames or the mothership
+bonus-score popup). `render.drawScatteredDebris` paints it as the
+last FG-plane pass per frame, mirroring the source's tail-of-dispatch
+write order.
 
-JS at runtime:
-
-```js
-const windowIdx = 7 - (((counterA5 - 0x20) >> 3) & 7);  // §5.2 mapping
-const frame = PLAYER_EXPLOSION_FRAMES[windowIdx];
-state.scatteredDebris.clear();
-for (const [col, row, tile] of frame) {
-    state.scatteredDebris.set(`${baseX + col * 8},${baseY + row * 8}`, tile);
-}
-```
-
-Pros: ~8 lines of JS. Walk math is gone from runtime entirely.
-Cons: `build_data.py` grows by ~30 lines (the simulator can be
-imported from `tools/simulate_l2085.py`). The data flow becomes
-"Python is the spec; JS just iterates."
-
-### 9.4 Recommendation
-
-**Strategy 1.** The walk math turned out to be ~10 lines once the
-algorithm was understood. The total runtime cost is trivial (256
-operations per frame, only during the ~32-frame explosion early
-phase). Strategy 2's main advantage — "intricate math runs once at
-build time" — doesn't apply once the math is this simple.
-
-Strategy 2 is still worth keeping in mind as a fallback if A/B testing
-reveals the walk math has a subtle bug — having the simulator output
-the expected per-frame cells makes verification trivial.
-
-### 9.5 Per-explosion integration
-
-| Site | Replace | With |
-|---|---|---|
-| `states_mothership.js:_drawScatteredParticles` | Current cos/sin visual-effect ring | Strategy-2 lookup into `MOTHERSHIP_EXPLOSION_FRAMES` |
-| `states_player.js:state4_PlayerExplosion` early phase, `a5 & 3 == 3` branch | (currently no scatter) | Strategy-2 lookup into `PLAYER_EXPLOSION_FRAMES` |
-
-Both sites: compute `baseX/baseY` from the killed object's position +
-the source-offset constants (player: `E - $0A + $C0` per §2;
-mothership: `E - $05 + $C0` per §3). Translate from source's
-screen-RAM offset arithmetic to canvas (x, y) — see the existing
-`_drawParticleFrame` calls for the conversion pattern.
-
-### 9.6 Existing visual-effect ring removal
-
-The current `_drawScatteredParticles` in `states_mothership.js` uses
-a cos/sin scatter — a visual-effect approximation predating this
-research. Strategy-2 replacement is byte-for-byte source-faithful,
-so the ring code can be deleted in the same commit. Net diff
-should be roughly zero (~30 lines removed, ~30 lines added).
+`scatteredDebris.clear()` runs at three sites: at the start of every
+L2085 call (source's `$20B5 LD (HL),$00` region wipe), at state-4
+`a5==$20` (`L0BBA` mid-explosion ClearForeground), and at
+`_motherShipBonusScore`/`_playerRespawnDecision` (explosion-end
+boundaries).
 
 ---
 
-## 10. Open questions / verify at port time
+## 10. Calibration notes
 
-- **`baseX` / `baseY` calibration**: Source computes the engine's
-  starting screen-ptr from the player or mothership screen address
-  via `LD A, E; SUB $0A; ADD $C0; LD C, A` (`$2071-$2079`). The exact
-  canvas offset of the 16×16 region's top-left relative to the
-  killed object's position needs verification. From the simulation
-  data alone, window 0 (explosion start) has cells clustering at
-  `row 10-13, col 6-9` — roughly the bottom-center of the region —
-  consistent with the region being **centered on the killed object,
-  not anchored at its top-left**. Likely `baseX = player.x - 64`,
-  `baseY = player.y - 56`, but **needs A/B against MAME**.
+- **Anchor offsets.** The 16×16 region's canvas top-left is computed
+  from the killed object's position:
+  - Player: `baseX = player.x - 56`, `baseY = player.y - 88`. Lands
+    the simulation's window-0 centroid (col ≈ 7.5, row ≈ 11.5 — the
+    *bottom-center* of the region per T2800/T2900's data layout) on
+    the player ship center.
+  - Mothership: `baseX = 40`, `baseY = (beltRow - 1) * 8 - 56`. Lands
+    T2A00/T2B00's window-0 centroid (col ≈ 7.5, row ≈ 7.5 — *centered*
+    in the region; different table layout from the player) on the
+    pilot at canvas (100, (beltRow-1)*8+4).
+  Both are best-guesses from the §7-§8 simulation; the source's
+  screen-ptr arithmetic (`$2071-$2079` for player, `$2415-$2419` for
+  mothership) does similar `E ± const + C0` math, but the exact
+  canvas offset to drop into has never been A/B'd against MAME.
 
-- **Region edge clipping**: 16-cell-wide region × 8 px = 128 px.
-  Canvas is 208 px wide. Player X ranges `$0C..$C0` = 12..192 px.
-  With `baseX = player.x - 64`, region spans `player.x - 64 ..
-  player.x + 56`. At extreme player X (12), region left edge is at
-  -52 — partially off-canvas. At extreme right (192), region extends
-  to 248 — partially off-canvas right. Source presumably lets the
-  writes go to screen-RAM wrap; port should skip out-of-canvas
-  cells (`if (canvas_x < 0 || canvas_x >= 208) continue;`).
+- **Region edge clipping.** 16-col region × 8 px = 128 px. With
+  player X ranging $0C..$C0 (12..192) and `baseX = player.x - 56`,
+  the region can extend off either canvas edge — and likewise for
+  mothership when the pilot is near a boundary. The walk skips
+  cells outside `[0, 208) × [0, 256)`. Source presumably let writes
+  wrap into adjacent screen-RAM rows; the canvas port treats wraps
+  as invisible.
 
-- **Per-frame clear semantics for `state.scatteredDebris`**:
-  Source's L2085 clears every cell in the region each call (writes
-  `$00` first, then conditionally overwrites with a tile). Port
-  should call `state.scatteredDebris.clear()` at the start of each
-  scattered-particle frame, then fill with the current window's
-  cells. Without this, debris from previous frames lingers and
-  accumulates — wrong behavior (source visibly wipes the region
-  each frame).
-
-- **state-4 `a5=$20` wipe interaction**: The wipe at `a5 === $20`
-  clears `fgOverlay` + explosion slots, but not `scatteredDebris`.
-  Add `state.scatteredDebris.clear()` to that wipe so the debris
-  doesn't survive past the mid-explosion ClearForeground.
-
-- **Mothership stage 9-A transition during debug-K cheat**: If the
-  player kills the mothership immediately after stage 9 fade-in
-  starts (via debug `K`), state-6 runs with the mothership still
-  scrolling in (`bgTiles` updated each frame). The `baseX/baseY`
-  calculation should use the CURRENT mothership position, not the
-  stored start position. Verify the mothership-center calculation
-  in `_drawScatteredParticles` handles this. [test by triggering K
-  during stage 9]
+- **Mothership pilot tracking.** `findBeltRow(state)` scans
+  `state.bgTiles` for the belt-tile row each frame, so the anchor
+  `(beltRow - 1) * 8 - 56` follows the mothership as `$24E0`
+  continuous-scroll drifts it down during stage B combat. Same
+  helper drives the L20E8 central-particle anchor — both effects
+  stay co-located on the moving pilot.
 
 ---
 
@@ -751,11 +709,11 @@ should be roughly zero (~30 lines removed, ~30 lines added).
 
 - `research_player_ship.md §2` — player explosion state-4 dispatch
   (covers the L0FC0 path that's not part of this doc's scope)
-- `research_player_ship.md §2.5` — the deferral note this research
-  resolves; can be updated to "✅ resolved, see research_explosion_visual.md"
+- `research_player_ship.md §2.5` — port mapping for `L2070` → `L2085`
+  walk via `_drawPlayerScatteredFrame`
 - `research_mothership.md §7` — mothership explosion state-6 dispatch
-- `research_mothership.md §10` item 7 — the same deferral note from
-  the mothership side
+- `research_mothership.md §10` — port deviations list (deviations from
+  earlier port iterations now resolved by this engine)
 - `research_rendering.md §2.5` — sprite decode + the FG/BG plane split
 - `Code.md $2085-$20E2` — the engine itself
 - `Code.md $2800/$2900/$2A00/$2B00` — the four ROM data tables

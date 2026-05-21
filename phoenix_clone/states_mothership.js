@@ -21,7 +21,7 @@ const PARTICLE_T1B80 = 32;  // frame 2 — sparse
 // $60-$6F belt-tile codes. Returns the row index, or -1 if no belt.
 // Cheap (~18 cells × 33 rows = 594 ops) and runs at beltAnimate's 7.5 Hz
 // during stage B + occasional antenna/particle calls; total < 30k ops/s.
-function findBeltRow(state) {
+export function findBeltRow(state) {
     let bestRow = -1, bestCount = 0;
     for (let r = 1; r <= 32; r++) {
         let count = 0;
@@ -464,59 +464,6 @@ export const mothershipMixin = {
         }
     },
 
-    // $2085 + T2A00/T2B00 — visual-effect port (NOT source-faithful).
-    // Source's odd-CounterA5 path draws a second set of particles via
-    // a serpentine 2D-blit with control-byte-gated cell writes, using
-    // T2A00 (FG tile data, 256 bytes) + T2B00 (control bits, 256 bytes).
-    // Source-faithful port deferred — see research_mothership.md §10
-    // for the deferral note.
-    //
-    // This port renders the visual essence: each odd-A5 tick adds a
-    // small ring of particle tiles at varying radii around the mother-
-    // ship center. Particles accumulate in fgOverlay (no per-tick
-    // clear), building up density over the explosion window
-    // ($5F → $21). Cleared by _motherShipBonusScore's fgOverlay.clear()
-    // at A5=$20 (= source's $2520 ClearForeground equivalent).
-    _drawScatteredParticles(counterA5) {
-        const beltRow = findBeltRow(state);
-        if (beltRow < 0) return;
-        const centerRow = beltRow - 2;   // pilot-area row
-        const centerCol = 12;
-
-        // Tile-code pool sampled from T2A00 (mostly $CE..$E3 range).
-        const TILES = [0xCE, 0xCF, 0xD0, 0xD1, 0xD2, 0xD3, 0xDE, 0xDF, 0xE0, 0xE1, 0xE2, 0xE3];
-
-        // Phase 0..30 across the explosion window ($5F → $21).
-        const phase = (0x5F - counterA5) >> 1;
-
-        // Spawn 8 particles per tick at varying angles + radii.
-        // Each particle's position derived from a per-particle pseudo-
-        // random seed (deterministic, reproducible). Particles avoid
-        // the central 4×4 region (cols 11-14, rows 8-11) where the
-        // _drawParticleFrame clear-and-write would wipe them.
-        for (let i = 0; i < 8; i++) {
-            // Per-particle seed: mixed from counterA5 + index. The
-            // multiplicative constants are chosen for low-period mixing
-            // (cheap PRNG with no Math.random determinism worry).
-            const s1 = (counterA5 * 13 + i * 41 + 0x5A) & 0xFF;
-            const s2 = (counterA5 * 17 + i * 71 + 0xA5) & 0xFF;
-            // Angle in 0..2π via s1; radius 3..5 per particle (keeps
-            // particles inside the mothership area, not over the score
-            // row at top or below the player ship).
-            const angle = (s1 / 256) * Math.PI * 2;
-            const radius = 3 + ((s2 + phase) & 0x03);   // 3..6
-            const dx = Math.round(Math.cos(angle) * radius);
-            const dy = Math.round(Math.sin(angle) * radius);
-            const col = centerCol + dx;
-            const row = centerRow + dy;
-            // Clamp to mothership area (rows 5-16 = canvas y 32-127).
-            if (col < 3 || col > 22 || row < 5 || row > 16) continue;
-            // Skip if inside the central 4×4 region (would be wiped).
-            if (col >= 11 && col <= 14 && row >= 8 && row <= 11) continue;
-            state.fgOverlay.set(`${col * 8},${row * 8}`, TILES[s2 % TILES.length]);
-        }
-    },
-
     // $20E8 + T1B90 selector — particle frame draw (even-CounterA5 path).
     //
     // Source's T1B90 selector indexes by (CounterA5 >> 2) & $0E to pick
@@ -606,6 +553,7 @@ export const mothershipMixin = {
         state.player.bullet.active = false;
         for (const b of state.enemyBullets) b.state = 0;
         state.fgOverlay.clear();
+        state.scatteredDebris.clear();  // explosion-end wipe (research_explosion_visual.md §10)
 
         // Compute bonus score per $2525-$253C.
         const skillBonus = (((state.counterB9 + 0x60) & 0xFF) >> 1) & 0xFF;

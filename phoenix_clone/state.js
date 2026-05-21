@@ -297,6 +297,17 @@ export const state = {
         // during transition" visual.
         this.fgOverlay = new Map();
 
+        // L2085 scattered-debris overlay — "x,y" → tile code. Distinct from
+        // fgOverlay because source's L2085 wipes every cell in its 16×16
+        // region each call (writes $00 first, then conditionally overwrites
+        // with a tile), which would erase concurrent fgOverlay content
+        // (central particle, bonus-score popup) if they shared the same Map.
+        // Cleared at the start of each L2085 call (player + mothership
+        // scattered-frame draw), at state-4 `a5 == $20` mid-explosion wipe,
+        // and at state-6 mothership ClearForeground equivalent.
+        // research_explosion_visual.md §10.
+        this.scatteredDebris = new Map();
+
         // BG tile plane — 26 cols × 33 rows (1 extra "hidden" row at the
         // top, above the visible area). research_hardware.md §4 describes
         // the source's two independent tile planes (FG and BG each 32×26

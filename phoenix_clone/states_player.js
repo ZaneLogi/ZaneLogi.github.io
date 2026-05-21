@@ -187,11 +187,11 @@ export const playerMixin = {
     //   >  $20   → L0BBA early phase: particle frame draw on bit-0 odd, bit-1 clear ticks
     //
     // Source's L0BBA alternates between L0FC0 (alien + bonus explosion
-    // anims) on bit-0 even, L2070 (T2800/T2900 serpentine) on bit-0 odd
-    // + bit-1 set, and L20E8 (T1B90 4×4 particle) on bit-0 odd + bit-1
-    // clear. Port reuses L0FC0 and L20E8; the serpentine scatter is the
-    // second instance of the research_mothership.md §10 deviation (also
-    // documented at research_player_ship.md §2.5).
+    // anims) on bit-0 even, L2070 → L2085 (T2800/T2900 scattered debris)
+    // on bit-0 odd + bit-1 set, and L20E8 (T1B90 4×4 particle) on bit-0
+    // odd + bit-1 clear. All three are ported as of
+    // research_explosion_visual.md §9 — scatter writes into
+    // state.scatteredDebris, central particle into state.fgOverlay.
     state4_PlayerExplosion() {
         state.counterA5 = (state.counterA5 - 1) & 0xFF;
         const a5 = state.counterA5;
@@ -210,6 +210,7 @@ export const playerMixin = {
             // "GAME OVER" — source wipes them here so the game-over
             // banner sits on a (mostly) clean screen.
             state.fgOverlay.clear();
+            state.scatteredDebris.clear();      // research_explosion_visual.md §10
             for (const a of state.aliens) {
                 a.controlA &= ~0x08;
                 a.alive = false;
@@ -245,8 +246,10 @@ export const playerMixin = {
         } else if ((a5 & 0x02) === 0) {
             // bit-0 odd AND bit-1 clear → L20E8 player particle frame.
             this._drawPlayerParticleFrame(a5);
+        } else {
+            // bit-0 odd AND bit-1 set → L2070 → L2085 scattered debris.
+            this._drawPlayerScatteredFrame(a5);
         }
-        // bit-0 odd AND bit-1 set → L2070 serpentine scatter (port skipped).
     },
 
     // $20E8 + T1B90 selector port — particle frame at player's hit position.
@@ -261,24 +264,30 @@ export const playerMixin = {
         const START_COL = (cx >> 3) - 1;
         const START_ROW = (cy >> 3) - 1;
 
+        // Pre-clear the 4×4 region. Source's DrawImageCbyB writes EVERY
+        // cell of the 4×4 (including $00 = empty tile), which naturally
+        // erases the previous frame; the port skips $00 cells (canvas
+        // transparency convention) so the clear has to happen explicitly
+        // — otherwise dense-frame tiles at $00 positions of later
+        // medium/sparse frames linger and build up. Matches the
+        // mothership _drawParticleFrame pattern.
+        for (let dc = 0; dc < 4; dc++) {
+            for (let dr = 0; dr < 4; dr++) {
+                state.fgOverlay.delete(`${(START_COL + dc) * 8},${(START_ROW + dr) * 8}`);
+            }
+        }
+
         // T1B90 selector — (CounterA5 >> 2) & $0E maps to a frame:
         //   0 → T1B80 sparse, 2 → T1B70, 4 → T1B60 densest, 6 → T1B70.
-        // 8..E → source's "deletion" path; in port we clear the 4×4
-        // region (functionally equivalent to source's screen-RAM erase).
+        // 8..E → source's "deletion" path; pre-clear above already
+        // wiped the region, so we just return without drawing.
         const tableIdx = (counterA5 >> 2) & 0x0E;
         let frameOff;
         if      (tableIdx === 0) frameOff = PARTICLE_T1B80;
         else if (tableIdx === 2) frameOff = PARTICLE_T1B70;
         else if (tableIdx === 4) frameOff = PARTICLE_T1B60;
         else if (tableIdx === 6) frameOff = PARTICLE_T1B70;
-        else {
-            for (let dc = 0; dc < 4; dc++) {
-                for (let dr = 0; dr < 4; dr++) {
-                    state.fgOverlay.delete(`${(START_COL + dc) * 8},${(START_ROW + dr) * 8}`);
-                }
-            }
-            return;
-        }
+        else                     return;     // 8..E → deletion (region already cleared)
 
         // 4×4 column-major (DrawImageCbyB layout).
         for (let dc = 0; dc < 4; dc++) {
@@ -302,6 +311,7 @@ export const playerMixin = {
         if (state.player1Lives === 0) return;             // last life lost → GAME OVER
         state.gameState = 0;                              // respawn via cold path
         state.fgOverlay.clear();
+        state.scatteredDebris.clear();
     },
 
     // L0B60 — GAME OVER banner state. CounterA5 enters at 0 (carried

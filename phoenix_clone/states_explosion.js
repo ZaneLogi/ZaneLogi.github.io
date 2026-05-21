@@ -1,18 +1,25 @@
-// Explosion subsystem — L38F8 / L0EC3 spawn + L0FC0 / L3758 update.
+// Explosion subsystem — three families of visuals share this file:
 //
-// Shared by alien-kill (states.js bullet-vs-alien path), bird-kill
-// (states.js onBirdWingHit / onBirdHit), and mothership-pilot kill
-// (states_mothership.js). Spread into the main `states` object in
-// states.js the same way states_mothership.js / states_intro.js /
-// states_player.js do, so consumers continue to call
-// `this.spawnExplosion(...)` etc. with no change.
+//   1. Kill-anim slots (L38F8 / L0EC3 spawn + L0FC0 / L3758 update) —
+//      alien-kill (states.js bullet-vs-alien path), bird-kill (states.js
+//      onBirdWingHit / onBirdHit), bonus kills (200-pt path-byte 7/8).
 //
-// Carved out ahead of the explosion-visual port (research_explosion_visual.md
-// — L2085 center-out shockwave) so the visual rewrite lands in one
-// focused file instead of buried inside states.js.
+//   2. L2085 scattered-debris walk — center-out shockwave used by player
+//      death (T2800/T2900) and mothership pilot kill (T2A00/T2B00).
+//      Engine described in research_explosion_visual.md §5; §9.2
+//      "Strategy 1" walk math is implemented in _walkL2085.
+//
+// Spread into the main `states` object in states.js the same way
+// states_mothership.js / states_intro.js / states_player.js do, so
+// consumers continue to call `this.spawnExplosion(...)` /
+// `this._drawScatteredParticles(...)` / `this._drawPlayerScatteredFrame(...)`
+// with no change.
 
 import { state } from './state.js';
-import { ALIEN_EXPLOSION_ROM } from './data.js';   // source $17B0..$17F5 — T17B0 + frame tiles
+import { ALIEN_EXPLOSION_ROM,
+         PLAYER_EXPLOSION_TILES, PLAYER_EXPLOSION_CONTROL,
+         MOTHERSHIP_EXPLOSION_TILES, MOTHERSHIP_EXPLOSION_CONTROL } from './data.js';
+import { findBeltRow } from './states_mothership.js';   // L2085 mothership anchor tracks the moving pilot
 
 export const explosionMixin = {
     // L38F8 — find the first free alien-explosion slot ($4370 or $4374)
@@ -113,5 +120,95 @@ export const explosionMixin = {
             if (e.counter === 0) continue;
             e.counter = (e.counter - 1) & 0xFF;
         }
+    },
+
+    // $2085 walk — shared between the player and mothership scattered
+    // explosions. CounterA5 selects a 32-byte sliding window of the
+    // control table; the walk visits 16 column-pairs × 16 rows = 256
+    // cells, writing tileTable[deOff] to any cell whose control bit is
+    // set. Window L_initial computation:
+    //   L = $E0 - ((CounterA5 - $20) << 2 & $E0)
+    // ~10-25 cells actually written per frame depending on table
+    // density + window. Off-canvas cells are silently skipped (source's
+    // screen-RAM wrap is a no-op on the canvas's bounded coord space).
+    // research_explosion_visual.md §5/§7/§9.
+    _walkL2085(counterA5, baseX, baseY, controlTable, tileTable) {
+        const L_initial = (0xE0 - (((counterA5 - 0x20) << 2) & 0xE0)) & 0xFF;
+        let L = L_initial;
+        let deOff = 0;
+
+        for (let pair = 0; pair < 16; pair++) {
+            // Byte 0 of pair: bits 0..7 walk DOWN rows 0..7 of column `pair`.
+            let controlByte = controlTable[L];
+            for (let bit = 0; bit < 8; bit++) {
+                if (controlByte & (1 << bit)) {
+                    const tile = tileTable[deOff];
+                    if (tile !== 0) {
+                        const x = baseX + pair * 8;
+                        const y = baseY + bit * 8;
+                        if (x >= 0 && x < 208 && y >= 0 && y < 256) {
+                            state.scatteredDebris.set(`${x},${y}`, tile);
+                        }
+                    }
+                }
+                deOff++;
+            }
+            L = (L + 1) & 0xFF;
+            // Byte 1 of pair: bits 0..7 walk DOWN rows 8..15 of same column.
+            controlByte = controlTable[L];
+            for (let bit = 0; bit < 8; bit++) {
+                if (controlByte & (1 << bit)) {
+                    const tile = tileTable[deOff];
+                    if (tile !== 0) {
+                        const x = baseX + pair * 8;
+                        const y = baseY + (8 + bit) * 8;
+                        if (x >= 0 && x < 208 && y >= 0 && y < 256) {
+                            state.scatteredDebris.set(`${x},${y}`, tile);
+                        }
+                    }
+                }
+                deOff++;
+            }
+            L = (L + 1) & 0xFF;
+        }
+    },
+
+    // $2085 + T2A00/T2B00 — mothership scattered debris. Anchored so
+    // the explosion-start cluster (window 0) lands on the pilot.
+    // T2A00/T2B00's window-0 centroid is at region (col 7.5, row 7.5)
+    // — centered, unlike the player's (7.5, 11.5) bottom-anchored
+    // cluster (the two tables encode different explosion shapes).
+    //
+    // Pilot center is at canvas (100, (beltRow-1)*8 + 4). Region anchor
+    // is 7.5 cells left and 7.5 cells up so the cluster lands on the pilot.
+    _drawScatteredParticles(counterA5) {
+        const beltRow = findBeltRow(state);
+        if (beltRow < 0) return;
+        const baseX = 40;                       // = 100 - 60
+        const baseY = (beltRow - 1) * 8 - 56;   // = pilot_center_y - 60, kept 8-px aligned
+
+        // Source semantics: each call clears the region first ($20B5
+        // LD (HL),$00 inside the inner loop), then conditionally
+        // overwrites with a tile. The separate scatteredDebris Map
+        // makes "clear the region" a one-line clear() rather than a
+        // per-cell delete loop.
+        state.scatteredDebris.clear();
+        this._walkL2085(counterA5, baseX, baseY,
+                        MOTHERSHIP_EXPLOSION_CONTROL, MOTHERSHIP_EXPLOSION_TILES);
+    },
+
+    // $2070 → $2085 + T2800/T2900 — player scattered debris.
+    // Anchored such that the simulation's window-0 centroid (col ≈ 7.5,
+    // row ≈ 11.5 of the 16-col × 16-row region) lands at the player
+    // center — so the tight end-of-explosion cluster appears at the
+    // player's last-known position, with debris expanding outward as
+    // CounterA5 ticks DOWN ($60 → $20). Calibration is the research's
+    // §10 best-guess; tune if MAME comparison shows a different anchor.
+    _drawPlayerScatteredFrame(counterA5) {
+        const baseX = state.player.x - 56;
+        const baseY = state.player.y - 88;
+        state.scatteredDebris.clear();
+        this._walkL2085(counterA5, baseX, baseY,
+                        PLAYER_EXPLOSION_CONTROL, PLAYER_EXPLOSION_TILES);
     },
 };
