@@ -12,9 +12,11 @@ disassembly** before designing.
 
 - Vector-display arcade game (1024×1024 vector coordinate space,
   origin lower-left) — the **first vector-display port in this repo**
-- No build step, no npm — open `index.html` via the project's local
-  HTTP server (`python -m http.server -b 127.0.0.1 8080` from the repo
-  root, then `/asteroids_clone/`)
+- No build step, no npm — open the project via the local HTTP server
+  (`python -m http.server -b 127.0.0.1 8080` from the repo root, then
+  `/asteroids_clone/`). The eventual game will boot from
+  `index.html` + `main.js`; until then, the vector-ROM demo is at
+  `demos/vector_rom.html`.
 - ES6 modules load directly in the browser
 
 ## Project stage

@@ -1,4 +1,4 @@
-// asteroids_clone/main.js
+// asteroids_clone/demos/vector_rom.js — vector-ROM-shape verification demo
 //
 // One ship at a time, rendered at cabinet-faithful scale.
 // Canvas is 800x600 = 4:3, the actual Asteroids cabinet aspect ratio.
@@ -6,14 +6,18 @@
 // (1 DVG unit ≈ 0.78 canvas pixels). This is the same coordinate scale
 // the 1979 cabinet rendered at.
 //
-// At gs=0, ShipDir0 renders ~96 DVG units = ~75 canvas pixels — the
-// actual gameplay ship size. Crank gs up to see SVEC back-edge details
-// emerge (they're invisible at gameplay scale).
+// At gs=0, ShipDir0 renders as a closed east-pointing arrow ~96 DVG
+// units across — the actual gameplay ship size. VEC tip-lines and SVEC
+// back-edge detail are visually proportional thanks to the additive
+// scale model (see research_dvg.md §4 + §6). Increasing gs grows BOTH
+// VEC and SVEC magnitudes together; saturation kicks in for SVECs once
+// (scaleMode + 2 + gs) > 9 (e.g. scaleMode=3 SVECs vanish at gs > 4).
 //
-// Prev/Next buttons step through all 17 ShipDirN variants.
+// Prev/Next buttons step through all 17 ShipDirN variants and the
+// other shapes (Rock, Shrapnel, UFO, etc.).
 
-import { VROM } from './vector_rom_data.js';
-import { runList } from './dvg.js';
+import { VROM } from '../vector_rom_data.js';
+import { runList } from '../dvg.js';
 
 const canvas = document.getElementById('demo');
 const ctx = canvas.getContext('2d');
@@ -53,9 +57,9 @@ function drawScaleNote(globalScale) {
   ctx.font = '11px -apple-system, sans-serif';
   ctx.textAlign = 'left';
   ctx.fillText(
-    `gs=${globalScale} — data is byte-faithful to the ROM. ` +
-    `Axis-aligned ships (ShipDir0/16/64) and ThrustDir0/64 use SVECs ` +
-    `that vanish at low gs — matches the cabinet's actual rendering.`,
+    `gs=${globalScale} — data byte-faithful to ROM. Additive scale model ` +
+    `(research_dvg.md §4 + §6): VEC total = local+gs; SVEC total = ` +
+    `(scaleMode+2)+gs. Saturation when total>9 (segment vanishes).`,
     12, canvas.height - 12,
   );
 }

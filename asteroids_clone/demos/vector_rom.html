@@ -45,7 +45,9 @@
   <h1>Vector ROM ship-shape demo</h1>
   <p>
     Canvas matches the Asteroids cabinet aspect ratio (4:3, DVG 1024×768 logical).
-    Use the slider to vary <code>globalScale</code> and watch SVEC back-edge details emerge as scale increases.
+    Use the slider to vary <code>globalScale</code> — VEC and SVEC magnitudes grow together
+    (additive scale model per <code>research_dvg.md §4 + §6</code>); SVEC segments saturate to zero
+    when <code>(scaleMode + 2 + gs) &gt; 9</code>.
   </p>
   <div class="controls">
     <button id="prev-btn">← Prev</button>
@@ -62,6 +64,6 @@
     </label>
   </div>
   <canvas id="demo" width="800" height="600"></canvas>
-  <script type="module" src="./main.js"></script>
+  <script type="module" src="./vector_rom.js"></script>
 </body>
 </html>

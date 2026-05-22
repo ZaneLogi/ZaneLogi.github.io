@@ -54,10 +54,12 @@ Implementation phase started on the same day. Current state:
   (re-extract when porting attract mode).
 - **`dvg.js`** — ~40-line DVG interpreter (per R-B §11 spec). Renderer-
   agnostic; takes a `drawSegment` callback.
-- **`index.html` + `main.js`** — verification demo. Canvas at 4:3 cabinet
-  aspect ratio (800×600 = DVG 1024×768). Prev/Next steps through all 64
-  navigable subroutines (ThrustDirN reachable via thrust toggle when on
-  matching ship). globalScale slider sweeps 0-9.
+- **`demos/vector_rom.html` + `demos/vector_rom.js`** — verification demo.
+  Canvas at 4:3 cabinet aspect ratio (800×600 = DVG 1024×768). Prev/Next
+  steps through all 64 navigable subroutines (ThrustDirN reachable via
+  thrust toggle when on matching ship). globalScale slider sweeps 0-9.
+  Moved into `demos/` 2026-05-22 to reserve the project root's
+  `index.html` / `main.js` for the eventual game entry point.
 
 Sparse-clone of `topherCantrell/computerarcheology` (Asteroids
 subfolder only) is set up on the second PC at
@@ -66,33 +68,38 @@ per-PC paths.
 
 ## Next step: per-object globalScale determination
 
-Visual verification of all 81 subroutines is done. Each shape renders
-correctly *at its intended gameplay globalScale* — but we don't yet
-know the gs value the CPU code sets per object. The cabinet's actual
-gs-per-object map lives in the un-disassembled list-builder routine
-around `$7555`. Likely values based on cabinet footage + research
-docs:
+Visual verification of all 81 subroutines is done. Each shape now
+renders correctly under the corrected DVG scale formula (see
+[`research_dvg.md §4 + §6`](research_dvg.md), 2026-05-22 update) —
+but we don't yet know the gs value the CPU code sets per object. The
+cabinet's actual gs-per-object map lives in the un-disassembled
+list-builder routine around `$7555`. Refined estimates after the
+SVEC fix, based on cabinet-faithful rendering at each candidate gs:
 
-| Object | Likely gs | Source |
+| Object | Likely gs | Reasoning |
 |---|---|---|
-| Player ship | 0 | Cabinet footage (~9% screen width) |
-| Lives icon | 0 (or close) | Small ship-shaped HUD element |
-| Asteroid (large/med/small) | 9 / 7 / 5 | [`research_vector_rom.md §3.6`](research_vector_rom.md) |
-| UFO (large/small) | 7-9 | [`research_vector_rom.md §3.7`](research_vector_rom.md) |
-| Characters | 4-6 (guess) | HUD readability |
-| Ship explosion fragments | varies per frame | Animation cycles through gs values |
+| Player ship | 0 | At gs=0 the ship VECs render at 96-unit lines + SVECs at 8-16-unit back detail → closed east-pointing arrow ≈ 80 DVG units across. Matches cabinet footage. |
+| Lives icon | 0 (or close) | Same shape family as ship. |
+| Asteroid (small/med/large) | **0 / 1 / 2** | Rock1 is SVEC-only with scaleMode≤3 (saturates at gs>4). Measured Rock1 spans: gs=0 → 64×64 small, gs=1 → 128×128 medium, gs=2 → 256×256 large. See [`research_vector_rom.md §3.6`](research_vector_rom.md). |
+| UFO (large/small) | 0-2 (guess) | UFO is SVEC-only; same scale-response curve as asteroids. |
+| Characters | 0-2 (guess) | HUD readability — to verify against cabinet HUD footage. |
+| Ship explosion fragments | varies per frame | Animation cycles through gs values. |
 
-To confirm: read the still-undisassembled `$7555` region (or Mikstas's
-alternate disassembly) when porting the main loop. Until then, the
-demo uses these guesses with the gs slider so we can spot-check.
+**Confirm by reading the un-disassembled `$7555` region** (or
+Mikstas's alternate disassembly) when porting the main loop. Until
+then, the demo lets us spot-check via the gs slider.
 
-**Side effect for ShipDir0 / ShipDir64 at gs=0:** SVECs `>>9` round to
-zero in hardware too, so the cabinet ship was *also* an "open V" without
-visible back-edge details at gameplay scale. CRT line width + phosphor
-afterglow likely filled the visual gap. We considered modernizing the
-data to make the ship look closed at all scales; reverted to preserve
-this diagnostic signal. Recipe parked in [Ship-data modification recipe
-(deferred)](#ship-data-modification-recipe-deferred) below.
+**Previous misreading (resolved 2026-05-22):** before the SVEC fix,
+the interpreter divided SVEC's `raw × scaleMode-multiplier` by
+`2^(9 - globalScale)`. That made SVECs vanish at low gs, which led
+to the wrong conclusion that the cabinet ship at gameplay scale was
+an "open V" missing its back-edge details. The actual hardware adds
+`scaleMode + 2` to the global scale (same additive model as VEC) —
+so at gs=0 the ship's back-edge SVECs render properly and the V
+closes. The "Ship-data modification recipe" below was a phantom-
+problem fix and is now obsolete; it stays in this file as a
+historical paper trail in case the analysis is useful for diagnosing
+similar misreads on other shapes later.
 
 ## Open questions surfaced during scouting
 
@@ -142,35 +149,46 @@ will be addressed in the relevant research doc when reached.
 | I-13 | Polish + visual tuning | not started |
 | I-14 | Sound (R-G dependency) | deferred |
 
-## Ship-data modification recipe (deferred)
+## Ship-data modification recipe (obsolete — phantom problem)
 
-**Status: tried, reverted 2026-05-22.** The recipe below was applied
-to `vector_rom_data.js` and then rolled back. Documented here so we
-can re-apply without re-deriving if we change our minds.
+**Status: obsolete 2026-05-22.** This recipe was applied to
+`vector_rom_data.js`, reverted the same day, then proven unnecessary
+by the SVEC-formula correction. It is retained here as a historical
+paper trail — both for the diagnostic methodology and for the
+warning it carries about confirming bias.
 
-### Why we reverted
+### Why it was a phantom problem
 
-ShipDir0 (face east), ShipDir16 (22.5°), and ShipDir64 (face north)
-use SVECs for their move opcode and (for 0/64) their back-edge
-detail. At the gameplay globalScale these SVECs would `>>9` round to
-zero, making the ships look like *open arrows with tiny back curls*
-that don't quite connect — different from the diagonal ShipDir4..60
-which use VECs throughout and render as closed shapes.
+Under the original (incorrect) SVEC interpretation, the interpreter
+treated `globalScale` as an additional divisor on top of the
+`scaleMode` multiplier. At gameplay gs=0 this drove SVEC magnitudes
+to ~0 integer DVG units. ShipDir0 / 16 / 64, which use SVECs for the
+back-edge details and the anchor-offset move, then rendered as
+"open V arrows with tiny back curls" — different from the diagonal
+ShipDir4..60 which use VECs throughout.
 
-We initially modernized the data to make all 17 ship shapes look
-identically "closed" at every gs. But on reflection: the original
-cabinet ran the same hardware math, so at the cabinet's gameplay gs
-the ship was *also* an open V with phantom SVEC data that never got
-drawn. CRT line width + phosphor afterglow likely filled the visual
-gap. Keeping the data byte-faithful preserves the cabinet's actual
-rendering as a diagnostic — if our port produces an open V, that's
-the real Asteroids ship; if our port produces something different,
-we have a rendering bug to find.
+The recipe below was an attempt to compensate for this in the
+**data**, by manually scaling the SVECs up so they'd survive the
+divisor. We then convinced ourselves this was a cabinet-faithful
+artifact (CRT line width filling a phantom-SVEC gap) and reverted.
 
-Most other shapes (Rock1..4, Shrapnel1..4, UFO, ShipExplosion,
-LivesIcon) don't have this problem because the game runs them at
-higher gs values (asteroids: gs=5/7/9, UFO: gs=7-9, etc.) where
-SVECs render at usable magnitudes natively.
+Both moves were wrong. The cabinet hardware adds `scaleMode + 2` to
+global scale (additive, not divisive — see
+[`research_dvg.md §4 + §6`](research_dvg.md) corrected 2026-05-22 via
+MAME `avgdvg.c` + Mikstas HDL). At gs=0 the SVECs render at their
+full `raw × 2^(scaleMode+1)` magnitudes (8-32 DVG units per
+segment), and the ship closes properly without any data modification.
+
+### Methodology lesson
+
+The recipe's existence shows a self-confirming-bias trap: once we
+saw the "open V" output, we rationalized it as cabinet-faithful
+rather than questioning the interpreter. Catching this required
+going outside the original DVG.md spec to MAME source + Mikstas HDL.
+**Default to suspecting the interpreter before rationalizing
+visual output as "intended".**
+
+### The recipe itself (preserved for reference)
 
 ### The recipe (if we want to re-apply)
 

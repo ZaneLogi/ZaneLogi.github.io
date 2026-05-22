@@ -91,10 +91,13 @@ LABS examples in `VectorROM.md` test pattern which use y ≤ 895).
 
 ## §4. Scale model — power-of-2 division
 
-Two scale fields combine:
+**Both VEC and SVEC use the same additive scale model.** Two fields
+combine into a **total scale** that drives a single barrel shifter:
 
 - **Global scale** (`$00-$0F`) — set by LABS, persists until next LABS
-- **Local scale** (`$0-$09`) — per-VEC field, in that opcode only
+- **Local scale** — per-opcode field. Source differs between VEC and SVEC:
+  - VEC: the opcode nibble itself (`0..9`).
+  - SVEC: the 2-bit `Ss` field remapped to `scaleMode + 2` → `2..5`. See §6 for the bit-level details.
 
 The values are *added* to form the **total scale**, used as a
 power-of-2 divisor:
@@ -115,21 +118,43 @@ power-of-2 divisor:
 So:
 
 ```
-rendered_dx = raw_dx >> total_scale   (with arithmetic right-shift)
-rendered_dy = raw_dy >> total_scale
+shift = 9 - total_scale
+rendered_dx = (|raw_dx| >> shift) × sign(raw_dx)
+rendered_dy = (|raw_dy| >> shift) × sign(raw_dy)
 ```
+
+The shift acts on an **unsigned magnitude**, then the sign is
+re-applied — i.e. truncation toward zero. This is NOT the same as
+JS's `>>` operator on signed values, which rounds toward −∞ for
+negatives. See §10 port implication.
+
+**Magnitude width.** VEC carries a full 10-bit magnitude (`0..1023`).
+SVEC's 2-bit raw is placed in bits 9-8 of the same internal 10-bit
+field (so it sees magnitudes `0, 256, 512, 768`) — the smaller
+SVEC packet trades resolution for compactness but goes through the
+identical barrel shifter. See §6 for the encoding detail.
+
+**Saturation.** When `total_scale > 9` the hardware decoder
+misbehaves: in practice the rendered delta becomes effectively zero
+integer DVG units. Well-formed cabinet ROMs choose per-object gs
+values that keep `(local + global) ≤ 9` for every opcode they
+invoke. The software port should match this — a vanishing segment
+in our render is a signal that the gs picked for that object is too
+high (or in dev-time terms: out of the data author's intended range).
 
 LABS coordinates are **absolute, NOT scaled** — they set the cursor
 verbatim. Only VEC/SVEC deltas are scaled.
 
 The same vector ROM subroutine can be drawn at different sizes by
 calling LABS with different global scales before each JSR.
-Asteroids uses this to render asteroids at 4 sizes from one
-sprite-image set (see §8).
+Asteroids uses this to render asteroids at 3 sizes from one
+sprite-image set (see §8 and [[research_vector_rom.md §3.6]]).
 
-**Port implication:** Implement as `dx >> total_scale` literally, or
-as `Math.floor(dx / (1 << total_scale))` — both round toward zero
-which matches the hardware's right-shift.
+**Port implication:** Implement as `Math.trunc(raw / (1 <<
+total_scale))` — JS's `Math.trunc(x / div)` matches the hardware's
+"shift unsigned magnitude, re-apply sign" semantics. Plain `raw >>
+total_scale` rounds toward −∞ for negative `raw`, off by one in
+edge cases, and was a source of bug 2026-05-22.
 
 ## §5. Brightness model
 
@@ -260,23 +285,51 @@ The scale field is split across the word's halves; verified against
 word:    1111 smYY BBBB SmXX
 ```
 
-- `Ss` together form a 2-bit scale-mode (S = high bit, s = low bit):
-  `00` = ×2, `01` = ×4, `10` = ×8, `11` = ×16
+- `Ss` together form a 2-bit `scaleMode` (S = high bit, s = low bit):
+  `00`, `01`, `10`, `11`. Hardware **remaps** this to a local-scale-
+  equivalent value `2, 3, 4, 5` (see below).
 - `m` is the sign bit (Y in upper nibble, X in lower nibble)
-- `YY` and `XX` are 2-bit magnitudes (0-3)
+- `YY` and `XX` are 2-bit magnitudes (0-3) — placed in **bits 9-8 of
+  an internal 10-bit magnitude field**, i.e. effective magnitude is
+  `raw × 256` = 0, 256, 512, or 768.
 - `BBBB` is brightness as in VEC
 
-So |dx|, |dy| ≤ 3, scaled by the small multiplier — total magnitude
-≤ 48 raw units before the *global* scale division applies.
-
-Worked examples from `VectorROM.md`:
+**Scale interaction with global.** SVEC uses the same additive scale
+model as VEC (§4): `total_scale = (scaleMode + 2) + global_scale`,
+then `rendered_d = magnitude >> (9 - total_scale)`. Equivalently:
 
 ```
-Bytes 1058: DB F0  →  word 0xF0DB  →  SVEC scale=2(×8), bri=13, x=+3, y=0
-                                       effective: cursor += (+3·8, 0) = (+24, 0)
+rendered_d = raw × 2^(scaleMode + 1 + global_scale)
+             (saturating when total_scale > 9 — delta becomes ~0)
+```
 
-Bytes 105E: 00 F9  →  word 0xF900  →  SVEC scale=1(×4), bri=0, x=0, y=+1
-                                       effective: cursor += (0, +1·4) = (0, +4)
+The disassembler's parenthesized "effective" value in
+`VectorROM.md` (e.g. `(-24.00, -16.00)` for `SVEC scale=02(*8) x=-3
+y=-2`) is the rendered value **at global scale 0** — not a pre-
+global intermediate. Increasing global scale makes SVECs BIGGER,
+just like it makes VECs bigger.
+
+**`*2 / *4 / *8 / *16` notation.** `DVG.md` and `VectorROM.md`
+annotate the scaleMode as `*2 / *4 / *8 / *16`. These multipliers
+are the rendered magnitude at gs=0: scaleMode 0 → raw × 2,
+scaleMode 1 → raw × 4, etc. The notation matches the formula above
+when `global_scale = 0`: `raw × 2^(scaleMode + 1)`. It does NOT mean
+"raw is multiplied by 2/4/8/16 and global divides on top" — that
+was an incorrect early reading that produced visually wrong shapes
+until 2026-05-22.
+
+Worked examples from `VectorROM.md` (rendered values shown for gs=0):
+
+```
+Bytes 1058: DB F0  →  word 0xF0DB  →  SVEC scaleMode=2, bri=13, x=+3, y=0
+                                       at gs=0: cursor += (+24, 0)
+                                       at gs=5: cursor += (+768, 0)  (max valid: total=9)
+                                       at gs=6: saturated, delta ≈ 0
+
+Bytes 105E: 00 F9  →  word 0xF900  →  SVEC scaleMode=1, bri=0, x=0, y=+1
+                                       at gs=0: cursor += (0, +4)
+                                       at gs=6: cursor += (0, +256)  (max valid: total=9)
+                                       at gs=7: saturated
 ```
 
 Note: `DVG.md`'s SVEC example FF70 has a typo in its decoded-text
@@ -284,9 +337,14 @@ annotation ("scale=01(\*2), y=-6") — the encoding logic is consistent
 with the table; the decoded annotation should read "scale=01(\*4),
 y=-12". The bytes themselves are not in question; just the comment.
 
-After SVEC interprets the scale-mode multiplier, the **global** scale
-still applies as a divisor on top — so for a global scale of 9 (/1),
-SVEC ×2 = 2 raw; for global 8 (/2), SVEC ×2 = 1 net.
+**Citation:** the corrected math is verified against MAME's
+`avgdvg.c` (`temp = 2 + ((firstwd >> 2) & 0x02) + ((firstwd >> 11) &
+0x01); temp = (scale + temp) & 0x0f; if (temp > 9) temp = -1;
+deltax = (x << 16) >> (9 - temp)`) and against Nicholas Mikstas's
+Asteroids HDL design notes
+(<https://nmikstas.github.io/portfolio/asteroidsHDL/asteroidsHDL.html>),
+which states explicitly: "Total Scaling Number = VEC(or SVEC)
+Scaling Number + Global Scaling Number".
 
 ## §7. The 4-level call stack
 
@@ -376,12 +434,13 @@ Memory | `Uint8Array(8192)` (VRAM 0-2047, ROM 4096-6143 — match CPU offsets)
 Entry | `dvg.run(ram, rom)` — sets up state, loops opcode-dispatch until HALT
 Output | Direct `ctx.moveTo / lineTo / stroke` per VEC/SVEC; `beginPath` at LABS
 Coord transform | `screenX = x * scaleX`; `screenY = canvasH - y * scaleY`
-Scale arithmetic | `dx_rendered = dx >> total_scale` (sign-preserving shift)
+Scale arithmetic | `dx_rendered = Math.trunc(magnitude / (1 << (9 - total_scale)))` — shift magnitude unsigned then re-apply sign (§4)
 Brightness | Per-segment `strokeStyle = rgba(0,255,0,bright/15)` — see §5
 Stack | JS array, `console.warn` if depth > 4
 Done flag | After HALT, set a `halted: true` field readable from outside (analog to `$2002` bit)
 
-Pseudocode for the main dispatch loop:
+Pseudocode for the main dispatch loop (corrected 2026-05-22 against
+MAME `avgdvg.c` and Mikstas's Asteroids HDL — see §6 Citation):
 
 ```js
 function run(ram, rom) {
@@ -391,21 +450,32 @@ function run(ram, rom) {
   const stack = [];
   let halted = false;
 
+  // Hardware: shift a 10-bit unsigned magnitude by (9 - total_scale),
+  // then re-apply sign. JS's signed >> would round toward -∞ for
+  // negatives, so use Math.trunc(magnitude / div) instead. Saturation:
+  // total > 9 → delta ≈ 0 (decoder misbehaves; well-formed ROMs avoid).
+  function applyScale(rawSigned, totalScale) {
+    if (totalScale > 9) return 0;              // saturation
+    const shift = 9 - totalScale;
+    const mag = Math.abs(rawSigned);
+    return Math.sign(rawSigned) * (mag >> shift);
+  }
+
   while (!halted) {
     const w1 = ram[pc] | (ram[pc+1] << 8);   // LE word
     const op = (w1 >> 12) & 0xF;
 
     if (op <= 9) {                            // VEC
       const w2 = ram[pc+2] | (ram[pc+3] << 8);
-      const localScale = op;
-      const totalScale = globalScale + localScale;
+      const localScale = op;                   // opcode nibble IS local scale
+      const totalScale = localScale + globalScale;
       const ySign = (w1 >> 10) & 1;
-      const yMag = w1 & 0x3FF;
+      const yMag = w1 & 0x3FF;                 // full 10-bit magnitude
       const xSign = (w2 >> 10) & 1;
       const xMag = w2 & 0x3FF;
       const bri = (w2 >> 12) & 0xF;
-      const dx = (xSign ? -xMag : xMag) >> totalScale;
-      const dy = (ySign ? -yMag : yMag) >> totalScale;
+      const dx = applyScale(xSign ? -xMag : xMag, totalScale);
+      const dy = applyScale(ySign ? -yMag : yMag, totalScale);
       drawVector(x, y, x + dx, y + dy, bri);
       x += dx; y += dy;
       pc += 4;
@@ -413,7 +483,7 @@ function run(ram, rom) {
       const w2 = ram[pc+2] | (ram[pc+3] << 8);
       y = w1 & 0x3FF;
       x = w2 & 0x3FF;
-      globalScale = (w2 >> 12) & 0xF;
+      globalScale = (w2 >> 12) & 0xF;          // sets global, not scaled itself
       pc += 4;
     } else if (op === 0xB) {                  // HALT
       halted = true;
@@ -427,17 +497,21 @@ function run(ram, rom) {
       pc = (w1 & 0x0FFF) * 2;
     } else if (op === 0xF) {                  // SVEC
       const bri = (w1 >> 4) & 0xF;
-      const s = (w1 >> 11) & 1;             // high bit of scale-mode
-      const S = (w1 >> 3) & 1;              // low bit of scale-mode
-      const scaleMode = (s << 1) | S;       // 0..3
-      const mult = 2 << scaleMode;          // ×2 / ×4 / ×8 / ×16
+      const s = (w1 >> 11) & 1;                // high bit of scaleMode
+      const S = (w1 >> 3) & 1;                 // low bit of scaleMode
+      const scaleMode = (s << 1) | S;          // 0..3
       const ySign = (w1 >> 10) & 1;
-      const yMag = (w1 >> 8) & 0x3;
+      const yMag = (w1 >> 8) & 0x3;            // 2-bit raw, 0..3
       const xSign = (w1 >> 2) & 1;
       const xMag = w1 & 0x3;
-      const totalScale = globalScale;
-      const dx = ((xSign ? -xMag : xMag) * mult) >> totalScale;
-      const dy = ((ySign ? -yMag : yMag) * mult) >> totalScale;
+      // SVEC's 2-bit raw is placed in bits 9-8 of a 10-bit magnitude
+      // (i.e. effective magnitude = raw × 256). scaleMode remaps to
+      // local-equivalent scaleMode+2 (range 2..5). Then identical
+      // additive scale + barrel shift as VEC.
+      const localEquiv = scaleMode + 2;
+      const totalScale = localEquiv + globalScale;
+      const dx = applyScale((xSign ? -xMag : xMag) << 8, totalScale);
+      const dy = applyScale((ySign ? -yMag : yMag) << 8, totalScale);
       drawVector(x, y, x + dx, y + dy, bri);
       x += dx; y += dy;
       pc += 2;
@@ -492,7 +566,7 @@ export const VROM = {
 |--------|---------------------------------|-------|
 | `LABS` | `x, y, globalScale`             | absolute coords; `globalScale` persists until next LABS |
 | `VEC`  | `localScale, bri, dx, dy`       | `localScale` is added to current `globalScale` at draw time (per §4) |
-| `SVEC` | `scaleMode, bri, dx, dy`        | `scaleMode` 0-3, indexes the ×2/×4/×8/×16 multiplier — additive vs VEC's scale, different name avoids confusion |
+| `SVEC` | `scaleMode, bri, dx, dy`        | `scaleMode` 0-3 is remapped to local-equivalent `scaleMode+2` (range 2..5) and added to `globalScale` the same way VEC's `localScale` is (§4 + §6). The `×2/×4/×8/×16` annotation in `VectorROM.md` is the rendered magnitude at gs=0 (`raw × 2^(scaleMode+1)`), NOT a separate "multiply then divide by global" formula. |
 | `JSR`  | `target`                        | symbolic name string, e.g. `'ShipDir0'`; matches source label |
 | `JMP`  | `target`                        | as JSR |
 | `RTS`  | —                               | |
@@ -512,33 +586,44 @@ Convention reasoning:
 
 ### Interpreter sketch
 
+Matches the implemented [`dvg.js`](../dvg.js). See §4 and §6 for the
+math derivations and the MAME/HDL citations.
+
 ```js
-export function runList(ctx, list, cursor, globalScale) {
+export function runList(VROM, list, cursor, globalScale, drawSegment) {
   for (const op of list) {
     switch (op.op) {
       case 'LABS':
         cursor.x = op.x; cursor.y = op.y; globalScale = op.globalScale;
-        ctx.moveTo(toCanvasX(cursor.x), toCanvasY(cursor.y));
         break;
+
       case 'VEC': {
-        const totalScale = op.localScale + globalScale;
-        cursor.x += op.dx >> (9 - totalScale);
-        cursor.y += op.dy >> (9 - totalScale);
-        if (op.bri > 0) stroke(ctx, cursor, op.bri);
-        else ctx.moveTo(toCanvasX(cursor.x), toCanvasY(cursor.y));
+        const fromX = cursor.x, fromY = cursor.y;
+        // Hardware shifts an unsigned magnitude then re-applies sign
+        // (truncation toward zero); JS `>>` rounds toward -∞ for
+        // negatives, so we use Math.trunc(raw / div) instead.
+        const div = 1 << Math.max(0, 9 - (op.localScale + globalScale));
+        cursor.x += Math.trunc(op.dx / div);
+        cursor.y += Math.trunc(op.dy / div);
+        if (op.bri > 0) drawSegment(fromX, fromY, cursor.x, cursor.y, op.bri);
         break;
       }
+
       case 'SVEC': {
-        const mul = 1 << (op.scaleMode + 1);
-        const div = 1 << (9 - globalScale);
-        cursor.x += (op.dx * mul) / div;
-        cursor.y += (op.dy * mul) / div;
-        if (op.bri > 0) stroke(ctx, cursor, op.bri);
-        else ctx.moveTo(toCanvasX(cursor.x), toCanvasY(cursor.y));
+        const fromX = cursor.x, fromY = cursor.y;
+        // scaleMode 0..3 remaps to local-equivalent 2..5, added to
+        // globalScale exactly like VEC. Saturation: total > 9 →
+        // hardware quirk, integer delta ≈ 0.
+        const total = (op.scaleMode + 2) + globalScale;
+        const mul = total > 9 ? 0 : 1 << (op.scaleMode + 1 + globalScale);
+        cursor.x += op.dx * mul;
+        cursor.y += op.dy * mul;
+        if (op.bri > 0) drawSegment(fromX, fromY, cursor.x, cursor.y, op.bri);
         break;
       }
-      case 'JSR':  runList(ctx, VROM[op.target], cursor, globalScale); break;
-      case 'JMP':  return runList(ctx, VROM[op.target], cursor, globalScale);
+
+      case 'JSR':  runList(VROM, VROM[op.target], cursor, globalScale, drawSegment); break;
+      case 'JMP':  return runList(VROM, VROM[op.target], cursor, globalScale, drawSegment);
       case 'RTS':  return;
       case 'HALT': return 'halt';
     }

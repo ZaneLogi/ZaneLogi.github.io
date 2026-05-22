@@ -135,13 +135,33 @@ about visual diversity, not collision-shape diversity).
 | 3       | `$521A-$5232` |
 | 4       | `$5234-$524E` |
 
-**Asteroid size is purely a scale operation.** A "large asteroid" is
-the same rock pattern drawn with global scale = 9 (/1, full size);
-medium = 7 (/4, quarter); small = 5 (/16, sixteenth). The shape's
-encoding into the size byte (`status[Y]` low 2 bits — see
-[[research_collisions.md §3]]) controls which **rock pattern**
-(rotation variant), while the asteroid's RAM "size" controls the
-**LABS global-scale** value at draw time.
+**Asteroid size is purely a scale operation.** Same rock pattern,
+different global scales. The shape's encoding into the size byte
+(`status[Y]` low 2 bits — see [[research_collisions.md §3]])
+controls which **rock pattern** (rotation variant), while the
+asteroid's RAM "size" controls the **LABS global-scale** value at
+draw time.
+
+The gs values for small/medium/large were initially guessed as
+`5/7/9` based on a wrong reading of the SVEC scale formula. After
+the [[research_dvg.md §6]] correction (2026-05-22) the actual gs
+range is much lower: Rock1 is SVEC-only with scaleMode up to 3
+(local-equivalent 5), which saturates when `total > 9`, i.e. when
+`gs > 4`. Measured spans of the unmodified Rock1 against the
+corrected interpreter:
+
+| gs | Rock1 span (DVG units) |
+|----|------------------------|
+| 0  | 64 × 64                |
+| 1  | 128 × 128              |
+| 2  | 256 × 256              |
+| 3  | 512 × 512              |
+| 4  | 1024 × 1024 (full screen — at saturation boundary for scaleMode=3) |
+
+So small/medium/large are most likely **gs = 0/1/2** (yielding
+64/128/256-unit spans, consistent with cabinet footage). To be
+confirmed when porting `$7555 mainListBuild` — that's where the
+per-object LABS scale lives.
 
 The 4 rock patterns × 4 rotation variants (the upper nibble of
 status, incremented each rotation step — see
