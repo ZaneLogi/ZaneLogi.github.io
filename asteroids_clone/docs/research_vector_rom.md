@@ -101,15 +101,16 @@ data).
 
 ### 3.5 Shrapnel patterns (`$5100-$51DC`)
 
-Four patterns indexed via the jump table at `$50F8-$50FE`:
+Four patterns indexed via the jump table at `$50F8-$50FE`. **The table
+order is reversed relative to the pattern-number labels in
+`VectorROM.md`:**
 
-| Pattern | Address       | Use                                  |
-|---------|---------------|--------------------------------------|
-| 1       | `$5100-$512A` | Compact spread                       |
-| 2       | `$512C-$5168` | Wider spread (VEC opcodes, larger)   |
-| 3       | `$516A-$519E` | Medium spread                        |
-| 4       | `$51A0-$51DC` | Widest spread                        |
-|         |               |                                      |
+| Jump-table entry | Address (target) | Pattern | Bbox span at gs=0 |
+|---|---|---|---|
+| `$50F8` (index 0) | `$51A0` | Shrapnel4 | 40 × 40 (smallest) |
+| `$50FA` (index 1) | `$516A` | Shrapnel3 | 48 × 48 |
+| `$50FC` (index 2) | `$512C` | Shrapnel2 | 56 × 56 |
+| `$50FE` (index 3) | `$5100` | Shrapnel1 | 64 × 64 (largest) |
 
 `VectorROM.md` comments note: *"all four patterns are the same just
 slightly spread out. This is extremely clever. You could use one
@@ -119,8 +120,13 @@ patterns can be used to take up the gaps in the large scaling
 doubles!"* — confirming the 4 patterns interpolate between the
 power-of-2 scale jumps that the DVG hardware supports natively.
 
-The shrapnel animator at the CPU side cycles through patterns 1→2→3→4
-across frames to produce a continuous-looking expansion.
+The CPU-side shrapnel animator advances a frame-counter through
+jump-table indices 0→3, which renders the patterns in source-name
+order **4→3→2→1** (small→large) for the outward-expansion impact
+effect. (An earlier version of this doc said "1→2→3→4 expansion",
+which was wrong — that order shrinks. The reversed-order trap is
+easy to fall into because the pattern numbers in the source comments
+read left-to-right while the jump table reads them backwards.)
 
 ### 3.6 Rock patterns (`$51E6-$524E`)
 

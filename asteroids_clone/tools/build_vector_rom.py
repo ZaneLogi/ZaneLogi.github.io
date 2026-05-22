@@ -102,6 +102,14 @@ LINE_RE = re.compile(
 LABEL_RE = re.compile(r"^(?P<name>[A-Za-z][A-Za-z0-9_]*):\s*$")
 MNEMONICS = ("VEC", "SVEC", "LABS", "JSR", "JMP", "RTS", "HALT")
 
+# Ship-explosion piece velocity table at CPU $50EC-$50F6 (DVG byte
+# $10EC-$10F6). 6 entries × 2 bytes (vx, vy signed). Paired with the
+# 6 ShipExplosion SVECs at $50E0-$50EA — one (svec, velocity) per
+# fragment. Used by the (un-disasm) animator near $7D-$94 RAM offsets.
+VELOCITY_TABLE_START = 0x10EC
+VELOCITY_TABLE_END   = 0x10F6
+VELOCITY_TABLE_ENTRIES = 6
+
 
 def decode_opcode(addr: int, byte_seq: list[int]) -> dict:
     """Decode 2 or 4 bytes at the given DVG byte address into an opcode dict.
@@ -162,6 +170,41 @@ def decode_opcode(addr: int, byte_seq: list[int]) -> dict:
             "dy": -y_mag if y_sign else y_mag,
         }
     raise ValueError(f"Unknown opcode nibble {op:X} at ${addr:04X}")
+
+
+def parse_velocity_table(source: Path) -> list[dict]:
+    """Extract the 6 ship-explosion fragment velocities from `;`-commented
+    data lines in the $10EC-$10F6 range. Each row has the form
+    `10EC: D8 1E ; (-40,  30)` — we read the 2 bytes (vx, vy signed)
+    and ignore the comment annotation."""
+    entries: dict[int, tuple[int, int]] = {}
+    with source.open(encoding="utf-8") as f:
+        for raw in f:
+            m = LINE_RE.match(raw.rstrip("\n"))
+            if not m:
+                continue
+            addr = int(m.group("addr"), 16)
+            if not (VELOCITY_TABLE_START <= addr <= VELOCITY_TABLE_END):
+                continue
+            # Skip if it's an opcode line (rest starts with a mnemonic) — the
+            # table is data-only, so this guard is paranoia.
+            rest_head = m.group("rest").lstrip().split(maxsplit=1)
+            if rest_head and rest_head[0] in MNEMONICS:
+                continue
+            bytes_seq = [int(b, 16) for b in m.group("bytes").split()]
+            if len(bytes_seq) < 2:
+                continue
+            vx_u, vy_u = bytes_seq[0], bytes_seq[1]
+            vx = vx_u - 256 if vx_u >= 128 else vx_u
+            vy = vy_u - 256 if vy_u >= 128 else vy_u
+            entries[addr] = (vx, vy)
+    expected_addrs = list(range(VELOCITY_TABLE_START, VELOCITY_TABLE_END + 1, 2))
+    got_addrs = sorted(entries.keys())
+    if got_addrs != expected_addrs:
+        raise ValueError(
+            f"velocity table addresses mismatch: expected {expected_addrs}, got {got_addrs}"
+        )
+    return [{"vx": entries[a][0], "vy": entries[a][1]} for a in expected_addrs]
 
 
 def parse(source: Path) -> dict[str, list[dict]]:
@@ -362,7 +405,11 @@ def _shape_description(name: str) -> str | None:
     return f"thrust flame, {angle_str}"
 
 
-def emit_js(subs: dict[str, list[dict]], addr_to_label: dict[int, str]) -> str:
+def emit_js(
+    subs: dict[str, list[dict]],
+    addr_to_label: dict[int, str],
+    velocity_table: list[dict],
+) -> str:
     label_to_addr = {v: k for k, v in addr_to_label.items()}
     lines = [
         "// asteroids_clone/vector_rom_data.js",
@@ -401,6 +448,18 @@ def emit_js(subs: dict[str, list[dict]], addr_to_label: dict[int, str]) -> str:
         lines.pop()
     lines.append("};")
     lines.append("")
+    lines.append("// Ship-explosion piece velocity table — CPU $50EC-$50F6 (6 × 2 bytes,")
+    lines.append("// signed). Paired with the 6 SVECs of VROM.ShipExplosion: one (svec, vel)")
+    lines.append("// per fragment. Cabinet animator (un-disasm CPU region near RAM $7D-$94)")
+    lines.append("// holds independent positions per fragment, advances by vx/vy each frame,")
+    lines.append("// and emits LABS+SVEC per fragment in the per-frame display list.")
+    lines.append("export const SHIP_EXPLOSION_VELOCITY = [")
+    for i, v in enumerate(velocity_table):
+        lines.append(
+            f"  {{vx: {_signed(v['vx'], 3)}, vy: {_signed(v['vy'], 3)}}},  // fragment {i}"
+        )
+    lines.append("];")
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -417,6 +476,9 @@ def main() -> int:
     subs = parse(source)
     print(f"  parsed {len(subs)} subroutine labels")
 
+    velocity_table = parse_velocity_table(source)
+    print(f"  parsed {len(velocity_table)} ship-explosion velocity entries")
+
     fix_misplaced_rts(subs)
     addr_to_label = derive_addr_to_label(subs)
     print(f"  derived {len(addr_to_label)} entry addresses post-fix")
@@ -428,15 +490,21 @@ def main() -> int:
     ship_subs = filter_ship_region(subs, addr_to_label)
     print(f"  ship region: {len(ship_subs)} subroutines")
 
-    # Sanity check: every sub should end with RTS.
+    # Sanity check: every sub should end with RTS — except ShipExplosion,
+    # which is a data block (6 SVECs paired with the velocity table at
+    # $50EC), not a true subroutine called via JSR.
     for name, ops in ship_subs.items():
+        if name == "ShipExplosion":
+            continue
         if not ops or ops[-1].get("op") != "RTS":
             tail = ops[-1] if ops else "(empty)"
             print(f"  warning: {name} does not end with RTS (tail: {tail})",
                   file=sys.stderr)
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUT_PATH.write_text(emit_js(ship_subs, addr_to_label), encoding="utf-8")
+    OUT_PATH.write_text(
+        emit_js(ship_subs, addr_to_label, velocity_table), encoding="utf-8"
+    )
     print(f"wrote:   {OUT_PATH}")
     return 0
 

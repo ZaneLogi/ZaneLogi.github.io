@@ -37,6 +37,10 @@ function drawSegment(fromX, fromY, toX, toY, bri) {
   ctx.lineTo(toCanvasX(toX),   toCanvasY(toY));
   ctx.strokeStyle = `rgba(0,255,0,${bri / 15})`;
   ctx.lineWidth = 1.5;
+  // Round caps so zero-length SVEC "dots" (used by shrapnel patterns —
+  // a bri>0 SVEC with raw=(0,0) puts a single illuminated point at the
+  // current cursor) render as visible points instead of vanishing.
+  ctx.lineCap = 'round';
   ctx.stroke();
 }
 
@@ -82,14 +86,31 @@ function drawHeader(name, globalScale) {
   ctx.fillText(`globalScale = ${globalScale} · canvas ${canvas.width}×${canvas.height} = DVG ${DVG_W}×${DVG_H} (cabinet ratio)`, 12, 40);
 }
 
-function drawShipCentered(name, globalScale, { withThrust = false } = {}) {
+function drawShipCentered(name, globalScale, { withThrust = false, burstMode = false } = {}) {
   // Anchor near the center, slightly upper-left so the shape (which extends
   // right + down from its anchor) ends up visually centered.
   const anchorCanvasX = canvas.width * 0.35;
   const anchorCanvasY = canvas.height * 0.45;
   drawAnchorMarker(anchorCanvasX, anchorCanvasY);
 
-  const cursor = { x: fromCanvasX(anchorCanvasX), y: fromCanvasY(anchorCanvasY) };
+  const anchorX = fromCanvasX(anchorCanvasX);
+  const anchorY = fromCanvasY(anchorCanvasY);
+
+  // Burst mode for ShipExplosion: the ROM stores 6 SVECs at $50E0-$50EA
+  // paired with a 6-entry velocity table at $50EC-$50F6. The cabinet uses
+  // these as data, not as a subroutine — each frame, the animator emits
+  // (LABS-fragment-pos + i-th SVEC) for each of 6 independently-tracked
+  // fragments. Burst mode here approximates the frame-0 appearance: all
+  // 6 SVECs drawn as standalone fragments radiating from the same anchor.
+  if (burstMode && name === 'ShipExplosion') {
+    for (const svec of VROM[name]) {
+      const cursor = { x: anchorX, y: anchorY };
+      runList(VROM, [svec], cursor, globalScale, drawSegment);
+    }
+    return;
+  }
+
+  const cursor = { x: anchorX, y: anchorY };
   runList(VROM, VROM[name], cursor, globalScale, drawSegment);
 
   if (withThrust && name.startsWith('ShipDir')) {
@@ -109,12 +130,13 @@ const ALL_NAMES = Object.keys(VROM).filter(n => !n.startsWith('ThrustDir'));
 let currentIndex = 0;
 let currentGs = 0;        // start at gameplay-like scale
 let withThrust = false;
+let burstMode = false;
 
 function render() {
   clear();
   const name = ALL_NAMES[currentIndex];
   drawHeader(name, currentGs);
-  drawShipCentered(name, currentGs, { withThrust });
+  drawShipCentered(name, currentGs, { withThrust, burstMode });
   drawScaleNote(currentGs);
   // Sync UI
   document.getElementById('ship-name').textContent =
@@ -137,6 +159,10 @@ document.getElementById('gs-slider').addEventListener('input', (e) => {
 });
 document.getElementById('thrust-toggle').addEventListener('change', (e) => {
   withThrust = e.target.checked;
+  render();
+});
+document.getElementById('burst-toggle').addEventListener('change', (e) => {
+  burstMode = e.target.checked;
   render();
 });
 
