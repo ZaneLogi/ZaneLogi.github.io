@@ -33,8 +33,8 @@ Local sparse-checkout of the official ComputerArcheology repo. The
 absolute path is **per-PC** — fill in the other-PC path when it's
 known:
 
-- `C:\Z_Temp\computer_archeology_asteroids\content\Arcade\Asteroids\` (this PC)
-- *(other-PC path — to be filled in)*
+- `C:\Z_Temp\computer_archeology_asteroids\content\Arcade\Asteroids\` (PC where the branch was created)
+- `D:\tmp\computer_archeology_asteroids\content\Arcade\Asteroids\` (other PC; mirrors the phoenix sparse-clone path style on that machine)
 
 Upstream: <https://github.com/topherCantrell/computerarcheology>
 (rendered at <https://www.computerarcheology.com/Arcade/Asteroids/>).

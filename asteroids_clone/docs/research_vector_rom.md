@@ -250,6 +250,25 @@ as the canonical image.
 
 ## §5. JS port spec
 
+**Status:** Implemented as the decoded-object format per
+[[research_dvg.md §11]] (which supersedes the Uint8Array model
+sketched in this section). `tools/build_vector_rom.py` parses
+`VectorROM.md` and emits `vector_rom_data.js` with 81 subroutines
+covering every gameplay-active shape (17 ShipDirN, 17 ThrustDirN,
+ShipExplosion, 4 Shrapnel patterns, 4 Rock patterns, UFO, LivesIcon,
+26 letters, 9 digits, Space). Digit `0` is an alias for `Char_O` per
+the ROM's cross-reference table. Power-on test pattern, BANK ERROR
+text, and credits text are skipped — re-extract when porting attract
+mode.
+
+The Uint8Array path described below was the original plan and is
+retained for context. The decoded-object format won because the
+interpreter ends up smaller (~40 LOC vs ~100), the data is human-
+readable, and the JSR target lookup is by symbolic name instead of
+address arithmetic.
+
+---
+
 Per [[research_dvg.md §10]], the DVG interpreter accepts the
 contiguous 8 KB memory image (VRAM + VROM). The vector ROM portion
 is the second half:

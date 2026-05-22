@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>asteroids_clone — vector ROM demo</title>
+  <style>
+    body {
+      background: #111;
+      color: #ccc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 16px;
+    }
+    h1 { font-size: 16px; margin: 0 0 4px; }
+    p  { font-size: 12px; color: #888; margin: 4px 0 12px; }
+    canvas {
+      display: block;
+      background: #000;
+      border: 1px solid #333;
+      image-rendering: pixelated;
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+    button {
+      background: #222;
+      color: #ccc;
+      border: 1px solid #444;
+      padding: 4px 12px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 13px;
+    }
+    button:hover { background: #2c2c2c; }
+    #ship-name { color: #aaa; min-width: 200px; }
+    .slider-group { display: flex; align-items: center; gap: 8px; }
+    input[type=range] { width: 180px; }
+    label { user-select: none; }
+  </style>
+</head>
+<body>
+  <h1>Vector ROM ship-shape demo</h1>
+  <p>
+    Canvas matches the Asteroids cabinet aspect ratio (4:3, DVG 1024×768 logical).
+    Use the slider to vary <code>globalScale</code> and watch SVEC back-edge details emerge as scale increases.
+  </p>
+  <div class="controls">
+    <button id="prev-btn">← Prev</button>
+    <span id="ship-name">—</span>
+    <button id="next-btn">Next →</button>
+    <span class="slider-group">
+      <label for="gs-slider">globalScale:</label>
+      <input id="gs-slider" type="range" min="0" max="9" step="1" value="0">
+      <span id="gs-value">0</span>
+    </span>
+    <label>
+      <input type="checkbox" id="thrust-toggle">
+      thrust
+    </label>
+  </div>
+  <canvas id="demo" width="800" height="600"></canvas>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

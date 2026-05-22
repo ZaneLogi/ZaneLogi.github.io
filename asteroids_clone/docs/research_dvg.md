@@ -359,7 +359,15 @@ dvg.run(displayList);      // sets cursor, walks opcodes, calls ctx.lineTo / str
 The "frame N draws while frame N+1 is being built" optimization is a
 historical artifact, not a gameplay-mechanism dependency.
 
-## §10. Canvas-side port spec
+## §10. Canvas-side port spec — bit-layout reference (input to build script)
+
+**Note (2026-05-22):** the runtime no longer interprets raw ROM bytes
+directly — see §11 for the decoded-object format that supersedes this
+section's runtime model. The bit-layout details below remain
+authoritative as the spec the build script consumes when decoding
+`VectorROM.md` into the runtime format; the pseudocode loop is a
+useful reference for what the runtime interpreter is conceptually
+doing per opcode.
 
 Component | JS shape
 ---|---
@@ -447,7 +455,143 @@ in the implementation phase. Two open decisions left for that phase:
    `console.warn` initially to catch our own hand-written-list
    mistakes during R-F vector-ROM porting; loosen later.
 
-## §11. Deferred questions
+## §11. Vector ROM data representation — decoded-object format
+
+Decided 2026-05-22 in discussion. Supersedes the runtime model in §10
+(which is retained as the bit-layout spec the build script consumes).
+
+**Status:** Implemented and verified. `tools/build_vector_rom.py`
+emits `vector_rom_data.js` containing 81 decoded subroutines covering
+all gameplay-active shapes. The data is byte-faithful to the ROM (no
+modernizing transforms applied — see `progress.md` for the recipe
+that was tried and reverted). The `dvg.js` interpreter (~40 LOC)
+walks the decoded objects and emits canvas line strokes.
+
+The vector ROM ships as a generated JS module exporting an object
+keyed by source-label name. Each subroutine is an array of decoded
+opcode objects; the runtime interpreter walks these directly rather
+than the underlying ROM bytes.
+
+### Format
+
+```js
+export const VROM = {
+  ShipDir0: [
+    {op: 'SVEC', scaleMode: 2, bri:  0, dx:  -3, dy:  -2},
+    {op: 'SVEC', scaleMode: 3, bri: 12, dx:   0, dy:  +2},
+    // ...
+    {op: 'RTS'},
+  ],
+  // ... ~80 more subroutines
+};
+```
+
+### Per-opcode field convention
+
+| Opcode | Fields                          | Notes |
+|--------|---------------------------------|-------|
+| `LABS` | `x, y, globalScale`             | absolute coords; `globalScale` persists until next LABS |
+| `VEC`  | `localScale, bri, dx, dy`       | `localScale` is added to current `globalScale` at draw time (per §4) |
+| `SVEC` | `scaleMode, bri, dx, dy`        | `scaleMode` 0-3, indexes the ×2/×4/×8/×16 multiplier — additive vs VEC's scale, different name avoids confusion |
+| `JSR`  | `target`                        | symbolic name string, e.g. `'ShipDir0'`; matches source label |
+| `JMP`  | `target`                        | as JSR |
+| `RTS`  | —                               | |
+| `HALT` | —                               | |
+
+Convention reasoning:
+
+- **`x, y` vs `dx, dy`** — absolute coords use `x, y` (LABS only);
+  delta motion uses `dx, dy` (VEC, SVEC). Grepping `dx` finds every
+  relative-motion site; grepping `x:` finds every absolute set.
+- **Scale field names** encode the semantic role (`globalScale` /
+  `localScale` / `scaleMode`), not just "scale". The names disambiguate
+  the three different scale concepts in the opcode set.
+- **JSR/JMP targets are symbolic names matching source labels**
+  (`'ShipDir0'`, not `0x5290`). The CPU-side indexed lookups port to
+  arrays of strings (e.g. `SHIP_DIR_TABLE`); readability is the win.
+
+### Interpreter sketch
+
+```js
+export function runList(ctx, list, cursor, globalScale) {
+  for (const op of list) {
+    switch (op.op) {
+      case 'LABS':
+        cursor.x = op.x; cursor.y = op.y; globalScale = op.globalScale;
+        ctx.moveTo(toCanvasX(cursor.x), toCanvasY(cursor.y));
+        break;
+      case 'VEC': {
+        const totalScale = op.localScale + globalScale;
+        cursor.x += op.dx >> (9 - totalScale);
+        cursor.y += op.dy >> (9 - totalScale);
+        if (op.bri > 0) stroke(ctx, cursor, op.bri);
+        else ctx.moveTo(toCanvasX(cursor.x), toCanvasY(cursor.y));
+        break;
+      }
+      case 'SVEC': {
+        const mul = 1 << (op.scaleMode + 1);
+        const div = 1 << (9 - globalScale);
+        cursor.x += (op.dx * mul) / div;
+        cursor.y += (op.dy * mul) / div;
+        if (op.bri > 0) stroke(ctx, cursor, op.bri);
+        else ctx.moveTo(toCanvasX(cursor.x), toCanvasY(cursor.y));
+        break;
+      }
+      case 'JSR':  runList(ctx, VROM[op.target], cursor, globalScale); break;
+      case 'JMP':  return runList(ctx, VROM[op.target], cursor, globalScale);
+      case 'RTS':  return;
+      case 'HALT': return 'halt';
+    }
+  }
+}
+```
+
+JS recursion replaces the DVG's 4-deep hardware stack — each
+recursive `runList` call corresponds to one push/pop. The depth
+limit is no longer a constraint (per §7, source uses at most 3
+nested levels).
+
+### Why this format
+
+1. **Human-readable.** Every shape can be inspected by reading the
+   data file. No bit-decoding in your head to understand what a
+   subroutine draws.
+2. **One mechanism, one interpreter.** The CPU's per-frame vector RAM
+   list is the same format, built by ported CPU code. The interpreter
+   doesn't distinguish ROM-resident shapes from CPU-built lists —
+   both are arrays of opcode objects.
+3. **No per-shape function proliferation.** An earlier consideration
+   of decompiling each ROM subroutine into its own JS draw function
+   was rejected — ~80 nearly-identical functions for what is
+   fundamentally data, not code.
+4. **Runtime cost.** No bit-decoding per opcode. V8 hidden classes
+   collapse the ~500 identically-shaped opcode objects into a single
+   shape descriptor; memory cost is negligible.
+
+### Build pipeline
+
+`tools/build_vector_rom.py` parses the disassembly text under
+`<sparse-clone>/content/Arcade/Asteroids/VectorROM.md`, walks the
+opcode bytes per §6 / §10, and emits:
+
+- `asteroids_clone/vector_rom_data.js` — the runtime input (above)
+- `asteroids_clone/assets/vector_rom.bin` — byte dump for verification
+  against `roms/035127.02` (planned roundtrip check via
+  `tools/check_roundtrip.py`)
+
+First implementation milestone is scoped to the ship region
+(`$5290-$54D8`, 17 ShipDirN + 17 ThrustDirN = 34 subroutines) to
+validate the format before scaling the script to the rest of the ROM.
+
+### Trade-off accepted
+
+Byte-level MAME cross-check is not free anymore — the runtime input
+is no longer the source ROM bytes. Mitigation: the planned roundtrip
+checker re-encodes the decoded form and asserts it matches
+`roms/035127.02`. Byte-accuracy is preserved as a build-time
+invariant, just not as a runtime artifact.
+
+## §12. Deferred questions
 
 - **CRT vector glow.** Whether to attempt bloom emulation (§5 option
   3) is purely a port-side visual decision and can land or not at any
