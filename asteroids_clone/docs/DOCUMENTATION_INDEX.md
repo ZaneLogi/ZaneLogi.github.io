@@ -215,11 +215,15 @@ These items will be addressed during the implementation phase by
 reading source on-demand and cross-checking against Mikstas's
 alternate disassembly where the upstream disasm has gaps:
 
-- **`$75EC`** — asteroid-hit score helper + split-velocity perturbation
-  (referenced in collisions §5; body in the un-disassembled ~20%)
-- **`$77B5` advanceRNG body** — likely an 8-bit LFSR using `$5F`
-- **DVG-list builders `$7C03`/`$7CDE`** — fixed-position list build
-  helpers; partial reading in dvg §10
+- ~~**`$75EC`** — body in the un-disassembled ~20%~~ — **fully
+  decoded 2026-05-24**; see [`research_collisions.md §5.1`](research_collisions.md).
+  Calls `$6A9D` (split-copy) + `$7203` (velocity perturbation) to
+  spawn 0-2 child asteroids; score table at `$7659` (2 bytes).
+- ~~**`$77B5` advanceRNG body** — likely 8-bit LFSR~~ — **actually
+  a 16-bit Galois LFSR** over `$5F:$60`, fully decoded; see
+  [`research_main_loop.md §10`](research_main_loop.md).
+- **DVG-list builders `$7C03`/`$7CDE`** — fully visible in source;
+  per-callsite reading happens during each port step (per dvg §10).
 - **`$724F scoreLivesDraw`** + per-object draw emit sites — exact
   per-object globalScale values are read from source during the
   per-object port steps (I-8 ship, I-9 asteroid, I-10 saucer, I-12

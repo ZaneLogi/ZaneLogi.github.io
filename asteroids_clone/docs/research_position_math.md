@@ -190,7 +190,7 @@ where each unit = 360°/256 ≈ 1.4°), looks up the X-component via
 70B8  TAX                           ; X = new fractional byte
 70B9  TYA
 70BA  ADC $023E (horzVelShip)       ; A = horzVelShip + signExt + carry
-70BD  JSR $7125                     ; clamp/saturate (body in the ~20% un-disassembled)
+70BD  JSR $7125                     ; clamp/saturate to signed [-64, +63] (body visible at $7125-$7138)
 70C0  STA $023E                     ; → horzVelShip (high byte)
 70C3  STX $64                       ; → ship_thrust_dH (low byte / accumulator)
 ```
@@ -478,7 +478,7 @@ overwrite.
 | Vertical position update           | `$6FF1-$7016`                          |
 | Saucer-edge despawn                | `$702D-$703E`                          |
 | Ship physics (thrust accumulator)  | `$703F-$70E0`, especially `$70AA-$70DE`|
-| Velocity clamp                     | `$7125` (body in the un-disassembled ~20%) |
+| Velocity clamp                     | `$7125-$7138` (signed clamp to [-64, +63]) |
 | Direction → thrust X-component LUT | `$77D2` (deferred to `research_player_movement.md`) |
 | Direction → thrust Y-component LUT | `$77D5` (deferred)                     |
 | Position bundle for draw dispatch  | `$6FB0-$6FC4` (asteroid example)       |

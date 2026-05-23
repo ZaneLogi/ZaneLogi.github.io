@@ -34,8 +34,25 @@ Status values: `not started` | `in progress` | `done` | `deferred`.
 
 **2026-05-23 update:** I-7 (main-loop scaffold + 15-JSR dispatch) and
 I-8 (ship physics — rotation, thrust, position math, fire) done.
-Hyperspace deferred to I-13 (needs un-disasm RNG body). Next up:
-**I-9** (asteroid spawn + split mechanics).
+Hyperspace deferred to I-13 (not a port blocker — see I-8 scope
+notes; RNG is now known, see below). Next up: **I-9** (asteroid
+spawn + split mechanics).
+
+**2026-05-24 update — "~20% un-disasm" claim was overstated.** A
+pre-I-9 read of the local `Code.md` for `$7168` (wave init) and
+`$77B5` (RNG) found both fully disassembled. A spot-check of every
+address this doc tree previously called "un-disasm" turned up the
+same for: `$7125`, `$77D2`-`$77E8` (direction LUT lookup; reads a
+table at `$57B9` in vector ROM), `$745A`/`$745C` (asteroid-slot
+scanner), `$75EC` (asteroid-hit score + split spawn), `$77F6`
+(PrintPackedMsg), `$7C03`/`$7CDE` (DVG list builders). The
+**actual** still-un-disasm regions appear to be much smaller than
+"20%" — most likely just sound routines, the per-character LUT
+contents inside `$77E8`'s table, and possibly small data tables.
+The "Missing ~20%" bullet below is preserved as a historical paper
+trail; specific claims have been corrected inline in the research
+docs that referenced them. Full sweep of remaining un-disasm
+references deferred to when each subsystem's port step starts.
 
 R-A through R-F all done. Research stage substantially complete.
 **2026-05-22 update:** the vector-ROM representation question was
@@ -162,14 +179,16 @@ will be addressed in the relevant research doc when reached.
   multi-pass bloom). Default starting point is alpha-mapped; upgrade
   later if visuals warrant it. Decision happens during DVG-interpreter
   implementation, not now.
-- **Missing ~20% of disassembly**: clusters around sound (R-G), RNG
+- **Missing ~20% of disassembly** (historical — see 2026-05-24
+  update at top of file). Original list was: sound (R-G), RNG
   `$77B5` body, DVG-list builders, packed-string unpacking, and
-  `$75EC` (asteroid-hit score + split-velocity perturbation —
-  surfaced by R-E §5/§7). Nicholas Mikstas's alternate disassembly
-  (<https://www.nicholasmikstas.com/games/>) is the fallback source.
-  (NMI handler body — earlier listed here — is actually fully
-  disassembled at `$7B65`; the `$7CF3` confusion was the RESET
-  handler. Both visible. Resolved during R-A.)
+  `$75EC`. **All except sound are now confirmed visible** in the
+  local `Code.md`. Nicholas Mikstas's alternate disassembly
+  (<https://github.com/nmikstas/asteroids-disassembly>) remains the
+  fallback source for anything that does turn out to be missing.
+  (NMI handler body — earlier listed here — was always visible at
+  `$7B65`; the `$7CF3` confusion was the RESET handler. Resolved
+  during R-A.)
 
 ## Implementation steps
 
@@ -201,7 +220,9 @@ I-8 covered four conceptual sub-steps:
   (analog of `$6AD3`'s EOR-during-VRAM-copy sign mirroring). Keyboard
   polled-switch model wired in `main.js`.
 - **Thrust + position math** — accel (`$70AC-$70DE`, Math.cos/sin
-  replaces the $77D2/$77D5 LUT in the un-disasm region), linear-
+  replaces the $77D2/$77D5 LUT helper that reads from a vector-ROM
+  table at `$57B9`; LUT-lookup *code* is fully visible, table
+  *contents* are in VROM data), linear-
   damping friction (`$70E1-$7124`), Float64 position advance
   (`$6FC7-$7016`) with toroidal wrap. Game-coord `[0, 32) × [0, 24)`
   per [`research_position_math.md §6`](research_position_math.md);
@@ -215,9 +236,10 @@ I-8 covered four conceptual sub-steps:
   Collisions stay out — I-11.
 
 **Deferred from I-8 scope:**
-- **Hyperspace** (`$6E74` + `$7052-$7081`) needs the RNG body
-  (`$77B5`, un-disasm region) and the death-rate constants — moved
-  to I-13.
+- **Hyperspace** (`$6E74` + `$7052-$7081`) — moved to I-13 (polish
+  stage, not a port blocker). The RNG body (`$77B5`) is in fact
+  fully visible — see 2026-05-24 update at top of file — so no real
+  un-disasm dependency exists; deferral is purely a scope call.
 
 ## Ship-data modification recipe (obsolete — phantom problem)
 

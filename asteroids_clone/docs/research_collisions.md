@@ -290,7 +290,7 @@ resolution routine:
 6B41  CPY #$1B                       ; was Y the ship?
 6B43  BEQ $6B66                      ;   yes — handle "saucer-shot killed player"
 6B45  BCS $6B73                      ;   no, but Y > $1B → Y was saucer → score it
-6B47  JSR $75EC                      ; asteroid-hit score + explosion sound (body in un-disasm.)
+6B47  JSR $75EC                      ; asteroid-hit score + child-spawn (visible at $75EC-$7658; see §5.1 below)
 6B4A  LDA $0200,Y
 6B4D  AND #$03                       ; pick out size bits
 6B4F  EOR #$02                       ; flip bit 1 (large→large doesn't toggle; small→medium-ish)
@@ -359,8 +359,7 @@ velocity:
 Note: the parent asteroid is NOT yet downgraded here — the caller
 must handle that. The split routine is the "spawn a child"
 primitive. The size-downgrade and velocity-perturbation happen at
-the call site (currently in the un-disassembled `$75EC` region —
-flag for verification against Mikstas's alt-disassembly).
+the call site (`$75EC` — see §5.1 below).
 
 The visible code at `$6B4D-$6B4F` shows the **size-downgrade
 pattern**:
@@ -378,8 +377,68 @@ Hmm, that doesn't read as a clean downgrade. The pattern is more
 complex than a simple ⊕ — likely the upstream caller chooses the new
 size differently. The visible code's `EOR #$02` is feeding into a
 sound-duration calculation (`STA $69 sndTimeExplosion`), not the
-status downgrade. **Asteroid-split size logic is partially deferred
-— exact downgrade lives in `$75EC` (un-disasm) or its callees.**
+status downgrade. **Status downgrade is performed by `$75EC` (see
+§5.1) via a different path — LSR A then OR with retained
+rotation bits, with branch-around for the large/small case.**
+
+### §5.1. `$75EC` — asteroid-hit handler (decoded 2026-05-24)
+
+Fully visible at `Code.md $75EC-$7658`. Called from `$6B47` after a
+shot-vs-asteroid or ship-vs-asteroid collision is resolved. Does:
+score + status downgrade + spawn 0/1/2 child asteroids.
+
+```
+75EC  STX $0D                        ; save shooter slot (X)
+75EE  LDA #$50; STA $02F9 (asteroid_hit_timer)
+75F3  LDA statusAsteroids[Y]; AND #$78; STA $0E   ; preserve upper rotation bits (mask $78 = bits 3-6)
+75FA  LDA statusAsteroids[Y]; AND #$07            ; isolate size bits 0-2
+75FF  LSR A; TAX                                  ; X = shifted size index
+                                                  ;   large $00 → X=0 (carry=0)
+                                                  ;   small $01 → X=0 (carry=1)
+                                                  ;   medium $02 → X=1 (carry=0)
+7601  BEQ $7605                                   ; X==0 → skip status update (leaves large/small status alone)
+7603    ORA $0E                                   ; X==1 → re-attach rotation bits to shifted size
+7605  STA statusAsteroids[Y]                      ; write back (only meaningful when not branched over)
+
+  ; SCORING — gated by numPlayers != 0 (no score in attract mode)
+7608  LDA $1C (numPlayers); BEQ $761D
+760C  LDA $0D; BEQ $7614                          ; shooter-slot==0 (ship hit asteroid): score the player
+760E  CMP #$04; BCC $761D                         ; shooter < 4 (saucer/saucer-shot): no score
+7614  LDA $7659,X                                 ; score = scoreTable[X]
+                                                  ;   $7659 = $10 BCD (large/small)
+                                                  ;   $765A = $05 BCD (medium)
+7617  LDX $19; CLC; JSR $7397                     ; BCD-add to current player score (tens byte)
+
+  ; FIRST CHILD ASTEROID
+761D  LDX statusAsteroids[Y]
+7620  BEQ $7656                                   ; if asteroid is now empty (small was destroyed), done
+7622  JSR $745A                                   ; find a free asteroid slot (X = slot or -1 if none)
+7625  BMI $7656                                   ; no free slot → skip spawn
+7627  INC $02F6 (curAsteroidCount)
+762A  JSR $6A9D                                   ; SPLIT-COPY: copy parent state into slot X
+762D  JSR $7203                                   ; PERTURB velocity: child = parent + random ±15
+                                                  ; (also nudges horizontal sub-tile position by horzVel * 2 XOR hposl)
+7630  LDA horzVelAsteroids[X]; AND #$1F; ASL A; EOR hposlAsteroids[X]; STA hposlAsteroids[X]
+
+  ; SECOND CHILD ASTEROID
+763C  JSR $745C                                   ; find another free slot
+763F  BMI $7656                                   ; none → done
+7641  INC $02F6
+7644  JSR $6A9D
+7647  JSR $7203
+764A  LDA vertVelAsteroids[X]; AND #$1F; ASL A; EOR vposlAsteroids[X]; STA vposlAsteroids[X]
+
+7656  LDX $0D; RTS                                ; restore X = shooter slot
+```
+
+**Key facts:**
+- **Score table at `$7659`** (2 bytes): `$10` for {large, small}, `$05` for {medium}. Mapped to standard 20/50/100 scoring via the BCD-add target byte's place value (`$7397` adds to "tens" byte at `$52,X`, so `$10 BCD = 100 pts`, `$05 BCD = 50 pts`). **The "large = 20 / medium = 50 / small = 100" claim was wrong** — actually the score is 100 for large AND for small (BCD `$10`), and 50 for medium (BCD `$05`).
+  *Verification TODO during I-9/I-11*: confirm against cabinet behaviour and Mikstas's annotations — the value table is 2 bytes, but classic Asteroids documents 3 distinct scores.
+- **Status downgrade**: `LSR A` of the size bits then re-OR with rotation bits — but only stored when result is non-zero (medium → small case). Large and small hits leave status[Y] unchanged; presumably the caller `$6B47` already set status to `$A0` (exploding) before `$75EC` runs, and that's what gets seen by the asteroid-explosion-anim path.
+- **Child count is dynamic** — up to 2 children spawned, but only as many as `$745A`/`$745C` can find free slots for, AND only if the (presumed-already-exploding) parent's status passes the `BEQ $7656` checks. Source effectively spawns 0-2 children depending on slot availability and asteroid type.
+- **`$745A`/`$745C`** at `Code.md $7531-...` (fully visible) — asteroid-slot scanners returning the next free slot index or negative if none. Investigate exact body during I-9.
+- **Velocity perturbation `$7203`** documented in [[research_main_loop.md §10]] context: random ±15 added to parent velocity, clamped via `$7233` to magnitude `[6, 31]` source-byte units. The 4 extra `JSR $77B5` calls in `$7203` between the X and Y perturbations are entropy-mixing to decorrelate the two axes.
+- **Sub-tile position jitter** at `$7630`/`$764A`: child's low-byte position is XOR'd with `(horzVel & $1F) << 1` (and same for vertical with vposl/vertVel). Cheap per-axis decorrelation so children don't perfectly overlap at the parent's tile center.
 
 ### Scoring ($6B73-$6B90)
 
@@ -408,15 +467,19 @@ Scoring values:
 |------------------|-------------|
 | Large saucer     | 200 (`$20`) |
 | Small saucer     | 990 (`$99` → expanded by `$7397` BCD logic) |
-| Large asteroid   | 20 — call site in `$75EC` per source convention; verify in implementation |
-| Medium asteroid  | 50 — same — verify |
-| Small asteroid   | 100 — same — verify |
+| Large asteroid   | **100** (`$10` BCD added to tens byte) — see §5.1 |
+| Medium asteroid  | **50** (`$05` BCD) — see §5.1 |
+| Small asteroid   | **100** (`$10` BCD — same as large) — see §5.1 |
 | Ship             | (no score) |
 
-The asteroid score values 20/50/100 are the well-known Asteroids
-scoring but the exact constants live in the un-disassembled `$75EC`
-region. **TBD verification source: Mikstas alt-disassembly during
-implementation.**
+The source-of-truth is the 2-byte table at `$7659`: `$10, $05`,
+indexed by `(sizeBits >> 1)`. **The classic "20/50/100" scoring
+documentation contradicts the source** — to be reconciled during
+I-11 against cabinet behaviour or Mikstas's annotations. Possible
+explanations: (a) the third score lives in a different code path
+(e.g. saucer-shot bonus), (b) the `$7397` BCD-add logic
+re-interprets the byte differently for one size, or (c) the
+documented 20/50/100 is a misremembering.
 
 ## §6. Port spec
 
@@ -474,19 +537,22 @@ Notes:
   medium** (or sometimes two large per a randomized choice based on
   $77B5 RNG bits — TBD); medium splits into two small; small
   vanishes (no further split, just disappears + score).
-- **Velocity perturbation** during split: the visible code copies
-  parent velocity verbatim, but Asteroids classically has each
-  child going off at a slightly-randomized angle. The perturbation
-  logic is in the call site (`$75EC` or its callees, in the
-  un-disasm region). Suggest: child velocities = parent velocity ±
-  small random component along a perpendicular axis. Will be
-  re-investigated when implementing.
+- **Velocity perturbation** during split: `$6A9D` copies parent
+  velocity verbatim, then the caller `$75EC` invokes `$7203` to add
+  a random ±15 (signed byte units) to each axis, clamped to
+  magnitude [6, 31]. Plus a sub-tile position jitter via XOR with
+  `(vel & $1F) << 1`. Faithful port re-implements this directly.
+  See §5.1.
 
 ## §7. Open questions / deferred to implementation phase
 
-- **`$75EC` (asteroid-hit-score + sound + split-velocity)** is in
-  the un-disassembled ~20% of the source. Cross-reference Mikstas's
-  disassembly when implementing splits.
+- **Score-table size mismatch.** Source's `$7659` table has 2
+  entries (`$10, $05`) — large/small share `$10`, medium gets
+  `$05`. Classic Asteroids docs say 20/50/100. Resolve during I-11
+  (cabinet behaviour, Mikstas annotation, or BCD-add interpretation).
+- **`$745A` / `$745C` slot-scanner body.** Visible at
+  `Code.md $7531+` but not yet decoded — needed to know exact
+  free-slot search order during `$75EC` child spawn.
 - **Saucer firing direction** — saucer shots use `saucerShotDir
   $62` and the saucer's targeting logic at `$6C54-$6CC4`. Collision
   itself is shape-agnostic; the firing-direction story belongs in a
@@ -495,12 +561,6 @@ Notes:
   test ship-vs-saucer directly. Whether the game allows the ship to
   physically touch the saucer without dying is TBD; if so, the
   saucer's collision with the ship happens via saucer-shot only.
-- **Asteroid size-downgrade exact transition table** — bits encoded
-  in status low nibble, but the call-site logic that chooses the
-  new size on split is in `$75EC` (un-disasm).
-- **Random angle on split** — the source perturbs split velocities
-  but the visible code shows a verbatim copy; the perturbation is
-  in the un-disasm call site.
 
 ## §8. Citations summary
 
@@ -518,7 +578,10 @@ Notes:
 | Ship-death via saucer-shot           | `$6B66-$6B72`      |
 | Saucer score (200/990)               | `$6B73-$6B90`      |
 | Asteroid-split-copy                  | `$6A9D-$6AD2`      |
-| Asteroid-hit score helper            | `$75EC` (un-disasm) |
+| Asteroid-hit handler (score + spawn) | `$75EC-$7658` (decoded §5.1) |
+| Score table (2 bytes)                | `$7659-$765A`      |
+| Velocity perturbation                | `$7203-$7232` + clamp `$7233-$724E` |
+| Free-slot scanners                   | `$745A`, `$745C`   |
 | Score-add (BCD)                      | `$7397`            |
 | Asteroid-size bits encoding          | `RAMUse.md $0200-$021A` (status, low 2 bits) |
 | Object position arrays               | `RAMUse.md $0223-$02F4` (per [[research_position_math.md]]) |

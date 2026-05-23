@@ -433,10 +433,29 @@ fixed-timestep accumulator handles host-display refresh drift.
   earlier scouting claim that "the NMI handler body is in the
   un-disassembled 20%" was wrong (that referred to `$7CF3`, which is
   the RESET handler — also visible).
-- **`$77B5 advanceRNG`** — body is in the ~20% un-disassembled
-  region. Likely an 8-bit LFSR using `$5F` as state. Defer to a
-  small standalone investigation when it matters (probably during
-  hyperspace teleport or saucer-direction work).
+- ~~**`$77B5 advanceRNG`** — body is in the ~20% un-disassembled
+  region~~ **— wrong, fully visible at `Code.md` `$77B5-$77D0`
+  (2026-05-24).** It is a **16-bit Galois LFSR** over `$5F:$60`
+  (not 8-bit), with two feedback taps and an anti-stuck-at-zero
+  guard. Output is the low byte `$5F`. Body (decoded):
+  ```
+  77B5  ASL $5F       ; shift 16-bit state $5F:$60 left
+  77B7  ROL $60       ;   (carry chained from $5F into $60)
+  77B9  BPL +2        ; N = new bit 7 of $60
+  77BB  INC $5F       ; feedback A: if bit 6 of old $60 was 1, ++LSB
+  77BD  LDA $5F
+  77BF  BIT $77D1     ; $77D1 holds the mask byte $02
+  77C2  BEQ +4
+  77C4  EOR #$01      ; feedback B: if bit 1 of A set, toggle bit 0
+  77C6  STA $5F
+  77C8  ORA $60
+  77CA  BNE +2
+  77CC  INC $5F       ; anti-zero: bump if entire state == 0
+  77CE  LDA $5F
+  77D0  RTS
+  ```
+  Initial seed must be non-zero. Port lands in I-9a (replaces the
+  +1 placeholder currently in `task_seq.js`).
 
 ## §11. Citations summary
 
