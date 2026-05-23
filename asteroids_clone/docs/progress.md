@@ -66,15 +66,29 @@ subfolder only) is set up on the second PC at
 `D:\tmp\computer_archeology_asteroids\` — see `../CLAUDE.md` for both
 per-PC paths.
 
-## Next step: per-object globalScale determination
+## Per-object globalScale: estimates and confirmation plan
 
 Visual verification of all 81 subroutines is done. Each shape now
 renders correctly under the corrected DVG scale formula (see
 [`research_dvg.md §4 + §6`](research_dvg.md), 2026-05-22 update) —
 but we don't yet know the gs value the CPU code sets per object. The
-cabinet's actual gs-per-object map lives in the un-disassembled
-list-builder routine around `$7555`. Refined estimates after the
-SVEC fix, based on cabinet-faithful rendering at each candidate gs:
+gs-per-object map is encoded in every caller of the LABS+JSR helper
+`$7C03`: each caller stores the LABS globalScale byte into
+`ram.$00` before calling, and `$7C03` ORs that byte into the LABS
+opcode's scale nibble (see [`research_dvg.md §10`](research_dvg.md)
+for the bit layout).
+
+**Confirmation strategy (decided 2026-05-23):** the gs values are
+**not** investigated as a standalone step. Each per-object port
+step (I-8 ship, I-9 asteroid, I-10 saucer, I-12 HUD/attract) reads
+the source for that object anyway — the gs value falls out as a
+side-effect. A standalone "I-6 gs table" step would be the same
+source-reading done twice. The estimates below are used as
+placeholders in JS code (with `// TODO: confirm during I-N`
+comments) and are corrected when the per-object port lands.
+
+Refined estimates after the SVEC fix, based on cabinet-faithful
+rendering at each candidate gs:
 
 | Object | Likely gs | Reasoning |
 |---|---|---|
@@ -85,9 +99,31 @@ SVEC fix, based on cabinet-faithful rendering at each candidate gs:
 | Characters | 0-2 (guess) | HUD readability — to verify against cabinet HUD footage. |
 | Ship explosion fragments | varies per frame | Animation cycles through gs values. |
 
-**Confirm by reading the un-disassembled `$7555` region** (or
-Mikstas's alternate disassembly) when porting the main loop. Until
-then, the demo lets us spot-check via the gs slider.
+**Per-object confirmation map** (which port step reads which
+callsite of `$7C03`):
+
+| Callsite | Object drawn (likely) | Port step |
+|---|---|---|
+| `$725E`, `$72A2`, `$72BF` (inside `scoreLivesDraw`) | score digits / lives icon / copyright | I-7 trailer or I-12 |
+| `$6F48` | asteroid | I-9 |
+| (site inside `$6E74` / `$703F`) | ship | I-8 |
+| (site inside `$6B93` / `$6C34`) | saucer | I-10 |
+| `$73F7` | high-score-entry text | I-12 |
+| `$781C` (inside `$77F6 PrintPackedMsg`) | packed message text | I-12 |
+| `$6DD5`, `$7EFD`, `$7F25`, `$7F6A`, `$7F97` | attract / test-pattern text (TBC) | I-12 |
+| `$686D` (direct main-loop call) | closing LABS+JSR pair (mid-screen) | I-7 |
+
+Each port step reads the `LDA #/STA $00` (or `LDY #/STY $00`)
+immediately before its `JSR $7C03` and pins down the actual gs.
+
+**Note (2026-05-23 — research bug):** earlier text in this section
+claimed the gs-per-object map lived in "the un-disassembled
+list-builder routine around `$7555`". That was wrong on two counts:
+`$7555` is fully disassembled, and it is the per-frame sound-channel
+update routine, not a list builder. List-building is distributed
+across the `$7C03` callsites above. See
+[`research_main_loop.md §3`](research_main_loop.md) for the
+corrected 15-JSR table.
 
 **Previous misreading (resolved 2026-05-22):** before the SVEC fix,
 the interpreter divided SVEC's `raw × scaleMode-multiplier` by
@@ -139,8 +175,7 @@ will be addressed in the relevant research doc when reached.
 | I-3 | DVG interpreter (renderer-agnostic, drawSegment callback) | **done** |
 | I-4 | Verification demo (canvas + slider + prev/next) | **done** |
 | I-5 | Extract all 81 gameplay-active subroutines (visual spot-check) | **done** |
-| I-6 | Determine per-object globalScale (see Next step above) | next |
-| I-7 | Object tables + main loop ($6800 dispatch) | not started |
+| I-7 | Object tables + main loop ($6800 dispatch) | next |
 | I-8 | Ship physics (rotation, thrust, position math) | not started |
 | I-9 | Asteroid spawn + split mechanics | not started |
 | I-10 | Saucer AI + state machine | not started |

@@ -101,7 +101,7 @@ run, some are gated.
 |13 | $685E | `$6F57`    | `asteroidUpdate`     | always              | Per-object motion (asteroids + ship + saucer + shots) — see [[research_position_math.md §3]] |
 |14 | $6861 | `$69F0`    | `collisions`         | always              | Geometric distance tests, splits, scoring, explosion spawn |
 |15 | $6864 | `$724F`    | `scoreLivesDraw`     | always              | Emit DVG bytes for score + lives display (top of screen) |
-|16 | $6867 | `$7555`    | `mainListBuild`      | always              | Main display-list build dispatch (numPlayers-conditional: attract vs play) |
+|16 | $6867 | `$7555`    | `soundDispatch`      | always              | Per-frame sound updates (saucer/fire/thrust/thump/explosion). See [[research_sound.md]] (R-G — deferred). |
 |17 | $686A | (helper)   | `LDA #$7F; TAX`      | always              | Set up params for next JSR |
 |18 | $686D | `$7C03`    | `listBuildHelper`    | always              | Position-bytes → DVG-coords + write to current list cursor (see [[research_dvg.md §10]]) |
 |19 | $6870 | `$77B5`    | `advanceRNG`         | always              | LFSR advance — game's random source (`$5F`) |
@@ -124,11 +124,26 @@ to continue or roll over to a new wave.
   for the dispatch detail.
 - **collisions $69F0** runs in the same X-loop pattern; details TBD
   in [[research_collisions.md]] (R-E).
-- **scoreLivesDraw $724F** and **mainListBuild $7555** are the two
-  display-list build sites. Their detailed structure (which segments
-  of vector RAM they populate, which vector ROM subroutines they
-  JSR to) is partly in the un-disassembled ~20% — to confirm against
-  Mikstas's alt-disassembly during R-F (`research_vector_rom.md`).
+- **List-building is distributed**, not concentrated in one routine.
+  The per-frame DVG vector RAM list is populated piecemeal via the
+  helper `$7C03` (LABS+JSR emitter — see [[research_dvg.md §10]]).
+  Callers of `$7C03`: `scoreLivesDraw $724F` (score + lives +
+  copyright, 3 emit sites at `$725E` / `$72A2` / `$72BF`), per-object
+  draw routines reached during the gameplay block (`$6CD7` / `$6E74`
+  / `$703F` / `$6B93` / `$6F57`), text helpers (`$77F6 PrintPackedMsg`,
+  `$73C4 highScoreEntry`), and a single closing emit at `$686D`.
+  Per-object globalScale values are confirmed during the per-object
+  port steps (I-8 ship, I-9 asteroid, I-10 saucer, I-12 HUD/attract)
+  by reading the `LDA/STA $00` immediately before each `JSR $7C03`.
+  Starting-point estimates from demo-driven visual matching live in
+  [[research_vector_rom.md §3.6]] (asteroids) and `progress.md`
+  "Per-object globalScale" section.
+  **Note (2026-05-23):** `$7555` was previously mislabeled
+  `mainListBuild` in this doc and across the research set. It is the
+  per-frame sound-channel update routine — fully disassembled at
+  `$7555-$75CC`, writes `$3A00` (SNDTHUMP), `$3C00-$3C04`
+  (saucer/fire/thrust), `$3600` (SNDEXP). Detailed analysis deferred
+  to R-G.
 - **emitHalt $7BC0** is two stores of `$B0` to `($02),Y` then `INY` —
   emits a 2-byte HALT word into the display list. This is the
   list-terminator that the DVG looks for.
@@ -306,9 +321,12 @@ asteroidUpdate iterates all 35 object slots; per-slot calls $6FC7 motion or $770
    ↓
 collisions     iterates pairs; mutates statusShip/Asteroids/Saucer, increments score, spawns explosions
    ↓
-scoreLivesDraw emits LABS+VEC for top-screen score and lives icons
-mainListBuild  emits per-object draws (player/asteroid/saucer/shots) into VRAM
-listBuildHelper writes a center-screen fixed item (likely copyright string per attract-mode)
+  (per-object draws were emitted inside each object's update routine
+   above — exact gs values confirmed during per-object port steps
+   I-8/I-9/I-10/I-12)
+scoreLivesDraw emits LABS+JSR for score + lives + copyright (3× $7C03)
+soundDispatch  updates 6 sound channels (no DVG emission)
+(closing emit) $686D — LDA #$7F; TAX; JSR $7C03 (mid-screen closing pair)
 advanceRNG     advance $5F LFSR for next frame's random choices
 emitHalt       writes B000 terminator at the cursor
    ↓
@@ -379,14 +397,14 @@ function tick() {
 }
 
 function drawAndEmit() {
-  // $6864 / $6867 / $686D / $6873 collapsed:
-  //   build canvas line-list (the JS-side equivalent of vector RAM),
-  //   then canvas.stroke() in render().
+  // $6864-$6873 collapsed:
+  //   per-object draws already emitted inside their update routines.
+  //   This trailer adds score/lives, sound, the closing pair, HALT.
   dvg.beginFrame();
-  scoreLivesDraw(dvg);   // $724F
-  mainListBuild(dvg);    // $7555
-  copyrightOrCenterDraw(dvg);  // $686A + $6870
-  dvg.halt();            // $7BC0
+  scoreLivesDraw(dvg);     // $724F
+  soundDispatch();         // $7555 — no DVG emit
+  emitClosingPair(dvg);    // $686D — LDA #$7F; TAX; JSR $7C03
+  dvg.halt();              // $7BC0
 }
 ```
 
@@ -400,10 +418,13 @@ fixed-timestep accumulator handles host-display refresh drift.
   curPlayer-rotation path at `$6960`) needs a closer read when
   `research_player_movement.md` or a player-flow doc is written.
   This R-D characterizes its role in the loop, not its internals.
-- **`scoreLivesDraw $724F`** and **`mainListBuild $7555`** structure
-  — sketched at the level of "they fill the display list", but
-  per-object list-building details (LABS placement, JSR to vector
-  ROM letter routines) belong in [[research_vector_rom.md]] (R-F).
+- **Per-object draw routines + `scoreLivesDraw $724F` structure** —
+  sketched at the level of "they fill the display list". Per-object
+  LABS placement, JSR to vector ROM, and exact globalScale per
+  object are read from source as part of the per-object port steps
+  (I-8 ship, I-9 asteroid, I-10 saucer, I-12 HUD/attract), not as a
+  standalone investigation — same source-reading either way, so the
+  factoring avoids double work.
 - **NMI handler body** — covered in [[research_hardware.md §3]]; the
   earlier scouting claim that "the NMI handler body is in the
   un-disassembled 20%" was wrong (that referred to `$7CF3`, which is
@@ -436,7 +457,7 @@ fixed-timestep accumulator handles host-display refresh drift.
 | saucerSpawn                             | `$6B93`     |
 | collisions                              | `$69F0`     |
 | Score/lives drawing                     | `$724F`     |
-| Main display-list build                 | `$7555`     |
+| Sound-channel updates (per frame)       | `$7555`     |
 | List-build helper                       | `$7C03` (see [[research_dvg.md §10]]) |
 | Halt emitter                            | `$7BC0`     |
 | RNG advance                             | `$77B5`     |

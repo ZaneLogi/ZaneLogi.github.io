@@ -165,9 +165,11 @@ corrected interpreter:
 | 4  | 1024 × 1024 (full screen — at saturation boundary for scaleMode=3) |
 
 So small/medium/large are most likely **gs = 0/1/2** (yielding
-64/128/256-unit spans, consistent with cabinet footage). To be
-confirmed when porting `$7555 mainListBuild` — that's where the
-per-object LABS scale lives.
+64/128/256-unit spans, consistent with cabinet footage). Confirmed
+during I-9 (asteroid spawn + split mechanics) by reading the gs byte
+the asteroid-draw routine stores into `ram.$00` before calling
+`$7C03` (the LABS+JSR list-build helper — see
+[[research_dvg.md §10]]).
 
 The 4 rock patterns × 4 rotation variants (the upper nibble of
 status, incremented each rotation step — see
@@ -345,7 +347,11 @@ calls** in JS. For example, drawing the player ship at the ship's
 current position becomes:
 
 ```js
-// equivalent of $7555 mainListBuild's ship-draw subsection
+// equivalent of the ship-draw emit inside shipControl ($6E74)
+//   — list-building is distributed across per-object update
+//   routines via the $7C03 LABS+JSR helper. The literal gs value
+//   below is the current estimate; confirmed against source during
+//   I-8 (ship physics) port.
 function buildShipDraw(listBuilder, state) {
   listBuilder.emit_LABS(state.ship.x * 32, state.ship.y * 32, /* scale */ 9);
   listBuilder.emit_JSR(SHIP_DIR_TABLE[state.ship.direction >> 2]);
@@ -390,9 +396,10 @@ export const VROM = {
   region. Likely a length-prefixed ASCII-coded string with the
   decoder calling per-character `JSR`s into ROM. Cross-reference
   Mikstas's disassembly during HUD port.
-- **Saucer large vs small dispatch** (§3.7) — verify by reading
-  `$724F scoreLivesDraw` and `$7555 mainListBuild` (currently un-
-  characterized) for the actual call-site.
+- **Saucer large vs small dispatch** (§3.7) — verify by reading the
+  saucer-draw caller of `$7C03` (in the gameplay block, likely
+  reachable from `saucerSpawn $6B93` or its dispatch into `$6C34`).
+  Output: gs value and JSR target for both small and large variants.
 - **Ship rotation** — port choice between byte-accurate 17-shape +
   reflection vs JS-friendly canvas-rotate. Default: canvas-rotate
   (cleaner). If subjectively wrong, switch later.

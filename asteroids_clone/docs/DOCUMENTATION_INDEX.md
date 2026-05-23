@@ -87,8 +87,11 @@ Path: see `../CLAUDE.md` "Source of truth". Local clone at
    │   research_position_math.md §3 (carry-propagated 16-bit motion)
    ├─ collisions
    │   research_collisions.md §3 (BB ∩ Manhattan threshold)
-   └─ scoreLivesDraw → mainListBuild → listBuildHelper → advanceRNG → emitHalt
+   └─ scoreLivesDraw → soundDispatch → (closing $7C03 emit) → advanceRNG → emitHalt
        research_dvg.md §10 (opcode emit), research_vector_rom.md §3 (JSR targets)
+       — per-object draws were emitted inside their update routines
+         above (callers of $7C03); exact gs values are read from
+         source during the per-object port steps (I-8/I-9/I-10/I-12)
 
 4. Wave-progression trailer ($6876-$6883)
    research_main_loop.md §6
@@ -159,7 +162,7 @@ models this as two state objects + active pointer; see
 |----|-------|-----------|
 | §1 | Cold path ($6803-$6809) | hardware §6 (sound reset $6EFA), §2 (memory init) |
 | §2 | Frame loop top — sync, DVG kick, double-buffer | hardware §4, §5; dvg §9 |
-| §3 | Task sequence (15 JSRs) | position_math §3 (asteroidUpdate), collisions §3 (collisions JSR), dvg §10 (mainListBuild/emitHalt) |
+| §3 | Task sequence (15 JSRs) | position_math §3 (asteroidUpdate), collisions §3 (collisions JSR), dvg §10 ($7C03 list-build helper / emitHalt) |
 | §4 | delayBeforePlay gate | (governs which task-seq entries run) |
 | §5 | Game state machine | (ship/saucer/timer/lives state transitions) |
 | §6 | Wave progression ($6876-$6883) | position_math (asteroid count decrements on hit), collisions §5 (DEC curAsteroidCount) |
@@ -217,8 +220,12 @@ alternate disassembly where the upstream disasm has gaps:
 - **`$77B5` advanceRNG body** — likely an 8-bit LFSR using `$5F`
 - **DVG-list builders `$7C03`/`$7CDE`** — fixed-position list build
   helpers; partial reading in dvg §10
-- **`$7555 mainListBuild`** + **`$724F scoreLivesDraw`** — exact per-
-  object list construction (top-level visible, details TBD)
+- **`$724F scoreLivesDraw`** + per-object draw emit sites — exact
+  per-object globalScale values are read from source during the
+  per-object port steps (I-8 ship, I-9 asteroid, I-10 saucer, I-12
+  HUD/attract), not as a standalone investigation. `$7555` was
+  previously mislabeled here as `mainListBuild`; it is the per-frame
+  sound-channel update (R-G).
 - **Packed-string format at `$77F6 PrintPackedMsg`** — character
   lookup table for "PLAYER N" / "PUSH START" / etc.
 - **Saucer firing direction logic at `$6C54-$6CC4`** — saucer AI
