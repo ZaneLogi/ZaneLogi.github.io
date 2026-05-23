@@ -229,14 +229,98 @@ Other objects (asteroids, saucer, shots) skip the
 `ship_thrust_dH/dV` step — their velocity is set when they spawn or
 split and never accumulates further.
 
-## §6. Game coordinates vs DVG coordinates
+## §6. Coordinate systems — three layers
 
-The position bytes don't go to the DVG directly. Source converts
-game coords (32 high-byte × 24 high-byte) to DVG coords (1024 × 1024
-vector units) at **draw time**, when the per-frame display list is
-built.
+Three distinct coordinate spaces are in play; conversions happen at
+fixed boundaries. Code that mixes them up tends to produce shapes at
+the wrong scale or position (e.g. the I-8c thrust-flame bug, where a
+fresh cursor for the flame re-anchored at the LABS position instead
+of picking up where ShipDirN's last opcode left off).
 
-From the asteroid draw setup at `$6FB0-$6FC4`:
+### 6.1 Game-world coordinates (Float64, narrow range)
+
+- **Range:** x ∈ [0, 32), y ∈ [0, 24) — the source's high-byte
+  position model (RAMUse.md `$0269-$02F4`), with hi/lo collapsed
+  per §7.
+- **Velocity:** ±0.25 game-units/tick — source's ±64-byte clamp at
+  `$7125`, divided by 256.
+- **Used by:** all gameplay state — `Ship.x/.y/.vx/.vy`,
+  `advancePosition()`, `applyThrust()`, `applyFriction()`, the
+  modular wrap (X mod 32 from `$6FDC AND #$1F`; Y mod 24 from
+  `$7007 CMP #$18`).
+
+This is the natural unit for physics math: small numbers, clean
+modulo, ample Float64 precision over hours of play.
+
+### 6.2 DVG coordinates (vector hardware)
+
+- **Range:** x ∈ [0, 1024), y ∈ [0, 768) for the cabinet's visible
+  area (1024 × 1024 nominal per R-B §3; upper line ignored, per
+  R-A).
+- **Origin:** bottom-left (Y-up — opposite of canvas).
+- **Used by:** the DVG interpreter — vector ROM opcodes
+  (VEC/SVEC/LABS), `runList`'s cursor, the dx/dy magnitudes inside
+  `vector_rom_data.js`.
+
+The DVG hardware's space. Shapes are ROM-baked at these magnitudes
+(e.g. ShipDir0's `dx: +768` is raw DVG units before the scale-shift
+divides it down), so the port can't rescale per-instance — it has
+to convert into this space at draw time.
+
+### 6.3 Canvas coordinates (Y-flipped DVG)
+
+- Same 1024 × 768 backing-store dimensions as DVG visible.
+- Y-axis flipped: `canvasY = canvas.height - dvgY` (see
+  `main.js:toCanvasY`).
+- Used only by `drawSegment` (the `ctx.moveTo` / `ctx.lineTo` calls).
+
+CSS-size selector (400/800/1024) just scales the backing store
+visually; drawing is always at 1024 × 768.
+
+See [[research_dvg.md §3]] for the DVG-internal Y-up convention.
+
+### 6.4 Conversion factor
+
+```
+DVG = game * 32
+```
+
+Falls out of both axes: 1024 DVG / 32 game-W = 32 horizontal,
+768 DVG / 24 game-H = 32 vertical. The cabinet's 4:3 aspect matches
+the world's 32:24 ratio, so the factor is symmetric — no per-axis
+scaling.
+
+Captured as `GAME_TO_DVG = 32`, `WORLD_W = 32`, `WORLD_H = 24` in
+`asteroids_clone/state.js`.
+
+### 6.5 Conversion happens at the rendering boundary
+
+```
+GAME-COORD (Float64, 0..32 × 0..24)
+    │
+    ├── physics, wrap, thrust/friction (game-coord)
+    │
+    └── Ship.dvgPos()  ──── × 32 ────►  DVG-COORD ({x, y} cursor)
+                                            │
+                                            ├── runList VEC/SVEC mutate cursor
+                                            ├── drawAt(name, cursor, gs, xFlip, yFlip)
+                                            │
+                                            └── drawSegment ── Y-flip ──► CANVAS
+```
+
+The cursor passed to `renderer.drawAt` is in DVG units;
+`Ship.dvgPos()` returns `{x: ship.x * 32, y: ship.y * 32}`.
+
+For sequential draws sharing one cursor (ship + thrust flame), pass
+the same cursor object — `runList` mutates it, so the second draw
+picks up where the first ended. Matches the source: one LABS at
+`$7C03`, then sequential JSRs into ShipDirN + ThrustDirN with no
+re-anchor (see `task_seq.js:drawShip`).
+
+### 6.6 Source's equivalent staging — `$04-$07` position bundle
+
+The source stages the game→DVG conversion through zero-page bytes
+`$04-$07`. The asteroid draw setup at `$6FB0-$6FC4`:
 
 ```
 6FB0  LDA $02AF,X (hposl)  → STA $04   ; copy hposl
@@ -246,16 +330,27 @@ From the asteroid draw setup at `$6FB0-$6FC4`:
 6FC4  JMP $7027 (asteroid draw dispatch)
 ```
 
-So `$04-$07` form a 4-byte "current object position bundle" that the
-draw code consumes. The exact game→DVG conversion (likely a
-multiply-by-32 on the high byte or shift on the combined 16-bit value
-to map 0-8191 to 0-1023) lives in the DVG-list-builder routines at
-`$72FE` and `$7C03+` — these are R-D / R-F territory.
+The draw-side scale + LABS-emit at `$72FE` reads `$04-$07` and
+combines them into LABS opcode coordinates. The exact bit-fiddling
+(LSR / ROR chains at `$7302-$731D`) is the byte-pair-to-LABS
+encoding; the conceptual conversion is the same `× 32` (the source's
+high-byte units × 32 → DVG 0-1023).
 
-The point for R-C: **position math is independent of rendering math.**
-The game-world coordinate system is 32×24 high-byte units; the DVG's
-1024×1024 is a separate space the renderer projects into. Update
-math in §3 works in game space.
+### 6.7 Why three layers, not two
+
+The source has the same three. They don't collapse because:
+
+- **Physics wants small numbers.** Game-coord gives clean modulo
+  and ample Float64 precision; DVG-coord modulo 1024 would still
+  work but velocity magnitudes (~8 DVG-units/tick) feel arbitrary.
+- **ROM data is fixed in DVG units.** Ship/asteroid/UFO shape
+  dx/dy are baked into ROM bytes; can't be rescaled per-instance.
+- **Canvas Y is flipped.** Vector hardware is Y-up, raster is
+  Y-down.
+
+So the port keeps all three, with conversion at exactly two
+boundaries: `Ship.dvgPos()` (game → DVG) and `toCanvasY`
+(DVG → canvas).
 
 ## §7. Port decision — faithful (hi, lo) vs JS Float64
 

@@ -18,7 +18,7 @@ files in the local ComputerArcheology mirror.
 |----------|-------|--------------|--------|
 | **research_hardware.md** | 6502 CPU, memory map, NMI vs frame timing, I/O | §1 CPU, §2 memory map, §3 NMI handler ($7B65), §4 frame timing (~62.5 Hz via $5B gate), §6 I/O (lamps/RAMSEL/sound/switches) | 308 lines |
 | **research_dvg.md** | Display-list spec, opcodes, canvas interpreter | §2 memory model, §3 coords (1024×1024, Y-flip), §4 scale (global+local, /512..\/1), §5 brightness (3 canvas options), §6 opcode reference, §10 interpreter pseudocode | 476 lines |
-| **research_position_math.md** | 16-bit positions, signed velocities, sub-pixel motion, screen wrap | §1 position arrays, §2 velocity, §3 carry-propagation update ($6FC7), §4 toroidal wrap, §5 ship dual-precision velocity, §7 port deviation (Float64) | 391 lines |
+| **research_position_math.md** | 16-bit positions, signed velocities, sub-pixel motion, screen wrap | §1 position arrays, §2 velocity, §3 carry-propagation update ($6FC7), §4 toroidal wrap, §5 ship dual-precision velocity, §6 **three-layer coord model**, §7 port deviation (Float64) | 391 lines |
 | **research_main_loop.md** | $6800 dispatch loop, per-frame task sequence, state machine | §2 preamble, §3 the 15 JSRs, §4 delayBeforePlay gate, §5 state machine diagram, §6 wave progression, §7 two-player RAMSEL, §9 port spec | 448 lines |
 | **research_collisions.md** | Geometric collision tests + dispatch + resolution + scoring | §2 dispatch (X-shooter / Y-target), §3 kernel ($6A0A), §4 (no) wrap-awareness, §5 resolution + scoring + split, §6 port deviation (Euclidean) | 524 lines |
 | **research_vector_rom.md** | 2 KB vector ROM — subroutine inventory + port spec | §1 overview, §3 inventory (ship, asteroid, UFO, shrapnel, characters), §3.8 ship-direction table + reflection, §5 port spec (keep ROM raw) | 379 lines |
@@ -138,7 +138,7 @@ models this as two state objects + active pointer; see
 | §  | Topic | Cross-refs |
 |----|-------|-----------|
 | §2 | Memory model (CPU bytes ↔ DVG words) | hardware §2, vector_rom §2 |
-| §3 | Coordinate system (1024×1024, Y-flip for canvas) | position_math §6 (game-coord → DVG-coord mapping at draw time) |
+| §3 | Coordinate system (1024×1024, Y-flip for canvas) | position_math §6 (full three-layer model: game ↔ DVG ↔ canvas) |
 | §4 | Scale model (global + local, power-of-2) | vector_rom §3.6 (asteroid-size = LABS global scale) |
 | §5 | Brightness (3 canvas options — alpha/width/bloom) | (port-side decision, no source cross-ref) |
 | §6 | Opcode reference (all 7) | vector_rom §3.10 (JSR targets characters) |
@@ -153,7 +153,7 @@ models this as two state objects + active pointer; see
 | §3 | Canonical position update at $6FC7 — carry-propagation | main_loop §3 task #13 (asteroidUpdate) |
 | §4 | Toroidal wrap (X mask, Y compare/branch) | collisions §4 (NOT wrap-aware) |
 | §5 | Ship dual-precision velocity ($023E + $64) | main_loop §3 task #11 (shipSpawnPhys $703F) |
-| §6 | Game-coord → DVG-coord mapping at draw time | dvg §3 (1024×1024 DVG space), vector_rom §3.6 |
+| §6 | **Three-layer coord model** (game-coord, DVG-coord, canvas-coord; conversion at `Ship.dvgPos()` and `toCanvasY`; shared-cursor pattern) | dvg §3 (1024×1024 DVG space), vector_rom §3.6 |
 | §7 | **Port deviation: Float64 collapse** | (all subsequent position-related sites cite this) |
 
 ### research_main_loop.md

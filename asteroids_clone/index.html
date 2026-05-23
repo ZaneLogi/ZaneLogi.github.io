@@ -37,6 +37,15 @@
       color: #5a5;
       pointer-events: none;
     }
+    #keymap {
+      position: fixed;
+      top: 8px;
+      left: 12px;
+      font-size: 11px;
+      color: #5a5;
+      pointer-events: none;
+      white-space: pre;
+    }
     #size-controls {
       position: fixed;
       top: 8px;
@@ -66,6 +75,7 @@
 </head>
 <body>
   <canvas id="game" width="1024" height="768"></canvas>
+  <div id="keymap"></div>
   <div id="status">starting…</div>
   <div id="size-controls">
     <button data-w="400" data-h="300" class="active">400×300</button>

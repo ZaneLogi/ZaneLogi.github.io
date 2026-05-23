@@ -32,6 +32,11 @@ Status values: `not started` | `in progress` | `done` | `deferred`.
 
 ## Current focus
 
+**2026-05-23 update:** I-7 (main-loop scaffold + 15-JSR dispatch) and
+I-8 (ship physics — rotation, thrust, position math, fire) done.
+Hyperspace deferred to I-13 (needs un-disasm RNG body). Next up:
+**I-9** (asteroid spawn + split mechanics).
+
 R-A through R-F all done. Research stage substantially complete.
 **2026-05-22 update:** the vector-ROM representation question was
 resolved as a **decoded-object format** — the ROM ships as a
@@ -92,7 +97,7 @@ rendering at each candidate gs:
 
 | Object | Likely gs | Reasoning |
 |---|---|---|
-| Player ship | 0 | At gs=0 the ship VECs render at 96-unit lines + SVECs at 8-16-unit back detail → closed east-pointing arrow ≈ 80 DVG units across. Matches cabinet footage. |
+| Player ship | **14 (confirmed I-8a)** | Source `$7027` derives Y=`$E0` from status=1 (alive); high nibble $E = 14 is stored at ram.$00 → ORs into the LABS scale field. Under the wrap-and-saturate scale model, gs=14 + ship local scales wraps to small visible total. |
 | Lives icon | 0 (or close) | Same shape family as ship. |
 | Asteroid (small/med/large) | **0 / 1 / 2** | Rock1 is SVEC-only with scaleMode≤3 (saturates at gs>4). Measured Rock1 spans: gs=0 → 64×64 small, gs=1 → 128×128 medium, gs=2 → 256×256 large. See [`research_vector_rom.md §3.6`](research_vector_rom.md). |
 | UFO (large/small) | 0-2 (guess) | UFO is SVEC-only; same scale-response curve as asteroids. |
@@ -106,7 +111,7 @@ callsite of `$7C03`):
 |---|---|---|
 | `$725E`, `$72A2`, `$72BF` (inside `scoreLivesDraw`) | score digits / lives icon / copyright | I-7 trailer or I-12 |
 | `$6F48` | asteroid | I-9 |
-| (site inside `$6E74` / `$703F`) | ship | I-8 |
+| `$7027` (inside `$72FE` per-slot dispatcher) | ship | **confirmed I-8a (gs=14)** |
 | (site inside `$6B93` / `$6C34`) | saucer | I-10 |
 | `$73F7` | high-score-entry text | I-12 |
 | `$781C` (inside `$77F6 PrintPackedMsg`) | packed message text | I-12 |
@@ -175,14 +180,44 @@ will be addressed in the relevant research doc when reached.
 | I-3 | DVG interpreter (renderer-agnostic, drawSegment callback) | **done** |
 | I-4 | Verification demo (canvas + slider + prev/next) | **done** |
 | I-5 | Extract all 81 gameplay-active subroutines (visual spot-check) | **done** |
-| I-7 | Object tables + main loop ($6800 dispatch) | in progress |
-| I-8 | Ship physics (rotation, thrust, position math) | not started |
+| I-7 | Object tables + main loop ($6800 dispatch) | **done** |
+| I-8 | Ship physics (rotation, thrust, position math, fire) | **done** (hyperspace deferred to I-13) |
 | I-9 | Asteroid spawn + split mechanics | not started |
 | I-10 | Saucer AI + state machine | not started |
 | I-11 | Collisions + scoring + lives | not started |
 | I-12 | Attract mode + power-on test pattern + credits | not started |
-| I-13 | Polish + visual tuning | not started |
+| I-13 | Polish + visual tuning (incl. ship hyperspace $7052-$7081) | not started |
 | I-14 | Sound (R-G dependency) | deferred |
+
+### I-8 scope
+
+I-8 covered four conceptual sub-steps:
+
+- **Visible ship** at cabinet-true gs=14 + DVG scale wrap-and-saturate
+  fix (4-bit mask + total>9 → shift-by-10 path, per MAME `avgdvg.c`).
+  Sim/render split lands in `task_seq.js`.
+- **Rotation** (`$7086-$709A`, ±3/tick) + 17-shape direction fold
+  (`$750B`) with X/Y flip flags. `dvg.runList` gains `xFlip`/`yFlip`
+  (analog of `$6AD3`'s EOR-during-VRAM-copy sign mirroring). Keyboard
+  polled-switch model wired in `main.js`.
+- **Thrust + position math** — accel (`$70AC-$70DE`, Math.cos/sin
+  replaces the $77D2/$77D5 LUT in the un-disasm region), linear-
+  damping friction (`$70E1-$7124`), Float64 position advance
+  (`$6FC7-$7016`) with toroidal wrap. Game-coord `[0, 32) × [0, 24)`
+  per [`research_position_math.md §6`](research_position_math.md);
+  shared cursor between ShipDirN and ThrustDirN matches the source's
+  one-LABS-then-sequential-JSRs pattern.
+- **Player fire** (`$6CD7`) — edge-detected SWFIRE via
+  `state.fireWasPressed` (source uses `photomLimiter $63`), spawn into
+  free slot $1F-$22, shot velocity = ship velocity + base direction
+  unit clamped ±112/256 (`$6D14`), 18-tick lifetime decrementing every
+  4 frames (`$7393`). Renderer gains `drawDot` (analog of `$7CE0`).
+  Collisions stay out — I-11.
+
+**Deferred from I-8 scope:**
+- **Hyperspace** (`$6E74` + `$7052-$7081`) needs the RNG body
+  (`$77B5`, un-disasm region) and the death-rate constants — moved
+  to I-13.
 
 ## Ship-data modification recipe (obsolete — phantom problem)
 

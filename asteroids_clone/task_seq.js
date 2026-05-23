@@ -9,13 +9,23 @@
 // Behavior style: cited free functions. Each routine names its
 // source label and is filled in by the corresponding implementation
 // step (I-8 ship, I-9 asteroid, I-10 saucer, I-11 collisions, I-12
-// HUD/attract). For I-7 these are intentionally empty stubs.
+// HUD/attract). For I-7 these were intentionally empty stubs.
 //
-// Drawing emit: per-object draws (ship, asteroid, saucer, shots)
-// will be emitted INSIDE the per-object update routines below — the
-// source structure has the gameplay routines themselves call the
-// $7C03 LABS-emit helper as they update each slot. No mainListBuild;
-// see the "Per-object globalScale" section in docs/progress.md.
+// **Port deviation — sim/render split (I-8a).** The source intermixes
+// simulation and DVG emission inside the 15-JSR dispatch: each
+// per-object update routine ALSO calls $7C03 to emit its draw.
+// Canvas rendering needs to be batched per painted frame (not per
+// simulation tick), so the port splits the dispatch in two:
+//
+//   - `simulate(state)` — called once per accumulator tick. Runs the
+//     simulation parts of the dispatch (motion, AI, collisions,
+//     timers). No DVG emit.
+//   - `render(state, renderer)` — called once per painted frame.
+//     Runs the rendering parts (per-object draws via $7C03 +
+//     scoreLivesDraw + closing emit + halt). Reads current state.
+//
+// Each split site cites the source routine it ports and notes the
+// split. The 1:1 source mapping survives at the routine level.
 
 // ----- Frame-rate gate (NMI $5B + main-loop $6811-$6813) -----
 //
@@ -25,7 +35,7 @@
 // main.js), so frameGate is a no-op here — it exists so we can
 // trace the source dispatch path one-to-one if we ever need to.
 
-export function tick(state) {
+export function simulate(state) {
   // $683C — playerMgmt: credits, delay, player rotation. CF=1 triggers
   // cold-restart (handled in main loop; for now, no-op).
   playerMgmt(state);
@@ -41,7 +51,9 @@ export function tick(state) {
     // $6849 — highScoreEntry: rotate/hyperspace entry input. CF=1
     // means still entering — skip the rest of the gameplay block.
     if (highScoreEntry(state)) {
-      finishFrame(state);
+      soundDispatch(state);
+      advanceRNG(state);
+      advanceTimers(state);
       return;
     }
   }
@@ -54,20 +66,35 @@ export function tick(state) {
     saucerSpawn(state);      // $6B93
   }
 
-  asteroidUpdate(state);     // $6F57 — iterates all 35 object slots
+  asteroidUpdate(state);     // $6F57 — iterates all 35 object slots (sim only)
   collisions(state);         // $69F0
 
-  finishFrame(state);
+  soundDispatch(state);      // $7555 — per-frame sound channel updates (R-G)
+  advanceRNG(state);         // $77B5
+
   advanceTimers(state);
 }
 
-function finishFrame(state) {
-  // The source's frame trailer at $6864-$6873:
-  scoreLivesDraw(state);     // $724F
-  soundDispatch(state);      // $7555 — per-frame sound channel updates (R-G)
-  closingEmit(state);        // $686D — single LABS at (~mid-screen) with inherited gs
-  advanceRNG(state);         // $77B5
-  emitHalt(state);           // $7BC0
+// ===== Render dispatch — called once per painted frame =====
+
+export function render(state, renderer) {
+  // Source equivalent: the per-object draw emit sites scattered
+  // through the per-object update routines + the frame trailer
+  // ($724F scoreLivesDraw, $686D closing emit, $7BC0 emitHalt).
+  // See the "Port deviation — sim/render split" note at top.
+
+  // Per-object draws — emit order matches source's slot-iteration
+  // direction in $6F57 (asteroids first, then ship, then saucer/shots).
+  drawAsteroids(state, renderer);   // (I-9)
+  drawShip(state, renderer);        // (I-8)
+  drawSaucer(state, renderer);      // (I-10)
+  drawPlayerShots(state, renderer); // (I-8d)
+  drawSaucerShots(state, renderer); // (I-10)
+
+  // Frame trailer:
+  scoreLivesDraw(state, renderer);  // $724F
+  closingEmit(state, renderer);     // $686D — single LABS at (~mid-screen)
+  emitHalt(state, renderer);        // $7BC0
 }
 
 function advanceTimers(state) {
@@ -105,9 +132,22 @@ function highScoreEntry(_state) {
   return false;
 }
 
-function playerFire(_state) {
-  // $6CD7 — read SWFIRE, spawn shot in $021F-$0222 slot if room.
-  // Body in I-8 (ship physics + fire).
+function playerFire(state) {
+  // $6CD7 — edge-detected SWFIRE: spawn shot in free slot $1F-$22.
+  // Source uses $63 photomLimiter (bit 7 = current, bit 6 = previous);
+  // JS uses state.fireWasPressed for the same rising-edge gate.
+  const edge = state.input.fire && !state.fireWasPressed;
+  state.fireWasPressed = state.input.fire;
+  if (!edge) return;
+
+  // $6CE6 — skip while ship is in spawn/respawn (we only check status===1).
+  if (state.ship.status !== 1) return;
+
+  // $6CF0-$6CFA — search slots top-down for the first free one.
+  const slot = state.playerShots.find((s) => s.status === 0);
+  if (!slot) return;
+
+  slot.spawn(state.ship);
 }
 
 function shipControl(_state) {
@@ -115,9 +155,25 @@ function shipControl(_state) {
   // ship.direction. Body in I-8.
 }
 
-function shipSpawnPhys(_state) {
-  // $703F — spawn timer + thrust accumulator → ship.vx/vy update.
-  // Body in I-8.
+function shipSpawnPhys(state) {
+  // $703F — ship-spawn-timer mgmt + rotation + thrust accumulator.
+  // I-8b/c implement rotation + thrust; spawn-timer body ($7041-$7085)
+  // lands when ship death + respawn is wired.
+  if (state.ship.status !== 1) return;
+
+  // $7086-$709A — SWROTLEFT has priority; either rotates direction by ±3.
+  if (state.input.rotLeft) {
+    state.ship.rotate(3);
+  } else if (state.input.rotRight) {
+    state.ship.rotate(-3);
+  }
+
+  // $70A0-$70DF — thrust accelerates vx/vy; thrust-off path applies friction.
+  if (state.input.thrust) {
+    state.ship.applyThrust();
+  } else {
+    state.ship.applyFriction();
+  }
 }
 
 function saucerSpawn(_state) {
@@ -125,12 +181,20 @@ function saucerSpawn(_state) {
   // saucer logic at $6C34. Body in I-10.
 }
 
-function asteroidUpdate(_state) {
-  // $6F57 — iterates all 35 object slots; per-slot calls $6FC7
-  // motion (or $7708 explosion anim if status high bit set).
-  // Also emits the asteroid draw via $7C03 (see $6F48 caller).
-  // Body in I-9 (asteroids) + I-8 (ship) + I-10 (saucer) since
-  // this routine iterates ALL object types.
+function asteroidUpdate(state) {
+  // $6F57 — iterates all 35 object slots; per-slot calls $6FC7 motion
+  // (or $7708 explosion anim if status high bit set). I-8c/d implement
+  // ship-slot ($1B) + player-shot slots ($1F-$22); asteroid + saucer +
+  // saucer-shot slots fill in with I-9 / I-10.
+  if (state.ship.status === 1) {
+    state.ship.advancePosition();
+  }
+  for (const shot of state.playerShots) {
+    if (shot.status > 0) {
+      shot.advancePosition();
+      shot.decrementLifetime(state.fastTimer);
+    }
+  }
 }
 
 function collisions(_state) {
@@ -138,25 +202,10 @@ function collisions(_state) {
   // spawn. Body in I-11.
 }
 
-function scoreLivesDraw(_state) {
-  // $724F — emits LABS opcodes (3 $7C03 callsites at $725E /
-  // $72A2 / $72BF) and matching JSRs for score digits, lives icons,
-  // and copyright. Body in I-12 / I-7-trailer.
-}
-
 function soundDispatch(_state) {
   // $7555 — per-frame sound-channel updates. Writes SNDSAUCR /
   // SNDSFIRE / SNDTHRUST / SNDFIRE / SNDTHUMP / SNDEXP. Body in
   // R-G (deferred until silent game runs).
-}
-
-function closingEmit(_state) {
-  // $686D — LDA #$7F; TAX; JSR $7C03. Emits one LABS opcode at
-  // DVG coords (~127×4 = ~508, ~127×4 = ~508) — roughly mid-
-  // screen — with whatever globalScale was last set into ram.$00.
-  // Likely a sentinel for the credits/copyright JSR that follows.
-  // Body fleshed out when the per-object draws need their
-  // surrounding LABS context.
 }
 
 function advanceRNG(state) {
@@ -168,7 +217,69 @@ function advanceRNG(state) {
   state.rng = ((state.rng ?? 0) + 1) & 0xFF;
 }
 
-function emitHalt(_state) {
+// ===== Render-side stubs (called by render(state, renderer)) =====
+
+function drawShip(state, renderer) {
+  // $750B — ship.shapeSelection() returns the right ShipDirN + flip flags
+  // for the current 8-bit direction. gs from $7027 = 14 (ship status=1 →
+  // high nibble $E stored at ram.$00 → upper nibble of LABS opcode).
+  if (state.ship.status !== 1) return;
+  const { name, xFlip, yFlip } = state.ship.shapeSelection();
+  // One shared cursor so the thrust flame starts where the ship's last
+  // SVEC left it (matches the source: one LABS, then sequential JSRs
+  // into ShipDirN + ThrustDirN with no re-anchor between them).
+  const cursor = state.ship.dvgPos();
+  renderer.drawAt(name, cursor, 14, xFlip, yFlip);
+
+  // $753B-$7553 — matching ThrustDirN flickers on bit 2 of fastTimer
+  // while SWTHRUST is held. Picks up cursor from ship's last opcode.
+  if (state.input.thrust && (state.fastTimer & 4)) {
+    const thrustName = name.replace('ShipDir', 'ThrustDir');
+    renderer.drawAt(thrustName, cursor, 14, xFlip, yFlip);
+  }
+}
+
+function drawAsteroids(_state, _renderer) {
+  // I-9 — per-slot iteration via $6F48 caller of $7C03, emitting
+  // LABS + JSR into the right Rock_N subroutine.
+}
+
+function drawSaucer(_state, _renderer) {
+  // I-10 — saucer-draw emit site (probably inside $6B93/$6C34).
+}
+
+function drawPlayerShots(state, renderer) {
+  // $7384-$738B — source emits a small bright mark per active shot via
+  // $7CE0 (a zero-length VEC ≈ illuminated dot). JS renders a tiny dot
+  // at the shot's DVG position.
+  for (const shot of state.playerShots) {
+    if (shot.status > 0) {
+      const { x, y } = shot.dvgPos();
+      renderer.drawDot(x, y);
+    }
+  }
+}
+
+function drawSaucerShots(_state, _renderer) {
+  // I-10 — same as drawPlayerShots but for saucer's 2 shot slots.
+}
+
+function scoreLivesDraw(_state, _renderer) {
+  // $724F — emits LABS opcodes (3 $7C03 callsites at $725E /
+  // $72A2 / $72BF) and matching JSRs for score digits, lives icons,
+  // and copyright. Body in I-12 / I-7-trailer.
+}
+
+function closingEmit(_state, _renderer) {
+  // $686D — LDA #$7F; TAX; JSR $7C03. Emits one LABS opcode at
+  // DVG coords (~127×4 = ~508, ~127×4 = ~508) — roughly mid-
+  // screen — with whatever globalScale was last set into ram.$00.
+  // Likely a sentinel for the credits/copyright JSR that follows.
+  // Body fleshed out when the per-object draws need their
+  // surrounding LABS context.
+}
+
+function emitHalt(_state, _renderer) {
   // $7BC0 — writes $B0 (HALT opcode) to the cursor. In JS the
   // canvas frame ends when the rAF callback returns; nothing to
   // do here. Kept as a citation point.

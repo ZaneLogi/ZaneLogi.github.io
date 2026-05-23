@@ -9,24 +9,40 @@
 // calls live in the caller (demos/vector_rom.js for the dev demo;
 // main.js once the runtime/game ports land).
 
-// Scale arithmetic — corrected 2026-05-22 against MAME avgdvg.c + Nick Mikstas's
-// Asteroids HDL. Both VEC and SVEC use ADDITIVE total scale (local + global)
-// with the same barrel-shifter:
-//   - VEC:  local = opcode nibble (0..9), magnitude = raw 10-bit (0..1023)
-//   - SVEC: local = scaleMode + 2 (i.e. 2..5), magnitude = raw 2-bit << 8
-//                  (i.e. 0, 256, 512, or 768 — top 2 bits of a 10-bit field)
-//   - Rendered delta = magnitude >> (9 - total) for both.
+// Scale arithmetic — corrected 2026-05-23 against MAME avgdvg.c (lines 631-641
+// and 785-799 of the DVG handler). Both VEC and SVEC use the same model:
 //
-// Saturation: if total > 9, the hardware decoder turns on all output bits and
-// the delta becomes ≈ 0 integer units. Well-formed cabinet ROMs choose per-
-// object gs values that avoid this; if we see a vanishing segment in our port
-// it means the gs picked for that object is too high.
+//   1. total = (localScale + globalScale) & 0x0f   ← 4-bit MASK (hardware wraps)
+//   2. if (total > 9) total = -1                   ← saturation to "shift by 10"
+//   3. shift = 9 - total                           ← divisor exponent
+//   4. rendered = magnitude >> shift                ← pixel delta
 //
-// Rounding: the hardware shifts an unsigned magnitude and re-applies the
-// sign — i.e. truncation toward zero. JS `>>` is sign-extending and rounds
-// toward -∞ for negatives, so we use Math.trunc(dx / div) instead.
+// The 4-bit mask is critical: when local + global ≥ 16 the sum wraps modulo 16,
+// often dropping back into the 0..9 range and producing a visible-small render.
+// This is why the cabinet can use gs=14 for ship + small asteroid (apparent
+// "out of range") and still get visible output — local + 14 wraps.
+//
+// VEC:  local = opcode nibble (0..9), magnitude = raw 10-bit (signed -512..+511)
+// SVEC: local = scaleMode + 2 (i.e. 2..5), magnitude = raw 2-bit << 8
+//                (i.e. 0, 256, 512, or 768 — top 2 bits of a 10-bit field)
+//
+// Saturation (total > 9 after mask): MAME sets temp=-1 → shift=10 → delta =
+// magnitude/1024. For VEC this is small-but-possibly-visible; for SVEC at
+// integer-pixel granularity the fraction truncates to 0 (sub-pixel detail lost,
+// matches our integer-cursor implementation — full fixed-point fidelity would
+// preserve sub-pixel accumulation across multiple SVECs).
+//
+// Rounding: hardware shifts an unsigned magnitude and re-applies sign — i.e.
+// truncation toward zero. JS `>>` sign-extends so we use Math.trunc instead.
 
-export function runList(VROM, list, cursor, globalScale, drawSegment) {
+// X/Y flip — JS analog of source $6AD3's EOR-during-VRAM-copy mirroring at
+// $6AD3 lines $6ADC (EOR $09 on dy sign-bit) and $6AF6 (EOR $08 on dx sign-bit).
+// Source flips the sign bit (bit 2 of byte +1 for dy, bit 2 of byte +3 for dx)
+// in the encoded opcodes; we negate the decoded dx/dy in the interpreter
+// instead, which is geometrically identical and avoids re-encoding. Flips
+// propagate through JSR — only matters if a flipped subroutine itself JSRs;
+// ShipDirN doesn't, but keeping it consistent costs nothing.
+export function runList(VROM, list, cursor, globalScale, drawSegment, xFlip = false, yFlip = false) {
   for (const op of list) {
     switch (op.op) {
       case 'LABS':
@@ -37,31 +53,39 @@ export function runList(VROM, list, cursor, globalScale, drawSegment) {
 
       case 'VEC': {
         const fromX = cursor.x, fromY = cursor.y;
-        const div = 1 << Math.max(0, 9 - (op.localScale + globalScale));
-        cursor.x += Math.trunc(op.dx / div);
-        cursor.y += Math.trunc(op.dy / div);
+        let total = (op.localScale + globalScale) & 0x0f;
+        if (total > 9) total = -1;
+        const div = 1 << (9 - total);
+        const dx = xFlip ? -op.dx : op.dx;
+        const dy = yFlip ? -op.dy : op.dy;
+        cursor.x += Math.trunc(dx / div);
+        cursor.y += Math.trunc(dy / div);
         if (op.bri > 0) drawSegment(fromX, fromY, cursor.x, cursor.y, op.bri);
         break;
       }
 
       case 'SVEC': {
         const fromX = cursor.x, fromY = cursor.y;
-        const total = (op.scaleMode + 2) + globalScale;
-        // Saturation: hardware delta becomes ~0 when total > 9. Skip the cursor
-        // update (and still emit a zero-length segment if the SVEC is a draw).
-        const mul = total > 9 ? 0 : 1 << (op.scaleMode + 1 + globalScale);
-        cursor.x += op.dx * mul;
-        cursor.y += op.dy * mul;
+        let total = ((op.scaleMode + 2) + globalScale) & 0x0f;
+        if (total > 9) total = -1;
+        // Hardware: pixel delta = (raw_2bit << 8) >> (9 - total). Equivalent
+        // integer-pixel form: delta = raw * 2^(total - 1) for total ≥ 1,
+        // else 0 (sub-pixel — truncates).
+        const mul = total >= 1 ? 1 << (total - 1) : 0;
+        const dx = xFlip ? -op.dx : op.dx;
+        const dy = yFlip ? -op.dy : op.dy;
+        cursor.x += dx * mul;
+        cursor.y += dy * mul;
         if (op.bri > 0) drawSegment(fromX, fromY, cursor.x, cursor.y, op.bri);
         break;
       }
 
       case 'JSR':
-        runList(VROM, VROM[op.target], cursor, globalScale, drawSegment);
+        runList(VROM, VROM[op.target], cursor, globalScale, drawSegment, xFlip, yFlip);
         break;
 
       case 'JMP':
-        return runList(VROM, VROM[op.target], cursor, globalScale, drawSegment);
+        return runList(VROM, VROM[op.target], cursor, globalScale, drawSegment, xFlip, yFlip);
 
       case 'RTS':
         return;

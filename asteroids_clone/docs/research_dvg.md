@@ -89,6 +89,13 @@ aspect ratio (the production game ran on a 1024-wide × 768-tall
 visible window, with the upper 256 units unused — confirmed by the
 LABS examples in `VectorROM.md` test pattern which use y ≤ 895).
 
+This section covers the DVG layer in isolation. See
+[[research_position_math.md §6]] for the full three-layer model
+(game-coord → DVG-coord → canvas-coord) — including where each
+conversion happens in the port (`Ship.dvgPos()`, `toCanvasY`) and
+why the cursor passed to `runList` must be shared across sequential
+draws (the I-8c thrust-flame anchor pattern).
+
 ## §4. Scale model — power-of-2 division
 
 **Both VEC and SVEC use the same additive scale model.** Two fields
@@ -134,13 +141,42 @@ field (so it sees magnitudes `0, 256, 512, 768`) — the smaller
 SVEC packet trades resolution for compactness but goes through the
 identical barrel shifter. See §6 for the encoding detail.
 
-**Saturation.** When `total_scale > 9` the hardware decoder
-misbehaves: in practice the rendered delta becomes effectively zero
-integer DVG units. Well-formed cabinet ROMs choose per-object gs
-values that keep `(local + global) ≤ 9` for every opcode they
-invoke. The software port should match this — a vanishing segment
-in our render is a signal that the gs picked for that object is too
-high (or in dev-time terms: out of the data author's intended range).
+**Wrap + saturate at total > 9** (corrected 2026-05-23 against MAME
+`avgdvg.c` lines 631-641 + 785-799). The hardware does **two** things
+before the barrel shift:
+
+1. **4-bit mask:** `total = (local + global) & 0x0f` — the sum
+   WRAPS modulo 16. So `local=6 + gs=14 = 20`, masked to `4`.
+2. **Saturation:** if the masked `total > 9`, the hardware
+   effectively sets `total = -1`, giving `shift = 10` (one bit
+   smaller than `gs=0`'s `/512` — a render at `magnitude / 1024`).
+
+The wrap is what makes the cabinet's use of "out of range" gs
+values (10-15) produce visible output. Asteroids uses `gs=14` for
+ship + small asteroid and `gs=15` for medium asteroid; both rely on
+the wrap to bring `local + global` back into 0-9. For example:
+
+- Ship VEC with `local=6`, `gs=14`: total = 20 & 15 = 4 → shift=5 →
+  rendered ≈ raw/32 (small, visible)
+- Rock1 SVEC with `local=5` (scaleMode=3), `gs=14`: total = 19 & 15
+  = 3 → shift=6 → rendered ≈ raw/64 (smaller than at gs=0)
+- Rock1 SVEC with `local=2` (scaleMode=0), `gs=14`: total = 16 & 15
+  = 0 → shift=9 → rendered ≈ raw/512 (sub-pixel, truncates to 0)
+
+So at high gs values some opcodes wrap into the visible range and
+some truncate to zero — the rendered shape is a *subset* of the
+shape at low gs, missing the smallest-scaleMode details. This is
+deliberate cabinet behavior, not a bug.
+
+When `total > 9` *after* the mask (i.e. masked sum lands in 10-15),
+the saturation gives `shift = 10`. In integer-pixel arithmetic SVEC
+truncates to 0 here (sub-pixel); for VEC the rendered delta is
+`raw/1024` — small but possibly visible for large raws.
+
+**Earlier (incorrect) version of this section claimed
+"saturation = delta becomes ≈ 0 at total > 9".** That was true for
+the SVEC integer-pixel case but wrong for VEC, and missed the
+crucial wraparound mask. See dvg.js header for the implementation.
 
 LABS coordinates are **absolute, NOT scaled** — they set the cursor
 verbatim. Only VEC/SVEC deltas are scaled.
@@ -150,11 +186,21 @@ calling LABS with different global scales before each JSR.
 Asteroids uses this to render asteroids at 3 sizes from one
 sprite-image set (see §8 and [[research_vector_rom.md §3.6]]).
 
-**Port implication:** Implement as `Math.trunc(raw / (1 <<
-total_scale))` — JS's `Math.trunc(x / div)` matches the hardware's
-"shift unsigned magnitude, re-apply sign" semantics. Plain `raw >>
-total_scale` rounds toward −∞ for negative `raw`, off by one in
-edge cases, and was a source of bug 2026-05-22.
+**Port implication:** Implement the full wrap+saturate sequence:
+
+```js
+let total = (localScale + globalScale) & 0x0f;
+if (total > 9) total = -1;
+const div = 1 << (9 - total);
+rendered = Math.trunc(raw / div);
+```
+
+JS's `Math.trunc(x / div)` matches the hardware's "shift unsigned
+magnitude, re-apply sign" semantics. Plain `raw >> total_scale`
+rounds toward −∞ for negative `raw`, off by one in edge cases,
+and was a source of bug 2026-05-22. Omitting the `& 0x0f` mask
+and the `total = -1` substitution was a source of bug 2026-05-23
+(ship rendered way too big at the cabinet-true gs=14).
 
 ## §5. Brightness model
 
