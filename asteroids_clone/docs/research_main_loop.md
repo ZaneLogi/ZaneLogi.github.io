@@ -126,7 +126,11 @@ to continue or roll over to a new wave.
   in [[research_collisions.md]] (R-E).
 - **List-building is distributed**, not concentrated in one routine.
   The per-frame DVG vector RAM list is populated piecemeal via the
-  helper `$7C03` (LABS+JSR emitter — see [[research_dvg.md §10]]).
+  helper `$7C03` (LABS-emit helper — writes a 4-byte LABS opcode
+  per call; the matching JSR opcode is emitted by a separate
+  helper, likely `$7CDE` based on its call pattern right after
+  `$7C03` at sites like `$73FC`. To confirm during per-object
+  port. See [[research_dvg.md §10]]).
   Callers of `$7C03`: `scoreLivesDraw $724F` (score + lives +
   copyright, 3 emit sites at `$725E` / `$72A2` / `$72BF`), per-object
   draw routines reached during the gameplay block (`$6CD7` / `$6E74`
@@ -324,7 +328,7 @@ collisions     iterates pairs; mutates statusShip/Asteroids/Saucer, increments s
   (per-object draws were emitted inside each object's update routine
    above — exact gs values confirmed during per-object port steps
    I-8/I-9/I-10/I-12)
-scoreLivesDraw emits LABS+JSR for score + lives + copyright (3× $7C03)
+scoreLivesDraw emits LABS+JSR for score + lives + copyright (3× $7C03 for the LABS halves, paired with JSRs from a separate helper)
 soundDispatch  updates 6 sound channels (no DVG emission)
 (closing emit) $686D — LDA #$7F; TAX; JSR $7C03 (mid-screen closing pair)
 advanceRNG     advance $5F LFSR for next frame's random choices

@@ -168,7 +168,7 @@ So small/medium/large are most likely **gs = 0/1/2** (yielding
 64/128/256-unit spans, consistent with cabinet footage). Confirmed
 during I-9 (asteroid spawn + split mechanics) by reading the gs byte
 the asteroid-draw routine stores into `ram.$00` before calling
-`$7C03` (the LABS+JSR list-build helper — see
+`$7C03` (the LABS-emit helper — see
 [[research_dvg.md §10]]).
 
 The 4 rock patterns × 4 rotation variants (the upper nibble of
@@ -349,7 +349,7 @@ current position becomes:
 ```js
 // equivalent of the ship-draw emit inside shipControl ($6E74)
 //   — list-building is distributed across per-object update
-//   routines via the $7C03 LABS+JSR helper. The literal gs value
+//   routines via the $7C03 LABS-emit helper. The literal gs value
 //   below is the current estimate; confirmed against source during
 //   I-8 (ship physics) port.
 function buildShipDraw(listBuilder, state) {

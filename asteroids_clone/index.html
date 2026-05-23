@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Asteroids — port (I-7 scaffold)</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #000;
+      height: 100%;
+    }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #888;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+    }
+    /* Canvas backing store is 1024×768 (cabinet DVG visible area);
+       CSS width/height controls displayed size — toggled by the
+       size selector. Browser scales backing store to fit CSS box. */
+    #game {
+      display: block;
+      background: #000;
+      width: 400px;
+      height: 300px;
+      /* Outline (not border) so the canvas dimensions stay exactly as
+         set — outline draws outside without affecting layout. */
+      outline: 1px solid #333;
+    }
+    #status {
+      position: fixed;
+      bottom: 8px;
+      left: 12px;
+      font-size: 11px;
+      color: #5a5;
+      pointer-events: none;
+    }
+    #size-controls {
+      position: fixed;
+      top: 8px;
+      right: 12px;
+      font-size: 11px;
+      display: flex;
+      gap: 4px;
+    }
+    #size-controls button {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #888;
+      padding: 4px 8px;
+      cursor: pointer;
+      font: inherit;
+    }
+    #size-controls button:hover {
+      border-color: #555;
+      color: #aaa;
+    }
+    #size-controls button.active {
+      background: #1a2a1a;
+      border-color: #5a5;
+      color: #aea;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game" width="1024" height="768"></canvas>
+  <div id="status">starting…</div>
+  <div id="size-controls">
+    <button data-w="400" data-h="300" class="active">400×300</button>
+    <button data-w="800" data-h="600">800×600</button>
+    <button data-w="1024" data-h="768">1024×768</button>
+  </div>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

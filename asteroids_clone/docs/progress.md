@@ -72,8 +72,8 @@ Visual verification of all 81 subroutines is done. Each shape now
 renders correctly under the corrected DVG scale formula (see
 [`research_dvg.md §4 + §6`](research_dvg.md), 2026-05-22 update) —
 but we don't yet know the gs value the CPU code sets per object. The
-gs-per-object map is encoded in every caller of the LABS+JSR helper
-`$7C03`: each caller stores the LABS globalScale byte into
+gs-per-object map is encoded in every caller of the LABS-emit
+helper `$7C03`: each caller stores the LABS globalScale byte into
 `ram.$00` before calling, and `$7C03` ORs that byte into the LABS
 opcode's scale nibble (see [`research_dvg.md §10`](research_dvg.md)
 for the bit layout).
@@ -111,7 +111,7 @@ callsite of `$7C03`):
 | `$73F7` | high-score-entry text | I-12 |
 | `$781C` (inside `$77F6 PrintPackedMsg`) | packed message text | I-12 |
 | `$6DD5`, `$7EFD`, `$7F25`, `$7F6A`, `$7F97` | attract / test-pattern text (TBC) | I-12 |
-| `$686D` (direct main-loop call) | closing LABS+JSR pair (mid-screen) | I-7 |
+| `$686D` (direct main-loop call) | closing LABS opcode (mid-screen) | I-7 |
 
 Each port step reads the `LDA #/STA $00` (or `LDY #/STY $00`)
 immediately before its `JSR $7C03` and pins down the actual gs.
@@ -175,7 +175,7 @@ will be addressed in the relevant research doc when reached.
 | I-3 | DVG interpreter (renderer-agnostic, drawSegment callback) | **done** |
 | I-4 | Verification demo (canvas + slider + prev/next) | **done** |
 | I-5 | Extract all 81 gameplay-active subroutines (visual spot-check) | **done** |
-| I-7 | Object tables + main loop ($6800 dispatch) | next |
+| I-7 | Object tables + main loop ($6800 dispatch) | in progress |
 | I-8 | Ship physics (rotation, thrust, position math) | not started |
 | I-9 | Asteroid spawn + split mechanics | not started |
 | I-10 | Saucer AI + state machine | not started |
