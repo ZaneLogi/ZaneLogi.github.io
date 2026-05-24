@@ -917,9 +917,9 @@ export const VROM = {
 
 // Ship-explosion piece velocity table — CPU $50EC-$50F6 (6 × 2 bytes,
 // signed). Paired with the 6 SVECs of VROM.ShipExplosion: one (svec, vel)
-// per fragment. Cabinet animator (un-disasm CPU region near RAM $7D-$94)
-// holds independent positions per fragment, advances by vx/vy each frame,
-// and emits LABS+SVEC per fragment in the per-frame display list.
+// per fragment. Consumed by the animator at $7465-$7508; per-fragment
+// position state lives in RAM at $7D-$88 (X axis) + $89-$94 (Y axis).
+// See docs/research_ship_explosion.md.
 export const SHIP_EXPLOSION_VELOCITY = [
   {vx: -40, vy: +30},  // fragment 0
   {vx: +50, vy: -20},  // fragment 1

@@ -105,7 +105,9 @@ MNEMONICS = ("VEC", "SVEC", "LABS", "JSR", "JMP", "RTS", "HALT")
 # Ship-explosion piece velocity table at CPU $50EC-$50F6 (DVG byte
 # $10EC-$10F6). 6 entries × 2 bytes (vx, vy signed). Paired with the
 # 6 ShipExplosion SVECs at $50E0-$50EA — one (svec, velocity) per
-# fragment. Used by the (un-disasm) animator near $7D-$94 RAM offsets.
+# fragment. Consumed by the animator at $7465-$7508; per-fragment
+# position state lives in RAM at $7D-$88 (X axis) + $89-$94 (Y axis).
+# See docs/research_ship_explosion.md.
 VELOCITY_TABLE_START = 0x10EC
 VELOCITY_TABLE_END   = 0x10F6
 VELOCITY_TABLE_ENTRIES = 6
@@ -450,9 +452,9 @@ def emit_js(
     lines.append("")
     lines.append("// Ship-explosion piece velocity table — CPU $50EC-$50F6 (6 × 2 bytes,")
     lines.append("// signed). Paired with the 6 SVECs of VROM.ShipExplosion: one (svec, vel)")
-    lines.append("// per fragment. Cabinet animator (un-disasm CPU region near RAM $7D-$94)")
-    lines.append("// holds independent positions per fragment, advances by vx/vy each frame,")
-    lines.append("// and emits LABS+SVEC per fragment in the per-frame display list.")
+    lines.append("// per fragment. Consumed by the animator at $7465-$7508; per-fragment")
+    lines.append("// position state lives in RAM at $7D-$88 (X axis) + $89-$94 (Y axis).")
+    lines.append("// See docs/research_ship_explosion.md.")
     lines.append("export const SHIP_EXPLOSION_VELOCITY = [")
     for i, v in enumerate(velocity_table):
         lines.append(
