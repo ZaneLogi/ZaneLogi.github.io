@@ -1,9 +1,13 @@
 # asteroids_clone — Complete Documentation Index
 
-**Date:** 2026-05-22
-**Status:** Research stage substantially complete (R-A through R-F).
-R-G (sound) deferred until silent game runs. Implementation phase
-ready to begin.
+**Date:** 2026-05-24
+**Status:** Implementation phase well underway — I-7 (main-loop
+scaffold), I-8 (ship + fire), and I-9 (asteroid spawn / motion /
+draw / explode / split / collide) all **done**. Next:
+I-10 (saucer AI), I-11 (remaining collision pairs + scoring +
+ship death + lives), I-12 (attract/credits/HUD), I-13 (hyperspace
+polish), I-14 (sound, R-G dependency). R-A through R-F research
+docs are landed; R-G (sound) still deferred until silent game runs.
 
 **Total docs:** 6 research docs (~2,500 lines) + source-of-truth
 files in the local ComputerArcheology mirror.
@@ -20,7 +24,7 @@ files in the local ComputerArcheology mirror.
 | **research_dvg.md** | Display-list spec, opcodes, canvas interpreter | §2 memory model, §3 coords (1024×1024, Y-flip), §4 scale (global+local, /512..\/1), §5 brightness (3 canvas options), §6 opcode reference, §10 interpreter pseudocode | 476 lines |
 | **research_position_math.md** | 16-bit positions, signed velocities, sub-pixel motion, screen wrap | §1 position arrays, §2 velocity, §3 carry-propagation update ($6FC7), §4 toroidal wrap, §5 ship dual-precision velocity, §6 **three-layer coord model**, §7 port deviation (Float64) | 391 lines |
 | **research_main_loop.md** | $6800 dispatch loop, per-frame task sequence, state machine | §2 preamble, §3 the 15 JSRs, §4 delayBeforePlay gate, §5 state machine diagram, §6 wave progression, §7 two-player RAMSEL, §9 port spec | 448 lines |
-| **research_collisions.md** | Geometric collision tests + dispatch + resolution + scoring | §2 dispatch (X-shooter / Y-target), §3 kernel ($6A0A), §4 (no) wrap-awareness, §5 resolution + scoring + split, §6 port deviation (Euclidean) | 524 lines |
+| **research_collisions.md** | Geometric collision tests + dispatch + resolution + scoring | §2 dispatch (X-shooter / Y-target), §3 kernel ($6A0A) — **incl. step 2 LSR/ROR correction (|dx|/2 fold; effective radii 2× table)**, §4 (no) wrap-awareness, §5 resolution + scoring + split, **§5.1 $75EC decoded**, **§5.2 shrapnel render path (Pattern 4→1; mod-16 gs growth)**, §6 port deviation (Euclidean), **§7 deferred questions (resolved: collision-tightness; open: saucer-adjust block unreachable, score-table 2-entry mismatch, $745A/$745C decode)** | 599 lines |
 | **research_vector_rom.md** | 2 KB vector ROM — subroutine inventory + port spec | §1 overview, §3 inventory (ship, asteroid, UFO, shrapnel, characters), §3.8 ship-direction table + reflection, §5 port spec (keep ROM raw) | 379 lines |
 
 ### Source-of-truth files (in the ComputerArcheology mirror)
@@ -222,6 +226,22 @@ alternate disassembly where the upstream disasm has gaps:
 - ~~**`$77B5` advanceRNG body** — likely 8-bit LFSR~~ — **actually
   a 16-bit Galois LFSR** over `$5F:$60`, fully decoded; see
   [`research_main_loop.md §10`](research_main_loop.md).
+- ~~**Collision kernel `$6A22-$6A25` "extract sign bit"**~~ —
+  **misread; corrected 2026-05-24 (post-I-9h)**. The LSR/ROR/ASL
+  sequence is a 16-bit unsigned right shift folding `|dx|` to
+  `|dx|/2` before comparing to the radius table. Effective radii in
+  raw sub-tile units are **2× the table** (84/144/264 sub-tile =
+  10.5/18/33 DVG ≈ Rock1 visible extent). Resolves the deferred
+  "collision feels tight vs cabinet" question. See
+  [`research_collisions.md §3 step 2 + step 4 + §7`](research_collisions.md).
+- ~~**Across-sweep shrapnel scale expansion**~~ — **decoded
+  2026-05-24 during I-9e**. Source's `$6FA4-$6FA9 + $7321` LABS-
+  emit cycles globalScale `$B → $0` across explosion stages,
+  exploiting the same mod-16 wrap trick as asteroid sizing
+  (14/15/0). The `$7324-$7339 $90` emit loop confirmed as no-op
+  DVG padding per MAME's `avgdvg dvg_generate_vector_list`. See
+  [`research_dvg.md §4` "Confirmed reappearance" + `§12`](research_dvg.md)
+  and [`research_collisions.md §5.2`](research_collisions.md).
 - **DVG-list builders `$7C03`/`$7CDE`** — fully visible in source;
   per-callsite reading happens during each port step (per dvg §10).
 - **`$724F scoreLivesDraw`** + per-object draw emit sites — exact

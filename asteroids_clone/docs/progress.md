@@ -116,7 +116,7 @@ rendering at each candidate gs:
 |---|---|---|
 | Player ship | **14 (confirmed I-8a)** | Source `$7027` derives Y=`$E0` from status=1 (alive); high nibble $E = 14 is stored at ram.$00 → ORs into the LABS scale field. Under the wrap-and-saturate scale model, gs=14 + ship local scales wraps to small visible total. |
 | Lives icon | 0 (or close) | Same shape family as ship. |
-| Asteroid (small/med/large) | **0 / 1 / 2** | Rock1 is SVEC-only with scaleMode≤3 (saturates at gs>4). Measured Rock1 spans: gs=0 → 64×64 small, gs=1 → 128×128 medium, gs=2 → 256×256 large. See [`research_vector_rom.md §3.6`](research_vector_rom.md). |
+| Asteroid (small/med/large) | **14 / 15 / 0 (confirmed I-9d, 2026-05-24)** | Source `$701B-$7025` derives gs from size bits: small (bit 0 set) → `$E0` = 14, medium (bit 1 set) → `$F0` = 15, large (neither) → `$00` = 0. Under wrap-and-saturate, gs=14 wraps to a small visible size + gs=15 to medium + gs=0 to large. Earlier "0 / 1 / 2" estimate from demo-driven Rock1 spans was wrong direction (we measured at the wrong scaleMode assumption). |
 | UFO (large/small) | 0-2 (guess) | UFO is SVEC-only; same scale-response curve as asteroids. |
 | Characters | 0-2 (guess) | HUD readability — to verify against cabinet HUD footage. |
 | Ship explosion fragments | varies per frame | Animation cycles through gs values. |
@@ -127,7 +127,7 @@ callsite of `$7C03`):
 | Callsite | Object drawn (likely) | Port step |
 |---|---|---|
 | `$725E`, `$72A2`, `$72BF` (inside `scoreLivesDraw`) | score digits / lives icon / copyright | I-7 trailer or I-12 |
-| `$6F48` | asteroid | I-9 |
+| ~~`$6F48`~~ → **`$7018-$7027`** (after motion, falls into `$72FE`) | asteroid | **confirmed I-9d (gs=14/15/0)**. Earlier `$6F48` claim was wrong — that site is inside a high-score table draw routine. |
 | `$7027` (inside `$72FE` per-slot dispatcher) | ship | **confirmed I-8a (gs=14)** |
 | (site inside `$6B93` / `$6C34`) | saucer | I-10 |
 | `$73F7` | high-score-entry text | I-12 |
@@ -201,7 +201,7 @@ will be addressed in the relevant research doc when reached.
 | I-5 | Extract all 81 gameplay-active subroutines (visual spot-check) | **done** |
 | I-7 | Object tables + main loop ($6800 dispatch) | **done** |
 | I-8 | Ship physics (rotation, thrust, position math, fire) | **done** (hyperspace deferred to I-13) |
-| I-9 | Asteroid spawn + split mechanics | not started |
+| I-9 | Asteroid spawn + split mechanics | **done** (I-9c rotation animation dropped — alive asteroids static) |
 | I-10 | Saucer AI + state machine | not started |
 | I-11 | Collisions + scoring + lives | not started |
 | I-12 | Attract mode + power-on test pattern + credits | not started |
@@ -240,6 +240,105 @@ I-8 covered four conceptual sub-steps:
   stage, not a port blocker). The RNG body (`$77B5`) is in fact
   fully visible — see 2026-05-24 update at top of file — so no real
   un-disasm dependency exists; deferral is purely a scope call.
+
+### I-9 scope (done 2026-05-24)
+
+I-9 covered seven sub-steps; the per-step plan expanded from the
+original `not started` line above. Post-impl fixes for gameplay-feel
+issues surfaced during play-testing are folded into the matching
+sub-step bullets below.
+
+- **I-9a wave spawn + RNG** — `$7168` newWaveInit (edge
+  selection, asteroidsPerWave cap 11, max_rocks_for_ufo cap 10);
+  `$77B5` 16-bit Galois LFSR; `$7203` perturbVelocity (4-RNG-call
+  inter-axis decorrelation); `$7233` magnitude clamp [6, 31];
+  `$7206-$720B` signedPerturb.
+- **I-9b motion + wrap** — extends `$6F57` dispatch to
+  asteroid slots `$00-$1A`; uses `Asteroid.advancePosition` (shared
+  `$6FC7-$7016` pattern from I-8).
+- **I-9c rotation animation** — **dropped**. Source `$701B-$7025`
+  confirms alive asteroids are static; shape variety comes from
+  bits 3-4 seeded at spawn (1 of 4 fixed Rock tumble poses per
+  asteroid lifetime). Earlier "status += $10 per rotation step"
+  claim was the exploding-asteroid path only.
+- **I-9d draw + per-object gs** — `$7018-$7027` + `$72FE` alive
+  draw path; per-size gs=14/15/0 via `$701B-$7025` (exploits mod-16
+  wrap; design note in [`research_dvg.md §4`](research_dvg.md));
+  shape from bits 3,4 via `$7365-$736A`. **Stale claim correction:**
+  "asteroid draw site is `$6F48`" was wrong (that's high-score
+  table) — actual site is `$7018-$7027` (inline after motion, falls
+  into `$72FE`).
+- **I-9e explosion animation** — `$6F64-$6F77` increment formula
+  `(-status>>4)+1` per tick; `$6F82-$6F8E` cleanup. **Shape order:
+  4→3→2→1** per `$50F8` jump table at `$10F8-$10FE` (Pattern 4 is
+  smallest spread ±10-15, Pattern 1 is largest ±16-32 — concentric
+  patterns play smallest-first to grow outward). **Across-sweep gs
+  expansion** via source's `$7321` LABS emit with gs computed at
+  `$6FA4-$6FA9` as `(status & $F0) + $10`, cycling
+  $B→$C→$D→$E→$F→$0 across stages to double the shrapnel pattern
+  each step via the same mod-16 wrap trick. **`$7324-$7339`
+  `$90`/`$80`/`$70` emit loop** confirmed as no-op DVG padding per
+  MAME's `avgdvg dvg_generate_vector_list` (only LABS modifies
+  the DVG scale latch); see [`research_dvg.md §12`](research_dvg.md)
+  for the resolved investigation.
+- **I-9f wave-progression trailer** — `$6876-$6883`: drain
+  `astdWaveTimer` and fire `newWaveInit` when both timer +
+  `curAsteroidCount` hit zero. I-9a's dev-shim bootstrap call in
+  `main.js` was removed (the trailer naturally fires wave 1 on
+  frame 1 since both fields start at 0).
+- **I-9g split-copy primitive** — `$6A9D-$6AD2` (status / position
+  / velocity copy with random shape-variant bits); reuses I-9a's
+  `$7203` perturb + `$7233` clamp; `$7630`/`$764A` sub-tile XOR
+  jitter so children don't perfectly overlap. **Terminology cleanup
+  folded in:** "rotation seed/bits" → "shape-variant seed/bits"
+  across `task_seq.js` + `state.js` + research docs (source-listing's
+  "rotation" misled into expecting visible spin).
+- **I-9h shot-vs-asteroid collision** — `$69F0-$6A95` kernel
+  (subset: outer = playerShots, inner = asteroids); `$6B0F`+`$75EC`
+  resolver subset (shot kill, size LSR-downgrade, spawn ≤2 children
+  via I-9g splitAsteroid, mark parent exploding `$A0`). **Radius
+  correction:** source's `$6A22-$6A25` LSR/ROR is a 16-bit unsigned
+  right shift (`$08 = |dx|/2`, NOT `|dx|`), so the `$6A55` table
+  values (42/72/132) are halved-unit; effective radii in raw
+  sub-tile units are **2× the table: 84/144/264** = 10.5/18/33 DVG
+  ≈ Rock1 visible extent (resolves the deferred "collision feels
+  tight vs cabinet" item from `research_collisions.md §7`).
+  **Proximity gate widened** from `|dx|>1` to `|dx|>=2` (source
+  accepts dx_hi ∈ `{0, 1, $FE, $FF}` = ±2 game units).
+
+**Deferred from I-9 scope (re-open at I-11 unless noted):**
+- **Other collision pairs** (ship-vs-asteroid, saucer-shot-vs-ship,
+  ship-shot-vs-saucer, saucer-vs-asteroid) — natural I-11 scope.
+- **Scoring + ship death + lives** — needs `$7397` BCD-add port +
+  saucer score path at `$6B73-$6B90`. I-11.
+- **Score-table size mismatch** — source's `$7659` is 2 bytes
+  (`$10, $05`), classic docs say 20/50/100. Resolve during I-11
+  against cabinet behavior or Mikstas annotations. See
+  [`research_collisions.md §7`](research_collisions.md).
+- **Saucer-adjustment block `$6A6B-$6A75` unreachable** — `$6A69`
+  BNE always branches because A (= r or r+28) is never zero for
+  any radius-table value. Either dead source code or a missing
+  saucer-radius path elsewhere. Verify when I-11's saucer
+  collision lands.
+- **`$745A`/`$745C` slot-scanner body** — visible at `$7531+`
+  but not decoded; I-9h uses `Array.find` as placeholder.
+  Re-port during I-11 when the same `$75EC` handler fires for
+  the additional collision pairs (spawned as a separate chip).
+- **`$72FE` +4 game-unit Y offset** at `$7311-$7313` — HUD margin
+  reservation (the bottom DVG rows y=[0,128) belong to score +
+  lives). Apply during I-12 when HUD lands.
+
+**Port deviations introduced during I-9 (documented at site):**
+- **Euclidean collision** (vs source's BB ∩ Manhattan octagon) —
+  documented at [`research_collisions.md §6`](research_collisions.md).
+- **`Array.find` for free-slot search** — see above deferred entry.
+- **Round-cap zero-length SVECs at 3px lineWidth** — canvas-side
+  rendering decision for shrapnel sparks; no source counterpart
+  (cabinet phosphor decay isn't a discrete pixel size). Player-shot
+  dot stays at the I-8 4px to remain visually distinct from
+  shrapnel debris. See `main.js drawSegment`.
+- **Skip `$7324-$7339` `$90`-emit loop** — confirmed via MAME as
+  no-op DVG padding; no visual effect when omitted.
 
 ## Ship-data modification recipe (obsolete — phantom problem)
 

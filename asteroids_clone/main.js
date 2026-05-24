@@ -35,6 +35,11 @@ const TICK_MS = 1000 / TICK_HZ;
 const MAX_TICKS_PER_FRAME = 5;
 
 const state = new GameState();
+// First wave spawns automatically via the I-9f wave-trailer on frame 1
+// — state.astdWaveTimer = 0 + state.curAsteroidCount = 0 at init
+// naturally satisfies the trailer's "both zero" condition. The real
+// game-start sequence ($68F0+ burst, I-12) will set astdWaveTimer
+// to $7F for a 2-second pre-wave pause before path (a) fires.
 window.__game = state;  // dev hook for poking at state from the console
 const renderer = makeRenderer(ctx);
 
@@ -95,9 +100,12 @@ function makeRenderer(ctx) {
     ctx.moveTo(toCanvasX(fromX), toCanvasY(fromY));
     ctx.lineTo(toCanvasX(toX),   toCanvasY(toY));
     ctx.strokeStyle = `rgba(0,255,0,${bri / 15})`;
-    ctx.lineWidth = 1.5;
-    // Round caps so zero-length SVEC "dots" (e.g. shrapnel sparks)
-    // render as visible points instead of vanishing.
+    // Zero-length SVECs are dots (shrapnel sparks via $7CE0-style
+    // emit); fatten them so they read as visible specks rather than
+    // 1.5px nubs. Kept smaller than the 4px player-shot dot to stay
+    // visually distinct from a bullet.
+    const isDot = fromX === toX && fromY === toY;
+    ctx.lineWidth = isDot ? 3 : 1.5;
     ctx.lineCap = 'round';
     ctx.stroke();
   }

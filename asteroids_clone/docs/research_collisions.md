@@ -112,67 +112,94 @@ cases) or ship/saucer (when X is a shot).
 6A11  STA $0B                        ; save status (for size lookup in §4)
 ```
 
-### Step 2: Compute absolute |dx| ($6A13-$6A32)
+### Step 2: Compute |dx|/2 and quadrant flag ($6A13-$6A32)
 
-The pattern is the 6502 standard 16-bit signed subtract + absolute-
-value with sign-extension trick:
+The sequence does two things at once: a 16-bit **unsigned right shift**
+of the signed dx (so `$08` ends up holding `|dx|/2`, **not** `|dx|`),
+and a quadrant test on the shifted high byte left in A.
 
 ```
 6A13  LDA hposl[Y]                   ; dx_lo = hposl[Y] - hposl[X]
 6A16  SEC
 6A17  SBC hposl[X]
-6A1A  STA $08                        ; $08 = dx_lo
+6A1A  STA $08                        ; $08 = dx_lo (low byte of signed dx)
 6A1C  LDA hposh[Y]                   ; dx_hi = hposh[Y] - hposh[X] (with borrow)
 6A1F  SBC hposh[X]
-6A22  LSR A; ROR $08; ASL A          ; extract sign bit into A
-6A26  BEQ $6A34                      ; dx_hi was 0 → dx is small positive
-6A28  BPL $6A97                      ; dx_hi positive but not 0 → too far → skip
-6A2A  EOR #$FE                       ; check if dx_hi == $FF
-6A2C  BNE $6A97                      ; else → too far → skip
-6A2E  LDA $08
-6A30  EOR #$FF                       ; one's-complement → ≈ abs(dx_lo)
-6A32  STA $08                        ; $08 = |dx| (now strictly positive)
+6A22  LSR A                          ; A := dx_hi >> 1; carry := bit 0 of dx_hi
+6A23  ROR $08                        ; $08 := (carry<<7) | ($08>>1)
+                                     ;        = low byte of (dx_unsigned >> 1)
+6A25  ASL A                          ; A := dx_hi & $FE  (quadrant flag)
+6A26  BEQ $6A34                      ; A == 0 → dx_hi was 0 or 1 (positive small/medium)
+6A28  BPL $6A97                      ; A positive nonzero → dx_hi was 2..$7F → too far
+6A2A  EOR #$FE                       ; check A == $FE (dx_hi was $FE or $FF)
+6A2C  BNE $6A97                      ; else → too far
+6A2E  LDA $08                        ; negative-dx fixup: one's-complement converts the
+6A30  EOR #$FF                       ;   unsigned-shifted bytes into |dx|/2
+6A32  STA $08                        ; $08 ≈ |dx_signed| / 2 (off-by-one at boundaries)
 ```
 
-Same pattern repeats for vertical at `$6A34-$6A53`, producing `$09 =
-|dy|` and using vposl[Y] - vposl[X] and vposh[Y] - vposh[X].
+**Critical correction (2026-05-24).** The earlier reading of this
+sequence as "extract sign bit into A; $08 = |dx|" was wrong on both
+counts. The LSR A + ROR $08 pair is a 16-bit unsigned right shift;
+`$08` captures `dx/2` (with one-bit precision loss). The
+EOR #$FF at `$6A30` then converts the unsigned-shifted bytes back to
+`|dx|/2` for the negative-dx branch. The radius-table values at
+`$6A55` (42/72/132) are compared against these **halved** distances —
+so the **effective collision radius in raw sub-tile units is `2×` the
+table value: 84 / 144 / 264** (verified empirically and explained in
+step 4 below).
 
-The check `dx_hi must be 0 or $FF` enforces a **proximity gate**: the
-two objects must be within ±256 sub-tile units (i.e., within one
-high-byte tile) on each axis before the radius test even runs. This
-makes the kernel O(targets) cheap — most pairs are dismissed in 6
-instructions.
+Same pattern repeats for vertical at `$6A34-$6A53`, producing `$09 ≈
+|dy|/2` from vposl[Y] - vposl[X] and vposh[Y] - vposh[X].
+
+The quadrant test on `A` accepts `dx_hi ∈ {0, 1, $FE, $FF}` — a
+**proximity gate** of ~±511 sub-tile units (~2 game units), **not
+±256 as previously documented**. This makes the kernel O(targets)
+cheap — most pairs are dismissed in 6 instructions.
 
 ### Step 3: Radius lookup ($6A55-$6A75)
 
+**Read step 2 first.** All values loaded here are **halved-unit** —
+they're compared against `|dx|/2` and `|dy|/2` (per step 2's LSR/ROR
+fold). Effective collision radius in raw sub-tile units is **2× the
+table value**.
+
 ```
-6A55  LDA #$2A                       ; small radius = 42
+6A55  LDA #$2A                       ; small radius (table) = 42  →  effective 84
 6A57  LSR $0B                        ; status[Y] bit 0 → carry
 6A59  BCS $6A63                      ; if set, use small
-6A5B  LDA #$48                       ; medium radius = 72
+6A5B  LDA #$48                       ; medium radius = 72  →  effective 144
 6A5D  LSR $0B                        ; status[Y] bit 1 → carry
 6A5F  BCS $6A63                      ; if set, use medium
-6A61  LDA #$84                       ; else large = 132
+6A61  LDA #$84                       ; else large = 132  →  effective 264
 6A63  CPX #$01                       ; X = ship?
 6A65  BCS $6A69                      ;   no, skip ship adjustment
-6A67  ADC #$1C                       ;   yes — A += 28
-6A69  BNE $6A77                      ; (branch only true if X is shot or saucer/saucer-shot)
-6A6B  ADC #$12                       ;   X = saucer-shot path — A += 18
-6A6D  LDX $021C                      ; (statusSaucer)
+6A67  ADC #$1C                       ;   yes — A += 28 (halved) = effective +56
+6A69  BNE $6A77                      ; ALWAYS BRANCHES — A (= r or r+28) is never
+                                     ; zero for any radius-table value, so $6A6B-
+                                     ; $6A75 is UNREACHABLE. See §7 deferred entry.
+6A6B  ADC #$12                       ; (unreachable) X = saucer-shot path: A += 18
+6A6D  LDX $021C                      ; (unreachable) statusSaucer
 6A6E  DEX
-6A6F  BEQ $6A75                      ;   small saucer — done
-6A73  ADC #$12                       ;   large saucer — A += another 18
-6A75  LDX #$01                       ; (restore X)
+6A6F  BEQ $6A75                      ; (unreachable) small saucer — done
+6A73  ADC #$12                       ; (unreachable) large saucer — A += another 18
+6A75  LDX #$01                       ; (unreachable) restore X
 6A77  ... (move to test phase)
 ```
 
-Combined radius table:
+Reachable combinations (corrected 2026-05-24; saucer-shot rows are
+unreachable per `$6A69` analysis above — they were guesses based on
+the dead-code path):
 
-| Asteroid size | Base r | + Ship X=0 | + Saucer shot vs saucer-1 | + Saucer shot vs saucer-2 |
-|---------------|--------|-----------|--------------------------|--------------------------|
-| Small  (bit 0)| 42     | 70        | 60 (= 42+18)            | 78 (= 42+18+18)          |
-| Medium (bit 1)| 72     | 100       | 90                       | 108                      |
-| Large  (none) | 132    | 160       | 150                      | 168                      |
+| Asteroid size | Table r | Effective R (= 2r) | + Ship X=0 (effective R+56) |
+|---------------|---------|--------------------|------------------------------|
+| Small  (bit 0)| 42      | **84** (10.5 DVG)  | **140** (17.5 DVG)           |
+| Medium (bit 1)| 72      | **144** (18.0 DVG) | **200** (25.0 DVG)           |
+| Large  (none) | 132     | **264** (33.0 DVG) | **320** (40.0 DVG)           |
+
+For Rock1 visible extents (8.94/17.89/35.78 DVG) the
+visible:collision ratios are 0.85/0.99/1.08 — source's collision
+closely matches the visible asteroid.
 
 Asteroid-size encoding in `status[Y]` (low 2 bits, **first-set-bit
 wins**):
@@ -183,42 +210,89 @@ wins**):
 | `xxxx x10`           | Medium| 72     |
 | `xxxx x00`           | Large | 132    |
 
-The remaining bits in `status[Y]` (high 4 bits) encode the asteroid's
-**shape rotation / animation frame** (per [[research_position_math.md
-§3]] which showed the asteroid-update routine increments the upper
-nibble of status by `$10` per rotation step).
+The remaining bits in `status[Y]` (high 4 bits) serve **two distinct
+purposes** that earlier docs conflated:
+
+- **For alive asteroids:** bits 3-4 hold the spawn-time
+  **shape-variant seed** set by `$71A0 AND #$18`. These bits **never
+  change** during an alive asteroid's lifetime — they pick 1 of 4
+  fixed Rock shapes (Rock1..Rock4) via `$72FE`'s shape-selection at
+  `$7365-$736A`. The cabinet visual is a static-orientation tumbling
+  rock; the 4-shape variety is per-asteroid, not per-frame.
+  (Source listings call these "rotation bits" — the name misleads
+  into expecting visible spin; the I-9g port renamed them to
+  "shape-variant seed" everywhere.)
+- **For exploding asteroids (status ≥ $80):** the upper nibble
+  increments by `$10` each tick at `$6FA1-$6FA7` to advance the
+  explosion-shrapnel animation. That's where the "per rotation step"
+  claim came from — but it's the explosion cycle, not alive rotation.
+
+Verified 2026-05-24 by reading `$6F62-$702A` (alive dispatch: no
+status increment) vs `$6F64`-`$6FA1+` (exploding dispatch: status
+increment). The earlier `research_position_math.md §3` cross-reference
+described the exploding path only.
 
 ### Step 4: Threshold tests ($6A77-$6A8F)
 
 Three tests in sequence — collision requires all three to pass.
+**`$08` and `$09` hold the halved distances `|dx|/2` and `|dy|/2`
+(per step 2), so the table value `r` is being compared against
+half-distances throughout.**
 
 ```
-6A77  CMP $08                        ; r vs |dx|
-6A79  BCC $6A97                      ; r < |dx| → no hit
-6A7B  CMP $09                        ; r vs |dy|
-6A7D  BCC $6A97                      ; r < |dy| → no hit
+6A77  CMP $08                        ; r vs |dx|/2
+6A79  BCC $6A97                      ; r < |dx|/2 → no hit
+6A7B  CMP $09                        ; r vs |dy|/2
+6A7D  BCC $6A97                      ; r < |dy|/2 → no hit
 6A7F  STA $0B                        ; $0B = r
 6A81  LSR A                          ; A = r/2
 6A82  CLC
 6A83  ADC $0B                        ; A = r + r/2 = 1.5*r
 6A85  STA $0B                        ; $0B = 1.5*r
-6A87  LDA $09                        ; |dy|
-6A89  ADC $08                        ; |dy| + |dx|
+6A87  LDA $09                        ; |dy|/2
+6A89  ADC $08                        ; (|dx| + |dy|) / 2
 6A8B  BCS $6A97                      ; carry-out → too big → no hit
-6A8D  CMP $0B                        ; (|dx|+|dy|) vs 1.5*r
+6A8D  CMP $0B                        ; (|dx|+|dy|)/2 vs 1.5*r
 6A8F  BCS $6A97                      ; >= 1.5*r → no hit
 6A91  JSR $6B0F                      ; HIT — resolve
 ```
 
-Three conditions:
+Three conditions, expressed in the halved-distance form the kernel
+literally tests:
 
 ```
-|dx|       <  r        (bounding-box X)
-|dy|       <  r        (bounding-box Y)
-|dx|+|dy|  <  1.5*r    (Manhattan diamond, approximates circle)
+|dx|/2          <  r        (bounding-box X)
+|dy|/2          <  r        (bounding-box Y)
+(|dx|+|dy|)/2   <  1.5*r    (Manhattan diamond)
 ```
 
-Geometry visualization (radius 100 example):
+**In raw sub-tile units** (multiplying through by 2), the equivalent
+geometry uses an effective radius `R = 2*r`:
+
+```
+|dx|       <  R         (bounding-box X)
+|dy|       <  R         (bounding-box Y)
+|dx|+|dy|  <  1.5*R     (Manhattan diamond)
+```
+
+Concrete effective radii:
+
+| Size   | Table r ($6A55) | Effective R = 2r (sub-tile) | DVG (R/8) |
+|--------|-----------------|-----------------------------|-----------|
+| Small  | 42              | **~84**                     | **10.5**  |
+| Medium | 72              | **~144**                    | **18.0**  |
+| Large  | 132             | **~264**                    | **33.0**  |
+
+Compared to Rock1's visible extent (8.94 / 17.89 / 35.78 DVG):
+ratios visible : collision = **0.85 / 0.99 / 1.08** — source's
+collision tracks visible extent closely (small is slightly more
+generous than visible, large is slightly tighter). This explains
+why cabinet footage feels lenient: source IS lenient, and the
+earlier "1.70/1.99/2.17" ratios in §7 were off by 2× from the
+step-2 misread.
+
+Geometry visualization (radius 100 example — `R = 100` after the 2×
+unfold):
 
 ```
                          |
@@ -440,6 +514,60 @@ score + status downgrade + spawn 0/1/2 child asteroids.
 - **Velocity perturbation `$7203`** documented in [[research_main_loop.md §10]] context: random ±15 added to parent velocity, clamped via `$7233` to magnitude `[6, 31]` source-byte units. The 4 extra `JSR $77B5` calls in `$7203` between the X and Y perturbations are entropy-mixing to decorrelate the two axes.
 - **Sub-tile position jitter** at `$7630`/`$764A`: child's low-byte position is XOR'd with `(horzVel & $1F) << 1` (and same for vertical with vposl/vertVel). Cheap per-axis decorrelation so children don't perfectly overlap at the parent's tile center.
 
+### §5.2. Shrapnel render path — Pattern 4 → 1, mod-16 gs growth
+
+Once a hit asteroid's status flips to `$A0` (exploding), the per-frame
+`$72FE` dispatcher routes to the **shrapnel render path**, not the
+alive Rock path. Decoded 2026-05-24 while porting I-9e.
+
+**Pattern selection — plays 4 → 3 → 2 → 1** (the opposite of what
+the source-label numbering suggests). Source `$7349-$7353` isolates
+status bits 2,3, shifts right 1, and looks up a JSR pointer table at
+`$50F8-$50FF` (matching the in-ROM jump table at `$10F8-$10FE`):
+
+| (status bits 2,3) shifted | $50F8,Y points to | Shrapnel pattern | Spread radius |
+|---------------------------|-------------------|-----------------|----------------|
+| 0 (status `$_0`)          | `$11A0`           | **Pattern 4**   | ±10-15 (smallest) |
+| 2 (status `$_4`)          | `$116A`           | **Pattern 3**   | ±12-24            |
+| 4 (status `$_8`)          | `$112C`           | **Pattern 2**   | ±14-28            |
+| 6 (status `$_C`)          | `$1100`           | **Pattern 1**   | ±16-32 (largest)  |
+
+So as the status increment (`(-status>>4)+1` per tick — see §5.1
+upstream + `task_seq.js asteroidUpdate` exploding branch) cycles bits
+2,3 through 0→1→2→3, the rendered pattern grows 4→3→2→1 outward.
+[`VectorROM.md` line 185](../../../computer_archeology_asteroids/content/Arcade/Asteroids/VectorROM.md)
+confirms: "all four patterns are the same just slightly spread out"
+— they're concentric spreads at increasing radii, deliberately
+arranged to fill the gaps between the power-of-two global-scale
+doublings (next paragraph).
+
+**Across-sweep gs expansion.** Layered on top of the per-sweep
+4→3→2→1 shape growth, source ALSO modulates the LABS globalScale
+across the ~600 ms explosion lifetime. `$6FA4-$6FA9` computes
+`gs_byte = (status & $F0) + $10`, and `$7321`'s call to `$7C1C`
+(LABS-emit) ORs that byte's upper nibble into the LABS word. So gs
+cycles `$B → $C → $D → $E → $F → $0` across the 6 status buckets
+(`$A_` ... `$F_`), exploiting the SAME mod-16 wrap trick documented
+at [[research_dvg.md §4]] for asteroid sizing. Concrete render for
+Shrapnel4's `VEC localScale=3, raw=640`: dx becomes
+`0 → 0 → 1 → 2 → 5 → 10` px across the 6 buckets — first two
+collapse to a near-point ("POP" at impact), then bursts outward and
+lands at "normal" (gs=0, same as alive Rock) at the final stage.
+
+**Status increment is NOT constant.** `$6F64-$6F77` recomputes the
+increment each tick as `(-status >> 4) + 1`, which shrinks as status
+grows. Net effect: ~38 ticks total (~600 ms at 62.5 Hz), arranged
+as roughly 6 sweeps of 4→3→2→1, with early sweeps fast (skipping
+shapes via large increment) and late sweeps slow (lingering 3-4
+ticks per shape). Combined with the gs expansion above, the visible
+sequence reads as: tight rapid burst → expanding gallop → slow wide
+fadeout.
+
+**Stale code-comment caveat:** lines 415 + 456 above ("rotation
+increment", "rotation bits") refer to the same status bits 3-4
+renamed to **shape-variant** seed in I-9g — see §3 step 3's
+correction note.
+
 ### Scoring ($6B73-$6B90)
 
 Visible scoring path for saucer kill:
@@ -514,13 +642,21 @@ function collisions(state) {
 // for ship-shots, asteroids-only for the ship.
 
 function radiusFor(shooter, target) {
+  // Effective radii in raw sub-tile units = 2 × $6A55 table values.
+  // Source folds |dx|→|dx|/2 via LSR/ROR at $6A22 before comparing
+  // to the table — see §3 step 2. Doubling here keeps the comparison
+  // in raw units and matches source's actual collision shape.
   let r;
   if (target.isAsteroid) {
-    r = target.size === SMALL ? 42 : target.size === MEDIUM ? 72 : 132;
+    r = target.size === SMALL ? 84 : target.size === MEDIUM ? 144 : 264;
   } else if (target.isSaucer) {
-    r = target.subType === SMALL_SAUCER ? 60 : 78;
+    // TODO (I-11): saucer radii depend on the $6A6B-$6A75 block which
+    // appears unreachable in source ($6A69 BNE always branches). Numbers
+    // here are placeholders pending decode of how saucer-as-target r is
+    // actually picked. See §7 "Saucer-adjustment block reachability".
+    r = target.subType === SMALL_SAUCER ? 120 : 156;
   }
-  if (shooter.isShip) r += 28;
+  if (shooter.isShip) r += 56;   // $6A67 ADC #$1C = +28 in halved units = +56 raw
   return r;
 }
 ```
@@ -546,6 +682,31 @@ Notes:
 
 ## §7. Open questions / deferred to implementation phase
 
+- ~~**Collision feel too tight vs cabinet**~~ — **RESOLVED 2026-05-24
+  by re-reading the source.** The earlier audit mis-described
+  `$6A22-$6A25 LSR/ROR/ASL` as "extract sign bit / $08 = |dx|" when
+  it is actually a 16-bit unsigned right shift (`$08 = |dx|/2`). The
+  subsequent CMP against the `$6A55` table compares table values
+  against **half-distances**, so the effective collision radius in
+  raw sub-tile units is `2× r_table`: **84 / 144 / 264** = **10.5 /
+  18 / 33 DVG** (not 5.25/9/16.5). Compared to Rock1 visible extents
+  (8.94/17.89/35.78 DVG), the corrected ratios are
+  **0.85 / 0.99 / 1.08** (visible : collision) — source's collision
+  closely tracks the visible asteroid, which matches cabinet feel
+  without any deviation. Port fixed in the same commit (radii in
+  `task_seq.js` doubled to 84/144/264). See §3 steps 2 + 4 for the
+  corrected geometry.
+- **Saucer-adjustment block reachability** (noted 2026-05-24 while
+  fixing the radius bug). The block at `$6A6B-$6A75` adds `+$12`
+  (and optionally another `+$12`) for the saucer-shot case, but
+  `$6A69 BNE $6A77` always branches because A (= r or r+28) is
+  never zero for any radius-table value. So the block appears
+  **unreachable** in source — meaning the "+ Saucer shot vs saucer-N"
+  rows in §3 step 3's table cannot be derived from this path. Either
+  (a) the block is genuinely dead source code (a Q-team feature
+  placeholder), (b) saucer-as-target uses a different radius-lookup
+  path elsewhere, or (c) my reading is missing a flag side-effect.
+  Resolve during I-11 when saucer collision actually lands.
 - **Score-table size mismatch.** Source's `$7659` table has 2
   entries (`$10, $05`) — large/small share `$10`, medium gets
   `$05`. Classic Asteroids docs say 20/50/100. Resolve during I-11

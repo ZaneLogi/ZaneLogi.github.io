@@ -171,11 +171,14 @@ the asteroid-draw routine stores into `ram.$00` before calling
 `$7C03` (the LABS-emit helper — see
 [[research_dvg.md §10]]).
 
-The 4 rock patterns × 4 rotation variants (the upper nibble of
-status, incremented each rotation step — see
-[[research_position_math.md]]) × 3 size scales = 48 visible asteroid
-images from 4 ROM shapes. ROM-size optimization is the source's
-default mindset.
+The 4 rock patterns × 3 size scales = 12 visible asteroid images
+from 4 ROM shapes. Each asteroid picks ONE of the 4 patterns at
+spawn (status bits 3,4 set by `$71A0 AND #$18`) and stays in that
+pose for its alive lifetime — there is no per-frame cycling
+through the patterns. (Earlier text here claimed "incremented each
+rotation step"; that was the EXPLODING-asteroid path at `$6FA1+`,
+not alive. See [[research_collisions.md §3]] for the correction.)
+ROM-size optimization is the source's default mindset.
 
 ### 3.7 UFO shape (`$5252-$526C`)
 

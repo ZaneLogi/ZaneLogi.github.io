@@ -186,6 +186,62 @@ calling LABS with different global scales before each JSR.
 Asteroids uses this to render asteroids at 3 sizes from one
 sprite-image set (see §8 and [[research_vector_rom.md §3.6]]).
 
+### Design note: why Asteroids picks gs = (14, 15, 0) for (small, medium, large)
+
+Source `$701B-$7025` selects gs per asteroid size: small→14,
+medium→15, large→0. The ordering looks backwards (numerically
+small/medium gs values are huge, large is zero) but it's dictated
+by the wrap-and-saturate formula above.
+
+Working through `total = (local + gs) & 0x0F` for Rock SVECs at a
+representative `scaleMode=3` (which adds `scaleMode+2 = 5` to gs):
+
+| gs | total before mask | total & 0x0F | shift = 9 - masked | rendered scale | role |
+|---|---|---|---|---|---|
+| 14 | 14+5 = 19 | 3 | 6 | raw / 64 (smallest) | **small** |
+| 15 | 15+5 = 20 | 4 | 5 | raw / 32 (2× larger) | **medium** |
+| 0  | 0+5 = 5  | 5 | 4 | raw / 16 (2× larger again) | **large** |
+
+The (gs + 5) values 19, 20, 5 *mask* to a monotonic 3, 4, 5 — each
+size step is one bit of shift = exactly 2× the previous. That clean
+octave relationship is what makes the choice work.
+
+**Why other natural-looking orderings break:**
+- Swap 14 ↔ 15 (small=15, medium=14): masked totals become 4, 3, 5
+  → small at shift=5 (raw/32), medium at shift=6 (raw/64) — medium
+  would render SMALLER than small. Visually wrong.
+- Use 3, 4, 5 directly (no wrap): masked totals 8, 9, 10 → shifts
+  1, 0, saturate-10 → huge sprites, large saturates to invisible.
+- Use 13, 14, 15 instead: masked totals 2, 3, 4 → shifts 7, 6, 5 →
+  similar 2× progression but starts one step smaller overall.
+
+The (14, 15, 0) triplet is the **smallest absolute baseline that
+still yields a clean three-tier 2×-step size progression**, given
+Rock1..4's local scales. Likely chosen empirically by the original
+designer to match desired cabinet visuals. The deeper trick: source
+exploits the mod-16 wrap to compress the shift sequence into a
+tight monotonic 3-step range, treating gs=14/15 as "almost wrap"
+and gs=0 as "the high end on the other side of zero."
+
+This pattern probably reappears elsewhere — anywhere the source
+picks gs values near 14-15, suspect wrap-exploitation rather than
+literal "scale down by 5/6 octaves". Worth re-checking saucer +
+character + HUD gs values during their port steps (I-10, I-12).
+
+**Confirmed reappearance: asteroid explosion expansion (I-9e,
+2026-05-24).** Source's `$6FA4-$6FA9` derives an exploding asteroid's
+gs as `(status & $F0) + $10`, plumbs it into LABS at `$7321` (via
+`$7C1C`'s `ORA $00` at `$7C34` — see §12 "$A0-loop" entry for
+why the visible `$90` emits at `$7327-$7339` are red herrings). As
+status increments $A0 → $FF during the explosion, gs cycles
+$B → $C → $D → $E → $F → $0, exploiting the SAME mod-16 wrap to
+double the shrapnel pattern each stage. Concrete trace for
+Shrapnel4's VEC (`localScale=3, raw=640`): rendered dx grows
+0 → 0 → 1 → 2 → 5 → 10 px across the 6 stages — first two
+collapse to a near-point ("POP" at impact), then bursts outward
+and lands at "normal" (gs=0, same as alive asteroids) on the final
+stage. See `task_seq.js drawAsteroids` exploding branch.
+
 **Port implication:** Implement the full wrap+saturate sequence:
 
 ```js
@@ -737,6 +793,31 @@ invariant, just not as a runtime artifact.
   DVG itself.
 - **Bank-error / power-on test.** The test pattern at `$5040+`
   (rendered if RAM check fails) is harmless; ignored by the port.
+- **`$72FE` per-slot dispatcher — two skipped behaviors** (deferred
+  during I-9d, 2026-05-24). Source's `$72FE` does more than just
+  position math + shape JSR:
+  - **+4 game-unit Y offset** at `$7311-$7313` (`CLC; ADC #$04`
+    on vposh before the ÷8 quantization). Translates to +128 DVG
+    units up in our coord space. Likely reserves the bottom DVG
+    rows (y=[0,128)) for the HUD (score + lives in I-12). Without
+    this offset our asteroids can drift over the HUD area once
+    score lands. **Re-visit during I-12 when HUD ports.**
+  - **`$A0`-loop at `$7327-$7339`** — **RESOLVED 2026-05-24 while
+    porting I-9e across-sweep expansion.** The loop emits a varying
+    count of `$90` bytes (4 at status `$A_`, 3 at `$B_`, ... 0 at
+    `$F_`) plus a final `$90`/`$80`/`$70` via `$7CDE`. Each `$7CDE`
+    call writes 4 bytes `[0, A, 0, 0]` → two DVG words `$A000` and
+    `$0000`. Per MAME's `dvg_generate_vector_list` in `avgdvg.c`,
+    only LABS (high nibble `$A`) modifies the DVG scale latch; these
+    `$9X00`/`$8X00`/`$7X00` words are **VEC opcodes** (high nibbles
+    9, 8, 7) with zero magnitude and zero brightness — true no-ops
+    that just call `vector_add_point` at the current position with
+    intensity 0. Best guess for source's intent: DVG-list timing
+    padding (cabinet display sync) or dead code from an earlier
+    revision. Immaterial to our port — the actual across-sweep
+    scale modulation is upstream at `$7321`'s LABS emit (see §4's
+    "Asteroid explosion expansion" note + `task_seq.js drawAsteroids`
+    exploding branch).
 
 ## Citations summary (for grep)
 

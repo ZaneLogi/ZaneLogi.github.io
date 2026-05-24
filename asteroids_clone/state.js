@@ -52,11 +52,52 @@ const SHOT_LIFETIME = 18;
 
 export class Asteroid {
   constructor() {
-    this.status = 0;        // $0200+slot — low 2 bits = size (0=large, 1=small, 2=med)
+    this.status = 0;        // $0200+slot — low 2 bits = size (0=large, 1=small, 2=med);
+                            //   bit 2 = "alive marker" set by $71A2; bits 3-4 = shape-
+                            //   variant seed set by $71A0 (picks 1 of 4 fixed Rock
+                            //   tumble poses, NEVER cycled per-frame for alive
+                            //   asteroids); high bit = "exploding" flag
     this.vx = 0;            // signed velocity
     this.vy = 0;
     this.x = 0;             // Float64 — collapses (x_hi, x_lo) per R-C §7
     this.y = 0;
+  }
+
+  // $6FC7-$7016 — position += velocity, with toroidal wrap. X mod 32,
+  // Y mod 24. Same shape as Ship.advancePosition / Shot.advancePosition;
+  // source's $6F57 dispatch reuses one motion routine across all object
+  // types (research_position_math.md §3).
+  advancePosition() {
+    this.x = ((this.x + this.vx) % WORLD_W + WORLD_W) % WORLD_W;
+    this.y = ((this.y + this.vy) % WORLD_H + WORLD_H) % WORLD_H;
+  }
+
+  // Game-coord → DVG-coord (× 32). Mirrors Ship.dvgPos.
+  dvgPos() {
+    return { x: this.x * GAME_TO_DVG, y: this.y * GAME_TO_DVG };
+  }
+
+  // $7365-$736A — pick 1 of 4 Rock shapes from status bits 3,4. These
+  // bits are the "shape-variant seed" set by $71A0 AND #$18 at spawn
+  // and NEVER CHANGE during an alive asteroid's lifetime — each asteroid
+  // stays in one of 4 fixed tumble poses (Rock1..Rock4). The poses LOOK
+  // like 4 rotations of the same rock, but no per-frame animation runs;
+  // source-listing convention calls these "rotation bits" but that's
+  // misleading. See research_collisions.md §3.
+  shapeSelection() {
+    return `Rock${1 + ((this.status & 0x18) >> 3)}`;
+  }
+
+  // $701B-$7025 — size bits → globalScale. Small (bit 0 set) → 14,
+  // medium (bit 1 set, bit 0 clear) → 15, large (neither) → 0. Under
+  // the wrap-and-saturate DVG scale model, 14/15/0 produce shifts 3/4/5
+  // (monotonic 2x size progression). See research_dvg.md §4 design-note
+  // for why this specific triplet — the ordering looks backwards but
+  // is dictated by the mod-16 wrap.
+  globalScale() {
+    if (this.status & 0x01) return 14;  // small
+    if (this.status & 0x02) return 15;  // medium
+    return 0;                            // large
   }
 }
 
@@ -212,6 +253,24 @@ export class GameState {
     this.astdWaveTimer = 0;      // $02FB
     this.astWaveTimerReload = 0; // $02FC
     this.hyperSpaceFlag = 0;     // $59
+
+    // $02F5 asteroidsPerWave — initial value 2 from $6ED8. Each $7168
+    // call adds 2 (capped at 11), so wave 1 = 4, wave 2 = 6, ..., wave 5+ = 11.
+    this.asteroidsPerWave = 2;
+    // $02FD max_rocks_for_ufo — initial 5 from game-init burst $6910.
+    // $7168 increments per wave (capped at 10) to make UFOs appear more often.
+    // Consumed by saucer-spawn (I-10).
+    this.max_rocks_for_ufo = 5;
+    // $02F7 saucerTimer — countdown until next saucer spawn attempt.
+    // $7168 resets to $7F at end of wave-init. Consumed by saucer-spawn (I-10).
+    this.saucerTimer = 0;
+
+    // $5F:$60 rndValue — 16-bit Galois LFSR state. Seed must be non-zero
+    // (the LFSR has an anti-stuck-at-zero guard at $77CA-$77CC but it
+    // can only inch the state forward — a fresh non-zero seed avoids
+    // the boot-time bias). Port of $77B5 (research_main_loop.md §10).
+    this.rngLo = 1;
+    this.rngHi = 0;
 
     // Polled-switch state — mirrors source's $2003-$2407 hardware ports.
     // Source reads SWROTLEFT/SWROTRGHT/SWTHRUST/SWHYPER/SWFIRE every frame
