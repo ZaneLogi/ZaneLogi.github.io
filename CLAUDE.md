@@ -299,6 +299,95 @@ as two commits (mixin-refactor, then feature+audit) — if the audit
 had revealed DrawShields was fundamentally broken, the refactor
 would survive the revert.
 
+## When implementation surprises the research
+
+Two lessons surfaced from asteroids_clone I-9's post-port fix
+arc. Both apply to retro-port work generally, not just to the
+specific project that produced them.
+
+### Visual mismatch → suspect the research, not the code
+
+When ported code is source-faithful per the research doc but
+visual output disagrees with expectation (cabinet footage, user
+intuition, mechanic feel), the **research claim itself** is the
+default suspect — not the port code. Re-derive the relevant
+claim from primary source (disassembly, MAME, hardware spec)
+before patching the JS or proposing port deviations.
+
+This generalizes the "Agents can write confidently wrong
+research docs" warning above: that section is scoped to
+sub-agent output, but the same pattern shows up with research
+the lead author wrote themselves. The trigger is different —
+not "an agent claim feels too clean" but "visual output
+disagrees with what the faithful port should produce."
+
+Three I-9 cases proved the pattern, all "code was correct
+relative to a wrong research claim":
+
+1. **Collision felt too tight vs cabinet** → research had read
+   `$6A22-$6A25 LSR/ROR/ASL` as "extract sign bit into A; `$08
+   = |dx|`"; actually a 16-bit unsigned right shift, so `$08
+   = |dx|/2`. The CMP against the `$6A55` table thus tested
+   half-distances, meaning effective radii are 2× the table
+   values. Faithful port of the wrong reading produced
+   collision exactly half what cabinet does.
+2. **Explosion debris appeared to converge inward** → research
+   mapped status bits 2,3 → Shrapnel1..4 by incrementing
+   index. Source's `$50F8` jump table at `$10F8-$10FE`
+   actually maps 0→Pattern4, 3→Pattern1 (smallest-to-largest
+   spread, concentric patterns played smallest-first to grow
+   outward). VectorROM.md line 185 had this explicitly: "all
+   four patterns are the same just slightly spread out."
+3. **Explosion stayed static despite the shape-order fix** →
+   research treated `$7324-$7339`'s `$90`-byte emit loop as
+   the across-sweep scale mechanism (initially deferred as a
+   port deviation). MAME's `dvg_generate_vector_list`
+   confirmed those words are no-op VEC opcodes; the real gs
+   plumbing was upstream at `$7321`'s LABS emit, where
+   `(status & $F0) + $10` gets OR'd into the LABS word's gs
+   nibble. Research had missed that path entirely.
+
+**Defense:** when the user reports visual mismatch, "feels
+wrong," or "doesn't match cabinet," before patching the JS or
+accepting it as a port deviation, ask: *what does the
+research doc claim about this behavior, and have I verified
+that claim against the primary source recently?* If the claim
+is months old or was only verified once, re-derive with
+skepticism. "Unexpected output despite faithful port" is a
+strong signal the research is wrong, not the code.
+
+### Re-evaluate deferrals against current-step impact
+
+When an item is flagged "out of scope, defer to later step"
+but turns out to affect the **current step's** quality,
+validation, or feel, fix it now rather than letting the
+original deferral stand. Deferral decisions made during
+planning should be re-evaluated against the actual impact
+discovered during implementation.
+
+The asteroids_clone I-9 collision-tightness item was
+originally classified as "defer until after I-9 + I-11
+complete, to revisit alongside other gameplay-feel tuning."
+The deferral assumed it was a polish-stage concern — but in
+practice the wrong (half-size) radii made shots feel
+unreliable, blocking confident validation of the I-9h
+collision kernel itself. Re-investigating it during I-9 both
+unblocked validation AND turned out to resolve a research-
+doc bug (see previous subsection).
+
+**Defense:** before deferring an item, ask:
+- Does it interfere with testing the current step's other
+  code paths?
+- Does it cause visible friction during play-testing of this
+  step's output?
+- Is the only "scope-conserving" reason for the deferral that
+  it spans subsystems the current step doesn't touch directly?
+
+If yes to any of these, the deferral is probably wrong — do
+the work now. Polish-stage deferrals (CRT glow rendering,
+sound) are fine; gameplay-feel and validation-blocking
+deferrals are not.
+
 ## mini_mario (`mario_physics/`) — quick reference
 
 Fixed-timestep accumulator (1/60 s physics ticks) with render
