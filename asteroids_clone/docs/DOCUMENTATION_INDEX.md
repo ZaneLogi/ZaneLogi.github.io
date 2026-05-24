@@ -2,12 +2,14 @@
 
 **Date:** 2026-05-24
 **Status:** Implementation phase well underway — I-7 (main-loop
-scaffold), I-8 (ship + fire), and I-9 (asteroid spawn / motion /
-draw / explode / split / collide) all **done**. Next:
-I-10 (saucer AI), I-11 (remaining collision pairs + scoring +
-ship death + lives), I-12 (attract/credits/HUD), I-13 (hyperspace
-polish), I-14 (sound, R-G dependency). R-A through R-F research
-docs are landed; R-G (sound) still deferred until silent game runs.
+scaffold), I-8 (ship + fire), I-9 (asteroid spawn / motion / draw /
+explode / split / collide), and I-10 (saucer AI + state machine +
+shot-vs-saucer collision + death anim) all **done**. Next:
+I-11 (remaining collision pairs: ship-vs-saucer, saucer-shot-vs-ship,
+saucer-vs-asteroid + scoring + ship death + lives + respawn),
+I-12 (attract/credits/HUD), I-13 (hyperspace polish), I-14 (sound,
+R-G dependency). R-A through R-F research docs are landed; R-G
+(sound) still deferred until silent game runs.
 
 **Total docs:** 6 research docs (~2,500 lines) + source-of-truth
 files in the local ComputerArcheology mirror.

@@ -166,7 +166,8 @@ function playerFire(state) {
   const slot = state.playerShots.find((s) => s.status === 0);
   if (!slot) return;
 
-  slot.spawn(state.ship);
+  const s = state.ship;
+  slot.spawn(s.x, s.y, s.vx, s.vy, s.direction);
 }
 
 function shipControl(_state) {
@@ -195,9 +196,133 @@ function shipSpawnPhys(state) {
   }
 }
 
-function saucerSpawn(_state) {
-  // $6B93 — saucer spawn (every 4th frame), dispatch to active-
-  // saucer logic at $6C34. Body in I-10.
+// $6B93-$6C33 — saucer-spawn dispatch. Runs every 4th frame; either
+// (a) dispatches to active-saucer logic if a saucer is alive, or
+// (b) ticks the spawn countdown and spawns a new saucer when it fires.
+//
+// Source RTS exits compress into early returns. The dual-use saucerTimer
+// (state.saucerTimer) is read+decremented here in role (a), and is
+// read+decremented in role (b) by saucerActive() — see state.js field doc.
+function saucerSpawn(state) {
+  // $6B93-$6B97 — fastTimer & 3: gate to every 4th frame.
+  if ((state.fastTimer & 0x03) !== 0) return;
+
+  // $6B9A-$6B9D — currently exploding ($80+)? RTS (explosion-anim runs
+  // elsewhere; spawn dispatch idle).
+  if (state.saucer.status >= 0x80) return;
+
+  // $6B9F-$6BA1 — saucer alive? Dispatch to active-saucer logic.
+  if (state.saucer.status !== 0) {
+    saucerActive(state);
+    return;
+  }
+
+  // $6BA4-$6BAE — in play mode (numPlayers!=0), skip if ship absent
+  // (status==0) or exploding (status>=$80). Attract mode (numPlayers==0)
+  // spawns saucers regardless of ship state.
+  if (state.numPlayers !== 0) {
+    if (state.ship.status === 0 || state.ship.status >= 0x80) return;
+  }
+
+  // $6BAF-$6BB6 — asteroid_hit_timer countdown (set to $50 by $75EC's
+  // shot-vs-asteroid resolver).
+  if (state.asteroid_hit_timer > 0) state.asteroid_hit_timer -= 1;
+
+  // $6BB7-$6BBA — saucerTimer countdown. Spawn attempt fires when it hits 0.
+  state.saucerTimer = (state.saucerTimer - 1) & 0xff;
+  if (state.saucerTimer !== 0) return;
+
+  // $6BBC-$6BBE — re-arm to $12 (= 18 frames) as the retry delay if spawn
+  // aborts below; if it succeeds, $02F7 becomes the inter-shot timer and
+  // drifts to $0A via saucerActive's first shot.
+  state.saucerTimer = 0x12;
+
+  // $6BC1-$6BCE — while asteroid_hit_timer is still ticking (recent
+  // explosion), only spawn if curAsteroidCount is in (0, max_rocks_for_ufo).
+  // Once asteroid_hit_timer drains to 0, spawn unconditionally.
+  if (state.asteroid_hit_timer !== 0) {
+    if (state.curAsteroidCount === 0) return;
+    if (state.curAsteroidCount >= state.max_rocks_for_ufo) return;
+  }
+
+  // $6BD0-$6BDC — shorten saucerTimeReload (next saucer appears sooner),
+  // floor at $20. Only write back if the new value is >= $20.
+  const next = (state.saucerTimeReload - 6) & 0xff;
+  if (next >= 0x20) state.saucerTimeReload = next;
+
+  // $6BDD-$6C30 — set position, velocity, size on the saucer object.
+  state.saucer.spawn(state, advanceRNG);
+}
+
+// $6C34-$6C44 — active-saucer logic (called from saucerSpawn every 4th
+// frame when saucer is alive). Two responsibilities:
+//   (a) Periodic vertical direction change (this routine, I-10b).
+//   (b) Shot-timer countdown + fire shot (I-10d, deferred to saucerActive
+//       extension).
+function saucerActive(state) {
+  // $6C34-$6C37 — ASL fastTimer; BNE skip. Source fires when the post-ASL
+  // result is zero, i.e. when fastTimer's low 7 bits are all zero — which
+  // happens at fastTimer == $00 or $80. Since this dispatch is itself
+  // gated to every 4th frame (saucerSpawn's fastTimer & 3 check), direction
+  // change fires roughly twice per 256-frame cycle = once every ~128 frames.
+  if ((state.fastTimer & 0x7f) === 0) {
+    // $6C39-$6C42 — RNG AND #$03 indexes a 4-entry direction table at $6CD3.
+    // Bytes: $F0, $00, $00, $10. So 50% chance of no vertical change,
+    // 25% chance down ($F0 = -16/256), 25% chance up ($10 = +16/256).
+    // Result is written as the new vertVel.
+    const VERT_DIR_TABLE = [0xf0, 0x00, 0x00, 0x10];
+    const byte = VERT_DIR_TABLE[advanceRNG(state) & 0x03];
+    state.saucer.vy = byte <= 0x7f ? byte / 256 : (byte - 256) / 256;
+  }
+
+  // $6C45-$6C53 — gate shot-timer countdown on ship not in spawn-protect:
+  //   numPlayers != 0 (in play) AND shipSpawnTimer != 0 ⟹ skip (RTS).
+  //   Otherwise decrement saucerTimer; if it hits 0, fire.
+  if (state.numPlayers !== 0 && state.shipSpawnTimer !== 0) return;
+  state.saucerTimer = (state.saucerTimer - 1) & 0xff;
+  if (state.saucerTimer !== 0) return;
+
+  // $6C54-$6C56 — reset shot timer to $0A = 10 ticks (40 frames @ every-4 = ~0.64s).
+  state.saucerTimer = 0x0a;
+
+  // $6C59-$6CC4 — compute saucerShotDir.
+  let dir;
+  if (state.saucer.status === 2) {
+    // $6C59-$6C62 — LARGE saucer: random direction.
+    dir = advanceRNG(state);
+  } else {
+    // $6C65-$6CAA — SMALL saucer: aim at ship with self-velocity compensation.
+    //   dx = ship.x - saucer.x - 0.5 * saucer.vx
+    //   dy = ship.y - saucer.y - 0.5 * saucer.vy
+    //   atan2(dy, dx) → 8-bit direction (0=east, $40=north, $80=west, $C0=south).
+    // Source scales dx/dy by 4 before atan2 to widen the byte range, but the
+    // angle is invariant under uniform scale — we skip the scale step and
+    // use Math.atan2 directly. Not wrap-aware (matches source).
+    const dx = state.ship.x - state.saucer.x - 0.5 * state.saucer.vx;
+    const dy = state.ship.y - state.saucer.y - 0.5 * state.saucer.vy;
+    const base = Math.round(Math.atan2(dy, dx) / (2 * Math.PI) * 256) & 0xff;
+
+    // $6CAC-$6CC4 — score-based aim noise:
+    //   <35k pts: signed [-16, +15] (AND $8F + sign-extend with OR $70)
+    //   ≥35k pts: signed [-8,  +7]  (AND $87 + sign-extend with OR $78)
+    const rnd = advanceRNG(state);
+    const tight = state.scoreThousands >= 35;
+    const andMask = tight ? 0x87 : 0x8f;
+    const orMask  = tight ? 0x78 : 0x70;
+    const masked = rnd & andMask;
+    const noise = (masked & 0x80) ? ((masked | orMask) - 0x100) : masked;
+    dir = (base + noise) & 0xff;
+  }
+
+  // $6CC6-$6D8E — spawn shot in first free saucer-shot slot. Source scans
+  // $021E (slot $1E) down to $021D (slot $1D), Y=$03..$02 with $0E=$01 stop.
+  // Shot inherits saucer's velocity + unit-vector in dir, position = saucer
+  // position + nose offset. Same Shot.spawn path as player fire (refactored
+  // to take explicit source state).
+  const slot = state.saucerShots.find((s) => s.status === 0);
+  if (!slot) return;
+  const s = state.saucer;
+  slot.spawn(s.x, s.y, s.vx, s.vy, dir);
 }
 
 function asteroidUpdate(state) {
@@ -208,6 +333,44 @@ function asteroidUpdate(state) {
   // saucer + saucer-shot slots fill in with I-10.
   if (state.ship.status === 1) {
     state.ship.advancePosition();
+  }
+  // Saucer slot ($1C) — three branches in source's $6F57 dispatch:
+  //   status == 0: skip
+  //   status >= $80: explosion-anim path ($6F64-$6F77 + $6F99 cleanup)
+  //   status > 0 < $80: motion path ($6FC7) + edge-cross despawn
+  //
+  // Explosion-anim formula: same as exploding-asteroid (negate + >>4 +
+  // increment by counter+1) since source's $6F77 SEC sets C=1 for both
+  // non-ship slots. On completion ($6F99): clear status + reset
+  // saucerTimer = saucerTimeReload (mirrors source's reset of the
+  // spawn countdown).
+  if (state.saucer.status >= 0x80) {
+    const negated = ((~state.saucer.status) + 1) & 0xff;
+    const increment = (negated >> 4) + 1;
+    const newStatusRaw = state.saucer.status + increment;
+    if (newStatusRaw <= 0xff) {
+      state.saucer.status = newStatusRaw;
+    } else {
+      // $6F99-$6F9F — saucer cleanup: reset spawn countdown.
+      state.saucer.status = 0;
+      state.saucerTimer = state.saucerTimeReload;
+    }
+  } else if (state.saucer.status > 0) {
+    // Motion + edge-cross despawn ($6FC7 motion + $6FE2-$6FEA saucer-
+    // specific wrap-becomes-despawn). Saucer.advancePosition extends
+    // source's high-edge-only wrap to the low edge too, since the
+    // saucer's horzVel can be either +$10 (enters left, exits right)
+    // or -$10 (enters right, exits left).
+    state.saucer.advancePosition(state);
+  }
+  // Saucer-shot slots ($1D-$1E) — same shared motion + lifetime decrement
+  // as player shots in source's $6F57 / $7393. Iterated separately here only
+  // because state.saucerShots and state.playerShots are different arrays.
+  for (const shot of state.saucerShots) {
+    if (shot.status > 0) {
+      shot.advancePosition();
+      shot.decrementLifetime(state.fastTimer);
+    }
   }
   for (const shot of state.playerShots) {
     if (shot.status > 0) {
@@ -276,6 +439,32 @@ function collisions(state) {
         resolveShotVsAsteroid(state, shot, ast);
       }
     }
+
+    // Skip shot-vs-saucer if this shot already killed an asteroid (port
+    // deviation in I-9h: source aborts the inner loop on hit via
+    // $6A94 JMP $69F9, but our impl continues — guard the saucer test
+    // explicitly so a single shot only resolves one collision per frame).
+    if (shot.status === 0) continue;
+
+    // Shot-vs-saucer collision (I-10f). Source's outer loop $69F0-$69FA
+    // hits player-shot slots ($1F-$22) at the X=$04-$07 mapping; inner
+    // Y iterates down from $1C (= saucer) per $69FD-$6A09. The radius
+    // calc at $6A55-$6A65 picks asteroid-size-style radii from the
+    // saucer's status low bits (status=1 small → r=42, status=2 large →
+    // r=72), then the saucer-specific adjustment block at $6A6B-$6A75
+    // is UNREACHABLE per I-9 audit ($6A69 BNE always branches), so the
+    // effective radii match small/medium asteroid values exactly. The
+    // halved-unit correction (×2) from I-9h applies the same way here.
+    if (state.saucer.status > 0 && state.saucer.status < 0x80) {
+      const dx = state.saucer.x - shot.x;
+      const dy = state.saucer.y - shot.y;
+      if (Math.abs(dx) < 2 && Math.abs(dy) < 2) {
+        const r = state.saucer.status === 1 ? 84 / 256 : 144 / 256;
+        if (dx * dx + dy * dy < r * r) {
+          resolveShotVsSaucer(state, shot, state.saucer);
+        }
+      }
+    }
   }
 }
 
@@ -291,6 +480,13 @@ function collisions(state) {
 function resolveShotVsAsteroid(state, shot, ast) {
   // $6B3C-$6B3E — kill the shot.
   shot.status = 0;
+
+  // $75EE-$75F2 — set asteroid_hit_timer = $50 (80 frames ≈ 1.3 s @ 62.5 Hz).
+  // Gates saucer-spawn dispatch ($6BC1-$6BCE) so a saucer doesn't appear
+  // immediately after an asteroid hit unless the asteroid count is in
+  // (0, max_rocks_for_ufo). Wired here as part of I-10a setup since
+  // saucerSpawn reads this field.
+  state.asteroid_hit_timer = 0x50;
 
   // $75EC size downgrade via LSR of low 2 bits:
   //   large ($04 or $00) → medium ($02)
@@ -325,6 +521,27 @@ function resolveShotVsAsteroid(state, shot, ast) {
   ast.status = 0xA0;
   ast.vx = 0;
   ast.vy = 0;
+}
+
+// $6B0F-$6B65 player-shot-vs-saucer subset of the resolver (X=$04-$07 +
+// Y=$1C path through the X!=1 + X!=0 + Y>$1B branch). Source:
+//   $6B3C: STA #$00 / STA $021B,X    → kill shot
+//   $6B45: BCS $6B73                  → score path (DEFERRED to I-11)
+//   $6B90: JMP $6B4A                  → fall into mark-exploding common code
+//   $6B4A-$6B65: status & $03 → sound timer + STA #$A0 / STA $0200,Y +
+//                zero velocity for Y (saucer)
+//
+// I-10f kills the shot + marks the saucer exploding. Score path
+// ($6B73-$6B90: 200 points large, 990 small via $7397 BCD-add) is
+// deferred to I-11 with BCD scoring. Sound timer ($6B56 STA $69)
+// also deferred to R-G.
+function resolveShotVsSaucer(state, shot, saucer) {
+  shot.status = 0;
+  // $6B58-$6B62 — exploding flag + zero velocity. Source's $6B58 stores
+  // literal $A0, overwriting the saucer's size bits (1 or 2) — we match.
+  saucer.status = 0xA0;
+  saucer.vx = 0;
+  saucer.vy = 0;
 }
 
 function soundDispatch(_state) {
@@ -575,8 +792,28 @@ function drawAsteroids(state, renderer) {
   }
 }
 
-function drawSaucer(_state, _renderer) {
-  // I-10 — saucer-draw emit site (probably inside $6B93/$6C34).
+function drawSaucer(state, renderer) {
+  // Per-slot dispatcher $72FE-$7383 routes the saucer slot ($1C) two
+  // ways based on the exploding-flag check at $7343:
+  //   alive ($7363-$7382): JSR into VROM's UFO subroutine
+  //     gs from $7018-$7025 (shared with asteroid alive path): small=1
+  //     → gs=14, large=2 → gs=15. Mod-16 wrap (research_dvg.md §4) +
+  //     local scales render gs=14 smaller than gs=15 (cabinet behavior).
+  //   exploding ($7345-$7353): falls into the same Shrapnel-cycling
+  //     path as exploding asteroids ($72FE CPX #$1B skip → $7349 picks
+  //     Shrapnel from status bits 2,3 via $50F8 jump table). Across-
+  //     sweep gs expansion via $7321's LABS opcode is also shared,
+  //     using the same mod-16 wrap trick.
+  if (state.saucer.status === 0) return;
+  if (state.saucer.status < 0x80) {
+    renderer.drawAt('UFO', state.saucer.dvgPos(), state.saucer.globalScale());
+  } else {
+    // Same formula as drawAsteroids' exploding branch (see that comment
+    // for the full $7349-$7353 + $7321 LABS decode).
+    const shrapnelIdx = (state.saucer.status & 0x0c) >> 2;
+    const gs = (((state.saucer.status >> 4) + 1) & 0x0f);
+    renderer.drawAt(`Shrapnel${4 - shrapnelIdx}`, state.saucer.dvgPos(), gs);
+  }
 }
 
 function drawPlayerShots(state, renderer) {
@@ -591,8 +828,16 @@ function drawPlayerShots(state, renderer) {
   }
 }
 
-function drawSaucerShots(_state, _renderer) {
-  // I-10 — same as drawPlayerShots but for saucer's 2 shot slots.
+function drawSaucerShots(state, renderer) {
+  // $7384-$738B — saucer-shot slots ($1D, $1E) emit a single dot per shot.
+  // Source uses the same emit path as player shots; JS draws via the
+  // renderer's drawDot (the cabinet's zero-length VEC via $7CE0).
+  for (const shot of state.saucerShots) {
+    if (shot.status > 0) {
+      const { x, y } = shot.dvgPos();
+      renderer.drawDot(x, y);
+    }
+  }
 }
 
 function scoreLivesDraw(_state, _renderer) {

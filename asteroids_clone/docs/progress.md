@@ -202,7 +202,7 @@ will be addressed in the relevant research doc when reached.
 | I-7 | Object tables + main loop ($6800 dispatch) | **done** |
 | I-8 | Ship physics (rotation, thrust, position math, fire) | **done** (hyperspace deferred to I-13) |
 | I-9 | Asteroid spawn + split mechanics | **done** (I-9c rotation animation dropped — alive asteroids static) |
-| I-10 | Saucer AI + state machine | not started |
+| I-10 | Saucer AI + state machine | **done** (6 sub-steps; player-shot-vs-saucer pulled in mid-step; other collisions deferred to I-11) |
 | I-11 | Collisions + scoring + lives | not started |
 | I-12 | Attract mode + power-on test pattern + credits | not started |
 | I-13 | Polish + visual tuning (incl. ship hyperspace $7052-$7081) | not started |
@@ -339,6 +339,129 @@ sub-step bullets below.
   shrapnel debris. See `main.js drawSegment`.
 - **Skip `$7324-$7339` `$90`-emit loop** — confirmed via MAME as
   no-op DVG padding; no visual effect when omitted.
+
+### I-10 scope (done 2026-05-24)
+
+I-10 covered six sub-steps; per-sub-step verification was done in
+the dev console via `__game.saucer.*` mutation + state polling.
+The sixth sub-step (I-10f, player-shot-vs-saucer collision + saucer
+death animation) was pulled in mid-step after the I-10e play-test,
+since the corresponding I-11-scope deferrals (other saucer
+collisions, scoring, ship death) cleanly factor out.
+
+- **I-10a saucer spawn + spawn-timer** — `$6B93-$6C33` saucer-spawn
+  dispatch: every-4-frame gate, status check (alive → dispatch to
+  active), ship/numPlayers/asteroid_hit_timer/max_rocks_for_ufo
+  gating, `$02F8` saucerTimeReload SBC #$06 progression, position
+  + horzVel set (left/right edge from `$60` bit 6, random Y from
+  RNG >> 3 clamped to `[0, 23]`), size pick (large unless
+  saucerTimeReload < $80; then score 30k+ → small, else
+  saucerTimeReload/2 < RNG → small). New `Saucer.spawn(state,
+  advanceRNG)` method. Also folded in: `$75F0` sets
+  `asteroid_hit_timer = $50` on shot-vs-asteroid hit (the I-9h
+  resolver got the one missing line that gates I-10a's behavior).
+  New state fields: `saucerTimeReload` (init $92), `asteroid_hit_timer`,
+  `shipSpawnTimer` (init **0** not source's cold-init 1 — port
+  deviation, see note below), `scoreThousands` (placeholder for I-11).
+- **I-10b saucer motion + direction-change + despawn** — extends
+  `$6F57` dispatch over slot `$1C` to call `Saucer.advancePosition`;
+  `$6C34-$6C44` periodic vertical direction-change firing when
+  `fastTimer & 0x7F == 0` (twice per 256-frame cycle, since dispatch
+  is itself every-4-frame gated → effectively ~once per 128 frames),
+  RNG-indexed into 4-entry direction table at `$6CD3` (bytes
+  `$F0, $00, $00, $10` = 50% zero, 25% down, 25% up); `$6FE2-$6FEA
+  → $702D` despawn when saucer crosses either x-edge (source only
+  checks high-edge AND #$1F wrap, but port extends to low-edge too
+  since saucer's horzVel can be either sign). Despawn resets
+  saucerTimer = saucerTimeReload for next-spawn countdown.
+- **I-10c saucer draw** — `$737C-$7382` per-slot dispatcher case:
+  JSR into VROM's `UFO` subroutine at `state.saucer.dvgPos()` with
+  gs from `Saucer.globalScale()` = `$7018-$7025`'s mod-16 wrap
+  (small status=1 → bit 0 set → gs=14; large status=2 → bit 1 set
+  → gs=15). Small saucer visibly smaller than large — same wrap
+  trick as asteroids (research_dvg.md §4). Verified visually.
+- **I-10d saucer shoot** — `$6C45-$6CCD` shot dispatch (continuation
+  of `saucerActive`): gate on `shipSpawnTimer == 0` (or attract
+  mode); decrement `saucerTimer`; on hit-0, reset to `$0A`, compute
+  `saucerShotDir`. Large saucer (status=2): random direction from
+  RNG. Small saucer (status=1): aim at ship with self-velocity
+  compensation (`dx = ship.x - saucer.x - saucer.vx/2`, dy same),
+  `Math.atan2` for the 8-bit angle (port replaces `$76F0` slope-LUT
+  + sign-quadrant reflections — angle is invariant under uniform
+  scale, so source's `dx *= 4` scaling step is skipped), then
+  `$6CAC-$6CC4` score-based noise (`<35k`: AND `$8F` + OR `$70` →
+  signed `[-16, +15]`; `>=35k`: AND `$87` + OR `$78` → signed
+  `[-8, +7]`). Spawn into first-free `state.saucerShots` slot via
+  refactored `Shot.spawn(x, y, vx, vy, direction)` (was `spawn(ship)`
+  — refactored to take explicit source state so both player + saucer
+  fire paths share it). Verified: large saucer = uniform random
+  direction; small saucer at (4,12) targeting ship at (28,12) =
+  shots cluster around east with ±20° spread.
+- **I-10e saucer-shot motion + draw** — extends `asteroidUpdate`
+  loop over `state.saucerShots` (same `Shot.advancePosition` +
+  `Shot.decrementLifetime` as player shots, slots `$1D-$1E` in
+  source's `$6F57` dispatch); `drawSaucerShots` emits a dot per
+  alive shot via the renderer's `drawDot` (same as `drawPlayerShots`).
+- **I-10f player-shot-vs-saucer collision + saucer death animation**
+  — pulled in mid-step (after I-10e play-test). Extends `collisions()`
+  with shot-vs-saucer test after the asteroid inner loop: same
+  Euclidean proximity test as I-9h, radius from `$6A55` table by
+  saucer size bits (small=1 → r=84/256, large=2 → r=144/256;
+  saucer-specific +18/+36 adjustments at `$6A6B-$6A75` confirmed
+  UNREACHABLE per I-9 audit, so effective radii match small/medium
+  asteroid values). `resolveShotVsSaucer` kills the shot + marks
+  saucer exploding ($A0) + zeroes velocity, mirroring `$6B3C-$6B65`
+  shot-path subset (scoring path `$6B73-$6B90` deferred to I-11).
+  Asteroid-style explosion-anim added for saucer slot in
+  `asteroidUpdate`: same negate/shift/increment formula as exploding
+  asteroid; on completion ($6F99-$6F9F) clears status and resets
+  `saucerTimer = saucerTimeReload` for next spawn countdown.
+  `drawSaucer` renders Shrapnel cycling + across-sweep gs expansion
+  for the exploding branch (identical formula to `drawAsteroids`'s
+  exploding path — source's `$72FE` per-slot dispatcher falls through
+  to the same `$7349-$7353` Shrapnel selector for any non-ship slot
+  with status >= $80). Also gates the saucer collision behind a
+  `shot.status === 0` check after the asteroid inner loop, to avoid
+  a single shot resolving against both an asteroid AND the saucer
+  in one frame (port deviation: source's `$6A94 JMP $69F9` aborts
+  the inner loop on hit; our impl continues — gate compensates).
+
+**Deferred from I-10 scope (re-open at I-11 unless noted):**
+- **Other saucer collision pairs** — ship-vs-saucer, saucer-vs-asteroid,
+  saucer-shot-vs-ship. (Player-shot-vs-saucer pulled into I-10f.)
+  Natural I-11 scope alongside scoring + death/lives.
+- **Saucer scoring** — `$6B73-$6B90` (200 large, 990 small) fires
+  from player-shot-vs-saucer resolution at the `$6B45 BCS $6B73`
+  branch. I-11 with BCD score adder `$7397`.
+- **Ship death/respawn body** — `$7048-$704D` shipSpawnTimer decrement
+  + `$706F-$707E` death transition + `$6B1E-$6B27` ship-hit resolution.
+  Workaround in I-10a: `shipSpawnTimer` initialized to 0 (steady-state
+  value when ship is alive), since the source's cold-init `1` would
+  permanently block saucer shooting until the deferred decrement runs.
+
+**Port deviations introduced during I-10 (documented at site):**
+- **`Math.atan2` for `$76F0`** — replaces source's 16-entry slope-LUT
+  at `$772F+` + sign-quadrant reflections. Angle invariant under
+  uniform scale, so source's `dx *= 4` widening step is also skipped.
+  Output convention matches `$77D2`/`$77D5` LUT input (verified by
+  small-saucer aim test: saucer at (4,12), ship at (28,12) → shots
+  cluster around east with ±20° spread per low-score noise mask).
+- **`Array.find` for free saucer-shot slot** — same shortcut as
+  I-9h's asteroid free-slot scan. Source uses `$6CF2-$6CFA` Y-decrement
+  loop + `$0E` stop sentinel; port walks `state.saucerShots`.
+- **Edge-symmetric despawn** — source's `$6FE2` only checks high-edge
+  AND #$1F wrap, but in 8-bit position math the low-edge underflow
+  also produces a wrapped value the source carries to `$6FE0 AND
+  #$1F`. Port detects both edges explicitly in `Saucer.advancePosition`
+  since Float64 doesn't naturally trigger the high-byte overflow.
+- **Single-collision-per-shot gate** — added in I-10f. Source's `$6A94
+  JMP $69F9` aborts the inner loop on hit so one shot resolves at
+  most one pair per frame; I-9h's port continues the inner loop. I-10f
+  adds an explicit `if (shot.status === 0) continue` after the
+  asteroid inner loop so the shot-vs-saucer test can't fire on a
+  shot that just killed an asteroid.
+- **Euclidean for shot-vs-saucer** — inherited from I-9h's asteroid
+  port deviation. Same code path. See `research_collisions.md §6`.
 
 ## Ship-data modification recipe (obsolete — phantom problem)
 

@@ -650,11 +650,11 @@ function radiusFor(shooter, target) {
   if (target.isAsteroid) {
     r = target.size === SMALL ? 84 : target.size === MEDIUM ? 144 : 264;
   } else if (target.isSaucer) {
-    // TODO (I-11): saucer radii depend on the $6A6B-$6A75 block which
-    // appears unreachable in source ($6A69 BNE always branches). Numbers
-    // here are placeholders pending decode of how saucer-as-target r is
-    // actually picked. See §7 "Saucer-adjustment block reachability".
-    r = target.subType === SMALL_SAUCER ? 120 : 156;
+    // I-10f confirmed (§7 entry resolved): $6A6B-$6A75 is dead code, so
+    // saucer-as-target uses the same low-2-bits → radius mapping as
+    // asteroids. Small saucer (status=1, bit 0 set) → r=84; large
+    // saucer (status=2, bit 1 set) → r=144.
+    r = target.subType === SMALL_SAUCER ? 84 : 144;
   }
   if (shooter.isShip) r += 56;   // $6A67 ADC #$1C = +28 in halved units = +56 raw
   return r;
@@ -696,17 +696,19 @@ Notes:
   without any deviation. Port fixed in the same commit (radii in
   `task_seq.js` doubled to 84/144/264). See §3 steps 2 + 4 for the
   corrected geometry.
-- **Saucer-adjustment block reachability** (noted 2026-05-24 while
-  fixing the radius bug). The block at `$6A6B-$6A75` adds `+$12`
-  (and optionally another `+$12`) for the saucer-shot case, but
-  `$6A69 BNE $6A77` always branches because A (= r or r+28) is
-  never zero for any radius-table value. So the block appears
-  **unreachable** in source — meaning the "+ Saucer shot vs saucer-N"
-  rows in §3 step 3's table cannot be derived from this path. Either
-  (a) the block is genuinely dead source code (a Q-team feature
-  placeholder), (b) saucer-as-target uses a different radius-lookup
-  path elsewhere, or (c) my reading is missing a flag side-effect.
-  Resolve during I-11 when saucer collision actually lands.
+- ~~**Saucer-adjustment block reachability**~~ — **RESOLVED 2026-05-24
+  by I-10f play-test.** I-10f ported player-shot-vs-saucer collision
+  using the table-value path only (no saucer-specific adjustment), on
+  the hypothesis that `$6A6B-$6A75` is dead code because `$6A69 BNE
+  $6A77` always branches. Saucer-as-target therefore uses the
+  **same low-2-bits → radius mapping as asteroids**: status=1 (small
+  saucer, bit 0 set) → `r = 84/256 = 0.33` game-units; status=2
+  (large saucer, bit 1 set) → `r = 144/256 = 0.56` game-units. Play-
+  test confirms shots that visibly intersect the UFO sprite land
+  hits, matching cabinet behavior. Conclusion (a) — the block is
+  genuinely dead source code. The "+ Saucer shot vs saucer-N" rows
+  in §3 step 3's table should be read as inheriting the
+  small-asteroid (84) and medium-asteroid (144) rows.
 - **Score-table size mismatch.** Source's `$7659` table has 2
   entries (`$10, $05`) — large/small share `$10`, medium gets
   `$05`. Classic Asteroids docs say 20/50/100. Resolve during I-11
