@@ -23,9 +23,12 @@ const ctx = canvas.getContext('2d');
 const statusEl = document.getElementById('status');
 
 // DVG coordinates → canvas coordinates: 1:1 except Y is flipped.
-// (Canvas backing store is sized to match DVG visible area.)
+// Y mapping uses (900 - dvgY) so the test-pattern visible Y range
+// [128, 896] plus a ~4 px slack lands inside the 1024×768 canvas.
+// See research_hud_coords.md §5 for the choice; pre-I-11a used
+// canvas.height - dvgY which clipped the HUD at the top edge.
 export function toCanvasX(dvgX) { return dvgX; }
-export function toCanvasY(dvgY) { return canvas.height - dvgY; }
+export function toCanvasY(dvgY) { return 900 - dvgY; }
 
 const TICK_HZ = 62.5;
 const TICK_MS = 1000 / TICK_HZ;
@@ -110,6 +113,31 @@ function makeRenderer(ctx) {
     ctx.stroke();
   }
 
+  // Bright stroked-line renderer for ship-explosion fragments. Cabinet
+  // vector CRTs make explosion sparks stand out via phosphor accumulation
+  // from the double-SVEC reinforcement at $74DA/$74EC. We skip that double
+  // emit (research_ship_explosion.md §5.3 — confirmed invisible on cabinet)
+  // and compensate with max alpha + thick line + butt caps. With Plan B's
+  // fixed gs per stage (drawShip exploding branch), line LENGTH no longer
+  // cycles per frame, so the bullet/comet morphing artifact is gone.
+  function drawSegmentBright(fromX, fromY, toX, toY, _bri) {
+    ctx.beginPath();
+    ctx.moveTo(toCanvasX(fromX), toCanvasY(fromY));
+    ctx.lineTo(toCanvasX(toX),   toCanvasY(toY));
+    ctx.strokeStyle = 'rgba(0,255,0,1.0)';
+    const isDot = fromX === toX && fromY === toY;
+    if (isDot) {
+      // Zero-length SVEC: butt-capped 0-length line has no area; fall back
+      // to a small filled square so the fragment still renders.
+      ctx.fillStyle = 'rgba(0,255,0,1.0)';
+      ctx.fillRect(toCanvasX(fromX) - 2, toCanvasY(fromY) - 2, 4, 4);
+      return;
+    }
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'butt';
+    ctx.stroke();
+  }
+
   return {
     // Emit a ROM subroutine starting from `cursor` (a mutable {x, y}
     // object — runList mutates it as opcodes advance). For sequential
@@ -127,6 +155,26 @@ function makeRenderer(ctx) {
     drawDot(dvgX, dvgY) {
       ctx.fillStyle = 'rgba(0,255,0,0.9)';
       ctx.fillRect(toCanvasX(dvgX) - 2, toCanvasY(dvgY) - 2, 4, 4);
+    },
+
+    // Emit ONE SVEC from VROM.ShipExplosion[idx] at `cursor`, at the given
+    // globalScale, with an optional alpha multiplier (0..1) to fade the
+    // fragment as the explosion ages. Wraps a 1-element opList for runList
+    // so the SVEC emits naturally with the same scale arithmetic as full
+    // subroutines.
+    //
+    // Source $74D4-$74DA: A,X = ShipExplosion[Y], JSR $7D45 inline emit.
+    // Port deviation: single SVEC per fragment (source emits twice with
+    // EOR #$04 phosphor reinforcement — confirmed not visible on cabinet,
+    // see research_ship_explosion.md §5.3). We compensate by routing
+    // fragments through drawSegmentBright (max alpha + thicker line) AND
+    // by fading them via ctx.globalAlpha as status progresses — that
+    // fade-out approximates the phosphor decay the cabinet relies on.
+    drawShipExplosionPiece(idx, cursor, globalScale, alpha = 1.0) {
+      const prevAlpha = ctx.globalAlpha;
+      ctx.globalAlpha = alpha;
+      runList(VROM, [VROM.ShipExplosion[idx]], cursor, globalScale, drawSegmentBright, false, false);
+      ctx.globalAlpha = prevAlpha;
     },
   };
 }

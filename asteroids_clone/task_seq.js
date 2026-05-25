@@ -27,6 +27,8 @@
 // Each split site cites the source routine it ports and notes the
 // split. The 1:1 source mapping survives at the routine level.
 
+import { GAME_TO_DVG } from './world.js';
+
 // ----- Frame-rate gate (NMI $5B + main-loop $6811-$6813) -----
 //
 // The cabinet's NMI ticks $5B at 250 Hz; the main loop drains it at
@@ -176,10 +178,40 @@ function shipControl(_state) {
 }
 
 function shipSpawnPhys(state) {
-  // $703F — ship-spawn-timer mgmt + rotation + thrust accumulator.
-  // I-8b/c implement rotation + thrust; spawn-timer body ($7041-$7085)
-  // lands when ship death + respawn is wired.
-  if (state.ship.status !== 1) return;
+  // $703F-$7085 — ship-spawn-timer mgmt + respawn dispatch.
+
+  if (state.numPlayers === 0) return;        // $7041 — skip in attract mode
+  if (state.ship.status >= 0x80) return;     // $7046 — still exploding, no input + no respawn
+
+  if (state.shipSpawnTimer !== 0) {
+    // $704D-$7050 — countdown phase: DEC + RTS if still > 0.
+    state.shipSpawnTimer -= 1;
+    if (state.shipSpawnTimer !== 0) return;
+
+    // $7052+ — timer just hit 0 this frame. Hyperspace path ($7052-$7081)
+    // deferred to I-13 (state.hyperSpaceFlag is always 0 for I-11d).
+
+    // $7058-$705B — safe-respawn scan. If blocked, source INCs timer
+    // back to 1 to retry next frame (kept on countdown until clear).
+    if (!state.ship.canSafelyRespawn(state)) {
+      state.shipSpawnTimer = 1;
+      return;
+    }
+
+    // $705D-$7060 — saucer alive? Defer 2 frames (avoid spawning into
+    // saucer's flight path even if it's geometrically distant).
+    if (state.saucer.status > 0 && state.saucer.status < 0x80) {
+      state.shipSpawnTimer = 2;
+      return;
+    }
+
+    // $7068-$706A — respawn: position to center, status = 1.
+    state.ship.respawn(state);
+    return;
+  }
+
+  // $7086+ — ship alive (status === 1, shipSpawnTimer === 0): handle input.
+  if (state.ship.status !== 1) return;       // safety net
 
   // $7086-$709A — SWROTLEFT has priority; either rotates direction by ±3.
   if (state.input.rotLeft) {
@@ -333,6 +365,26 @@ function asteroidUpdate(state) {
   // saucer + saucer-shot slots fill in with I-10.
   if (state.ship.status === 1) {
     state.ship.advancePosition();
+  } else if (state.ship.status >= 0x80) {
+    // $74A4-$74C5 — fragment positions advance every tick. Source's
+    // per-frame phase at $748E also runs unconditionally.
+    state.ship.advanceExplosionFragments();
+
+    // $6F62-$6F77 ship-slot exploding-anim status increment. Source formula:
+    // (negated >> 4) base + (fastTimer & 1) carry-in for the ship slot.
+    // Net: explosion duration ~0.58 sec at 62.5 Hz. Matches research_ship_
+    // explosion.md §6 — one frame slower per tick than asteroid explosion.
+    const negated = ((~state.ship.status) + 1) & 0xff;
+    const increment = (negated >> 4) + (state.fastTimer & 1);
+    const newStatusRaw = state.ship.status + increment;
+    if (newStatusRaw <= 0xff) {
+      state.ship.status = newStatusRaw;
+    } else {
+      // $6F93-$6F8E — explosion complete: place ship at center + status=0.
+      // shipSpawnPhys continues ticking the timer until 0 → status = 1.
+      state.ship.placeAtCenter();
+      state.ship.status = 0;
+    }
   }
   // Saucer slot ($1C) — three branches in source's $6F57 dispatch:
   //   status == 0: skip
@@ -408,13 +460,52 @@ function asteroidUpdate(state) {
 }
 
 function collisions(state) {
-  // $69F0-$6A95 — collision kernel, GATED TO SHOT-VS-ASTEROID ONLY for
-  // I-9h. Other pairs (ship-vs-asteroid, saucer-shot-vs-ship, etc.)
-  // land in I-11 by widening this loop's outer/inner ranges and adding
-  // resolution cases. Source uses BB-intersected-Manhattan threshold
-  // shape; we use plain Euclidean per research_collisions.md §6 port
-  // spec — visually indistinguishable, simpler code, no integer-
-  // saturation edge cases.
+  // $69F0-$6A95 — collision kernel. Source outer-loop X iterates 0 (ship),
+  // 1 (saucer), 2-3 (saucer shots), 4-7 (player shots) — pairs added per
+  // sub-step (I-11b shot-vs-asteroid, I-11c shot-vs-saucer, I-11d+f ship-
+  // vs-asteroid, I-11g saucer-shot-vs-*, I-11h saucer-vs-*).
+  //
+  // Source uses BB collision: |dx| < r AND |dy| < r (= square region of
+  // half-side r). Earlier port deviation used plain Euclidean (dx²+dy²<r²)
+  // which is 79% the area of source's BB — missed ~21% of corner-case
+  // hits where |dx| AND |dy| are both near r. Reverted to source-faithful
+  // BB everywhere per user observation 2026-05-25 (ship-vs-asteroid felt
+  // too forgiving). All collision pairs in this function use BB.
+
+  // ----- X=0: ship-vs-asteroid (I-11d folded in I-11f) -----
+  // Ship can only be hit when alive (status === 1). Source $69F0-$69FA
+  // skips this loop when ship is exploding or absent.
+  if (state.ship.status === 1) {
+    for (const ast of state.asteroids) {
+      if (ast.status === 0 || ast.status >= 0x80) continue;
+      const dx = ast.x - state.ship.x;
+      const dy = ast.y - state.ship.y;
+      if (Math.abs(dx) >= 2 || Math.abs(dy) >= 2) continue;
+      // $6A55 table + $6A67 ADC #$1C ship-radius adjust: source adds $1C
+      // (= 28) halved-unit, which is +56/256 game-coord after the ×2
+      // halved-unit correction (research_collisions.md §3). So ship hit-
+      // radii: small=(84+56)/256, medium=(144+56)/256, large=(264+56)/256.
+      let r;
+      if (ast.status & 0x01)      r = (84 + 56) / 256;
+      else if (ast.status & 0x02) r = (144 + 56) / 256;
+      else                        r = (264 + 56) / 256;
+      // **Port deviation reverted to source-faithful BB.** Source's
+      // $6A77-$6A7D checks |dx|<r AND |dy|<r (bounding box). The earlier
+      // Euclidean check (dx²+dy²<r²) missed ~21% of cabinet-valid hits
+      // — specifically glancing-angle ram-ins where |dx| and |dy| are
+      // both near r. User feedback 2026-05-25 — ship-vs-asteroid felt
+      // too forgiving. BB matches source exactly.
+      if (Math.abs(dx) < r && Math.abs(dy) < r) {
+        // $6B1E + $760C — kill ship AND score the asteroid kill (X=0
+        // shooter path scores per $760C-$7612).
+        state.ship.kill(state);
+        killAsteroid(state, ast, true);
+        break;  // $6A94 JMP $69F9: one collision per frame
+      }
+    }
+  }
+
+  // ----- X=4-7: player-shot-vs-asteroid + shot-vs-saucer (I-11b/I-11c) -----
   for (const shot of state.playerShots) {
     if (shot.status === 0) continue;   // dead shot
     for (const ast of state.asteroids) {
@@ -435,15 +526,22 @@ function collisions(state) {
       if (ast.status & 0x01)      r = 84 / 256;   // small  (2*42)
       else if (ast.status & 0x02) r = 144 / 256;  // medium (2*72)
       else                        r = 264 / 256;  // large  (2*132)
-      if (dx * dx + dy * dy < r * r) {
+      // BB collision per source $6A77-$6A7D (see top-of-function comment).
+      if (Math.abs(dx) < r && Math.abs(dy) < r) {
         resolveShotVsAsteroid(state, shot, ast);
+        // $6A94 JMP $69F9 — source aborts the inner loop on hit so one
+        // shot only resolves against one asteroid per frame. I-9h missed
+        // this; latent until scoring landed in I-11b (without scoring,
+        // 1 vs N dead asteroids per shot looked identical).
+        break;
       }
     }
 
-    // Skip shot-vs-saucer if this shot already killed an asteroid (port
-    // deviation in I-9h: source aborts the inner loop on hit via
-    // $6A94 JMP $69F9, but our impl continues — guard the saucer test
-    // explicitly so a single shot only resolves one collision per frame).
+    // Skip shot-vs-saucer if this shot already killed an asteroid —
+    // matches source's outer-loop early-exit semantics. Still useful
+    // even with the inner-loop break above, since `shot.status===0`
+    // (set by resolveShotVsAsteroid) is the same single-resolve-per-
+    // frame guarantee at a different scope.
     if (shot.status === 0) continue;
 
     // Shot-vs-saucer collision (I-10f). Source's outer loop $69F0-$69FA
@@ -460,32 +558,145 @@ function collisions(state) {
       const dy = state.saucer.y - shot.y;
       if (Math.abs(dx) < 2 && Math.abs(dy) < 2) {
         const r = state.saucer.status === 1 ? 84 / 256 : 144 / 256;
-        if (dx * dx + dy * dy < r * r) {
+        // BB collision per source $6A77-$6A7D (see top-of-function comment).
+        if (Math.abs(dx) < r && Math.abs(dy) < r) {
           resolveShotVsSaucer(state, shot, state.saucer);
+        }
+      }
+    }
+  }
+
+  // ----- X=2,3: saucer-shot vs ship + asteroid (I-11g) -----
+  // Outer loop over saucer shots. Inner Y starts at ship slot ($1B) per
+  // $69FD-$6A08, then walks down through all asteroid slots. Saucer-shot
+  // is the shooter, so $760E-$7612 score gate fails (no scoring on
+  // asteroid kills). No $1C shooter-radius adjustment (X=2/3, not 0).
+  for (const shot of state.saucerShots) {
+    if (shot.status === 0) continue;
+
+    // Saucer-shot vs ship: kill shot + Ship.kill. No score.
+    if (state.ship.status === 1) {
+      const dx = state.ship.x - shot.x;
+      const dy = state.ship.y - shot.y;
+      if (Math.abs(dx) < 2 && Math.abs(dy) < 2) {
+        // Ship-target picks $6A55's $2A (=42 halved-unit, =84/256 game-coord
+        // raw) via $0B's low bit being ship.status=1.
+        const r = 84 / 256;
+        if (Math.abs(dx) < r && Math.abs(dy) < r) {
+          shot.status = 0;
+          state.ship.kill(state);
+          continue;  // $6A94 JMP $69F9: shot dies → outer-loop continues
+        }
+      }
+    }
+
+    // Saucer-shot vs asteroid: kill shot + killAsteroid(no score).
+    for (const ast of state.asteroids) {
+      if (ast.status === 0 || ast.status >= 0x80) continue;
+      const dx = ast.x - shot.x;
+      const dy = ast.y - shot.y;
+      if (Math.abs(dx) >= 2 || Math.abs(dy) >= 2) continue;
+      let r;
+      if (ast.status & 0x01)      r = 84 / 256;
+      else if (ast.status & 0x02) r = 144 / 256;
+      else                        r = 264 / 256;
+      if (Math.abs(dx) < r && Math.abs(dy) < r) {
+        shot.status = 0;
+        killAsteroid(state, ast, false);   // false: no score (saucer shooter)
+        break;
+      }
+    }
+  }
+
+  // ----- X=1: saucer body vs ship + asteroid (I-11h) -----
+  // Source's $6B0F-$6B19 X-swap: for saucer-vs-ship, source remaps
+  // (X=1, Y=$1B) to (X=0, Y=$1C) — treats it as "ship-vs-saucer" so the
+  // $6B73-$6B90 saucer-score path fires (ship gets 200/990 saucer pts
+  // even though it's the saucer who initiated the collision). For
+  // saucer-vs-asteroid, the X=1 path falls through to $6B29 (mark both
+  // exploding, no score because shooter index $0D = 1 fails the
+  // $760E-$7612 gate).
+  if (state.saucer.status > 0 && state.saucer.status < 0x80) {
+    let saucerHit = false;
+
+    // Saucer-vs-ship: both die, ship scores saucer points (200/990).
+    if (state.ship.status === 1) {
+      const dx = state.ship.x - state.saucer.x;
+      const dy = state.ship.y - state.saucer.y;
+      if (Math.abs(dx) < 2 && Math.abs(dy) < 2) {
+        // Radius from $0B = saucer.status low bits (1=small, 2=large) via
+        // $6A55-$6A61's LSR chain. No $1C adjust (X=1 outer-loop).
+        const r = state.saucer.status === 1 ? 84 / 256 : 144 / 256;
+        if (Math.abs(dx) < r && Math.abs(dy) < r) {
+          state.ship.kill(state);
+          // $6B73-$6B76 saucerTimer re-arm + $6B85-$6B8B scoring.
+          // Small=$99 (990 pts), large=$20 (200 pts) — matches $6B81's LSR
+          // on saucer.status: bit 0 set (small) → carry → keep $99.
+          if (state.numPlayers !== 0) {
+            addScore(state, state.saucer.status === 1 ? 0x99 : 0x20);
+          }
+          state.saucerTimer = state.saucerTimeReload;
+          // Mark saucer exploding ($A0 + zero vel). Source $6B29-$6B33
+          // (after X-swap, X=0 so $021B,X = ship; $6B47-$6B73 separately
+          // marks Y=$1C as exploding via $6B4A-$6B65 common path).
+          state.saucer.status = 0xA0;
+          state.saucer.vx = 0;
+          state.saucer.vy = 0;
+          saucerHit = true;
+        }
+      }
+    }
+
+    // Saucer-vs-asteroid: both die, no score.
+    if (!saucerHit) {
+      for (const ast of state.asteroids) {
+        if (ast.status === 0 || ast.status >= 0x80) continue;
+        const dx = ast.x - state.saucer.x;
+        const dy = ast.y - state.saucer.y;
+        if (Math.abs(dx) >= 2 || Math.abs(dy) >= 2) continue;
+        let r;
+        if (ast.status & 0x01)      r = 84 / 256;
+        else if (ast.status & 0x02) r = 144 / 256;
+        else                        r = 264 / 256;
+        if (Math.abs(dx) < r && Math.abs(dy) < r) {
+          state.saucer.status = 0xA0;
+          state.saucer.vx = 0;
+          state.saucer.vy = 0;
+          // saucerTimer re-arm happens at explosion-completion ($6F99-$6F9F),
+          // not at hit-time for this path. The asteroidUpdate saucer-
+          // exploding branch already handles that.
+          killAsteroid(state, ast, false);
+          break;
         }
       }
     }
   }
 }
 
-// $6B0F-$6B65 + $75EC subset — shot-vs-asteroid resolution. Kills shot,
-// downgrades asteroid size, spawns up to 2 children via splitAsteroid,
-// then kills the parent.
-//
-// For I-9h we use immediate parent kill (status = 0) instead of source's
-// $A0 exploding phase. I-9e will introduce the explosion-anim delay +
-// shrapnel render; at that point this resolver changes to set $A0 + zero
-// velocity, and the per-frame cleanup ($7708 port) handles the eventual
-// status → 0 + curAsteroidCount decrement (mirroring source's $6F82).
+// $6B0F-$6B65 + $75EC subset — shot-vs-asteroid resolution. Kills shot
+// + scores + kills asteroid via shared killAsteroid helper.
 function resolveShotVsAsteroid(state, shot, ast) {
   // $6B3C-$6B3E — kill the shot.
   shot.status = 0;
+  // $760C-$761B player-shot scoring path: shooter index $0D == 0 (ship)
+  // → score; saucer-shot shooter (X=2/3) skips this path (I-11g).
+  killAsteroid(state, ast, true);
+}
+
+// $75EE-$7625 — common kill-asteroid logic: hit timer + size downgrade +
+// up to 2 child spawns via splitAsteroid + mark parent exploding. Used by
+// shot-vs-asteroid (I-11b, scores), ship-vs-asteroid (I-11f, scores),
+// saucer-shot-vs-asteroid (I-11g, no score), saucer-vs-asteroid (I-11h,
+// no score). Scoring is gated by the caller via shouldScore.
+function killAsteroid(state, ast, shouldScore) {
+  if (shouldScore) {
+    addScore(state, asteroidScoreByte(ast));
+  }
 
   // $75EE-$75F2 — set asteroid_hit_timer = $50 (80 frames ≈ 1.3 s @ 62.5 Hz).
   // Gates saucer-spawn dispatch ($6BC1-$6BCE) so a saucer doesn't appear
   // immediately after an asteroid hit unless the asteroid count is in
-  // (0, max_rocks_for_ufo). Wired here as part of I-10a setup since
-  // saucerSpawn reads this field.
+  // (0, max_rocks_for_ufo).
   state.asteroid_hit_timer = 0x50;
 
   // $75EC size downgrade via LSR of low 2 bits:
@@ -523,20 +734,94 @@ function resolveShotVsAsteroid(state, shot, ast) {
   ast.vy = 0;
 }
 
-// $6B0F-$6B65 player-shot-vs-saucer subset of the resolver (X=$04-$07 +
-// Y=$1C path through the X!=1 + X!=0 + Y>$1B branch). Source:
-//   $6B3C: STA #$00 / STA $021B,X    → kill shot
-//   $6B45: BCS $6B73                  → score path (DEFERRED to I-11)
-//   $6B90: JMP $6B4A                  → fall into mark-exploding common code
-//   $6B4A-$6B65: status & $03 → sound timer + STA #$A0 / STA $0200,Y +
-//                zero velocity for Y (saucer)
+// $7659-$765B score table = [$10, $05, $02] BCD = 100/50/20 pts in
+// scoreTens units (where $10 BCD = "1 hundred + 0 tens" = 100 pts).
+// Cabinet scoring is small=100/medium=50/large=20 (smaller = harder to
+// hit = more pts).
 //
-// I-10f kills the shot + marks the saucer exploding. Score path
-// ($6B73-$6B90: 200 points large, 990 small via $7397 BCD-add) is
-// deferred to I-11 with BCD scoring. Sound timer ($6B56 STA $69)
-// also deferred to R-G.
+// **Port deviation.** Source's $75FF LSR/TAX path doesn't cleanly index
+// the 3-byte table: status low 3 bits ∈ {$04 large, $05 small, $06 medium}
+// LSR to {$02, $02, $03}, so large and small both map to X=2 (table[2]
+// = $02 = 20 pts), and medium's X=3 reads past the table into adjacent
+// code bytes. Port uses a direct size-bit dispatch instead, matching
+// cabinet behavior.
+//
+// **plan_i11.md §I-11b note.** That doc lists the lookup as
+// `{small: $01, medium: $05, large: $10}` — labels swapped vs cabinet
+// behavior. The verify section (large → +20, small → +100) is the
+// source-of-truth; using cabinet-faithful values here. Flag in the
+// I-11 squash + progress.md.
+function asteroidScoreByte(ast) {
+  const sizeBits = ast.status & 0x03;
+  if (sizeBits & 0x01) return 0x10;   // small  → 100 pts
+  if (sizeBits & 0x02) return 0x05;   // medium → 50 pts
+  return 0x02;                         // large  → 20 pts
+}
+
+// $7397-$73B1 — BCD score adder. SED-mode ADC of bcdByte into scoreTens
+// with carry propagating to scoreThousands. Bonus-ship trigger at
+// $73A4-$73AE fires when the 10k-digit (high nibble of scoreThousands)
+// increments — cabinet awards one free ship per 10k pts (DIP-tunable
+// to 15k/20k/none, but we use the 10k default).
+function addScore(state, bcdByte) {
+  const oldThousandsHi = (state.scoreThousands >> 4) & 0x0f;
+
+  const tens = bcdAdd(state.scoreTens, bcdByte, 0);
+  state.scoreTens = tens.result;
+
+  const thous = bcdAdd(state.scoreThousands, 0x00, tens.carry);
+  state.scoreThousands = thous.result;
+
+  // $73A4-$73AE — bonus ship on 10k-digit increment.
+  const newThousandsHi = (state.scoreThousands >> 4) & 0x0f;
+  if (newThousandsHi !== oldThousandsHi) {
+    state.curShips += 1;
+  }
+}
+
+// Decimal-mode ADC equivalent: each nibble is a decimal digit (0-9),
+// with intra-byte carry between nibbles when a sum reaches 10. Returns
+// {result, carry}. Equivalent to the 6502 SED/ADC/CLD pattern source
+// uses in $7397-$73B1.
+function bcdAdd(a, b, carryIn) {
+  const lowSum = (a & 0x0f) + (b & 0x0f) + carryIn;
+  const lowResult = lowSum >= 10 ? lowSum - 10 : lowSum;
+  const lowCarry = lowSum >= 10 ? 1 : 0;
+  const highSum = ((a >> 4) & 0x0f) + ((b >> 4) & 0x0f) + lowCarry;
+  const highResult = highSum >= 10 ? highSum - 10 : highSum;
+  const carry = highSum >= 10 ? 1 : 0;
+  return { result: (highResult << 4) | lowResult, carry };
+}
+
+// $6B0F-$6B65 + $6B73-$6B90 player-shot-vs-saucer resolver. Source path:
+//   $6B3C: kill shot
+//   $6B45: BCS $6B73                  → score path (I-11c)
+//   $6B73-$6B76: saucerTimer = saucerTimeReload (re-arm spawn countdown)
+//   $6B79-$6B7B: BEQ $6B4A             → numPlayers gate: skip scoring in attract
+//   $6B81-$6B8B: LSR status → C set means small ($99 = 990 pts); else large ($20 = 200 pts)
+//   $6B90: JMP $6B4A                   → fall into mark-exploding common code
+//   $6B4A-$6B65: STA #$A0 / STA $0200,Y + zero velocity (saucer)
+//
+// I-10f did kill-shot + mark-exploding. I-11c adds the score + saucer-
+// Timer re-arm. Sound timer ($6B56 STA $69) still deferred to R-G.
 function resolveShotVsSaucer(state, shot, saucer) {
   shot.status = 0;
+
+  // $6B73-$6B76 — re-arm spawn countdown unconditionally (source does this
+  // BEFORE the numPlayers gate). Without this, next saucer doesn't appear
+  // until saucerTimer naturally re-arms via the explosion-anim cleanup at
+  // $6F99-$6F9F (~12 ticks later) — source-faithful means start the
+  // countdown at hit time, not explosion-complete time.
+  state.saucerTimer = state.saucerTimeReload;
+
+  // $6B79-$6B8E — score path, gated on numPlayers != 0 (attract mode skips).
+  // status 1=small / 2=large via LSR-carry: C=1 (small) → $99 = 990 pts,
+  // C=0 (large) → $20 = 200 pts.
+  if (state.numPlayers !== 0) {
+    const bcdByte = (saucer.status & 0x01) ? 0x99 : 0x20;
+    addScore(state, bcdByte);
+  }
+
   // $6B58-$6B62 — exploding flag + zero velocity. Source's $6B58 stores
   // literal $A0, overwriting the saucer's size bits (1 or 2) — we match.
   saucer.status = 0xA0;
@@ -732,22 +1017,60 @@ function applyXorJitter(coord, vel) {
 // ===== Render-side stubs (called by render(state, renderer)) =====
 
 function drawShip(state, renderer) {
-  // $750B — ship.shapeSelection() returns the right ShipDirN + flip flags
-  // for the current 8-bit direction. gs from $7027 = 14 (ship status=1 →
-  // high nibble $E stored at ram.$00 → upper nibble of LABS opcode).
-  if (state.ship.status !== 1) return;
-  const { name, xFlip, yFlip } = state.ship.shapeSelection();
-  // One shared cursor so the thrust flame starts where the ship's last
-  // SVEC left it (matches the source: one LABS, then sequential JSRs
-  // into ShipDirN + ThrustDirN with no re-anchor between them).
-  const cursor = state.ship.dvgPos();
-  renderer.drawAt(name, cursor, 14, xFlip, yFlip);
+  // Alive branch: $750B — ship.shapeSelection() returns the right ShipDirN
+  // + flip flags for the current 8-bit direction. gs from $7027 = 14 (ship
+  // status=1 → high nibble $E stored at ram.$00 → upper nibble of LABS).
+  if (state.ship.status === 1) {
+    const { name, xFlip, yFlip } = state.ship.shapeSelection();
+    // One shared cursor so the thrust flame starts where the ship's last
+    // SVEC left it (matches the source: one LABS, then sequential JSRs
+    // into ShipDirN + ThrustDirN with no re-anchor between them).
+    const cursor = state.ship.dvgPos();
+    renderer.drawAt(name, cursor, 14, xFlip, yFlip);
 
-  // $753B-$7553 — matching ThrustDirN flickers on bit 2 of fastTimer
-  // while SWTHRUST is held. Picks up cursor from ship's last opcode.
-  if (state.input.thrust && (state.fastTimer & 4)) {
-    const thrustName = name.replace('ShipDir', 'ThrustDir');
-    renderer.drawAt(thrustName, cursor, 14, xFlip, yFlip);
+    // $753B-$7553 — matching ThrustDirN flickers on bit 2 of fastTimer
+    // while SWTHRUST is held. Picks up cursor from ship's last opcode.
+    if (state.input.thrust && (state.fastTimer & 4)) {
+      const thrustName = name.replace('ShipDir', 'ThrustDir');
+      renderer.drawAt(thrustName, cursor, 14, xFlip, yFlip);
+    }
+    return;
+  }
+
+  // Exploding branch: $7465-$7508 — emit one SVEC per active fragment
+  // at ship.dvgPos() + fragment[i] offset converted to DVG-coord.
+  // Active count from research_ship_explosion.md §5.1's formula:
+  //   ((~status) & 0x70) >> 4 + 1, simplified below as 6 → 1 across stages.
+  if (state.ship.status >= 0x80) {
+    // Stage 0 ($A0..$AF) = 6 frags, stage 5 ($F0..$FF) = 1 frag.
+    const stage = (state.ship.status - 0xA0) >> 4;   // 0..5
+    const activeCount = Math.max(1, 6 - stage);
+    // **Port deviation: fixed gs = 0 across all stages** (current experiment
+    // 2026-05-25). Source cycles gs through 0/14/15 per status bits 0,1,
+    // which on a vector CRT integrates via phosphor decay into a "growing
+    // star" perception. Our canvas clears each frame (no phosphor), so
+    // per-frame cycling reads as shape-morphing (the bullet/comet artifact
+    // the user observed). Earlier progressive-gs experiments (15→0 step,
+    // and 14→15→0 step) had visible discontinuities at each gs change.
+    // Fixed gs=0 gives stable per-fragment shape (lengths 4-12 px) with
+    // visible drift driving the "spreading" feel.
+    const gs = 0;
+    // **Port deviation: fragment alpha fades from 1.0 (status $A0) → 0.2
+    // (status $FF).** Approximates the cabinet's phosphor-decay fade-out
+    // — fragments visibly dim as the explosion ages, in addition to the
+    // count-decay (6 → 1). Min alpha 0.2 floor so the last fragments
+    // remain visible up to the moment they vanish. Linear ramp across
+    // the status range.
+    const alpha = 0.2 + 0.8 * (0xFF - state.ship.status) / 0x5F;
+    const shipDvg = state.ship.dvgPos();
+    for (let i = 0; i < activeCount; i++) {
+      const frag = state.ship.shipExplosionFragments[i];
+      const cursor = {
+        x: shipDvg.x + frag.x * GAME_TO_DVG,
+        y: shipDvg.y + frag.y * GAME_TO_DVG,
+      };
+      renderer.drawShipExplosionPiece(i, cursor, gs, alpha);
+    }
   }
 }
 
@@ -840,10 +1163,41 @@ function drawSaucerShots(state, renderer) {
   }
 }
 
-function scoreLivesDraw(_state, _renderer) {
-  // $724F — emits LABS opcodes (3 $7C03 callsites at $725E /
-  // $72A2 / $72BF) and matching JSRs for score digits, lives icons,
-  // and copyright. Body in I-12 / I-7-trailer.
+function scoreLivesDraw(state, renderer) {
+  // $724F — HUD render (I-11a). Player-1 score + player-1 lives only;
+  // 2-player score mirror ($72BF), high-score display ($72A2), and
+  // attract-mode text are deferred to I-12. See research_hud_coords.md
+  // §4 + §7 for the decoded LABS coordinates.
+
+  // $725E — player-1 score LABS at DVG (100, 876) gs=1, then 5 digit
+  // JSRs. Score lives in scoreThousands:scoreTens BCD bytes plus an
+  // implicit trailing zero (cabinet score is always a multiple of 10).
+  // Digit-0 renders as Char_O via the $56D4 cross-reference table —
+  // VROM has no Char_0 entry (research_hud_coords.md §6.1).
+  const scoreCursor = { x: 100, y: 876 };
+  const digits = [
+    (state.scoreThousands >> 4) & 0x0f,   // 10,000s
+    state.scoreThousands & 0x0f,           // 1,000s
+    (state.scoreTens >> 4) & 0x0f,        // 100s
+    state.scoreTens & 0x0f,                // 10s
+    0,                                      // implicit ones place
+  ];
+  for (const d of digits) {
+    const name = d === 0 ? 'Char_O' : `Char_${d}`;
+    renderer.drawAt(name, scoreCursor, 1);
+  }
+
+  // $6F48 — player-1 lives LABS at DVG (160, 852) gs=14, then curShips
+  // × LivesIcon JSRs. Per-icon stride is encoded in LivesIcon's own
+  // SVECs (the runList cursor advances naturally as each subroutine
+  // executes). Source's $6F3E BEQ $6F56 skips the whole emit when
+  // ply1CurShips == 0; we mirror with the guard.
+  if (state.curShips > 0) {
+    const livesCursor = { x: 160, y: 852 };
+    for (let i = 0; i < state.curShips; i++) {
+      renderer.drawAt('LivesIcon', livesCursor, 14);
+    }
+  }
 }
 
 function closingEmit(_state, _renderer) {

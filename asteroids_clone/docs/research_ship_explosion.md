@@ -406,56 +406,106 @@ exploding branch in `asteroidUpdate` already calls
 `ship.respawn(state)` and resets status to 1, putting the ship
 back in the alive branch.
 
-## §8. Port plan summary for I-11e
+## §8. Port summary (as landed in I-11e)
 
-State changes (already partly in [vector_rom_data.js](../vector_rom_data.js) — confirm + extend):
+I-11e landed with six port deviations from the source-faithful path
+described in §3-§7. Each is documented inline in `ship.js` /
+`main.js`; this section consolidates them.
 
-- `vector_rom_data.js`: `SHIP_EXPLOSION_VELOCITY` already
-  exported (verified §3.2). Fix the stale "un-disasm" comment
-  above it.
-- `ship.js`: add `shipExplosionFragments` field — 6 × `{x: number,
-  y: number}` game-coord-relative offsets from ship's death
-  point. Initialize in `Ship.kill(state)` as
-  `{x: SHIP_EXPLOSION_VELOCITY[i].vx / 16 / 256, y:
-  SHIP_EXPLOSION_VELOCITY[i].vy / 16 / 256}` (game-coord ÷256
-  to convert source-byte to game-coord). Verify the scale by
-  comparing fragment displacement vs ship size on cabinet
-  footage.
-- `ship.js`: add `Ship.advanceExplosionFragments()` — for each
-  active fragment, advance by velocity scaled to game-coord per
-  frame (i.e. `velocity / 256` if velocity values match the
-  position advance unit).
+State (`ship.js`):
 
-Render changes:
+- `shipExplosionFragments` — 6 × `{x: number, y: number}` game-coord
+  offsets from ship death position.
+- `Ship.kill(state)` — additionally initializes each fragment offset
+  as `SHIP_EXPLOSION_VELOCITY[i].{vx,vy} / 96` (see deviation #1).
+- `Ship.advanceExplosionFragments()` — each fragment offset advances
+  by `velocity / 4096` per frame (see deviation #2).
 
-- `task_seq.js asteroidUpdate` ship-exploding branch (already
-  exists as stub): call `state.ship.advanceExplosionFragments()`
-  on each frame the explosion-anim status increment fires. Apply
-  the fastTimer-bit-0 gate from §6.
-- `task_seq.js drawShip` exploding branch (currently early-returns
-  on `status !== 1`): add a new branch for `status >= 0x80`:
-  - Compute active fragment count from status (see §5.1's table
-    or the formula `((~status) & 0x70) >> 4` to get count, where
-    >>4 makes the result the fragment count - 1).
-  - Actually, simpler: `count = 6 - ((status - 0xA0) >> 4)` for
-    status in `[$A0, $FF]`. Confirm the boundary case during
-    I-11e.
-  - For each active fragment `i` in `0..count-1`, compute its DVG
-    position as `ship.dvgPos() + fragment[i]_offset_in_DVG`, and
-    emit one SVEC at that position via a new renderer method
-    `drawShipExplosionPiece(idx, cursor, gs)` (one element of
-    `VROM.ShipExplosion`).
-- `main.js` renderer: add `drawShipExplosionPiece(idx, cursor,
-  gs)` — wraps a 1-element opList (just `VROM.ShipExplosion[idx]`)
-  in `runList` so the SVEC emits naturally.
+Sim (`task_seq.js asteroidUpdate` ship-slot exploding branch):
 
-gs selection (see §2 port note):
-- Default: cycle gs from status bits 0,1 per `$7018-$7025`:
-  ```js
-  const gs = (ship.status & 1) ? 14 : (ship.status & 2) ? 15 : 0;
-  ```
-- Fallback if cabinet footage shows fixed-size fragments: use
-  `gs = 14`.
+- Per-tick status increment uses source-faithful `(negated >> 4) +
+  (fastTimer & 1)` for ~0.9-sec lifetime.
+- `state.ship.advanceExplosionFragments()` called every tick.
+- On status overflow past $FF: `placeAtCenter()` + `status = 0`
+  per `$6F93-$6F8E`. shipSpawnPhys then ticks the timer until
+  status=1.
+
+Render (`task_seq.js drawShip` exploding branch + `main.js
+drawShipExplosionPiece`):
+
+- Active fragment count = `Math.max(1, 6 - stage)` where `stage =
+  (status - 0xA0) >> 4`. Decays 6→5→4→3→2→1 across stages 0..5.
+- For each active fragment, emit one SVEC from
+  `VROM.ShipExplosion[i]` at `ship.dvgPos() + frag_offset_in_DVG`,
+  routed through `drawSegmentBright` (oriented filled rect, not
+  stroked line — see deviation #4).
+
+### The six port deviations
+
+1. **Init `/96` instead of source's `/16`.** Source writes
+   `velocity/16` to the HI byte of fragment position (giving offsets
+   up to 4.4 game-units in our coord system). Cabinet footage shows
+   fragments tightly clustered around ship — within ~1 game-unit.
+   `/96` empirically matches the cabinet snapshot's burst radius.
+2. **Drift `/4096` instead of source's effective `/256`.** Source-
+   faithful per-frame add (`position += velocity`) gives ~15 game-
+   units of drift across the lifetime — way off-screen. `/4096`
+   gives ~1 unit of additional spread on top of init, matching the
+   cabinet's slow visible drift.
+3. **Fixed `gs = 0`** instead of source's per-status-bit cycling
+   (0/14/15 from status bits 0,1). Source's cycling builds a
+   "growing star" appearance via CRT phosphor decay integrating
+   multiple frames at different sizes. Our canvas clears each
+   frame (no phosphor integration), so the cycling reads as bullet/
+   comet shape-morphing per frame. Fixed gs gives stable per-
+   fragment shape (5-14 px lengths at gs=0).
+4. **Render as oriented filled rectangle** (rotated `fillRect` of
+   3 px × SVEC-length) instead of stroked line. Short stroked lines
+   with any `lineCap` produce a teardrop/comet appearance because
+   the cap (or AA-end pixels) is comparable in size to the line.
+   Oriented filled rect gives uniform thickness with sharp ends.
+5. **Single SVEC per fragment** (no double-emit + EOR #$04). Source
+   `$74DA + $74EC` emits each SVEC twice for CRT phosphor brightness
+   reinforcement — confirmed not visible on cabinet per user
+   observation. Skipped; max alpha + thicker line compensate.
+6. **Alpha fade `1.0 → 0.2`** across status $A0 → $FF via
+   `ctx.globalAlpha`. Approximates the cabinet's phosphor-decay
+   fade-out so fragments visibly dim as they age — in addition to
+   the count decay.
+
+The combination produces a cabinet-faithful "burst → slow drift →
+fade out" visual without needing CRT phosphor emulation. Port spec
+was tuned empirically with user feedback across ~6 iterations.
+
+### §8.1 Why the `/96` and `/4096` numbers don't fall out of source
+
+The source-faithful per-frame fragment-position math is straight-
+forward — init writes `velocity/16` to the position HI byte; per-frame
+adds `velocity` to the position lo byte with carry to hi. Applying
+those formulas directly with our HI-byte-as-game-unit interpretation
+gives init offsets up to 4.4 game-units and per-frame drift of
+`velocity/256`, producing ~15 game-units of total drift across the
+explosion lifetime — way wider than what cabinet shows.
+
+The reason source's same numbers render small on cabinet is the
+**scale-normalization in `$7C49`** (the signed-magnitude LABS-emit
+helper). `$7C49` left-shifts the signed-magnitude position values
+until the value normalizes into the 10-bit LABS coordinate field,
+encoding the shift count into the LABS `scale` nibble. The DVG then
+applies the LABS scale to subsequent SVECs only — not to the LABS
+cursor itself. The net effect on rendered cursor position is that
+`$7C49` performs an implicit division of the source's position
+magnitude by some power-of-2 derived from the per-frame normalization.
+
+Porting `$7C49` faithfully (~50 lines of sign-magnitude + ASL-loop
+scale-normalization, plus the LABS bit-layout packing at `$7CBB-$7CD9`)
+would let our renderer reproduce source's exact rendered position
+without the empirical `/96` and `/4096` divisors. We chose the
+empirical path during I-11e because (a) the cabinet visual was
+adjustable with two small constants, and (b) `$7C49`'s logic is
+specialized to the source's 6502 sign-magnitude encoding which
+doesn't map cleanly to Float64 game-coords. A future polish step
+could revisit this as a separate research+port chip.
 
 ## §9. Verification checklist for I-11e
 
@@ -469,15 +519,11 @@ After ship-explosion render lands:
    straight down, etc. — verify each direction matches the
    velocity table sign).
 3. Watch the fragment count decay: 6 → 5 → 4 → 3 → 2 → 1
-   across roughly 56 ticks. Use `tsq.simulate(s)` with
-   single-step to confirm the count at each `$10` status
-   boundary.
+   across roughly 56 ticks (per source) or ~36 real frames at
+   our timing. Use a `setInterval`-based freeze in dev console
+   to confirm the count at each `$10` status boundary.
 4. After explosion completes (status overflows `$FF`), confirm
-   `ship.respawn(state)` fires (I-11d's plumbing) and the ship
-   reappears at game-coord (16.375, 12.375).
-5. If cycling gs is implemented: confirm fragment-size flicker
-   matches cabinet footage. If it looks distracting or wrong,
-   switch to fixed gs=14 and re-verify.
-6. If single SVEC per fragment is chosen (§5.3 deviation):
-   confirm fragments are clearly visible and not too faint. If
-   too faint, implement the double-SVEC reinforcement.
+   the ship is placed at center via `placeAtCenter` and reappears
+   at game-coord (16.375, 12.375) once shipSpawnTimer hits 0.
+5. Alpha fade: stage 0 fragments should be at full brightness;
+   stage 4-5 visibly dimmer (alpha ~0.46 → 0.2).

@@ -6,7 +6,7 @@
 // lifetime decrement for all shot slots; only the source position +
 // direction (set at spawn) differs. Shot-specific constants live here.
 
-import { WORLD_W, WORLD_H, GAME_TO_DVG } from './world.js';
+import { WORLD_W, WORLD_H, GAME_TO_DVG, PLAYFIELD_Y_OFFSET } from './world.js';
 
 // $6D14-$6D24 — shot velocity clamp: ±112 source-byte units
 // (= ±$70 positive, ±$91 negative two's-complement). Larger than the
@@ -68,7 +68,9 @@ export class Shot {
     if (this.status <= 0) this.status = 0;
   }
 
+  // Game-coord → DVG-coord (× 32) + $72FE's +128 DVG-y playfield offset.
+  // Mirrors Ship.dvgPos / Asteroid.dvgPos / Saucer.dvgPos.
   dvgPos() {
-    return { x: this.x * GAME_TO_DVG, y: this.y * GAME_TO_DVG };
+    return { x: this.x * GAME_TO_DVG, y: this.y * GAME_TO_DVG + PLAYFIELD_Y_OFFSET };
   }
 }

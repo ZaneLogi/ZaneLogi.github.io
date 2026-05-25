@@ -32,6 +32,22 @@ Status values: `not started` | `in progress` | `done` | `deferred`.
 
 ## Current focus
 
+**2026-05-25 update:** I-11 (collisions + scoring + lives + HUD) done.
+Eight sub-steps planned in `plan_i11.md` were collapsed into six
+in-session commits (I-11d+f folded ship-vs-asteroid collision into
+I-11d so the death flow was play-testable; I-11g+h combined since
+both extend the same `collisions` function with saucer pairs). HUD
+landed first to make every subsequent scoring/lives change visually
+verifiable. Two cross-cutting fixes folded in: (1) **multi-resolve
+fix** — `$6A94 JMP $69F9` was missed in I-9h; latent until I-11b
+scoring made it observable; added inner-loop `break` after each
+resolve in all collision pairs. (2) **BB collision restored** —
+I-9h's Euclidean port deviation missed ~21% of source-valid hits
+(corner regions); reverted to source's `|dx|<r AND |dy|<r` for all
+pairs after user observation that ship-vs-asteroid felt too
+forgiving. Next up: **I-12** (attract mode + 2-player + game-over
+flow that retires the temp lives-replenish stub in `Ship.kill`).
+
 **2026-05-23 update:** I-7 (main-loop scaffold + 15-JSR dispatch) and
 I-8 (ship physics — rotation, thrust, position math, fire) done.
 Hyperspace deferred to I-13 (not a port blocker — see I-8 scope
@@ -203,8 +219,8 @@ will be addressed in the relevant research doc when reached.
 | I-8 | Ship physics (rotation, thrust, position math, fire) | **done** (hyperspace deferred to I-13) |
 | I-9 | Asteroid spawn + split mechanics | **done** (I-9c rotation animation dropped — alive asteroids static) |
 | I-10 | Saucer AI + state machine | **done** (6 sub-steps; player-shot-vs-saucer pulled in mid-step; other collisions deferred to I-11) |
-| I-11 | Collisions + scoring + lives | not started |
-| I-12 | Attract mode + power-on test pattern + credits | not started |
+| I-11 | Collisions + scoring + lives + HUD | **done** (6 sub-steps; I-11d+f folded ship-collision into death flow; I-11g+h combined saucer pairs; BB-faithful collision restored; multi-resolve fix) |
+| I-12 | Attract mode + power-on test pattern + credits + game-over flow | not started |
 | I-13 | Polish + visual tuning (incl. ship hyperspace $7052-$7081) | not started |
 | I-14 | Sound (R-G dependency) | deferred |
 
@@ -462,6 +478,198 @@ collisions, scoring, ship death) cleanly factor out.
   shot that just killed an asteroid.
 - **Euclidean for shot-vs-saucer** — inherited from I-9h's asteroid
   port deviation. Same code path. See `research_collisions.md §6`.
+  **Reverted to BB in I-11** (see I-11 scope below); this entry is
+  preserved for historical paper trail of when the deviation lived.
+
+### I-11 scope (done 2026-05-25)
+
+I-11 covered six in-session sub-steps, planned as eight in
+`plan_i11.md` but collapsed via two foldings (I-11d+f for
+play-testable death; I-11g+h for combined saucer collision pairs).
+Per-sub-step commits served as save points during the session;
+they were squashed into one `impl I-11` commit at the end matching
+the I-8/I-9/I-10 commit shape.
+
+- **I-11a HUD render** — score + lives, BCD digits + ship-icon
+  rendering. Decoded from `research_hud_coords.md`:
+  - `$7C03` LABS-emit helper: A register → DVG-X, X register → DVG-Y,
+    both ×4 (CPU register names are OPPOSITE the DVG coordinate they
+    drive — v1 mis-decoded this). HUD callsites: player-1 score at
+    DVG `(100, 876)` gs=1 (`$725E`), player-1 lives at DVG `(160, 852)`
+    gs=14 (`$6F48`).
+  - `$72FE` `+$0400 / 8 = +128` DVG-y playfield offset added to every
+    actor's `dvgPos()` (`asteroid.js` / `ship.js` / `saucer.js` /
+    `shot.js` all read `PLAYFIELD_Y_OFFSET` from `world.js`). The
+    +128 reserves the bottom of the visible cabinet region for HUD;
+    earlier port omitted this since HUD wasn't yet rendering.
+  - `toCanvasY = 900 - dvgY` (was `canvas.height - dvgY`); the +4 px
+    slack past the test-pattern visible rectangle prevents digit
+    tops from clipping at canvas y=0.
+  - State changes: `scoreThousands` re-typed decimal → BCD byte;
+    new `scoreTens` BCD byte; new `curShips` (init 3 from
+    `$6925-$6927` numShipsPerGame DIP); `numPlayers` cold-init
+    flipped 0 → 1 (I-12 will make this dynamic via `$6885`
+    playerMgmt).
+  - Digit-0 renders as `Char_O` via the `$56D4` cross-reference
+    table — VROM has no `Char_0` glyph; the table maps digit-0 to
+    `Char_O`'s body at `$55BA` ([research_hud_coords.md §6.1]).
+- **I-11b BCD score-add + shot-vs-asteroid scoring** —
+  `$7397-$73B1` SED-mode ADC port via `bcdAdd(a, b, carryIn)`
+  helper (per-nibble adjust if sum ≥ 10). `addScore(state, byte)`
+  applies the adder to `scoreTens` then propagates carry to
+  `scoreThousands`. `$73A4-$73AE` bonus-life trigger when the 10k
+  digit (high nibble of `scoreThousands`) increments — `state.curShips
+  += 1`. **Score-table mystery resolved by port deviation:** source's
+  `$75FF LSR / TAX` indexes the 3-byte table at `$7659` `[$10, $05,
+  $02]`, but the LSR collapses large+small both to X=2 and pushes
+  medium to X=3 (out-of-table). Port uses a direct size-bit dispatch
+  matching cabinet scoring: `small=$10 (100 pts)`, `medium=$05 (50
+  pts)`, `large=$02 (20 pts)`. **Plan_i11.md typo flagged:** that
+  doc lists the lookup as `{small: $01, medium: $05, large: $10}` —
+  labels swapped vs cabinet. The verify section ("Shoot large → 00020,
+  medium → 00070, small → 00170") is the source-of-truth; cabinet-
+  faithful values used. Also folded in: **multi-resolve fix** —
+  source's `$6A94 JMP $69F9` aborts the inner loop on hit; I-9h's
+  port continued. Added `break` after each resolve in all collision
+  pairs. Latent until scoring made it observable.
+- **I-11c shot-vs-saucer scoring + saucerTimer re-arm** —
+  `$6B73-$6B90`: `saucerTimer = saucerTimeReload` unconditional
+  re-arm (no longer waiting for explosion-completion at `$6F99`),
+  then `$6B79` `numPlayers != 0` gate, then scoring via `LSR` on
+  saucer status — small (status=1) = `$99 BCD = 990 pts`, large
+  (status=2) = `$20 BCD = 200 pts`. Sound timer `$6B56 STA $69`
+  still deferred to R-G.
+- **I-11d+f ship state machine + ship-vs-asteroid collision** —
+  ship death/respawn body finally lands. `Ship.kill(state)`:
+  status=$A0, vx=vy=0, `curShips -= 1`, `shipSpawnTimer = $81`
+  (129-frame respawn delay) per `$706F-$707E` + `$6B1E-$6B27`.
+  `Ship.respawn(state)`: status=1, position=(16.375, 12.375)
+  per `$71E8`'s `hposhShip $10 / hposlShip $60 / vposhShip $0C /
+  vposlShip $60`. `Ship.placeAtCenter()` for explosion-end cleanup
+  at `$6F93` (places ship + status=0; shipSpawnPhys keeps ticking
+  timer until status=1). `Ship.canSafelyRespawn(state)`: `$7139`
+  scan of saucer + all asteroids for `|dx| < 4 AND |dy| < 4`
+  (non-wrap-aware per source's high-byte SBC + CMP #$04/#$FC
+  pattern). `shipSpawnPhys` body extended for `$703F-$7085`:
+  numPlayers + status>=$80 skip → timer countdown → on-zero
+  safe-respawn check + saucer-alive 2-frame defer → respawn.
+  Ship cold-init flipped to `status=0` + `shipSpawnTimer=1`
+  matching `$68F2` (was `status=1` workaround in I-7).
+  asteroidUpdate ship-slot branch: exploding-anim with fastTimer-
+  bit-0 carry-in per `$6F62-$6F77` (ship explodes one frame slower
+  than asteroid). drawShip exploding branch kept skipping render
+  here — I-11e adds the visible fragments. **Folded in I-11f:**
+  ship-vs-asteroid collision with `$6A67 ADC #$1C` ship-radius
+  adjustment (+28 halved-unit = +56 raw / 256 game-coord), so
+  ship hit-radii: small=(84+56)/256, medium=(144+56)/256,
+  large=(264+56)/256. On hit, both die + score via
+  `killAsteroid(state, ast, true)`. Folded in because ship-vs-
+  asteroid is the only natural way to test ship death through
+  gameplay (without it, only dev-console `__game.ship.kill()`
+  works). **Temp lives-replenish stub** in `Ship.kill`: when
+  curShips hits 0, reset to 3 — keeps testing past the 3rd
+  death until I-12 lands the real game-over → attract-mode
+  transition via `$6885` playerMgmt. Hyperspace (`$7052-$7081`)
+  still deferred to I-13.
+- **I-11e ship explosion 6-fragment render** —
+  `$7465-$7508` animator from
+  [`research_ship_explosion.md`](research_ship_explosion.md).
+  `Ship.shipExplosionFragments` field holds 6 × `{x, y}` game-
+  coord offsets from ship death position. `Ship.kill` initializes
+  fragment offsets from `SHIP_EXPLOSION_VELOCITY` table at
+  `$50EC-$50F6` (already in `vector_rom_data.js`).
+  `Ship.advanceExplosionFragments()` ticks per frame.
+  `drawShip`'s exploding branch emits one SVEC per active fragment
+  via new `renderer.drawShipExplosionPiece(idx, cursor, gs, alpha)`.
+  Active fragment count from `((~status) & 0x70) >> 4`: 6 at $A0
+  decaying to 1 at $F0. **Six port deviations** documented inline
+  in `ship.js` + `main.js`:
+  1. **Init `/96` instead of source's `/16`** — source-faithful gave
+     fragment offsets up to 4.4 game-units (way wider than cabinet);
+     tuned empirically against user-provided cabinet snapshot.
+  2. **Drift `/4096` per frame** instead of source's effective `/256` —
+     source-faithful gave 15 game-unit drift across the ~36-frame
+     lifetime (off-screen by half-lifetime); tuned to keep fragments
+     near the ship's death point.
+  3. **Fixed `gs = 0`** instead of source's per-status-bit cycling
+     (0/14/15). Source's cycling relies on CRT phosphor decay to
+     visually integrate into a "growing star"; on canvas (which
+     clears each frame) the cycling reads as bullet/comet shape-
+     morphing. Fixed gs gives stable per-fragment shape.
+  4. **Render as oriented filled rectangle** (rotated `fillRect`)
+     instead of stroked line. Short stroked lines with any lineCap
+     produce a teardrop appearance because cap/AA-end pixels are
+     comparable in size to the line. Oriented rect (3 px thick,
+     SVEC length) gives uniform thickness with sharp ends.
+  5. **Single SVEC per fragment** (no double-emit + EOR #$04). Source's
+     double-emit was a CRT phosphor brightness-reinforcement trick;
+     not visible on cabinet per user observation; canvas doesn't
+     have phosphor accumulation. Single emit, full alpha + thicker
+     line compensate.
+  6. **Alpha fade `1.0 → 0.2`** across the status range. Approximates
+     cabinet's phosphor-decay fade-out. Linear ramp keyed to status.
+- **I-11g+h saucer-shot + saucer-body collisions** —
+  Four new collision pairs added to the `collisions` function:
+  - **Saucer-shot vs ship** (outer X=2,3): kill shot + `Ship.kill`.
+    Ship target → table picks `$2A` (small-asteroid-equivalent
+    radius = 84/256). No `$1C` shooter adjustment (X != 0). No
+    score path for this pair.
+  - **Saucer-shot vs asteroid**: kill shot + `killAsteroid(false)`
+    — no score (saucer shooter fails `$75EC`'s `$760E-$7612` gate
+    `BCC` when shooter index < 4).
+  - **Saucer-body vs ship** (outer X=1): both die. Score saucer
+    points (200/990) via source's `$6B0F-$6B19` X-swap to ship-
+    shooter semantic; `$6B73-$6B76` re-arms `saucerTimer` at hit
+    time; `$6B79` numPlayers gate; `$6B81-$6B8B` LSR-on-saucer-
+    status picks `$99` (small) or `$20` (large).
+  - **Saucer-body vs asteroid**: both die, no score (same shooter-
+    gate). Saucer marked exploding via the existing $A0 path;
+    saucerTimer re-arms at explosion-completion (`$6F99-$6F9F`),
+    not at hit time.
+  All four use BB collision (matching the rest after the revert).
+  Saucer geometry uses `$6A55-$6A61`'s LSR-on-saucer-status chain
+  to pick `$2A`/`$48` (small/large saucer hit-radius).
+
+**Deferred from I-11 scope (re-open at I-12 unless noted):**
+- **Game-over flow + attract-mode transition** — `$6885` playerMgmt
+  decides "player ran out of ships" branch; per-PC sync via
+  `$0300` ply2RAM (banked at `$3200` bit 3). I-12 with attract mode.
+  The temp lives-replenish stub in `Ship.kill` retires when this
+  lands.
+- **2-player HUD branch** (`$7286-$72FA`) and **high-score display +
+  entry** (`$72A2`, `$72BF`, `$73F7`) — I-12.
+- **Hyperspace** (`$7052-$7081`) — I-13.
+- **Sound** — all `STA $69`/`STA $6B`-style timer writes, including
+  bonus-ship sound at `$73A8`. R-G.
+- **`$745A` / `$745C` slot-scanner body** — still using `Array.find`
+  placeholder from I-9. Future cleanup chip; not gameplay-affecting.
+- **Leading-zero suppression in HUD digits** — currently all 5
+  digits render (with `Char_O` for nibble=0). If cabinet shows
+  leading-zero suppression in any DIP setting, revisit.
+
+**Port deviations introduced (or restored) during I-11:**
+- **BB collision restored** for all pairs (ship-vs-asteroid,
+  player-shot-vs-asteroid, player-shot-vs-saucer, saucer-shot-vs-*,
+  saucer-vs-*). Earlier port deviation (Euclidean since I-9h) missed
+  the ~21% of source-valid hits where `|dx|` AND `|dy|` are both
+  near `r` — visible as "ship-vs-asteroid feels too forgiving" user
+  observation 2026-05-25.
+- **Direct size→BCD score lookup** at `asteroidScoreByte` instead
+  of source's `$75FF LSR / TAX` indexing. Source's path doesn't
+  cleanly index the 3-byte score table (LSR collapses two sizes to
+  the same index; one size reads past the table). Port uses
+  `{small: $10, medium: $05, large: $02}` direct dispatch matching
+  cabinet scoring.
+- **Temp lives-replenish in `Ship.kill`** — sets `curShips = 3` when
+  it would hit 0. Removed by I-12.
+- **Six ship-explosion render deviations** in `Ship.kill` /
+  `advanceExplosionFragments` / `drawShipExplosionPiece` (see I-11e
+  bullet above). Source's render relies on CRT phosphor integration
+  that doesn't translate to canvas; deviations approximate the
+  perceived cabinet effect (slow drift, fixed shape, alpha fade).
+- **Multi-resolve fix** (added inner-loop `break` after each
+  resolve) — actually restores source faithfulness (`$6A94 JMP
+  $69F9`); I-9h's port had missed it. Not a deviation; bug fix.
 
 ## Ship-data modification recipe (obsolete — phantom problem)
 

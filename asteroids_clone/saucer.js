@@ -4,7 +4,7 @@
 // its own constants (tunables like saucerTimeReload live on GameState
 // and reach the methods through the `state` argument).
 
-import { WORLD_W, WORLD_H, GAME_TO_DVG } from './world.js';
+import { WORLD_W, WORLD_H, GAME_TO_DVG, PLAYFIELD_Y_OFFSET } from './world.js';
 
 export class Saucer {
   constructor() {
@@ -86,9 +86,10 @@ export class Saucer {
     this.y = ((this.y + this.vy) % WORLD_H + WORLD_H) % WORLD_H;
   }
 
-  // Game-coord → DVG-coord (× 32). Mirrors Ship.dvgPos / Asteroid.dvgPos.
+  // Game-coord → DVG-coord (× 32) + $72FE's +128 DVG-y playfield offset.
+  // Mirrors Ship.dvgPos / Asteroid.dvgPos.
   dvgPos() {
-    return { x: this.x * GAME_TO_DVG, y: this.y * GAME_TO_DVG };
+    return { x: this.x * GAME_TO_DVG, y: this.y * GAME_TO_DVG + PLAYFIELD_Y_OFFSET };
   }
 
   // $7018-$7025 size→gs (shared with asteroid alive dispatch via the same

@@ -612,18 +612,27 @@ documented 20/50/100 is a misremembering.
 ## §6. Port spec
 
 The JS port models collision as a single per-frame pass with the
-same outer/inner topology. The threshold shape — BB ∩ Manhattan — is
-trivial to replicate, but we should also consider replacing it with
-**either** a clean Euclidean test (modern, more accurate) **or** an
-AABB test (cheapest), based on whether the octagonal shape
-matters subjectively.
+same outer/inner topology. The threshold shape is source's
+**bounding box** — `|dx| < r AND |dy| < r` — matching `$6A77-$6A7D`
+exactly.
 
-Recommended port: **plain Euclidean for clarity**:
+(Earlier port deviation used plain Euclidean for "simpler code,
+visually indistinguishable" — reverted during I-11 after user
+observation that ship-vs-asteroid felt too forgiving. Euclidean
+covers only ~79% the area of source's BB; the missing ~21% is the
+corner regions where `|dx|` AND `|dy|` are both near `r`. Glancing-
+angle collisions registered on cabinet but missed in the port.)
+
+The full source's BB ∩ Manhattan octagonal shape (`$6A77-$6A8F`'s
+extra `A+|dx|+|dy| ≤ ...` test, plus the `$1C` shooter adjustment
+to one side) is NOT implemented — only the BB component. The
+Manhattan-octagon refinement clips corner extents slightly tighter
+than pure BB but the difference is sub-pixel for our radius values
+and not user-observable.
 
 ```js
 // $69F0 — collisions
-// Deviation: replace BB ∩ Manhattan with clean Euclidean (visually
-// indistinguishable at the radius values used; simpler code).
+// Source-faithful BB: |dx| < r AND |dy| < r per $6A77-$6A7D.
 function collisions(state) {
   for (const shooter of [state.ship, state.saucer, ...state.saucerShots, ...state.shipShots]) {
     if (!shooter.alive) continue;
@@ -632,7 +641,7 @@ function collisions(state) {
       const dx = target.x - shooter.x;
       const dy = target.y - shooter.y;
       const r = radiusFor(shooter, target);  // §3 step 3 table
-      if (dx*dx + dy*dy < r*r) resolveHit(shooter, target);
+      if (Math.abs(dx) < r && Math.abs(dy) < r) resolveHit(shooter, target);
     }
   }
 }
@@ -709,21 +718,30 @@ Notes:
   genuinely dead source code. The "+ Saucer shot vs saucer-N" rows
   in §3 step 3's table should be read as inheriting the
   small-asteroid (84) and medium-asteroid (144) rows.
-- **Score-table size mismatch.** Source's `$7659` table has 2
-  entries (`$10, $05`) — large/small share `$10`, medium gets
-  `$05`. Classic Asteroids docs say 20/50/100. Resolve during I-11
-  (cabinet behaviour, Mikstas annotation, or BCD-add interpretation).
+- ~~**Score-table size mismatch**~~ — **RESOLVED 2026-05-25 by
+  I-11b via port deviation.** Source's table at `$7659` is 3 bytes
+  `[$10, $05, $02]` (= 100/50/20 in cabinet BCD). The `$75FF LSR /
+  TAX` indexing path doesn't cleanly index 3 distinct values:
+  large (status `$04`) and small (status `$05`) both shift to X=2;
+  medium (status `$06`) shifts to X=3 (out-of-table). Port uses a
+  direct size-bit dispatch matching cabinet behavior: `{small: $10,
+  medium: $05, large: $02}`. Cabinet scoring is small=100,
+  medium=50, large=20 (smaller asteroids are harder to hit → more
+  points). See `progress.md` I-11 scope's I-11b bullet.
 - **`$745A` / `$745C` slot-scanner body.** Visible at
   `Code.md $7531+` but not yet decoded — needed to know exact
-  free-slot search order during `$75EC` child spawn.
+  free-slot search order during `$75EC` child spawn. Port still
+  uses `Array.find` placeholder across all collision pairs.
 - **Saucer firing direction** — saucer shots use `saucerShotDir
   $62` and the saucer's targeting logic at `$6C54-$6CC4`. Collision
   itself is shape-agnostic; the firing-direction story belongs in a
   future `research_saucer_ai.md` if it's needed.
-- **Ship-vs-saucer overlap** — the outer-X table in §2 doesn't
-  test ship-vs-saucer directly. Whether the game allows the ship to
-  physically touch the saucer without dying is TBD; if so, the
-  saucer's collision with the ship happens via saucer-shot only.
+- ~~**Ship-vs-saucer overlap**~~ — **RESOLVED 2026-05-25 by I-11h.**
+  Source DOES test ship-vs-saucer: when X=1 (saucer outer-loop) and
+  inner Y=$1B (ship target), `$6B0F-$6B19` swaps to (X=0, Y=$1C) to
+  route through the ship-shooter path. Both die; player scores
+  saucer points (200/990) via `$6B73-$6B90`. Ported in I-11g+h
+  bullet of `progress.md` I-11 scope.
 
 ## §8. Citations summary
 

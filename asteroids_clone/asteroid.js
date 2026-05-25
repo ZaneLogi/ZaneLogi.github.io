@@ -5,7 +5,7 @@
 // (task_seq.js + future per-subsystem modules). See state.js header
 // for the broader convention.
 
-import { WORLD_W, WORLD_H, GAME_TO_DVG } from './world.js';
+import { WORLD_W, WORLD_H, GAME_TO_DVG, PLAYFIELD_Y_OFFSET } from './world.js';
 
 export class Asteroid {
   constructor() {
@@ -29,9 +29,10 @@ export class Asteroid {
     this.y = ((this.y + this.vy) % WORLD_H + WORLD_H) % WORLD_H;
   }
 
-  // Game-coord → DVG-coord (× 32). Mirrors Ship.dvgPos.
+  // Game-coord → DVG-coord (× 32) + $72FE's +128 DVG-y playfield offset.
+  // See world.js PLAYFIELD_Y_OFFSET + research_hud_coords.md §2.
   dvgPos() {
-    return { x: this.x * GAME_TO_DVG, y: this.y * GAME_TO_DVG };
+    return { x: this.x * GAME_TO_DVG, y: this.y * GAME_TO_DVG + PLAYFIELD_Y_OFFSET };
   }
 
   // $7365-$736A — pick 1 of 4 Rock shapes from status bits 3,4. These

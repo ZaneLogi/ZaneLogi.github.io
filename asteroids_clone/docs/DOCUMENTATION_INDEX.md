@@ -1,18 +1,20 @@
 # asteroids_clone — Complete Documentation Index
 
-**Date:** 2026-05-24
-**Status:** Implementation phase well underway — I-7 (main-loop
-scaffold), I-8 (ship + fire), I-9 (asteroid spawn / motion / draw /
-explode / split / collide), and I-10 (saucer AI + state machine +
-shot-vs-saucer collision + death anim) all **done**. Next:
-I-11 (remaining collision pairs: ship-vs-saucer, saucer-shot-vs-ship,
-saucer-vs-asteroid + scoring + ship death + lives + respawn),
-I-12 (attract/credits/HUD), I-13 (hyperspace polish), I-14 (sound,
-R-G dependency). R-A through R-F research docs are landed; R-G
-(sound) still deferred until silent game runs.
+**Date:** 2026-05-25
+**Status:** Implementation phase well underway — I-7 through I-11
+all **done**. The silent game is end-to-end playable: ship rotates +
+thrusts + fires, asteroids spawn / split / collide, saucer spawns +
+AI + fires + dies, ship dies + respawns, HUD shows score + lives,
+scoring covers all collision pairs (including bonus life at 10k).
+Next: I-12 (attract mode + 2-player flow + real game-over →
+retire temp lives-replenish stub), I-13 (hyperspace polish), I-14
+(sound, R-G dependency). R-A through R-F research docs are landed;
+R-G (sound) still deferred until silent game runs (which we are
+now in!).
 
-**Total docs:** 6 research docs (~2,500 lines) + source-of-truth
-files in the local ComputerArcheology mirror.
+**Total docs:** 8 research docs (~3,800 lines) — added
+`research_hud_coords.md` and `research_ship_explosion.md` as
+pre-research for I-11.
 
 ---
 
@@ -26,8 +28,10 @@ files in the local ComputerArcheology mirror.
 | **research_dvg.md** | Display-list spec, opcodes, canvas interpreter | §2 memory model, §3 coords (1024×1024, Y-flip), §4 scale (global+local, /512..\/1), §5 brightness (3 canvas options), §6 opcode reference, §10 interpreter pseudocode | 476 lines |
 | **research_position_math.md** | 16-bit positions, signed velocities, sub-pixel motion, screen wrap | §1 position arrays, §2 velocity, §3 carry-propagation update ($6FC7), §4 toroidal wrap, §5 ship dual-precision velocity, §6 **three-layer coord model**, §7 port deviation (Float64) | 391 lines |
 | **research_main_loop.md** | $6800 dispatch loop, per-frame task sequence, state machine | §2 preamble, §3 the 15 JSRs, §4 delayBeforePlay gate, §5 state machine diagram, §6 wave progression, §7 two-player RAMSEL, §9 port spec | 448 lines |
-| **research_collisions.md** | Geometric collision tests + dispatch + resolution + scoring | §2 dispatch (X-shooter / Y-target), §3 kernel ($6A0A) — **incl. step 2 LSR/ROR correction (|dx|/2 fold; effective radii 2× table)**, §4 (no) wrap-awareness, §5 resolution + scoring + split, **§5.1 $75EC decoded**, **§5.2 shrapnel render path (Pattern 4→1; mod-16 gs growth)**, §6 port deviation (Euclidean), **§7 deferred questions (resolved: collision-tightness; open: saucer-adjust block unreachable, score-table 2-entry mismatch, $745A/$745C decode)** | 599 lines |
+| **research_collisions.md** | Geometric collision tests + dispatch + resolution + scoring | §2 dispatch (X-shooter / Y-target), §3 kernel ($6A0A) — **incl. step 2 LSR/ROR correction (|dx|/2 fold; effective radii 2× table)**, §4 (no) wrap-awareness, §5 resolution + scoring + split, **§5.1 $75EC decoded**, **§5.2 shrapnel render path (Pattern 4→1; mod-16 gs growth)**, §6 port spec (source-faithful BB after I-11's revert of the earlier Euclidean port deviation), **§7 deferred questions (resolved: collision-tightness, saucer-adjust block dead code, score-table 3-byte direct lookup, ship-vs-saucer X-swap; open: $745A/$745C slot-scanner decode)** | 599 lines |
 | **research_vector_rom.md** | 2 KB vector ROM — subroutine inventory + port spec | §1 overview, §3 inventory (ship, asteroid, UFO, shrapnel, characters), §3.8 ship-direction table + reflection, §5 port spec (keep ROM raw) | 379 lines |
+| **research_hud_coords.md** | HUD coordinate system — `$7C03` byte→DVG mapping + `$72FE` +128 playfield Y-offset + HUD callsite decode | §1 LABS-emit helper, §2 per-slot dispatcher Y-offset, §3 visible coordinate bounds, §4 HUD callsites (score gs=1, lives gs=14), §6 digit emit pattern + Char_O alias | 438 lines |
+| **research_ship_explosion.md** | Ship explosion 6-fragment animator — `$7465-$7508` decode + port summary | §3 ROM data (ShipExplosion + SHIP_EXPLOSION_VELOCITY), §4 init phase, §5 per-frame phase + fragment count formula, §6 status-increment formula (fastTimer-bit-0 gate), §8 port summary as landed in I-11e (six deviations) | 487 lines |
 
 ### Source-of-truth files (in the ComputerArcheology mirror)
 
@@ -244,19 +248,43 @@ alternate disassembly where the upstream disasm has gaps:
   DVG padding per MAME's `avgdvg dvg_generate_vector_list`. See
   [`research_dvg.md §4` "Confirmed reappearance" + `§12`](research_dvg.md)
   and [`research_collisions.md §5.2`](research_collisions.md).
-- **DVG-list builders `$7C03`/`$7CDE`** — fully visible in source;
-  per-callsite reading happens during each port step (per dvg §10).
-- **`$724F scoreLivesDraw`** + per-object draw emit sites — exact
-  per-object globalScale values are read from source during the
-  per-object port steps (I-8 ship, I-9 asteroid, I-10 saucer, I-12
-  HUD/attract), not as a standalone investigation. `$7555` was
-  previously mislabeled here as `mainListBuild`; it is the per-frame
-  sound-channel update (R-G).
+- ~~**DVG-list builders `$7C03`/`$7CDE`**~~ — **decoded 2026-05-25
+  during I-11a** ([`research_hud_coords.md §1`](research_hud_coords.md)).
+  `$7C03` emits 4-byte LABS from (A, X) register values × 4 with a
+  scale byte from `ram.$00`; A → DVG-X, X → DVG-Y (CPU register
+  names are OPPOSITE the DVG coordinate they drive). `$72FE`
+  per-slot variant skips `$7C03`'s register-multiplication and adds
+  `+$0400/8 = +128` to DVG-y for the playfield offset before jumping
+  into `$7C03`'s emit tail at `$7C1C`.
+- ~~**`$724F scoreLivesDraw`** + per-object draw emit sites~~ —
+  **all per-object emit sites decoded 2026-05-25**. Player-1 score
+  LABS at DVG (100, 876) gs=1 ([`research_hud_coords.md §4.1`](research_hud_coords.md));
+  player-1 lives LABS at DVG (160, 852) gs=14
+  ([`research_hud_coords.md §4.2`](research_hud_coords.md)).
+  2-player branch + high-score display deferred to I-12. `$7555`
+  was previously mislabeled here as `mainListBuild`; it is the
+  per-frame sound-channel update (R-G).
+- ~~**Ship-explosion fragment animator `$7465-$7508`**~~ —
+  **decoded 2026-05-25 during I-11e** ([`research_ship_explosion.md`](research_ship_explosion.md)).
+  Six fragment positions in zero-page RAM ($7D-$94); per-frame
+  position += velocity from `SHIP_EXPLOSION_VELOCITY` table at
+  `$50EC`; fragment count from `((~status) & $70) >> 4`. Port
+  landed with 6 documented deviations to fit canvas without CRT
+  phosphor emulation.
 - **Packed-string format at `$77F6 PrintPackedMsg`** — character
-  lookup table for "PLAYER N" / "PUSH START" / etc.
+  lookup table for "PLAYER N" / "PUSH START" / etc. I-12.
 - **Saucer firing direction logic at `$6C54-$6CC4`** — saucer AI
+  (decoded in I-10d, used by I-10/I-11; no standalone doc needed).
 - **`$77D2`/`$77D5` sin/cos tables** — direction → thrust components
-- **Sound subsystem** — full R-G doc deferred
+  (port uses `Math.cos`/`Math.sin` instead).
+- **`$745A`/`$745C` asteroid-slot scanner** — visible in source but
+  not decoded; port still uses `Array.find` placeholder. Future
+  cleanup chip; not gameplay-affecting.
+- **`$6885 playerMgmt`** — game-over / attract-mode transition.
+  I-12 will decode + port; the temp lives-replenish stub in
+  `Ship.kill` retires then.
+- **Sound subsystem** — full R-G doc deferred until silent game is
+  validated (which is now — I-12 will start R-G work).
 
 Reference for the gaps: Nicholas Mikstas's alternate disassembly at
 <https://www.nicholasmikstas.com/games/>.
