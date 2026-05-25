@@ -72,6 +72,16 @@ Claude session needs to discover what the other PC did from git itself.
 - **Write rich commit messages.** They are the cross-PC communication
   channel — anything you'd want the other-PC me to know belongs there
   (or in a research doc / CLAUDE.md update committed in the same change).
+- **Cross-cutting cleanup → choose branch by target activity, not
+  current location.** Repo-wide infra cleanup (tools/, root
+  `CLAUDE.md`, build scripts, .gitignore) goes on `main` when the
+  target branch is inactive OR the change is cross-cutting; on the
+  project branch when that branch is currently active. Don't touch
+  other projects' files from the branch you're sitting on — it
+  muddies branch scope and creates harder merges later. If you're
+  on `asteroids_clone` and need to fix something in
+  `phoenix_clone/` or repo-root config, switch branches (or use a
+  worktree) first.
 
 **The "last-known HEAD" sync protocol:** at session end (or whenever you
 make/observe a commit), record `git rev-parse HEAD` for the active
@@ -232,6 +242,41 @@ immediately. The cost of skimping on research is paid in
 implementation drift. Time spent on research docs before coding is
 the cheapest time in the project.
 
+### When a subsystem has no software counterpart — drop, not defer
+
+Some retro source code includes mechanisms the CPU doesn't actually
+implement. The 6502 / Z80 / 8085 pokes a byte to a memory-mapped
+register, and a custom analog circuit on the PCB (op-amps, VCOs,
+filters, noise generators) converts that byte into continuous audio
+or visual output. The "code" is the byte write; the rest is
+hardware.
+
+When you encounter such a subsystem, ask: **does the source code
+implement the mechanism, or just pulse-trigger it?** If the latter,
+a "port" is a re-design of the analog circuit in JavaScript — not a
+routine-level translation, and not in the spirit of an educational
+port.
+
+The honest call is to **drop the subsystem, not defer it.** A defer
+is "we'll do it later"; a drop is "there's nothing here to port."
+Write a short characterization-only research doc explaining why,
+flip status to "dropped" across progress.md / per-project CLAUDE.md
+/ DOCUMENTATION_INDEX.md, sweep deferred-to-later comments in code
+to say "not ported (no software counterpart)." Leave references for
+any future revisit (MAME netlist + FPGA HDL + original schematic).
+
+Example: **asteroids_clone R-G (sound)** — 9 memory-mapped
+registers (`$3600-$3E00`) drive discrete analog circuits on the
+cabinet PCB. Each byte write selects volume/frequency in the analog
+stage; the CPU has no oscillator or wavetable code. Dropped via
+`asteroids_clone/docs/research_sound.md` with references to MAME's
+discrete netlist + Mikstas's FPGA HDL + the Atari schematic.
+
+The drop-vs-defer transition only applies when the upstream
+mechanism is genuinely hardware-only. When the source DOES
+implement the subsystem (e.g. phoenix_clone's sound, which the
+8085 explicitly builds), defer + later-port is the right call.
+
 ## Delegating to sub-agents
 
 Sub-agents (Explore, general-purpose, etc.) are good for **bounded
@@ -356,6 +401,38 @@ is months old or was only verified once, re-derive with
 skepticism. "Unexpected output despite faithful port" is a
 strong signal the research is wrong, not the code.
 
+### Verify negative source claims (un-disasm, missing routines)
+
+Claims of *absence* in source — "this region is un-disasm",
+"this routine isn't decoded", "the body is missing" — are
+systematically under-verified and propagate across research
+docs as if confirmed. The author writes it once based on a
+quick read; future-author inherits the claim; the wrong claim
+persists for weeks until a port step actually needs the region.
+
+asteroids_clone's pre-I-9 sweep falsified the "~20% un-disasm"
+framing wholesale: `$77B5` (RNG), `$75EC` (asteroid-hit handler),
+`$7168` (wave init), `$77D2-$77E8` (direction LUT), `$745A`/
+`$745C` (slot scanner), `$77F6` (PrintPackedMsg), `$7C03`/
+`$7CDE` (DVG list builders) — all claimed un-disasm in earlier
+docs, all fully visible on re-read of `Code.md`. The actual
+un-disasm content turned out to be mostly sound-routine
+internals (dropped anyway) plus small data tables.
+
+**Defense:** before asserting absence in a research doc, grep
+the local mirror of `Code.md` for the specific address. The
+check is seconds; the propagating wrong claim costs hours when
+a port step later inherits it. If you write "X is un-disasm,"
+include the addresses or bytes that prove the absence. Otherwise
+downgrade the phrasing to "X looks un-disasm at a glance — verify
+before relying on."
+
+This is parallel to "Agents can write confidently wrong research
+docs" under "Delegating to sub-agents" — same class of error,
+committed by the lead author rather than a sub-agent. Defense is
+the same: cite addresses, re-derive from primary source, demand
+the bytes.
+
 ### Re-evaluate deferrals against current-step impact
 
 When an item is flagged "out of scope, defer to later step"
@@ -387,6 +464,40 @@ If yes to any of these, the deferral is probably wrong — do
 the work now. Polish-stage deferrals (CRT glow rendering,
 sound) are fine; gameplay-feel and validation-blocking
 deferrals are not.
+
+### Sub-step plan + save-point commits + final squash
+
+Single-commit implementation of a multi-sub-step subsystem leads
+to fragile, hard-to-validate work. **asteroids_clone I-11 v1** is
+the cautionary example: tried to land collisions + scoring + lives
++ HUD as one diff (~600 lines, 10 files), spent 4 patch rounds on
+HUD coordinates and 3 on the ship explosion, still buggy at the
+end, rolled back entirely. Redone as 6 in-session save-point
+commits, then squashed — landed cleanly.
+
+The pattern that works:
+
+1. **Pre-implementation research doc** for the trickiest sub-step
+   first. asteroids_clone I-11 had `research_hud_coords.md` +
+   `research_ship_explosion.md` land *before* impl started.
+2. **Sub-step plan** — informal: a short list of bullets in a
+   scratch doc, a comment block, or a throwaway plan-branch. The
+   sub-step list should be small enough that each bullet maps to
+   one commit's worth of work (~50-200 lines).
+3. **Each sub-step lands as one save-point commit.** Browser-
+   verify the change visually before moving to the next. If a
+   sub-step approach is wrong, `git reset --hard HEAD~1` rolls
+   back cleanly.
+4. **Final squash** at the end into one `impl I-N` commit. The
+   progress.md "I-N scope" subsection carries the per-sub-step
+   notes + per-deviation decode notes — the level of detail that
+   doesn't fit in a commit body but is needed for cross-PC
+   continuity.
+
+The save-point commits aren't meant to be published — they exist
+for the developer's safety during the work. Only the squash goes
+to origin. Commit-body convention: cite the research-doc sections
+that hold the details, don't restate them in the commit message.
 
 ## mini_mario (`mario_physics/`) — quick reference
 
