@@ -197,7 +197,7 @@ const KEY_MAP = [
   { code: 'ArrowLeft',  slot: 'rotLeft',  label: '←  rotate left' },
   { code: 'ArrowRight', slot: 'rotRight', label: '→  rotate right' },
   { code: 'ArrowUp',    slot: 'thrust',   label: '↑  thrust' },
-  { code: 'ArrowDown',  slot: 'hyper',    label: '↓  hyperspace (later)' },
+  { code: 'ArrowDown',  slot: 'hyper',    label: '↓  hyperspace' },
   { code: 'Space',      slot: 'fire',     label: 'space fire' },
   { code: 'Digit5',     slot: 'coin',     label: '5  insert coin' },
   { code: 'Digit1',     slot: 'start1',   label: '1  1-player start' },

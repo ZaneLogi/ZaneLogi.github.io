@@ -371,9 +371,58 @@ function playerFire(state) {
   slot.spawn(s.x, s.y, s.vx, s.vy, s.direction);
 }
 
-function shipControl(_state) {
-  // $6E74 — read SWHYPER + SWROTLEFT/RIGHT, run hyperspace, update
-  // ship.direction. Body in I-8.
+// $6E74-$6ED7 — hyperspace initiation. Polled-switch (no edge detect)
+// because spawnTimer gate prevents re-trigger during the vanish window.
+// Source: SWHYPER ($2003) pressed while alive + not respawn-protecting →
+// teleport to random position. ~75% safe, ~25% fail (explode on re-entry).
+//
+// Rotation + thrust input live in shipSpawnPhys ($7086-$70DF) per I-8d —
+// shipControl in source is hyperspace-only at this dispatch level.
+function shipControl(state) {
+  if (state.numPlayers === 0) return;          // $6E76 — attract: skip
+  if (state.ship.status >= 0x80) return;       // $6E7B — exploding: skip
+  if (state.shipSpawnTimer !== 0) return;      // $6E80 — already in spawn-
+                                                 // protect/vanish: skip
+  if (!state.input.hyper) return;              // $6E85 — SWHYPER not pressed
+
+  // $6E87-$6E96 — vanish: zero status + velocity, set 48-frame re-entry timer.
+  state.ship.status = 0;
+  state.ship.vx = 0;
+  state.ship.vy = 0;
+  state.shipSpawnTimer = 0x30;
+
+  // $6E97-$6EA8 — random X position, clamp to game-coord [3, 28].
+  // Source uses hposhShip (high byte = integer game-coord). We collapse to
+  // Float64 X per R-C §7; integer value lands at the cell boundary.
+  let rndX = advanceRNG(state) & 0x1F;
+  if (rndX >= 0x1D) rndX = 0x1C;
+  if (rndX < 0x03) rndX = 0x03;
+  state.ship.x = rndX;
+
+  // $6EAB-$6EB3 — advance RNG 5 more times to decorrelate Y from X.
+  let rndY = 0;
+  for (let i = 0; i < 5; i++) rndY = advanceRNG(state);
+  rndY &= 0x1F;
+
+  // $6EB5-$6EC4 — fail-check + hyperspace flag.
+  // Source logic: if rndY >= $18 AND ((rndY & $07) * 2 + 4) >= curAsteroidCount,
+  // flag = $80 (fail). Else flag = 1 (success). Counter-intuitive: more
+  // asteroids on screen → LESS chance of fail. Cabinet-faithful as-decoded.
+  let hyperFlag = 0x01;
+  if (rndY >= 0x18) {
+    const dangerVal = ((rndY & 0x07) << 1) + 4;
+    if (dangerVal >= state.curAsteroidCount) {
+      hyperFlag = 0x80;
+    }
+  }
+
+  // $6EC6-$6ED2 — clamp Y to game-coord [3, 20].
+  if (rndY >= 0x15) rndY = 0x14;
+  if (rndY < 0x03) rndY = 0x03;
+  state.ship.y = rndY;
+
+  // $6ED5 — store flag for shipSpawnPhys to read on re-entry tick.
+  state.hyperSpaceFlag = hyperFlag;
 }
 
 function shipSpawnPhys(state) {
@@ -387,8 +436,24 @@ function shipSpawnPhys(state) {
     state.shipSpawnTimer -= 1;
     if (state.shipSpawnTimer !== 0) return;
 
-    // $7052+ — timer just hit 0 this frame. Hyperspace path ($7052-$7081)
-    // deferred to I-13 (state.hyperSpaceFlag is always 0 for I-11d).
+    // $7052-$7056 — timer just hit 0: check hyperSpaceFlag first (I-13).
+    // $80 = failed hyperspace (die at re-entry); non-zero non-$80 =
+    // successful hyperspace (just set status=1 at the position shipControl
+    // already wrote, NO placeAtCenter); 0 = normal post-explosion respawn.
+    if (state.hyperSpaceFlag & 0x80) {
+      // $706F-$707E — failed hyperspace death. Ship.kill writes the same
+      // status=$A0 / curShips-- / shipSpawnTimer=$81 sequence ($706F's
+      // explicit body); reuse the existing helper.
+      state.ship.kill(state);
+      state.hyperSpaceFlag = 0;
+      return;
+    }
+    if (state.hyperSpaceFlag !== 0) {
+      // $7068-$706A — successful hyperspace: status=1, position already set.
+      state.ship.status = 1;
+      state.hyperSpaceFlag = 0;
+      return;
+    }
 
     // $7058-$705B — safe-respawn scan. If blocked, source INCs timer
     // back to 1 to retry next frame (kept on countdown until clear).
