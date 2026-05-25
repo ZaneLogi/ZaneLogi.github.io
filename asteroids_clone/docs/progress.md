@@ -220,7 +220,7 @@ will be addressed in the relevant research doc when reached.
 | I-9 | Asteroid spawn + split mechanics | **done** (I-9c rotation animation dropped — alive asteroids static) |
 | I-10 | Saucer AI + state machine | **done** (6 sub-steps; player-shot-vs-saucer pulled in mid-step; other collisions deferred to I-11) |
 | I-11 | Collisions + scoring + lives + HUD | **done** (6 sub-steps; I-11d+f folded ship-collision into death flow; I-11g+h combined saucer pairs; BB-faithful collision restored; multi-resolve fix) |
-| I-12 | Attract mode + power-on test pattern + credits + game-over flow | not started |
+| I-12 | Attract mode + power-on test pattern + credits + game-over flow | **I-12a done** (research doc `research_game_state_machine.md` landed; sub-step plan on branch `asteroids_clone_i12_plan` at `docs/plan_i12.md`) |
 | I-13 | Polish + visual tuning (incl. ship hyperspace $7052-$7081) | not started |
 | I-14 | Sound (R-G dependency) | deferred |
 
