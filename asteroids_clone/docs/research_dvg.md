@@ -785,12 +785,13 @@ invariant, just not as a runtime artifact.
   time. Recommend deferring until the game is playable; the alpha
   mapping is "honest" enough for development.
 - **DVG-list builder routines.** `$7C03` and `$7CDE` are the source's
-  high-level list builders for the per-frame display list; they sit
-  in the ~20% un-disassembled region per `Code.md`. Mikstas's
-  alternate disassembly may have these. [[research_main_loop.md]]
-  (R-D) is the natural place to chase them down — they're more about
-  "how the source decides what to draw this frame" than about the
-  DVG itself.
+  high-level list builders for the per-frame display list — both
+  **fully decoded** in `Code.md` (per the 2026-05-24 progress.md
+  sweep confirming the "~20% un-disasm" claim was overstated). The
+  byte→DVG arg roles for `$7C03` (A reg → X-pos, X reg → Y-pos)
+  were decoded during the I-11 v1 attempt and reused by I-12's
+  `drawPackedMessage` cursor logic. [[research_main_loop.md]] (R-D)
+  carries the broader display-list narrative.
 - **Bank-error / power-on test.** The test pattern at `$5040+`
   (rendered if RAM check fails) is harmless; ignored by the port.
 - **`$72FE` per-slot dispatcher — two skipped behaviors** (deferred

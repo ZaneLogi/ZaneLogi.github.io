@@ -159,12 +159,6 @@ Already extracted in
 Velocities in source byte units (matching the per-frame position
 advance — see §5).
 
-**Cleanup note:** the comment block above the
-`SHIP_EXPLOSION_VELOCITY` export in `vector_rom_data.js` says
-"Cabinet animator (un-disasm CPU region near RAM $7D-$94)". This
-is wrong — the animator IS visible at `$7465-$7508`. Fix as
-part of I-11e or as a separate doc-comment cleanup chip.
-
 ## §4. Init phase — `$7465-$748C`
 
 ```

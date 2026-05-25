@@ -55,7 +55,9 @@ export class Ship {
   // $70AC-$70DE — accelerate by (cos, sin) of direction. Source ASLs a
   // 0..64-magnitude LUT entry, adds to 16-bit velocity, clamps the high
   // byte to ±64. JS uses Math.cos/sin directly (deviation: skip the
-  // $77D2/$77D5 LUT; LUT contents are in the un-disasm region anyway).
+  // $77D2/$77D5 LUT — source folds a 65-entry quarter-sin table at
+  // vector-ROM $57B9 via $77D2 ADC #$40 + $77E3 EOR #$7F symmetric
+  // reflection; Math.cos/sin is simpler and exact).
   applyThrust() {
     const rad = (this.direction / 256) * 2 * Math.PI;
     this.vx = Math.max(-MAX_VEL, Math.min(MAX_VEL, this.vx + THRUST_ACCEL * Math.cos(rad)));

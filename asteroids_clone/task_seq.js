@@ -879,8 +879,11 @@ function clampAsteroidVel(v) {
 //   - velocity = parent's velocity + ±15-clamped random perturbation
 //
 // I-9g lands this as a dev-console-testable primitive. I-9h calls it
-// from the shot-vs-asteroid collision resolution (after finding a free
-// slot via the eventual $745A/$745C port). NOT wired to collision yet.
+// from the shot-vs-asteroid collision resolution after finding a free
+// slot via the asteroid-slot scanner. Source's `$745A`/`$745C` is a
+// top-down scan (`LDX #$1A` decrementing); the port uses `Array.find`
+// which scans bottom-up but yields the same "first empty slot"
+// semantic — functionally equivalent given slot symmetry.
 export function splitAsteroid(target, parent, state) {
   // $6A9D-$6AAB — status: keep parent's low 3 bits (size + alive marker),
   // new shape-variant bits from RNG (child Rock pose differs from parent).

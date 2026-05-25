@@ -284,9 +284,14 @@ alternate disassembly where the upstream disasm has gaps:
   (decoded in I-10d, used by I-10/I-11; no standalone doc needed).
 - **`$77D2`/`$77D5` sin/cos tables** — direction → thrust components
   (port uses `Math.cos`/`Math.sin` instead).
-- **`$745A`/`$745C` asteroid-slot scanner** — visible in source but
-  not decoded; port still uses `Array.find` placeholder. Future
-  cleanup chip; not gameplay-affecting.
+- **`$745A`/`$745C` asteroid-slot scanner** — fully decoded at
+  `Code.md $745A-$7464` (`LDX #$1A` → scan-down loop reading
+  `$0200,X`, returns highest-index free slot, `X=$FF` if none;
+  `$745C` is the second entry point that reuses the caller's X for
+  a continued scan during multi-spawn). Port uses `Array.find`,
+  which yields the lowest-index free slot — opposite iteration
+  direction, same "first empty slot" semantic, functionally
+  equivalent given slot symmetry.
 - ~~**`$6885 playerMgmt`** — game-over / attract-mode transition~~ —
   **decoded + ported 2026-05-25 during I-12a/d/e**
   ([`research_game_state_machine.md §3 + §5`](research_game_state_machine.md)).

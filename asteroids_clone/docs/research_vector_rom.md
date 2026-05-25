@@ -249,9 +249,14 @@ symbols).
 **Indexing scheme**: a "print packed string" routine at `$77F6`
 (`code.PrintPackedMsg`, called by the score routine at e.g. `$69E2`
 to draw "PLAYER ") uses an index table to map characters to their
-ROM addresses. The packed-string format itself is in the
-un-disassembled ~20% region — to investigate via Mikstas's
-alt-disassembly when implementing the HUD.
+ROM addresses. **Decoded during I-12 (2026-05-25):** 5-bit packed
+format (3 chars in 2 bytes, low bit of byte 1 = terminator), 11
+messages with offsets at `$571E`, per-message LABS coords at
+`$7871`. Glyph dispatch reuses the `$56D2` Char_X cross-reference
+table. Ported as [`packed_messages.js`](../packed_messages.js) +
+[`tools/build_packed_messages.py`](../tools/build_packed_messages.py).
+See [`research_game_state_machine.md`](research_game_state_machine.md)
+for the full per-byte decode.
 
 For the port: the JS-side equivalent is a `printChar(code)` that
 appends a JSR opcode targeting the right character subroutine into
@@ -395,10 +400,14 @@ export const VROM = {
   notation = `$54F0+` in CPU bytes). The port needs an ASCII-code →
   ROM-address table; building it is a 5-minute task during the HUD
   port step.
-- **Packed-string format** at `$77F6 PrintPackedMsg` — un-disasm
-  region. Likely a length-prefixed ASCII-coded string with the
-  decoder calling per-character `JSR`s into ROM. Cross-reference
-  Mikstas's disassembly during HUD port.
+- ~~**Packed-string format** at `$77F6 PrintPackedMsg`~~ —
+  **RESOLVED 2026-05-25 during I-12.** Source is fully decoded;
+  format is 5-bit packed (3 chars in 2 bytes), 11 messages with
+  offsets at `$571E`, LABS coords at `$7871`. Ported as
+  [`packed_messages.js`](../packed_messages.js) +
+  [`tools/build_packed_messages.py`](../tools/build_packed_messages.py).
+  See [`research_game_state_machine.md`](research_game_state_machine.md)
+  and §3 above.
 - **Saucer large vs small dispatch** (§3.7) — verify by reading the
   saucer-draw caller of `$7C03` (in the gameplay block, likely
   reachable from `saucerSpawn $6B93` or its dispatch into `$6C34`).
@@ -427,7 +436,7 @@ export const VROM = {
 | Ship-direction table + 17 ship shapes     | `$526E-$54D8`     |
 | Lives icon                                | `$54DA-$54EE`     |
 | Character set                             | `$54F0-$57FF`     |
-| Packed-string printer (CPU-side)          | `$77F6` (un-disasm body) |
+| Packed-string printer (CPU-side)          | `$77F6` (decoded I-12) |
 | Asteroid-size = scale, not shape          | per [[research_collisions.md §3]] |
 | Mirror trick for full-circle ship rotation| §3.8              |
 | Rev 1 ROM dump (PAGE SELECT ERROR text)   | `VectorROM1.md`   |

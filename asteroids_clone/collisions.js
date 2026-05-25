@@ -282,6 +282,10 @@ function killAsteroid(state, ast, shouldScore) {
     // is overwritten momentarily before $6A9D reads it.
     ast.status = (ast.status & 0xF8) | childSizeBits;
     for (let i = 0; i < 2; i++) {
+      // $745A/$745C — source scans asteroid slots top-down (X=$1A → 0)
+      // for the first status==0; `Array.find` scans bottom-up but yields
+      // the same "first empty slot" intent (slot symmetry makes the
+      // iteration direction unobservable).
       const freeSlot = state.asteroids.find((a) => a.status === 0);
       if (!freeSlot) break;        // $7625/$763F — no free slot, skip spawn
       splitAsteroid(freeSlot, ast, state);
@@ -310,7 +314,7 @@ function killAsteroid(state, ast, shouldScore) {
 // code bytes. Port uses a direct size-bit dispatch instead, matching
 // cabinet behavior.
 //
-// **plan_i11.md §I-11b note.** That doc lists the lookup as
+// **I-11 sub-step plan §I-11b note.** That doc lists the lookup as
 // `{small: $01, medium: $05, large: $10}` — labels swapped vs cabinet
 // behavior. The verify section (large → +20, small → +100) is the
 // source-of-truth; using cabinet-faithful values here. Flag in the

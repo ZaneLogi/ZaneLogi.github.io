@@ -728,10 +728,17 @@ Notes:
   medium: $05, large: $02}`. Cabinet scoring is small=100,
   medium=50, large=20 (smaller asteroids are harder to hit → more
   points). See `progress.md` I-11 scope's I-11b bullet.
-- **`$745A` / `$745C` slot-scanner body.** Visible at
-  `Code.md $7531+` but not yet decoded — needed to know exact
-  free-slot search order during `$75EC` child spawn. Port still
-  uses `Array.find` placeholder across all collision pairs.
+- ~~**`$745A` / `$745C` slot-scanner body.**~~ —
+  **RESOLVED 2026-05-25 (polish pass).** Fully decoded at
+  `Code.md $745A-$7464` (`LDX #$1A` → scan-down loop reading
+  `$0200,X`, returning the highest-index free slot with `X=$FF`
+  if none; `$745C` is the second entry point that reuses the
+  caller's X for a continued scan during multi-spawn). Port uses
+  `Array.find`, which yields the lowest-index free slot — opposite
+  iteration direction, same "first empty slot" semantic,
+  functionally equivalent given slot symmetry. Used by collision
+  pairs at `collisions.js` (split-spawn), `task_seq.js` (player
+  fire, saucer fire).
 - **Saucer firing direction** — saucer shots use `saucerShotDir
   $62` and the saucer's targeting logic at `$6C54-$6CC4`. Collision
   itself is shape-agnostic; the firing-direction story belongs in a

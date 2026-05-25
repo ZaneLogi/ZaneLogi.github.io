@@ -52,8 +52,8 @@ grace. I-13 is just the hyperspace teleport (`$6E74 + $7052-$7081`);
 Remaining: I-14 sound (R-G dependency) is the only non-dropped item.
 
 **2026-05-25 update:** I-11 (collisions + scoring + lives + HUD) done.
-Eight sub-steps planned in `plan_i11.md` were collapsed into six
-in-session commits (I-11d+f folded ship-vs-asteroid collision into
+Eight sub-steps planned in the I-11 sub-step plan were collapsed
+into six in-session commits (I-11d+f folded ship-vs-asteroid collision into
 I-11d so the death flow was play-testable; I-11g+h combined since
 both extend the same `collisions` function with saucer pairs). HUD
 landed first to make every subsequent scoring/lives change visually
@@ -355,10 +355,15 @@ sub-step bullets below.
   any radius-table value. Either dead source code or a missing
   saucer-radius path elsewhere. Verify when I-11's saucer
   collision lands.
-- **`$745A`/`$745C` slot-scanner body** — visible at `$7531+`
-  but not decoded; I-9h uses `Array.find` as placeholder.
-  Re-port during I-11 when the same `$75EC` handler fires for
-  the additional collision pairs (spawned as a separate chip).
+- ~~**`$745A`/`$745C` slot-scanner body**~~ —
+  **RESOLVED 2026-05-25 (polish pass).** Source is fully decoded
+  at `Code.md $745A-$7464` (`LDX #$1A` → scan-down loop reading
+  `$0200,X`, returns highest-index free slot, `X=$FF` if none).
+  Port keeps `Array.find` (bottom-up scan, same "first empty
+  slot" semantic, functionally equivalent given slot symmetry).
+  Comments + research_collisions.md updated to drop the
+  "placeholder" framing. See `research_collisions.md §7` for
+  the full per-line decode.
 - **`$72FE` +4 game-unit Y offset** at `$7311-$7313` — HUD margin
   reservation (the bottom DVG rows y=[0,128) belong to score +
   lives). Apply during I-12 when HUD lands.
@@ -503,7 +508,7 @@ collisions, scoring, ship death) cleanly factor out.
 ### I-11 scope (done 2026-05-25)
 
 I-11 covered six in-session sub-steps, planned as eight in
-`plan_i11.md` but collapsed via two foldings (I-11d+f for
+the I-11 sub-step plan but collapsed via two foldings (I-11d+f for
 play-testable death; I-11g+h for combined saucer collision pairs).
 Per-sub-step commits served as save points during the session;
 they were squashed into one `impl I-11` commit at the end matching
@@ -660,8 +665,10 @@ the I-8/I-9/I-10 commit shape.
 - **Hyperspace** (`$7052-$7081`) — I-13.
 - **Sound** — all `STA $69`/`STA $6B`-style timer writes, including
   bonus-ship sound at `$73A8`. R-G.
-- **`$745A` / `$745C` slot-scanner body** — still using `Array.find`
-  placeholder from I-9. Future cleanup chip; not gameplay-affecting.
+- ~~**`$745A` / `$745C` slot-scanner body**~~ —
+  **RESOLVED 2026-05-25 (polish pass).** Source decoded; port
+  keeps `Array.find` as the documented functional equivalent
+  (same "first empty slot" intent, opposite iteration direction).
 - **Leading-zero suppression in HUD digits** — currently all 5
   digits render (with `Char_O` for nibble=0). If cabinet shows
   leading-zero suppression in any DIP setting, revisit.
@@ -821,9 +828,11 @@ I-9/I-10/I-11 shape.
   misconception.
 - **Sound** — all `STA $69`/`STA $6B`-style timer writes (R-G;
   I-14).
-- **`$745A` / `$745C` slot-scanner body** — still using
-  `Array.find` placeholder from I-9. Future cleanup chip; not
-  gameplay-affecting.
+- ~~**`$745A` / `$745C` slot-scanner body**~~ —
+  **RESOLVED 2026-05-25 (polish pass).** Source decoded; port
+  keeps `Array.find` as the documented functional equivalent
+  (bottom-up vs top-down iteration, same "first empty slot"
+  intent — slot symmetry makes the difference unobservable).
 - **GAME OVER hold-time deviation** — kept cabinet-faithful
   brief (~1.2 sec); easy to extend later if it ever feels too
   short.
