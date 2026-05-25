@@ -35,7 +35,8 @@
 import { collisions } from './collisions.js';
 import {
   drawShip, drawAsteroids, drawSaucer, drawPlayerShots, drawSaucerShots,
-  scoreLivesDraw, closingEmit, emitHalt,
+  scoreLivesDraw, attractOverlay, gameOverOverlay, highScoreTable,
+  closingEmit, emitHalt,
 } from './render.js';
 
 // ----- Frame-rate gate (NMI $5B + main-loop $6811-$6813) -----
@@ -123,6 +124,9 @@ export function render(state, renderer) {
 
   // Frame trailer:
   scoreLivesDraw(state, renderer);  // $724F
+  attractOverlay(state, renderer);  // $68AD coinage + $6949 PUSH START blink (attract only)
+  gameOverOverlay(state, renderer); // $6984 GAME OVER text (in-game, curShips==0)
+  highScoreTable(state, renderer);  // $73C4 high-score table (attract only)
   closingEmit(state, renderer);     // $686D — single LABS at (~mid-screen)
   emitHalt(state, renderer);        // $7BC0
 }
@@ -139,14 +143,200 @@ function advanceTimers(state) {
 
 // ===== 15-JSR stubs — implementation lands per step =====
 
-function playerMgmt(_state) {
-  // $6885 — credits, "wait between players", trigger new ship via
-  // $6960. Body in I-12 (attract / credits / 2-player flow).
+function playerMgmt(state) {
+  // $6885 — credits + game-state dispatcher.
+  // I-12d.2 scope: attract-branch only (coin + start-press + game-start burst).
+  // In-game branch (delayBeforePlay tick + JMP $6960 game-over check) is I-12e.
+  // 2-player branch dropped per scope decision (see plan_i12.md "Drop 2P"
+  // discussion 2026-05-25).
+
+  // Edge-detect coin press → increment credits.
+  // Source: coin counter hardware triggers; we use key '5' polled-switch.
+  const coinEdge = state.input.coin && !state.coinWasPressed;
+  state.coinWasPressed = state.input.coin;
+  if (coinEdge) state.numCredits++;
+
+  if (state.numPlayers !== 0) {
+    // $6889-$6896 — in-game: delayBeforePlay tick + game-over check.
+    if (state.delayBeforePlay > 0) {
+      state.delayBeforePlay--;
+      return;
+    }
+    // $688D JMP $6960 — game-over flow (1-player only; 2-player branch dropped).
+    gameOverFlow(state);
+    return;
+  }
+
+  // $689D-$695F — attract branch.
+  // Coinage message + PUSH START blink are rendered in render.js attractOverlay.
+  // Lamp blink ($694C-$695C) skipped — no cabinet lamps to drive.
+
+  // $68B4-$68DE — edge-detect SW1START to begin 1-player game.
+  const start1Edge = state.input.start1 && !state.start1WasPressed;
+  state.start1WasPressed = state.input.start1;
+  if (start1Edge && state.numCredits > 0) {
+    state.numCredits--;
+    gameStartBurst(state, 1);
+  }
 }
 
-function attractText(_state) {
-  // $765C — numPlayers-conditional attract-mode text drawing.
-  // Calls into PrintPackedMsg. Body in I-12.
+// $6960 — game-over flow. Called from playerMgmt's in-game branch when
+// delayBeforePlay == 0. Per docs/research_game_state_machine.md §5.
+//
+// Source's $6970-$6991 GAME OVER + PLAYER N text emit is RENDER-side in
+// our port (see render.js gameOverOverlay) — sim only handles the state
+// transitions. Single-player only; 2-player switch branch dropped.
+//
+// The trick: Ship.kill writes shipSpawnTimer = $81 universally. The timer
+// ticks to $80 exactly once on its way to 0. THIS routine catches that
+// $80 frame and either resets to $10 (between-player wait, 2P only — dead
+// code in our 1P-only port) or transitions to attract via numPlayers=$FF
+// when curShips==0.
+function gameOverFlow(state) {
+  // $6960-$696D — per-game difficulty drift: every 64 frames, decrement
+  // astWaveTimerReload until it floors at $08. Shortens the inter-wave
+  // grace as the game wears on.
+  if ((state.fastTimer & 0x3F) === 0) {
+    if (state.astWaveTimerReload > 0x08) {
+      state.astWaveTimerReload--;
+    }
+  }
+
+  // $6992-$699C — transition only fires when ship is fully cleaned up
+  // (status==0 after explosion-anim completed via $6F93) AND on the exact
+  // frame shipSpawnTimer == $80 (it ticks $81 → $80 → ... in shipSpawnPhys
+  // post-explosion).
+  if (state.ship.status !== 0) return;
+  if (state.shipSpawnTimer !== 0x80) return;
+
+  // $69A0 — re-arm shipSpawnTimer to $10 (the 2P between-player wait;
+  // in 1P this is effectively dead time before the attract-mode transition
+  // takes hold via $765C on the next dispatch).
+  state.shipSpawnTimer = 0x10;
+
+  // $69A5-$69A9 — if all banks have ships left, this would be the next-
+  // player switch path (2P only). In 1P, falls through to the all-out
+  // branch when curShips==0; otherwise the ship would just respawn
+  // (which our Ship.kill already handles via shipSpawnTimer=$81 → 0).
+  if (state.curShips !== 0) return;
+
+  // $69CF-$69E1 — cold-attract transition. Source sets numPlayers=$FF (the
+  // "just-ended, run high-score-placement check" intermediate per
+  // research_game_state_machine.md §1), turns off all sounds ($6EFA, R-G),
+  // and turns on both start lamps. We model only the numPlayers flag —
+  // sound off + lamps are no-ops in this port.
+  state.numPlayers = 0xFF;
+}
+
+// $68F0-$693A — game-start burst. Single-player only (2P bank-swap deferred).
+// Per docs/research_game_state_machine.md §4: zero per-player object tables,
+// reset all timers, set numPlayers + curShips + delayBeforePlay, set
+// ply1HighPlacement = $FF for the eventual placement check.
+function gameStartBurst(state, numPlayers) {
+  // $6916-$691A — placements reset (= "neither qualifies yet").
+  // (state.ply1HighPlacement / ply2HighPlacement land in I-12e/f.)
+
+  // $691C-$691E — 128-frame pre-game pause before ship actually appears.
+  state.delayBeforePlay = 0x80;
+
+  // $6921-$6923 — curPlayer = 0 (player 1 starts).
+  state.curPlayer = 0;
+
+  // $6925-$6927 — ply1CurShips = numShipsPerGame DIP.
+  state.curShips = state.numShipsPerGame;
+
+  // $68F0-$68F5 — shipSpawnTimer = 1 → respawn fires on next shipSpawnPhys tick.
+  state.shipSpawnTimer = 1;
+
+  // $68F8-$6903 — saucer timers ($92 = 146 frames at every-4-tick = ~9 sec to
+  // first saucer attempt).
+  state.saucerTimeReload = 0x92;
+  state.saucerTimer = 0x92;
+
+  // $6906-$690B — astdWaveTimer = $7F (127-frame pre-wave grace; lets the
+  // delayBeforePlay banner drain before asteroids appear).
+  state.astdWaveTimer = 0x7F;
+
+  // $690E-$6913 — max_rocks_for_ufo = 5.
+  state.max_rocks_for_ufo = 5;
+
+  // $692F-$6934 — astWaveTimerReload = $30.
+  state.astWaveTimerReload = 0x30;
+
+  // $6ED8 — asteroidsPerWave seeded at 2; newWaveInit will bump to 4 on
+  // wave 1.
+  state.asteroidsPerWave = 2;
+  state.curAsteroidCount = 0;
+
+  // $6EE7-$6EF4 — zero all object slots (asteroids 27 + ship + saucer + shots).
+  for (const ast of state.asteroids) ast.status = 0;
+  for (const shot of state.playerShots) shot.status = 0;
+  for (const shot of state.saucerShots) shot.status = 0;
+  state.saucer.status = 0;
+  // Ship reset: position to center, status=0 (shipSpawnTimer=1 will set status=1
+  // next frame via shipSpawnPhys's respawn dispatch).
+  state.ship.placeAtCenter();
+  state.ship.status = 0;
+
+  // Score reset.
+  state.scoreThousands = 0;
+  state.scoreTens = 0;
+
+  // Commit numPlayers last so attract-mode guards don't suddenly fail mid-burst.
+  state.numPlayers = numPlayers;
+}
+
+function attractText(state) {
+  // $765C — MISNOMER (per research_game_state_machine.md §6): actually the
+  // post-game-over high-score-placement detector. Runs only when numPlayers
+  // has high bit set (= $FF, set by gameOverFlow's all-out branch).
+  //
+  // I-12f port: $7660-$76ED placement scan + table shuffle for player 1
+  // (2P scan dropped per scope). If player's score beats any table entry,
+  // shuffle it in with placeholder initials. Then numPlayers = 0 →
+  // attract mode resumes.
+  if (state.numPlayers !== 0xFF) return;
+
+  const placement = scanHighScorePlacement(state);
+  if (placement !== 0xFF) {
+    insertHighScore(state, placement);
+  }
+
+  // $7694: numPlayers = 0 (complete the single-frame $FF → $00 intermediate).
+  state.numPlayers = 0;
+}
+
+// $7668-$767A — placement scan for one player. Walks the table top-down;
+// returns the index of the first entry the player beats, or 0xFF if not.
+// Comparison: player score (scoreThousands:scoreTens) > entry (thous:tens).
+function scanHighScorePlacement(state) {
+  for (let i = 0; i < 10; i++) {
+    const entry = state.highScores[i];
+    if (state.scoreThousands > entry.thous) return i;
+    if (state.scoreThousands === entry.thous && state.scoreTens > entry.tens) return i;
+  }
+  return 0xFF;
+}
+
+// $7699-$76ED — table shuffle: slide entries down from `placement` to make
+// room, then insert the player's score with placeholder initials.
+//
+// Source uses 5-bit char code $0B as the initial placeholder (= 'G' per the
+// packed-message char map). We use 'A' as a more conventional default — port
+// deviation since I-12g letter-entry input is deferred and the player can't
+// customize.
+function insertHighScore(state, placement) {
+  // Slide entries [placement..8] down to [placement+1..9].
+  for (let i = 9; i > placement; i--) {
+    state.highScores[i] = state.highScores[i - 1];
+  }
+  // Insert new entry. Use string concat to avoid sharing array refs across
+  // entries (each entry needs its own initials array).
+  state.highScores[placement] = {
+    thous: state.scoreThousands,
+    tens: state.scoreTens,
+    initials: ['A', 'A', 'A'],
+  };
 }
 
 function highScoreMgmt(_state) {
@@ -460,9 +650,19 @@ function asteroidUpdate(state) {
       if (newStatusRaw <= 0xff) {
         ast.status = newStatusRaw;
       } else {
-        // $6F82-$6F8E — explosion complete: clear slot + dec count.
+        // $6F82-$6F8E — explosion complete: clear slot + dec count. If the
+        // dec brings curAsteroidCount to 0, arm astdWaveTimer = $7F (127
+        // frames ≈ 2 sec pre-wave grace before the trailer fires the next
+        // newWaveInit). Source: $6F85 BNE skip-timer-set; $6F87-$6F89 STY
+        // astdWaveTimer. Without this, the wave-trailer fires the next wave
+        // on the same frame as the last asteroid's death (visible only
+        // during attract mode, where saucer kills are the only way for
+        // curAsteroidCount to hit 0).
         ast.status = 0;
         state.curAsteroidCount -= 1;
+        if (state.curAsteroidCount === 0) {
+          state.astdWaveTimer = 0x7F;
+        }
       }
     }
   }

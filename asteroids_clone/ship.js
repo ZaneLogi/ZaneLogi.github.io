@@ -99,16 +99,17 @@ export class Ship {
   // $6B1E-$6B25 + $706F-$707E — ship-hit/hyperspace-death sequence:
   // status = $A0 (exploding), curShips -= 1, shipSpawnTimer = $81 (129
   // frames respawn delay), zero velocity. Sound timer ($69) deferred to R-G.
+  //
+  // When curShips hits 0, the source's $81 universal-respawn-delay marker
+  // ticks to $80 exactly once on the way down ($81 → $80 on the next frame's
+  // shipSpawnPhys tick) — and the $6960 game-over flow (I-12e, see
+  // playerMgmt → gameOverFlow) catches that $80 frame to fire the cold-
+  // attract transition. No special-case needed here.
   kill(state) {
     this.status = 0xA0;
     this.vx = 0;
     this.vy = 0;
     state.curShips -= 1;
-    // TEMP (I-11d+f, to be removed by I-12): replenish lives back to 3 when
-    // they hit zero. Real game-over → attract-mode transition lives in source
-    // $6885 playerMgmt and lands in I-12. Until then this guard keeps the
-    // test flow open past the 3rd death so we can keep play-testing.
-    if (state.curShips <= 0) state.curShips = 3;
     state.shipSpawnTimer = 0x81;
 
     // $7465-$748C init phase — source writes velocity/16 (signed-shifted)

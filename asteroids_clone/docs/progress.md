@@ -32,6 +32,25 @@ Status values: `not started` | `in progress` | `done` | `deferred`.
 
 ## Current focus
 
+**2026-05-25 update (late):** I-12 (attract mode + game-over →
+attract transition + high-score table) and I-13 (ship hyperspace)
+both **done** — the silent single-player game is end-to-end:
+attract mode → press '5' to insert coin → '1' to start →
+in-game with hyperspace available (↓) → die 3 times → GAME OVER
+→ score-vs-table placement → back to attract with updated table.
+**Temp lives-replenish stub retired** as planned via $6960's body.
+I-12 went 5 sub-steps deep (a/b/d/e/f); c (per-player split for
+2-player) + g (letter entry) + h (2-player HUD mirror) all dropped
+per `user_retro_port_goal` — none are gameplay-affecting and the
+HI-banner goal of h folded into f's `highScoreTable` render. One
+cross-cutting bug found and fixed during I-12: `$6F89` arm of
+`astdWaveTimer = $7F` was missing in our port (asteroid-explosion-
+complete branch), so attract-mode wave respawn fired on the same
+frame as the last asteroid's death instead of after the 127-frame
+grace. I-13 is just the hyperspace teleport (`$6E74 + $7052-$7081`);
+"polish" otherwise empty — power-on test pattern dropped per scope.
+Remaining: I-14 sound (R-G dependency) is the only non-dropped item.
+
 **2026-05-25 update:** I-11 (collisions + scoring + lives + HUD) done.
 Eight sub-steps planned in `plan_i11.md` were collapsed into six
 in-session commits (I-11d+f folded ship-vs-asteroid collision into
@@ -220,8 +239,8 @@ will be addressed in the relevant research doc when reached.
 | I-9 | Asteroid spawn + split mechanics | **done** (I-9c rotation animation dropped — alive asteroids static) |
 | I-10 | Saucer AI + state machine | **done** (6 sub-steps; player-shot-vs-saucer pulled in mid-step; other collisions deferred to I-11) |
 | I-11 | Collisions + scoring + lives + HUD | **done** (6 sub-steps; I-11d+f folded ship-collision into death flow; I-11g+h combined saucer pairs; BB-faithful collision restored; multi-resolve fix) |
-| I-12 | Attract mode + power-on test pattern + credits + game-over flow | **I-12a done** (research doc `research_game_state_machine.md` landed; sub-step plan on branch `asteroids_clone_i12_plan` at `docs/plan_i12.md`) |
-| I-13 | Polish + visual tuning (incl. ship hyperspace $7052-$7081) | not started |
+| I-12 | Attract mode + credits + game-over flow + high-score table | **done** (5 sub-steps a/b/d/e/f; c+g+h dropped per scope — see I-12 scope below; lives-replenish stub retired; `$6F89` wave-timer arm fix folded in) |
+| I-13 | Polish + visual tuning (incl. ship hyperspace $7052-$7081) | **done** (hyperspace only; power-on test pattern + demo AI dropped per scope) |
 | I-14 | Sound (R-G dependency) | deferred |
 
 ### I-8 scope
@@ -670,6 +689,209 @@ the I-8/I-9/I-10 commit shape.
 - **Multi-resolve fix** (added inner-loop `break` after each
   resolve) — actually restores source faithfulness (`$6A94 JMP
   $69F9`); I-9h's port had missed it. Not a deviation; bug fix.
+
+### I-12 scope (done 2026-05-25)
+
+I-12 covered five core sub-steps (a/b/d/e/f) plus one cross-cutting
+fix (`$6F89`). Sub-steps c (per-player split for 2-player), g
+(high-score initial-entry input) and h (HUD finish / 2-player
+mirror) were dropped per [`user_retro_port_goal`] — the temp
+lives-replenish stub retires at I-12e (the stated I-12 target),
+and the remaining items are mechanical-completeness for 2-player
++ initials-entry that don't change the educational-port reach.
+Per-sub-step commits served as save points during the session;
+squashed into one `impl I-12` commit at the end matching the
+I-9/I-10/I-11 shape.
+
+- **I-12a research doc** — new
+  [`research_game_state_machine.md`](research_game_state_machine.md)
+  (~720 lines) decoding the numPlayers state machine
+  (attract `0` ↔ in-game `1/2` ↔ post-game `$FF`), `$6885`
+  playerMgmt, `$6960` game-over flow, `$765C` placement detector,
+  `$68F0-$693A` game-start burst, `$77F6` PrintPackedMsg format +
+  11-message offset table at `$571E` + LABS coord table at
+  `$7871`, and the 2-player bank-swap mapping to PerPlayerState.
+  Key finding: temp lives-replenish stub retires simply by
+  implementing `$6960`'s body — source's `$81` spawn-timer marker
+  passes through `$80` exactly once on its way to 0, and `$6960`
+  catches that frame. Also corrects an earlier task_seq.js
+  mislabel: `$73C4` is the attract-mode HIGH SCORE table draw,
+  NOT the initial-entry input (which lives inside `$6D90`).
+- **I-12b PrintPackedMsg port + message data** —
+  `tools/build_packed_messages.py` decodes the 11 packed messages
+  from `VectorROM.md` (`$171E` offset table + `$1729-$17B8` byte
+  blobs) per the 5-bit-per-char spec (3 chars in 2 bytes, low bit
+  of byte 1 = terminator). Generated `packed_messages.js` has
+  pre-decoded glyph-name arrays + per-msg LABS coords from
+  Code.md's `$7871` table. `drawPackedMessage(renderer, msgKey)`
+  in `render.js` walks the glyph array, emitting each `Char_X`
+  subroutine into a shared cursor at LABS ×4 with gs=`$10`.
+  Verified GAME OVER, PUSH START, and YOUR SCORE IS ONE OF THE
+  TEN BEST render at correct positions. (Computer Archeology
+  comment for msg-id 3 misspells "PEASE" but the decoded bytes
+  give "PLEASE".)
+- **I-12c — DROPPED.** Two-player support skipped per scope
+  decision. Per-player state stays as a flat layout in `state.js`
+  (single player); 2P would have required a `PerPlayerState`
+  split + bank-swap mapping. user_retro_port_goal: mechanical-
+  completeness item, defer indefinitely. 2P-only branches in
+  I-12d/e (`$69BE-$69CC` switch logic) also dropped.
+- **I-12d attract mode + coin + start1** — cold-init flipped
+  `numPlayers` 1→0 and `curShips` 3→0 to match source's `$7CF3`
+  RESET (all-RAM-zero); existing per-frame guards (`$7041`,
+  `$6E76`, `$6BA4` ship-status skip, `$6F40` BEQ lives gate)
+  produce attract behavior with no further changes. `playerMgmt`
+  body ports `$6885`'s attract branch (1P only): edge-detect coin
+  (key `5`) → `numCredits++`; edge-detect start1 (key `1`) +
+  `numCredits > 0` → `gameStartBurst`. `gameStartBurst` ports
+  `$68F0-$693A`: zero per-player object tables, reset all per-
+  wave timers, set numPlayers + curShips + delayBeforePlay +
+  scoreTens/Thous. Lamp output and 2P bank swap skipped.
+  `attractOverlay` (render.js) ports `$68AD` coinage message +
+  `$6949` PUSH START blink, gated on `numPlayers === 0`. Coinage
+  hardcoded to `ONE_COIN_ONE_PLAY` (cabinet DIP-selectable; we
+  don't model holdDIP yet).
+- **`$6F89` fix (cross-cutting)** — source's `$6F82-$6F8E`
+  asteroid-explosion-complete branch arms `astdWaveTimer = $7F`
+  when `curAsteroidCount` drops to 0, giving the wave-trailer a
+  ~2 sec (127-frame) grace before spawning the next wave. Our
+  port at `task_seq.js` asteroidUpdate explosion-complete was
+  missing this — when the last asteroid died, `newWaveInit`
+  fired on the same frame. Observable only in attract mode where
+  saucer kills are the only path to `curAsteroidCount=0`; during
+  gameplay the grace was masked by other timing.
+- **I-12e `$6960` game-over flow + retire lives stub** — `Ship.kill`
+  stub `if (state.curShips <= 0) state.curShips = 3` REMOVED.
+  The `$81` marker set by `Ship.kill` ticks to `$80` exactly once
+  on the next `shipSpawnPhys` decrement (post-explosion, since
+  the timer is gated during explosion). On that `$80` frame,
+  `gameOverFlow` catches: `status==0 + shipSpawnTimer==$80` →
+  set `shipSpawnTimer=$10` + (if `curShips==0`) `numPlayers=$FF`.
+  `attractText` converts `$FF→$00` next frame (high-score-
+  placement scan extended in I-12f). `render.js` `gameOverOverlay`
+  emits `GAME_OVER` text during the brief window before the
+  attract-mode transition. Duration ~1.2 sec — cabinet-faithful
+  brevity (Atari designed it this way; no port deviation to
+  extend per user decision).
+- **I-12f high-score table** — seed + display + placement scan +
+  shuffle. `state.highScores` cold-inits to 10 default entries
+  (`10000 AAA` → `1000 JJJ`) — **port deviation matching cabinet
+  UX expectations**. Real cabinet had EAROM persistence; without
+  it source's all-zero RESET state would show `00000` entries
+  until played. `attractText` body extended (`$7660-$76ED`): when
+  `numPlayers=$FF` post-game-over, scan player score against
+  table; if beats an entry, shuffle entries down and insert with
+  placeholder `'AAA'` initials (I-12g letter entry skipped per
+  scope). `render.js` `highScoreTable` ports `$73C4` body —
+  header + 10 rows of `[rank, score, initials]` during attract
+  mode. Slow-timer blink (`$73CA-$73CE`) dropped — keeps table
+  readable on canvas without phosphor decay. Per-row layout
+  simplified to 3 fixed-X-position LABS emits (rank / score /
+  initials) instead of source's single-LABS-and-cursor-advance
+  with embedded `$7CE0` / `$7CDE` raw byte emits.
+- **I-12g — DROPPED.** Letter entry input (`$6DF9-$6E6F`:
+  SWROTLEFT/RIGHT cycles current letter, SWHYPER advances)
+  skipped per scope. Qualifying scores get placeholder `'AAA'`
+  initials. No gameplay impact; pure UX customization.
+- **I-12h — MOOT.** Originally specified for 2-player HUD mirror
+  (`$72BF-$72FA`) + "HI <top>" banner (`$72A2`). The 2P mirror
+  is dropped with I-12c. The HI banner is folded into I-12f's
+  `highScoreTable` display (the full 10-entry table renders
+  during attract, so the "top score visible" goal is met).
+  Player-1 score gate in attract (`$7268`) confirmed NOT a gate
+  in source — source DOES draw the player-1 score even in
+  attract (just renders `00000` when cold-init).
+
+**Deferred from I-12 scope (drop indefinitely unless flagged):**
+- **2-player support** (I-12c, I-12d's start2 path, I-12e's
+  `$69AB-$69CC` switch logic, I-12f's per-player score+placement,
+  I-12h's player-2 HUD mirror) — drop per `user_retro_port_goal`.
+  Easy retrofit if ever wanted: the `PerPlayerState` getter
+  pattern is documented in
+  [`research_game_state_machine.md §9`](research_game_state_machine.md).
+- **High-score initial entry** (I-12g: `$6DF9-$6E6F` + `$6D90`
+  entry-render body) — drop. Qualifying scores show `AAA`
+  permanently.
+- **Power-on test pattern** (`$6DD5`, `$7EFD`, `$7F25`, `$7F6A`,
+  `$7F97` geometric shapes shown briefly at cold boot) — drop;
+  purely nostalgic, no gameplay impact.
+- **Demo AI in attract** — confirmed NOT in source (Asteroids
+  cabinet attract is just gameplay-without-ship, same as our
+  port). No deferral needed; just dispelling a planning-time
+  misconception.
+- **Sound** — all `STA $69`/`STA $6B`-style timer writes (R-G;
+  I-14).
+- **`$745A` / `$745C` slot-scanner body** — still using
+  `Array.find` placeholder from I-9. Future cleanup chip; not
+  gameplay-affecting.
+- **GAME OVER hold-time deviation** — kept cabinet-faithful
+  brief (~1.2 sec); easy to extend later if it ever feels too
+  short.
+
+**Port deviations introduced during I-12:**
+- **Two-player support dropped** — single-player flat state stays
+  in `state.js` rather than split `PerPlayerState` (research doc
+  §9 describes the retrofit pattern if ever wanted).
+- **Coinage message hardcoded to `ONE_COIN_ONE_PLAY`** — cabinet
+  DIP `$71` bits 0-1 selectable; we don't model `holdDIP` yet.
+- **Lamp output dropped** — `$3200` writes become no-ops (no
+  cabinet lamps); related lamp-blink during attract is
+  documented at site but not visually rendered.
+- **`numCredits` cold-init = 0** matching source's `$7CF3` RAM-
+  clear; player must press `5` to insert a coin before starting
+  a game.
+- **High-score table seeded with descending defaults**
+  (`10000 AAA` → `1000 JJJ`) instead of all-zero — port deviation
+  matching cabinet UX. Source had EAROM persistence; we don't
+  model it.
+- **High-score table blink (`$73CA-$73CE` slow-timer bit 2)
+  dropped** — table stays steady-visible during attract; canvas
+  lacks the phosphor afterglow that makes blink readable on
+  cabinet.
+- **`$73C4` re-labeled `highScoreTable` (not `highScoreEntry`)** —
+  source's `$73C4` body draws the attract-mode HIGH SCORE table;
+  earlier task_seq.js stub mislabeled it. The actual rotate/
+  hyperspace input lives inside `$6D90` (I-12g scope, deferred).
+
+### I-13 scope (done 2026-05-25)
+
+I-13 covered the single deferred-from-I-8 hyperspace teleport,
+delivered as one commit (not multi-sub-step). "Polish + visual
+tuning" placeholder is otherwise empty.
+
+- **Hyperspace teleport** (`$6E74` + `$7052-$7081`) — `shipControl`
+  body filled in: SWHYPER (key ↓) pressed while alive + not
+  respawn-protecting → vanish (`status=0`, `vel=0`,
+  `shipSpawnTimer=$30` ≈ 0.77 sec), pick random X clamped
+  `[3, 28]` from RNG, advance RNG 5× for entropy mixing, pick
+  random Y clamped `[3, 20]`, compute fail-flag per
+  `$6EB6-$6EC4` (fail if `rndY >= $18` AND
+  `((rndY & $07) * 2 + 4) >= curAsteroidCount`).
+  `state.hyperSpaceFlag` holds 1 (success) or `$80` (fail) for
+  the re-entry tick. `shipSpawnPhys` timer-hits-0 dispatch
+  extended with hyperspace branch (`$7052-$7081`): `$80` →
+  `Ship.kill` (failed re-entry); non-zero non-`$80` →
+  `ship.status=1` at the position `shipControl` already set (no
+  `placeAtCenter` — that's normal-respawn only); 0 → existing
+  post-explosion path unchanged.
+- **Keymap label fix** — `main.js` keymap text "↓ hyperspace"
+  (was "↓ hyperspace (later)").
+- **Cabinet-faithful counter-intuitive fail logic** — MORE
+  asteroids on screen → LESS chance of fail (since the danger-
+  value cap (`$18`-up range) is lower than typical asteroid
+  counts). Atari's choice; ported as-decoded.
+
+**Port deviations introduced during I-13:** none. The cabinet
+behavior (player must scan to find re-entry position; no
+phosphor afterglow help) was kept after a brief I-13.1 flash-on-
+re-entry deviation was tried and reverted per user decision to
+stay source-faithful.
+
+**Deferred from I-13 scope:**
+- **Power-on test pattern** (`$6DD5` / `$7EFD` etc.) — dropped
+  per user. Cosmetic only.
+- **Demo AI in attract** — confirmed not a real source feature
+  (see I-12 deferred items).
 
 ## Ship-data modification recipe (obsolete — phantom problem)
 

@@ -1,20 +1,21 @@
 # asteroids_clone — Complete Documentation Index
 
 **Date:** 2026-05-25
-**Status:** Implementation phase well underway — I-7 through I-11
-all **done**. The silent game is end-to-end playable: ship rotates +
-thrusts + fires, asteroids spawn / split / collide, saucer spawns +
-AI + fires + dies, ship dies + respawns, HUD shows score + lives,
-scoring covers all collision pairs (including bonus life at 10k).
-Next: I-12 (attract mode + 2-player flow + real game-over →
-retire temp lives-replenish stub), I-13 (hyperspace polish), I-14
-(sound, R-G dependency). R-A through R-F research docs are landed;
-R-G (sound) still deferred until silent game runs (which we are
-now in!).
+**Status:** Implementation phase essentially complete for the
+single-player educational port. I-7 through I-13 all **done**:
+ship rotates + thrusts + fires + hyperspaces, asteroids spawn /
+split / collide / re-spawn-after-wave-clear, saucer spawns + AI +
+fires + dies, ship dies + respawns + game-overs, HUD shows score +
+lives + high-score table during attract, scoring covers all
+collision pairs (bonus life at 10k), coin → start → game →
+game-over → attract loop runs end-to-end. **Temp lives-replenish
+stub retired** as planned by I-12e.
+Remaining: I-14 (sound, R-G dependency). Dropped per
+`user_retro_port_goal`: 2-player support (I-12c), high-score
+letter entry (I-12g), power-on test pattern, demo AI in attract.
 
-**Total docs:** 8 research docs (~3,800 lines) — added
-`research_hud_coords.md` and `research_ship_explosion.md` as
-pre-research for I-11.
+**Total docs:** 9 research docs (~4,500 lines) — added
+`research_game_state_machine.md` as pre-research for I-12.
 
 ---
 
@@ -32,6 +33,7 @@ pre-research for I-11.
 | **research_vector_rom.md** | 2 KB vector ROM — subroutine inventory + port spec | §1 overview, §3 inventory (ship, asteroid, UFO, shrapnel, characters), §3.8 ship-direction table + reflection, §5 port spec (keep ROM raw) | 379 lines |
 | **research_hud_coords.md** | HUD coordinate system — `$7C03` byte→DVG mapping + `$72FE` +128 playfield Y-offset + HUD callsite decode | §1 LABS-emit helper, §2 per-slot dispatcher Y-offset, §3 visible coordinate bounds, §4 HUD callsites (score gs=1, lives gs=14), §6 digit emit pattern + Char_O alias | 438 lines |
 | **research_ship_explosion.md** | Ship explosion 6-fragment animator — `$7465-$7508` decode + port summary | §3 ROM data (ShipExplosion + SHIP_EXPLOSION_VELOCITY), §4 init phase, §5 per-frame phase + fragment count formula, §6 status-increment formula (fastTimer-bit-0 gate), §8 port summary as landed in I-11e (six deviations) | 487 lines |
+| **research_game_state_machine.md** | numPlayers state machine + `$6885` playerMgmt + `$6960` game-over + `$765C` placement + `$68F0` burst + `$77F6` PrintPackedMsg + 2-player bank-swap → PerPlayerState mapping | §1 state machine, §2 revised 15-JSR dispatch, §3 playerMgmt, §4 game-start burst, §5 game-over flow, §6 placement detector, §7 PrintPackedMsg format + 11 messages + LABS coord table, §8 bank-swap → PerPlayerState, §9 port deviations | ~720 lines |
 
 ### Source-of-truth files (in the ComputerArcheology mirror)
 
@@ -271,8 +273,13 @@ alternate disassembly where the upstream disasm has gaps:
   `$50EC`; fragment count from `((~status) & $70) >> 4`. Port
   landed with 6 documented deviations to fit canvas without CRT
   phosphor emulation.
-- **Packed-string format at `$77F6 PrintPackedMsg`** — character
-  lookup table for "PLAYER N" / "PUSH START" / etc. I-12.
+- ~~**Packed-string format at `$77F6 PrintPackedMsg`**~~ —
+  **decoded 2026-05-25 during I-12a**
+  ([`research_game_state_machine.md §7`](research_game_state_machine.md)).
+  5-bit-per-char format, 3 chars in 2 bytes, low bit of byte 1 =
+  terminator. 11 messages at offset table `$571E`. LABS coord
+  table at `$7871`. Glyph dispatch reuses the `$56D2` Char_X
+  cross-reference table (same one HUD digits use).
 - **Saucer firing direction logic at `$6C54-$6CC4`** — saucer AI
   (decoded in I-10d, used by I-10/I-11; no standalone doc needed).
 - **`$77D2`/`$77D5` sin/cos tables** — direction → thrust components
@@ -280,9 +287,18 @@ alternate disassembly where the upstream disasm has gaps:
 - **`$745A`/`$745C` asteroid-slot scanner** — visible in source but
   not decoded; port still uses `Array.find` placeholder. Future
   cleanup chip; not gameplay-affecting.
-- **`$6885 playerMgmt`** — game-over / attract-mode transition.
-  I-12 will decode + port; the temp lives-replenish stub in
-  `Ship.kill` retires then.
+- ~~**`$6885 playerMgmt`** — game-over / attract-mode transition~~ —
+  **decoded + ported 2026-05-25 during I-12a/d/e**
+  ([`research_game_state_machine.md §3 + §5`](research_game_state_machine.md)).
+  Temp lives-replenish stub in `Ship.kill` retired at I-12e
+  via `$6960`'s body catching the `$80` marker frame.
+- ~~**`$6E74` shipControl / hyperspace teleport** + `$7052-$7081`~~
+  — **decoded + ported 2026-05-25 during I-13**. SWHYPER →
+  vanish + random reappear with counter-intuitive fail-flag
+  logic per `$6EB6-$6EC4`.
+- ~~**`$73C4`**~~ — **decoded 2026-05-25 during I-12f**. Body
+  draws the attract-mode HIGH SCORE table; corrects an earlier
+  task_seq.js stub mislabel that called it the entry-input.
 - **Sound subsystem** — full R-G doc deferred until silent game is
   validated (which is now — I-12 will start R-G work).
 

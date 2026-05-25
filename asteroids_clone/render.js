@@ -18,6 +18,22 @@
 // renderer object built in main.js).
 
 import { GAME_TO_DVG } from './world.js';
+import { PACKED_MSG, PACKED_MSG_GS } from './packed_messages.js';
+
+// $77F6 PrintPackedMsg — emits one packed message starting at the
+// per-msg LABS coord from $7871's table, with global scale $10 (from
+// $77F6's STA $00 at $77FD-$77FF). Each glyph is drawn into the
+// shared cursor; the per-Char_X VROM subroutine advances the cursor
+// internally (matches source's one-LABS-then-sequential-JSRs pattern).
+// See docs/research_game_state_machine.md §7.
+export function drawPackedMessage(renderer, msgKey) {
+  const msg = PACKED_MSG[msgKey];
+  if (!msg) return;
+  const cursor = { x: msg.labs.x * 4, y: msg.labs.y * 4 };
+  for (const glyphName of msg.glyphs) {
+    renderer.drawAt(glyphName, cursor, PACKED_MSG_GS);
+  }
+}
 
 export function drawShip(state, renderer) {
   // Alive branch: $750B — ship.shapeSelection() returns the right ShipDirN
@@ -164,6 +180,125 @@ export function drawSaucerShots(state, renderer) {
       renderer.drawDot(x, y);
     }
   }
+}
+
+// I-12d.2 — attract-mode overlays. Ports the text-emit sites inside the
+// $6885 attract branch ($68AD coinage message + $6949 PUSH START blink).
+// Source emits these from inside the sim dispatch via JSR $77F6, which
+// writes to vector RAM; in our sim/render split they belong on the render
+// side so the canvas overlay is rebuilt each painted frame.
+//
+// Port deviations:
+//   - DIP coinage hardcoded to "1 COIN 1 PLAY". Cabinet selectable via
+//     DIP $71 bits 0-1; we don't model holdDIP yet.
+//   - Lamp blink ($694C-$695C) dropped — no cabinet lamps.
+//   - High-score-entry-active gate ($693B-$6940 `LDA $32 AND $32 BPL`)
+//     deferred to I-12g (no entry path until then; both placements always
+//     $FF at this stage).
+export function attractOverlay(state, renderer) {
+  if (state.numPlayers !== 0) return;
+
+  // $68AD — coinage message always visible in attract.
+  drawPackedMessage(renderer, 'ONE_COIN_ONE_PLAY');
+
+  // $6941-$6949 — PUSH START blink, only when credits available.
+  // Source: `LDA fastTimer; AND #$20; BNE skip` — visible when bit 5
+  // is clear (= 32 frames on, 32 frames off, ~1 sec cycle at 62.5 Hz).
+  if (state.numCredits > 0 && (state.fastTimer & 0x20) === 0) {
+    drawPackedMessage(renderer, 'PUSH_START');
+  }
+}
+
+// I-12f — attract-mode high-score table render. Ports $73C4 body:
+// header ("HIGH SCORES") at LABS (400, 728) plus 10 rows below, each
+// emitting [rank, score, initials]. Source LABS starts at Y=$A7×4=668
+// and decrements $0E by 8 per row (= -32 DVG units).
+//
+// Gate conditions per $73C4-$73D4:
+//   - numPlayers == 0 (attract mode)
+//   - Top entry not empty (top.tens | top.thous != 0)
+//
+// Port deviations:
+//   - $73CA-$73CE slow-timer blink (table blinks on/off per slowTimer bit 2)
+//     skipped — port deviation, keep readable on canvas (no phosphor decay).
+//   - 2P player-N-banner during entry mode dropped (2P out of scope).
+//   - Per-row layout simplified to 3 fixed-X-position LABS emits (rank /
+//     score / initials) instead of source's single-LABS-and-cursor-advance
+//     with embedded raw byte emits ($7CE0 dot + $7CDE raw advance).
+export function highScoreTable(state, renderer) {
+  if (state.numPlayers !== 0) return;
+  const top = state.highScores[0];
+  if (top.tens === 0 && top.thous === 0) return;
+
+  // $73D6-$73D8 — "HIGH SCORES" header at LABS (400, 728).
+  drawPackedMessage(renderer, 'HIGH_SCORES');
+
+  // Per-row coords (port-side estimates; tunable if cabinet footage differs).
+  const ROW_Y_START = 668;     // source $A7 × 4
+  const ROW_Y_STEP = -32;      // source $0E -= 8 → ×4 = -32 DVG
+  const RANK_X = 340;
+  const SCORE_X = 440;
+  const INITIALS_X = 640;
+  const GS = 0x10;             // global scale (same as packed-message gs)
+
+  for (let i = 0; i < 10; i++) {
+    const entry = state.highScores[i];
+    // $73EF — skip empty entries (both tens and thous zero).
+    if (entry.tens === 0 && entry.thous === 0) continue;
+
+    const rowY = ROW_Y_START + i * ROW_Y_STEP;
+
+    // $7401-$7406 — rank: BCD increment of (X >> 1) → 1..10.
+    const rank = i + 1;
+    const rankHi = Math.floor(rank / 10);
+    const rankLo = rank % 10;
+    const rankCursor = { x: RANK_X, y: rowY };
+    renderer.drawAt(rankHi === 0 ? 'Char_O' : `Char_${rankHi}`, rankCursor, GS);
+    renderer.drawAt(rankLo === 0 ? 'Char_O' : `Char_${rankLo}`, rankCursor, GS);
+
+    // Score digits: thous_hi thous_lo tens_hi tens_lo 0 (implicit trailing zero,
+    // cabinet scores always multiples of 10 — same as scoreLivesDraw).
+    const scoreCursor = { x: SCORE_X, y: rowY };
+    const digits = [
+      (entry.thous >> 4) & 0x0f,
+      entry.thous & 0x0f,
+      (entry.tens >> 4) & 0x0f,
+      entry.tens & 0x0f,
+      0,
+    ];
+    for (const d of digits) {
+      renderer.drawAt(d === 0 ? 'Char_O' : `Char_${d}`, scoreCursor, GS);
+    }
+
+    // Initials: 3 chars (placeholder 'AAA' for player-qualified entries
+    // until I-12g letter entry lands).
+    const initCursor = { x: INITIALS_X, y: rowY };
+    for (const ch of entry.initials) {
+      renderer.drawAt(`Char_${ch}`, initCursor, GS);
+    }
+  }
+}
+
+// I-12e — in-game GAME OVER overlay. Ports the $6984-$6986 text emit
+// inside $6960's curShips==0 branch. Render-side because $77F6 writes
+// to vector RAM (sim) in source, and our port keeps text emit on the
+// painted-frame side.
+//
+// Gate conditions (all from $6960's $6970-$6991):
+//   - numPlayers != 0 (in-game)
+//   - curPlayer's ships == 0
+//   - no active player shots (waits for last shots to expire)
+// delayBeforePlay==0 is implicit: $6960 only runs when delay==0 in
+// $6885's dispatch, so we don't need to re-check here at the render
+// level (the message just won't be appropriate during the pre-game
+// pause anyway — but at game start curShips!=0 gates us off).
+//
+// 2-player PLAYER N emit ($698F) deferred — 2P out of scope.
+export function gameOverOverlay(state, renderer) {
+  if (state.numPlayers === 0) return;
+  if (state.curShips !== 0) return;
+  if (state.playerShots.some(s => s.status !== 0)) return;
+  drawPackedMessage(renderer, 'GAME_OVER');
 }
 
 export function scoreLivesDraw(state, renderer) {

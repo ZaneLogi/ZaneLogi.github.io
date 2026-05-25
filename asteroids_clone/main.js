@@ -15,6 +15,7 @@
 
 import { GameState } from './state.js';
 import { simulate, render } from './task_seq.js';
+import { drawPackedMessage } from './render.js';
 import { VROM } from './vector_rom_data.js';
 import { runList } from './dvg.js';
 
@@ -80,6 +81,14 @@ function paint(now) {
   // Render dispatch — per-object draws + frame trailer (LABS/HALT).
   // See task_seq.js header "Port deviation — sim/render split".
   render(state, renderer);
+
+  // I-12b dev hook: render a packed message every frame when the dev
+  // flag is set. Set via console: `__game.devPackedMessage = 'GAME_OVER'`.
+  // Will retire once I-12d/e wires packed messages into the real attract
+  // / game-over flow.
+  if (state.devPackedMessage) {
+    drawPackedMessage(renderer, state.devPackedMessage);
+  }
 
   // FPS / tick diagnostic.
   fpsBuffer.push(now);
@@ -190,6 +199,8 @@ const KEY_MAP = [
   { code: 'ArrowUp',    slot: 'thrust',   label: '↑  thrust' },
   { code: 'ArrowDown',  slot: 'hyper',    label: '↓  hyperspace (later)' },
   { code: 'Space',      slot: 'fire',     label: 'space fire' },
+  { code: 'Digit5',     slot: 'coin',     label: '5  insert coin' },
+  { code: 'Digit1',     slot: 'start1',   label: '1  1-player start' },
 ];
 const KEY_BY_CODE = Object.fromEntries(KEY_MAP.map((k) => [k.code, k.slot]));
 window.addEventListener('keydown', (e) => {

@@ -34,8 +34,16 @@ export class GameState {
     this.delayBeforePlay = 0;    // $5A — inter-life pause counter
 
     // Game-state bytes.
-    this.numPlayers = 1;         // $1C — 0 = attract mode; I-12 makes dynamic
+    this.numPlayers = 0;         // $1C — 0 = attract mode; I-12d will flip to 1/2 on start press
     this.curPlayer = 0;          // $18 — 0/1
+    // $70 numCredits — cold-init 0 per source's $7CF3 RESET (all RAM zeroed).
+    // Coin-press handler ($6885 + I-12d.2 port) increments; start-press
+    // decrements. No coin hardware in JS — coin input wired to key '5'.
+    this.numCredits = 0;
+    // $56 numShipsPerGame — DIP-set (typical cabinet = 3). Cold-init = 3
+    // (port deviation: source reads the DIP at $6EDF during $6ED8 game-start
+    // sub; we hardcode the typical value).
+    this.numShipsPerGame = 3;
     this.curAsteroidCount = 0;   // $02F6
     this.astdWaveTimer = 0;      // $02FB
     this.astWaveTimerReload = 0; // $02FC
@@ -86,11 +94,13 @@ export class GameState {
     // and 10s digits). Score's ones place is implicit 0 (cabinet score is
     // always a multiple of 10). Written by the BCD adder ($7397) in I-11b.
     this.scoreTens = 0x00;
-    // $57 ply1CurShips — player-1 lives remaining. Init from numShipsPerGame
-    // DIP at $6925-$6927 (typical cabinet setting = 3). Read by $6F3E lives-
-    // icon emit; decremented by Ship.kill (I-11d) and incremented by bonus-
-    // ship grant in the BCD adder (I-11b).
-    this.curShips = 3;
+    // $57 ply1CurShips — player-1 lives remaining. Cold-init = 0 to match
+    // source's all-RAM-zero state at $7CF3 RESET; $6F3E BEQ then skips
+    // the lives-icon emit during attract mode. Set to numShipsPerGame DIP
+    // ($56, typically 3) inside the $68F0 game-start burst (I-12d). Read by
+    // $6F3E lives-icon emit; decremented by Ship.kill (I-11d) and incremented
+    // by bonus-ship grant in the BCD adder (I-11b).
+    this.curShips = 0;
 
     // $5F:$60 rndValue — 16-bit Galois LFSR state. Seed must be non-zero
     // (the LFSR has an anti-stuck-at-zero guard at $77CA-$77CC but it
@@ -109,13 +119,48 @@ export class GameState {
       thrust: false,     // $2405 SWTHRUST
       hyper: false,      // $2003 SWHYPER   — consumed in I-13
       fire: false,       // $2004 SWFIRE
+      coin: false,       // coin-slot analog (key '5') — I-12d.2
+      start1: false,     // $2403 SW1START (key '1') — I-12d.2
     };
 
     // $63 photomLimiter — edge-detection state for SWFIRE so a held fire
     // button doesn't auto-spam shots. Tracks last frame's fire state.
     this.fireWasPressed = false;
+    // Edge-detect state for coin + start buttons (port deviation: source uses
+    // hardware switch transitions; JS polled-switch model needs explicit
+    // last-frame tracking). Same shape as fireWasPressed.
+    this.coinWasPressed = false;
+    this.start1WasPressed = false;
 
-    // High-score table, DIP settings, sound timers, credits, and per-
-    // subsystem state get added as their port steps land (I-8..I-14).
+    // $1D-$30 highScores — 10 entries × 2 BCD bytes (scoreTens / scoreThous,
+    // same encoding as state.scoreTens/scoreThousands). Source cold-inits
+    // to all-zero via $7CF3 RESET RAM clear; cabinet then fills the table
+    // via the $7699 shuffle as players qualify, and persists across power-
+    // cycles via EAROM hardware (not modeled in this port).
+    //
+    // **Port deviation (I-12f, option b chosen 2026-05-25):** seed with
+    // descending defaults 10000 AAA → 1000 JJJ so the attract-mode table
+    // renders something meaningful at cold-boot rather than 10 empty rows.
+    // Cabinet behavior would show 10 zero entries until someone played;
+    // our deviation skips that "boring boot" state.
+    //
+    // $34-$51 highScoresInitials — 10 entries × 3 chars (5-bit codes in
+    // source; here just letter strings for clarity since I-12g letter-
+    // entry input is deferred — qualifying scores get placeholder 'AAA').
+    this.highScores = [
+      { thous: 0x10, tens: 0x00, initials: ['A', 'A', 'A'] }, // 10000
+      { thous: 0x09, tens: 0x00, initials: ['B', 'B', 'B'] }, //  9000
+      { thous: 0x08, tens: 0x00, initials: ['C', 'C', 'C'] }, //  8000
+      { thous: 0x07, tens: 0x00, initials: ['D', 'D', 'D'] }, //  7000
+      { thous: 0x06, tens: 0x00, initials: ['E', 'E', 'E'] }, //  6000
+      { thous: 0x05, tens: 0x00, initials: ['F', 'F', 'F'] }, //  5000
+      { thous: 0x04, tens: 0x00, initials: ['G', 'G', 'G'] }, //  4000
+      { thous: 0x03, tens: 0x00, initials: ['H', 'H', 'H'] }, //  3000
+      { thous: 0x02, tens: 0x00, initials: ['I', 'I', 'I'] }, //  2000
+      { thous: 0x01, tens: 0x00, initials: ['J', 'J', 'J'] }, //  1000
+    ];
+
+    // DIP settings, sound timers, and per-subsystem state get added as
+    // their port steps land (I-13/R-G).
   }
 }
