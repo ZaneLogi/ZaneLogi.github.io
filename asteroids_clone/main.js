@@ -5,11 +5,12 @@
 // per requestAnimationFrame — by I-7 it just clears the canvas and
 // draws a diagnostic overlay since no objects are emitted yet.
 //
-// Canvas backing store is 1024×768 — matches the DVG visible area
-// (research_dvg.md §3). CSS controls displayed size via the size-
-// selector buttons in index.html; the browser scales the backing
-// store to fit. Drawing code uses DVG coordinates directly, with
-// only the Y-axis flip (DVG origin bottom-left → canvas top-left).
+// Canvas backing store is DPR-aware: it's resized per displayed
+// CSS size × devicePixelRatio so vector strokes render at native
+// device pixels with no browser downscale blur. A DVG → device-
+// pixel transform set in syncBackingStore() lets drawing code keep
+// using DVG logical coordinates (1024×768 visible area per
+// research_dvg.md §3); only the Y axis is flipped via toCanvasY.
 //
 // See research_main_loop.md §9 for the port spec this implements.
 
@@ -75,8 +76,11 @@ function loop(now) {
 }
 
 function paint(now) {
+  // Clear in DVG logical coords (1024×768) — the DVG→device-pixel
+  // transform set by syncBackingStore() scales this fill to cover
+  // the entire backing store.
   ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, 1024, 768);
 
   // Render dispatch — per-object draws + frame trailer (LABS/HALT).
   // See task_seq.js header "Port deviation — sim/render split".
@@ -103,8 +107,9 @@ function paint(now) {
 
 // Renderer — wraps the DVG interpreter + canvas drawing. Exposes
 // `drawAt(name, x, y, globalScale)` to per-object render stubs in
-// task_seq.js. Coordinate handling: DVG units go straight to canvas
-// pixels (backing store is 1024×768 = DVG visible area); only Y is
+// task_seq.js. Coordinate handling: drawing uses DVG logical
+// coords (1024×768); a DVG→device-pixel transform set in
+// syncBackingStore() scales them to backing pixels. Only Y is
 // flipped via toCanvasY since DVG origin is bottom-left.
 function makeRenderer(ctx) {
   function drawSegment(fromX, fromY, toX, toY, bri) {
@@ -217,22 +222,111 @@ window.addEventListener('keyup', (e) => {
     e.preventDefault();
   }
 });
-document.getElementById('keymap').textContent =
-  KEY_MAP.map((k) => k.label).join('\n');
+// One <div> per entry so the 2-column CSS Grid in #keymap (see
+// index.html) can lay them out as 4 movement keys in column 1 +
+// 3 action keys in column 2, flowing top-to-bottom via
+// grid-auto-flow: column.
+{
+  const keymapEl = document.getElementById('keymap');
+  for (const k of KEY_MAP) {
+    const row = document.createElement('div');
+    row.textContent = k.label;
+    keymapEl.appendChild(row);
+  }
+}
 
-// Display-size selector — toggles canvas CSS dimensions only; the
-// backing store stays at 1024×768 so drawing coordinates are
-// cabinet-faithful regardless of viewing size.
+// Display-size selector. The CSS Grid layout (see index.html) gives
+// the canvas a dedicated middle row clear of the keymap/status/size-
+// controls overlays. JS owns the sizing math because pure-CSS
+// aspect-ratio doesn't preserve ratio under simultaneous max-width
+// + max-height clamps: when the user-chosen size exceeds the stage
+// in BOTH dimensions, both clips fire and the ratio breaks.
+//
+// Each fixed-size button caps the canvas at its (W, H); "Fit" caps
+// at Infinity (i.e. just fits the stage). In both cases the actual
+// canvas size is the largest 4:3 rectangle that fits within
+// min(cap, stage). After resizing the displayed canvas,
+// syncBackingStore() resizes the backing store to match device
+// pixels — drawing code keeps using DVG-1024×768 coords; the
+// transform set by syncBackingStore() does the scaling.
 const sizeControls = document.getElementById('size-controls');
+const canvasStage = document.getElementById('canvas-stage');
+
+function applyCanvasSize(maxW, maxH) {
+  const wCap = Math.min(maxW, canvasStage.clientWidth);
+  const hCap = Math.min(maxH, canvasStage.clientHeight);
+  let w = wCap;
+  let h = (w * 3) / 4;
+  if (h > hCap) {
+    h = hCap;
+    w = (h * 4) / 3;
+  }
+  canvas.style.width  = Math.floor(w) + 'px';
+  canvas.style.height = Math.floor(h) + 'px';
+  syncBackingStore();
+}
+
+// Match the canvas backing store to (displayed CSS size × DPR) so
+// vector strokes render at native device pixels — no browser
+// bilinear downscale on top of the canvas's own anti-aliasing.
+// Setting canvas.width/height resets the 2D context's transform
+// stack, so we re-apply the DVG → device-pixel scale here every
+// time. Drawing code stays in DVG logical coords (1024×768).
+function syncBackingStore() {
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth;
+  const cssH = canvas.clientHeight;
+  canvas.width  = Math.max(1, Math.floor(cssW * dpr));
+  canvas.height = Math.max(1, Math.floor(cssH * dpr));
+  ctx.setTransform(canvas.width / 1024, 0, 0, canvas.height / 768, 0, 0);
+}
+
+// Disable fixed-size buttons whose (W, H) exceeds the current stage,
+// so picking a size never silently clamps. If the active button gets
+// disabled (e.g. user resized the window down after picking 800×600),
+// fall back to "Fit" so the canvas keeps a sensible size.
+function updateButtonAvailability() {
+  const sw = canvasStage.clientWidth;
+  const sh = canvasStage.clientHeight;
+  let activeStillAvailable = true;
+  for (const btn of sizeControls.querySelectorAll('button')) {
+    if (btn.dataset.fit) continue;   // "Fit" is always available
+    const w = +btn.dataset.w;
+    const h = +btn.dataset.h;
+    const fits = w <= sw && h <= sh;
+    btn.disabled = !fits;
+    if (!fits && btn.classList.contains('active')) activeStillAvailable = false;
+  }
+  if (!activeStillAvailable) {
+    for (const b of sizeControls.querySelectorAll('button')) {
+      b.classList.toggle('active', !!b.dataset.fit);
+    }
+  }
+}
+
+function applyActiveButtonSize() {
+  updateButtonAvailability();
+  const btn = sizeControls.querySelector('button.active');
+  if (!btn) return;
+  if (btn.dataset.fit) {
+    applyCanvasSize(Infinity, Infinity);
+  } else {
+    applyCanvasSize(+btn.dataset.w, +btn.dataset.h);
+  }
+}
+
 sizeControls.addEventListener('click', (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;
-  canvas.style.width = btn.dataset.w + 'px';
-  canvas.style.height = btn.dataset.h + 'px';
   for (const b of sizeControls.querySelectorAll('button')) {
     b.classList.toggle('active', b === btn);
   }
+  applyActiveButtonSize();
 });
+
+window.addEventListener('resize', applyActiveButtonSize);
+// Apply default sizing once initial layout settles.
+requestAnimationFrame(applyActiveButtonSize);
 
 requestAnimationFrame((now) => {
   lastFrameTime = now;
