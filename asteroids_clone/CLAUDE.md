@@ -127,9 +127,13 @@ working hypotheses — replace with cited facts in the research docs.
   sound channel. Game logic runs in the main loop at **~62.5 Hz**,
   gated by `$5B` via `LSR/BCC` at `$6811`. See
   `docs/research_hardware.md §3-§4`.
-- **Sound is 8 hardware-generated channels** at $3600-$3E00, not
-  samples. Faithful path is Web Audio synthesis; visual-effect path
-  is sampled playback. Defer until silent game runs end-to-end.
+- **Sound is 9 hardware-generated channels** at $3600-$3E00, all
+  analog discrete circuitry on the cabinet PCB (not samples, not a
+  programmable sound chip). The CPU pokes one byte per channel into
+  memory-mapped registers; the analog circuit converts. **Sound is
+  dropped from the port** 2026-05-25 — see
+  [`docs/research_sound.md`](docs/research_sound.md) for the
+  characterization and references.
 
 ## Research-stage plan
 
@@ -144,7 +148,7 @@ DVG prototype (R-B) is the first runnable artifact.
 | R-D | `research_main_loop.md`      | $6800 dispatch, 6-step task sequence, ship/saucer state machines, NMI handler $7CF3 (in the missing 20%) |
 | R-E | `research_collisions.md`     | Distance-threshold geometry, asteroid-size encoding, fragmentation dispatch |
 | R-F | `research_vector_rom.md`     | Port the 2 KB vector ROM as JS draw subroutines              |
-| R-G | `research_sound.md`          | Deferred — characterize 8-channel synthesis model after silent game runs |
+| R-G | `research_sound.md`          | **Dropped 2026-05-25** — analog discrete hardware on cabinet PCB; no software counterpart to port. Characterization-only doc retained for the paper trail. |
 
 All R-* docs are paper-only — the DVG prototype originally planned
 for R-B was dropped 2026-05-22 (architecture validation already done

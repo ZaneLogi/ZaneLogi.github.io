@@ -81,7 +81,7 @@ export function simulate(state) {
   asteroidUpdate(state);     // $6F57 — iterates all 35 object slots (sim only)
   collisions(state);         // $69F0
 
-  soundDispatch(state);      // $7555 — per-frame sound channel updates (R-G)
+  soundDispatch(state);      // $7555 — per-frame sound channel updates (intentional no-op; sound dropped, see docs/research_sound.md)
   advanceRNG(state);         // $77B5
 
   waveTrailer(state);        // $6876-$6883 — fire newWaveInit when field is empty
@@ -222,7 +222,7 @@ function gameOverFlow(state) {
 
   // $69CF-$69E1 — cold-attract transition. Source sets numPlayers=$FF (the
   // "just-ended, run high-score-placement check" intermediate per
-  // research_game_state_machine.md §1), turns off all sounds ($6EFA, R-G),
+  // research_game_state_machine.md §1), turns off all sounds ($6EFA — not ported, sound dropped),
   // and turns on both start lamps. We model only the numPlayers flag —
   // sound off + lamps are no-ops in this port.
   state.numPlayers = 0xFF;
@@ -735,8 +735,10 @@ function asteroidUpdate(state) {
 
 function soundDispatch(_state) {
   // $7555 — per-frame sound-channel updates. Writes SNDSAUCR /
-  // SNDSFIRE / SNDTHRUST / SNDFIRE / SNDTHUMP / SNDEXP. Body in
-  // R-G (deferred until silent game runs).
+  // SNDSFIRE / SNDTHRUST / SNDFIRE / SNDTHUMP / SNDEXP in the cabinet.
+  // Intentional no-op in the port — sound is dropped (analog discrete
+  // hardware on cabinet PCB, no software counterpart to port; see
+  // docs/research_sound.md).
 }
 
 function advanceRNG(state) {

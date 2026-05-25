@@ -1,21 +1,24 @@
 # asteroids_clone — Complete Documentation Index
 
 **Date:** 2026-05-25
-**Status:** Implementation phase essentially complete for the
-single-player educational port. I-7 through I-13 all **done**:
-ship rotates + thrusts + fires + hyperspaces, asteroids spawn /
-split / collide / re-spawn-after-wave-clear, saucer spawns + AI +
-fires + dies, ship dies + respawns + game-overs, HUD shows score +
-lives + high-score table during attract, scoring covers all
-collision pairs (bonus life at 10k), coin → start → game →
-game-over → attract loop runs end-to-end. **Temp lives-replenish
-stub retired** as planned by I-12e.
-Remaining: I-14 (sound, R-G dependency). Dropped per
-`user_retro_port_goal`: 2-player support (I-12c), high-score
-letter entry (I-12g), power-on test pattern, demo AI in attract.
+**Status:** **Project feature-complete for the educational port.**
+I-7 through I-13 all **done**: ship rotates + thrusts + fires +
+hyperspaces, asteroids spawn / split / collide / re-spawn-after-
+wave-clear, saucer spawns + AI + fires + dies, ship dies + respawns
++ game-overs, HUD shows score + lives + high-score table during
+attract, scoring covers all collision pairs (bonus life at 10k),
+coin → start → game → game-over → attract loop runs end-to-end.
+**Temp lives-replenish stub retired** as planned by I-12e.
+**R-G (sound research) and I-14 (sound implementation) both dropped
+2026-05-25** — Asteroids' sound is analog discrete circuitry on the
+cabinet PCB, with no software counterpart to port. See
+[`research_sound.md`](research_sound.md). Other items dropped per
+`user_retro_port_goal`: 2-player support (I-12c), high-score letter
+entry (I-12g), power-on test pattern, demo AI in attract.
 
-**Total docs:** 9 research docs (~4,500 lines) — added
-`research_game_state_machine.md` as pre-research for I-12.
+**Total docs:** 10 research docs (~4,560 lines) — added
+`research_game_state_machine.md` as pre-research for I-12;
+`research_sound.md` as the dropped-status characterization for R-G.
 
 ---
 
@@ -34,6 +37,7 @@ letter entry (I-12g), power-on test pattern, demo AI in attract.
 | **research_hud_coords.md** | HUD coordinate system — `$7C03` byte→DVG mapping + `$72FE` +128 playfield Y-offset + HUD callsite decode | §1 LABS-emit helper, §2 per-slot dispatcher Y-offset, §3 visible coordinate bounds, §4 HUD callsites (score gs=1, lives gs=14), §6 digit emit pattern + Char_O alias | 438 lines |
 | **research_ship_explosion.md** | Ship explosion 6-fragment animator — `$7465-$7508` decode + port summary | §3 ROM data (ShipExplosion + SHIP_EXPLOSION_VELOCITY), §4 init phase, §5 per-frame phase + fragment count formula, §6 status-increment formula (fastTimer-bit-0 gate), §8 port summary as landed in I-11e (six deviations) | 487 lines |
 | **research_game_state_machine.md** | numPlayers state machine + `$6885` playerMgmt + `$6960` game-over + `$765C` placement + `$68F0` burst + `$77F6` PrintPackedMsg + 2-player bank-swap → PerPlayerState mapping | §1 state machine, §2 revised 15-JSR dispatch, §3 playerMgmt, §4 game-start burst, §5 game-over flow, §6 placement detector, §7 PrintPackedMsg format + 11 messages + LABS coord table, §8 bank-swap → PerPlayerState, §9 port deviations | ~720 lines |
+| **research_sound.md** | **Dropped-status characterization for R-G.** Why R-G + I-14 are dropped (analog discrete hardware on cabinet PCB), 9-channel register map + RAM timer model, dispatch architecture, references for any future revisit | §1 why dropped, §2 source-side surface area (registers/RAM/dispatch/byte→audio), §3 references (MAME netlist + Mikstas HDL + Atari schematic), §4 Web Audio port options if ever pursued, §5 status pointers | ~120 lines |
 
 ### Source-of-truth files (in the ComputerArcheology mirror)
 
@@ -214,7 +218,7 @@ research:
 | Position math as Float64 (not 16-bit `{hi,lo}`) | position_math §7 | Drift acceptable; cleaner code; cite at affected JS sites |
 | Collision test as clean Euclidean (not BB ∩ Manhattan) | collisions §6 | Visually indistinguishable; simpler code |
 | Wrap-awareness in collision — match source (NOT wrap-aware) | collisions §4 | Faithful to original; minor visible quirk only at wrap edges |
-| Sound deferred to R-G post-silent-game | progress.md (research plan) | Lower-priority for educational port |
+| Sound dropped (R-G + I-14) 2026-05-25 | [`research_sound.md`](research_sound.md) | Analog discrete hardware on cabinet PCB; no software counterpart to port |
 | Vector glow rendering — alpha-mapped default, bloom optional | dvg §5 + progress.md | Cheapest faithful default; can upgrade later |
 | DVG prototype not built during research | progress.md (decided 2026-05-22) | Architecture validated by framework reasoning; interpreter built proper in implementation phase |
 | Ship-direction shapes — 64 pre-rendered or canvas-rotate (NOT 17 + mirror) | vector_rom §3.8 | JS isn't space-constrained; cleaner code |
@@ -265,7 +269,8 @@ alternate disassembly where the upstream disasm has gaps:
   ([`research_hud_coords.md §4.2`](research_hud_coords.md)).
   2-player branch + high-score display deferred to I-12. `$7555`
   was previously mislabeled here as `mainListBuild`; it is the
-  per-frame sound-channel update (R-G).
+  per-frame sound-channel update (intentional no-op in the port,
+  see [`research_sound.md`](research_sound.md)).
 - ~~**Ship-explosion fragment animator `$7465-$7508`**~~ —
   **decoded 2026-05-25 during I-11e** ([`research_ship_explosion.md`](research_ship_explosion.md)).
   Six fragment positions in zero-page RAM ($7D-$94); per-frame
@@ -304,8 +309,10 @@ alternate disassembly where the upstream disasm has gaps:
 - ~~**`$73C4`**~~ — **decoded 2026-05-25 during I-12f**. Body
   draws the attract-mode HIGH SCORE table; corrects an earlier
   task_seq.js stub mislabel that called it the entry-input.
-- **Sound subsystem** — full R-G doc deferred until silent game is
-  validated (which is now — I-12 will start R-G work).
+- ~~**Sound subsystem**~~ — **dropped 2026-05-25 (R-G + I-14)**.
+  Analog discrete circuitry on cabinet PCB, no software counterpart
+  to port. Characterization + future-revisit references in
+  [`research_sound.md`](research_sound.md).
 
 Reference for the gaps: Nicholas Mikstas's alternate disassembly at
 <https://www.nicholasmikstas.com/games/>.

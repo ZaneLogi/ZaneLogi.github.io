@@ -160,7 +160,8 @@ export class GameState {
       { thous: 0x01, tens: 0x00, initials: ['J', 'J', 'J'] }, //  1000
     ];
 
-    // DIP settings, sound timers, and per-subsystem state get added as
-    // their port steps land (I-13/R-G).
+    // DIP settings + sound timers are not modeled — DIP coinage is
+    // hardcoded to ONE_COIN_ONE_PLAY (see I-12d), and sound is dropped
+    // (analog hardware; see docs/research_sound.md).
   }
 }

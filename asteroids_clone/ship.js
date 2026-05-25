@@ -100,7 +100,8 @@ export class Ship {
 
   // $6B1E-$6B25 + $706F-$707E — ship-hit/hyperspace-death sequence:
   // status = $A0 (exploding), curShips -= 1, shipSpawnTimer = $81 (129
-  // frames respawn delay), zero velocity. Sound timer ($69) deferred to R-G.
+  // frames respawn delay), zero velocity. Sound timer ($69) not ported
+  // (sound dropped — analog hardware; see docs/research_sound.md).
   //
   // When curShips hits 0, the source's $81 universal-respawn-delay marker
   // ticks to $80 exactly once on the way down ($81 → $80 on the next frame's

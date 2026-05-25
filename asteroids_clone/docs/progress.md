@@ -20,17 +20,28 @@ built from R-B's spec).
 | R-D | `research_main_loop.md` | $6800 dispatch, 15-JSR task sequence, frame-sync gate via $5B | **done** |
 | R-E | `research_collisions.md` | Distance-threshold geometry, asteroid-size encoding | **done** |
 | R-F | `research_vector_rom.md` | Port the 2 KB vector ROM as JS draw subroutines | **done** |
-| R-G | `research_sound.md` | 8-channel hardware synthesis | deferred until silent game runs |
+| R-G | `research_sound.md` | 8-channel hardware synthesis | **dropped 2026-05-25** (analog discrete hardware; no software counterpart to port — see [`research_sound.md`](research_sound.md)) |
 
-**Research stage substantially complete** — R-A through R-F are
-landed (the docs that gate gameplay code); R-G is deferred to
-post-silent-game per the original plan. The DVG interpreter +
-runtime skeleton can now be written from these specs as the first
-implementation-phase commit.
+**Research stage complete** — R-A through R-F landed (the docs
+that gate gameplay code); R-G dropped 2026-05-25 with a short
+characterization-only doc explaining why (analog discrete hardware;
+no software counterpart to port). See [`research_sound.md`](research_sound.md).
 
-Status values: `not started` | `in progress` | `done` | `deferred`.
+Status values: `not started` | `in progress` | `done` | `deferred` | `dropped`.
 
 ## Current focus
+
+**2026-05-25 update (final):** project is **feature-complete** from
+the educational-port goal's standpoint. R-G (sound research) and
+I-14 (sound implementation) are both **dropped, not deferred** —
+Asteroids' sound lives in analog discrete circuitry on the cabinet
+PCB, not in any software the 6502 runs, so a "port" of the sound
+would be a Web Audio re-design of analog topology rather than a
+routine-level translation. See [`research_sound.md`](research_sound.md)
+for the characterization + references for any future revisit. The
+silent single-player game (attract → coin → start → in-game with
+hyperspace → die → game-over → high-score placement → attract)
+is the final state.
 
 **2026-05-25 update (late):** I-12 (attract mode + game-over →
 attract transition + high-score table) and I-13 (ship hyperspace)
@@ -49,7 +60,6 @@ complete branch), so attract-mode wave respawn fired on the same
 frame as the last asteroid's death instead of after the 127-frame
 grace. I-13 is just the hyperspace teleport (`$6E74 + $7052-$7081`);
 "polish" otherwise empty — power-on test pattern dropped per scope.
-Remaining: I-14 sound (R-G dependency) is the only non-dropped item.
 
 **2026-05-25 update:** I-11 (collisions + scoring + lives + HUD) done.
 Eight sub-steps planned in the I-11 sub-step plan were collapsed
@@ -241,7 +251,7 @@ will be addressed in the relevant research doc when reached.
 | I-11 | Collisions + scoring + lives + HUD | **done** (6 sub-steps; I-11d+f folded ship-collision into death flow; I-11g+h combined saucer pairs; BB-faithful collision restored; multi-resolve fix) |
 | I-12 | Attract mode + credits + game-over flow + high-score table | **done** (5 sub-steps a/b/d/e/f; c+g+h dropped per scope — see I-12 scope below; lives-replenish stub retired; `$6F89` wave-timer arm fix folded in) |
 | I-13 | Polish + visual tuning (incl. ship hyperspace $7052-$7081) | **done** (hyperspace only; power-on test pattern + demo AI dropped per scope) |
-| I-14 | Sound (R-G dependency) | deferred |
+| I-14 | Sound (R-G dependency) | **dropped 2026-05-25** (R-G dropped — analog hardware; see [`research_sound.md`](research_sound.md)) |
 
 ### I-8 scope
 

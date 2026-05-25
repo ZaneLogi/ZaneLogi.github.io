@@ -371,7 +371,8 @@ function bcdAdd(a, b, carryIn) {
 //   $6B4A-$6B65: STA #$A0 / STA $0200,Y + zero velocity (saucer)
 //
 // I-10f did kill-shot + mark-exploding. I-11c adds the score + saucer-
-// Timer re-arm. Sound timer ($6B56 STA $69) still deferred to R-G.
+// Timer re-arm. Sound timer ($6B56 STA $69) not ported (sound dropped —
+// analog hardware; see docs/research_sound.md).
 function resolveShotVsSaucer(state, shot, saucer) {
   shot.status = 0;
 
