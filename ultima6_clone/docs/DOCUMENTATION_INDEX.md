@@ -1,0 +1,126 @@
+# ultima6_clone — Documentation Index
+
+**Date:** 2026-05-28
+**Status:** Research phase. 9 research docs landed. **Game-loop +
+animation pipeline decoded**: source is turn-based blocking with a
+three-channel animation tick (palette cycling + animdata tile-pointer
+rewrite + hybrid tiles) firing in `CON_prompt`'s idle path. Modern-UX
+anchor principle captured in `../CLAUDE.md` §"Modern-browser UX as
+architectural anchor" — render-cadence in the rebuild is driven by
+display refresh + drag-scroll requirements, not source's polling
+cadence. **Conversation VM decoded** (2026-05-28): four-layer stack
+VM (TalkDriver → parse_statement → execute_op + parse_factor) over
+LZW-compressed `converse.a`/`converse.b` scripts; legacy port
+`script.js` is a ~1300-line reference implementation usable as the
+rebuild's starting point. **NPC AI decoded** (2026-05-28):
+action-economy turn scheduler (`C_1E0F_4E0A` + MovePts/DEXTE),
+per-mode state-machine dispatcher (`C_1E0F_3E6A`), hourly schedule
+transitions, and bucket-Dijkstra pathfinding — no legacy port
+exists for this subsystem. **Player↔object interaction +
+save/load decoded** (2026-05-28): the five world-interaction
+commands (look/get/drop/move/use, shared target→validate→apply
+pipeline, Use = object-type dispatch table) and the savegame
+composition (objlist actor arrays + D_2C4A global block + objblk*
+world objects; the format is throwaway, the state-set is the
+deliverable). The core engine — loop, render, world data,
+animation, conversation, NPC AI, interaction, save/load — is now
+broadly characterized. **Pillar-bug** root cause stays identified
+(legacy `drawObject` layer routing); see `research_map_render.md`.
+
+This index will be populated as research docs accumulate. Shape
+matches sibling projects (asteroids_clone, phoenix_clone) — Quick
+Navigation table, Architecture Overview, Cross-Document Reference
+Map, key port-side decisions, open items.
+
+---
+
+## Quick Navigation
+
+### Research docs (under `docs/`)
+
+| Document | Focus | Length |
+|----------|-------|--------|
+| [research_engine_overview.md](research_engine_overview.md) | Subsystem map — `seg_*.c` → subsystem assignments + entry point + screen geometry + global-state architecture; follow-up questions partially resolved by `research_game_loop.md` + `research_animation.md` | ~260 lines |
+| [research_world_data.md](research_world_data.md) | World data layer — OBJBLK file format, chunk-cache strategy, Link[] sorted+free-list, MapObjPtr per-cell index, slot-ID space, sort comparator order, containment rebuild, sav/tmp atomicity, pillar-bug implications | ~520 lines |
+| [research_map_render.md](research_map_render.md) | Map render path — two-pass pipeline (build Tile_11x11/Obj_11x11 chains → blit forward), `C_1184_35EA` double-tile auto-extension via `tile-1/-2/-3`, `ShowObject` 3-zone Z-buffer via FG-aware chain insertion, `C_0A33_09CE` frame composer + viewport frame border. Falsifies pillar-bug hypothesis B (auto-extension is source-faithful). | ~330 lines |
+| [research_game_loop.md](research_game_loop.md) | Game loop + input dispatch — `C_0A33_1CB4` turn-based blocking structure, three-phase command dispatch (keystroke→CMD_* translation + party/solo + action), `C_1E0F_4E0A` NPC tick with MovePts/DEXTE time-slicing, `C_0A33_1355` time-advance, CON_getch→C_0C9C_1D59→CON_prompt input polling chain. Identifies CON_prompt's idle path as the animation tick site. | ~280 lines |
+| [research_animation.md](research_animation.md) | Animation channels — three independent mechanisms: (1) hardware VGA palette cycling via `PaletteAnimation` for fires/braziers/BluGlo/cauldrons in slots 0xE0-0xFB; (2) animdata tile-pointer rewriting for water/fountains/flags/NPCs/protection-fields (29 entries with `tile_to_animate`/`first_anim_frame`/`and_mask`/`shift_value`); (3) hybrid tiles for coast/river banks. Cross-validated against `u6tech.txt` §"Animation" and legacy `anim_data_manager.js` + `map_viewer.js:updateFrame`. Documents the legacy port's `tileUsageMap` sparse-update pattern as implementation precedent. | ~280 lines |
+| [research_conversation_vm.md](research_conversation_vm.md) | NPC conversation VM (`talkdr`) — four-layer architecture (`TalkDriver` entry + outer ask/answer loop, `parse_statement` statement read loop, `execute_op` ~30-opcode control dispatcher, `parse_factor` RPN expression evaluator with 10-deep stack), conversation-file format (`converse.a` + `converse.b`, LZW-compressed lib_32, ≈220 entries), full opcode catalog with source-vs-legacy-port name mapping, variables (`VarStr[32]` / `VarInt[32]` / `TalkFlags[256]`), substitution syntax, NPC self-reference via `0xEB`. Cross-validated against `u6converse.txt` (Nuvie) + legacy `script.js` (~1300 lines, substantial port). Rebuild implications: coroutine-style input pump, separation of VM core / world / I/O, ECS mapping. | ~530 lines |
+| [research_npc_ai.md](research_npc_ai.md) | NPC AI / schedules / pathfinding (`seg_1E0F`, "NPCTracker") — action-economy turn scheduler (`C_1E0F_4E0A` + MovePts/DEXTE round economy + time-advance coupling), per-mode state-machine dispatcher (`C_1E0F_3E6A`, full mode table), schedule data layout (`tSchedule` + SchedPointer/SchedIndex) + hourly transition (`C_1E0F_5165`) + arrival behaviors (`__AtDestination`: sleep/sit/eat/play/stand/guard), bucket-priority Dijkstra pathfinding (`C_1E0F_2D37` + relax/traceback + RLE path + cost map), movement legality (`C_1E0F_000F`). AI mode catalog from `ai.h`. **No legacy port** of this subsystem exists. Rebuild implications: ECS turn system, AI-mode component, reimplement-not-transliterate pathfinding, off-area-teleport design choice, min-scope subset for "wander Britain". | ~470 lines |
+| [research_object_interaction.md](research_object_interaction.md) | Player↔object interaction (`seg_27a1`, biggest segment) — the five world-interaction commands (Look `C_27A1_0C67`, Get `C_27A1_18F5`, Drop `C_27A1_14DA`, Move `C_27A1_1E8B`, Use `C_27A1_6179`). Shared target→validate(range/legality)→apply→recompose+cost pipeline; `Selection` struct; Get's theft/karma coupling; Drop's thrown-missile arc; Use's ~40-case `switch(GetType)` object-type dispatch (food/vehicles/doors/levers/lanterns/instruments/spellbook/moonstones/ladders/...). Mutation primitives (GiveObj/TakeObj/InsertObj/MoveObj/AddObj/DeleteObj). Rebuild: ECS command/intent system, Use = handler registry, click/drag targeting replaces blocking getch. | ~270 lines |
+| [research_save_load.md](research_save_load.md) | Save/load mechanism + savegame composition (`seg_0C9C` save/restore). A savegame = a memory-array dump split by slot range: `savegame\objlist` (24 actor parallel arrays + the contiguous `D_2C4A` global-state blob: clock/karma/wind/light/SpellFx[16]/moonstones/moon-phases/gender/language/flags) + `objblkXX` per-region + `objblk{A-E}I` dungeon world objects. Static files (schedule/basetile/chunks/*.vga) are NOT save data. Save = flush dirty regions + write objlist; restore = read static tables + objlist + stream current region. **Format is throwaway (rebuild uses modern persistence); the deliverable is the authoritative state-set checklist.** ECS: serialize component stores + singleton resources; staging-swap atomicity; new-game-init via parsing the original starting savegame. | ~250 lines |
+
+### Source-of-truth files
+
+Local clone of ergonomy_joe's u6-decompiled. **The clone's absolute
+path is per-PC** — both per-PC paths live in
+[`../CLAUDE.md`](../CLAUDE.md) §"Source of truth" (the only place
+the absolute paths are recorded). Research docs under `docs/` cite
+source by relative name only (`seg_XXXX.c:NNN`, `u6.h:NNN`, etc.).
+
+| Relative path | Contents |
+|---------------|----------|
+| `SRC/seg_XXXX.c` | Decompiled C function/segment files (Borland Turbo C 2.0 derivation; no friendly names — function discovery via reading) |
+| `SRC/*.h` | Headers: `ai.h`, `cmd.h`, `gr.h`, `obj.h`, `spells.h`, `tile.h`, `u6.h` |
+| `SRC/BSS.ASM` | Uninitialized data |
+| `SRC/OSILIB/` | Low-level asm: `KBD.ASM`, `MOUSE.ASM`, `SOUND1-5.ASM`, `RAND.ASM`, `INFLATE.ASM`, `OSI_FILE.ASM` |
+| `README.md` | Upstream notes on build process + decompilation method |
+
+### Reference materials (legacy, lower trust)
+
+| Path | Contents | Notes |
+|------|----------|-------|
+| `../ultima6/doc/*.pdf` + `*.txt` | U6 Technical Documents | Per upstream README: refer to an *earlier* version of the game; tech-docs lose to u6-decompiled where they disagree |
+| `../ultima6/*.js` | Legacy JS port | Built from tech-docs + nuvie + Zane's own C++ `U6WorldEditor`. Has known divergence from source (pillar-render bug near Lycaeum; flag-alias bug at `obj.js:9-11`). Useful as a "what does the current port assume" reference for diff'ing against u6-decompiled. |
+
+---
+
+## Architecture Overview
+
+_(Pending — to be drafted once research has clarified the
+engine's actual model. Discussion-phase architecture hypotheses
+[Pure ECS + A-grid + packed Status + graphics-first] are working
+inputs, not authoritative until research validates them.)_
+
+---
+
+## Cross-Document Reference Map
+
+_(Pending — meaningful once ≥3 research docs exist.)_
+
+---
+
+## Key port-side decisions
+
+These are deviations from byte-faithful porting (decided in
+research, locked once decided):
+
+| Decision | Where decided | Rationale |
+|----------|---------------|-----------|
+| **Modern rewrite, not routine-level translation** | Discussion phase 2026-05-26 + 2026-05-27; summary in [`../CLAUDE.md`](../CLAUDE.md) | U6 is hardware-as-substrate (DOS RPG), not hardware-as-design (arcade). Source-availability (u6-decompiled) doesn't change the family. See user memory `feedback_retro_port_translation_choice`. |
+| **Modern-browser UX drives render cadence, not source's polling rate** | Research phase 2026-05-27 (game-loop + animation reads); captured in [`../CLAUDE.md`](../CLAUDE.md) §"Modern-browser UX as architectural anchor" | Source's on-demand composite + ~20-30Hz palette/animdata polling is hardware residue, not mechanic. Modern UX needs 60Hz+ drag-scroll smoothness + continuous-input-free animation. D2 corollary applied to behavioral envelope. WebGL is the natural substrate. |
+
+More decisions land here as research surfaces them.
+
+---
+
+## Open items / deferrals
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Map render audit — pillar bug at Lycaeum | **RESOLVED — root cause identified, minimal fix sketched** | `research_map_render.md` "Pillar bug — root cause resolution" section. Bug = `drawObject` in `map_viewer.js:299-335` checks `isTopTile()` only on the base tile for layer routing; extensions inherit the base's layer. For pillars (base `isTopTile=false`, head `isTopTile=true`), the head ends up in Layer 1 instead of Layer 3, gets covered by Layer 3 objects like Steps (OBJ_114, decimal #276) at the same cell. Minimal fix: per-tile `isTopTile()` check during emission. |
+| Conversation VM port — legacy `script.js` stubs to verify | **OPEN** — listed in `research_conversation_vm.md` §"Open questions" | Five concrete stubs (`OBJINPARTY`, `OWNS`, `WEIGHT`, `JOIN` cap, `LEAVEPARTY` inventory drop) + AND/OR boolean-vs-bitwise semantics + string equality in `OP_EQU` + `OP_FUNC` (0xD1) usage check + f2-vs-f3 marker mystery. None blocking; all fixable when the rebuild's `ConversationVM` lands. |
+| CURSED/MUTANT/HATCHED 0x40 aliasing in legacy `obj.js:9-11` | **RESOLVED — not a port bug** | Source u6.h:80-82 deliberately overloads bit 0x40 across object types. Legacy port faithfully mirrors source. Disambiguation in either engine requires per-call-site object-type dispatch. |
+| ECS-core specifics (entity ID format, component storage, query API, system pipeline, tick model) | **DEFERRED** — discussion phase deliberately did not resolve these (depth ceiling) | Land when graphics-first minimum-viable demand surfaces them |
+
+---
+
+## How to use this index
+
+- **Starting research on a subsystem?** Add a row to Quick Navigation
+  when the `research_*.md` file is first created.
+- **Resuming after a break?** Read `Journal.md` first for process
+  context; use this index to navigate the synthesized facts.
+- **Modifying docs?** Update the relevant entry here in the same
+  commit if you changed sections, added new ones, or resolved an
+  open item.
