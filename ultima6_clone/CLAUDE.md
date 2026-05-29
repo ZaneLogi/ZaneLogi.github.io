@@ -46,10 +46,13 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 
 ## Project stage
 
-**Implementation phase — opening at I-1 (terrain on screen).** The ECS
-runtime ground is settled; the full spec is `docs/architecture_ecs.md`
-and the step ledger is `docs/progress.md`. No game code written yet —
-I-1 is next.
+**Implementation phase — I-1 (terrain on screen) COMPLETE; I-2 (world-data
+system) next.** The ECS runtime-ground spec is `docs/architecture_ecs.md`,
+implemented in `ecs/world.js` as of I-1; the ledger + per-step detail are in
+`docs/progress.md`. Code layout: `ecs/` (runtime core), `assets/` (format
+decoders), `resources/` (TileRegistry, MapLevel, Camera), `systems/` (render,
+camera, entity), `components/`, `view/` (WebGL renderer), `u6db.js` (BYO-data
+store), `index.html`/`main.js` (app shell), `tests/`.
 
 The three phases (see local memory `feedback_project_phases`):
 
@@ -58,7 +61,8 @@ The three phases (see local memory `feedback_project_phases`):
   u6-decompiled to ground decisions in reality. Closed (9 source-research
   docs committed at `4656410`; ECS ground settled 2026-05-29).
 - **Implementation phase (current)** → per-step `I-N` ports under
-  `ultima6_clone/`, graphics-first. See `docs/progress.md`.
+  `ultima6_clone/`, graphics-first. See `docs/progress.md` for the ledger and
+  each step's "scope" subsection.
 
 The discussion-phase architecture decisions (Pure ECS primary + Hybrid
 fallback; A-grid for terrain; packed Status byte; folder split +

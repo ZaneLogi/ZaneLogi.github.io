@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ultima VI — engine reimplementation (bring your own data)</title>
+<style>
+  body { font: 14px/1.6 monospace; background: #14110c; color: #d8cdb4; margin: 0; padding: 20px; }
+  h1 { font-size: 16px; color: #e8c060; margin: 0 0 4px; }
+  .sub { color: #8a7f66; margin: 0 0 16px; }
+  #dropzone {
+    border: 2px dashed #6b5d3a; border-radius: 8px; padding: 28px; text-align: center;
+    color: #b8a878; background: #1c180f; margin-bottom: 16px;
+  }
+  #dropzone.drag { border-color: #e8c060; background: #241d10; color: #e8c060; }
+  #checklist { white-space: pre; background: #0e0b07; border: 1px solid #2a2316; padding: 12px; border-radius: 6px; }
+  #log { white-space: pre-wrap; background: #0e0b07; border: 1px solid #2a2316; padding: 12px; border-radius: 6px; margin-top: 12px; min-height: 1.6em; }
+  #screen { display: none; margin-top: 12px; border: 1px solid #2a2316; image-rendering: pixelated; cursor: grab; touch-action: none; }
+  #screen.dragging { cursor: grabbing; }
+  .ok { color: #6c6; } .miss { color: #c66; } .warn { color: #e8c060; }
+</style>
+</head>
+<body>
+<h1>Ultima VI — engine reimplementation</h1>
+<p class="sub">Bring your own data: drop the files from a copy of Ultima VI you own. They stay in your browser (IndexedDB) and are never uploaded.</p>
+<div id="dropzone">Drop your Ultima VI data files here</div>
+<div id="checklist">scanning…</div>
+<canvas id="screen" width="768" height="512"></canvas>
+<div id="log"></div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

@@ -1,10 +1,10 @@
 # ultima6_clone — Documentation Index
 
 **Date:** 2026-05-29
-**Status:** Implementation phase — opening at **I-1 (terrain on screen)**.
-Research phase closed; the ECS runtime ground is settled in
-[architecture_ecs.md](architecture_ecs.md) and the step ledger is
-[progress.md](progress.md). The 9 source-research docs below remain the
+**Status:** Implementation phase — **I-1 (terrain on screen) COMPLETE; I-2
+(world-data system) next.** The ECS runtime ground (spec in
+[architecture_ecs.md](architecture_ecs.md)) is implemented in `ecs/world.js`;
+the step ledger + per-step detail are in [progress.md](progress.md). The 9 source-research docs below remain the
 subsystem truth. **Game-loop + animation pipeline decoded**: source is turn-based blocking with a
 three-channel animation tick (palette cycling + animdata tile-pointer
 rewrite + hybrid tiles) firing in `CON_prompt`'s idle path. Modern-UX

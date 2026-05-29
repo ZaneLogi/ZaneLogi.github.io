@@ -186,3 +186,56 @@ This is the rejected-alternative's opposite: not "let the renderer pull a core i
 existence," but "build the core, then prove it by rendering through it." The
 minimal surface I-1 forces into existence is the §10 graphics-first set of
 `architecture_ecs.md`.
+
+## 8. How Origin rendered terrain (source comparison)
+
+Investigated for I-1c against `u6-decompiled`. Origin's terrain render:
+
+- **Fixed 11×11 player-centered viewport** (176×176 px in the 320×200 VGA screen,
+  8 px frame border). The clone deviates → canvas-sized free-scroll (modern-UX).
+- **Two-pass, on-demand recomposite** (dirty-gated, not per-frame). Pass 1
+  (`C_1100_0306`, seg_1100.c:144) builds `Tile_11x11[][]` from `AreaTiles[][]` with
+  visibility flood-fill + lighting + neighbour-aware wall-variant selection
+  (`D_0644[]`). Pass 2 (`C_0A33_09CE`, seg_0A33.c:350) blits each cell: background
+  tile then object chain. The clone's RenderSystem is the same shape as Pass 2's
+  121-cell loop, canvas-sized and continuous.
+- **Blit primitive `GR_42`** is a macro dispatching through a graphics-driver
+  function-pointer table: `(D_ECB8.iii.ofs = 0x42, (*D_ECB8.f)(tile,x,y))`
+  (gr.h:61). The actual pixel copy lives in a *separate* VGA driver, not in the
+  decompiled `GAME.EXE` — a clean hardware-abstraction seam. Draws to off-screen
+  `D_9E3D`; `GR_45` flushes to the visible screen.
+- **Palette-indexed (mode 13h):** screen + tiles are bytes of palette indices
+  (0xFF transparent); the VGA DAC maps index→RGB; animation is palette-register
+  cycling + animdata tile-pointer swaps, so static terrain bytes never move.
+
+**The port/clone is structurally faithful, not just visually correct.** The
+WebGL renderer reproduces Origin's palette-indexed model 1:1: an R8 index texture
+= the screen's index bytes; the fragment shader's index→RGB lookup = the VGA DAC;
+WebGL's "draw tile N at (x,y)" = `GR_42`'s dispatch; `colorCycling` rewriting the
+palette texture = VGA palette-register cycling. The only deliberate departures are
+viewport size and recompose cadence (both modern-UX deviations, §6).
+
+## 9. How Origin renders objects (source comparison, for I-1d)
+
+- **`ShowObjects` → `C_1184_35EA`** (seg_1184.c:1702) — double-tile expansion:
+  hotspot tile at `(x,y)`, plus *preceding* tile-index entries into adjacent cells
+  for big tiles — `DoubleH`(0x80)→`tile-1` at `(x-1,y)`; `DoubleV`(0x40)→`tile-1`
+  at `(x,y-1)`; 2×2→`tile-1/-2/-3` at left/above/upper-left. A pillar = base +
+  `tile-1` head in the cell above.
+- **`ShowObject`** (seg_1184.c:1651) — per-cell linked chain, 3-zone Z-order by
+  each tile's own `IsTileFor` flag: `IsTileBa` replaces terrain (skips chain);
+  non-FG → chain head (covered); FG hotspot → before the FG block; FG **extension**
+  → chain **end** (on top). Blit walks the chain forward (painter's).
+- **Pillar bug** = the head (a `DoubleV` extension, itself a top tile) lands at
+  chain-end/on-top in Origin (keyed off its OWN flag); the legacy `drawObject`
+  routes the whole object by the BASE tile's flag, so the head inherits the lower
+  layer and gets covered. Fix: route each tile by its own flag (research_map_render.md:603).
+
+**I-1d** lifts these with the fix: `Position`+`Renderable` entities, an entity
+render pass `query(Position,Renderable)` → double-tile expansion + **per-tile**
+`isTopTile` layer routing → overlay layers above terrain. Two simplifications vs
+Origin, both matching the locked plan: the fine per-cell **chain** Z-order becomes
+a coarser **layer model + per-tile flag** (the documented coarse approximation;
+full chain deferred to the object system), and the **spatial index** is deferred —
+a few entities → `query` + viewport-cull (don't build for an absent scale). Both
+arrive with the real object system.

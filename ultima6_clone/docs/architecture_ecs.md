@@ -1,9 +1,11 @@
 # Architecture: the ECS runtime ground
 
-> **Status: designed, not yet built.** The entire ECS runtime ground (Entities +
-> Components + Systems, plus tick model and world-loading) was settled in
-> discussion **2026-05-29**. This document is the **build spec** the I-N
-> implementation steps work to — self-contained; build to this.
+> **Status: designed; runtime ground built as of I-1 (2026-05-29).** The
+> Entities + Components + Systems core specified here is implemented in
+> `ecs/world.js` (allocator, parallel-array stores, 64-bit signature-mask query,
+> two-list scheduler + `TurnClock`). The two-clock tick is wired; world-loading is
+> designed and its region load-seam lands with the world-data system (I-2). This
+> document is the **build spec** the I-N steps work to — self-contained.
 
 This is the ground layer only — the runtime (identity, storage, world, query,
 scheduler, resources, tick). The full component/system **catalogue** lands

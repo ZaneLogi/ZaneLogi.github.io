@@ -1,6 +1,9 @@
 # ultima6_clone — Research Journal
 
-Chronological log of the research phase. **Newest entries at the top.**
+Chronological log — research-phase reading plus source reading during
+implementation. **Newest entries at the top.** Per-step implementation detail
+(sub-steps, decisions, status) lives in `progress.md`; this is the
+reading/discovery narrative.
 
 The Journal is the project's narrative — what was read, when, what
 surprised, what got documented, where to go next. The synthesized
@@ -24,6 +27,29 @@ the process record; the research docs are the product.
 ```
 
 ---
+
+## 2026-05-29 — Implementation phase opened: I-1 built; terrain + object render read against source
+
+Research phase closed; implementation began (per-step narrative now in
+`progress.md` "scope" subsections). I-1 (terrain + a few entities through the ECS
+core) landed and was verified on real U6 data. Two source investigations grounded
+the render work:
+
+- **Read**: terrain — `C_1100_0306` (populate Tile_11x11), `C_0A33_09CE` (Pass-2
+  blit), `GR_42` (`gr.h:61` — a graphics-driver dispatch *macro*, not inline pixel
+  code; actual blit lives in a separate VGA driver). Objects — `C_1184_35EA`
+  (`seg_1184.c:1702`, double-tile expansion via `tile-1/-2/-3`) + `ShowObject`
+  (`seg_1184.c:1651`, per-cell chain, 3-zone Z-order by `IsTileFor`).
+- **Found**: U6 is palette-indexed (mode 13h) — the WebGL indexed-palette shader is
+  the exact modern analog (fragment shader = VGA DAC; `GR_42` dispatch = WebGL draw).
+  Water tiles are transparent bases remapped via animdata to opaque frames (drawing
+  raw → black). Coastlines are a two-layer composite (animated water base + shore
+  overlay). The pillar bug = per-object vs per-tile flag routing; fix = route each
+  tile by its own `isTopTile`.
+- **Docs**: `research_i1_render_slice.md` §8 (terrain) + §9 (objects); `progress.md`
+  I-1 scope + re-ordered ledger (object/world-data system pulled to I-2).
+- **Next**: I-2 — world-data system: `OBJBLK*`/`objlist` → real ECS entities +
+  `SpatialIndex` + `ObjManager` dissolution.
 
 ## 2026-05-28 — Player↔object interaction + save/load mechanism decoded
 
