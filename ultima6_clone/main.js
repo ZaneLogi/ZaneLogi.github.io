@@ -1,6 +1,6 @@
-// I-1b boot: bring-your-own-data load. Dropzone -> U6DB (IndexedDB) -> decoders
-// -> TileRegistry + MapLevel resources on a World. No rendering yet (I-1c).
-// Final decode-correctness check needs the user's own U6 files (legal: nothing bundled).
+// Boot: bring-your-own-data load. Dropzone -> U6DB (IndexedDB) -> decoders ->
+// resources + ECS entities on a World, then render (terrain + world objects + NPCs).
+// Decode correctness needs the user's own U6 files (legal: nothing is bundled).
 
 import { World } from './ecs/world.js';
 import { U6DB } from './u6db.js';
@@ -9,20 +9,37 @@ import { Tiles } from './assets/tiles.js';
 import { U6Map } from './assets/map.js';
 import { TileFlags } from './assets/tile_flags.js';
 import { AnimData } from './assets/anim.js';
+import { BaseTile } from './assets/basetile.js';
+import { decodeObjlist } from './assets/objlist.js';
 import { TileRegistry } from './resources/tile_registry.js';
 import { MapLevel } from './resources/map_level.js';
+import { SpatialIndex } from './resources/spatial_index.js';
 import { unzip } from './assets/zip.js';
 import { TileRenderer } from './view/renderer.js';
 import { Camera } from './resources/camera.js';
 import { makeRenderSystem } from './systems/render_system.js';
 import { makeCameraSystem } from './systems/camera_system.js';
-import { makeEntityRenderSystem } from './systems/entity_system.js';
-import { Position, Renderable } from './components/components.js';
+import { makeTileAnimationSystem } from './systems/tile_animation_system.js';
+import { makePaletteCycleSystem } from './systems/palette_cycle_system.js';
+import { makeWorldRenderSystem } from './systems/world_render_system.js';
+import { Position, Renderable, ObjType, Status, Amount, Actor } from './components/components.js';
+import { loadActors, ensureRegionsInView, makeStreamingSystem } from './world_loader.js';
 
-// Gating set for terrain + flags (I-1b). Names are the original U6 filenames, lowercased.
-const REQUIRED = ['maptiles.vga', 'objtiles.vga', 'tileindx.vga', 'masktype.vga', 'u6pal', 'chunks', 'map', 'tileflag'];
-const OPTIONAL = ['animdata', 'animmask.vga', 'look.lzd'];
-const KNOWN = new Set([...REQUIRED, ...OPTIONAL]);   // only these are extracted from a dropped zip
+// Gating set for terrain + flags (I-1b) + world objects (I-2). Names are the
+// original U6 filenames, lowercased.
+const REQUIRED = ['maptiles.vga', 'objtiles.vga', 'tileindx.vga', 'masktype.vga', 'animmask.vga', 'animdata', 'u6pal', 'chunks', 'map', 'tileflag', 'basetile', 'objlist'];
+const OPTIONAL = ['look.lzd'];   // tile display names only (getTileLook); rendering doesn't need it
+
+// OBJBLK region files (64 surface objblk[col][row] + 5 dungeon objblk[level]i).
+// Demand-loaded per region from U6DB, so they gate by presence-count, not the
+// all-or-nothing REQUIRED set.
+const OBJBLK_NAMES = [];
+for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++)
+  OBJBLK_NAMES.push(`objblk${String.fromCharCode(97 + c)}${String.fromCharCode(97 + r)}`);
+for (let d = 0; d < 5; d++) OBJBLK_NAMES.push(`objblk${String.fromCharCode(97 + d)}i`);
+
+const KNOWN = new Set([...REQUIRED, ...OPTIONAL]);   // these + any objblk* are extracted from a dropped zip
+const isKnown = (base) => KNOWN.has(base) || base.startsWith('objblk');
 
 const dropzone = document.getElementById('dropzone');
 const checklistEl = document.getElementById('checklist');
@@ -39,10 +56,14 @@ async function updateChecklist() {
   for (const n of [...REQUIRED, ...OPTIONAL]) present[n] = await U6DB.has(n);
   const ready = REQUIRED.every((n) => present[n]);
 
+  let objblkCount = 0;
+  for (const n of OBJBLK_NAMES) if (await U6DB.has(n)) objblkCount++;
+
   let out = 'Required:\n';
   for (const n of REQUIRED) out += `  ${present[n] ? '✓' : '✗'} ${n}\n`;
   out += '\nOptional:\n';
   for (const n of OPTIONAL) out += `  ${present[n] ? '✓' : '—'} ${n}\n`;
+  out += `\nOBJBLK regions: ${objblkCount}/${OBJBLK_NAMES.length}\n`;
   out += `\nReady: ${ready ? 'YES' : 'NO'}`;
   checklistEl.textContent = out;
 
@@ -65,7 +86,7 @@ async function load() {
   const palette = decodePalette(fileMap.get('u6pal'), /* useTransparent */ true);
 
   const tiles = new Tiles();
-  tiles.init(fileMap, /* tileOnly */ !(fileMap.has('animmask.vga') && fileMap.has('look.lzd')));
+  tiles.init(fileMap);   // animmask + look decoded when present (both presence-guarded inside)
 
   const flags = new TileFlags(fileMap.get('tileflag'));
 
@@ -75,19 +96,41 @@ async function load() {
   let anim = null;
   if (fileMap.has('animdata')) { anim = new AnimData(); anim.init(fileMap.get('animdata')); }
 
+  const baseTile = new BaseTile(fileMap.get('basetile'));
+  const objlist = decodeObjlist(fileMap.get('objlist'));
+
   const world = new World();
-  world.setResource(new TileRegistry({ tiles, flags, palette, anim }));
+  world.setResource(new TileRegistry({ tiles, flags, palette, anim, baseTile }));
   world.setResource(new MapLevel(u6map, 0));
-  window.__U6 = { world, tileRegistry: world.getResource(TileRegistry), mapLevel: world.getResource(MapLevel) };
+  world.setResource(new SpatialIndex());
+  world.registerComponent(Position).registerComponent(Renderable)
+       .registerComponent(ObjType).registerComponent(Status)
+       .registerComponent(Amount).registerComponent(Actor);
+  window.__U6 = { world, tileRegistry: world.getResource(TileRegistry), mapLevel: world.getResource(MapLevel), spatial: world.getResource(SpatialIndex), objlist };
 
   diagnostics(world);
-  startRender(world);
+  const npcCount = loadActors(world, objlist);
+  log(`\nLoaded ${npcCount} on-map NPCs from objlist.`, 'ok');
+  await startRender(world);
 }
 
-// I-1c: terrain on screen. Build the GPU atlas + palette from TileRegistry, place
-// the camera at Britain's default origin, register CameraSystem + RenderSystem, and
-// drive a continuous rAF frame loop. Drag the canvas to pan.
-function startRender(world) {
+// I-2b verification: the world is now ECS entities + a spatial index.
+function verifyWorld(world) {
+  const spatial = world.getResource(SpatialIndex);
+  let total = 0, npcs = 0;
+  for (const _ of world.query(Position)) total++;
+  for (const _ of world.query(Actor)) npcs++;
+  log('\nI-2b world built:', 'ok');
+  log(`  entities: ${total} (${npcs} NPCs, ${total - npcs} world objects)`);
+  log(`  spatial: ${spatial.cells.size} occupied cells, ${spatial.loadedRegions.size} regions loaded`);
+  const here = spatial.at(307, 352);   // the Avatar's start cell
+  log(`  cell (307,352) holds ${here ? here.length : 0} entit${here && here.length === 1 ? 'y' : 'ies'}`);
+}
+
+// I-1c/I-2b: terrain + world objects on screen. Build the GPU atlas + palette, place
+// the camera at Britain's default origin, demand-load the OBJBLK regions in view, then
+// register CameraSystem + RenderSystem(s) and drive a continuous rAF loop. Drag to pan.
+async function startRender(world) {
   const canvas = document.getElementById('screen');
   canvas.style.display = 'block';
 
@@ -96,16 +139,25 @@ function startRender(world) {
   renderer.uploadAtlas(reg);
   renderer.uploadPalette(reg.palette);
 
-  world.setResource(new Camera(276 * 16, 367 * 16));        // Britain's default origin (tiles 276,367)
-  world.registerComponent(Position).registerComponent(Renderable);
-  spawnDemoEntities(world);
-
-  world.addRenderSystem(makeCameraSystem(1024 * 16, 1024 * 16));
-  world.addRenderSystem(makeRenderSystem(renderer));         // terrain: layers 0 (water base) + 1 (shore)
-  world.addRenderSystem(makeEntityRenderSystem(renderer));   // entities: layers 2 (lower) + 3 (top)
-  world.addRenderSystem(() => renderer.render());            // present
+  const camera = new Camera(276 * 16, 367 * 16);            // Britain's default origin (tiles 276,367)
+  world.setResource(camera);
   window.__U6.renderer = renderer;
-  window.__U6.camera = world.getResource(Camera);
+  window.__U6.camera = camera;
+
+  // Demand-load the OBJBLK regions overlapping the initial viewport, then the
+  // StreamingSystem keeps loading regions as the camera pans into them.
+  const objCount = await ensureRegionsInView(world, camera, canvas, renderer.tileSize);
+  log(`Loaded ${objCount} world objects in the initial view.`, 'ok');
+  verifyWorld(world);
+
+  const ts = renderer.tileSize;
+  world.addRenderSystem(makeTileAnimationSystem());                // advance animdata -> reg.animDirty
+  world.addRenderSystem(makePaletteCycleSystem(renderer));         // rotate water/lava palette (shimmer)
+  world.addRenderSystem(makeCameraSystem(1024 * 16, 1024 * 16));   // clamp camera to world bounds
+  world.addRenderSystem(makeStreamingSystem(canvas, ts));          // load regions entering the view
+  world.addRenderSystem(makeRenderSystem(renderer));               // terrain: layers 0 (water base) + 1 (shore)
+  world.addRenderSystem(makeWorldRenderSystem(renderer));          // objects + NPCs: per-cell painter, layers 2-5
+  world.addRenderSystem(() => renderer.render());                  // present
 
   // drag-to-pan
   let dragging = false, lastX = 0, lastY = 0;
@@ -127,32 +179,6 @@ function startRender(world) {
   log('\nRendering started — drag the map to pan.', 'ok');
 }
 
-// Spawn a few demo entities to exercise the ECS render path — one of each
-// expansion shape (single / double-width / double-height), so the per-tile layer
-// routing (pillar-bug fix) is observable. Tiles chosen by scanning TileRegistry flags.
-function spawnDemoEntities(world) {
-  const reg = world.getResource(TileRegistry);
-  let single = 0, dw = 0, dh = 0;
-  for (let t = 256; t < 2048; t++) {
-    const w = reg.isDoubleWidth(t), h = reg.isDoubleHeight(t);
-    if (!dh && h && !w) dh = t;
-    if (!dw && w && !h) dw = t;
-    if (!single && !w && !h && reg.tiles.getTileLook(t) !== 'Unknown') single = t;
-    if (single && dw && dh) break;
-  }
-  const spawn = (x, y, tile) => {
-    if (!tile) return;
-    const e = world.create();
-    world.add(e, Position, { x, y, z: 0 });
-    world.add(e, Renderable, { tileId: tile });
-    log(`  entity tile ${tile} ("${reg.tiles.getTileLook(tile)}") at (${x},${y})`);
-  };
-  log('\nSpawning demo entities (single / double-W / double-H):', 'warn');
-  spawn(285, 374, single || 0x100);
-  spawn(288, 374, dw);
-  spawn(291, 375, dh);
-}
-
 // I-1b verification surface: prove the decode end-to-end with concrete values the
 // user can sanity-check against the game.
 function diagnostics(world) {
@@ -167,11 +193,11 @@ function diagnostics(world) {
   const tBritain = lvl.tileAt(276, 367);
   log(`  mapLevel.tileAt(276,367) = tile ${tBritain}`);
   const px = reg.pixels(tBritain);
-  log(`  tile ${tBritain}: ${px.length}-byte pixel buffer; flags top=${reg.isTopTile(tBritain)} dblH=${reg.isDoubleHeight(tBritain)} dblW=${reg.isDoubleWidth(tBritain)} forceLower=${reg.isForceLowerTile(tBritain)}`);
+  log(`  tile ${tBritain}: ${px.length}-byte pixel buffer; flags fg=${reg.isForeground(tBritain)} bg=${reg.isBackground(tBritain)} dblH=${reg.isDoubleHeight(tBritain)} dblW=${reg.isDoubleWidth(tBritain)}`);
   if (reg.tiles.looks) log(`  tile ${tBritain} look = "${reg.tiles.getTileLook(tBritain)}"`);
 
   // A few sample tiles' flags, so a bad flag-plane offset would show up.
-  log('  sample flags: ' + [16, 256, 512].map((t) => `#${t}{top:${+reg.isTopTile(t)},dW:${+reg.isDoubleWidth(t)},dH:${+reg.isDoubleHeight(t)}}`).join(' '));
+  log('  sample flags: ' + [16, 256, 512].map((t) => `#${t}{fg:${+reg.isForeground(t)},bg:${+reg.isBackground(t)},dW:${+reg.isDoubleWidth(t)},dH:${+reg.isDoubleHeight(t)}}`).join(' '));
 
   log('\nI-1b plumbing complete — resources on window.__U6.', 'ok');
 }
@@ -191,7 +217,7 @@ dropzone.addEventListener('drop', async (e) => {
       catch (err) { log(`could not read ${file.name}: ${err.message}`, 'miss'); continue; }
       for (const { name, bytes } of entries) {
         const base = name.split(/[/\\]/).pop().toLowerCase();
-        if (KNOWN.has(base)) {
+        if (isKnown(base)) {
           await U6DB.set(base, bytes);
           log(`unzipped ${base} (${bytes.length} bytes)`);
         }

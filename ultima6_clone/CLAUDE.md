@@ -46,8 +46,8 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 
 ## Project stage
 
-**Implementation phase — I-1 (terrain on screen) COMPLETE; I-2 (world-data
-system) next.** The ECS runtime-ground spec is `docs/architecture_ecs.md`,
+**Implementation phase — I-2 (world-data system) COMPLETE; I-3 (world clock)
+next.** The ECS runtime-ground spec is `docs/architecture_ecs.md`,
 implemented in `ecs/world.js` as of I-1; the ledger + per-step detail are in
 `docs/progress.md`. Code layout: `ecs/` (runtime core), `assets/` (format
 decoders), `resources/` (TileRegistry, MapLevel, Camera), `systems/` (render,

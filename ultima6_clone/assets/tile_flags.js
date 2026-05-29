@@ -1,9 +1,17 @@
 // Per-tile flag table, keyed by tile ID (0..2047). Decoded from the U6 `tileflag`
-// file; layout from the legacy port's loadTileFlag (../ultima6/obj_manager.js):
-// three byte-planes — flags1 at [0], flags2 at [0x800], flags3 at [0x1400].
-// flags2 carries top-tile / double-size bits; flags3 carries force-lower.
-// These flags are tile-type data (shared across all objects of a tile), so they
-// live here in the registry, not on per-entity Renderable components.
+// file. Source loads it as FOUR planes (seg_0903.c:229-232): TerrainType@0,
+// TileFlag@0x800, TypeWeight@0x1000 (0x400 bytes), D_B3EF@0x1400. We mirror three
+// of them — flags1 = TerrainType (@0), flags2 = TileFlag (@0x800), flags3 = D_B3EF
+// (@0x1400) — and skip TypeWeight.
+//
+// Accessor names follow the SOURCE macros (u6.h), not the legacy port's labels,
+// which misread two of them: the legacy "isTopTile" is really IsTileFor
+// (Foreground) and "isForceLowerTile" is really IsTileBr (Breakthrough, an
+// AI/movement flag — NOT render). The real render-bottom flag is IsTileBa
+// (Background), which the legacy port didn't decode at all.
+//
+// These are tile-type data (shared across all objects of a tile), so they live
+// here in the registry, not on per-entity Renderable components.
 
 const TILE_COUNT = 2048;
 
@@ -19,9 +27,9 @@ export class TileFlags {
     }
   }
 
-  isTopTile(t)        { return (this.flags2[t] & 0x10) !== 0; }
-  isBoundary(t)       { return (this.flags2[t] & 0x0c) !== 0; } // 0x04 | 0x08
-  isDoubleHeight(t)   { return (this.flags2[t] & 0x40) !== 0; }
-  isDoubleWidth(t)    { return (this.flags2[t] & 0x80) !== 0; }
-  isForceLowerTile(t) { return (this.flags3[t] & 0x04) !== 0; }
+  isForeground(t)   { return (this.flags2[t] & 0x10) !== 0; }   // IsTileFor    (was "isTopTile")
+  isDoubleHeight(t) { return (this.flags2[t] & 0x40) !== 0; }   // IsTileDoubleV
+  isDoubleWidth(t)  { return (this.flags2[t] & 0x80) !== 0; }   // IsTileDoubleH
+  isBackground(t)   { return (this.flags3[t] & 0x20) !== 0; }   // IsTileBa  — replaces terrain (render bottom)
+  isBreakthrough(t) { return (this.flags3[t] & 0x04) !== 0; }   // IsTileBr  — AI/movement, NOT render (was "isForceLowerTile")
 }

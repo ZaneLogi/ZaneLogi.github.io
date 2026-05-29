@@ -521,6 +521,14 @@ selection for the whole object including extensions.**
 
 ### Worked example: pillar at Lycaeum
 
+> **Correction (I-2c source verification).** The flag specifics in this subsection
+> predate reading `ShowObject` against real data and are partly wrong: the Lycaeum
+> pillar is `OBJ_144` **frame 3 = tile 1191, a 2×2** (`IsTileDoubleH`+`IsTileDoubleV`),
+> and **Steps are NOT foreground** — `IsTileFor=false`; the platform-edge Steps frame
+> (tile 949) is **`IsTileBa` (Background)**, which replaces terrain. The bug *diagnosis*
+> below (legacy routes an object's extensions by the BASE tile's flag) still holds, but
+> for the verified flags + the full ordering rule see **"Painter's algorithm"** below.
+
 Pillar object at world (x, y). Object number = `OBJ_144` (`obj.h:674`).
 
 - **Base tile** `T_b`: `isDoubleHeight = true`, `isTopTile = false`.
@@ -652,6 +660,83 @@ granularity.
 For the educational-port goal (per `user_retro_port_goal` memory),
 the minimal fix above is probably sufficient. The architectural
 refactor belongs in the `ultima6_clone/` rebuild, not in legacy.
+
+## Painter's algorithm — source chain vs. clone zones (implemented I-2c)
+
+The within-cell Z-order. Source uses a per-cell linked chain; the clone uses an
+equivalent zone-bucketed pass. Flags below are the source-verified mapping (named to
+match source in `assets/tile_flags.js`): `isForeground` = `IsTileFor`, `isBackground`
+= `IsTileBa`, `isDoubleHeight/Width` = `IsTileDoubleV/H`. (Note `IsTileBr`
+"Breakthrough" — the legacy port's misnamed `isForceLowerTile` — is an AI/movement
+flag, NOT a render flag; it plays no part here.)
+
+### Source — per-cell linked chain (`ShowObject`, seg_1184.c:1651)
+
+`C_1184_35EA` (seg_1184.c:1702) emits one `ShowObject` per tile: the hotspot
+(`bp06=0`), then double-tile extensions (`bp06=1`) at `(x-1,y)` / `(x,y-1)` /
+`(x-1,y-1)` for `IsTileDoubleH` / `+IsTileDoubleV` / 2×2. Each call routes its tile by
+that tile's OWN flags:
+
+| Tile's own flag | Placement in cell (x,y) |
+|---|---|
+| **`IsTileBa`** (Background) | **replaces the terrain tile** (`Tile_11x11[y][x]=tile`) and returns — never enters the chain → bottom |
+| non-FG (not `IsTileFor`) | inserted at chain **HEAD** |
+| `IsTileFor` **hotspot** (`bp06=0`) | walk past non-FGs, insert **before the first FG** |
+| `IsTileFor` **extension** (`bp06=1`) | walk to chain **END** → top |
+
+Pass 2 (`C_0A33_09CE`) blits cells in scan order; per cell it draws the background
+tile then the chain forward (head→tail = bottom→top). Within-cell order, bottom→top:
+**background → non-FG → FG-hotspot → FG-extension.**
+
+### Clone — zone-bucketed painter's pass (`WorldRenderSystem`)
+
+Walks the visible cells via the `SpatialIndex`, expands each object's double-tiles,
+and routes each tile by its own flag into one of four ordered render layers (above the
+two terrain layers):
+
+| layer | zone | flag |
+|---|---|---|
+| 2 | background | `isBackground` |
+| 3 | normal | neither |
+| 4 | foreground hotspot | `isForeground`, own cell |
+| 5 | foreground extension | `isForeground`, a double-tile extension |
+
+**Why zones == the chain here:** U6 tiles are exactly one cell, so tiles in *different*
+cells never share pixels — Z-order only matters *within* a cell, and the four zones
+give exactly `ShowObject`'s cross-zone order.
+
+**Within a zone, the order objects were LOADED decides the view.** When two objects
+share a cell *and* a zone (e.g. an NPC standing on a carpet — both "normal"), no flag
+separates them, so the result depends on load order. The `WorldRenderSystem` draws each
+cell's entities in **reverse load order** (the `SpatialIndex` cell list is in insertion
+order), so the **first-loaded object draws last = on top**. This reproduces source:
+`ShowObjects` (seg_1184.c:1723) walks the sorted `Link[]` and inserts non-FG tiles at
+the chain HEAD, so the first-processed object lands at the TAIL and (blit head→tail) is
+drawn last. Two load-order facts the clone depends on, both matching source:
+
+- **NPCs render over floor objects** — `loadActors` runs before `loadRegion`, so an NPC
+  is first in its cell list → drawn last → on top (the Avatar stands ON the carpet).
+  Source gets the same result because actors (slots `0x00–0xFF`, loaded first) precede
+  world objects (`0x100+`) in the tied-position `Link[]`.
+- **OBJBLK record order matters** — objects stacked in one cell draw in the order the
+  `objblk` file stores them, and U6 stores the **top item first** (so it draws last).
+  The clone preserves this by loading records in file order.
+
+The only genuinely-undefined case is two objects at the *same* (x, y, z): source's
+comparator ties and the merge-sort fall-through decides (`research_world_data.md`), so
+there is no "correct" order to match. A per-cell height sort could be added later if a
+specific stack ever looks wrong.
+
+### Two worked cases (verified on real data, region `objblkhg` = the Lycaeum)
+
+- **Pillar over steps** — pillar `OBJ_144` frame 3 = tile 1191 (2×2, base
+  `IsTileFor=false`); its upper-left extension tile 1188 has `IsTileFor=true` →
+  FG-extension → top. A neighbouring Steps tile in the same cell is non-FG → lower.
+  Head on top. ✓
+- **Carpet over platform-edge steps** — at (922–924, 862) a carpet (obj 303 → normal)
+  shares a cell with a Steps tile (obj 276, tile 949, **`IsTileBa`**). Background steps
+  replace terrain (bottom); carpet draws above. ✓ (The 2-zone model that only checked
+  `isForeground` ignored `IsTileBa`, so the steps wrongly covered the carpet.)
 
 ## Open targets for the next research pass
 

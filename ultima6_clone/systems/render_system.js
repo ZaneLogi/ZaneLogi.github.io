@@ -30,7 +30,6 @@ export function makeRenderSystem(renderer) {
   let basePos = null, baseIdx = null;       // layer 0: full grid
   let shoreIdx = null, shorePos = null;     // layer 1: sparse (shore cells only)
   let lastTileX = NaN, lastTileY = NaN;
-  let frame = 0;
 
   return (world) => {
     const cam = world.getResource(Camera);
@@ -39,9 +38,7 @@ export function makeRenderSystem(renderer) {
     const remap = reg.anim ? reg.anim.tileIndexMap : null;
     const rm = remap ? (t) => remap[t] : (t) => t;
 
-    let animChanged = false;
-    if (reg.anim) animChanged = reg.anim.update(frame >> 2).size > 0;   // /4: legacy anim-frame divisor
-    frame++;
+    const animChanged = reg.animDirty;   // advanced once per frame by TileAnimationSystem
 
     const cw = renderer.canvas.width, ch = renderer.canvas.height;
     const needCols = Math.ceil(cw / ts) + 1;   // +1 row/col covers the sub-tile scroll

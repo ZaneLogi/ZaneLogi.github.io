@@ -5,11 +5,11 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status:** **I-1 (terrain on screen) COMPLETE** — the first vertical slice through
-the ECS runtime ground (`architecture_ecs.md`) renders Britain (terrain + animated
-water + coastlines) and a few `Position`+`Renderable` entities on real U6 data,
-drag-pannable. Next: **I-2** — the world-data system (load `OBJBLK*`/`objlist` into
-real ECS entities), the clone's core ECS validation.
+**Status:** **I-2 (world-data system) COMPLETE** — the real world (`OBJBLK*` objects
++ `objlist` NPCs) loads into ECS entities, drawn through a spatial-index-driven
+per-cell painter's render, with the legacy `ObjManager` dissolved. Verified on real
+data (1837 entities; Britain + the Lycaeum render correctly, pillars + carpet/steps
+Z-order faithful, camera-driven region streaming). Next: **I-3** — the world clock.
 
 ---
 
@@ -18,8 +18,8 @@ real ECS entities), the clone's core ECS validation.
 | Step | Title | Status |
 |---|---|---|
 | **I-1** | **terrain on screen** (ECS core + overworld render + demo entities) | **done** |
-| **I-2** | **world-data system** — load `OBJBLK*` objects + `objlist` NPCs into real ECS entities (drawn + spatial-indexed; `ObjManager` dissolved) | **next** |
-| I-3 | world clock (game-time tick → schedules / day-night) | planned |
+| **I-2** | **world-data system** — load `OBJBLK*` objects + `objlist` NPCs into real ECS entities (drawn + spatial-indexed; `ObjManager` dissolved) | **done** |
+| **I-3** | world clock (game-time tick → schedules / day-night) | **next** |
 | I-4 | tile passability (walkability primitive; reused by NPC + avatar) | planned |
 | I-5 | NPC scheduled movement (hourly schedules + pathfinding + walking) | planned |
 | I-6 | avatar entity + input + movement + camera follow | planned |
@@ -144,3 +144,48 @@ final squash → one `[ultima6_clone] impl I-1 (terrain on screen)`):
 **Pre-impl research done:** `research_i1_render_slice.md` (render seam),
 `research_map_render.md` (pillar-bug root cause + fix), `architecture_ecs.md`
 (runtime ground). No further research blocks I-1.
+
+## I-2 scope — world-data system
+
+**Goal:** load the real world (`OBJBLK*` objects + `objlist` NPCs) into ECS entities,
+drawn through a spatial-index-driven per-cell painter's render, `ObjManager` dissolved.
+Landed as ONE squashed commit (I-2a+b+c) — a correct display needs the data *and* the
+faithful render together (Zane's call).
+
+- **I-2a — decoders + load gate.** `assets/{basetile,objblk,objlist}.js` (copy-then-own
+  from the legacy `ObjManager`). BYO-data gating: require `basetile`+`objlist`;
+  recognise/count `objblk*`. Also fixed an I-1 misclassification (`animdata` +
+  `animmask.vga` are render-required, not optional). objlist layout verified against
+  `seg_0C9C.c:297-321` (25 sections / 7283 bytes, size-driven read; `D_8C42` is the
+  pathfinding buffer, not "per-NPC palette") — see `research_save_load.md`.
+
+- **I-2b — components + SpatialIndex + loader (ObjManager dissolution).** Components
+  `ObjType`/`Status`/`Amount` + `Actor` tag; `SpatialIndex` resource
+  (`Map<packedXY→entity[]>` + `loadedRegions` + `dirty`). `world_loader.js`:
+  `loadActors` (NPCs, eager-resident) + `loadRegion` (OBJBLK per region, demand-loaded,
+  idempotent/cached) + `ensureRegionsInView` + `makeStreamingSystem` (camera-driven).
+  Only on-map (LOCXYZ) objects/NPCs become entities; containment deferred — the in-file
+  assoc index (16-bit, source `GetAssoc`) isn't carried into the ECS (see
+  `research_world_data.md`). Verified: 1837 entities (188 NPCs + 1649 objects, CC+CD),
+  1488 spatial cells.
+
+- **I-2c — per-cell painter's render + palette cycling.** `WorldRenderSystem`
+  (spatial-walk + 4-zone within-cell order: **background → normal → FG-hotspot →
+  FG-extension**; each cell's entities drawn in REVERSE load order so the first-loaded
+  is on top → NPCs stand on carpets/floor, matching source's chain) replaces I-1d's
+  2-zone `EntityRenderSystem`. Two render channels extracted as systems:
+  `TileAnimationSystem` (animdata frame-remap → `reg.animDirty`) and
+  `PaletteCycleSystem` (the 0xE0–0xFC palette-register shimmer, ported from the legacy
+  `colorCycling`). Painter's algorithm decoded from `ShowObject` (seg_1184.c:1651) and
+  documented (source + clone) in `research_map_render.md` §"Painter's algorithm".
+  **Flag corrections (source-verified, the legacy port misread two):** "isTopTile" =
+  `IsTileFor` (Foreground) → renamed **`isForeground`**; "isForceLowerTile" = `IsTileBr`
+  (Breakthrough — an AI/movement flag, NOT render) → renamed **`isBreakthrough`**,
+  dropped from render; the real render-bottom flag `IsTileBa` (Background) was missing →
+  added as **`isBackground`**. Verified on the Lycaeum (`objblkhg`): pillar heads on top
+  (2×2 frame-3 → FG extension) and the carpet over the `IsTileBa` platform-edge steps.
+
+**Deferred (noted):** containment/inventory entities; the exact same-Z/same-cell tie
+(reverse-load-order matches source for NPC-over-floor + objblk top-first, but a true
+same-position tie is merge-sort-undefined in source anyway); the `objlist` `D_8C42`
+pathfinding buffer + global block (feed I-3/I-5).

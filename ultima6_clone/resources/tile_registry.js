@@ -6,17 +6,23 @@
 // for layer routing; this resource is GL-free.
 
 export class TileRegistry {
-  constructor({ tiles, flags, palette, anim = null }) {
+  constructor({ tiles, flags, palette, anim = null, baseTile = null }) {
     this.tiles = tiles;       // Tiles      — pixel decode
     this.flags = flags;       // TileFlags  — per-tile flag bits
     this.palette = palette;   // Uint8Array(256*4) RGBA
     this.anim = anim;         // AnimData | null — animated-tile frame remap
+    this.baseTile = baseTile; // BaseTile | null — objNumber -> base tile index
+    this.animDirty = false;   // set each frame by TileAnimationSystem; read by render systems
   }
 
   pixels(tileId) { return this.tiles.getTilePixels(tileId); }
 
-  isTopTile(t)        { return this.flags.isTopTile(t); }
-  isDoubleHeight(t)   { return this.flags.isDoubleHeight(t); }
-  isDoubleWidth(t)    { return this.flags.isDoubleWidth(t); }
-  isForceLowerTile(t) { return this.flags.isForceLowerTile(t); }
+  // Render tile for an object: baseTile[objNumber] + frame (source TILE_FRAME).
+  tileForObject(objNumber, frame) { return this.baseTile.tileFor(objNumber, frame); }
+
+  isForeground(t)   { return this.flags.isForeground(t); }    // IsTileFor
+  isBackground(t)   { return this.flags.isBackground(t); }    // IsTileBa — render bottom
+  isDoubleHeight(t) { return this.flags.isDoubleHeight(t); }  // IsTileDoubleV
+  isDoubleWidth(t)  { return this.flags.isDoubleWidth(t); }   // IsTileDoubleH
+  isBreakthrough(t) { return this.flags.isBreakthrough(t); }  // IsTileBr — AI/movement, not render
 }

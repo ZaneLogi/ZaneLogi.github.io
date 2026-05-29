@@ -119,8 +119,21 @@ position"). From `C_0C9C_089F` (save) / `C_0C9C_042A` (load),
 | 21 | `TalkFlags` | 0x100 | per-NPC conversation flags |
 | 22 | `Leader` | 0x100 | leader / path-index |
 | 23 | `NPCFlag` | 0x100 | direction + flags |
-| 24 | `D_8C42` | 0x100 | per-NPC palette? |
+| 24 | `D_8C42` | 0x100 | pathfinding step buffer `content[8][32]` (8 paths × 32 dir steps) |
 | 25 | `D_2C4A` block | ~0x82 | global game state (above) |
+
+**Total = 7283 bytes (0x1C73).** The load is **size-driven, not EOF-driven** —
+`C_0C9C_042A` reads exactly these 25 sections in order and stops; it never reads to
+end-of-file. Sizes are fixed by `struct coord` = 3 bytes (`u6.h:302`) and Turbo C
+`int` = 2 bytes. Verified against a real **initial/new-game `objlist`** (7539 bytes):
+everything from `D_8C42` (0x1AF1) onward is zeroed — paths, clock, karma, etc. are
+populated at new-game start — and the file carries an extra 256 zero bytes past
+0x1C73 that the engine simply never reads (harmless slack, not part of the format).
+
+`D_8C42` is the live pathfinding step buffer, not a per-NPC field — it's a pointer
+to `content[8][32]` (8 concurrent NPC paths × 32 direction steps), built/reversed/
+consumed in `seg_1E0F.c` (the NPC-AI segment). It's saved so in-progress paths
+survive save/load; the rebuild can skip persisting it and recompute paths on load.
 
 Note the first 4 arrays (`ObjStatus`/`ObjPos`/`ObjShapeType`/
 `Amount`) are the **same 4 fields the OBJBLK records store** (see
@@ -290,15 +303,12 @@ path and reuses the same loader the save/load uses.
 3. **`LoadNewRegions`** (`seg_1184.c:1550`) — the region-streaming
    entry; partially noted in
    [`research_world_data.md`](research_world_data.md) open questions.
-4. **`D_8C42`** (array #24 in objlist, "per-NPC palette?") — exact
-   meaning unconfirmed; it's saved per-NPC so it's mutable state, but
-   what it drives needs a read.
-5. **Multiple save slots** — source appears to use a single
+4. **Multiple save slots** — source appears to use a single
    `savegame\` directory (one slot). U6 used a "journal" copy
    mechanism for multiple saves at the DOS level (copy the
    directory). The rebuild can offer unlimited named slots trivially
    (modern storage) — a UX improvement, not a fidelity question.
-6. **Original starting-state assets** — whether to bundle and parse
+5. **Original starting-state assets** — whether to bundle and parse
    the original U6 initial `savegame\`, or author a fresh start.
    Decision for the implementation phase.
 
