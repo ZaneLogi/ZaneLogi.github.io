@@ -18,38 +18,55 @@ known to exist). It stays untouched here — the viewers keep working.
 Going forward, this folder is the canonical home for U6 rebuild work;
 all decisions, research, and Journal narrative live under `docs/`.
 
-> Historical: the discussion-phase exploration that led to this
-> folder happened in note-branch sessions on 2026-05-26 and
-> 2026-05-27. Substance has been folded into this CLAUDE.md +
-> docs/research_*.md; those note files are kept on the `note`
-> branch as historical record but are NOT required reading. See
-> `feedback_note_branch_is_scratchpad` in local memory for the
-> principle.
+## Game-data legal pattern (binding)
+
+**Never commit U6 game data to the repo — not even a test fixture.**
+Gitignore any local data files. Users supply their own legally-owned
+U6 files at runtime; nothing copyrighted is ever distributed by this
+repo. GitHub Pages serves it publicly, so a committed asset would be
+*public distribution* — the highest-risk thing.
+
+The legacy `ultima6/` port already established the safe flow, and the
+rebuild reuses it rather than reinventing:
+
+- **Dropzone** — user drags in their own U6 files
+  (`../ultima6/map_viewer.js:831`).
+- **IndexedDB** — bytes stored client-side only, keyed by lowercased
+  filename (`../ultima6/u6db.js`). GitHub Pages is static hosting, so
+  the data never reaches a server — it stays on the user's machine.
+- **Checklist gate** — `expectedFiles` shown ✅/⛔ with a
+  "Ready: YES/NO" flag (`../ultima6/map_viewer.js:814`).
+
+This is the deliberate Nuvie-style "bring your own data" design, not an
+accident — keep it. The slip to guard against is committing a "just for
+testing" data file mid-implementation; don't. (This note exists because
+auto-memory is per-PC and doesn't sync — a cold session on the other PC
+needs the rule in committed form. A `<input type=file>` fallback
+alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 
 ## Project stage
 
-**Research phase.** Discussion phase ended 2026-05-27 with the
-creation of this folder; implementation phase has NOT started.
+**Implementation phase — opening at I-1 (terrain on screen).** The ECS
+runtime ground is settled; the full spec is `docs/architecture_ecs.md`
+and the step ledger is `docs/progress.md`. No game code written yet —
+I-1 is next.
 
 The three phases (see local memory `feedback_project_phases`):
 
-- **Discussion phase** → on the `note` branch; architecture-level
-  exploration without source-code grounding. Closed.
-- **Research phase (current)** → here, in `ultima6_clone/docs/`;
-  reading u6-decompiled to ground decisions in reality.
-- **Implementation phase** → when research is sufficient; per-
-  subsystem ports under `ultima6_clone/`.
+- **Discussion phase** → architecture-level exploration. Closed.
+- **Research phase** → `ultima6_clone/docs/research_*.md`; reading
+  u6-decompiled to ground decisions in reality. Closed (9 source-research
+  docs committed at `4656410`; ECS ground settled 2026-05-29).
+- **Implementation phase (current)** → per-step `I-N` ports under
+  `ultima6_clone/`, graphics-first. See `docs/progress.md`.
 
-**No gameplay code until research clarifies the engine's model.**
-The driving research questions (entity layout, draw order, double-
-height handling, transparency policy, conversation VM, schedule
-logic, etc.) are open. Only u6-decompiled can answer them.
-
-Architecture decisions from the discussion phase (Pure ECS primary
-+ Hybrid fallback; A-grid for terrain; packed Status byte; folder
-split + copy-then-own; graphics-first sequencing) are **provisional
-inputs** into research, not locked outputs. Research may refine or
-overturn any of them — that's the point of having a research phase.
+The discussion-phase architecture decisions (Pure ECS primary + Hybrid
+fallback; A-grid for terrain; packed Status byte; folder split +
+copy-then-own; graphics-first sequencing) were **inputs** into research;
+research validated rather than overturned them, and they are now **locked
+in `docs/architecture_ecs.md`**. Remaining open questions are per-system
+details that surface as each `I-N` step lands, not architecture-level
+unknowns.
 
 ## Source of truth
 
@@ -127,7 +144,8 @@ substrate** (DOS RPG), which lands under a different choice:
 modern rewrite. See `feedback_retro_port_translation_choice` in
 local memory for the principle.
 
-Working hypotheses, subject to research validation:
+**Settled — full spec in `docs/architecture_ecs.md`.** Summary of the
+locked decisions:
 
 - **Pure ECS as primary architecture; Hybrid as named fallback.**
   Picked for learning value + deferred-subsystem extensibility +
@@ -161,9 +179,9 @@ Working hypotheses, subject to research validation:
   `MapLevel` resource + `RenderSystem` + `CameraSystem`. Then each
   next system adds 1-2 components + 1 system.
 
-> Historical: these were settled in note-branch sessions on
-> 2026-05-26 and 2026-05-27. The hypotheses live here now; the
-> note files are historical context, not required reading.
+> These were first framed during the discussion phase; the full runtime
+> ground (E+C+S, tick, world-loading) was closed 2026-05-29. The
+> canonical, self-contained spec is `docs/architecture_ecs.md`.
 
 ## Modern-browser UX as architectural anchor
 
@@ -261,12 +279,4 @@ structure.
   screen-RAM mapping)
 - Local memory: `project_ultima6_status`,
   `feedback_retro_port_translation_choice`, `feedback_project_phases`,
-  `feedback_doc_style`, `feedback_note_branch_is_scratchpad`
-
-**Historical-only** (kept on the `note` branch as the discussion-
-phase record; substance has been folded into this CLAUDE.md +
-docs/research_*.md — NOT required reading):
-- `notes/2026-05-26-1141-candidate-deep-dives.md` (candidate survey)
-- `notes/2026-05-26-2226-u6-architecture-settled.md` (D1-Q3 settlements)
-- `notes/2026-05-27-0121-u6-pillar-bug-and-decompiled-discovery.md`
-  (pillar bug + u6-decompiled as ground-truth reference)
+  `feedback_doc_style`

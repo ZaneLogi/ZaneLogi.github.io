@@ -1,8 +1,11 @@
 # ultima6_clone — Documentation Index
 
-**Date:** 2026-05-28
-**Status:** Research phase. 9 research docs landed. **Game-loop +
-animation pipeline decoded**: source is turn-based blocking with a
+**Date:** 2026-05-29
+**Status:** Implementation phase — opening at **I-1 (terrain on screen)**.
+Research phase closed; the ECS runtime ground is settled in
+[architecture_ecs.md](architecture_ecs.md) and the step ledger is
+[progress.md](progress.md). The 9 source-research docs below remain the
+subsystem truth. **Game-loop + animation pipeline decoded**: source is turn-based blocking with a
 three-channel animation tick (palette cycling + animdata tile-pointer
 rewrite + hybrid tiles) firing in `CON_prompt`'s idle path. Modern-UX
 anchor principle captured in `../CLAUDE.md` §"Modern-browser UX as
@@ -50,6 +53,14 @@ Map, key port-side decisions, open items.
 | [research_object_interaction.md](research_object_interaction.md) | Player↔object interaction (`seg_27a1`, biggest segment) — the five world-interaction commands (Look `C_27A1_0C67`, Get `C_27A1_18F5`, Drop `C_27A1_14DA`, Move `C_27A1_1E8B`, Use `C_27A1_6179`). Shared target→validate(range/legality)→apply→recompose+cost pipeline; `Selection` struct; Get's theft/karma coupling; Drop's thrown-missile arc; Use's ~40-case `switch(GetType)` object-type dispatch (food/vehicles/doors/levers/lanterns/instruments/spellbook/moonstones/ladders/...). Mutation primitives (GiveObj/TakeObj/InsertObj/MoveObj/AddObj/DeleteObj). Rebuild: ECS command/intent system, Use = handler registry, click/drag targeting replaces blocking getch. | ~270 lines |
 | [research_save_load.md](research_save_load.md) | Save/load mechanism + savegame composition (`seg_0C9C` save/restore). A savegame = a memory-array dump split by slot range: `savegame\objlist` (24 actor parallel arrays + the contiguous `D_2C4A` global-state blob: clock/karma/wind/light/SpellFx[16]/moonstones/moon-phases/gender/language/flags) + `objblkXX` per-region + `objblk{A-E}I` dungeon world objects. Static files (schedule/basetile/chunks/*.vga) are NOT save data. Save = flush dirty regions + write objlist; restore = read static tables + objlist + stream current region. **Format is throwaway (rebuild uses modern persistence); the deliverable is the authoritative state-set checklist.** ECS: serialize component stores + singleton resources; staging-swap atomicity; new-game-init via parsing the original starting savegame. | ~250 lines |
 
+### Design / plan docs (the rebuild's own decisions)
+
+| Document | Focus | Length |
+|----------|-------|--------|
+| [architecture_ecs.md](architecture_ecs.md) | **The ECS runtime-ground build spec** (settled 2026-05-29) — Pure-ECS-primary/Hybrid-fallback choice; E (generational handle + free-stack allocator); C (parallel-array stores + sparse-set + spatial-index `Map<cell→entity[]>` + A-grid terrain + packed `Status`); S (systems-as-functions, 64-bit signature-mask query + generator + store-handle, two-list scheduler + `TurnClock` turn-driver, typed-`Map` resources, components+resources comms with the `Use`-switch dissolved); two-clock tick model; demand-load world streaming; green-Earth + the infinite-RAM litmus; the `ObjManager`-dissolution lineage table. Self-contained — build to this. | ~330 lines |
+| [research_i1_render_slice.md](research_i1_render_slice.md) | I-1 pre-impl render-seam design — the legacy renderer split into draw-mechanism / terrain-feed / entity-feed / upload-strategy, with reuse/drop/lift/defer verdicts; the pillar-bug fix applied during the rules-lift; tile-flags-in-`TileRegistry` decision; the bring-your-own-data legal path; the flicker-hazard fold-in. | ~150 lines |
+| [progress.md](progress.md) | Implementation step ledger (`I-N`) + per-step "scope" subsections. Carries the I-1 sub-step plan (I-1a core skeleton → I-1b assets → I-1c terrain → I-1d entity layer). | grows |
+
 ### Source-of-truth files
 
 Local clone of ergonomy_joe's u6-decompiled. **The clone's absolute
@@ -77,10 +88,14 @@ source by relative name only (`seg_XXXX.c:NNN`, `u6.h:NNN`, etc.).
 
 ## Architecture Overview
 
-_(Pending — to be drafted once research has clarified the
-engine's actual model. Discussion-phase architecture hypotheses
-[Pure ECS + A-grid + packed Status + graphics-first] are working
-inputs, not authoritative until research validates them.)_
+The rebuild's architecture is settled and specified in
+[architecture_ecs.md](architecture_ecs.md) — Pure ECS (Hybrid fallback
+named), A-grid terrain + `TileRegistry`, packed `Status`, generational-
+handle identity, signature-mask query, two-clock tick, demand-load world
+streaming. Research validated these inputs rather than overturning them.
+The first implementation slice and its render seam are in
+[research_i1_render_slice.md](research_i1_render_slice.md);
+the step ledger is [progress.md](progress.md).
 
 ---
 
@@ -111,7 +126,7 @@ More decisions land here as research surfaces them.
 | Map render audit — pillar bug at Lycaeum | **RESOLVED — root cause identified, minimal fix sketched** | `research_map_render.md` "Pillar bug — root cause resolution" section. Bug = `drawObject` in `map_viewer.js:299-335` checks `isTopTile()` only on the base tile for layer routing; extensions inherit the base's layer. For pillars (base `isTopTile=false`, head `isTopTile=true`), the head ends up in Layer 1 instead of Layer 3, gets covered by Layer 3 objects like Steps (OBJ_114, decimal #276) at the same cell. Minimal fix: per-tile `isTopTile()` check during emission. |
 | Conversation VM port — legacy `script.js` stubs to verify | **OPEN** — listed in `research_conversation_vm.md` §"Open questions" | Five concrete stubs (`OBJINPARTY`, `OWNS`, `WEIGHT`, `JOIN` cap, `LEAVEPARTY` inventory drop) + AND/OR boolean-vs-bitwise semantics + string equality in `OP_EQU` + `OP_FUNC` (0xD1) usage check + f2-vs-f3 marker mystery. None blocking; all fixable when the rebuild's `ConversationVM` lands. |
 | CURSED/MUTANT/HATCHED 0x40 aliasing in legacy `obj.js:9-11` | **RESOLVED — not a port bug** | Source u6.h:80-82 deliberately overloads bit 0x40 across object types. Legacy port faithfully mirrors source. Disambiguation in either engine requires per-call-site object-type dispatch. |
-| ECS-core specifics (entity ID format, component storage, query API, system pipeline, tick model) | **DEFERRED** — discussion phase deliberately did not resolve these (depth ceiling) | Land when graphics-first minimum-viable demand surfaces them |
+| ECS-core specifics (entity ID format, component storage, query API, system pipeline, tick model) | **RESOLVED — settled 2026-05-29** | Full spec in [architecture_ecs.md](architecture_ecs.md): generational handle + free-stack allocator; parallel-array stores + sparse-set + spatial-index Map; 64-bit signature-mask query + generator + store-handle; two ordered system lists + `TurnClock` turn-driver; two-clock tick. |
 
 ---
 

@@ -82,7 +82,7 @@ Confirmed from `main()` + `u6.h`:
   centered window into it.
 
 The 11×11 viewport is the answer to "small visible screen area" Zane
-mentioned in the discussion-phase note as a DOS-era limitation we
+mentioned as a DOS-era limitation we
 should not carry into the JS port. The 40×40 work area is the
 engine's actual model.
 
@@ -182,8 +182,8 @@ shape) is a separate question — research pending.
 
 ## What we know about flags vs. how the legacy port handles them
 
-Several legacy-port observations from the note-branch pillar-bug
-note are now grounded in source:
+Several legacy-port observations from the earlier pillar-bug
+investigation are now grounded in source:
 
 1. **CURSED / MUTANT / HATCHED all alias to 0x40 in u6.h:80-82.**
    This is intentional in source — bit 0x40 means different things

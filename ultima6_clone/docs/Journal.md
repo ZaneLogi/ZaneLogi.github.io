@@ -701,11 +701,11 @@ the process record; the research docs are the product.
   Zane: apply the minimal fix to legacy `ultima6/map_viewer.js`,
   or treat the bug as motivation for the `ultima6_clone/`
   rebuild and don't invest more in legacy. Per the original
-  note-branch framing 2026-05-27: "the pillar bug fix is one
+  framing 2026-05-27: "the pillar bug fix is one
   thing, the u6_clone based on u6 decompiled is another" —
   these are still orthogonal questions.
 
-## 2026-05-27 — Render-design discussion parked on note branch
+## 2026-05-27 — Render-design discussion parked (design-phase)
 
 - **What happened**: extended discussion of the rebuild's render
   strategy — 4-zone WebGL → 2-zone collapse → 3-buffer refinement
@@ -716,12 +716,9 @@ the process record; the research docs are the product.
 - **Classification**: this was **design-phase**, not research.
   The substance is "how should the rebuild's render system look,"
   not "how does U6 source render."
-- **Where it lives**: note branch, session 2026-05-27 ~1500.
-  Historical-only reference; not required reading for continuing
-  research-phase work here. Per `feedback_note_branch_is_scratchpad`,
-  design discussions stay on the note branch until research/
-  implementation needs them folded into a `<project>_clone/docs/`
-  file.
+- **Status**: design-phase, parked. Not required reading for continuing
+  research-phase work here; design discussions get folded into a
+  `<project>_clone/docs/` file when implementation needs them.
 - **Why NOT in `research_map_render.md`**: that doc is
   currently-true source-behavior decoding (per `feedback_doc_style`).
   Adding "here's what the rebuild might do" would mix research
@@ -732,9 +729,9 @@ the process record; the research docs are the product.
   flag (`IsTileBa` / `IsTileFor`) routes into buffer, last-wins
   per cell via alpha-blend with one prepend trick for the
   back-buffer to match source's "non-FG insert at HEAD" rule.
-  See note branch entry for full rationale + edge cases worked
-  through (item-on-chest, actor-below-beam, actor-on-rug,
-  two-FG-hotspot residual ambiguity).
+  Full rationale + edge cases (item-on-chest, actor-below-beam,
+  actor-on-rug, two-FG-hotspot residual ambiguity) were worked
+  through in that discussion.
 - **What's deferred**: atlas layout, palette handling, animation
   overlays, lighting/fog, bp06=2/3 spell effects, ECS-shape
   questions for the iteration entry point.
@@ -1049,9 +1046,6 @@ the process record; the research docs are the product.
   A-grid terrain, packed Status byte, graphics-first sequencing —
   summarized in [`../CLAUDE.md`](../CLAUDE.md) "Architecture choice")
   are now provisional inputs into research, not locked decisions.
-  Discussion happened in note-branch sessions on 2026-05-26 and
-  2026-05-27 — historical-only at this point, not required reading
-  (see `feedback_note_branch_is_scratchpad`).
   Zane's framing: *"we get more data in the research phase so we
   can discuss how the project will look like not just blah blah
   blah without the support of the reality."*
@@ -1068,8 +1062,7 @@ the process record; the research docs are the product.
 - **Open**:
   - What does the in-game map render actually do? (Driving question:
     is `../ultima6/map_viewer.js`'s `drawObject` correct against
-    Origin's actual draw routine? — see note branch
-    `2026-05-27-0121-u6-pillar-bug-and-decompiled-discovery.md`.)
+    Origin's actual draw routine?)
   - Where is the main game loop / per-frame dispatch in
     `SRC/seg_XXXX.c`? Need to find the entry point before any
     subsystem reading makes sense.
