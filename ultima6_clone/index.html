@@ -16,6 +16,24 @@
   #log { white-space: pre-wrap; background: #0e0b07; border: 1px solid #2a2316; padding: 12px; border-radius: 6px; margin-top: 12px; min-height: 1.6em; }
   #screen { display: none; margin-top: 12px; border: 1px solid #2a2316; image-rendering: pixelated; cursor: grab; touch-action: none; }
   #screen.dragging { cursor: grabbing; }
+  #clock-hud {
+    position: fixed; top: 12px; right: 12px;
+    background: rgba(0,0,0,0.7); color: #e8c060;
+    font: 13px monospace; padding: 6px 10px;
+    border: 1px solid #6b5d3a; border-radius: 4px;
+    display: none; pointer-events: none;
+  }
+  #clock-hud.paused { border-color: #c66; }
+  #clock-text { white-space: nowrap; }
+  #clock-controls { margin-top: 4px; display: flex; gap: 4px; }
+  #clock-hud button {
+    pointer-events: auto;
+    background: #1c180f; color: #e8c060;
+    border: 1px solid #6b5d3a; border-radius: 3px;
+    font: 12px monospace; padding: 2px 6px;
+    cursor: pointer;
+  }
+  #clock-hud button:hover { background: #241d10; }
   .ok { color: #6c6; } .miss { color: #c66; } .warn { color: #e8c060; }
 </style>
 </head>
@@ -25,6 +43,16 @@
 <div id="dropzone">Drop your Ultima VI data files here</div>
 <div id="checklist">scanning…</div>
 <canvas id="screen" width="768" height="512"></canvas>
+<div id="clock-hud">
+  <div id="clock-text"></div>
+  <div id="clock-controls">
+    <button data-act="pause">⏸ pause</button>
+    <button data-act="m60">−1h</button>
+    <button data-act="m10">−10m</button>
+    <button data-act="p10">+10m</button>
+    <button data-act="p60">+1h</button>
+  </div>
+</div>
 <div id="log"></div>
 <script type="module" src="./main.js"></script>
 </body>

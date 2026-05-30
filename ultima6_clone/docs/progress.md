@@ -19,7 +19,7 @@ Z-order faithful, camera-driven region streaming). Next: **I-3** — the world c
 |---|---|---|
 | **I-1** | **terrain on screen** (ECS core + overworld render + demo entities) | **done** |
 | **I-2** | **world-data system** — load `OBJBLK*` objects + `objlist` NPCs into real ECS entities (drawn + spatial-indexed; `ObjManager` dissolved) | **done** |
-| **I-3** | world clock (game-time tick → schedules / day-night) | **next** |
+| **I-3** | world clock (game-time tick → schedules; `D_2C55` computed but unconsumed) | **next** |
 | I-4 | tile passability (walkability primitive; reused by NPC + avatar) | planned |
 | I-5 | NPC scheduled movement (hourly schedules + pathfinding + walking) | planned |
 | I-6 | avatar entity + input + movement + camera follow | planned |
@@ -189,3 +189,61 @@ faithful render together (Zane's call).
 (reverse-load-order matches source for NPC-over-floor + objblk top-first, but a true
 same-position tie is merge-sort-undefined in source anyway); the `objlist` `D_8C42`
 pathfinding buffer + global block (feed I-3/I-5).
+
+## I-3 scope — world clock
+
+**Goal:** game-time advances per turn; the date/time cascades minute → hour → day →
+month → year; `D_2C55` (sun-strength byte) is computed and stored on the clock for
+future consumption; an hourly hook list lets I-5 register its schedule re-check. **No
+ambient-light render** at I-3 — the visible day/night transition on the map lands
+in a later step alongside the lighting subsystem (see below). A small dev/cheat HUD
+overlays the canvas so the clock is visible + manually steppable across the
+remaining impl steps.
+
+**Why no ambient-light render at I-3.** Pre-impl source read (2026-05-30) corrected a
+misleading research-doc summary: `D_2C55` is the SUN-STRENGTH **input** to a per-cell
+flood-fill lighting model, NOT a render-side ambient tint. A faithful port requires
+`AreaFlags[][]` + `AreaLight[][]` + `C_1100_0131` BFS + per-cell tile substitution
+(`TIL_0FF` / `TIL_1BC`) + obscurity overlay pass — all of which need (a) a
+player-position source (avatar from I-6), (b) richer tile flags than I-1/I-2 decoded
+(`IsTileWin`, `IsTileOpa`, `GetTileLight`), and (c) a render-path change. Defer to its
+own later step. Full decode: `research_map_render.md` §"Lighting + visibility model";
+correction trail: `research_game_loop.md` §"Time-advance" phase 9 + key takeaway.
+
+**In scope:**
+
+- `WorldClock` resource: `Time_H`, `Time_M`, `Date_D / M / Y`, `D_2C55` (stored).
+- `WorldClockSystem` (sim-list): per turn, call `clock.advance(1)`. Cascade per
+  `seg_0A33.c:853-885`. Recompute `D_2C55` per `seg_0A33.c:918-931`.
+- Hourly hook list: `onHour(cb)` registration on the clock; hooks fire once per
+  hour-rollover during `advance()`. Ships empty at I-3; I-5's NPC schedule
+  re-check (`C_1E0F_5165`) is the first registrant.
+- Dev/cheat HUD: corner overlay showing `Year Y · M D · HH:MM · ☀ D_2C55 ·
+  hours fired N` + controls (pause/resume the turn-driver, ±10m and ±1h time
+  jumps). `+1h` matches source's Alt+215 debug hotkey (`C_0A33_1355(60)`).
+  Always-visible during development; hide-vs-toggle (e.g. backtick) revisited
+  when the real status panel ports.
+- Verification: live on the canvas via the HUD (clock ticks, ± jumps + rewind,
+  pause freezes auto-advance, paused border tint) plus `tests/test_clock.html`
+  (20/20 for the pure data class).
+
+**Out of scope (deferred to later steps):**
+
+- Ambient light render — its own later step after I-6 (avatar exists), with its own
+  pre-impl research. ~1-2 days on its own.
+- Spell-FX timers, powder keg, eruption — depend on combat / spell-FX components
+  not landed.
+- Per-minute status-effect rolls — depend on combat components.
+- Torch fuel / ring procs / storm cloak rolls — depend on inventory components.
+- Sundial tile rewrite, moon phase recompute, moongates spawn/despawn — each its
+  own small subsystem; defer.
+- Wind reroll — no ships.
+- Music hooks — no audio.
+- Real status panel — `seg_0A33.c:933-936` `CON_printf(DateMsg, ...)`. The
+  dev/cheat HUD substitutes during development; the status-panel port is its
+  own step.
+
+**Estimate:** ~1-2 hours of focused work — beyond the small DOM HUD, no new render
+path and no new asset decode; the two-clock architectural seam (`TurnClock`
+resource + `frame()` orchestration) is already in `ecs/world.js` from I-1a, so
+I-3 is purely additive.

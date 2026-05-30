@@ -229,23 +229,36 @@ Phases (in order, simplified):
 8. **Wind reroll** (915) — `C_0A33_12F6(0)` (1/64 chance, overworld /
    sky only; sets to -1 in dungeons).
 9. **Ambient light bucket** (918-931) — `D_2C55` recompute based on
-   `Time_H` + `Time_M`:
+   `Time_H` + `Time_M`. **`D_2C55` is the sun-strength INPUT to the
+   per-cell lighting flood-fill, NOT a render-side ambient knob.** The
+   full lighting model lives in
+   [`research_map_render.md`](research_map_render.md) §"Lighting +
+   visibility model"; this step just updates the byte and triggers a
+   full composite if it shifted:
    - `Time_H == 5` (dawn): `D_2C55 = Time_M / 10 + 1` (6 steps)
    - `Time_H == 19` (dusk): `D_2C55 = (59 - Time_M) / 10 + 1`
    - 6 ≤ Time_H ≤ 18: `D_2C55 = 7` (full daylight)
    - Else / eclipse / dungeon: `D_2C55 = 0` (full dark)
    - Torch (`bp_0c`) or LightSpell (`SpellFx[0]`) sets floor at 4
-   - **If bucket changed → `C_1100_0306()`** (full viewport
-     recompose).
+   - **If bucket changed → `C_1100_0306()`** (full composite +
+     flood-fill rebuild).
 10. **Display refresh** (933-936) — print `DateMsg` (date + wind
     direction) into the status-text region.
 
 **Key takeaway**: the only render side-effect of normal time-advance
-is the conditional ambient-light recompose at step 9. Sunrise and
-sunset thus produce **stepped redraws every 10 minutes of game time**
-during 5:00-5:59 and 19:00-19:59 (6 steps each). Other transitions
-are invisible to the composite pass — animation is the palette /
-animdata channels' job (see [`research_animation.md`](research_animation.md)).
+is the conditional composite re-render at step 9 when `D_2C55`
+shifts. The visible effect is NOT "the screen tints darker" — the
+per-cell flood-fill in `C_1100_0306` re-runs with the new sun
+strength, recomputing `AreaLight[][]` and re-substituting the
+`TIL_0FF` / `TIL_1BC` placeholder tiles per cell, plus emitting new
+obscurity overlays in `ShowObjects`. Sunrise and sunset thus produce
+**stepped relights every 10 minutes of game time** during 5:00-5:59
+and 19:00-19:59 (6 steps each). Other transitions are invisible to
+the composite pass — animation is the palette / animdata channels'
+job (see [`research_animation.md`](research_animation.md)). The
+lighting decode is in
+[`research_map_render.md`](research_map_render.md) §"Lighting +
+visibility model".
 
 ## Input polling — `CON_getch` → `C_0C9C_1D59` → `CON_prompt`
 
@@ -338,10 +351,18 @@ The game-loop structure has clear ECS-pipeline mappings:
 - **`NPCTickSystem`** → runs after each player action. Iterates
   NPCs by movepts, advances `WorldClock` resource when round
   exhausted. Mirrors `C_1E0F_4E0A` but expressed as ECS queries.
-- **`WorldClockSystem`** → equivalent to `C_0A33_1355`. Drains
-  spell durations, ticks light bucket, runs hourly schedule
-  re-check. No render side-effects — render channels read clock
-  state.
+- **`WorldClockSystem`** → equivalent to `C_0A33_1355`. Advances
+  clock + cascades date, recomputes `D_2C55` (`seg_0A33.c:918-931`),
+  emits an hourly hook list (NPC schedule re-check, sundial tile
+  rewrite, moon phase, moongate spawn/despawn — each its own future
+  step). `D_2C55` is the sun-strength input to the lighting model
+  ([`research_map_render.md`](research_map_render.md) §"Lighting +
+  visibility model"), NOT a render-side knob — the visible day/night
+  effect requires the full lighting subsystem (per-cell flood-fill
+  with player position, tile flags, and light-source overlays) and
+  lands in a later step after the avatar (I-6). Spell-FX timers,
+  inventory rolls, status-effect rolls fold in alongside their owning
+  subsystems.
 - **`RenderSystem`** → continuous, driven by animation channels +
   drag-scroll input (NOT by game state changes). Reads
   `WorldClock`, `TileRegistry`, `MapObjPtr` and produces frames.

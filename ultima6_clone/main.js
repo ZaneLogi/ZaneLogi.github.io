@@ -2,7 +2,7 @@
 // resources + ECS entities on a World, then render (terrain + world objects + NPCs).
 // Decode correctness needs the user's own U6 files (legal: nothing is bundled).
 
-import { World } from './ecs/world.js';
+import { World, TurnClock } from './ecs/world.js';
 import { U6DB } from './u6db.js';
 import { decodePalette } from './assets/palette.js';
 import { Tiles } from './assets/tiles.js';
@@ -17,11 +17,13 @@ import { SpatialIndex } from './resources/spatial_index.js';
 import { unzip } from './assets/zip.js';
 import { TileRenderer } from './view/renderer.js';
 import { Camera } from './resources/camera.js';
+import { WorldClock } from './resources/world_clock.js';
 import { makeRenderSystem } from './systems/render_system.js';
 import { makeCameraSystem } from './systems/camera_system.js';
 import { makeTileAnimationSystem } from './systems/tile_animation_system.js';
 import { makePaletteCycleSystem } from './systems/palette_cycle_system.js';
 import { makeWorldRenderSystem } from './systems/world_render_system.js';
+import { makeWorldClockSystem } from './systems/world_clock_system.js';
 import { Position, Renderable, ObjType, Status, Amount, Actor } from './components/components.js';
 import { loadActors, ensureRegionsInView, makeStreamingSystem } from './world_loader.js';
 
@@ -103,10 +105,16 @@ async function load() {
   world.setResource(new TileRegistry({ tiles, flags, palette, anim, baseTile }));
   world.setResource(new MapLevel(u6map, 0));
   world.setResource(new SpatialIndex());
+  // I-3: turn-driver + game-clock. idleInterval = 100ms => 1 game-minute per
+  // 0.1s real => full game-day in ~2.4 min. Start date is a stand-in until
+  // save-load lands (research_save_load.md). D_2C55 is stored but unconsumed
+  // until the lighting step (research_map_render.md §"Lighting + visibility model").
+  world.setResource(new TurnClock(100));
+  world.setResource(new WorldClock({ Time_H: 9, Time_M: 0, Date_D: 1, Date_M: 1, Date_Y: 161 }));
   world.registerComponent(Position).registerComponent(Renderable)
        .registerComponent(ObjType).registerComponent(Status)
        .registerComponent(Amount).registerComponent(Actor);
-  window.__U6 = { world, tileRegistry: world.getResource(TileRegistry), mapLevel: world.getResource(MapLevel), spatial: world.getResource(SpatialIndex), objlist };
+  window.__U6 = { world, tileRegistry: world.getResource(TileRegistry), mapLevel: world.getResource(MapLevel), spatial: world.getResource(SpatialIndex), clock: world.getResource(WorldClock), objlist };
 
   diagnostics(world);
   const npcCount = loadActors(world, objlist);
@@ -151,6 +159,7 @@ async function startRender(world) {
   verifyWorld(world);
 
   const ts = renderer.tileSize;
+  world.addSimSystem(makeWorldClockSystem());                      // per turn: clock.advance(1)
   world.addRenderSystem(makeTileAnimationSystem());                // advance animdata -> reg.animDirty
   world.addRenderSystem(makePaletteCycleSystem(renderer));         // rotate water/lava palette (shimmer)
   world.addRenderSystem(makeCameraSystem(1024 * 16, 1024 * 16));   // clamp camera to world bounds
@@ -158,6 +167,66 @@ async function startRender(world) {
   world.addRenderSystem(makeRenderSystem(renderer));               // terrain: layers 0 (water base) + 1 (shore)
   world.addRenderSystem(makeWorldRenderSystem(renderer));          // objects + NPCs: per-cell painter, layers 2-5
   world.addRenderSystem(() => renderer.render());                  // present
+
+  // I-3 dev/cheat HUD: time + sun bucket + hour-fire counter + manual controls
+  // (pause/resume the turn-driver, ±10m/±1h time jumps). +1h matches source's
+  // debug hotkey Alt+215 (C_0A33_1355(60)). Kept across the remaining impl
+  // steps as a permanent dev affordance — modern UX (corner overlay, drag-
+  // safe pointer-events) the cabinet couldn't surface. Always-visible during
+  // development; hide-vs-toggle (e.g. backtick hotkey) revisited when the
+  // real status panel ports (seg_0A33.c:933-936).
+  const hudEl = document.getElementById('clock-hud');
+  const textEl = document.getElementById('clock-text');
+  const controlsEl = document.getElementById('clock-controls');
+  const pauseBtn = controlsEl.querySelector('[data-act="pause"]');
+  hudEl.style.display = 'block';
+  const clock = world.getResource(WorldClock);
+  const tc = world.getResource(TurnClock);
+  let hourFires = 0;
+  clock.onHour(() => hourFires++);
+  const pad2 = (n) => String(n).padStart(2, '0');
+  world.addRenderSystem(() => {
+    textEl.textContent =
+      `Year ${clock.Date_Y} · M${pad2(clock.Date_M)} D${pad2(clock.Date_D)}` +
+      ` · ${pad2(clock.Time_H)}:${pad2(clock.Time_M)}` +
+      ` · ☀ ${clock.D_2C55} · hours fired ${hourFires}`;
+  });
+
+  // Inverse cascade for the ± buttons. Forward advance is the contract
+  // (fires hooks, source-faithful); rewind is a local debug aid only — no
+  // hooks fire and the hour-fires counter doesn't decrement.
+  function rewind(c, minutes) {
+    let m = c.Time_M - minutes;
+    while (m < 0) {
+      m += 60;
+      c.Time_H--;
+      if (c.Time_H < 0) {
+        c.Time_H = 23;
+        c.Date_D--;
+        if (c.Date_D < 1) {
+          c.Date_D = 28;
+          c.Date_M--;
+          if (c.Date_M < 1) { c.Date_M = 12; c.Date_Y--; }
+        }
+      }
+    }
+    c.Time_M = m;
+    c.recomputeD_2C55();
+  }
+
+  let paused = false;
+  controlsEl.addEventListener('click', (e) => {
+    const act = e.target.dataset.act;
+    if (!act) return;
+    if (act === 'pause') {
+      paused = !paused;
+      if (paused) { tc.suspend(); pauseBtn.textContent = '▶ resume'; hudEl.classList.add('paused'); }
+      else        { tc.resume();  pauseBtn.textContent = '⏸ pause';  hudEl.classList.remove('paused'); }
+    } else if (act === 'p10') clock.advance(10);
+    else if (act === 'p60') clock.advance(60);
+    else if (act === 'm10') rewind(clock, 10);
+    else if (act === 'm60') rewind(clock, 60);
+  });
 
   // drag-to-pan
   let dragging = false, lastX = 0, lastY = 0;

@@ -738,6 +738,132 @@ specific stack ever looks wrong.
   replace terrain (bottom); carpet draws above. ✓ (The 2-zone model that only checked
   `isForeground` ignored `IsTileBa`, so the steps wrongly covered the carpet.)
 
+## Lighting + visibility model
+
+The decode that backs Pass 1a's brief "compute AreaFlags / AreaLight"
+hint. Sized for the rebuild to plan day/night honestly: **`D_2C55`
+is the SUN STRENGTH at the player's feet, NOT a render-side ambient
+knob**, so a "shader-uniform tint by `D_2C55`" port would diverge
+visibly (no torches casting local light, no walls blocking sun, no
+dungeon model).
+
+### Storage — two 40×40 byte maps
+
+The composite operates on a 40×40 area centred on the player
+(`AREA_W = AREA_H = 40` per `BSS.ASM:96`; viewport sits at offset
+`(ViewX, ViewY) = (12, 12)`, 11×11 wide, per `seg_1100.c:11`):
+
+- `AreaFlags[40][40]` (`u6.h` alongside `AreaLight`) — per-cell
+  bitfield: `0x80` visible, `0x40` visited-by-BFS, `0x20` opaque,
+  `0x10` window, `0x08` wall (terrain), `0x04` background
+  (`IsTileBa`), bits `0x03` = light-source intensity 0..3.
+- `AreaLight[40][40]` (`u6.h:502`) — per-cell computed light, 0..N
+  additive then clamped. 0 = darkness, ≥ 4 = full bright.
+
+`D_2C55` (`D_2C4A.c:18`, init 7, comment "AmbiantLight?") is the
+single byte that survives across composites — the sun-strength fed
+as the flood-fill `dist` argument.
+
+### Per-composite pipeline (`C_1100_0306`, `seg_1100.c:144-310`)
+
+1. **Zero the active region** (lines 166-173):
+   `AreaFlags[8..31][8..31] = 0`, `AreaLight[8..31][8..31] = 0`. The
+   16-cell border around the 11×11 viewport is the BFS work area.
+
+2. **Walk every object in the active area via `SearchArea`** (lines
+   176-213). For each tile, OR flag bits into `AreaFlags`:
+   - `IsTileWin` → `0x10`
+   - `IsTileOpa` → `0x20` (plus propagation to extension cell for
+     `IsTileDoubleV/H`, lines 192-198 — already covered under
+     "Wall-edge auto-extension" above)
+   - `IsTileBa` → `0x04`
+   - `IsTerrainWall` → `0x08` (plus the same V/H propagation)
+   - `GetTileLight(tile)` → write `max(existing, new)` into bits
+     `0x03` (a torch on a cell that already had a candle stays at the
+     torch's intensity).
+
+3. **Sun flood-fill from the player** (line 215):
+   `C_1100_0131(ViewX + 5, ViewY + 5, D_2C55, 1)`. BFS from the
+   player's cell (centre of the 11×11 viewport) with strength
+   `D_2C55`, bounds-clipped to the viewport (`bp06 == 1` clip at
+   lines 128-133). Sets the `0x80` visible bit AND adds light. Per
+   visited cell:
+   `light = clamp(4 - D_05EA[|dx|][|dy|] + dist, 0, 4)`
+   where `D_05EA` (lines 15-24) is an 8×8 chess-distance falloff
+   table. With `dist = 7` (full day), most viewport cells clamp to
+   4 = full bright.
+
+4. **Light-source flood-fills** (lines 218-239, ONLY if `D_2C55 < 7`):
+   for each cell with `AreaFlags & 0x03` AND `AreaFlags & 0x80` (a
+   torch/lamp on an already-visible cell), clear `0x40` (visited) in a
+   7×7 region around it, then
+   `C_1100_0131(x, y, (flags & 0x03) - 4, 0)`. The `bp06 == 0` arg
+   means don't set visibility (light without revealing); radius is
+   bounded by `D_05EA <= dist + 3` (lines 136-138). Intensity-3 torch
+   fills with `dist = -1`, reaching only ~3-4 cells.
+
+5. **Per-cell tile pick** (lines 242-300): fill `Tile_11x11[][]` from
+   `AreaTiles[][]` with three special cases:
+   - `(flags & 0x80) == 0` → `TIL_0FF` (Hidden — fog of war for
+     never-seen cells).
+   - `AreaLight[][] == 0` → `TIL_1BC` (Darkness — solid dark tile).
+   - Otherwise the real tile (plus the "hide inside wall"
+     neighbor-aware variant for wall-impass terrain, lines 256-296).
+
+### The obscurity overlay (`seg_1184.c:1829-1833`)
+
+A SECOND lighting pass runs inside `ShowObjects` (Pass 1b),
+iterating the same 11×11 viewport cells:
+
+```c
+light = AreaLight[j + ViewY][i + ViewX];
+if(light < 4 && light > 0) {
+    tile = TIL_1BC + light;
+    ShowObject(tile, i, j, 3);
+}
+```
+
+`TIL_1BC` is the darkness tile (light=0); `TIL_1BC + 1..3` are
+obscurity-graded variants. Partly-lit cells (light 1..3) get an
+overlay tile inserted into their cell's chain via `bp06 == 3` (the
+X-ray-equivalent insertion point). This is what produces the visible
+dusk / dawn / torch-edge gradient instead of a hard cutoff.
+
+### So `D_2C55` is not the "ambient light" itself
+
+`D_2C55` is the **byte the time-advance writes** (`seg_0A33.c:918-931`)
+and the **byte the sun flood-fill reads** (`seg_1100.c:215`).
+Everything else — what's visible, how dark, where torches reach —
+falls out of the flood-fill model. Concretely:
+
+- A "tint the screen by `D_2C55`" port would render full-day at
+  strength 7 and uniformly dim the screen as it drops — but it would
+  miss torches (which only locally brighten via the secondary flood),
+  walls (which block both fills via `0x20` opacity), windows (which
+  let light through differently), and the dungeon model (always
+  `D_2C55 = 0`, relying entirely on torch flood-fills for visibility).
+- A faithful port needs `AreaFlags[][]`, `AreaLight[][]`,
+  `C_1100_0131`, the per-cell tile substitution (`TIL_0FF` /
+  `TIL_1BC`), and the obscurity-overlay pass. Inputs it needs that
+  the rebuild doesn't have yet at I-2: a player-position source
+  (avatar from I-6), a richer tile-flag decode (`IsTileWin`,
+  `IsTileOpa`, `GetTileLight`), and a render path that can substitute
+  a tile and overlay a dim tile per cell.
+
+### Implications for the rebuild
+
+Defer the lighting model to its own step, **after I-6** (avatar =
+flood-fill source exists). At I-3 the `WorldClock` stores `D_2C55`
+(computed per `seg_0A33.c:918-931`) but nothing reads it yet; the
+visible day/night transition lands when the lighting step does.
+
+The modern wide drag-scrollable view also re-opens an architectural
+question source didn't face: source bounds the flood-fill to the
+11×11 viewport (`bp06 == 1` clipping in `C_1100_0131`); the modern
+view needs either a wider flood region recomputed on camera move, or
+a different lighting model that doesn't depend on viewport-clipped
+BFS. That's a design call for the lighting step's pre-impl research.
+
 ## Open targets for the next research pass
 
 The pillar bug is now resolved (see "Pillar bug — root cause
@@ -751,11 +877,7 @@ in case they come up later:
 2. **Animation overlay timing**: `animdata`-driven tile-pointer
    rewrites in `C_0A33_0073` — what's the frame rate, and how
    does the legacy port's `AnimDataManager` compare?
-3. **Light propagation**: `C_1100_0131` flood-fill visibility is
-   only sketched here; if the rebuild wants a different lighting
-   model (gradient instead of binary visible/dark), this needs a
-   careful read.
-4. **Special-cases in `ShowObjects`** (mirror reflection, lens
+3. **Special-cases in `ShowObjects`** (mirror reflection, lens
    placement, storm cloak, eruption) — minor compared to the
    main render flow, but they'll be edge cases to handle in the
    rebuild.

@@ -28,6 +28,42 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-05-30 — Ambient-light decode: `D_2C55` is a flood-fill input, not a render knob
+
+Pre-impl source read for I-3 (world clock) flipped a misleading research-doc claim
+before any code landed.
+
+- **Read**: `D_2C4A.c:18` (`D_2C55 = 7` init + "AmbiantLight?" comment), `u6.h:502`
+  (`AreaLight[40][40]`), `BSS.ASM:96` (`AreaLight db 40*40`), `seg_1100.c:11/87-142`
+  (`C_1100_0131` flood-fill BFS), `seg_1100.c:144-310` (`C_1100_0306` composite —
+  zero region → object-walk flag setup → sun fill from player → torch fills →
+  per-cell tile pick), `seg_1184.c:1829-1833` (obscurity overlay pass),
+  `seg_0A33.c:918-931` (the bucket recompute already in `research_game_loop.md`).
+- **Found**: `D_2C55` is the SUN STRENGTH at the player's feet, fed to
+  `C_1100_0131` as its BFS `dist` argument — NOT a render-side ambient tint. The
+  visible day/night effect is the *result* of re-running the per-cell flood-fill
+  with new strength, which (a) recomputes `AreaLight[40][40]`, (b) re-substitutes
+  `TIL_0FF` / `TIL_1BC` placeholder tiles for unseen/dark cells, (c) emits
+  obscurity-overlay tiles for partly-lit cells. Torches, walls (opaque + window),
+  dungeon darkness all fall out of the flood-fill model — none would survive a
+  "shader-uniform tint by `D_2C55`" port.
+- **Docs**: `research_map_render.md` — added §"Lighting + visibility model" with
+  storage, per-composite pipeline, obscurity overlay, the "`D_2C55` is not the
+  ambient" framing, rebuild implications; removed the now-resolved open-question
+  item #3. `research_game_loop.md` — corrected phase 9 ("Ambient light bucket")
+  description, the key-takeaway, and the `WorldClockSystem` implications bullet to
+  point at the lighting model and flag it as its own later step. `progress.md` —
+  updated I-3 ledger row + added "I-3 scope — world clock" subsection: clock +
+  cascade + hourly hook list, ~1-2 hours; ambient-light render dropped, deferred
+  to its own step after I-6 (avatar = flood-fill source exists).
+- **Open**: where in the step ledger the lighting subsystem lands (after I-6, but
+  unnumbered for now). The modern wide drag-scrollable view re-opens an
+  architectural question source didn't face — source's flood-fill is
+  viewport-clipped (`bp06 == 1` clip in `C_1100_0131`); the rebuild needs either a
+  wider flood region recomputed on camera move, or a different lighting model.
+  Design call for the lighting step's pre-impl research.
+- **Next**: I-3 implementation per the revised scope.
+
 ## 2026-05-29 — Implementation phase opened: I-1 built; terrain + object render read against source
 
 Research phase closed; implementation began (per-step narrative now in
