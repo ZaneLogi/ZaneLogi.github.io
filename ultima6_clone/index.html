@@ -14,8 +14,7 @@
   #dropzone.drag { border-color: #e8c060; background: #241d10; color: #e8c060; }
   #checklist { white-space: pre; background: #0e0b07; border: 1px solid #2a2316; padding: 12px; border-radius: 6px; }
   #log { white-space: pre-wrap; background: #0e0b07; border: 1px solid #2a2316; padding: 12px; border-radius: 6px; margin-top: 12px; min-height: 1.6em; }
-  #screen { display: none; margin-top: 12px; border: 1px solid #2a2316; image-rendering: pixelated; cursor: grab; touch-action: none; }
-  #screen.dragging { cursor: grabbing; }
+  #screen { display: none; margin-top: 12px; border: 1px solid #2a2316; image-rendering: pixelated; touch-action: none; }
   #clock-hud {
     position: fixed; top: 12px; right: 12px;
     background: rgba(0,0,0,0.7); color: #e8c060;
@@ -26,6 +25,9 @@
   #clock-hud.paused { border-color: #c66; }
   #clock-text { white-space: nowrap; }
   #clock-controls { margin-top: 4px; display: flex; gap: 4px; }
+  #probe-text { white-space: nowrap; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2316; color: #b8a878; font-size: 12px; }
+  #probe-text.blocked { color: #c66; }
+  #probe-text.pass { color: #6c6; }
   #clock-hud button {
     pointer-events: auto;
     background: #1c180f; color: #e8c060;
@@ -34,6 +36,12 @@
     cursor: pointer;
   }
   #clock-hud button:hover { background: #241d10; }
+  #probe-cell {
+    position: fixed; width: 16px; height: 16px;
+    border: 2px solid #e8c060; box-sizing: border-box;
+    outline: 1px solid #000;    /* dark halo so the yellow stands out on any tile */
+    pointer-events: none; display: none;
+  }
   .ok { color: #6c6; } .miss { color: #c66; } .warn { color: #e8c060; }
 </style>
 </head>
@@ -43,6 +51,7 @@
 <div id="dropzone">Drop your Ultima VI data files here</div>
 <div id="checklist">scanning…</div>
 <canvas id="screen" width="768" height="512"></canvas>
+<div id="probe-cell"></div>
 <div id="clock-hud">
   <div id="clock-text"></div>
   <div id="clock-controls">
@@ -52,6 +61,7 @@
     <button data-act="p10">+10m</button>
     <button data-act="p60">+1h</button>
   </div>
+  <div id="probe-text">hover the map…</div>
 </div>
 <div id="log"></div>
 <script type="module" src="./main.js"></script>

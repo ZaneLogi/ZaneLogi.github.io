@@ -20,6 +20,7 @@ import { Camera } from '../resources/camera.js';
 import { TileRegistry } from '../resources/tile_registry.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
 import { Position, Renderable } from '../components/components.js';
+import { forEachOccupiedCell } from './tile_footprint.js';
 
 export function makeWorldRenderSystem(renderer) {
   const ts = renderer.tileSize;
@@ -68,15 +69,7 @@ export function makeWorldRenderSystem(renderer) {
         for (let k = ents.length - 1; k >= 0; k--) {
           const i = world.resolve(ents[k]);
           if (i === -1) continue;
-          const t = rend.tileId[i];
-          emit(t, c, r, false);                                    // hotspot (bp06=0)
-          const dw = reg.isDoubleWidth(t), dh = reg.isDoubleHeight(t);
-          if (dw) {
-            emit(t - 1, c - 1, r, true);                           // left
-            if (dh) { emit(t - 2, c, r - 1, true); emit(t - 3, c - 1, r - 1, true); }  // 2x2
-          } else if (dh) {
-            emit(t - 1, c, r - 1, true);                           // DoubleV head
-          }
+          forEachOccupiedCell(reg, rend.tileId[i], c, r, emit);
         }
       }
     }

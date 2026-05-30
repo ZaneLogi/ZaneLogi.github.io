@@ -28,6 +28,90 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-05-30 — I-4 (tile passability) landed: walks branch + footprint util + cell probe
+
+`C_1E0F_000F` (the per-step movement-legality predicate) ported as
+`canStandAt(world, x, y, { actorId })` — the signature mirrors source's
+`(objNum, x, y)`; the body implements the walks-class branch only and grows
+in-place for swim/fly/ethereal as their owning subsystems land.
+
+- **Read**: `seg_1E0F.c:66-235` (`C_1E0F_000F` end-to-end, focused on the
+  `bp_10` walks branch + the `c_04ed` NPC-always-blocks gate); `u6.h:175-247`
+  (TerrainType / TileFlag / D_B3EF plane bit definitions, including the
+  `[Ig]nore` short-form decoding); `seg_1E0F.c:1866-1922`
+  (`__ComputeResistance` — the pathfinder's parallel cost-map that uses the
+  same 2×2 footprint expansion via `C_1E0F_4265`); `seg_0903.c:229-232`
+  (the tileflag file's 4-plane @0x0000/0x0800/0x1000/0x1400 layout —
+  TypeWeight skipped, real total 0x1C00 bytes).
+- **Found**:
+  - **Door open/closed is per-FRAME tile flags, not an `OBJ_129..12C`
+    special case.** Closed frames have `IsTerrainImpassable` set; open
+    frames don't. The walks-class predicate handles both transparently.
+    When door-opening lands later, updating an entity's frame updates
+    render AND passability via the same `Renderable.tileId` read — one
+    source of truth.
+  - **`IsTileIgnore` is "don't short-circuit on Breakthrough"** — not a
+    generic "ignore me." A Breakthrough tile grants pass + breaks the cell
+    scan UNLESS Ignore is also set on the same tile (`seg_1E0F.c:142-146`).
+    Stacked Breakthrough + NPC at the same cell behaves differently with
+    vs without Ignore — confirmed in unit tests.
+  - **The legacy port misread two flags.** I-2 already corrected
+    `isTopTile` → `isForeground` (`IsTileFor`) and `isForceLowerTile` →
+    `isBreakthrough` (`IsTileBr`, an AI/movement flag, NOT render); I-4
+    added the missing `isTileIgnore` (`IsTileIg`, `D_B3EF & 0x10`) and the
+    four TerrainType walks-branch flags (`isTerrainImpassable` / `Wet` /
+    `Wall` / `Damage`).
+  - **2×2 footprint expansion at the QUERY site** (the 4 candidate anchors
+    `(x,y)` / `(x+1,y)` / `(x,y+1)` / `(x+1,y+1)`) cleanly replaces
+    source's `MapObjPtr` register-at-each-cell trick. Source registers a
+    2×2 anchor at all 4 cells; we register only the anchor and expand at
+    lookup. Same semantic, less memory, no per-move bookkeeping. Shared
+    between render (per-cell painter zones) and passability (per-cell
+    block check) via `forEachOccupiedCell`.
+- **Docs**: `progress.md` — I-4 ledger row flipped + "I-4 scope"
+  subsection added (sub-step breakdown, deferred class arms, durable
+  source findings, verification record). `passability.js` header carries
+  the deferred items list with subsystem-owner notes (swim → boats,
+  fly+ethereal → combat, etc.). No `research_*.md` changes — the
+  walks-branch decode in `research_npc_ai.md` §"Movement legality" was
+  already accurate; the new source insights here (door per-frame,
+  IsTileIgnore semantics) are captured in the durable-findings block of
+  `progress.md` "I-4 scope" alongside the impl rather than re-flowed into
+  the research doc.
+- **Discussion notes (for the cross-PC paper trail)**:
+  - **Function naming**: `canWalk` → `canStandAt` mid-step. Source's
+    predicate has no friendly name (`C_1E0F_000F`); its semantic role is
+    broader than "walks" — it covers any monster class, switching
+    internally. Renaming keeps the body's future expansion
+    (swim/fly/ethereal arms) in one function rather than spawning sibling
+    predicates.
+  - **Scope of class branches**: I floated expanding to the full class
+    dispatch now (unit tests don't need real game data), but
+    [[green-earth-default-justified-override]] won out — none of
+    swim/fly/ethereal are reachable in the visible-progress trajectory
+    (I-5 → I-6 → I-7 → I-8 → I-9 are all walks), and the source is
+    short + well-documented in `research_npc_ai.md` for the eventual
+    re-read. Defer-not-now.
+  - **Cursor scheme**: removed `cursor: grab` / `grabbing` from the canvas
+    because the OS grab-hand obscured the 16×16 probe highlight. The
+    proper cursor scheme follows the input-model decision (keyboard-
+    primary vs point-and-click hybrid) that I-6 forces; current state is
+    a debug-visibility tradeoff, not a UX commitment.
+- **Open**:
+  - Input model decision (keyboard-primary + mouse for pan/inspect vs
+    point-and-click hybrid) — determines the cursor scheme and the
+    avatar's movement input mechanic. Pinned to land before I-6 (avatar
+    movement) starts.
+  - Lighting subsystem step number (still unnumbered, post-I-6) —
+    placement in the ledger settles when its pre-impl research begins.
+  - Boats / vehicles step (the first caller that needs the swim arm of
+    `canStandAt`) — unscheduled.
+- **Next**: I-5 — NPC scheduled movement. Consumes the I-3 `WorldClock`
+  hook list (`onHour` → `C_1E0F_5165` schedule re-check) AND the I-4
+  `canStandAt` predicate (movement-legality per step + pathfinder cost
+  map). The first step where multiple I-N primitives compose into
+  observable behaviour.
+
 ## 2026-05-30 — Ambient-light decode: `D_2C55` is a flood-fill input, not a render knob
 
 Pre-impl source read for I-3 (world clock) flipped a misleading research-doc claim

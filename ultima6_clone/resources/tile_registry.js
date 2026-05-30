@@ -20,9 +20,14 @@ export class TileRegistry {
   // Render tile for an object: baseTile[objNumber] + frame (source TILE_FRAME).
   tileForObject(objNumber, frame) { return this.baseTile.tileFor(objNumber, frame); }
 
-  isForeground(t)   { return this.flags.isForeground(t); }    // IsTileFor
-  isBackground(t)   { return this.flags.isBackground(t); }    // IsTileBa — render bottom
-  isDoubleHeight(t) { return this.flags.isDoubleHeight(t); }  // IsTileDoubleV
-  isDoubleWidth(t)  { return this.flags.isDoubleWidth(t); }   // IsTileDoubleH
-  isBreakthrough(t) { return this.flags.isBreakthrough(t); }  // IsTileBr — AI/movement, not render
+  isForeground(t)        { return this.flags.isForeground(t); }        // IsTileFor
+  isBackground(t)        { return this.flags.isBackground(t); }        // IsTileBa — render bottom
+  isDoubleHeight(t)      { return this.flags.isDoubleHeight(t); }      // IsTileDoubleV
+  isDoubleWidth(t)       { return this.flags.isDoubleWidth(t); }       // IsTileDoubleH
+  isBreakthrough(t)      { return this.flags.isBreakthrough(t); }      // IsTileBr — AI/movement, not render
+  isTileIgnore(t)        { return this.flags.isTileIgnore(t); }        // IsTileIg
+  isTerrainWet(t)        { return this.flags.isTerrainWet(t); }        // IsTerrainWet
+  isTerrainImpassable(t) { return this.flags.isTerrainImpassable(t); } // IsTerrainImpass
+  isTerrainWall(t)       { return this.flags.isTerrainWall(t); }       // IsTerrainWall
+  isTerrainDamage(t)     { return this.flags.isTerrainDamage(t); }     // IsTerrainDamage
 }

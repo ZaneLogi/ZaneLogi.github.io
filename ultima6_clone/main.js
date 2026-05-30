@@ -24,6 +24,8 @@ import { makeTileAnimationSystem } from './systems/tile_animation_system.js';
 import { makePaletteCycleSystem } from './systems/palette_cycle_system.js';
 import { makeWorldRenderSystem } from './systems/world_render_system.js';
 import { makeWorldClockSystem } from './systems/world_clock_system.js';
+import { canStandAt } from './systems/passability.js';
+import { forEachOccupiedCell } from './systems/tile_footprint.js';
 import { Position, Renderable, ObjType, Status, Amount, Actor } from './components/components.js';
 import { loadActors, ensureRegionsInView, makeStreamingSystem } from './world_loader.js';
 
@@ -230,18 +232,98 @@ async function startRender(world) {
 
   // drag-to-pan
   let dragging = false, lastX = 0, lastY = 0;
+  const cellEl = document.getElementById('probe-cell');
   canvas.addEventListener('pointerdown', (e) => {
     dragging = true; lastX = e.clientX; lastY = e.clientY;
-    canvas.classList.add('dragging'); canvas.setPointerCapture(e.pointerId);
+    canvas.setPointerCapture(e.pointerId);
+    cellEl.style.display = 'none';                              // I-4d: hide the probe highlight during drag-pan
   });
   canvas.addEventListener('pointermove', (e) => {
     if (!dragging) return;
     world.getResource(Camera).pan(e.clientX - lastX, e.clientY - lastY);
     lastX = e.clientX; lastY = e.clientY;
   });
-  const end = () => { dragging = false; canvas.classList.remove('dragging'); };
+  const end = () => { dragging = false; };
   canvas.addEventListener('pointerup', end);
   canvas.addEventListener('pointercancel', end);
+
+  // I-4d cell probe: hover-to-inspect overlay on the dev HUD. Shows the cell
+  // under the cursor, terrain tile + key flags, any per-cell object tile id
+  // covering it (via footprint expansion), and the live canStandAt verdict.
+  // The integration check for I-4c — proves the flag plumbing + canStandAt
+  // logic line up with real `tileflag` values on real `OBJBLK*` data. Kept
+  // across the remaining impl steps like the clock HUD.
+  const probeEl = document.getElementById('probe-text');
+  const rendStore = world.store(Renderable);
+  function describeCell(x, y) {
+    const reg = world.getResource(TileRegistry);
+    const lvl = world.getResource(MapLevel);
+    const spatial = world.getResource(SpatialIndex);
+
+    const tT = lvl.tileAt(x, y);
+    const tFlags = [];
+    if (reg.isTerrainImpassable(tT)) tFlags.push('impass');
+    if (reg.isTerrainWet(tT)) tFlags.push('wet');
+    if (reg.isTerrainWall(tT)) tFlags.push('wall');
+    if (reg.isTerrainDamage(tT)) tFlags.push('damage');
+
+    const objs = [];
+    for (let dy = 0; dy <= 1; dy++) {
+      for (let dx = 0; dx <= 1; dx++) {
+        const ents = spatial.at(x + dx, y + dy);
+        if (!ents) continue;
+        for (let k = ents.length - 1; k >= 0; k--) {
+          const handle = ents[k];
+          const id = world.resolve(handle);
+          if (id === -1) continue;
+          let tile = -1;
+          forEachOccupiedCell(reg, rendStore.tileId[id], x + dx, y + dy, (t, col, row) => {
+            if (col === x && row === y) tile = t;
+          });
+          if (tile === -1) continue;
+          const lbl = [];
+          if (world.has(handle, Actor)) lbl.push('NPC');
+          if (reg.isBreakthrough(tile)) lbl.push('br');
+          if (reg.isTileIgnore(tile)) lbl.push('ig');
+          if (reg.isTerrainImpassable(tile)) lbl.push('impass');
+          objs.push(`t#${tile}${lbl.length ? '[' + lbl.join(',') + ']' : ''}`);
+        }
+      }
+    }
+
+    return {
+      text: `(${x},${y}) terrain t#${tT}${tFlags.length ? '[' + tFlags.join('+') + ']' : ''} · objs:${objs.length ? '[' + objs.join(' ') + ']' : 'none'}`,
+      stand: canStandAt(world, x, y),
+    };
+  }
+  function updateProbe(e) {
+    if (dragging) return;                                         // freeze probe + highlight while panning
+    const cam = world.getResource(Camera);
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+    if (sx < 0 || sy < 0 || sx >= rect.width || sy >= rect.height) return;
+    const W = 1024;
+    const tx = (Math.floor((cam.worldX + sx) / ts) % W + W) % W;
+    const ty = (Math.floor((cam.worldY + sy) / ts) % W + W) % W;
+    const d = describeCell(tx, ty);
+    probeEl.textContent = `${d.text} · stand=${d.stand ? 'YES' : 'NO'}`;
+    probeEl.classList.toggle('pass', d.stand);
+    probeEl.classList.toggle('blocked', !d.stand);
+    // Position the 1px highlight rectangle on the cell. Computed from the cursor's
+    // tile-snapped pixel inside the canvas (avoids wrap edge-cases with tx/ty); the
+    // result is the same pixel the renderer paints the tile at.
+    const offX = ((cam.worldX % ts) + ts) % ts;
+    const offY = ((cam.worldY % ts) + ts) % ts;
+    cellEl.style.left = (rect.left + Math.floor((sx + offX) / ts) * ts - offX) + 'px';
+    cellEl.style.top  = (rect.top  + Math.floor((sy + offY) / ts) * ts - offY) + 'px';
+    cellEl.style.display = 'block';
+  }
+  canvas.addEventListener('pointermove', updateProbe);
+  canvas.addEventListener('pointerleave', () => {
+    probeEl.textContent = 'hover the map…';
+    probeEl.classList.remove('pass', 'blocked');
+    cellEl.style.display = 'none';
+  });
 
   let last = performance.now();
   (function loop(t) { world.frame(t - last, t); last = t; requestAnimationFrame(loop); })(last);

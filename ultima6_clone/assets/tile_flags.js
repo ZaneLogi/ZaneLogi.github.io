@@ -27,9 +27,14 @@ export class TileFlags {
     }
   }
 
-  isForeground(t)   { return (this.flags2[t] & 0x10) !== 0; }   // IsTileFor    (was "isTopTile")
-  isDoubleHeight(t) { return (this.flags2[t] & 0x40) !== 0; }   // IsTileDoubleV
-  isDoubleWidth(t)  { return (this.flags2[t] & 0x80) !== 0; }   // IsTileDoubleH
-  isBackground(t)   { return (this.flags3[t] & 0x20) !== 0; }   // IsTileBa  — replaces terrain (render bottom)
-  isBreakthrough(t) { return (this.flags3[t] & 0x04) !== 0; }   // IsTileBr  — AI/movement, NOT render (was "isForceLowerTile")
+  isForeground(t)        { return (this.flags2[t] & 0x10) !== 0; }   // IsTileFor    (was "isTopTile")
+  isDoubleHeight(t)      { return (this.flags2[t] & 0x40) !== 0; }   // IsTileDoubleV
+  isDoubleWidth(t)       { return (this.flags2[t] & 0x80) !== 0; }   // IsTileDoubleH
+  isBackground(t)        { return (this.flags3[t] & 0x20) !== 0; }   // IsTileBa  — replaces terrain (render bottom)
+  isBreakthrough(t)      { return (this.flags3[t] & 0x04) !== 0; }   // IsTileBr  — AI/movement, NOT render (was "isForceLowerTile")
+  isTileIgnore(t)        { return (this.flags3[t] & 0x10) !== 0; }   // IsTileIg  — Breakthrough scan does NOT short-circuit
+  isTerrainWet(t)        { return (this.flags1[t] & 0x01) !== 0; }   // IsTerrainWet
+  isTerrainImpassable(t) { return (this.flags1[t] & 0x02) !== 0; }   // IsTerrainImpass
+  isTerrainWall(t)       { return (this.flags1[t] & 0x04) !== 0; }   // IsTerrainWall    — blocks flight
+  isTerrainDamage(t)     { return (this.flags1[t] & 0x08) !== 0; }   // IsTerrainDamage  — hazard tile
 }

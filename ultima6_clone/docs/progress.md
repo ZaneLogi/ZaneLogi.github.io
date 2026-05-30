@@ -5,11 +5,15 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status:** **I-2 (world-data system) COMPLETE** — the real world (`OBJBLK*` objects
-+ `objlist` NPCs) loads into ECS entities, drawn through a spatial-index-driven
-per-cell painter's render, with the legacy `ObjManager` dissolved. Verified on real
-data (1837 entities; Britain + the Lycaeum render correctly, pillars + carpet/steps
-Z-order faithful, camera-driven region streaming). Next: **I-3** — the world clock.
+**Status:** **I-4 (tile passability) COMPLETE** — `canStandAt(world, x, y, { actorId })`,
+a pure predicate that mirrors source's `C_1E0F_000F` for the walks-class branch,
+landed alongside the shared `forEachOccupiedCell` footprint utility, the five
+new tile-flag accessors it needs, and a HUD cell probe that lights up the real-
+data integration (cursor hover → cell coords + flags + verdict + 16×16 highlight).
+Deferred class arms (swim/fly/ethereal/amphibian) live in their own later steps;
+the signature is source-shaped so they fold into the same predicate's body when
+their owning subsystems land. Next: **I-5** — NPC scheduled movement (the
+attractive all-new step; consumes the I-3 clock + the I-4 predicate).
 
 ---
 
@@ -19,9 +23,9 @@ Z-order faithful, camera-driven region streaming). Next: **I-3** — the world c
 |---|---|---|
 | **I-1** | **terrain on screen** (ECS core + overworld render + demo entities) | **done** |
 | **I-2** | **world-data system** — load `OBJBLK*` objects + `objlist` NPCs into real ECS entities (drawn + spatial-indexed; `ObjManager` dissolved) | **done** |
-| **I-3** | world clock (game-time tick → schedules; `D_2C55` computed but unconsumed) | **next** |
-| I-4 | tile passability (walkability primitive; reused by NPC + avatar) | planned |
-| I-5 | NPC scheduled movement (hourly schedules + pathfinding + walking) | planned |
+| **I-3** | world clock (game-time tick → schedules; `D_2C55` computed but unconsumed) | done |
+| **I-4** | **tile passability** — `canStandAt` primitive (walks-only body) + footprint util + HUD cell probe | **done** |
+| **I-5** | NPC scheduled movement (hourly schedules + pathfinding + walking) | **next** |
 | I-6 | avatar entity + input + movement + camera follow | planned |
 | I-7 | talk trigger (adjacency + key) | planned |
 | I-8 | dialog UI window | planned |
@@ -247,3 +251,118 @@ correction trail: `research_game_loop.md` §"Time-advance" phase 9 + key takeawa
 path and no new asset decode; the two-clock architectural seam (`TurnClock`
 resource + `frame()` orchestration) is already in `ecs/world.js` from I-1a, so
 I-3 is purely additive.
+
+## I-4 scope — tile passability
+
+**Goal:** `canStandAt(world, x, y, { actorId })` — a pure predicate, NOT a
+scheduler-registered system, called by I-5 (NPC path step) and I-6 (avatar
+input) to decide whether a single tile move is legal. Mirrors source's
+`C_1E0F_000F` (`seg_1E0F.c:66-235`); the walks branch only — the signature is
+source-shaped (covers any monster class), the body grows by adding
+`if (swims) …` arms in-place when later subsystems bring those classes online,
+without touching callers (`research_npc_ai.md` §"Movement legality").
+
+**Sub-steps** (each ≈ one save-point commit, squashed at the end → one
+`impl I-4`):
+
+- **I-4a — flag accessors (walks subset).** Five accessors on `TileFlags` +
+  passthroughs on `TileRegistry`: `isTerrainImpassable` / `isTerrainWet` /
+  `isTerrainWall` / `isTerrainDamage` (TerrainType plane @ 0x0000) +
+  `isTileIgnore` (D_B3EF plane @ 0x1400). Source-name comments on each line
+  preserve the citation (`IsTerrainImpass`, `IsTileIg`, etc.) per
+  [[expand-source-abbreviations]] — JS gets the full word, comment carries
+  the cryptic source short-form. 32 unit cases in
+  `tests/test_passability.html` cover plane isolation + last-tile (2047)
+  boundary.
+
+- **I-4b — shared footprint utility.** Extract the 2×2 expansion previously
+  inline in `world_render_system.js` into `systems/tile_footprint.js`:
+  `forEachOccupiedCell(reg, tile, anchorCol, anchorRow, cb)`. `WorldRenderSystem`
+  switches to it; no behavior change. Shared by two consumers — render's
+  painter zones (needs the per-cell tile id + `isExt` flag) and passability's
+  "what blocks at (x,y)" iteration (only needs the cell coords). Render
+  verified pixel-identical on Britain after the extract.
+
+- **I-4c — `canStandAt` primitive (walks-only body).** New
+  `systems/passability.js`. Iterates the 4 candidate anchor cells whose 2×2
+  footprint could cover `(x,y)`; per entity, calls `forEachOccupiedCell` to
+  find the per-cell tile that actually lands on `(x,y)`; checks Breakthrough
+  (short-circuit unless `IsTileIgnore`) + object-tile `IsTerrainImpassable`
+  + NPC always-blocks. Skip-self via `actorId` (entity handle). Initial
+  function name `canWalk` was renamed to `canStandAt` mid-step to match
+  source's broader semantic — the walks-only body grows into the full
+  predicate by adding `if (swims) …` / `if (flies) …` arms inside, rather
+  than spawning sibling `canSwim` / `canFly` predicates that would leak the
+  class switch into every caller. 19 synthetic-fixture unit cases:
+  empty-cell pass, impassable terrain block, breakthrough-overrides-terrain,
+  impassable object block, door open vs closed (via per-frame tile flags,
+  no `OBJ_xxx` special), NPC blocks, skip-self, 2×2 anchor blocks all 4
+  body cells + leaves 4 surrounding cells free, Breakthrough+Ignore stack
+  interaction with NPC, Breakthrough-without-Ignore short-circuit, neighbour-
+  cell isolation.
+
+- **I-4d — HUD cell probe + highlight.** Real-data integration check for
+  I-4c, paired with a small overlay so the readout is self-evidencing.
+  Pointer hover updates a dev-HUD line `(x,y) terrain t#N[flags] · objs:
+  [t#M[flags] …] · stand=YES/NO` (red on blocked, green on pass) AND
+  positions a 16×16 yellow rectangle with a dark halo at the probed cell.
+  Hides during drag-pan (probe text freezes too), resumes on the next
+  hover, clears on canvas leave. Removed `cursor: grab` / `grabbing` from
+  `#screen` — the grab hand obscured the 16×16 highlight at this scale; a
+  debug-visibility tradeoff, default arrow cursor in dev; the proper cursor
+  scheme is decided alongside the input model when I-6 lands. **Kept across
+  the remaining impl steps** alongside the I-3 clock HUD — both are removed
+  or gated behind a debug toggle when the real status panel ports
+  (`seg_0A33.c:933-936`) and game UI lands; see `CLAUDE.md` §"Modern-browser
+  UX".
+
+**Deferred (each owns a later step, with subsystem owner noted):**
+- swim / fly / amphibian / ethereal monster-class branches — boats → swim
+  (post-I-6 boats subsystem); combat → fly + ethereal; folded INTO
+  `canStandAt`'s body as class arms, NOT sibling functions
+- party-member pass-through (`D_17B2`) — no avatar party until I-6+
+- sacred-quest gate (`OBJ_1A0` + `VarInt['Q'-0x37]`) — no quest flags yet
+- fence directional pass (object's `TerrainType` bits `80/40/20/10`)
+- damage-tile flag (`TERRAIN_FLAG_08` + `D_17A9`) — no combat / hazard system
+- 5-type NPC-furniture overlap exception list — no SIT/EAT/PLAY worktypes yet
+- door-opening mechanism (the predicate already handles open vs closed
+  transparently via per-frame tile flags; the open/close *trigger* logic is
+  its own subsystem)
+
+**Durable source findings (worth recalling before touching this code again):**
+- **`IsTileIgnore` is the "don't short-circuit on Breakthrough" flag**
+  (`seg_1E0F.c:142-146`). A Breakthrough tile grants pass + breaks the cell
+  scan UNLESS Ignore is also set, in which case the scan continues and a
+  later blocker (e.g. an NPC at the same cell) can still block.
+- **Door open/closed is per-FRAME tile flags, NOT an `OBJ_xxx` special
+  case.** Closed-door frames have `IsTerrainImpassable` set; open-door
+  frames don't. `canStandAt` handles both transparently via the flag-bit
+  check on `Renderable.tileId` — when door-opening lands, updating an
+  entity's frame automatically updates both render and passability.
+- **NPCs always block at `c_04ed`** in source. A 5-type furniture
+  exception list exists in source (chairs/tables for SIT/EAT) but is
+  dropped at this scope — none of those overlap types are in scope until
+  the SIT/EAT/PLAY worktypes land.
+- **Per-cell iteration order matches source's chain head→tail**
+  (newest-insert first via `FindLoc`/`NextLoc`). Our `ents[]` is in load
+  order (oldest at index 0), so iterate REVERSE — same direction as render.
+- **2×2 footprint expansion at the QUERY site** (4 candidate anchor cells:
+  `(x,y)`, `(x+1,y)`, `(x,y+1)`, `(x+1,y+1)`) replaces source's
+  `MapObjPtr` register-at-each-cell trick. Our `SpatialIndex` stores
+  entities at their anchor only, so both render and passability expand at
+  lookup time via `forEachOccupiedCell`.
+
+**Verification:**
+- `tests/test_passability.html`: 51/51 (32 flag accessors + 19 canStandAt cases)
+- HUD probe live on Britain on real `OBJBLK*` data: walls at (289,349) /
+  (311,362) show `terrain t#156/146 [impass+wall] · stand=NO`; passable
+  cells show `stand=YES`; the Avatar start cell (307,352) correctly blocks
+  via 2 stacked objects despite passable terrain
+- Render unchanged after the I-4b extract (visual check on Britain)
+- Drag-pan still works after the cursor + `dragging`-class cleanup; the
+  highlight + probe text correctly freeze during drag and resume after
+
+**Estimate vs actual:** estimated ~2-3 h; landed in ~3-4 h including the
+`canWalk` → `canStandAt` rename mid-step (a source-faithfulness discussion
+that changed the function's naming scope) and the probe-highlight visibility
+iteration (border 1px → 2px + dark outline + cursor swap to default arrow).
