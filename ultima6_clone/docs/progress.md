@@ -5,15 +5,32 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status:** **I-4 (tile passability) COMPLETE** — `canStandAt(world, x, y, { actorId })`,
-a pure predicate that mirrors source's `C_1E0F_000F` for the walks-class branch,
-landed alongside the shared `forEachOccupiedCell` footprint utility, the five
-new tile-flag accessors it needs, and a HUD cell probe that lights up the real-
-data integration (cursor hover → cell coords + flags + verdict + 16×16 highlight).
-Deferred class arms (swim/fly/ethereal/amphibian) live in their own later steps;
-the signature is source-shaped so they fold into the same predicate's body when
-their owning subsystems land. Next: **I-5** — NPC scheduled movement (the
-attractive all-new step; consumes the I-3 clock + the I-4 predicate).
+**Status:** **I-5 (NPC schedule resolution) COMPLETE** — narrowed mid-flight
+from the original "NPC scheduled movement (hourly schedules + pathfinding +
+walking)" framing to **schedule-resolution-only**: snap eligible NPCs to
+their slot's `xyz` on each game-hour rollover, with no pathfinding, no
+facing/frame updates, and no `NPCMode` plumbing. Day-long world-clock sweep
+shows sensible snap counts at meal/sleep boundaries; the dev HUD's stats
+line + cell probe surface live activity + per-NPC slot details. Six
+save-point commits (I-5a parser → I-5f HUD probe). A post-I-5 fix in
+`WorldRenderSystem` reworked the within-cell sort from reverse-load-order
+to a type-based z-priority (`Actor=1`, else=0) after Lord British rendered
+under his throne — the rule is now decoupled from entity-index recycling,
+ready for the object-interaction phase. See I-2c scope (updated) for the
+current painter rule and the new I-5 scope section for the slice that
+landed + the deferred items (pathfinding, action-driven pose sprites,
+first-tick alignment, NPC names, fgExt-source-faithful ordering).
+
+Next: **I-6** (inventory data layer) — first step of a re-planned
+post-I-5 trajectory that pulls **inventory data + UI substrate** ahead
+of **avatar movement**. The UI substrate (formerly "I-8 dialog UI
+window") is now broadened to be the shared foundation for every later
+UI surface (object inspector, status panel, save/load, spell select,
+conversation); its first consumer is the object inspector (I-7) — the
+heaviest UI consumer in primitive usage, so the substrate is battle-
+tested by a real surface rather than aspirationally general. See the
+explainer paragraph below the ledger for the full rationale + binding
+modal-stack / turn-driver-suspension design decisions.
 
 ---
 
@@ -25,11 +42,16 @@ attractive all-new step; consumes the I-3 clock + the I-4 predicate).
 | **I-2** | **world-data system** — load `OBJBLK*` objects + `objlist` NPCs into real ECS entities (drawn + spatial-indexed; `ObjManager` dissolved) | **done** |
 | **I-3** | world clock (game-time tick → schedules; `D_2C55` computed but unconsumed) | done |
 | **I-4** | **tile passability** — `canStandAt` primitive (walks-only body) + footprint util + HUD cell probe | **done** |
-| **I-5** | NPC scheduled movement (hourly schedules + pathfinding + walking) | **next** |
-| I-6 | avatar entity + input + movement + camera follow | planned |
-| I-7 | talk trigger (adjacency + key) | planned |
-| I-8 | dialog UI window | planned |
-| I-9 | conversation VM (adapt legacy `script.js`) | planned |
+| **I-5** | **NPC schedule resolution** — hourly slot snap (pathfinding + pose sprites deferred) | **done** |
+| **I-6** | **inventory data layer** — CONTAINED/INVEN/EQUIP entities + `Container`/`ContainedIn` components; resolve OBJBLK's in-file `GetAssoc` against live entities (deferred from I-2). No UI. | **next** |
+| I-7 | UI substrate + object inspector view (first surface) — modal stack + input routing + turn-driver gating + list-with-cursor + atlas-icon DOM rendering | planned |
+| I-8 | avatar movement + NPC pathfinding — `C_1E0F_2D37` shared by both consumers; avatar input + camera follow + facing-on-step + facing-on-snap fold in | planned |
+| I-9 | object-action dispatch core — `Map<ObjectType, handler>` registries per action (USE / GET / LOOK / DROP); minimum handlers for "walk around without getting stuck" (door USE, LOOK on any, GET/DROP via inventory) | planned |
+| I-10 | talk trigger — adds TALK as a case in the I-9 dispatch + adjacency-pick logic | planned |
+| I-11 | dialog window — second surface on the I-7 substrate; opens when TALK fires | planned |
+| I-12 | conversation VM (adapt legacy `script.js`) — β reached: walk + talk works end-to-end. Give/take opcodes work because I-6 inventory data exists. | planned |
+| I-13 | status panel — third surface on the substrate; replaces the dev HUD's clock readout | planned |
+| I-14 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / moonstones / instruments / etc.); each handler tied to its owning subsystem when that subsystem lands | planned |
 
 **Why I-2 is the world-data system.** Loading the real world from `OBJBLK*`/
 `objlist` into ECS entities is the clone's core purpose — the reason for choosing
@@ -49,14 +71,67 @@ of any player. Its two hard prerequisites come first: the **world clock** (I-3)
 drives the hourly schedule lookup `C_1E0F_5165` (no clock → no "where should this
 NPC be now"), and **tile passability** (I-4) is what the bucket-Dijkstra
 pathfinder `C_1E0F_2D37` + movement-legality `C_1E0F_000F` walk on (object-blocking
-comes from I-2's `SpatialIndex`). The avatar (I-6) reuses the same passability
-primitive, so it slots in cheaply after. See `research_npc_ai.md`.
+comes from I-2's `SpatialIndex`). The avatar reuses the same passability primitive
+when its movement step lands (I-8 in the re-planned trajectory). See
+`research_npc_ai.md`.
+
+**Why the post-I-5 trajectory re-plans inventory + UI ahead of avatar (decided
+2026-05-31).** The originally-scoped "I-8 dialog UI window" is rescoped into a
+broader **UI substrate** (modal stack + input routing + turn-driver gating +
+list-with-cursor + atlas-icon DOM rendering) shared by every later UI surface
+(object inspector, status panel, save/load, spell select, conversation). Its first
+consumer is the **object inspector** (I-7) — the heaviest UI consumer in primitive
+usage, so the substrate is battle-tested by a real surface rather than
+aspirationally general. To feed the inspector, the **inventory data layer** (I-6)
+lands first: parse CONTAINED/INVEN/EQUIP records into entities, resolve OBJBLK's
+in-file `GetAssoc` against the live entity space (the bit deferred from I-2).
+Avatar movement + NPC pathfinding then fold into one step (I-8) — both consumers
+share `C_1E0F_2D37` machinery, plus facing-on-step (pathfind walker) + facing-on-
+snap (schedule trigger) want the same direction logic.
+
+**Object-action dispatch (I-9) precedes talk trigger (I-10).** U6 doesn't have
+"USECODE" in the Ultima 7 sense — instead source uses two distinct mechanisms:
+a stack-based bytecode VM at `seg_1703.c` for NPC dialogue (the conversation
+VM, I-12) and a hardcoded C dispatch table at `seg_27a1.c` for object actions
+(USE / GET / LOOK / DROP / PUSH / SEARCH per `OBJ_xxx`). The object-action
+dispatch is the more general primitive: TALK is just one case in the same
+"press a key, do X to the entity in front of me" pattern that USE/GET/LOOK
+share. So I-9 lays the dispatch infrastructure with a minimum handler set
+(door USE, generic LOOK, GET/DROP via inventory) — enough to walk around
+without getting stuck. I-10 then adds TALK as a new case alongside, plus the
+adjacency-pick logic ("which NPC am I facing?"). I-14 (post-β) fills in the
+rest of `seg_27a1.c`'s table (spellbooks → `C_27A1_2D8E`, moonstones →
+`C_27A1_3425`, instruments → `C_27A1_5935`, etc.), each gated on its owning
+subsystem becoming available.
+
+The β path (walk + talk) reaches at **I-12**, later than the prior plan, but
+the conversation VM lands with full give/take semantics rather than stubbed
+inventory opcodes; the world feels alive sooner via inventory inspection
+before agency exists; and the object-action dispatch is in place from I-9 so
+β includes "USE on doors works" rather than requiring a follow-up step.
+
+**Binding design decisions for the substrate (decided 2026-05-31).**
+- **Object inspector, not container view.** ONE inspector surface for any
+  entity — sword, NPC, barrel, chest. Identity (sprite + name + type) always
+  shown; contents-list area conditional on `Container` component (empty/absent
+  for non-containers).
+- **Modal-stack pattern for nested containers** — opening a container child
+  pushes a new inspector modal on top of the existing stack (not inline tree
+  expansion). Each modal lists ONE level of children; the window manager's
+  z-stack handles the rest. Cleaner widget, matches source's "open this then
+  open that" interaction model.
+- **Turn-driver suspended for the entire modal-stack lifetime.** When any
+  inspector opens, `TurnClock.suspend()` fires; every sim-system activity
+  (schedule snaps, NPC moves, clock advance — all turn-driver-gated work)
+  pauses until every modal in the stack closes, then `TurnClock.resume()`.
+  No schedule snaps fire while the player inspects. Matches source's
+  "world pauses during inspection" behavior and the existing dev HUD's
+  pause button mechanism.
 
 Steps past I-2 are the visible-progress trajectory, not a committed sub-step plan
 — each step's real breakdown is written into its "scope" subsection when it
 starts, after pre-impl research for its trickiest part. Deferred-to-later
-subsystems (HUD, combat, magic, inventory UI, save/load, audio) fold in after the
-β path lands.
+subsystems (combat, magic, save/load, audio) fold in after the β path lands.
 
 ---
 
@@ -174,10 +249,18 @@ faithful render together (Zane's call).
   1488 spatial cells.
 
 - **I-2c — per-cell painter's render + palette cycling.** `WorldRenderSystem`
-  (spatial-walk + 4-zone within-cell order: **background → normal → FG-hotspot →
-  FG-extension**; each cell's entities drawn in REVERSE load order so the first-loaded
-  is on top → NPCs stand on carpets/floor, matching source's chain) replaces I-1d's
-  2-zone `EntityRenderSystem`. Two render channels extracted as systems:
+  (spatial-walk + 4-zone cross-cell order: **background → normal → FG-hotspot →
+  FG-extension**) replaces I-1d's 2-zone `EntityRenderSystem`. Within-zone
+  order: for each visible cell, gather all contributions (own anchor + the 3
+  neighbor anchors whose 2×2 footprint can reach in), then sort ascending by a
+  **type-based z-priority** (`Actor=1`, else=0; JS stable sort keeps ties in
+  scan order) before emitting to the zone lists — `Actor` entities end up
+  drawn last within zone = on top of furniture/floor objects. This rule
+  replaces an earlier "reverse load order" iteration that broke for
+  double-tile extensions reaching IN from a neighbor (the LB-throne bug
+  surfaced post-I-5). See `research_map_render.md §"Painter's algorithm"` for
+  the full source-vs-clone comparison + the deferred fgExt-source-faithful
+  rule. Two render channels extracted as systems:
   `TileAnimationSystem` (animdata frame-remap → `reg.animDirty`) and
   `PaletteCycleSystem` (the 0xE0–0xFC palette-register shimmer, ported from the legacy
   `colorCycling`). Painter's algorithm decoded from `ShowObject` (seg_1184.c:1651) and
@@ -366,3 +449,159 @@ without touching callers (`research_npc_ai.md` §"Movement legality").
 `canWalk` → `canStandAt` rename mid-step (a source-faithfulness discussion
 that changed the function's naming scope) and the probe-highlight visibility
 iteration (border 1px → 2px + dark outline + cursor swap to default arrow).
+
+## I-5 scope — NPC schedule resolution
+
+**Goal:** at each game-hour rollover, NPCs whose schedule has a slot for that
+hour snap to the slot's `xyz`. Position-only — no pathfinding, no facing/
+frame update, no AI-mode plumbing. Narrower than the step-ledger's original
+"NPC scheduled movement (hourly schedules + pathfinding + walking)" framing;
+the visible payoff (NPCs at scheduled positions across a game-day) ships
+without the pathfinding subsystem source mirrors at this trigger.
+
+**Scope narrowing — what was deferred and why.** Source's `C_1E0F_5165`
+(seg_1E0F.c:2264-2294) does TWO things on hour-tick: (a) resolve the slot
+and (b) set `NPCMode = AI_FINDPATH` to kick pathfinding toward the slot's
+xyz. Frame/facing updates and action-driven pose sprites (sleep/sit/eat)
+come from pathfinding (frame-during-walk) + the AI dispatch reading
+`NPCMode` on arrival, NOT from the schedule trigger itself. Landing all of
+that at I-5 would be a multi-subsystem commit; the schedule-resolution-only
+slice composes cleanly with what already exists (I-3 onHour + I-4
+`canStandAt`) and produces a self-evident result (advance the clock → see
+NPCs jump to new positions). Pathfinding, facing updates, and pose sprites
+are I-6+ territory.
+
+**Sub-steps** (each ≈ one save-point commit, browser-verified before the
+next):
+
+- **I-5a — `assets/schedule.js` parser** + `tests/test_schedule.html`.
+  Decode the 257 u16-LE pointer table + N×5-byte `tSchedule` records per
+  `seg_0C9C.c:285` + `u6.h:469`. Exposes raw `pointers` plus `byNpc[256]`
+  convenience view + `AiAction` schedule-tier constants. Two data quirks
+  surfaced and documented in the parser header: unused NPCs may have
+  `pointers[n] > totalSlots` (empty-range sentinel; source's resolver loop
+  tolerates `start > end` naturally); `AI_9A 0x9a` is a legitimate
+  schedule action despite `ai.h`'s "RETREAT?" comment. 18 structural
+  checks pass on real data (563 slots, 178 scheduled NPCs). `schedule`
+  added to `main.js` REQUIRED so the dropzone extracts it.
+
+- **I-5b — `resources/schedules.js` + pure resolver.**
+  `Schedules.resolveSlotAt(npcId, hour, dayOfWeek)` mirrors
+  `C_1E0F_5165`'s backward scan: highest-indexed slot whose hour matches
+  AND whose day field is 0 (wildcard) or matches `dayOfWeek` wins.
+  Returns null when nothing triggers — between-event hours are no-ops,
+  consistent with source (NPC stays in its last-set mode). Static
+  `dayOfWeek(Date_D)` helper for the `((D-1)%7+1)` conversion. 25 pure
+  unit tests cover empty NPC, any-day match, day-specific match/miss,
+  between-events miss, duplicate-key backward-scan precedence, wildcard
+  fallback, `slotIndex` correctness, DoW wraparound, idempotency.
+
+- **I-5c — `Schedule { npcId }` component + load-time tagging.**
+  Component in `components/components.js`. `main.js` decodes the SCHEDULE
+  file via `Schedules.fromBytes` and registers the resource; `loadActors`
+  in `world_loader.js` tags NPCs whose objlist slot has schedule data via
+  `schedules.hasSchedule(a.id)`. Result: 188 spawned NPCs, 176 tagged (2
+  of the 178 scheduled NPCs are off-map / not LOCXYZ — no entity to tag,
+  as designed). `loadActors` return shape now `{ actors, scheduled }`.
+
+- **I-5d — Active-area predicate (OBJBLK residency).**
+  `SpatialIndex.hasRegionAt(x, y)` — is the OBJBLK region containing
+  `(x, y)` currently loaded? Method on `SpatialIndex` (per the
+  methods-on-state-objects feedback memory) since it reads a single field.
+  Inlines `world_loader`'s `regionId(col, row)` formula to stay
+  self-contained; cross-checked against the exported `regionId` in tests
+  across all 64 `(col, row)` pairs. 24 unit tests cover empty set,
+  single-region, multi-region, boundaries between adjacent regions,
+  world-edge region (7, 7). The semantics — "NPCs whose current region
+  isn't loaded are skipped silently" — relies on our loader's monotonic
+  `loadedRegions` set (never unloaded for the page session); the working
+  set therefore grows as the player explores, eventually saturating at
+  all 256 NPCs.
+
+- **I-5e — NPC schedule system.** `systems/npc_schedule_system.js`:
+  hooks `WorldClock.onHour`. Each tick, iterate `(Schedule, Position)`
+  entities; gate by `SpatialIndex.hasRegionAt(currentPos)` (NPCs in
+  unloaded regions are silently skipped); resolve slot via
+  `Schedules.resolveSlotAt`; skip if null trigger; check `canStandAt`
+  for the target; if OK, snap pos and update `SpatialIndex`. Per-tick
+  stats (`snapped / alreadyAtTarget / blocked / inactive / noTrigger`)
+  exposed via the returned object, mutated in place each tick so the
+  I-5f HUD can read live state.
+
+  Two small infra additions made this step possible:
+  - `World.handleOf(i)` — reverse of `resolve()`, packs index +
+    generation back into a handle. Needed by callers that get an index
+    from `query()` but need a handle for spatial ops or `canStandAt`'s
+    `actorId`.
+  - `SpatialIndex.remove(x, y, handle)` — splices an entity out of its
+    cell when it moves. Drops empty cells so `cells.size` stays
+    meaningful.
+
+- **I-5f — Dev HUD schedule probe.** Two surfaces on the existing dev
+  HUD:
+  - **(A) NPC stats line** — dedicated `<div id="npc-stats">` between
+    the time-op buttons and the hover probe:
+    `schedule @ hour HH: snap N / block M / idle K / inactive L`. Reads
+    `npcScheduleStats` every frame.
+  - **(B) Cell probe schedule line** — when a hovered cell holds an
+    NPC entity with a `Schedule` component, the probe appends a second
+    line: `NPC #<id> "<name>" · slot N: <ACTION> (hour H, day D) →
+    (x,y,z) · active=YES|NO`. Reverse-maps the action byte to its
+    `AiAction` name; reads `Schedules.resolveSlotAt` for the current
+    `(hour, dayOfWeek)`, falling back to `no slot at hour H day D`
+    between triggers. NPC name comes from objlist (party members only;
+    `"(undefined)"` for everyone else until name-loading lands).
+
+**Post-I-5 Z-order fix** (queued during I-5c verification when Lord
+British rendered UNDER his throne; fixed immediately after I-5f
+landed): the per-cell normal-zone emits followed scan order, so the
+throne's `isDoubleWidth` extension from (308, 348) reaching back into
+(307, 348) got pushed to the flat normal list AFTER LB's own emit at (307, 348)
+and drew on top. Fix in `systems/world_render_system.js`: per-cell
+gather (own anchor + 3 neighbors whose 2×2 footprint could reach in)
+then sort by **type-based z-priority** (`Actor=1`, else=0) before
+emitting to zone lists. Decouples Z-order from entity index so freed-
+slot recycling in the object-interaction phase can't break it (the
+"Option A" forward-compatible design discussed in chat). Header
+comment in the file carries the source ref (seg_1184.c:1651
+`ShowObject`) + the deferred fgExt source-faithful rule (newer at
+chain tail = top — rare in u6 data, revisit if observed). The I-2c
+scope text above now describes this current rule; the cross-
+source comparison is in `research_map_render.md §"Painter's algorithm"`.
+
+**Verification:**
+- Pure unit tests: `tests/test_schedule.html` (18/18 structural),
+  `test_schedules.html` (25/25 resolver), `test_active_area.html`
+  (24/24 predicate).
+- Live world: day-long sweep across hours 9-24 + 00:00 shows sensible
+  snap counts at meal/sleep boundaries (noon snap=9, evening snap=11,
+  late-night snap=2). No errors in console.
+- HUD probe at hour 8 reports
+  `NPC #5 "(undefined)" · slot 0: SIT (hour 8, day 0) → (307,348,0)
+  · active=YES`, with LB rendered visibly on top of his throne after
+  the Z-order fix.
+
+**Deferred (each owns a later step):**
+
+- **Pathfinding** — bucket-Dijkstra walker per `C_1E0F_2D37`. Lands at
+  I-6 or later (avatar movement needs it too); until then, the
+  schedule snap is teleport-not-walk.
+- **`NPCMode` component + action-driven sprite swap** — sleep/sit/eat
+  pose sprites need an `NPCMode` (or equivalent) field on the NPC
+  entity that the schedule system can set on snap, and a render-side
+  mapping from action → frame/sprite. The four `AI_STAND_*` actions
+  could be wired cheaply (action → frame 0..3 = N/E/S/W) before the
+  full sleep/sit/eat rework if a pose-correctness pass becomes worth
+  doing.
+- **First-tick alignment on game-load.** Currently NPCs stay at
+  OBJLIST positions until the first hour-tick crosses an event.
+  Acceptable for the I-5 demo (OBJLIST positions are close-enough to
+  schedule). Real save/load will need to restore `SchedIndex` per the
+  savegame.
+- **NPC names** — `"(undefined)"` in the probe is because objlist's
+  name section only fills party members. Real NPC names live in a
+  separate string table (probably `LZNAMES`) not yet decoded.
+- **Multi-fgExt-per-cell source-faithful ordering** — within-zone sort
+  for fgExt uses the same z-priority as normal/fgHot, which inverts
+  source's "chain tail = top" rule. Rare in u6 data; revisit if
+  observed.

@@ -12,7 +12,8 @@ import { decodeObjblk } from './assets/objblk.js';
 import { Camera } from './resources/camera.js';
 import { TileRegistry } from './resources/tile_registry.js';
 import { SpatialIndex } from './resources/spatial_index.js';
-import { Position, Renderable, ObjType, Status, Amount, Actor } from './components/components.js';
+import { Schedules } from './resources/schedules.js';
+import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule } from './components/components.js';
 
 const LOCXYZ = 0x00;   // ObjStatus coord-use bits 0x18 == 0 => object lives at (x,y,z)
 
@@ -63,17 +64,24 @@ export async function loadRegion(world, id) {
 }
 
 // Load all on-map NPCs from the decoded objlist. NPCs are global (one objlist file),
-// so this runs once at startup, independent of the viewport. Returns spawn count.
+// so this runs once at startup, independent of the viewport. Tags NPCs that have
+// schedule data (I-5c) with the Schedule component carrying their objlist slot id.
+// Returns { actors, scheduled } counts.
 export function loadActors(world, objlist) {
   const reg = world.getResource(TileRegistry);
   const spatial = world.getResource(SpatialIndex);
-  let n = 0;
+  const schedules = world.getResource(Schedules);
+  let actors = 0, scheduled = 0;
   for (const a of objlist.actors) {
     if (a.objNumber === 0 || (a.status & 0x18) !== LOCXYZ) continue;   // empty slot or off-map
-    spawnFromRecord(world, reg, spatial, a, true);
-    n++;
+    const e = spawnFromRecord(world, reg, spatial, a, true);
+    if (schedules?.hasSchedule(a.id)) {
+      world.add(e, Schedule, { npcId: a.id });
+      scheduled++;
+    }
+    actors++;
   }
-  return n;
+  return { actors, scheduled };
 }
 
 // Demand-load every OBJBLK region overlapping the current viewport. Returns total spawned.

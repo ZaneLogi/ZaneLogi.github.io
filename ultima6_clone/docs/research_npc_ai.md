@@ -166,6 +166,22 @@ gameplay property: NPCs "are where their schedule says" by the time
 the player arrives. `AllowNPCTeleport` gates whether the teleport is
 allowed when the NPC is near the player (normally not).
 
+**Port deviation (I-5d, picked 2026-05-31).** The clone chose
+**OBJBLK residency** instead of a 40×40 tile box: an NPC is active
+iff its current `(x, y)` falls in an OBJBLK region that's currently
+in `SpatialIndex.loadedRegions`. The set is monotonic — once a region
+loads, it stays loaded for the page session — so the active cohort
+grows as the player explores and eventually covers all 256 NPCs. The
+working set is larger than source's (up to ~4 × 128 × 128 = 65k tiles
+straddled vs. source's fixed 1600), but for I-5's
+schedule-resolution-only workload (one resolver call + maybe one
+position snap per active NPC per game-hour), the cost is rounding
+error. Off-area teleport is the same in spirit: NPCs in unloaded
+regions stay frozen at their last known position and "are where the
+last hour-tick put them" by the time the player visits. See
+`progress.md` §"I-5d" + the chat 2026-05-31 for the rationale +
+expected I-6+ tightening (inner radius for pathfinding cost control).
+
 ## Pre-tick maintenance
 
 ### `C_1E0F_4B6A` — party leadership (`seg_1E0F.c:2083-2145`)
@@ -263,10 +279,41 @@ extern int SchedPointer[];               // u6.h:511 — per-NPC FIRST entry ind
   = day-of-week selector matched against `(Date_D-1)%7 + 1`, or `0`
   = every day (`seg_1E0F.c:2283-2284`).
 
-The on-disk `schedule` file (`../ultima6/doc/schedule.txt`): 0x200
-bytes of 256 uint16 per-NPC offsets, then a uint16 entry count, then
-the 5-byte entries from 0x202 onward. Entries are sorted ascending
-by start hour.
+The on-disk `schedule` file, per source (`seg_0C9C.c:285-287`, the
+two-pass read):
+
+```c
+OSI_read(si, 0, (0x100 + 1) * sizeof(int), SchedPointer);   // 514 bytes
+OSI_read(si, -1, (long)SchedPointer[0x100] * sizeof(struct tSchedule), Schedule);
+```
+
+- **Bytes 0..513** — `SchedPointer[0..256]` as **257 × u16-LE**.
+  `SchedPointer[npc]` is the start slot for NPC `npc`;
+  `SchedPointer[256]` is the sentinel = total slot count. NPC `n`
+  owns `Schedule[SchedPointer[n] .. SchedPointer[n+1] - 1]`.
+- **Bytes 514+** — `Schedule[0..N-1]` where `N = SchedPointer[256]`,
+  5 bytes per `tSchedule` record (`time` + `action` + 3-byte packed
+  `coord`).
+
+Entries are sorted ascending by start hour within each NPC's slot
+range.
+
+**Tech-doc disagreement (`../ultima6/doc/schedule.txt` is wrong).**
+That Nuvie doc reads "0x200 bytes of 256 uint16 + a uint16 entry
+count + entries from 0x202 onward." Source's read is `(0x100 + 1) *
+sizeof(int)` = **514** bytes of **257** u16-LE values, with the
+sentinel taking the role of the "entry count." Trust source.
+
+**Empty-slot encoding quirk.** An NPC with no schedule entries has
+`SchedPointer[n] > totalSlots` (i.e. its start pointer is past the
+end of the data), producing an effectively-empty range. Source's
+resolver loop `for(di = SchedPointer[n+1] - 1; di >= SchedPointer[n];
+di--)` handles this naturally — `end < start` means the body never
+runs. Real data has `SchedPointer[255] = totalSlots + 1` for the
+unused-slot tail; a strict-monotonicity check is too tight here.
+(We tripped over this writing the I-5a parser; see
+`ultima6_clone/assets/schedule.js` header for the same note in
+implementation language.)
 
 ### Hourly transition — `C_1E0F_5165` (`seg_1E0F.c:2264-2295`)
 

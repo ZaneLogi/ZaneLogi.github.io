@@ -25,6 +25,33 @@ export class SpatialIndex {
     this.dirty = true;               // a region streamed in / object moved -> render rebuilds
   }
 
+  // Remove a handle from (x, y)'s cell. No-op if absent. Used when an entity
+  // moves between cells — caller pairs it with insert() at the new position.
+  // Drops the cell entry entirely if it becomes empty, so cells.size still
+  // reflects "cells holding at least one entity".
+  remove(x, y, handle) {
+    const k = this.key(x, y);
+    const arr = this.cells.get(k);
+    if (!arr) return false;
+    const idx = arr.indexOf(handle);
+    if (idx === -1) return false;
+    arr.splice(idx, 1);
+    if (arr.length === 0) this.cells.delete(k);
+    this.dirty = true;
+    return true;
+  }
+
   // entity handle[] at a cell, or undefined if empty.
   at(x, y) { return this.cells.get(this.key(x, y)); }
+
+  // Is the OBJBLK region containing (x, y) currently loaded? Used by the NPC
+  // schedule system (I-5) as the "active area" predicate — NPCs outside any
+  // loaded region get no schedule updates (their data isn't in memory yet).
+  // Inlines world_loader's regionId(col, row) formula to keep this self-
+  // contained: col = x >> 7, row = y >> 7, id = col | (row << 3) for an 8×8
+  // grid of 128×128-tile regions. Valid for the 1024-wide overworld.
+  hasRegionAt(x, y) {
+    const id = ((x >> 7) & 7) | (((y >> 7) & 7) << 3);
+    return this.loadedRegions.has(id);
+  }
 }

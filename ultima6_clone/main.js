@@ -26,12 +26,15 @@ import { makeWorldRenderSystem } from './systems/world_render_system.js';
 import { makeWorldClockSystem } from './systems/world_clock_system.js';
 import { canStandAt } from './systems/passability.js';
 import { forEachOccupiedCell } from './systems/tile_footprint.js';
-import { Position, Renderable, ObjType, Status, Amount, Actor } from './components/components.js';
+import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule } from './components/components.js';
+import { Schedules } from './resources/schedules.js';
+import { AiAction } from './assets/schedule.js';
+import { installNpcScheduleSystem } from './systems/npc_schedule_system.js';
 import { loadActors, ensureRegionsInView, makeStreamingSystem } from './world_loader.js';
 
-// Gating set for terrain + flags (I-1b) + world objects (I-2). Names are the
-// original U6 filenames, lowercased.
-const REQUIRED = ['maptiles.vga', 'objtiles.vga', 'tileindx.vga', 'masktype.vga', 'animmask.vga', 'animdata', 'u6pal', 'chunks', 'map', 'tileflag', 'basetile', 'objlist'];
+// Gating set for terrain + flags (I-1b) + world objects (I-2) + NPC schedules (I-5).
+// Names are the original U6 filenames, lowercased.
+const REQUIRED = ['maptiles.vga', 'objtiles.vga', 'tileindx.vga', 'masktype.vga', 'animmask.vga', 'animdata', 'u6pal', 'chunks', 'map', 'tileflag', 'basetile', 'objlist', 'schedule'];
 const OPTIONAL = ['look.lzd'];   // tile display names only (getTileLook); rendering doesn't need it
 
 // OBJBLK region files (64 surface objblk[col][row] + 5 dungeon objblk[level]i).
@@ -102,11 +105,13 @@ async function load() {
 
   const baseTile = new BaseTile(fileMap.get('basetile'));
   const objlist = decodeObjlist(fileMap.get('objlist'));
+  const schedules = Schedules.fromBytes(fileMap.get('schedule'));
 
   const world = new World();
   world.setResource(new TileRegistry({ tiles, flags, palette, anim, baseTile }));
   world.setResource(new MapLevel(u6map, 0));
   world.setResource(new SpatialIndex());
+  world.setResource(schedules);
   // I-3: turn-driver + game-clock. idleInterval = 100ms => 1 game-minute per
   // 0.1s real => full game-day in ~2.4 min. Start date is a stand-in until
   // save-load lands (research_save_load.md). D_2C55 is stored but unconsumed
@@ -115,13 +120,20 @@ async function load() {
   world.setResource(new WorldClock({ Time_H: 9, Time_M: 0, Date_D: 1, Date_M: 1, Date_Y: 161 }));
   world.registerComponent(Position).registerComponent(Renderable)
        .registerComponent(ObjType).registerComponent(Status)
-       .registerComponent(Amount).registerComponent(Actor);
-  window.__U6 = { world, tileRegistry: world.getResource(TileRegistry), mapLevel: world.getResource(MapLevel), spatial: world.getResource(SpatialIndex), clock: world.getResource(WorldClock), objlist };
+       .registerComponent(Amount).registerComponent(Actor)
+       .registerComponent(Schedule);
+  window.__U6 = { world, tileRegistry: world.getResource(TileRegistry), mapLevel: world.getResource(MapLevel), spatial: world.getResource(SpatialIndex), clock: world.getResource(WorldClock), schedules, objlist };
 
   diagnostics(world);
-  const npcCount = loadActors(world, objlist);
-  log(`\nLoaded ${npcCount} on-map NPCs from objlist.`, 'ok');
-  await startRender(world);
+  const { actors, scheduled } = loadActors(world, objlist);
+  log(`\nLoaded ${actors} on-map NPCs from objlist (${scheduled} with schedules).`, 'ok');
+
+  // I-5e: NPC schedule system. Hooks WorldClock.onHour; snaps eligible NPCs to
+  // their resolved slot position. Returned stats object is mutated each tick.
+  const npcScheduleStats = installNpcScheduleSystem(world);
+  window.__U6.npcScheduleStats = npcScheduleStats;
+
+  await startRender(world, { npcScheduleStats, objlist, schedules });
 }
 
 // I-2b verification: the world is now ECS entities + a spatial index.
@@ -140,7 +152,7 @@ function verifyWorld(world) {
 // I-1c/I-2b: terrain + world objects on screen. Build the GPU atlas + palette, place
 // the camera at Britain's default origin, demand-load the OBJBLK regions in view, then
 // register CameraSystem + RenderSystem(s) and drive a continuous rAF loop. Drag to pan.
-async function startRender(world) {
+async function startRender(world, { npcScheduleStats, objlist, schedules } = {}) {
   const canvas = document.getElementById('screen');
   canvas.style.display = 'block';
 
@@ -192,6 +204,19 @@ async function startRender(world) {
       `Year ${clock.Date_Y} · M${pad2(clock.Date_M)} D${pad2(clock.Date_D)}` +
       ` · ${pad2(clock.Time_H)}:${pad2(clock.Time_M)}` +
       ` · ☀ ${clock.D_2C55} · hours fired ${hourFires}`;
+  });
+
+  // I-5f (A): schedule-stats line. Lives between the time-op buttons and the
+  // hover probe. Reads npcScheduleStats live each frame; stats are mutated in
+  // place by the I-5e system on every hour-tick, so the line shows the most
+  // recent tick's counts.
+  const npcStatsEl = document.getElementById('npc-stats');
+  world.addRenderSystem(() => {
+    const s = npcScheduleStats;
+    if (!s || s.lastHour === null) return;     // pre-first-tick: leave placeholder text
+    npcStatsEl.textContent =
+      `schedule @ hour ${pad2(s.lastHour)}: ` +
+      `snap ${s.snapped} / block ${s.blocked} / idle ${s.noTrigger} / inactive ${s.inactive}`;
   });
 
   // Inverse cascade for the ± buttons. Forward advance is the contract
@@ -247,14 +272,19 @@ async function startRender(world) {
   canvas.addEventListener('pointerup', end);
   canvas.addEventListener('pointercancel', end);
 
-  // I-4d cell probe: hover-to-inspect overlay on the dev HUD. Shows the cell
-  // under the cursor, terrain tile + key flags, any per-cell object tile id
-  // covering it (via footprint expansion), and the live canStandAt verdict.
-  // The integration check for I-4c — proves the flag plumbing + canStandAt
-  // logic line up with real `tileflag` values on real `OBJBLK*` data. Kept
-  // across the remaining impl steps like the clock HUD.
+  // I-4d cell probe + I-5f schedule probe: hover-to-inspect overlay on the dev
+  // HUD. Shows the cell under the cursor, terrain tile + key flags, per-cell
+  // object tile ids, canStandAt verdict, AND for any NPC entity in the cell its
+  // current schedule slot (action, target xyz) + active-area status. Integration
+  // check for I-4c (flag plumbing + canStandAt on real data) and I-5e
+  // (resolver + active-area gate on the actual world). Kept across remaining
+  // impl steps like the clock HUD.
   const probeEl = document.getElementById('probe-text');
   const rendStore = world.store(Renderable);
+  const schedStore = world.store(Schedule);
+  // Reverse of AiAction: action code (e.g. 0x91) -> name (e.g. "SLEEP"). Built
+  // once; consumed by the schedule probe to decode the resolver's `action`.
+  const actionName = new Map(Object.entries(AiAction).map(([k, v]) => [v, k]));
   function describeCell(x, y) {
     const reg = world.getResource(TileRegistry);
     const lvl = world.getResource(MapLevel);
@@ -268,6 +298,7 @@ async function startRender(world) {
     if (reg.isTerrainDamage(tT)) tFlags.push('damage');
 
     const objs = [];
+    const npcs = [];                                    // schedule lines, one per NPC entity in the cell
     for (let dy = 0; dy <= 1; dy++) {
       for (let dx = 0; dx <= 1; dx++) {
         const ents = spatial.at(x + dx, y + dy);
@@ -287,12 +318,33 @@ async function startRender(world) {
           if (reg.isTileIgnore(tile)) lbl.push('ig');
           if (reg.isTerrainImpassable(tile)) lbl.push('impass');
           objs.push(`t#${tile}${lbl.length ? '[' + lbl.join(',') + ']' : ''}`);
+
+          // I-5f schedule probe: surface the NPC's resolved slot for this hour.
+          // Scheduled NPCs carry their objlist npcId; un-scheduled NPCs (Actor
+          // without Schedule) show "no schedule" without an id since we don't
+          // tag them with one.
+          if (world.has(handle, Actor)) {
+            if (world.has(handle, Schedule) && schedules) {
+              const npcId = schedStore.npcId[id];
+              const name = objlist?.actors?.[npcId]?.name ?? '(unnamed)';
+              const dow = Schedules.dayOfWeek(clock.Date_D);
+              const slot = schedules.resolveSlotAt(npcId, clock.Time_H, dow);
+              const slotStr = slot
+                ? `slot ${slot.slotIndex}: ${actionName.get(slot.action) ?? '0x' + slot.action.toString(16)} (hour ${slot.hour}, day ${slot.day}) → (${slot.x},${slot.y},${slot.z})`
+                : `no slot at hour ${clock.Time_H} day ${dow}`;
+              const active = world.getResource(SpatialIndex).hasRegionAt(x + dx, y + dy);
+              npcs.push(`NPC #${npcId} "${name}" · ${slotStr} · active=${active ? 'YES' : 'NO'}`);
+            } else {
+              npcs.push('NPC (no schedule)');
+            }
+          }
         }
       }
     }
 
     return {
       text: `(${x},${y}) terrain t#${tT}${tFlags.length ? '[' + tFlags.join('+') + ']' : ''} · objs:${objs.length ? '[' + objs.join(' ') + ']' : 'none'}`,
+      npcs,
       stand: canStandAt(world, x, y),
     };
   }
@@ -306,7 +358,13 @@ async function startRender(world) {
     const tx = (Math.floor((cam.worldX + sx) / ts) % W + W) % W;
     const ty = (Math.floor((cam.worldY + sy) / ts) % W + W) % W;
     const d = describeCell(tx, ty);
-    probeEl.textContent = `${d.text} · stand=${d.stand ? 'YES' : 'NO'}`;
+    // Cell line + per-NPC schedule lines (I-5f). innerHTML for the <br>; cell
+    // / NPC strings come from describeCell which doesn't accept user input, so
+    // we're not escaping for an external string here.
+    const headline = `${d.text} · stand=${d.stand ? 'YES' : 'NO'}`;
+    probeEl.innerHTML = d.npcs.length
+      ? headline + '<br>' + d.npcs.join('<br>')
+      : headline;
     probeEl.classList.toggle('pass', d.stand);
     probeEl.classList.toggle('blocked', !d.stand);
     // Position the 1px highlight rectangle on the cell. Computed from the cursor's

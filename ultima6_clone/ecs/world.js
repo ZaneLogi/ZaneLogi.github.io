@@ -132,6 +132,10 @@ export class World {
     return (i < this.highWater && this.generation[i] === handleGen(h)) ? i : -1;
   }
   isAlive(h) { return this.resolve(h) !== -1; }
+  // Inverse of resolve(): pack index + current generation back into a handle.
+  // Useful when query() yields an index and a caller needs the handle (e.g. for
+  // SpatialIndex ops or canStandAt's actorId exclusion).
+  handleOf(i) { return i + this.generation[i] * GEN_MULT; }
 
   // --- components on entities ---
   add(h, def, values) {
