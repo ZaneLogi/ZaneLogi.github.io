@@ -28,6 +28,68 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-05-31 — I-6 (inventory data layer) landed
+
+I-6 lands the off-map item layer — CONTAINED / INVEN / EQUIP records
+become ECS entities with `Container` / `ContainedIn` components, no
+`Position` so they stay out of `SpatialIndex` and `query(Position)`.
+Three save-point commits (I-6a INVEN/EQUIP → I-6b CONTAINED → I-6c
+page chrome cleanup) squashed into one `impl I-6`. Inspector UI is
+I-7's job; this step is data-only.
+
+- **Read**:
+  - `seg_1184.c:1370-1426` (`__ObjectsDeserialize`) — per-record
+    loop pops a free slot, copies the 8-byte payload into
+    `ObjStatus`/`ObjPos`/`ObjShapeType`/`Amount`, records in-file
+    index → live slot in `ScratchBuf->_6000[]`, and at line 1389
+    rewrites `GetAssoc(si) = _6000[GetAssoc(si)]` ONLY when
+    `GetCoordUse(si) == CONTAINED`. INVEN/EQUIP keep their on-disk
+    assoc untouched — meaning that value is already a stable NPC
+    slot ID (0..0xFF), not an in-file index.
+  - `research_world_data.md` §"Containment" — `GetAssoc(i) =
+    *(unsigned int *)&ObjPos[i]`: assoc is **16-bit**, the first
+    two bytes of `ObjPos` reinterpreted as a u16.
+  - Legacy `ultima6/obj_manager.js:381-409` (`loadSuperchunk`) +
+    `ultima6/obj.js:246-261` (`owner` / `container` getters).
+- **Found**:
+  - **Legacy port's 10-bit assoc bug.** `obj.js` exposes
+    `owner = this.x` and `container = this.x`, where `x` is
+    `(lo >>> 8) & 0x3ff` — 10 bits. NPC slot IDs fit in 8 bits so
+    INVEN/EQUIP works by accident; container in-file indices reach
+    12 bits (cap 0xc00 = 3072 records per file). The clone exposes
+    a separate 16-bit `assoc` field to read the full
+    `*(unsigned int *)` reinterpretation.
+  - **Source's single-pass works because of two implicit
+    assumptions** — CONTAINED records' assoc points at an EARLIER
+    in-file index (parents come first on disk), and `ScratchBuf` is
+    zeroed before each region load. The clone uses an explicit
+    two-pass: pass 1 spawns all records and records handles; pass 2
+    fixes up CONTAINED via the now-complete in-file-index → handle
+    map. Modern JS has no RAM constraint, so trading source's
+    single-pass for clarity is free.
+  - **No nested-container orphans observed** in Britain's two
+    in-view regions (`objblkcd` + `objblkdd`) — every CONTAINED
+    record's `assoc` resolved to a spawned entity on the first try,
+    so the two-pass handles whatever nesting Britain's containers
+    carry (≤ depth 2 in this sample; possibly deeper elsewhere).
+- **Docs**:
+  - `progress.md` — new `## I-6 scope` section appended.
+- **Open**:
+  - **`main.js` logic refactor** — `startRender()` is at ~235
+    lines and mixes 6 concerns. Cuts already legible (`view/
+    dev_hud.js`, `view/dev_probe.js`, `view/inspector.js`). Pairs
+    with I-7's UI substrate; deferred there.
+  - **Save export/import** flagged as a forward-looking
+    nice-to-have once I-9+ introduces in-game mutations and IDB
+    state can diverge from the loaded zip. Not on the current
+    trajectory; conversation-noted only.
+- **Next**: I-7 (UI substrate + object inspector — the first
+  surface on the substrate; modal stack + input routing +
+  turn-driver gating + list-with-cursor + atlas-icon DOM
+  rendering).
+
+---
+
 ## 2026-05-31 — I-5 (schedule resolution) landed + post-I-5 Z-order bug fix
 
 I-5 narrowed mid-flight from the ledger's "NPC scheduled movement (hourly

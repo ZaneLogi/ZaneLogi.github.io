@@ -605,3 +605,70 @@ source comparison is in `research_map_render.md §"Painter's algorithm"`.
   for fgExt uses the same z-priority as normal/fgHot, which inverts
   source's "chain tail = top" rule. Rare in u6 data; revisit if
   observed.
+
+## I-6 scope — inventory data layer
+
+**Goal:** off-map item entities (NPC inventory + object containers)
+live in ECS with `Container` / `ContainedIn` components, resolved
+from each OBJBLK region's records (the `GetAssoc` rewrite source's
+`__ObjectsDeserialize` does in one pass at `seg_1184.c:1385-1390`).
+No UI surface — the inspector view is I-7's first consumer.
+
+**Sub-steps** (each ≈ one save-point commit, browser-verified before
+the next; squashed for the final commit):
+
+- **I-6a — components + INVEN/EQUIP wiring.** Add `Container`
+  (marker) + `ContainedIn { holder: Float64Array, equipped:
+  Uint8Array }` to `components/components.js`. `objblk.js` decoder
+  exposes 16-bit `assoc` (source's `*(unsigned int *)&ObjPos[i]`);
+  the legacy port's 10-bit `owner = this.x` read works for NPC slot
+  IDs (≤ 8 bits) but is lossy for CONTAINED in-file indices (up to
+  12 bits). New `resources/actor_index.js` holds `Map<slotId →
+  handle>`, populated by `loadActors`. `loadRegion` spawns items
+  for records with bit 0x10 set (INVEN=0x10, EQUIP=0x18), resolves
+  the holder via `ActorIndex.get(rec.assoc)` (NPC slot IDs are
+  stable across files per source's `if(CONTAINED)` guard at line
+  1389 — INVEN/EQUIP keep their on-disk assoc). Items spawn
+  *without* `Position`, so `SpatialIndex` and `query(Position)`
+  skip them. Holders get `Container` idempotently. `inventoryOf(
+  world, handle)` helper exposed via `window.__U6` for console
+  inspection. **Verified:** 42 ContainedIn items in initial view;
+  party dump Avatar / Dupre / Shamino / Iolo = 3 / 9 / 9 / 12;
+  Dupre splits 5 equipped + 4 carried; SpatialIndex unchanged at
+  1488 cells.
+
+- **I-6b — CONTAINED resolution.** Two-pass `loadRegion`: pass 1
+  spawns every record and records its in-file index → handle
+  (LOCXYZ + INVEN/EQUIP attach during pass 1; CONTAINED entities
+  created but `ContainedIn` deferred). Pass 2 walks again, looks
+  up each CONTAINED record's `assoc` in the in-file-index map,
+  attaches `ContainedIn{holder, equipped:0}`, idempotently flags
+  the parent `Container`. Adapted from source's single-pass
+  `_6000[GetAssoc(si)]` (`seg_1184.c:1389-1390`) which relies on
+  parents-come-first ordering plus a zeroed scratch buffer; modern
+  JS has no RAM constraint, so explicit two-pass is the cheaper
+  read. **Verified:** 117 container-held items, no orphan
+  warnings; 12 sample object-containers including a 5-item chest
+  at `(293,351,0)`.
+
+- **I-6c — page chrome cleanup.** Mostly stale-log eviction now
+  that I-1b / I-2b are several steps behind: delete `diagnostics()`
+  (palette / mapLevel / tile-87 / sample flags / "I-1b plumbing
+  complete") and `verifyWorld()` (I-2b entity counts / spatial
+  cells / cell `(307,352)`) plus their two call sites. Surviving
+  on-page log = 5 lines (Decoding / Loaded N NPCs / Loaded N
+  objects+items+container-held / I-6 inventory summary / Rendering
+  started). Detailed I-6 console-group dumps stay in DevTools
+  where they don't crowd the page. UI: collapse Required panel
+  into a `<details>` element (auto-closes when ready); fold intro
+  paragraph into the dropzone; canvas 768×512 → 1024×640;
+  relocate dev HUD `top: 12px` → `bottom: 12px` (the old position
+  overlapped the now-shorter dropzone area).
+
+**Deferred (noted):** `main.js`-side logic refactor —
+`startRender()` is at ~235 lines and mixes 6 concerns
+(composition, dev HUD, schedule-stats line, drag-to-pan, hover
+probe, rAF loop). Refactor pairs with I-7's UI substrate when the
+inspector lands (`view/dev_hud.js`, `view/dev_probe.js`, `view/
+inspector.js` are the natural cuts already legible in
+`startRender`). Doing it now would buy nothing.

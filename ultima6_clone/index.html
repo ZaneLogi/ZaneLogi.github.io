@@ -8,15 +8,22 @@
   h1 { font-size: 16px; color: #e8c060; margin: 0 0 4px; }
   .sub { color: #8a7f66; margin: 0 0 16px; }
   #dropzone {
-    border: 2px dashed #6b5d3a; border-radius: 8px; padding: 28px; text-align: center;
-    color: #b8a878; background: #1c180f; margin-bottom: 16px;
+    border: 2px dashed #6b5d3a; border-radius: 8px; padding: 20px; text-align: center;
+    color: #b8a878; background: #1c180f; margin-bottom: 12px;
   }
+  #dropzone .dz-headline { color: #d8cdb4; }
+  #dropzone .dz-sub { color: #8a7f66; font-size: 12px; margin-top: 4px; }
   #dropzone.drag { border-color: #e8c060; background: #241d10; color: #e8c060; }
-  #checklist { white-space: pre; background: #0e0b07; border: 1px solid #2a2316; padding: 12px; border-radius: 6px; }
+  #checklist { background: #0e0b07; border: 1px solid #2a2316; padding: 8px 12px; border-radius: 6px; }
+  #checklist > summary { cursor: pointer; user-select: none; list-style: none; }
+  #checklist > summary::before { content: '▸ '; color: #6b5d3a; }
+  #checklist[open] > summary::before { content: '▾ '; }
+  #checklist[open] > summary { margin-bottom: 8px; }
+  #checklist-body { margin: 0; white-space: pre; color: #d8cdb4; font: 14px monospace; }
   #log { white-space: pre-wrap; background: #0e0b07; border: 1px solid #2a2316; padding: 12px; border-radius: 6px; margin-top: 12px; min-height: 1.6em; }
   #screen { display: none; margin-top: 12px; border: 1px solid #2a2316; image-rendering: pixelated; touch-action: none; }
   #clock-hud {
-    position: fixed; top: 12px; right: 12px;
+    position: fixed; bottom: 12px; right: 12px;
     background: rgba(0,0,0,0.7); color: #e8c060;
     font: 13px monospace; padding: 6px 10px;
     border: 1px solid #6b5d3a; border-radius: 4px;
@@ -48,10 +55,15 @@
 </head>
 <body>
 <h1>Ultima VI — engine reimplementation</h1>
-<p class="sub">Bring your own data: drop the files from a copy of Ultima VI you own. They stay in your browser (IndexedDB) and are never uploaded.</p>
-<div id="dropzone">Drop your Ultima VI data files here</div>
-<div id="checklist">scanning…</div>
-<canvas id="screen" width="768" height="512"></canvas>
+<div id="dropzone">
+  <div class="dz-headline">Drop your Ultima VI data files here</div>
+  <div class="dz-sub">Bring your own data — files stay in your browser (IndexedDB) and are never uploaded.</div>
+</div>
+<details id="checklist" open>
+  <summary id="checklist-summary">scanning…</summary>
+  <pre id="checklist-body"></pre>
+</details>
+<canvas id="screen" width="1024" height="640"></canvas>
 <div id="probe-cell"></div>
 <div id="clock-hud">
   <div id="clock-text"></div>

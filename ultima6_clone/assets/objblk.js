@@ -6,9 +6,11 @@
 //   bytes 4..5 ObjShapeType   objNumber(10) + frame(6)
 //   byte 6     Amount.quantity
 //   byte 7     Amount.quality
-// For CONTAINED / INVEN / EQUIP objects the position bytes are reused as an in-file
-// assoc index (source's GetAssoc), exposed here as `assoc` so the loader can resolve
-// or skip them; LOCXYZ objects use x/y/z as world coords.
+// For CONTAINED / INVEN / EQUIP objects the position bytes are reused as an
+// association ref (source's GetAssoc = *(unsigned int *)&ObjPos[i], a 16-bit
+// reinterpretation of the first two pos bytes); exposed as `assoc` alongside
+// x/y/z so the loader can resolve INVEN/EQUIP holders (NPC slot ID 0..0xFF) and
+// CONTAINED parents (in-file index up to ~3071, needs the full 16 bits).
 
 export const CoordUse = { LOCXYZ: 0x00, CONTAINED: 0x08, INVEN: 0x10, EQUIP: 0x18 };
 
@@ -24,9 +26,10 @@ export function decodeObjblk(bytes) {
     records[i] = {
       status,
       coordUse: status & 0x18,
-      x: (lo >>> 8) & 0x3ff,                 // doubles as `assoc` when coordUse != LOCXYZ
+      x: (lo >>> 8) & 0x3ff,
       y: (lo >>> 18) & 0x3ff,
       z: (lo >>> 28) & 0xf,
+      assoc: (lo >>> 8) & 0xffff,            // 16-bit GetAssoc for non-LOCXYZ records
       objNumber: shape & 0x3ff,
       frame: (shape >>> 10) & 0x3f,
       quantity: dv.getUint8(p + 6),

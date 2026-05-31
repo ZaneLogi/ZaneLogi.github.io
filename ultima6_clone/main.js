@@ -26,11 +26,12 @@ import { makeWorldRenderSystem } from './systems/world_render_system.js';
 import { makeWorldClockSystem } from './systems/world_clock_system.js';
 import { canStandAt } from './systems/passability.js';
 import { forEachOccupiedCell } from './systems/tile_footprint.js';
-import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule } from './components/components.js';
+import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn } from './components/components.js';
 import { Schedules } from './resources/schedules.js';
+import { ActorIndex } from './resources/actor_index.js';
 import { AiAction } from './assets/schedule.js';
 import { installNpcScheduleSystem } from './systems/npc_schedule_system.js';
-import { loadActors, ensureRegionsInView, makeStreamingSystem } from './world_loader.js';
+import { loadActors, ensureRegionsInView, makeStreamingSystem, inventoryOf } from './world_loader.js';
 
 // Gating set for terrain + flags (I-1b) + world objects (I-2) + NPC schedules (I-5).
 // Names are the original U6 filenames, lowercased.
@@ -50,6 +51,8 @@ const isKnown = (base) => KNOWN.has(base) || base.startsWith('objblk');
 
 const dropzone = document.getElementById('dropzone');
 const checklistEl = document.getElementById('checklist');
+const checklistSummaryEl = document.getElementById('checklist-summary');
+const checklistBodyEl = document.getElementById('checklist-body');
 const logEl = document.getElementById('log');
 let loaded = false;
 
@@ -66,15 +69,20 @@ async function updateChecklist() {
   let objblkCount = 0;
   for (const n of OBJBLK_NAMES) if (await U6DB.has(n)) objblkCount++;
 
-  let out = 'Required:\n';
-  for (const n of REQUIRED) out += `  ${present[n] ? '✓' : '✗'} ${n}\n`;
-  out += '\nOptional:\n';
-  for (const n of OPTIONAL) out += `  ${present[n] ? '✓' : '—'} ${n}\n`;
-  out += `\nOBJBLK regions: ${objblkCount}/${OBJBLK_NAMES.length}\n`;
-  out += `\nReady: ${ready ? 'YES' : 'NO'}`;
-  checklistEl.textContent = out;
+  let body = 'Required:\n';
+  for (const n of REQUIRED) body += `  ${present[n] ? '✓' : '✗'} ${n}\n`;
+  body += '\nOptional:\n';
+  for (const n of OPTIONAL) body += `  ${present[n] ? '✓' : '—'} ${n}\n`;
+  body += `\nOBJBLK regions: ${objblkCount}/${OBJBLK_NAMES.length}`;
+  checklistBodyEl.textContent = body;
 
-  if (ready && !loaded) { loaded = true; await load(); }
+  const missing = REQUIRED.filter((n) => !present[n]).length;
+  checklistSummaryEl.className = ready ? 'ok' : 'miss';
+  checklistSummaryEl.textContent = ready
+    ? `✓ Ready · ${REQUIRED.length} required + ${objblkCount}/${OBJBLK_NAMES.length} regions`
+    : `✗ Missing ${missing} of ${REQUIRED.length} required files`;
+
+  if (ready && !loaded) { loaded = true; checklistEl.open = false; await load(); }
 }
 
 async function buildFileMap() {
@@ -112,6 +120,7 @@ async function load() {
   world.setResource(new MapLevel(u6map, 0));
   world.setResource(new SpatialIndex());
   world.setResource(schedules);
+  world.setResource(new ActorIndex());           // I-6a: slot-id -> NPC handle (populated by loadActors)
   // I-3: turn-driver + game-clock. idleInterval = 100ms => 1 game-minute per
   // 0.1s real => full game-day in ~2.4 min. Start date is a stand-in until
   // save-load lands (research_save_load.md). D_2C55 is stored but unconsumed
@@ -121,10 +130,10 @@ async function load() {
   world.registerComponent(Position).registerComponent(Renderable)
        .registerComponent(ObjType).registerComponent(Status)
        .registerComponent(Amount).registerComponent(Actor)
-       .registerComponent(Schedule);
-  window.__U6 = { world, tileRegistry: world.getResource(TileRegistry), mapLevel: world.getResource(MapLevel), spatial: world.getResource(SpatialIndex), clock: world.getResource(WorldClock), schedules, objlist };
+       .registerComponent(Schedule)
+       .registerComponent(Container).registerComponent(ContainedIn);
+  window.__U6 = { world, tileRegistry: world.getResource(TileRegistry), mapLevel: world.getResource(MapLevel), spatial: world.getResource(SpatialIndex), clock: world.getResource(WorldClock), schedules, objlist, actorIndex: world.getResource(ActorIndex), inventoryOf: (h) => inventoryOf(world, h) };
 
-  diagnostics(world);
   const { actors, scheduled } = loadActors(world, objlist);
   log(`\nLoaded ${actors} on-map NPCs from objlist (${scheduled} with schedules).`, 'ok');
 
@@ -136,17 +145,50 @@ async function load() {
   await startRender(world, { npcScheduleStats, objlist, schedules });
 }
 
-// I-2b verification: the world is now ECS entities + a spatial index.
-function verifyWorld(world) {
-  const spatial = world.getResource(SpatialIndex);
-  let total = 0, npcs = 0;
-  for (const _ of world.query(Position)) total++;
-  for (const _ of world.query(Actor)) npcs++;
-  log('\nI-2b world built:', 'ok');
-  log(`  entities: ${total} (${npcs} NPCs, ${total - npcs} world objects)`);
-  log(`  spatial: ${spatial.cells.size} occupied cells, ${spatial.loadedRegions.size} regions loaded`);
-  const here = spatial.at(307, 352);   // the Avatar's start cell
-  log(`  cell (307,352) holds ${here ? here.length : 0} entit${here && here.length === 1 ? 'y' : 'ies'}`);
+// I-6 verification: dump party inventories (I-6a) + a sampling of object
+// containers (I-6b). All inspection lives in the console; entries are reachable
+// interactively via window.__U6.inventoryOf(handle).
+function verifyInventory(world, objlist) {
+  const actorIndex = world.getResource(ActorIndex);
+
+  // ContainedIn total + breakdown (NPC-held vs object-held).
+  const csStore = world.store(ContainedIn);
+  let totalContained = 0, npcHeld = 0, objHeld = 0;
+  for (const id of world.query(ContainedIn)) {
+    totalContained++;
+    const holder = csStore.holder[id];
+    if (world.has(holder, Actor)) npcHeld++; else objHeld++;
+  }
+  log(`\nI-6 inventory: ${totalContained} ContainedIn (${npcHeld} NPC-held, ${objHeld} object-held).`, 'ok');
+
+  // Party inventory dump (I-6a).
+  console.group('I-6a — party inventory dump');
+  for (let i = 0; i < objlist.partySize; i++) {
+    const slotId = objlist.party[i];
+    const a = objlist.actors[slotId];
+    const handle = actorIndex.get(slotId);
+    if (handle === undefined) { console.log(`#${slotId} ${a.name}: off-map (no entity)`); continue; }
+    const items = inventoryOf(world, handle);
+    console.log(`#${slotId} ${a.name} @ (${a.x},${a.y},${a.z}): ${items.length} item${items.length === 1 ? '' : 's'}`, items);
+  }
+  console.groupEnd();
+
+  // Object-container dump (I-6b). Walk query(Container), skip NPCs, show
+  // type + position + contents for the first 12 to keep the log finite.
+  console.group('I-6b — object container dump (first 12 non-NPC containers)');
+  const objStore = world.store(ObjType);
+  const posStore = world.store(Position);
+  let shown = 0;
+  for (const id of world.query(Container)) {
+    if (world.has(world.handleOf(id), Actor)) continue;
+    if (shown++ >= 12) break;
+    const handle = world.handleOf(id);
+    const items = inventoryOf(world, handle);
+    const hasPos = world.has(handle, Position);
+    const posStr = hasPos ? `@(${posStore.x[id]},${posStore.y[id]},${posStore.z[id]})` : '@(nested)';
+    console.log(`obj#${objStore.objNumber[id]}/f${objStore.frame[id]} ${posStr}: ${items.length} item${items.length === 1 ? '' : 's'}`, items);
+  }
+  console.groupEnd();
 }
 
 // I-1c/I-2b: terrain + world objects on screen. Build the GPU atlas + palette, place
@@ -168,9 +210,9 @@ async function startRender(world, { npcScheduleStats, objlist, schedules } = {})
 
   // Demand-load the OBJBLK regions overlapping the initial viewport, then the
   // StreamingSystem keeps loading regions as the camera pans into them.
-  const objCount = await ensureRegionsInView(world, camera, canvas, renderer.tileSize);
-  log(`Loaded ${objCount} world objects in the initial view.`, 'ok');
-  verifyWorld(world);
+  const { objects: objCount, items: itemCount, contained: containedCount } = await ensureRegionsInView(world, camera, canvas, renderer.tileSize);
+  log(`Loaded ${objCount} world objects + ${itemCount} carried + ${containedCount} container-held in the initial view.`, 'ok');
+  verifyInventory(world, objlist);
 
   const ts = renderer.tileSize;
   world.addSimSystem(makeWorldClockSystem());                      // per turn: clock.advance(1)
@@ -386,29 +428,6 @@ async function startRender(world, { npcScheduleStats, objlist, schedules } = {})
   let last = performance.now();
   (function loop(t) { world.frame(t - last, t); last = t; requestAnimationFrame(loop); })(last);
   log('\nRendering started — drag the map to pan.', 'ok');
-}
-
-// I-1b verification surface: prove the decode end-to-end with concrete values the
-// user can sanity-check against the game.
-function diagnostics(world) {
-  const reg = world.getResource(TileRegistry);
-  const lvl = world.getResource(MapLevel);
-
-  log('\nDecode OK. Diagnostics:', 'ok');
-  log(`  palette[0] = rgb(${reg.palette[0]}, ${reg.palette[1]}, ${reg.palette[2]})`);
-  log(`  palette[255] alpha = ${reg.palette[255 * 4 + 3]} (0 = colourkey)`);
-
-  // Tile at Britain's default overworld origin (276, 367) — see research_i1_render_slice.md.
-  const tBritain = lvl.tileAt(276, 367);
-  log(`  mapLevel.tileAt(276,367) = tile ${tBritain}`);
-  const px = reg.pixels(tBritain);
-  log(`  tile ${tBritain}: ${px.length}-byte pixel buffer; flags fg=${reg.isForeground(tBritain)} bg=${reg.isBackground(tBritain)} dblH=${reg.isDoubleHeight(tBritain)} dblW=${reg.isDoubleWidth(tBritain)}`);
-  if (reg.tiles.looks) log(`  tile ${tBritain} look = "${reg.tiles.getTileLook(tBritain)}"`);
-
-  // A few sample tiles' flags, so a bad flag-plane offset would show up.
-  log('  sample flags: ' + [16, 256, 512].map((t) => `#${t}{fg:${+reg.isForeground(t)},bg:${+reg.isBackground(t)},dW:${+reg.isDoubleWidth(t)},dH:${+reg.isDoubleHeight(t)}}`).join(' '));
-
-  log('\nI-1b plumbing complete — resources on window.__U6.', 'ok');
 }
 
 // --- dropzone: store dropped files into IndexedDB (bring-your-own-data) ---
