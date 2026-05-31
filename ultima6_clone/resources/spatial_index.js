@@ -17,12 +17,32 @@ export class SpatialIndex {
 
   key(x, y) { return y * this.width + x; }
 
+  // Append at the cell's chain TAIL. Used by INITIAL LOAD (loadRegion), where
+  // records iterate in OBJBLK file order — pushing in that order makes
+  // spatial.at[0] = first-loaded = chain head, matching source's
+  // __ObjectsDeserialize merge (the inner-while-loop preserves file order for
+  // the batch; first-in-file lands at the head position; seg_1184.c:1370+).
   insert(x, y, handle) {
     const k = this.key(x, y);
     const arr = this.cells.get(k);
     if (arr) arr.push(handle);
     else this.cells.set(k, [handle]);
     this.dirty = true;               // a region streamed in / object moved -> render rebuilds
+  }
+
+  // Insert at the cell's chain HEAD. Used by RUNTIME MOVE/DROP (NPC schedule
+  // snap, avatar step, GET/DROP, throw, magic teleport) — anything that mirrors
+  // source's AddMapObj (seg_1184.c:658-659) or MoveObj (seg_1184.c:971-973),
+  // both of which splice the arriving object at the chain head of the
+  // destination cell. The U6 design intent: the most-recently-placed entity
+  // sits at the chain head and gets picked first by FindLoc (= our forward
+  // iteration of spatial.at), so LOOK/USE target what the player just did.
+  insertAtHead(x, y, handle) {
+    const k = this.key(x, y);
+    const arr = this.cells.get(k);
+    if (arr) arr.unshift(handle);
+    else this.cells.set(k, [handle]);
+    this.dirty = true;
   }
 
   // Remove a handle from (x, y)'s cell. No-op if absent. Used when an entity

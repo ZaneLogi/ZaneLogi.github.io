@@ -75,12 +75,17 @@ function tick(world, clock, stats) {
       continue;
     }
 
-    // Snap. Spatial index must move with position so render + collision stay correct.
+    // Snap. Spatial index must move with position so render + collision stay
+    // correct. insertAtHead matches source's MoveObj chain-head splice
+    // (seg_1184.c:971-973) — most-recently-moved sits at the head, so LOOK
+    // picks it first. (For Actors specifically the inspector's NPC-override
+    // would pick correctly even with `insert`; using insertAtHead anyway
+    // keeps the spatial chain in source-faithful runtime order.)
     spatial.remove(oldX, oldY, handle);
     pos.x[i] = slot.x;
     pos.y[i] = slot.y;
     pos.z[i] = slot.z;
-    spatial.insert(slot.x, slot.y, handle);
+    spatial.insertAtHead(slot.x, slot.y, handle);
     snapped++;
   }
 

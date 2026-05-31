@@ -23,9 +23,18 @@
 // chain: Actor entities get priority 1 (drawn last within their zone = on top), all
 // else gets 0. This decouples Z-order from entity index — which would otherwise be
 // fragile once world.create() starts reusing freed slots in the object-interaction
-// phase (a recycled low index could put a new object above NPCs). Within-zone ties
-// (two Actors / two objects in one cell) preserve scan order via JS's stable sort.
-// fgExt's source-faithful "newer at tail = top" rule isn't modeled — multi-fgExt-
+// phase (a recycled low index could put a new object above NPCs).
+//
+// WITHIN-ZONE TIE-BREAK (e.g. candle on a table — both `normal` zone, both
+// non-Actor): we iterate `spatial.at` in REVERSE so older entries (chain head,
+// per loadRegion's file-order push + insertAtHead at runtime) emit LATER, get
+// drawn LATER, and end up on TOP. This mirrors source's ShowObject
+// (seg_1184.c:1676-1699): for non-foreground tiles it inserts NEW at the HEAD
+// of Obj_11x11[y][x], and the render walks that list forward (first-in-list
+// drawn first = bottom). So source's effect is "first-inserted (= older) ends
+// up at the tail of the render list = drawn last = on top." Our reverse-iter
+// reproduces that without modeling Obj_11x11 explicitly. fgExt's "newer at
+// tail = top" rule (source's ShowObject fg-branch) inverts this — multi-fgExt-
 // per-cell is rare in u6 data; revisit if it ever surfaces.
 //
 // The cell-scan is gather-then-sort: visit each cell, scan the 4 anchor candidates
@@ -78,7 +87,12 @@ export function makeWorldRenderSystem(renderer) {
           for (let dx = 0; dx <= 1; dx++) {
             const ents = spatial.at(col + dx, row + dy);
             if (!ents) continue;
-            for (const handle of ents) {
+            // Reverse iter so older entities (chain head — file-order push +
+            // runtime insertAtHead) emit later within their zPri tier, get
+            // drawn later, and end up on TOP. Mirrors source's ShowObject
+            // non-fg "insert NEW at head of render list, walk forward" effect.
+            for (let k = ents.length - 1; k >= 0; k--) {
+              const handle = ents[k];
               const i = world.resolve(handle);
               if (i === -1) continue;
               // Extract just the tile this entity contributes at (col, row), if any.

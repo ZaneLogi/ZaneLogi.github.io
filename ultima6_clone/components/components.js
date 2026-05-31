@@ -12,7 +12,11 @@ export const Renderable = defineComponent('Renderable', { tileId: Uint16Array })
 export const ObjType = defineComponent('ObjType', { objNumber: Uint16Array, frame: Uint8Array });
 export const Status = defineComponent('Status', { bits: Uint8Array });
 export const Amount = defineComponent('Amount', { quantity: Uint8Array, quality: Uint8Array });
-export const Actor = defineComponent('Actor');
+// Actor — tag for the 256 objlist NPC slots. Carries the objlist slot id
+// (the same id used as ActorIndex key + Schedule.npcId). Used by the
+// inspector + future systems to look up the NPC's per-slot record
+// (party-membership check, name, AI state).
+export const Actor = defineComponent('Actor', { npcId: Uint8Array });
 
 // Schedule (I-5): NPCs with at least one slot in the SCHEDULE file. npcId is the
 // objlist slot index (0..255) — the same index used as Schedules.byNpc[npcId].

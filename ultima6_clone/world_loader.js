@@ -49,7 +49,7 @@ function spawnFromRecord(world, reg, spatial, rec, isActor) {
   world.add(e, ObjType, { objNumber: rec.objNumber, frame: rec.frame });
   world.add(e, Status, { bits: rec.status });
   world.add(e, Renderable, { tileId: reg.tileForObject(rec.objNumber, rec.frame) });
-  if (isActor) world.add(e, Actor);
+  if (isActor) world.add(e, Actor, { npcId: rec.id });
   else world.add(e, Amount, { quantity: rec.quantity, quality: rec.quality });
   spatial.insert(rec.x, rec.y, e);
   return e;

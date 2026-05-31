@@ -309,13 +309,32 @@ Mixed LOCXYZ vs non-LOCXYZ:
 Primary:    Y ascending  (GetY(assoc_0) - GetY(assoc_1))
 Secondary:  X ascending
 Tertiary:   Z DESCENDING (note REVERSED operands: GetZ(1) - GetZ(0))
-Tie:        order undefined (merge-sort fall-through)
+Tie:        comparator returns 0; relative order resolved by the
+            merge-sort that consumes it
 ```
 
-**Two objects at the same (x, y, z) in the world: tied in the
-comparator. Their relative Link[] order is determined by whatever
-the merge-sort happens to do.** This matters for the pillar bug —
-see "Implications" below.
+**Tie-break is NOT undefined — it's file order.** For two LOCXYZ
+objects at identical (x, y, z) with different slot IDs, the comparator
+returns 0 (the `assoc_0 == assoc_1` override at lines 1334-1339 only
+fires when the two slots are the same object, which they aren't).
+The merge-sort in `__ObjectsDeserialize` resolves the tie:
+
+- `seg_1184.c:1394-1422` walks both chains and uses an inner-while-loop
+  to splice **contiguous runs** of new equal-key elements as a single
+  block. Within the block, the loop advances `di` through the run
+  while `C_1184_29C4(di, Link[di]) <= 0`. For equal-key new
+  elements (`compare == 0`, `0 <= 0` is true), `di` keeps advancing
+  → the entire equal-key run lands in the chain in **file order**:
+  first-in-file at the run's head position, last-in-file at the
+  tail.
+
+So if OBJBLK file order at cell (x, y, z) is `[Door (idx 721),
+Doorway (idx 722)]`, the resulting Link[] chain at that cell is
+`[..., Door, Doorway, ...]` — Door closer to the chain head, Doorway
+behind it. This is load-bearing for the cell-pick rule (see
+[`research_object_interaction.md`](research_object_interaction.md)
+§"Cell-pick (`C_2337_08F1`)"): `FindLoc/NextLoc` walks head-first, so
+Door is returned first.
 
 ### `MapObjPtr[40][40]` — per-cell head pointer
 
@@ -397,10 +416,82 @@ translation table built during the same loop).
 3. Merge-sort the new objects into the existing `Link[]` list
    using `C_1184_29C4` as the comparator. The merge walks both
    lists starting from `Link[0x100]` and `ScratchBuf->_6000[0]`,
-   splicing in.
+   splicing in. **Equal-key new elements stay in file order
+   within the merged chain** (see "Sort order" above for the
+   inner-while-loop mechanism that preserves run order).
 
 After deserialize, `C_1184_2ECC()` is called separately to rebuild
 `MapObjPtr[][]` from the now-sorted `Link[]`.
+
+## Runtime mutation — `AddMapObj` and `MoveObj`
+
+Two routines splice into `Link[]` outside of bulk load. Both insert
+the affected slot at the **chain head** of the destination cell.
+
+### `AddMapObj` (`seg_1184.c:642`)
+
+Brand-new world object placed at `(x, y, z)`:
+
+```c
+bp_04 = C_1184_02FA(x, y, 1);   // find chain anchor for the cell
+D_D5DA = Link[D_D5DA]; D_E6E0 --;
+ObjStatus[objNum] = status | LOCAL;
+SetXYZ(objNum, x, y, z);
+ObjShapeType[objNum] = shapeType;
+Amount[objNum] = amount;
+Link[objNum] = Link[bp_04];     // <-- new.next = anchor.next
+Link[bp_04] = objNum;           // <-- anchor.next = new (splice in front)
+// MapObjPtr[y][x] = objNum     // anchor updated to point at the new head
+```
+
+### `MoveObj` (`seg_1184.c:927`)
+
+Existing object relocated from `(GetX(objNum), GetY(objNum))` to
+`(to_x, to_y, to_z)`:
+
+```c
+bp_0a = C_1184_1D60(objNum);
+Link[bp_0c] = Link[bp_0a];                     // unlink from old cell
+... (handle dirty flags) ...
+bp_0e = C_1184_02FA(to_x, to_y, 1);            // find chain anchor for new cell
+Link[bp_0a] = Link[bp_0e];                     // moved.next = anchor.next
+Link[bp_0e] = objNum;                          // anchor.next = moved
+SetXYZ(objNum, to_x, to_y, to_z);
+// MapObjPtr[y][x] = objNum
+```
+
+Both `AddMapObj` and `MoveObj` make the arriving object the chain's
+new head at the destination, so the next `FindLoc(x, y)` returns it
+first. This is the U6 design intent: **the most-recently-placed
+entity at a cell sits at the chain head and gets picked first by
+LOOK/USE.** The renderer uses the inverse: head-first walking + a
+"insert NEW at HEAD" pass during composition makes the same chain-head
+entity end up *drawn last = visually on top* — both behaviours fall
+out of the same head-insertion rule (see `research_map_render.md`
+§"Painter's algorithm — within-tier order").
+
+`AddMonster` (`seg_1184.c:689`), `AddInvObj` (`:668`), `InsertObj`
+(`:998`), and the various combat-spawn paths all use the same
+head-splice pattern at their respective destination chains.
+
+## Clone correspondence — `SpatialIndex` API
+
+`resources/spatial_index.js` maps source's chain ops to our sparse
+`Map<packedXY → entity[]>`:
+
+| Source op | Clone API | spatial.at semantics |
+|---|---|---|
+| `__ObjectsDeserialize` batch merge | `insert(x, y, h)` (`push`) | initial-load: spatial.at[0] = first-loaded = chain head (file order preserved by `loadRegion`'s forward iteration) |
+| `AddMapObj` / `MoveObj` / `InsertObj` | `insertAtHead(x, y, h)` (`unshift`) | runtime: spatial.at[0] = newest arrival = chain head |
+| `C_1184_1665` / unlink | `remove(x, y, h)` | drops handle from its current cell; drops the cell entry when empty |
+
+The convention is enforced by API naming — `insert` is for batch
+load only; runtime mutation systems (NPC schedule snap at
+`systems/npc_schedule_system.js`, future avatar step in I-8,
+DROP/GET/throw/teleport in I-9+) must use `insertAtHead`. Calling
+plain `insert` at runtime would silently pile the new arrival at the
+tail of spatial.at, and the inspector (forward-iter) would pick the
+wrong target.
 
 ## Write/serialize pipeline
 
@@ -420,110 +511,49 @@ unlinking them from `Link[]` as it goes (this is "leave a dungeon
 level" — the objects must persist somewhere while you're elsewhere,
 and they get pulled back on re-entry via `C_1184_30A6`).
 
-## Implications for the pillar-bug audit
+## Pillar-bug audit — resolved
 
-### Hypothesis B — "is auto-extension fabricated by our port?"
+Each OBJBLK record stores **one object at one (x, y, z) position**;
+pillars are NOT stored as two objects (head + base). The double-cell
+appearance is driven by `TileFlag[tile]` bit 0x40 = `IsTileDoubleV`
+(or 0x80 = `IsTileDoubleH` for 2-wide). The renderer + cell-pick
+walk a SE-anchored 2×2 footprint expansion at query time (source's
+`NextLoc` recognises extensions at `(x+1, y)` / `(x, y+1)` / `(x+1,
+y+1)` via the double-tile flag; clone's `forEachOccupiedCell` and
+the 4-anchor gather in `WorldRenderSystem`/inspector do the same).
 
-Strongly trending toward **NO, not fabricated** (i.e., legacy port
-is doing the source-faithful thing):
+The within-cell stacking order is fully decoded:
 
-1. Each OBJBLK record stores ONE object at ONE (x, y, z) position.
-   Pillars are not stored as "two objects, head + base" — they're
-   one object.
-2. The "double-height" behavior is driven by **`TileFlag[tile]` bit
-   0x40 = `IsTileDoubleV`** (verified above). When the renderer
-   draws a tile with `IsTileDoubleV` set, it draws the tile spanning
-   two cells vertically (occupying both the object's own cell AND
-   the cell above). This is the engine's mechanism, not a port
-   fabrication.
+- **Cross-zone** order (background → normal → fgHot → fgExt) follows
+  each tile's own `IsTileBa` / `IsTileFor` flags, matching source's
+  `ShowObject` chain-position routing. See
+  [`research_map_render.md`](research_map_render.md) §"Painter's
+  algorithm".
+- **Within-zone** order for same-key objects: source's
+  `__ObjectsDeserialize` merge preserves file order (see "Sort
+  order" above); source's `ShowObject` then inserts non-FG tiles at
+  the per-cell render-list HEAD, so first-inserted ends up
+  drawn-last = on top. The clone reproduces this by iterating
+  `spatial.at` in REVERSE during the gather phase. See
+  `research_map_render.md` §"Painter's algorithm — within-tier".
 
-To confirm B fully, the renderer's handling of `IsTileDoubleV` /
-`IsTileDoubleH` needs reading — that's the next research target.
+CURSED / MUTANT / HATCHED overload on 0x40 is intentional per
+u6.h:80-82 — disambiguation requires per-object-type dispatch at call
+sites. Already covered in
+[`research_engine_overview.md`](research_engine_overview.md).
 
-### "Top item placed before bottom item, reverse-iteration intentional" — needs renderer read to confirm
+## Open targets
 
-Zane's recollection from the pillar-bug note:
-> the decision for the reverse iteration is from the rendering order
-> for the objects who occupy the same tile and the top item is
-> placed before the bottom item in the list of the data BLKOBJxxx.
-> reverse order rendering guarantee that the bottom item can be
-> drawn before the top item
+These are the genuinely-unanswered items, in priority order:
 
-What we now know:
-- **In Link[], objects in the same (x, y) cell are CONTIGUOUS** (sort
-  by Y then X) and **ordered by Z descending** (tertiary), or tied
-  if same Z.
-- **Same-Z stacking is UNDEFINED** in the comparator — merge-sort
-  fall-through. The "top item first" property cannot be guaranteed
-  by the comparator alone for objects on the same level.
-
-So the "top item first" claim in Zane's recollection is **either
-wrong, OR comes from the OBJBLK on-disk file order (not Link[] order
-after deserialize)**. The merge-sort scrambles the file order — but
-if multiple equal-keyed objects keep their relative file order
-through a stable merge, file order survives. Merge-sort can be
-stable or unstable depending on implementation.
-
-To resolve: read `C_1184_2DEF`'s merge body more carefully (we saw
-the structure but didn't dissect stability) AND/OR read the renderer
-to see what it actually iterates. The renderer's iteration direction
-through `Link[]` from `MapObjPtr[y][x]` is the load-bearing question.
-
-**Update 2026-05-31 (post-I-5 Z-order fix).** This open question is
-**partially mooted for the clone's port**: `WorldRenderSystem`'s
-within-cell sort is now a **type-based z-priority** (Actor=1,
-else=0; see `research_map_render.md §"Painter's algorithm"`) that
-doesn't depend on Link[] order or load order. The within-zone tie
-that the comparator leaves undefined is broken by entity type
-instead — NPCs always over floor objects, multi-object stacks fall
-back to stable scan order. Source's actual Link[]-iteration behavior
-is still a research question if anyone needs full source-faithfulness
-(e.g. to match source's exact within-zone object stacking order),
-but the clone's correctness no longer hinges on the answer.
-
-### CURSED / MUTANT / HATCHED overload on 0x40
-
-Already covered in [`research_engine_overview.md`](research_engine_overview.md) —
-intentional per u6.h:80-82, faithful to source. Disambiguation
-requires per-object-type dispatch at call sites.
-
-## Open questions
-
-1. **Merge-sort stability** in `__ObjectsDeserialize` — does file
-   order survive ties? Body needs a careful re-read.
-2. **AddObj / AddMapObj / AddInvObj** at `seg_1184.c:635/642/668` —
-   how new objects are added at runtime (not from OBJBLK load).
-3. **LoadNewRegions** at `seg_1184.c:1550` — what triggers it, what
-   the inputs are.
-4. **C_1184_3B1D** at `seg_1184.c:1849` — major init called from
+1. **`LoadNewRegions`** (`seg_1184.c:1550`) — triggers + inputs;
+   matters for the streaming-load systems but not for the
+   demand-load + keep-loaded-for-session model the clone uses
+   ([`../CLAUDE.md`](../CLAUDE.md) §"no region unloading in scope").
+2. **`C_1184_3B1D`** (`seg_1184.c:1849`) — major init called from
    main(); allocates the world arrays. Body unread.
-5. **Where are NPC slots populated?** `objlist` is the savegame
-   file; needs to find the load site (likely seg_0C9C's "load game"
-   at `C_0C9C_042A` per `investigation.txt`).
-6. **`BaseTile[]` population**: which file populates the
-   `BaseTile[]` array at startup? Likely loaded via `LoadFile`
-   from a `basetile.vga` or similar. Verification: grep for
-   `BaseTile` write sites in seg_0903 / seg_1184 init.
-7. **Animation overlay timing** — when `animdata` rewrites
-   `tileindx` pointers, does it run per-frame at a fixed rate, or
-   gated by game-loop input? Covered in the render-path doc.
-
-These are TBD targets for the next pass. None block the immediate
-next step (renderer reading).
-
-## Next-step concrete targets
-
-The doc this enables is `research_map_render.md`. Reading targets:
-
-1. `C_0A33_09CE(int bp06)` body — the on/off-screen draw function
-   in the game-loop module. Likely the per-frame map composer.
-2. `C_1184_35EA(int tile, int frame, int x, int y)` body — the
-   tile-frame blitter (called by the per-cell render path).
-3. Callers of `IsTileDoubleV` / `IsTileDoubleH` — where the double-
-   tile rendering actually happens.
-4. **Link[] iteration in render** — does the renderer walk
-   `Link[MapObjPtr[y][x]]` forward, and how does it handle
-   double-V tiles spanning into the cell above?
-
-Once those four are read, the pillar bug's A/B/C hypotheses are
-resolvable.
+3. **Animation overlay timing** — when `animdata` rewrites
+   `tileindx` pointers, does it run per-frame at fixed rate, or
+   gated by game-loop input? Covered in
+   [`research_animation.md`](research_animation.md) and the clone
+   already has `TileAnimationSystem` driving it on the render tick.

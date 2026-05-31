@@ -24,14 +24,16 @@ import { makeTileAnimationSystem } from './systems/tile_animation_system.js';
 import { makePaletteCycleSystem } from './systems/palette_cycle_system.js';
 import { makeWorldRenderSystem } from './systems/world_render_system.js';
 import { makeWorldClockSystem } from './systems/world_clock_system.js';
-import { canStandAt } from './systems/passability.js';
-import { forEachOccupiedCell } from './systems/tile_footprint.js';
 import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn } from './components/components.js';
 import { Schedules } from './resources/schedules.js';
 import { ActorIndex } from './resources/actor_index.js';
-import { AiAction } from './assets/schedule.js';
 import { installNpcScheduleSystem } from './systems/npc_schedule_system.js';
 import { loadActors, ensureRegionsInView, makeStreamingSystem, inventoryOf } from './world_loader.js';
+import { installDevHud } from './view/dev_hud.js';
+import { installDevProbe } from './view/dev_probe.js';
+import { UIStack } from './view/ui_stack.js';
+import { openInspector } from './view/inspector.js';
+import { forEachOccupiedCell } from './systems/tile_footprint.js';
 
 // Gating set for terrain + flags (I-1b) + world objects (I-2) + NPC schedules (I-5).
 // Names are the original U6 filenames, lowercased.
@@ -132,7 +134,8 @@ async function load() {
        .registerComponent(Amount).registerComponent(Actor)
        .registerComponent(Schedule)
        .registerComponent(Container).registerComponent(ContainedIn);
-  window.__U6 = { world, tileRegistry: world.getResource(TileRegistry), mapLevel: world.getResource(MapLevel), spatial: world.getResource(SpatialIndex), clock: world.getResource(WorldClock), schedules, objlist, actorIndex: world.getResource(ActorIndex), inventoryOf: (h) => inventoryOf(world, h) };
+  const uiStack = new UIStack(world, document.getElementById('ui-root'));
+  window.__U6 = { world, tileRegistry: world.getResource(TileRegistry), mapLevel: world.getResource(MapLevel), spatial: world.getResource(SpatialIndex), clock: world.getResource(WorldClock), schedules, objlist, actorIndex: world.getResource(ActorIndex), inventoryOf: (h) => inventoryOf(world, h), uiStack };
 
   const { actors, scheduled } = loadActors(world, objlist);
   log(`\nLoaded ${actors} on-map NPCs from objlist (${scheduled} with schedules).`, 'ok');
@@ -142,7 +145,7 @@ async function load() {
   const npcScheduleStats = installNpcScheduleSystem(world);
   window.__U6.npcScheduleStats = npcScheduleStats;
 
-  await startRender(world, { npcScheduleStats, objlist, schedules });
+  await startRender(world, { npcScheduleStats, objlist, schedules, uiStack });
 }
 
 // I-6 verification: dump party inventories (I-6a) + a sampling of object
@@ -194,7 +197,7 @@ function verifyInventory(world, objlist) {
 // I-1c/I-2b: terrain + world objects on screen. Build the GPU atlas + palette, place
 // the camera at Britain's default origin, demand-load the OBJBLK regions in view, then
 // register CameraSystem + RenderSystem(s) and drive a continuous rAF loop. Drag to pan.
-async function startRender(world, { npcScheduleStats, objlist, schedules } = {}) {
+async function startRender(world, { npcScheduleStats, objlist, schedules, uiStack } = {}) {
   const canvas = document.getElementById('screen');
   canvas.style.display = 'block';
 
@@ -224,210 +227,90 @@ async function startRender(world, { npcScheduleStats, objlist, schedules } = {})
   world.addRenderSystem(makeWorldRenderSystem(renderer));          // objects + NPCs: per-cell painter, layers 2-5
   world.addRenderSystem(() => renderer.render());                  // present
 
-  // I-3 dev/cheat HUD: time + sun bucket + hour-fire counter + manual controls
-  // (pause/resume the turn-driver, ±10m/±1h time jumps). +1h matches source's
-  // debug hotkey Alt+215 (C_0A33_1355(60)). Kept across the remaining impl
-  // steps as a permanent dev affordance — modern UX (corner overlay, drag-
-  // safe pointer-events) the cabinet couldn't surface. Always-visible during
-  // development; hide-vs-toggle (e.g. backtick hotkey) revisited when the
-  // real status panel ports (seg_0A33.c:933-936).
-  const hudEl = document.getElementById('clock-hud');
-  const textEl = document.getElementById('clock-text');
-  const controlsEl = document.getElementById('clock-controls');
-  const pauseBtn = controlsEl.querySelector('[data-act="pause"]');
-  hudEl.style.display = 'block';
-  const clock = world.getResource(WorldClock);
-  const tc = world.getResource(TurnClock);
-  let hourFires = 0;
-  clock.onHour(() => hourFires++);
-  const pad2 = (n) => String(n).padStart(2, '0');
-  world.addRenderSystem(() => {
-    textEl.textContent =
-      `Year ${clock.Date_Y} · M${pad2(clock.Date_M)} D${pad2(clock.Date_D)}` +
-      ` · ${pad2(clock.Time_H)}:${pad2(clock.Time_M)}` +
-      ` · ☀ ${clock.D_2C55} · hours fired ${hourFires}`;
+  // I-3 dev HUD: clock text + ±/pause controls + I-5f schedule-stats line.
+  // Permanent dev affordance per CLAUDE.md §"Modern-browser UX".
+  installDevHud(world, {
+    hudEl:        document.getElementById('clock-hud'),
+    textEl:       document.getElementById('clock-text'),
+    controlsEl:   document.getElementById('clock-controls'),
+    npcStatsEl:   document.getElementById('npc-stats'),
+    npcScheduleStats,
   });
 
-  // I-5f (A): schedule-stats line. Lives between the time-op buttons and the
-  // hover probe. Reads npcScheduleStats live each frame; stats are mutated in
-  // place by the I-5e system on every hour-tick, so the line shows the most
-  // recent tick's counts.
-  const npcStatsEl = document.getElementById('npc-stats');
-  world.addRenderSystem(() => {
-    const s = npcScheduleStats;
-    if (!s || s.lastHour === null) return;     // pre-first-tick: leave placeholder text
-    npcStatsEl.textContent =
-      `schedule @ hour ${pad2(s.lastHour)}: ` +
-      `snap ${s.snapped} / block ${s.blocked} / idle ${s.noTrigger} / inactive ${s.inactive}`;
+  // I-4d cell probe + I-5f per-NPC schedule line + canvas drag-to-pan.
+  // Returned handle exposes isDragging() + getLastCell() for the I-7 hotkey.
+  const probe = installDevProbe(world, {
+    canvas, ts,
+    probeEl: document.getElementById('probe-text'),
+    cellEl:  document.getElementById('probe-cell'),
+    objlist, schedules,
   });
 
-  // Inverse cascade for the ± buttons. Forward advance is the contract
-  // (fires hooks, source-faithful); rewind is a local debug aid only — no
-  // hooks fire and the hour-fires counter doesn't decrement.
-  function rewind(c, minutes) {
-    let m = c.Time_M - minutes;
-    while (m < 0) {
-      m += 60;
-      c.Time_H--;
-      if (c.Time_H < 0) {
-        c.Time_H = 23;
-        c.Date_D--;
-        if (c.Date_D < 1) {
-          c.Date_D = 28;
-          c.Date_M--;
-          if (c.Date_M < 1) { c.Date_M = 12; c.Date_Y--; }
-        }
-      }
-    }
-    c.Time_M = m;
-    c.recomputeD_2C55();
-  }
-
-  let paused = false;
-  controlsEl.addEventListener('click', (e) => {
-    const act = e.target.dataset.act;
-    if (!act) return;
-    if (act === 'pause') {
-      paused = !paused;
-      if (paused) { tc.suspend(); pauseBtn.textContent = '▶ resume'; hudEl.classList.add('paused'); }
-      else        { tc.resume();  pauseBtn.textContent = '⏸ pause';  hudEl.classList.remove('paused'); }
-    } else if (act === 'p10') clock.advance(10);
-    else if (act === 'p60') clock.advance(60);
-    else if (act === 'm10') rewind(clock, 10);
-    else if (act === 'm60') rewind(clock, 60);
-  });
-
-  // drag-to-pan
-  let dragging = false, lastX = 0, lastY = 0;
-  const cellEl = document.getElementById('probe-cell');
-  canvas.addEventListener('pointerdown', (e) => {
-    dragging = true; lastX = e.clientX; lastY = e.clientY;
-    canvas.setPointerCapture(e.pointerId);
-    cellEl.style.display = 'none';                              // I-4d: hide the probe highlight during drag-pan
-  });
-  canvas.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
-    world.getResource(Camera).pan(e.clientX - lastX, e.clientY - lastY);
-    lastX = e.clientX; lastY = e.clientY;
-  });
-  const end = () => { dragging = false; };
-  canvas.addEventListener('pointerup', end);
-  canvas.addEventListener('pointercancel', end);
-
-  // I-4d cell probe + I-5f schedule probe: hover-to-inspect overlay on the dev
-  // HUD. Shows the cell under the cursor, terrain tile + key flags, per-cell
-  // object tile ids, canStandAt verdict, AND for any NPC entity in the cell its
-  // current schedule slot (action, target xyz) + active-area status. Integration
-  // check for I-4c (flag plumbing + canStandAt on real data) and I-5e
-  // (resolver + active-area gate on the actual world). Kept across remaining
-  // impl steps like the clock HUD.
-  const probeEl = document.getElementById('probe-text');
+  // I-7c: "look" hotkey. Hover any cell, press I -> inspector opens on the
+  // source-faithful pick for that cell. Gated on:
+  //   (a) UIStack is empty — when a modal is open, the substrate's own
+  //       keydown handler is in front and routes keys to the top modal.
+  //   (b) probe not mid-drag — no spurious inspect mid-pan.
+  //
+  // Pick rule, derived from source's mkMouseSelection -> C_2337_08F1
+  // (seg_2337.c:365) + COMBAT_canSee (seg_2337.c:340):
+  //   1. Gather candidates from 4 anchor cells (own + 3 SE neighbors whose
+  //      double-tile may extend back into (x,y)). Source's NextLoc
+  //      (seg_1184.c:211) walks a single chain that already includes these.
+  //   2. Within each candidate, iterate spatial.at FORWARD — spatial.at[0]
+  //      is the chain head, matching source's FindLoc first-walk order.
+  //      Under our insert rules: initial-load is in OBJBLK file order
+  //      (insert/push); runtime move is at-head (insertAtHead).
+  //   3. IsTileIgnore tiles are DEPRIORITIZED, not absolutely skipped — source's
+  //      C_2337_08F1 first-pass saves the first Ignore-flagged candidate as a
+  //      fallback (objNum_3) and only returns it if no canSee object is found
+  //      anywhere in the chain. So Ignore tiles act like "carpet under a sword"
+  //      — invisible to LOOK when there's a real target above, but pickable
+  //      when they're all the cell has (e.g. an egg sitting alone on the floor).
+  //   4. NPCs override objects — C_2337_08F1's second pass keeps walking for an
+  //      NPC and any NPC wins. We track firstNpc / firstObj / firstIgObj
+  //      separately and return firstNpc ?? firstObj ?? firstIgObj.
   const rendStore = world.store(Renderable);
-  const schedStore = world.store(Schedule);
-  // Reverse of AiAction: action code (e.g. 0x91) -> name (e.g. "SLEEP"). Built
-  // once; consumed by the schedule probe to decode the resolver's `action`.
-  const actionName = new Map(Object.entries(AiAction).map(([k, v]) => [v, k]));
-  function describeCell(x, y) {
-    const reg = world.getResource(TileRegistry);
-    const lvl = world.getResource(MapLevel);
+  const inspectAtCell = (x, y) => {
     const spatial = world.getResource(SpatialIndex);
-
-    const tT = lvl.tileAt(x, y);
-    const tFlags = [];
-    if (reg.isTerrainImpassable(tT)) tFlags.push('impass');
-    if (reg.isTerrainWet(tT)) tFlags.push('wet');
-    if (reg.isTerrainWall(tT)) tFlags.push('wall');
-    if (reg.isTerrainDamage(tT)) tFlags.push('damage');
-
-    const objs = [];
-    const npcs = [];                                    // schedule lines, one per NPC entity in the cell
+    let firstObj = null, firstNpc = null, firstIgObj = null;
     for (let dy = 0; dy <= 1; dy++) {
       for (let dx = 0; dx <= 1; dx++) {
         const ents = spatial.at(x + dx, y + dy);
         if (!ents) continue;
-        for (let k = ents.length - 1; k >= 0; k--) {
-          const handle = ents[k];
-          const id = world.resolve(handle);
-          if (id === -1) continue;
-          let tile = -1;
-          forEachOccupiedCell(reg, rendStore.tileId[id], x + dx, y + dy, (t, col, row) => {
-            if (col === x && row === y) tile = t;
-          });
-          if (tile === -1) continue;
-          const lbl = [];
-          if (world.has(handle, Actor)) lbl.push('NPC');
-          if (reg.isBreakthrough(tile)) lbl.push('br');
-          if (reg.isTileIgnore(tile)) lbl.push('ig');
-          if (reg.isTerrainImpassable(tile)) lbl.push('impass');
-          objs.push(`t#${tile}${lbl.length ? '[' + lbl.join(',') + ']' : ''}`);
-
-          // I-5f schedule probe: surface the NPC's resolved slot for this hour.
-          // Scheduled NPCs carry their objlist npcId; un-scheduled NPCs (Actor
-          // without Schedule) show "no schedule" without an id since we don't
-          // tag them with one.
+        for (const handle of ents) {
+          const i = world.resolve(handle);
+          if (i === -1) continue;
+          let landedTile = -1;
+          forEachOccupiedCell(reg, rendStore.tileId[i], x + dx, y + dy,
+            (t, c, r) => { if (c === x && r === y) landedTile = t; });
+          if (landedTile === -1) continue;
           if (world.has(handle, Actor)) {
-            if (world.has(handle, Schedule) && schedules) {
-              const npcId = schedStore.npcId[id];
-              const name = objlist?.actors?.[npcId]?.name ?? '(unnamed)';
-              const dow = Schedules.dayOfWeek(clock.Date_D);
-              const slot = schedules.resolveSlotAt(npcId, clock.Time_H, dow);
-              const slotStr = slot
-                ? `slot ${slot.slotIndex}: ${actionName.get(slot.action) ?? '0x' + slot.action.toString(16)} (hour ${slot.hour}, day ${slot.day}) → (${slot.x},${slot.y},${slot.z})`
-                : `no slot at hour ${clock.Time_H} day ${dow}`;
-              const active = world.getResource(SpatialIndex).hasRegionAt(x + dx, y + dy);
-              npcs.push(`NPC #${npcId} "${name}" · ${slotStr} · active=${active ? 'YES' : 'NO'}`);
-            } else {
-              npcs.push('NPC (no schedule)');
-            }
+            if (firstNpc === null) firstNpc = handle;
+          } else if (reg.isTileIgnore(landedTile)) {
+            if (firstIgObj === null) firstIgObj = handle;
+          } else if (firstObj === null) {
+            firstObj = handle;
           }
         }
       }
     }
-
-    return {
-      text: `(${x},${y}) terrain t#${tT}${tFlags.length ? '[' + tFlags.join('+') + ']' : ''} · objs:${objs.length ? '[' + objs.join(' ') + ']' : 'none'}`,
-      npcs,
-      stand: canStandAt(world, x, y),
-    };
-  }
-  function updateProbe(e) {
-    if (dragging) return;                                         // freeze probe + highlight while panning
-    const cam = world.getResource(Camera);
-    const rect = canvas.getBoundingClientRect();
-    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
-    if (sx < 0 || sy < 0 || sx >= rect.width || sy >= rect.height) return;
-    const W = 1024;
-    const tx = (Math.floor((cam.worldX + sx) / ts) % W + W) % W;
-    const ty = (Math.floor((cam.worldY + sy) / ts) % W + W) % W;
-    const d = describeCell(tx, ty);
-    // Cell line + per-NPC schedule lines (I-5f). innerHTML for the <br>; cell
-    // / NPC strings come from describeCell which doesn't accept user input, so
-    // we're not escaping for an external string here.
-    const headline = `${d.text} · stand=${d.stand ? 'YES' : 'NO'}`;
-    probeEl.innerHTML = d.npcs.length
-      ? headline + '<br>' + d.npcs.join('<br>')
-      : headline;
-    probeEl.classList.toggle('pass', d.stand);
-    probeEl.classList.toggle('blocked', !d.stand);
-    // Position the 1px highlight rectangle on the cell. Computed from the cursor's
-    // tile-snapped pixel inside the canvas (avoids wrap edge-cases with tx/ty); the
-    // result is the same pixel the renderer paints the tile at.
-    const offX = ((cam.worldX % ts) + ts) % ts;
-    const offY = ((cam.worldY % ts) + ts) % ts;
-    cellEl.style.left = (rect.left + Math.floor((sx + offX) / ts) * ts - offX) + 'px';
-    cellEl.style.top  = (rect.top  + Math.floor((sy + offY) / ts) * ts - offY) + 'px';
-    cellEl.style.display = 'block';
-  }
-  canvas.addEventListener('pointermove', updateProbe);
-  canvas.addEventListener('pointerleave', () => {
-    probeEl.textContent = 'hover the map…';
-    probeEl.classList.remove('pass', 'blocked');
-    cellEl.style.display = 'none';
+    const pick = firstNpc ?? firstObj ?? firstIgObj;
+    if (pick !== null) openInspector(world, pick, uiStack, { reg, objlist });
+  };
+  document.addEventListener('keydown', (e) => {
+    if (!uiStack.isEmpty()) return;
+    if (probe.isDragging()) return;
+    if (e.key.toLowerCase() !== 'i') return;
+    const cell = probe.getLastCell();
+    if (!cell) return;
+    inspectAtCell(cell.x, cell.y);
+    e.preventDefault();
   });
 
   let last = performance.now();
   (function loop(t) { world.frame(t - last, t); last = t; requestAnimationFrame(loop); })(last);
-  log('\nRendering started — drag the map to pan.', 'ok');
+  log('\nRendering started — drag the map to pan. Hover a cell + press I to inspect.', 'ok');
 }
 
 // --- dropzone: store dropped files into IndexedDB (bring-your-own-data) ---

@@ -28,6 +28,131 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-05-31 — I-7 (UI substrate + object inspector) + cell-pick + render tie-break + LZNAMES correction
+
+I-7 lands the shared UI substrate (modal stack + input routing +
+turn-driver gating + list-with-cursor + atlas-icon DOM rendering)
+and its first consumer, the **object inspector**. The hotkey `I`
+over a hovered cell opens an inspector for the topmost entity;
+list-cursor `Up`/`Down` + `Enter` nests into held containers; `Esc`
+unwinds. Main.js's 235-line `startRender()` refactored into
+`view/dev_hud.js` + `view/dev_probe.js` + `view/inspector.js` + the
+new substrate modules along the way.
+
+The bigger payoff turned out to be everything the inspector forced
+us to understand. Each user-flagged behavior gap drove a new source
+read that surfaced a finding the existing docs had wrong or vague.
+By the end of the session we'd corrected three substantial doc
+claims and added two new mechanism decodes — none of which were
+"I-7's scope" but all of which were needed to make I-7 correct.
+
+- **Read**:
+  - `seg_1184.c:1912 GetObjectString` + `seg_1184.c:1892 GetTileString`
+    — display-name resolution path.
+  - `seg_1184.c:1370+ __ObjectsDeserialize` + `seg_1184.c:1308 C_1184_29C4`
+    — re-read of the chain comparator + the merge sort's inner-while-loop.
+  - `seg_1184.c:642 AddMapObj` + `seg_1184.c:927 MoveObj` + `seg_1184.c:998 InsertObj`
+    — runtime chain mutation (was an unread "open question" in the world-data
+    doc).
+  - `seg_1E0F.c` `MoveObj` call sites — verified NPC AI has NO special splice
+    path; every NPC movement (schedule snap line 1206, pathfinder step 1375 /
+    1436 / 1487, follower step 584, combat warps 635/667/677/890) calls the
+    same `MoveObj` routine objects use. So NPC and object movement share one
+    chain rule (insert-at-head) and one routine.
+  - `seg_2337.c:340 COMBAT_canSee` + `seg_2337.c:365 C_2337_08F1`
+    — the cell-pick rule. Three-tier priority via two-pass walk.
+  - `seg_0C9C.c:590 mkMouseSelection` + `seg_0C9C.c:1206 RETURN-in-SelectMode-1`
+    — verified keyboard targeting collapses into the mouse picker.
+  - `seg_27a1.c:472 C_27A1_0C67` (LOOK) + `seg_27a1.c:2956 C_27A1_6179` (USE)
+    + `seg_27a1.c:387 C_27A1_0919` — verified LOOK is NOT table-dispatched
+    while USE IS; decoded USE's IsTileIg re-pick.
+  - `seg_1184.c:1676 ShowObject` non-fg branch — found the source's render
+    list ALSO insert-at-head, explaining why our forward-iter renderer was
+    drawing the wrong thing on top for same-tier objects.
+
+- **Found**:
+  - **No `LZNAMES` file exists.** An earlier auto-memory note had invented
+    one as the supposed home for non-party NPC names. The real path:
+    party-`Names[]` from `objlist` → fall through to `look.lzd` via
+    `GetTileString` for everyone else. `look.lzd` stores personal names at
+    NPC-specific tile ids (tile 1769 = "Lord British"). Clone already
+    decodes `look.lzd` via `parseLook` (LZW-decompressed, format identical
+    to source). The inspector's "(undefined)" for non-party NPCs was a
+    short-circuit in our `nameFor` that never tried `getTileLook`.
+  - **Merge-sort tie-break preserves file order.** The
+    `__ObjectsDeserialize` merge's inner-while-loop walks contiguous runs
+    of equal-key new elements without re-linking back to existing chain
+    until the run ends, so first-in-file lands at the run's head position
+    in the resulting chain. Previously documented as "undefined" — wrong.
+    This is why `FindLoc` returns Door before Doorway at (293, 376) even
+    though both are at identical (x, y, z).
+  - **`AddMapObj` and `MoveObj` both splice at chain head.** U6 design
+    intent: most-recently-placed at a cell gets picked first by LOOK/USE.
+    Lines 658-659 (`AddMapObj`) and 971-973 (`MoveObj`) are identical
+    head-insertion patterns. **NPCs use the same routines** — `seg_1E0F.c`
+    has 14+ `MoveObj` call sites for NPC movement (schedule snap +
+    pathfinder + follower + combat); there's no NPC-specific chain path.
+    So our `npc_schedule_system`'s `insertAtHead` is direct source-
+    faithfulness, not just future-proofing.
+  - **`COMBAT_canSee` skips `IsTileIg` tiles** as a deprioritization, not
+    an absolute skip. `C_2337_08F1`'s `objNum_3` fallback fires when nothing
+    canSee exists at the cell, so an egg sitting alone on a floor (tile
+    1256 has `IsTileIg`) is still inspectable.
+  - **Source's `ShowObject` non-fg branch inserts NEW at HEAD of the
+    render list** (line 1676: `*si = bp_04`). Render walks list forward, so
+    first-inserted (= older, = chain head) ends up at the tail = drawn last
+    = visually on top. Our `WorldRenderSystem` was using forward iter →
+    older on bottom → wrong (candle under table, door behind doorway).
+    Fixed by reversing inner ents iter so older emits last.
+  - **Keyboard targeting collapses into mouse path** (seg_0C9C.c:1217). No
+    separate keyboard cell-picker.
+
+- **Docs**:
+  - `research_world_data.md` §"Sort order" rewritten — file-order
+    tie-break is now documented as a mechanism, not "undefined." New
+    §"Runtime mutation — AddMapObj and MoveObj" decodes the chain-head
+    splice. New §"Clone correspondence — SpatialIndex API" maps source ops
+    to clone's `insert` / `insertAtHead` / `remove`. Old "Implications for
+    the pillar-bug audit" + answered open questions collapsed.
+  - `research_map_render.md` §"Painter's algorithm" rewritten — within-tier
+    rule now decodes the source's chain-head-insert / draw-forward effect
+    + the clone's reverse-iter implementation. The "genuinely-undefined
+    case" claim removed. Two verified cases (candle+table, door+doorway)
+    tabulated.
+  - `research_object_interaction.md` gained §"Cell-pick (C_2337_08F1)"
+    (with the 3-tier rule + `COMBAT_canSee`'s IsTileIg filter + clone's
+    `inspectAtCell` correspondence), §"Display-name resolution
+    (GetObjectString)" (with the no-LZNAMES retraction), and §"Mouse and
+    keyboard targeting collapse." LOOK now explicitly says "NOT
+    table-dispatched"; USE's §-header now includes the IsTileIg re-pick
+    via `C_27A1_0919`.
+  - `progress.md` I-7 scope trimmed from a ~150-line mixed dump to a tight
+    per-substep list + a verified-cases table + pointer-paragraph into the
+    three research docs. Ledger flipped I-6 → done, I-7 → done.
+  - `DOCUMENTATION_INDEX.md` table rows updated for the three changed
+    research docs to mention the new sections.
+  - Auto-memory `project_ultima6_rebuild_status.md` — LZNAMES claim
+    explicitly retracted in the I-5 deferred block.
+
+- **Open**:
+  - Multi-fgExt-per-cell source-faithful ordering — still deferred. Rare
+    in u6 data. Source's `ShowObject` fg-branch inserts fgExt tiles at
+    chain TAIL (opposite of non-fg), so two adjacent foreground multi-tile
+    objects whose extensions share a cell would render with the wrong
+    within-zone order in the clone. Revisit if observed.
+  - Inspector currently allows opening multiple stacked modals if `I` is
+    pressed twice — should it enforce single-instance? Flagging only.
+  - `Schedule.npcId` is now redundant with `Actor.npcId`; cleanup deferred.
+
+- **Next**:
+  - Save-point commits for I-7 + LZNAMES fix + chain-rule + render fix
+    + docs — Zane's call on commit shape (per-step or one big squash).
+  - I-8 = avatar movement + NPC pathfinding. Both consumers share
+    `C_1E0F_2D37` machinery. Every move must use the new
+    `SpatialIndex.insertAtHead` at the destination cell.
+
+---
+
 ## 2026-05-31 — I-6 (inventory data layer) landed
 
 I-6 lands the off-map item layer — CONTAINED / INVEN / EQUIP records

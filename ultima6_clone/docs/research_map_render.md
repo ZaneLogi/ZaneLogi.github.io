@@ -705,61 +705,98 @@ two terrain layers):
 cells never share pixels — Z-order only matters *within* a cell, and the four zones
 give exactly `ShowObject`'s cross-zone order.
 
-**Within a zone, a type-based z-priority decides the view.** When two objects share a
-cell *and* a zone (e.g. an NPC standing on a carpet — both "normal"), no flag separates
-them. `WorldRenderSystem` **gathers per-cell contributions** then sorts before emit:
+**Within a zone, two rules combine to decide the view.** When multiple objects share a
+cell *and* a zone (e.g. an NPC standing on a carpet — both "normal"; a candle on a
+table — both "normal"), no flag separates them. `WorldRenderSystem` **gathers per-cell
+contributions** then sorts before emit, using a type-priority for the NPC-vs-object
+case and reverse iteration for the object-vs-object case:
 
 1. For each visible cell `(col, row)`, scan the 4 anchor candidates whose 2×2 footprint
    could cover it — `(col, row)`, `(col+1, row)`, `(col, row+1)`, `(col+1, row+1)`.
-2. For each entity at those anchors, ask `forEachOccupiedCell` whether it contributes a
-   tile *at this exact cell* (catching extensions from neighbors). Collect
-   `{tile, zPri, isExt}` per contribution.
-3. Compute `zPri`: **`Actor` entities = 1, everything else = 0**.
-4. Sort ascending by `zPri` (JS stable sort keeps ties in scan order), then emit to the
-   zone lists. Actors end up last within zone = drawn last = on top of floor objects.
+2. For each anchor's entity array, iterate **in REVERSE** (`for k = ents.length-1; k >=
+   0; k--`). This is the within-zone tie-break for same-priority objects (see
+   "Within-tier order" below).
+3. For each entity, ask `forEachOccupiedCell` whether it contributes a tile *at this
+   exact cell* (catching extensions from neighbors). Collect `{tile, zPri, isExt}` per
+   contribution.
+4. Compute `zPri`: **`Actor` entities = 1, everything else = 0**.
+5. **Stable** sort ascending by `zPri`, then emit to the zone lists. Actors end up
+   last within zone = drawn last = on top of floor objects.
 
-This reproduces source's "NPC on top of furniture" outcome — source achieves it via
-`ShowObjects` (seg_1184.c:1723) walking the sorted `Link[]` and inserting non-FG tiles
-at the chain HEAD, so NPCs (slots `0x00–0xFF`, processed first) end up at the chain
-TAIL and (blit head→tail) draw last. Our type-based sort produces the same end state
-without coupling Z-order to load order.
+### Within-tier order — same-zone same-priority objects
 
-**Why gather per-cell, not iterate-ents-per-cell.** A double-tile object's anchor lives
-in ONE cell, but its footprint expansion lands a tile in a NEIGHBORING cell. An
-"iterate the cell's entities reverse" loop only sees the anchor's own cell; the
-neighbor's extension reaching back IN gets emitted while processing the neighbor's
-anchor cell, so it lands in the emit list AFTER the cell's own entities — and within
-the same zone draws on top. The Lord British / throne case was the canonical repro:
-throne (`isDoubleWidth = true`) anchored at (308, 348), extension tile 1202 at (307, 348), LB at (307,
-348); the old "iterate ents reverse" rule put LB under the extension. Gather-then-sort
+For two non-Actor objects in the same zone (e.g. candle + table at (300, 378)), `zPri`
+ties at 0. The stable sort preserves the reverse-iteration order from the gather, so
+the **older entity in `spatial.at` emits LAST, gets drawn LAST, ends up on TOP**. This
+matches source's `ShowObject` (seg_1184.c:1676-1699) for non-foreground tiles: it
+inserts NEW at the HEAD of `Obj_11x11[y][x]`, and the render walks that list forward
+(first-in-list drawn first = bottom). So source's effect is "first-inserted (= older)
+ends up at the tail of the render list = drawn last = on top." Our reverse-iter
+reproduces that without modeling `Obj_11x11` explicitly.
+
+Combined with `spatial.at`'s ordering convention ([`research_world_data.md`](research_world_data.md)
+§"Clone correspondence — SpatialIndex API"): `spatial.at[0]` is always the chain head
+— initial-load uses `insert(push)` so file-order is preserved (first-loaded at idx 0),
+runtime uses `insertAtHead(unshift)` so the newest arrival is at idx 0. Either way,
+reverse-iter visits the OLDEST entries last, emitting them last, drawing them on top.
+
+This produces the source-faithful visual for two known stacks:
+
+| Cell | spatial.at[0..] | Visual top | Picked by inspector |
+|---|---|---|---|
+| (300, 378) candle + table | `[candle, table]` | candle | candle |
+| (293, 376) door + doorway | `[door, doorway]` | door | door |
+
+The inspector and renderer read the same chain-rule from opposite ends — inspector
+walks forward through `spatial.at` (first = chain head = source's `FindLoc` pick);
+renderer walks reverse (oldest emits last = drawn last = on top). Both arrive at the
+same chain entry being the "player-visible" thing. See
+[`research_object_interaction.md`](research_object_interaction.md)
+§"Cell-pick (`C_2337_08F1`)" for the pick side.
+
+### NPC-vs-object — type priority overrides
+
+When the cell has an NPC + objects (e.g. Lord British on a throne whose 2-wide
+extension reaches LB's cell), the `zPri` sort kicks in: NPCs (priority 1) emit last
+within the zone, drawing on top of the throne extension. This is the source-faithful
+"NPC on top of furniture" outcome — source achieves it via `ShowObjects`
+(seg_1184.c:1723) walking the sorted `Link[]` and inserting non-FG tiles at the chain
+HEAD, so NPCs (slots `0x00–0xFF`, processed first) end up at the chain TAIL and (blit
+head→tail) draw last. Our type-based sort produces the same end state without coupling
+Z-order to load order.
+
+The Lord British / throne case was the canonical repro: throne (`isDoubleWidth =
+true`) anchored at (308, 348), extension tile 1202 at (307, 348), LB at (307, 348); a
+naive "iterate the cell's entities reverse" loop only saw LB's own cell, so the
+neighbor's extension reaching back IN got emitted while processing the neighbor's
+anchor cell — *after* LB — and within the same zone drew on top. Gather-then-sort
 collects both the anchor-at-cell AND extension-into-cell contributions uniformly per
-cell.
+cell so the `zPri` sort decides correctly.
 
 (Naming: throne is `isDoubleWidth` in the port = `IsTileDoubleH` in source. Our port
 uses shape-naming (`isDoubleWidth` = 2-wide, `isDoubleHeight` = 2-tall); source uses
 extension-direction naming (`DoubleH` = horizontal-extension = 2-wide, `DoubleV` =
 vertical-extension = 2-tall). Same flag bits in `TileFlag[]`.)
 
-**Why type-based, not entity-index-based, sort.** An earlier version sorted by entity
-index descending (low indices = NPCs loaded first = drawn on top). That works while
-entity indices reflect load order, but `World.create()` reuses freed slots via
-`freeStack` — once the object-interaction phase destroys and respawns entities, a new
-object can inherit a low-indexed slot and incorrectly draw above an NPC at the same
-cell. The type-based rule decouples Z-order from slot identity. Source's chain encodes
-ordering incrementally on each `ShowObject` call; we encode it via per-cell sort.
+### Why type-based, not entity-index-based, sort
 
-**Known limitation, deferred — multi-fgExt source-faithful ordering.** Source's
-chain-TAIL insertion for foreground extensions means a newer-inserted fgExt covers an
-older one in the same cell (the *opposite* of normal/fgHot's HEAD insertion). Our
-type-based sort puts all object fgExts at priority 0 and falls back to scan-order
-stability; multi-fgExt-per-cell (two adjacent foreground multi-tile objects whose
+An earlier version sorted by entity index descending (low indices = NPCs loaded first
+= drawn on top). That works while entity indices reflect load order, but
+`World.create()` reuses freed slots via `freeStack` — once the object-interaction
+phase destroys and respawns entities, a new object can inherit a low-indexed slot and
+incorrectly draw above an NPC at the same cell. The type-based rule decouples Z-order
+from slot identity. Source's chain encodes ordering incrementally on each `ShowObject`
+call; we encode it via per-cell sort.
+
+### Known limitation, deferred — multi-fgExt source-faithful ordering
+
+Source's `ShowObject` foreground-branch inserts fgExt tiles at the chain TAIL (the
+`while(*si) si = D_E5E0 + *si;` walk-to-end), so a newer-inserted fgExt covers an
+older one in the same cell — the *opposite* of normal/fgHot's HEAD insertion. Our
+reverse-iter + stable sort gives all object fgExts the normal/fgHot rule (older on
+top); multi-fgExt-per-cell (two adjacent foreground multi-tile objects whose
 extensions share a cell) would render with the wrong within-zone order. Rare in u6
 data; revisit if observed.
-
-The only genuinely-undefined case is two objects at the *same* (x, y, z): source's
-comparator ties and the merge-sort fall-through decides (`research_world_data.md`), so
-there is no "correct" order to match. A per-cell height sort could be added later if a
-specific stack ever looks wrong.
 
 ### Two worked cases (verified on real data, region `objblkhg` = the Lycaeum)
 

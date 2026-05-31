@@ -39,6 +39,158 @@ target into the global `Selection` struct:
 layer (`seg_0C9C`, see [`research_game_loop.md`](research_game_loop.md)
 §"Input polling"). The handler treats it as its input.
 
+### Mouse and keyboard targeting collapse into the same path
+
+Both input modes converge on `mkMouseSelection` → `C_2337_08F1`. At
+`seg_0C9C.c:1206-1217`, the keyboard `RETURN`-while-in-SelectMode
+synthesises a "click" at the cursor:
+
+```c
+} else if(ch == '\r') {
+    if(SelectMode == 1) {
+        ch = CMD_8E;                       // = "select made"
+        ...
+        PointerX = TIL2SCR(AimX);           // turn cursor into a pointer pos
+        PointerY = TIL2SCR(AimY);
+        mkMouseSelection();                 // <-- SAME function the mouse calls
+    }
+```
+
+So there isn't a separate keyboard-specific picker. There's exactly
+one cell-pick rule, decoded in the next section.
+
+## Cell-pick — `C_2337_08F1` (`seg_2337.c:365`)
+
+The decision "which object at this cell is the target?" Runs from
+both `mkMouseSelection` (the map-click) and the keyboard path above,
+so it determines `Selection.obj` for every LOOK / GET / DROP / MOVE /
+USE / TALK.
+
+The body walks the cell's `Link[]` chain head-first via `FindLoc` +
+`NextLoc` (head-first per [`research_world_data.md`](research_world_data.md)
+§"Sort order — `C_1184_29C4` comparator"), running two passes:
+
+```c
+C_2337_08F1(int objNum_param, int x, int y) {
+    int objNum_ret, objNum_2, objNum_3;
+    objNum_3 = -1;
+    /* first "canSee" object */
+    for (objNum_ret = FindLoc(x, y, MapZ); objNum_ret >= 0; objNum_ret = NextLoc()) {
+        if (COMBAT_canSee(objNum_param, objNum_ret))
+            break;
+        if (objNum_3 < 0)
+            objNum_3 = objNum_ret;          /* save first non-canSee as fallback */
+    }
+    /* first "canSee" notDead NPC — overrides any prior pick */
+    for (objNum_2 = objNum_ret; objNum_2 >= 0; objNum_2 = NextLoc()) {
+        if (COMBAT_canSee(objNum_param, objNum_2)) {
+            if (objNum_2 < 0x100 && !IsDead(objNum_2))
+                break;
+            continue;
+        }
+        if (objNum_3 < 0)
+            objNum_3 = objNum_2;
+    }
+    if (objNum_2 >= 0)
+        objNum_ret = objNum_2;              /* NPC override */
+    else if (objNum_3 >= 0 && objNum_ret < 0)
+        objNum_ret = objNum_3;              /* fall back to first non-canSee */
+    return objNum_ret;
+}
+```
+
+**Three-tier priority:** NPC > first non-Ignore object > first
+Ignore-flagged object. Each tier corresponds to a temporary
+(`objNum_2` / `objNum_ret` / `objNum_3`).
+
+### `COMBAT_canSee` — the visibility filter
+
+Body at `seg_2337.c:340`. Returns 0 (invisible to the picker) when:
+
+- the candidate is `IsInvisible` (and not a fellow party member from a
+  party-member observer),
+- `IsDraggedUnder` (something being dragged behind a horse),
+- `ObjShapeType == TypeFrame(OBJ_165, 0)` (a specific stealth case),
+- **`IsTileIg(TILE_FRAME(candidate))`** — this is the load-bearing
+  flag for "decorative pass-through" tiles (doorway frames, carpets,
+  eggs, mushrooms),
+- `GetZ(observer) != GetZ(candidate)` (different map levels).
+
+The `IsTileIg` filter is what makes "look at door+doorway → oaken
+door" work without the picker explicitly knowing what a doorway is.
+But because the second pass *saves* the first Ignore candidate as
+`objNum_3` and falls back to it if nothing canSee exists, an egg
+sitting alone on a floor (tile 1256 has `IsTileIg=true`) is still
+inspectable — the third tier fires.
+
+### Clone correspondence — `inspectAtCell`
+
+`main.js`'s `inspectAtCell(x, y)` implements the same three-tier
+rule against the clone's spatial-index storage:
+
+```js
+let firstObj = null, firstNpc = null, firstIgObj = null;
+for (let dy = 0; dy <= 1; dy++) for (let dx = 0; dx <= 1; dx++) {
+  const ents = spatial.at(x + dx, y + dy);
+  if (!ents) continue;
+  for (const handle of ents) {                          // FORWARD = chain head order
+    ...
+    if (landedTile === -1) continue;                    // not at this cell
+    if (world.has(handle, Actor)) {
+      if (firstNpc === null) firstNpc = handle;
+    } else if (reg.isTileIgnore(landedTile)) {
+      if (firstIgObj === null) firstIgObj = handle;
+    } else if (firstObj === null) {
+      firstObj = handle;
+    }
+  }
+}
+const pick = firstNpc ?? firstObj ?? firstIgObj;
+```
+
+The 4-anchor gather mirrors source's `NextLoc`-recognises-extensions
+behavior (the four candidate anchors whose 2×2 footprint could cover
+`(x, y)`). Forward iteration of `spatial.at` is chain-head-first per
+the [`research_world_data.md`](research_world_data.md)
+§"Clone correspondence — `SpatialIndex` API" rule.
+
+### Display-name resolution — `GetObjectString` (`seg_1184.c:1912`)
+
+The string LOOK prints for `Selection.obj`. Two-tier fall-through:
+
+```c
+GetObjectString(int objNum) {
+    if (IsPlrControl(objNum)) {
+        di = GetTileString(TILE_FRAME(objNum));
+        for (bp_02 = 0; bp_02 < PartySize; bp_02++)
+            if (Party[bp_02] == objNum)
+                strcpy(D_D7DC, Names[bp_02]);       /* override with party name */
+    } else if (objNum < 0x100 && Isbis_0014(objNum)) {
+        di = GetTileString(BaseTile[OrigShapeType[objNum] & 0x3ff] +
+                           (OrigShapeType[objNum] >> 10));
+    } else {
+        di = GetTileString(TILE_FRAME(objNum));      /* everyone else */
+    }
+    return di;
+}
+```
+
+**No separate "NPC names" file.** Personal names for major NPCs live
+in `look.lzd` at NPC-specific tile ids: tile 1769 → "Lord British",
+tile 1700-1710 → "musician", etc. The `Names[][14]` table is
+populated only for **party members** (from `objlist`); for everyone
+else, `GetTileString` (= clone's `Tiles.getTileLook` over the
+LZW-decompressed `look.lzd`) is the canonical source of the
+displayed name.
+
+Clone's `view/inspector.js` `nameFor()` mirrors this: party member →
+`objlist.actors[npcId].name`; everyone else → `getTileLook(tileId,
+quantity)`. `look.lzd` format (16-bit tileId + null-terminated
+string, sorted ascending; first record with `tileId >= target` wins)
+is decoded identically by source's `GetTileString` (linear scan per
+query) and clone's `parseLook` (pre-built 2048-entry array — same
+result, different cache strategy).
+
 ## The shared interaction pattern
 
 All five commands follow the same skeleton:
@@ -71,6 +223,11 @@ validate → effect → world-recompose + time/move-point cost.
 ## Look — `C_27A1_0C67` (`seg_27a1.c:472-690`)
 
 Pure inspection; no world mutation (except revealing/searching).
+**Not table-dispatched.** A single function that consumes whatever
+`Selection.obj` the cell-pick set, formats a description via
+`GetObjectString`, and appends generic stats. Only USE has the big
+per-object-type switch — LOOK's text variations (weight / damage /
+armor / contents) are cosmetic branches inside the one function.
 
 - **Empty tile** (`Selection.obj == -1` or invisible): name the
   terrain tile (`GetTileString`), and if adjacent, "Searching here,
@@ -160,11 +317,19 @@ plate, shove a barrel, reposition a cannon).
 
 The richest command: a **`switch(GetType(Selection.obj))`** dispatch
 to ~40 per-object-type handlers. This is the "object-type dispatch"
-the engine-overview row anticipated.
+the engine-overview row anticipated — and it's the **only** verb
+that's table-dispatched (LOOK/GET/DROP/MOVE are generic single
+functions; USE is the dispatch table).
 
 Pre-dispatch:
 - `COMBAT_getHead` resolves multi-tile creatures.
-- `C_27A1_0919` disambiguates tile-vs-object targeting.
+- **USE-specific re-pick** (`seg_27a1.c:2962-2967`): if
+  `Selection.obj` is an NPC (`< 0x100` at a map tile, not a ridable
+  creature) OR the selected tile has `IsTileIg` set, re-pick via
+  `C_27A1_0919` to find a non-NPC non-Ignore target at the cell.
+  This is *additional* to the cell-pick rule in
+  §"Cell-pick (`C_2337_08F1`)": USE refuses NPCs and decorative
+  tiles as targets even if the initial pick landed on one.
 - `C_27A1_01DE(type)` gates "is this type usable at all?" → "Not
   possible!" if not.
 - Vehicle guard (`C_27A1_60F5`) — some things can't be used from a
@@ -172,6 +337,21 @@ Pre-dispatch:
 - Adjacency + facing as in the shared pattern.
 - Reagent/instrument guards (`C_1944_0AA9` checks for "use on
   altar"-style restrictions).
+
+**`C_27A1_0919`** (`seg_27a1.c:387`) is the USE re-picker:
+
+```c
+for (si = FindLoc(GetX(objNum), GetY(objNum), MapZ); si >= 0; si = NextLoc()) {
+    if (si == objNum) continue;
+    if (!IsTileIg(TILE_FRAME(si))) {
+        if (si > 0xff) break;        /* first non-NPC, non-Ignore wins */
+    }
+}
+```
+
+Walks the cell's chain, skips the current `Selection.obj` and any
+NPC (`si > 0xff` means "object slot, not NPC slot"), and stops at
+the first non-Ignore object.
 
 Representative dispatch cases (`seg_27a1.c:3016-3105+`):
 
@@ -205,7 +385,7 @@ its own verb semantics.
 | `C_27A1_0205(str, mode)` (`:131`) | Parse a typed string into an integer / quantity (used by "how many?" prompts). Returns -1/-2 for invalid/escape. |
 | `C_27A1_02D9(objNum)` (`:168`) | Display an NPC/object portrait in the status panel. |
 | `C_27A1_0841(objNum)` | Prefix the object name with the right article ("a"/"an"/"the"/count). |
-| `C_27A1_0919(obj)` | Resolve "what did the player actually target" when pointing at a tile that has both terrain and an object. |
+| `C_27A1_0919(obj)` | USE-specific re-pick — walks the cell's chain skipping the current selection + any NPC + any Ignore tile; returns the first remaining object. See §"Use" for the body. |
 | `COMBAT_getHead(obj)` | Map any tile of a multi-tile creature to its canonical head slot. |
 | `MkDirection(px, py)` | Convert a pointer position to a facing direction (or -1 if on the player). |
 | `CLOSE_ENOUGH(n, x0, y0, x1, y1)` | Chebyshev-distance range test. |
@@ -292,18 +472,16 @@ moonstones, fishing — each is one Use-dispatch entry addable later.
 1. **`Selection` struct full definition** — fields confirmed as
    `obj` / `x` / `y`; whether it carries more (range, mode) needs a
    `u6.h` grep when implementing.
-2. **`C_27A1_0919` tile-vs-object resolution** — the exact priority
-   when a cell has terrain + multiple objects; body not fully read.
-3. **The full Use dispatch table** (~40 cases) — only the
+2. **The full Use dispatch table** (~40 cases) — only the
    architecturally-representative ones are tabulated here. The
    complete enumeration is a mechanical pass when Use is implemented
    (one handler at a time).
-4. **`C_27A1_5289` board-vehicle + `Board`/`Unboard`
+3. **`C_27A1_5289` board-vehicle + `Board`/`Unboard`
    (`seg_1E0F.c:596/656`)** — the vehicle subsystem; its own
    research when boats/horses matter.
-5. **Move's diagonal corner-clearance** (`C_27A1_1DAB`) vs the NPC
+4. **Move's diagonal corner-clearance** (`C_27A1_1DAB`) vs the NPC
    AI's `__TryDiagMove` — confirm they use the same geometry.
-6. **`D_0DDC[]` message indices** — exact string per index; tabulate
+5. **`D_0DDC[]` message indices** — exact string per index; tabulate
    when wiring UI text.
 
 ## Cross-references

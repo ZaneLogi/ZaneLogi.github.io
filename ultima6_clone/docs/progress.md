@@ -43,8 +43,8 @@ modal-stack / turn-driver-suspension design decisions.
 | **I-3** | world clock (game-time tick → schedules; `D_2C55` computed but unconsumed) | done |
 | **I-4** | **tile passability** — `canStandAt` primitive (walks-only body) + footprint util + HUD cell probe | **done** |
 | **I-5** | **NPC schedule resolution** — hourly slot snap (pathfinding + pose sprites deferred) | **done** |
-| **I-6** | **inventory data layer** — CONTAINED/INVEN/EQUIP entities + `Container`/`ContainedIn` components; resolve OBJBLK's in-file `GetAssoc` against live entities (deferred from I-2). No UI. | **next** |
-| I-7 | UI substrate + object inspector view (first surface) — modal stack + input routing + turn-driver gating + list-with-cursor + atlas-icon DOM rendering | planned |
+| **I-6** | **inventory data layer** — CONTAINED/INVEN/EQUIP entities + `Container`/`ContainedIn` components; resolve OBJBLK's in-file `GetAssoc` against live entities (deferred from I-2). No UI. | **done** |
+| **I-7** | **UI substrate + object inspector view** (first surface) — modal stack + input routing + turn-driver gating + list-with-cursor + atlas-icon DOM rendering; `I` hotkey opens inspector on hovered cell | **done** |
 | I-8 | avatar movement + NPC pathfinding — `C_1E0F_2D37` shared by both consumers; avatar input + camera follow + facing-on-step + facing-on-snap fold in | planned |
 | I-9 | object-action dispatch core — `Map<ObjectType, handler>` registries per action (USE / GET / LOOK / DROP); minimum handlers for "walk around without getting stuck" (door USE, LOOK on any, GET/DROP via inventory) | planned |
 | I-10 | talk trigger — adds TALK as a case in the I-9 dispatch + adjacency-pick logic | planned |
@@ -598,9 +598,13 @@ source comparison is in `research_map_render.md §"Painter's algorithm"`.
   Acceptable for the I-5 demo (OBJLIST positions are close-enough to
   schedule). Real save/load will need to restore `SchedIndex` per the
   savegame.
-- **NPC names** — `"(undefined)"` in the probe is because objlist's
-  name section only fills party members. Real NPC names live in a
-  separate string table (probably `LZNAMES`) not yet decoded.
+- **NPC names** — the probe currently falls back to `"(unnamed)"`
+  when `objlist.actors[npcId].name` is empty (true for any non-party
+  NPC). Source's `GetObjectString` (`seg_1184.c:1912`) handles this by
+  falling through to `GetTileString(TILE_FRAME)` — i.e. `look.lzd`,
+  which we already decode and which stores personal names ("Lord
+  British" at tile id 1769, "musician" for the generic-musician tile
+  range, etc.). The probe needs the same fall-through; fixed in I-7c.
 - **Multi-fgExt-per-cell source-faithful ordering** — within-zone sort
   for fgExt uses the same z-priority as normal/fgHot, which inverts
   source's "chain tail = top" rule. Rare in u6 data; revisit if
@@ -672,3 +676,185 @@ probe, rAF loop). Refactor pairs with I-7's UI substrate when the
 inspector lands (`view/dev_hud.js`, `view/dev_probe.js`, `view/
 inspector.js` are the natural cuts already legible in
 `startRender`). Doing it now would buy nothing.
+
+## I-7 scope — UI substrate + object inspector view
+
+**Goal:** lay the shared UI substrate (modal stack + input routing +
+turn-driver gating + list-with-cursor + atlas-icon DOM rendering)
+that every later UI surface (dialog window I-11, status panel I-13,
+save/load, spell select, conversation) will sit on, and battle-test
+it on its heaviest primitive consumer — the **object inspector**, one
+surface for any entity (sword / NPC / barrel / chest) with
+nested-modal-stack opening of held containers. Paired with the
+deferred-from-I-6 `main.js` logic refactor so the substrate's hook
+sites are easier to wire on smaller modules.
+
+**Trigger (Zane's feel call, 2026-05-31):** hover any cell, press `I`
+→ inspector opens for the topmost entity at the hovered cell. Mirrors
+U6's "look" command, leaves canvas pointer plumbing untouched
+(drag-to-pan stays as is). Nested-open from a list row uses the
+substrate's in-modal cursor + Enter — no canvas interaction.
+
+**Sub-steps** (each ≈ one save-point commit, browser-verified before
+the next; squashed at the end into one `[ultima6_clone] impl I-7
+(UI substrate + object inspector view)`):
+
+- **I-7a — `main.js` logic refactor (behavior-identical).** Extracts
+  `view/dev_hud.js` (clock HUD installer: text, controls,
+  pause/±10m/±1h, schedule-stats line, rewind helper) and
+  `view/dev_probe.js` (drag-to-pan + I-4d describeCell + I-5f probe;
+  returns `{ isDragging, getLastCell }` for I-7c's hotkey). `main.js`
+  trims from 463 → ~280 lines; `startRender()` from ~235 → 53 lines.
+  No behavior change. Browser-verified: HUD ticks, probe shows the
+  same lines, drag-pan unchanged.
+
+- **I-7b — UI substrate.** Four new files plus `index.html` chrome.
+  `view/ui_stack.js` — `UIStack` class: `push(modal)` appends to
+  `<div id="ui-root">`; on first-push suspends `TurnClock` + installs
+  one global `keydown` listener that routes to `top().onKey` (Esc
+  auto-pops unless `preventDefault`'d). `pop()` reverses; last-pop
+  resumes `TurnClock` + removes listener. `TurnClock.suspendCount` is
+  already counter-based (`ecs/world.js:60`) so nested modals work
+  for free. `view/ui_widgets.js` — `makeListCursor(items, {
+  renderRow, onActivate })`: Up/Down wrap, Enter activates; cursor
+  row carries `.ui-cursor` class. `view/ui_icons.js` — `tileIcon(reg,
+  tileId)`: builds a 16×16 `<canvas>`, blits `getTilePixels` via
+  `reg.palette` (both already on CPU side); scaled 2× via CSS
+  `image-rendering: pixelated`. `index.html` — adds
+  `<div id="ui-root">` + substrate CSS (gold-on-black, matches dev
+  HUD palette). `UIStack` exposed via `window.__U6.uiStack` for
+  DevTools dry-run.
+
+- **I-7c — Object inspector + `I` hotkey.** `view/inspector.js`'s
+  `openInspector(world, handle, uiStack, { reg, objlist })` builds a
+  modal: header (icon, name [NPC name from `objlist.actors` for
+  scheduled actors, else `getTileLook`, else `Item #N`], kind +
+  obj#/frame + ×qty, position-or-(carried), decoded status bits),
+  contents list iff `Container` (rows = icon + name + ×N + equipped),
+  hint footer. `inventoryOf` (`world_loader.js:161`) provides the
+  list shape verbatim — no wrapper. `onActivate` on a child opens a
+  nested inspector (substrate's stack handles the LIFO). `main.js`
+  global keydown gated on `uiStack.isEmpty() && !probe.isDragging()
+  && key === 'i'` reads `probe.getLastCell()`, calls
+  `spatial.at(x,y)[length-1]` (same topmost = last-entry rule the
+  per-cell painter uses for Actor=1 z-priority), opens the
+  inspector.
+
+**Binding design decisions (recorded 2026-05-31, all carried through):**
+- **One inspector surface for any entity** (not container-specific).
+  Identity always present; contents-list conditional on `Container`.
+- **Modal-stack for nested containers**, not inline tree expansion.
+  Each open pushes; substrate's z-stack handles the rest.
+- **`TurnClock` suspended for the entire stack lifetime.** Push N
+  modals → N suspends; pop N → N resumes; net 0. No schedule snaps
+  fire while the player inspects. Matches source's pause-during-
+  inspection behavior + the existing dev HUD pause-button mechanism.
+- **Atlas-icon rendering uses existing CPU-side data** —
+  `Tiles.cache` (set by `getTilePixels`) + `TileRegistry.palette`
+  (already RGBA Uint8Array). No GPU readback, no extra cache.
+
+**Reuse-from-existing decisions** (no reinvention):
+- `inventoryOf(world, handle)` (`world_loader.js:161`) — already
+  returns `{ handle, objNumber, frame, quantity, quality, equipped }`,
+  exactly the list row shape.
+- `Tiles.getTilePixels(index)` / `getTileLook(index, quantity)`
+  (`assets/tiles.js:82, 128`) — pixel cache + display-name lookup.
+- `SpatialIndex.at(x, y)` (`resources/spatial_index.js:45`) — cell
+  entity array, no spatial scan.
+- `TurnClock.suspend() / .resume()` (`ecs/world.js:60-62`) —
+  suspendCount counter, no infra change.
+
+**Source-faithful pick / display-name / chain-insertion rules.** The
+chain-head-insertion rule (`AddMapObj` / `MoveObj` /
+`__ObjectsDeserialize`), the three-tier cell-pick rule
+(`C_2337_08F1` + `COMBAT_canSee` + `IsTileIg` fallback), the
+display-name fall-through (party-`Names[]` → `look.lzd` via
+`GetObjectString`), and the keyboard-targeting-collapses-into-mouse
+path all landed in this scope but are documented in their proper
+research homes — see [`research_world_data.md`](research_world_data.md)
+§"Runtime mutation — AddMapObj and MoveObj" + §"Clone correspondence
+— SpatialIndex API", [`research_object_interaction.md`](research_object_interaction.md)
+§"Cell-pick (`C_2337_08F1`)" + §"Display-name resolution", and
+[`research_map_render.md`](research_map_render.md) §"Painter's
+algorithm — within-tier order" for the renderer's reverse-iter rule.
+
+Concrete I-7c-time additions to the code base:
+- **`Actor` component upgraded from tag → `{ npcId: Uint8Array }`** so
+  party-membership checks work for any actor (the npcId used to live
+  only on `Schedule.npcId`).
+- **`SpatialIndex.insertAtHead(x, y, handle)`** added alongside
+  `insert(x, y, handle)`. `insert` is for batch-load (file order
+  preserved by push). `insertAtHead` is for runtime move/drop
+  (matches source's chain-head splice).
+- **`npc_schedule_system.tick`** switched its snap to `insertAtHead`.
+  Wasn't visible bug (Actor override masked it) but now the chain
+  state is source-faithful for any future reader.
+- **`WorldRenderSystem` within-tier iter is REVERSE** so older
+  spatial.at entries emit last → drawn last → on top. Fixed the
+  candle-under-table and door-under-doorway visual issues.
+
+Verified cases (combined across pick + render):
+
+| Cell | spatial.at[0..] | Inspector picks | Visually on top |
+|---|---|---|---|
+| (300, 378) | [candle, table] | candle | candle |
+| (293, 376) | [door, doorway] | oaken door | oaken door |
+| (296, 373) | [potion, table] | green potion | green potion |
+| (307, 348) | [LB] + throne extension | Lord British | Lord British |
+| (307, 360) | [egg] (`IsTileIg`) | egg (3rd-tier fallback) | egg |
+
+**Forward implications for I-8+:** every system that moves an entity
+mirrors a source `MoveObj` / `AddMapObj` call, so every system that
+moves an entity must use `SpatialIndex.insertAtHead` at the
+destination. Source has ONE chain rule (insert-at-head) and ONE
+movement routine (`MoveObj`); NPCs and objects both go through it —
+`seg_1E0F.c` has 14+ `MoveObj` call sites covering NPC schedule snap
+(line 1206), pathfinder per-step (1375/1436/1487), follower stepping
+(584), combat warps (635-890). The clone mirrors this with one API
+used uniformly:
+
+- **NPC schedule snap** (today, `npc_schedule_system.tick`) → analog of
+  `seg_1E0F.c:1206` `MoveObj`. ✓ uses `insertAtHead`.
+- **I-8 avatar step + NPC pathfinder** → analog of `seg_1E0F.c:1375` /
+  `seg_1E0F.c:921`. Must use `insertAtHead`.
+- **I-9 DROP** → analog of `MoveObj` on a previously-INVEN object
+  becoming LOCXYZ, OR `AddMapObj` for a split stack. Both head-splice
+  in source. Must use `insertAtHead`.
+- **I-9+ push / throw / teleport / magic move** → all `MoveObj`
+  equivalents. Must use `insertAtHead`.
+
+The NPC schedule snap's switch from `insert` → `insertAtHead` has no
+observable behavior today (Actor type-priority in inspector + renderer
+masks chain position for NPCs, and two-NPCs-per-cell is gameplay-
+impossible via `canStandAt`'s NPC-blocks rule). But it makes the API
+convention uniform — one API, one source rule, no split-brain — so I-8+
+callers don't have to remember "NPCs use one API, objects use the
+other." Plain `insert` at runtime by any future system would pile the
+new arrival at the tail of `spatial.at`, and the inspector / chain-
+consuming code would silently pick the wrong target. API naming is the
+guardrail.
+
+**Verification:**
+- Page loads with empty IndexedDB: no errors, `#ui-root` in DOM,
+  checklist scans cleanly.
+- DevTools dry-run after data loads:
+  `window.__U6.uiStack.push({ el: document.createElement('div'),
+  onKey: (e) => {} })` → clock HUD border tints `#c66` (TurnClock
+  suspended); Esc pops; border returns to `#6b5d3a`.
+- Live: hover (307, 348) (Lord British on his throne), press `I` →
+  inspector shows name = "Lord British", position (307,348,0), status
+  bits decoded, contents = ~12 inventory items. Up/Down cursor;
+  Enter on a held bag → nested inspector for that container. Esc
+  unwinds nested → root → close. During the stack lifetime: clock
+  text doesn't advance; canvas drag-pan unaffected. `I` over an
+  empty cell = no-op.
+
+**Deferred (each owns a later step):**
+- **Status panel** (I-13) — third substrate consumer, replaces the
+  dev HUD's clock readout. Substrate ready; consumer waits.
+- **Dialog window** (I-11) — second substrate consumer; opens when
+  TALK fires (I-10). Substrate ready; consumer waits.
+- **Inspector actions** (USE / GET / DROP buttons) — need I-9's
+  object-action dispatch core; today's inspector is read-only.
+- **Object-action triggers from the inspector** (e.g. USE-on-selected
+  child) — same I-9 dependency.
