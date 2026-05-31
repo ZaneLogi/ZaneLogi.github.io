@@ -469,6 +469,18 @@ the structure but didn't dissect stability) AND/OR read the renderer
 to see what it actually iterates. The renderer's iteration direction
 through `Link[]` from `MapObjPtr[y][x]` is the load-bearing question.
 
+**Update 2026-05-31 (post-I-5 Z-order fix).** This open question is
+**partially mooted for the clone's port**: `WorldRenderSystem`'s
+within-cell sort is now a **type-based z-priority** (Actor=1,
+else=0; see `research_map_render.md §"Painter's algorithm"`) that
+doesn't depend on Link[] order or load order. The within-zone tie
+that the comparator leaves undefined is broken by entity type
+instead — NPCs always over floor objects, multi-object stacks fall
+back to stable scan order. Source's actual Link[]-iteration behavior
+is still a research question if anyone needs full source-faithfulness
+(e.g. to match source's exact within-zone object stacking order),
+but the clone's correctness no longer hinges on the answer.
+
 ### CURSED / MUTANT / HATCHED overload on 0x40
 
 Already covered in [`research_engine_overview.md`](research_engine_overview.md) —

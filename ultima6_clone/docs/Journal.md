@@ -28,6 +28,143 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-05-31 — I-5 (schedule resolution) landed + post-I-5 Z-order bug fix
+
+I-5 narrowed mid-flight from the ledger's "NPC scheduled movement (hourly
+schedules + pathfinding + walking)" framing to **schedule-resolution-only**:
+on each game-hour rollover, snap eligible NPCs to their slot's xyz. No
+pathfinding, no facing/frame updates, no `NPCMode` plumbing. Six save-point
+commits (I-5a parser → I-5f HUD probe) squashed into one `impl I-5`. Then a
+Z-order bug ("Lord British drawn under his throne") surfaced during I-5c
+verification, was queued, and fixed post-I-5f as its own commit. Post-step
+doc resync paired with each implementing commit.
+
+- **Read**:
+  - `seg_1E0F.c:2264-2294` (`C_1E0F_5165` — the hourly schedule arm) +
+    `seg_0A33.c:875` (the calling site inside the time-advance routine).
+    Confirmed hour-EXACT match + day wildcard (0 = any), backward scan,
+    `SchedIndex[npc]` becomes the per-NPC offset.
+  - `seg_0C9C.c:285-287` (the SCHEDULE file's two-pass read) +
+    `u6.h:469-473` (`struct tSchedule`) + `u6.h:302-303` (`struct coord`).
+    Layout: **514 bytes (257 × u16-LE) of pointers, then N × 5-byte
+    entries** — `(0x100 + 1) * sizeof(int)`, Borland TC2 `int` is 16-bit.
+    Nuvie's `schedule.txt` says "0x200 + uint16 entry count"; source wins.
+  - `ai.h` end-to-end — schedule-tier action codes 0x80..0x9b.
+  - `seg_1184.c:1651-1700` (`ShowObject` — the chain insertion routine for
+    the per-cell painter) + `seg_1184.c:1702-1721` (`C_1184_35EA` — the
+    tile-frame expansion that emits anchor + horizontal/vertical/2×2
+    extensions; source's `IsTileDoubleH`/`IsTileDoubleV` = port's
+    `isDoubleWidth`/`isDoubleHeight`).
+    Source's normal-tile insertion is at chain HEAD; older inserts end
+    up at chain TAIL = drawn last = on top.
+- **Found**:
+  - **Schedule file format claim in Nuvie's `schedule.txt` is wrong.**
+    The doc had carried the Nuvie layout (256 u16 + uint16 entry count +
+    entries from 0x202); source reads 257 u16-LE pointers (514 bytes)
+    with the sentinel `SchedPointer[256]` as the total slot count.
+    Corrected in `research_npc_ai.md`; the parser header carries the
+    same warning. Same class of "tech-docs disagree with source"
+    surprise as the chunks-file format issue in `research_world_data.md`.
+  - **Empty-slot encoding quirk.** An NPC with no schedule has
+    `SchedPointer[n] > totalSlots` (start pointer past the end of data).
+    Source's resolver loop `for di = end-1; di >= start; di--` tolerates
+    `end < start` naturally — body never runs. A strict-monotonicity
+    parser check is too tight; we tripped it during I-5a verification.
+  - **`AI_9A 0x9a` is a legitimate schedule action**, despite `ai.h`'s
+    "RETREAT?" comment treating it as ambiguous. 8 real instances in
+    the schedule file. The comment was speculation; the data is real.
+  - **Source's schedule trigger is hour-EXACT, not "between events".**
+    Resolver returns null when no slot matches `Time_H` exactly; NPC
+    stays in its previous `NPCMode`. Big design simplification for our
+    I-5 — no need for a per-NPC `lastSlotIndex` field on the Schedule
+    component; snap only when the resolver returns non-null.
+  - **The LB-throne Z-order bug class: extensions reaching back into a
+    cell from a neighbor's anchor.** Our render's per-cell scan emitted
+    LB's tile first (at his cell), then the throne's anchor cell (the
+    throne is `isDoubleWidth`, 2-wide) emitted BOTH the anchor tile + the
+    extension landing back at LB's cell — the extension lands in the
+    normal-zone list AFTER LB, draws on top. Source avoids this via `ShowObject`'s chain-HEAD insertion:
+    LB (loaded first) ends up at chain TAIL = drawn last = on top,
+    regardless of scan order. Fixed our port with per-cell gather +
+    type-based z-priority sort (Actor=1, else=0); decouples Z-order
+    from entity index for forward-compat with the object-interaction
+    phase's slot recycling.
+- **Docs**:
+  - Created [`progress.md` §"I-5 scope"](progress.md) — goal +
+    scope-narrowing rationale + sub-steps a-f + post-I-5 Z-order fix
+    subsection + deferred list (pathfinding, NPCMode + pose sprites,
+    first-tick alignment, NPC names, multi-fgExt source-faithful order).
+  - Updated [`progress.md` §"I-2c"](progress.md) painter rule description
+    to match the current type-based z-priority implementation.
+  - Updated [`research_map_render.md` §"Painter's algorithm"](research_map_render.md)
+    clone subsection — gather-per-cell + type-based z-priority + LB-throne
+    case + "why type-based, not entity-index" forward-compat reasoning +
+    deferred fgExt rule.
+  - Updated [`research_npc_ai.md`](research_npc_ai.md) — schedule file
+    format corrected against `seg_0C9C.c:285`; empty-slot encoding
+    quirk added; "Off-area handling" gained a port-deviation note for
+    I-5d's OBJBLK-residency choice.
+  - Updated [`research_world_data.md`](research_world_data.md) —
+    open Link[]-iteration question marked partially mooted by the
+    clone's z-priority approach.
+  - Local memory `project_ultima6_npc_under_furniture_zorder_bug.md`
+    flipped from "QUEUED for after I-5" to "FIXED" with mechanism +
+    forward-compat rationale + deferred items.
+  - **Post-impl ledger re-plan.** End-of-session discussion landed a
+    revised post-I-5 trajectory in `progress.md`:
+    - I-6 (next) = inventory data layer (was: avatar movement)
+    - I-7 = UI substrate + object inspector view (was: I-8 dialog UI)
+    - I-8 = avatar movement + NPC pathfinding folded together
+    - I-9 = object-action dispatch core (USE/GET/LOOK/DROP + door
+      handler) — was missing from the prior ledger entirely
+    - I-10 = talk trigger (adds TALK as a case in I-9's dispatch +
+      adjacency-pick logic)
+    - I-11 = dialog window — substrate's 2nd surface
+    - I-12 = conversation VM (β reached)
+    - I-13 = status panel — substrate's 3rd surface
+    - I-14 = object-action handlers expansion — fills in
+      `seg_27a1.c`'s dispatch table (spellbooks / moonstones /
+      instruments / etc.), gated on owning subsystems
+    **Important USECODE clarification surfaced.** U6 has no
+    "USECODE" in the Ultima 7 sense — instead, two distinct
+    mechanisms: bytecode VM at `seg_1703.c` for NPC dialogue
+    (the conversation VM, I-12), and a hardcoded C dispatch table
+    at `seg_27a1.c` for object actions (the dispatch registry,
+    I-9 + I-14). Object-action dispatch is the GENERAL "press a
+    key, do X to entity in front of me" primitive — TALK is one
+    case in the same dispatch table that USE/GET/LOOK share,
+    which is why I-9 precedes I-10. Binding design decisions
+    recorded: object inspector (not container view — one surface
+    for any entity), modal-stack for nested containers (no inline
+    tree), turn-driver suspended for the full modal-stack lifetime
+    (sim activity stops until all inspectors close), integer-only
+    step numbers (no decimals; ordering is positional, free to
+    re-plan as we learn). Rationale + full re-plan in
+    `progress.md` §"Why the post-I-5 trajectory re-plans..." +
+    §"Object-action dispatch precedes talk trigger".
+- **Open** (each owns a later step):
+  1. **Pathfinding** (`C_1E0F_2D37` bucket-Dijkstra + RLE path). I-6
+     territory — avatar movement needs it too.
+  2. **`NPCMode` component + action-driven sprite swap.** Sleep/sit/eat
+     pose sprites need an `NPCMode` field that the schedule system can
+     set on snap + a render-side `action → frame/sprite` mapping. The
+     four `AI_STAND_*` actions could be a cheap directional-facing
+     interim (action → frame 0..3 = N/E/S/W) ahead of the full rework.
+  3. **First-tick alignment on game-load.** Objlist's per-actor
+     `a.schedule` byte (the saved `SchedIndex`) is parsed by
+     `objlist.js` but not consumed by I-5c. Real save/load will
+     need it.
+  4. **NPC names.** `"(undefined)"` in the HUD probe comes from
+     objlist's name section only filling party members. Real NPC
+     names probably live in `LZNAMES` or similar — not yet decoded.
+  5. **Multi-fgExt-per-cell source-faithful ordering.** Source's
+     chain-TAIL insertion for foreground extensions means newer = top;
+     our type-based sort inverts this for the rare case. Revisit if
+     ever observed in real data.
+- **Next**: push the squashed `impl I-5` + Z-order fix + the post-step
+  doc-resync commit to origin, update the cross-PC sync state memory,
+  then plan **I-6 (inventory data layer)** per the revised trajectory.
+
 ## 2026-05-30 — I-4 (tile passability) landed: walks branch + footprint util + cell probe
 
 `C_1E0F_000F` (the per-step movement-legality predicate) ported as

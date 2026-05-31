@@ -10,16 +10,33 @@
 //   4 foreground hotspot     (IsTileForeground, the object's own cell)
 //   5 foreground extension   (IsTileForeground double-tile extension — chain end / top)
 //
-// Why zones reproduce the chain: U6 tiles are one cell each, so tiles in different
-// cells never share pixels — only WITHIN a cell does order matter, and the four
-// zones give exactly ShowObject's within-cell order. The one case they don't capture
-// is multiple objects of the SAME zone stacked in ONE cell (then emission order
-// stands in for source's chain LIFO); see the research doc.
+// Within-cell order (source's chain semantics — seg_1184.c:1651 ShowObject):
+//   - Normal & fgHot tiles insert at HEAD; each new insert pushes the previous head
+//     down. Forward chain walk draws HEAD first = bottom. So FIRST-inserted entity
+//     ends up at chain TAIL = drawn LAST = ON TOP. Source's SearchArea visits NPCs
+//     first via Link[] order, so NPC sprites end up at chain tail = on top — Lord
+//     British visible on his throne.
+//   - fgExt tiles insert at TAIL. First-inserted = chain head = drawn first (bottom).
+//     So newer entity = on top (opposite of normal/fgHot).
+//
+// We mirror source's per-cell ordering with a TYPE-BASED Z-PRIORITY rather than the
+// chain: Actor entities get priority 1 (drawn last within their zone = on top), all
+// else gets 0. This decouples Z-order from entity index — which would otherwise be
+// fragile once world.create() starts reusing freed slots in the object-interaction
+// phase (a recycled low index could put a new object above NPCs). Within-zone ties
+// (two Actors / two objects in one cell) preserve scan order via JS's stable sort.
+// fgExt's source-faithful "newer at tail = top" rule isn't modeled — multi-fgExt-
+// per-cell is rare in u6 data; revisit if it ever surfaces.
+//
+// The cell-scan is gather-then-sort: visit each cell, scan the 4 anchor candidates
+// whose footprint COULD cover it (own anchor + 3 neighbors that may extend in),
+// collect each anchor's tile contribution at this cell, sort by z-priority, emit
+// to zone lists.
 
 import { Camera } from '../resources/camera.js';
 import { TileRegistry } from '../resources/tile_registry.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
-import { Position, Renderable } from '../components/components.js';
+import { Position, Renderable, Actor } from '../components/components.js';
 import { forEachOccupiedCell } from './tile_footprint.js';
 
 export function makeWorldRenderSystem(renderer) {
@@ -40,36 +57,57 @@ export function makeWorldRenderSystem(renderer) {
     const rows = Math.ceil(renderer.canvas.height / ts) + 1;
 
     // Rebuild only on camera move, animation, or a spatial change (e.g. a region just
-    // streamed in). Entities are static in I-2 — movement (I-5/I-6) will set dirty too.
+    // streamed in). Movement (I-5e) sets spatial.dirty so NPC snaps trigger rebuild.
     if (tileX === lastTileX && tileY === lastTileY && !reg.animDirty && !spatial.dirty) return;
     lastTileX = tileX; lastTileY = tileY; spatial.dirty = false;
 
     const bg = [], normal = [], fgHot = [], fgExt = [];   // flat [tileId, col, row, ...]
-    const emit = (tile, col, row, isExt) => {
-      if (col < -1 || col > cols || row < -1 || row > rows) return;
-      const list = reg.isBackground(tile) ? bg
-                 : reg.isForeground(tile) ? (isExt ? fgExt : fgHot)
-                 : normal;
-      list.push(rm(tile), col, row);
-    };
 
-    // Walk visible cells in scan order, +1 margin on right/bottom so off-screen
-    // objects whose up-left extensions reach into view are caught.
+    // Walk visible cells in scan order. For each cell, collect all tile contributions
+    // (own anchor + neighbor anchors whose 2×2 footprint reaches in), then sort by
+    // type-based z-priority (Actor=1, else=0) to reproduce ShowObject's "NPC on top
+    // within a cell" semantic, then route each contribution to its zone list.
+    const contributions = [];      // reused per cell: {tile, zPri, isExt}
     for (let row = tileY; row <= tileY + rows + 1; row++) {
       for (let col = tileX; col <= tileX + cols + 1; col++) {
-        const ents = spatial.at(col, row);
-        if (!ents) continue;
+        contributions.length = 0;
+        // Anchors whose footprint COULD cover (col, row): (col,row), (col+1,row),
+        // (col,row+1), (col+1,row+1) — SE-anchored 2×2 max footprint per
+        // research_world_data.md.
+        for (let dy = 0; dy <= 1; dy++) {
+          for (let dx = 0; dx <= 1; dx++) {
+            const ents = spatial.at(col + dx, row + dy);
+            if (!ents) continue;
+            for (const handle of ents) {
+              const i = world.resolve(handle);
+              if (i === -1) continue;
+              // Extract just the tile this entity contributes at (col, row), if any.
+              let landed = -1;
+              forEachOccupiedCell(reg, rend.tileId[i], col + dx, row + dy, (t, c, r) => {
+                if (c === col && r === row) landed = t;
+              });
+              if (landed === -1) continue;
+              const zPri = world.has(handle, Actor) ? 1 : 0;
+              contributions.push({ tile: landed, zPri, isExt: (dx > 0 || dy > 0) });
+            }
+          }
+        }
+        if (contributions.length === 0) continue;
+
+        // Sort ascending by z-priority: 0 (objects) first → emitted first → drawn
+        // first within the zone = bottom; 1 (Actors) last → emitted last → drawn
+        // last = on top. JS sort is stable, so multi-Actor or multi-object ties
+        // preserve scan order — deterministic across frames at a given world state.
+        contributions.sort((a, b) => a.zPri - b.zPri);
+
         const c = col - tileX, r = row - tileY;
-        // Iterate the cell's entities in REVERSE of load order. The array is NPCs
-        // first (loadActors), then objblk order; source's per-cell chain draws the
-        // first-processed object LAST (chain tail = top), with NPCs (tied position,
-        // loaded first) ahead of objects and objblk storing the top item first. So
-        // first-loaded must draw on top → NPCs stand ON carpets/floor. (This is the
-        // within-cell same-zone order the painter's-algorithm doc flagged.)
-        for (let k = ents.length - 1; k >= 0; k--) {
-          const i = world.resolve(ents[k]);
-          if (i === -1) continue;
-          forEachOccupiedCell(reg, rend.tileId[i], c, r, emit);
+        if (c < -1 || c > cols || r < -1 || r > rows) continue;
+        for (const ct of contributions) {
+          const tile = ct.tile;
+          const list = reg.isBackground(tile) ? bg
+                     : reg.isForeground(tile) ? (ct.isExt ? fgExt : fgHot)
+                     : normal;
+          list.push(rm(tile), c, r);
         }
       }
     }
