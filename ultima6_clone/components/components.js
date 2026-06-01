@@ -23,6 +23,15 @@ export const Actor = defineComponent('Actor', { npcId: Uint8Array });
 // NPCs without any schedule slots are not tagged.
 export const Schedule = defineComponent('Schedule', { npcId: Uint8Array });
 
+// PartyMember (I-8b): the player's party — Avatar + companions. slotIndex is the
+// 0-based position in source's Party[] array (Avatar = slot 0; no distinct avatar
+// marker — source treats the Avatar as just Party[0]). Membership IS this
+// component: world.query(PartyMember) sorted by slotIndex is the canonical member
+// list (MoveFollowers walks it at I-8c). Tagged at loadActors for any actor whose
+// objlist slot id appears in objlist.party[]. Singleton party state (active member,
+// follow/solo mode) lives in the Party resource, not here.
+export const PartyMember = defineComponent('PartyMember', { slotIndex: Uint8Array });
+
 // Containment (I-6): NPCs carry inventory, chests/barrels hold contents. Source's
 // CoordUse byte encodes three off-map relationships (CONTAINED=0x08, INVEN=0x10,
 // EQUIP=0x18 = INVEN|CONTAINED); INVEN/EQUIP land in I-6a, CONTAINED in I-6b.

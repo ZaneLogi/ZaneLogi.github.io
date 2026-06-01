@@ -46,13 +46,17 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 
 ## Project stage
 
-**Implementation phase — I-2 (world-data system) COMPLETE; I-3 (world clock)
-next.** The ECS runtime-ground spec is `docs/architecture_ecs.md`,
-implemented in `ecs/world.js` as of I-1; the ledger + per-step detail are in
-`docs/progress.md`. Code layout: `ecs/` (runtime core), `assets/` (format
-decoders), `resources/` (TileRegistry, MapLevel, Camera), `systems/` (render,
-camera, entity), `components/`, `view/` (WebGL renderer), `u6db.js` (BYO-data
-store), `index.html`/`main.js` (app shell), `tests/`.
+**Implementation phase — I-8 (avatar movement + party follow) COMPLETE;
+I-9 (NPC pathfinding) next.** Steps I-1 → I-8 are landed and browser-verified;
+the ledger + per-step detail are in `docs/progress.md`. The ECS runtime-ground
+spec is `docs/architecture_ecs.md`, implemented in `ecs/world.js` since I-1. The
+player now walks Britain 8-directionally with the camera following, the sprite
+facing + animating, and the three companions trailing in formation (the conga
+line). Code layout: `ecs/` (runtime core), `assets/` (format decoders),
+`resources/` (TileRegistry, MapLevel, Camera, Party, …), `systems/` (render,
+camera, world-data, schedule, passability, avatar move, move-followers,
+humanoid-anim, …), `components/`, `view/` (WebGL renderer + dev HUD/inspector),
+`u6db.js` (BYO-data store), `index.html`/`main.js` (app shell), `tests/`.
 
 The three phases (see local memory `feedback_project_phases`):
 

@@ -1,13 +1,20 @@
 # Research: U6 NPC AI, schedules, and pathfinding
 
-**Status:** decoded 2026-05-28. `seg_1E0F.c` (2295 lines, the
-"NPCTracker" module) read in full for the AI tick, per-mode
-dispatcher, schedule transitions, and pathfinding. Supporting data
-structures from `u6.h` + `ai.h`; schedule-file format cross-checked
-against `../ultima6/doc/schedule.txt` (Nuvie). Movement-legality
-core (`C_1E0F_000F`) read; a few render-side primitives
-(`C_1E0F_0664` face-and-animate) and the combat-AI handlers
-(`COMBAT_AI_*` in `seg_2337`) are noted but out of scope here.
+**Status:** decoded 2026-05-28; party-follow + avatar-move path added
+2026-06-01; **I-8 (avatar movement + party follow) implemented + verified
+2026-06-01** — the avatar-move (`C_1E0F_1B0E`), facing (`C_1E0F_0664` +
+`MACRO_A`), idle settle (`seg_0A33.c` arm), and `MoveFollowers` sections below
+are now landed code; pathfinding (`C_1E0F_2D37`) remains decode-only for I-9.
+`seg_1E0F.c` (2295 lines, the "NPCTracker" module) read for the AI tick,
+per-mode dispatcher, schedule transitions, pathfinding, and the
+party-follow/active-member movement path (`MoveFollowers` + the
+`AI_COMMAND`/`AI_FOLLOW` dispatcher exclusion — see §"Party follow + avatar
+movement"). Supporting data structures from
+`u6.h` + `ai.h`; schedule-file format cross-checked against
+`../ultima6/doc/schedule.txt` (Nuvie). Movement-legality core
+(`C_1E0F_000F`) read; a few render-side primitives (`C_1E0F_0664`
+face-and-animate) and the combat-AI handlers (`COMBAT_AI_*` in
+`seg_2337`) are noted but out of scope here.
 
 Citations use relative paths within the u6-decompiled clone (e.g.,
 `seg_1E0F.c:2147`). The clone's absolute path is per-PC; see
@@ -255,6 +262,204 @@ AI_BRAWL fallback. The bias uses a small geometric-random offset
 (`C_1E0F_31C7`, a "flip coins until tails" distribution) so the
 motion looks organic rather than beelining.
 
+## Party follow + avatar movement
+
+**The active party member and the followers move on a path SEPARATE
+from the per-mode dispatcher above.** The NPC tick explicitly skips
+`C_1E0F_3E6A` for `AI_COMMAND` (the active player member) and
+`AI_FOLLOW` (companions) at `seg_1E0F.c:2225`
+(`if(NPCMode[pick] != AI_COMMAND && NPCMode[pick] != AI_FOLLOW)`), and
+`AI_FOLLOW` members are also excluded from the move-point turn
+allocation at `seg_1E0F.c:2197`. So party motion is **not** AI-driven:
+
+- the **active member** (`AI_COMMAND`) moves on **player input**;
+- **followers** (`AI_FOLLOW`) move via **`MoveFollowers`**, called
+  immediately after the active member's move — never from the per-NPC
+  tick.
+
+This corrects a natural-but-wrong assumption that "party-follow is just
+another `NPCMode` case in the dispatcher." It is not; there is no
+follow case in the `C_1E0F_3E6A` switch.
+
+### Consumer structure — three move paths, one shared kernel
+
+| Mover | Trigger | Path build? |
+|-------|---------|-------------|
+| Avatar step (`AI_COMMAND`) | player input | no |
+| Follower step (`AI_FOLLOW`) | `MoveFollowers` after avatar move | no |
+| NPC schedule walk | `AI_FINDPATH` → `C_1E0F_2D37` (see §Pathfinding) | **yes** |
+
+The bucket-Dijkstra path builder `C_1E0F_2D37` is used by **NPC AI
+alone**. All three movers share the **single-step move kernel**:
+`C_1E0F_000F` (legality — the clone's `canStandAt`) + `MoveObj` (the
+clone's `SpatialIndex.insertAtHead` + `Position` write) + `C_1E0F_0664`
+(face & animate). This is why avatar movement and NPC pathfinding are
+two separate rebuild steps (I-8 vs I-9) sharing a kernel, not one step
+sharing a path builder.
+
+### Active-member move — `C_1E0F_1B0E` (`/*[advance]*/`, `seg_1E0F.c:811-936`)
+
+The player-move entry. Input → command → advance:
+
+- **Input dispatch** (`seg_0C9C.c:1069-1076`): arrow + diagonal keys set
+  `AdvanceDir` and raise `CMD_80`. The avatar is **8-directional** —
+  `0x148`↑=0, `0x149`↗=1, `0x14d`→=2, `0x151`↘=3, `0x150`↓=4, `0x14f`↙=5,
+  `0x14b`←=6, `0x147`↖=7. Encoding is **clockwise from North**, matching
+  `DirIncrX[]={0,1,1,1,0,-1,-1,-1}` / `DirIncrY[]={-1,-1,0,1,1,1,0,-1}`
+  (`seg_0903.c:20-21`; y increases southward).
+- **Command** (`seg_0A33.c:1202-1203`): `case CMD_80: C_1E0F_1B0E(AdvanceDir)`.
+- **`C_1E0F_1B0E(dir)`** (`seg_1E0F.c:811`): `si = Party[Active]`; if the
+  active member is a ship (`OBJ_19F`/`OBJ_1A7`) the dir is reinterpreted
+  through wind/flow (the sail sub-branch); otherwise `new = (MapX,MapY) +
+  DirIncr[dir]` (masked `& 0x3ff`), checked by `C_1E0F_000F`. A failed
+  legality sets the bump flag `D_17AE` (no `MoveObj`, a "bump" sound), with
+  a diagonal-slide fallback under mouse control. On success: `MapX`/`MapY`
+  become the destination (the viewport/camera centers on the active
+  member), `MoveObj` + facing `C_1E0F_0664`, then `MoveFollowers(si, 0)`.
+- **Drunk** (`seg_1E0F.c:820-823`): `DrunkCounter > 3` randomizes `dir` —
+  a status effect, deferred.
+
+The **pass** command (`seg_0A33.c:1311-1322`) moves no avatar but still
+calls `MoveFollowers(Party[Active], 1)` so a stationary party tightens up.
+
+### Facing-on-step — `C_1E0F_0664` + `MACRO_A` (`seg_1E0F.c:268-438`)
+
+Sprites have **4 facings, not 8**. `MACRO_A(dir, frame)` (`seg_1E0F.c:268`)
+collapses the 8-direction move into a 4-way facing:
+
+- **Cardinal** `dir` (even): `frame = dir >> 1` → 0=N, 1=E, 2=S, 3=W.
+- **Diagonal** `dir` (odd): **hysteresis** — keep the current facing unless
+  the diagonal points more than a right angle away
+  (`if(((dir>>1) - frame + 1) & 3) > 1) frame = (frame+2) & 3`), in which
+  case flip 180°. So walking NE while facing W flips to E; walking NE while
+  facing N or E keeps it. This avoids facing-flicker on diagonal movement.
+
+For humanoid actors (`OBJ_178..183`, the party range) the sprite frame is
+`walkCycle + (facing << 2)` — 4 facings × a 3-step walk cycle
+(`ClrWalking`/`SetWalking` toggles the mid-step). The rebuild keeps the
+8→4 facing collapse + diagonal hysteresis as visible mechanism; the exact
+frame-index arithmetic is sprite-data-specific and maps onto the clone's
+own animator.
+
+### Idle settle-to-stand — `seg_0A33.c:121-133`
+
+The move path only *advances* the walk cycle on a step (`C_1E0F_0664`); it
+never resets it, so a humanoid stopped on a leg-out frame (walk 0/2) would
+freeze mid-stride. Source settles it in a **separate continuous
+idle-animation pass** (`seg_0A33.c`) — the same per-tick function that drives
+animdata tile animation + palette cycling. For humanoids
+(`OBJ_178..0x19A`, generic branch `:120-141`), on each idle tick:
+
+```c
+switch(frm & 3) {
+  case 0: if(rand(0,31)==0) frm = 1;          // leg-out → stand (settle)
+  case 1: if(rand(0,63)==0) frm = rand(0,2);  // stand → random fidget
+  case 2: if(rand(0,31)==0) frm = 1;          // leg-out → stand (settle)
+}
+```
+Facing (`frm & 0xfc`) is preserved; only the low 2 walk-cycle bits change.
+Gated to actors within 6 tiles of the view (`CLOSE_ENOUGH_S(6,…)`).
+
+**Co-working with movement = temporal mutual exclusion.** Source's idle pass
+runs only on the no-key path of the input loop; while keys are queued only the
+move runs. The two never run in the same loop iteration, so the settle can't
+fight the walk cycle.
+
+**Clone realization (I-8a → generalized at I-8e).** This maps onto the
+`TurnClock`: a turn is either a player action (`pendingAction`) or an
+idle-heartbeat tick — which IS source's command-vs-idle split. So the settle
+runs in the **idle branch of the avatar's turn-driven update**
+(`pendingDir === -1`): on a leg-out frame, snap walk → 1 (stand), facing
+preserved. It runs only on idle turns, never on a move turn, so no cross-system
+race and no per-actor "recently moved" flag is needed. **I-8a** settled the
+avatar alone; **I-8e** generalized it to the whole party — the avatar's idle
+branch fires an `onIdle` callback (symmetric with the `onMove` that drives
+`MoveFollowers`) wired to `settleParty(world)`, which settles every `PartyMember`
+mid-stride, so the avatar (slot 0) and the followers plant their feet together.
+**Deviations** (per the modern-UX anchor): the settle is deterministic and gated
+on a separate idle-detection delay (`IDLE_SETTLE_MS`, ~500 ms of no movement
+input — the party holds its stride pose briefly rather than snapping on the first
+heartbeat) rather than the source `1/32` probability tuned to its ~10 Hz idle
+loop, and the `1/64` stand→random fidget (`:126-128`) is **dropped** as cosmetic.
+For walking NPCs (I-9) the same turn-cadence principle applies — a walker settles
+on the turns it doesn't step.
+
+### `MoveFollowers` — `C_1E0F_1193` (`seg_1E0F.c:501-594`)
+
+A **formation-offset greedy step** — NOT a trail-copy conga buffer and
+NOT per-follower pathfinding. Each follower owns a fixed formation slot
+behind the leader and greedily steps one tile toward it each turn.
+
+- `IN_VEHICLE` → early return (no follow while boarded/sailing).
+- Leader facing → `facing_dir` (from sprite frame for certain object
+  types, else `GetDirection`).
+- **Two passes** (`seg_1E0F.c:523`; the code references a `doc9.txt`
+  we don't have — pass 1 moves stragglers, pass 2 tightens). Per
+  follower in `AI_FOLLOW`:
+  1. **Formation target** from the offset tables `D_17B8`
+     (perpendicular) + `D_17C3` (behind), rotated by `facing_dir`
+     (`seg_1E0F.c:528-535`).
+  2. **Contiguity check** `C_1E0F_1056` ("already contiguous to the
+     party?", `seg_1E0F.c:473`).
+  3. **Step decision** (`seg_1E0F.c:549-588`): if not contiguous, or
+     (pass 2 AND an overshoot condition gated by `aFlag`), try all 8
+     directions and pick the best:
+     - legal via `C_1E0F_000F`;
+     - **eager** score = base (256, or **128 if `D_17A9`** damage-tile)
+       + contiguity bonus (+256 if the step keeps contiguity)
+       − |Δx to target| − |Δy to target|;
+     - highest-eager legal direction wins → `MoveObj` + `C_1E0F_0664`.
+  4. `SubMov(follower, 5)` — the move-point cost.
+- **`aFlag` = tightness.** `0` when the avatar actually moved (loose —
+  followers only correct if they've overshot the slot, giving natural
+  trailing); `1` on a pass/stationary turn (tighten fully onto the
+  slot). Call sites: `seg_1E0F.c:933` (aFlag 0, active-member move),
+  `seg_0A33.c:1322` (aFlag 1, pass command), `seg_101C.c:291`
+  (aFlag 1).
+
+**Formation offset tables (verbatim, `seg_1E0F.c:62-63`):**
+```
+D_17B8[] = { 0,-1, 1, 0,-2, 2,-1, 1,-3, 3, 0};   // perpendicular
+D_17C3[] = { 0, 1, 1, 2, 2, 2, 3, 3, 3, 3, 1};   // behind
+```
+Indexed by `follow_pos` (1-based per follower). Slot 1 = back-left,
+2 = back-right, 3 = two-behind, 4/5 = wider — a diamond expanding behind
+the leader. Rotation (`seg_1E0F.c:528-535`):
+```
+target_x = x − DirIncrX[facing]·D_17C3[fp] − DirIncrY[facing]·D_17B8[fp]
+target_y = y + DirIncrX[facing]·D_17B8[fp] − DirIncrY[facing]·D_17C3[fp]
+```
+
+### `D_17A9` — damage-tile reluctance
+
+`C_1E0F_000F` sets `D_17A9 = 1` (`seg_1E0F.c:95, 150`) when a candidate
+cell's terrain (or an object on it) carries `TERRAIN_FLAG_08` (the
+damage-tile flag — same flag I-4 deferred). `MoveFollowers` reads it
+(`seg_1E0F.c:564`): a damage cell halves base eagerness to 128 and, if
+the follower is already contiguous, is skipped outright (`continue`).
+So companions won't wade into lava/fire just to hold formation. The
+rebuild stubs `D_17A9 = false` until a hazard subsystem exists.
+
+### Rebuild shape (I-8)
+
+- **`PartyMember { slotIndex }`** component — Avatar = slot 0,
+  companions 1..N. `world.query(PartyMember)` sorted by `slotIndex` IS
+  the member list; no separate `members[]` array (source treats the
+  Avatar as just `Party[0]`, no distinct marker).
+- **`Party { activeIndex, mode }`** resource — `mode` is `'follow'` at
+  β, with a slot for the `'solo'` toggle (combat-era).
+- **Port faithfully, don't substitute.** The formation-greedy-step,
+  two-pass tighten, eager heuristic, and `aFlag` tightness are the
+  *mechanism* — the visible conga/diamond/route-around-block behavior is
+  emergent from them. A trail-copy ring buffer would look different and
+  is the wrong port.
+- `MoveFollowers` is a **system that runs right after the avatar-move
+  system**, not inside the per-NPC tick. Camera follows
+  `Party[activeIndex]`'s `Position`.
+- **Avatar input arity (4- vs 8-direction)** is TBD until the I-8a read
+  of the player-command dispatch in `seg_0A33.c`; note that
+  `MoveFollowers` itself tries all 8 directions for followers regardless.
+
 ## Schedules
 
 ### Data layout
@@ -437,6 +642,18 @@ The big predicate "can this object stand at `(x,y)`?". Considers:
   `D_17B2` set);
 - the sacred-quest gate (`OBJ_1A0` blocks unless `VarInt['Q'-0x37]`).
 
+**Order matters — NPC-ness is decided independent of the entity's tile
+flags** (`c_04ed`, `seg_1E0F.c:212-222`). An NPC blocks because it *is* an NPC
+(slot `< 0x100`), and the party pass-through (`IsPlrControl` mover walking past
+another `IsPlrControl` non-leader, `seg_1E0F.c:191-198`) is the only exception —
+**neither consults the NPC's own sprite-tile flags.** The clone's `canStandAt`
+must therefore evaluate the Actor/party-pass decision BEFORE the object-tile
+flag checks (terrain-impassable / breakthrough). I-8d hit exactly this: some
+NPC sprite tiles carry the terrain-impassable flag, so checking it first left
+`blocked` set even when the party pass-through skipped the follower, wrongly
+blocking the Avatar from stepping onto a companion's cell. Fixed by reordering
+the Actor check ahead of the tile-flag checks — which is what `c_04ed` does.
+
 `TryStraightMove` / `__TryDiagMove` call this, and on success
 `MoveObj` + `SetDirection` + `C_1E0F_0664` (face & animate). `TryMoveTo`
 picks horizontal/vertical/diagonal order based on the delta to the
@@ -511,8 +728,9 @@ Deferrable until later milestones:
 - Crime/justice modes: AI_THIEF, AI_BRAWL, AI_ARREST (+ jail
   teleport), AI_VIGILANTE.
 - AI_SEEKOBJ (object-seeking pathfind).
-- Vehicles / boarding (`Board`/`Unboard`), corpser drag-under,
-  party-formation following (`MoveFollowers`).
+- Vehicles / boarding (`Board`/`Unboard`), corpser drag-under.
+  (Party-formation following `MoveFollowers` is **in scope at I-8** and
+  decoded in §"Party follow + avatar movement".)
 
 ## Open questions
 
@@ -520,11 +738,14 @@ Deferrable until later milestones:
    after every successful move; body not read. Likely sets the
    sprite frame from direction and triggers the per-step redraw.
    Needs a read before implementing smooth NPC movement animation.
-2. **`C_1E0F_1B0E`** (player walk, called from game-loop CMD_80) —
-   the player-control movement entry. Not read here; belongs to a
-   future `research_player_movement.md` (separate from NPC AI).
-   Pairs with `MoveFollowers` (`seg_1E0F.c:501`, the two-pass party
-   formation algorithm that references a `doc9.txt` we don't have).
+2. **Mouse-driven movement + diagonal-slide fallback.** The keyboard
+   advance path is fully decoded (§"Active-member move"); `C_1E0F_1B0E`
+   is the general player advance (8-directional; the ship/wind handling
+   is a sub-branch). What's *not* yet traced is the mouse-control path —
+   `MousePress`/`MouseMapX`/`MouseMapY` drive a diagonal-slide fallback
+   (`seg_1E0F.c:848-865`) and the mouse→`AdvanceDir` mapping at
+   `seg_0C9C.c:816`. The clone is keyboard-first at I-8a; mouse movement
+   is a later UX add, not a mechanic blocker.
 3. **`COMBAT_AI_*` handlers** (`seg_2337`) — the combat dispositions
    (FRONT/REAR/FLANK/BERSEK/ASSAULT/etc.) are a whole subsystem.
    Their own research doc when combat becomes in-scope.

@@ -13,7 +13,6 @@
 // Deferred (each owns a later step):
 //   - swim branch + OBJ_19E/F skiff/raft check     (boats, post-I-6)
 //   - fly / ethereal branches                       (combat / monster AI)
-//   - party-member pass-through (D_17B2)           (no avatar party yet)
 //   - sacred-quest gate (OBJ_1A0 + VarInt['Q'-0x37]) (no quest flags yet)
 //   - fence directional pass (TERRAIN_FLAG_80/40/20/10 on object's TerrainType)
 //   - damage-tile flag (TERRAIN_FLAG_08 + D_17A9)  (no combat / hazard system)
@@ -24,14 +23,17 @@
 import { TileRegistry } from '../resources/tile_registry.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
 import { MapLevel } from '../resources/map_level.js';
-import { Renderable, Actor } from '../components/components.js';
+import { Renderable, Actor, PartyMember } from '../components/components.js';
 import { forEachOccupiedCell } from './tile_footprint.js';
 
 // Can the actor stand at (x, y)? actorId (entity handle, optional) excludes
 // the actor itself from the per-cell scan so it doesn't block its own
-// destination. Currently walks-class only; signature is source-shaped so the
-// swim/fly/ethereal branches grow inside without touching callers.
-export function canStandAt(world, x, y, { actorId } = {}) {
+// destination. asPartyMember + leaderHandle enable the party pass-through
+// (D_17B2, seg_1E0F.c:191-198): a moving party member walks through OTHER party
+// members, but the active leader stays solid. Currently walks-class only;
+// signature is source-shaped so the swim/fly/ethereal branches grow inside
+// without touching callers.
+export function canStandAt(world, x, y, { actorId, asPartyMember = false, leaderHandle } = {}) {
   const reg = world.getResource(TileRegistry);
   const spatial = world.getResource(SpatialIndex);
   const mapLevel = world.getResource(MapLevel);
@@ -72,6 +74,21 @@ export function canStandAt(world, x, y, { actorId } = {}) {
         });
         if (tile === -1) continue;
 
+        // NPCs FIRST (c_04ed: `if(i < 0x100 && i) ... keepFind=retVal=0; break;`). An
+        // NPC blocks because it's an NPC, not because of its sprite tile's flags — so
+        // decide it BEFORE the tile-flag checks below. (Some NPC sprite tiles are
+        // flagged terrain-impassable; if that ran first it would leave `blocked` set
+        // even when the party pass-through skips the NPC, wrongly blocking the mover.)
+        // Party pass-through (D_17B2, seg_1E0F.c:191-198): when a party member is the
+        // one moving, it walks through OTHER party members; only the active leader
+        // stays solid. Lets the avatar step onto a follower (which MoveFollowers then
+        // shuffles aside) and lets followers pack into formation. The 5-type furniture
+        // exception list is still dropped — not in scope until SIT/EAT/PLAY land.
+        if (world.has(handle, Actor)) {
+          if (asPartyMember && handle !== leaderHandle && world.has(handle, PartyMember)) continue;
+          return false;
+        }
+
         // Breakthrough — the object grants pass (overrides terrain block).
         // Short-circuit the scan UNLESS IsTileIgnore is also set on the same
         // tile (seg_1E0F.c:142-146:
@@ -86,11 +103,6 @@ export function canStandAt(world, x, y, { actorId } = {}) {
         // (closed-door frame, wall section, table). Open-door frames lack the bit
         // and fall through to non-blocking. seg_1E0F.c:162-164.
         if (reg.isTerrainImpassable(tile)) blocked = true;
-
-        // NPCs always block (c_04ed: `if(i < 0x100 && i) ... keepFind=retVal=0; break;`).
-        // The 5-type furniture exception list is dropped — none of those overlap
-        // types are in scope until SIT/EAT/PLAY worktypes land.
-        if (world.has(handle, Actor)) return false;
       }
     }
   }

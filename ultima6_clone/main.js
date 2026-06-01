@@ -24,10 +24,13 @@ import { makeTileAnimationSystem } from './systems/tile_animation_system.js';
 import { makePaletteCycleSystem } from './systems/palette_cycle_system.js';
 import { makeWorldRenderSystem } from './systems/world_render_system.js';
 import { makeWorldClockSystem } from './systems/world_clock_system.js';
-import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn } from './components/components.js';
+import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember } from './components/components.js';
+import { Party } from './resources/party.js';
 import { Schedules } from './resources/schedules.js';
 import { ActorIndex } from './resources/actor_index.js';
 import { installNpcScheduleSystem } from './systems/npc_schedule_system.js';
+import { installAvatarMovement } from './systems/avatar_move_system.js';
+import { installMoveFollowers, settleParty } from './systems/move_followers.js';
 import { loadActors, ensureRegionsInView, makeStreamingSystem, inventoryOf } from './world_loader.js';
 import { installDevHud } from './view/dev_hud.js';
 import { installDevProbe } from './view/dev_probe.js';
@@ -133,12 +136,14 @@ async function load() {
        .registerComponent(ObjType).registerComponent(Status)
        .registerComponent(Amount).registerComponent(Actor)
        .registerComponent(Schedule)
-       .registerComponent(Container).registerComponent(ContainedIn);
+       .registerComponent(Container).registerComponent(ContainedIn)
+       .registerComponent(PartyMember);
+  world.setResource(new Party());                 // I-8b: singleton party state (activeIndex, mode)
   const uiStack = new UIStack(world, document.getElementById('ui-root'));
-  window.__U6 = { world, tileRegistry: world.getResource(TileRegistry), mapLevel: world.getResource(MapLevel), spatial: world.getResource(SpatialIndex), clock: world.getResource(WorldClock), schedules, objlist, actorIndex: world.getResource(ActorIndex), inventoryOf: (h) => inventoryOf(world, h), uiStack };
+  window.__U6 = { world, tileRegistry: world.getResource(TileRegistry), mapLevel: world.getResource(MapLevel), spatial: world.getResource(SpatialIndex), clock: world.getResource(WorldClock), party: world.getResource(Party), schedules, objlist, actorIndex: world.getResource(ActorIndex), inventoryOf: (h) => inventoryOf(world, h), uiStack };
 
-  const { actors, scheduled } = loadActors(world, objlist);
-  log(`\nLoaded ${actors} on-map NPCs from objlist (${scheduled} with schedules).`, 'ok');
+  const { actors, scheduled, party } = loadActors(world, objlist);
+  log(`\nLoaded ${actors} on-map NPCs from objlist (${scheduled} with schedules, ${party} party members).`, 'ok');
 
   // I-5e: NPC schedule system. Hooks WorldClock.onHour; snaps eligible NPCs to
   // their resolved slot position. Returned stats object is mutated each tick.
@@ -205,11 +210,30 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   const renderer = new TileRenderer(canvas, { tileSize: 16, tilesPerRow: 64, tileCount: 2048 });
   renderer.uploadAtlas(reg);
   renderer.uploadPalette(reg.palette);
+  const ts = renderer.tileSize;
 
-  const camera = new Camera(276 * 16, 367 * 16);            // Britain's default origin (tiles 276,367)
+  // I-8a: the camera follows the active party member (Avatar = party slot 0),
+  // centered on its cell — source keeps MapX/MapY (the view center) = the active
+  // member's position (seg_1E0F.c:817-818). centerOn() is reused on every step.
+  const camera = new Camera();
   world.setResource(camera);
+  const actorIndex = world.getResource(ActorIndex);
+  const avatarRef = { handle: actorIndex.get(objlist.party[0]) };
+  const posStore = world.store(Position);
+  const centerOn = (tx, ty) => {
+    camera.worldX = tx * ts + ts / 2 - canvas.width / 2;
+    camera.worldY = ty * ts + ts / 2 - canvas.height / 2;
+  };
+  const avatarIdx = avatarRef.handle !== undefined ? world.resolve(avatarRef.handle) : -1;
+  if (avatarIdx !== -1) {
+    centerOn(posStore.x[avatarIdx], posStore.y[avatarIdx]);
+  } else {
+    camera.worldX = 276 * ts; camera.worldY = 367 * ts;     // fall back to Britain's default origin
+    log('Avatar not on-map (party slot 0) — camera at default origin; movement disabled.', 'warn');
+  }
   window.__U6.renderer = renderer;
   window.__U6.camera = camera;
+  window.__U6.avatarRef = avatarRef;
 
   // Demand-load the OBJBLK regions overlapping the initial viewport, then the
   // StreamingSystem keeps loading regions as the camera pans into them.
@@ -217,7 +241,23 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   log(`Loaded ${objCount} world objects + ${itemCount} carried + ${containedCount} container-held in the initial view.`, 'ok');
   verifyInventory(world, objlist);
 
-  const ts = renderer.tileSize;
+  // I-8a: avatar movement. installAvatarMovement wires the keydown handler
+  // (8-dir; arrows = cardinals, numpad = diagonals) and returns the per-turn move
+  // system. Registered BEFORE the clock so the avatar steps, then time advances
+  // within the same turn. Ignored while a modal (inspector) is open.
+  // I-8d: after the avatar (active leader) steps, the companions take one step
+  // toward their formation slots behind it (MoveFollowers). onMove composes the
+  // camera recenter + the follow step.
+  const moveFollowers = installMoveFollowers(world);
+  const avatarMoveSystem = avatarIdx !== -1
+    ? installAvatarMovement(world, {
+        avatarRef,
+        onMove: (x, y) => { centerOn(x, y); moveFollowers(avatarRef.handle, 0); },
+        onIdle: () => settleParty(world),               // I-8e: party plants its feet when idle
+        isBlocked: () => !uiStack.isEmpty(),
+      })
+    : null;
+  if (avatarMoveSystem) world.addSimSystem(avatarMoveSystem);     // consume the pending step
   world.addSimSystem(makeWorldClockSystem());                      // per turn: clock.advance(1)
   world.addRenderSystem(makeTileAnimationSystem());                // advance animdata -> reg.animDirty
   world.addRenderSystem(makePaletteCycleSystem(renderer));         // rotate water/lava palette (shimmer)

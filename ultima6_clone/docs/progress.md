@@ -5,32 +5,26 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status:** **I-5 (NPC schedule resolution) COMPLETE** — narrowed mid-flight
-from the original "NPC scheduled movement (hourly schedules + pathfinding +
-walking)" framing to **schedule-resolution-only**: snap eligible NPCs to
-their slot's `xyz` on each game-hour rollover, with no pathfinding, no
-facing/frame updates, and no `NPCMode` plumbing. Day-long world-clock sweep
-shows sensible snap counts at meal/sleep boundaries; the dev HUD's stats
-line + cell probe surface live activity + per-NPC slot details. Six
-save-point commits (I-5a parser → I-5f HUD probe). A post-I-5 fix in
-`WorldRenderSystem` reworked the within-cell sort from reverse-load-order
-to a type-based z-priority (`Actor=1`, else=0) after Lord British rendered
-under his throne — the rule is now decoupled from entity-index recycling,
-ready for the object-interaction phase. See I-2c scope (updated) for the
-current painter rule and the new I-5 scope section for the slice that
-landed + the deferred items (pathfinding, action-driven pose sprites,
-first-tick alignment, NPC names, fgExt-source-faithful ordering).
+**Status:** **I-8 (avatar movement + party follow) COMPLETE** — the player-
+movement phase. The Avatar walks Britain 8-directionally (arrows = cardinals,
+numpad = full 8-dir); the camera follows; the sprite faces the move direction
+and animates a walk cycle, settling to stand when idle. The three starting
+companions (Iolo / Shamino / Dupre) trail in a formation conga via a faithful
+port of source's `MoveFollowers`; the Avatar walks through followers (party
+pass-through) and they shuffle aside; the whole party plants its feet when
+idle. Landed as five save-point sub-steps **I-8a–e** (see the I-8 scope
+section); all browser-verified on real U6 data. Steps I-1 → I-8 complete.
 
-Next: **I-6** (inventory data layer) — first step of a re-planned
-post-I-5 trajectory that pulls **inventory data + UI substrate** ahead
-of **avatar movement**. The UI substrate (formerly "I-8 dialog UI
-window") is now broadened to be the shared foundation for every later
-UI surface (object inspector, status panel, save/load, spell select,
-conversation); its first consumer is the object inspector (I-7) — the
-heaviest UI consumer in primitive usage, so the substrate is battle-
-tested by a real surface rather than aspirationally general. See the
-explainer paragraph below the ledger for the full rationale + binding
-modal-stack / turn-driver-suspension design decisions.
+**NPC pathfinding was split out into its own step I-9** (decided 2026-06-01) —
+one step = one squash commit, and "player walks Britain" + "NPCs pathfind their
+schedules" are two distinct payoffs with two distinct verification methods. The
+two steps share only the **single-step move kernel** (`canStandAt` +
+`insertAtHead` + facing); the path builder `C_1E0F_2D37` is used by NPC AI
+alone. Steps I-9 onward were renumbered +1 to make room.
+
+Next: **I-9** (NPC pathfinding) — NPCs walk to their schedule slots instead of
+teleporting; see the I-9 scope stub (incl. the open time-model decision). Source
+mechanism for I-8 is in `research_npc_ai.md` §"Party follow + avatar movement".
 
 ---
 
@@ -45,13 +39,14 @@ modal-stack / turn-driver-suspension design decisions.
 | **I-5** | **NPC schedule resolution** — hourly slot snap (pathfinding + pose sprites deferred) | **done** |
 | **I-6** | **inventory data layer** — CONTAINED/INVEN/EQUIP entities + `Container`/`ContainedIn` components; resolve OBJBLK's in-file `GetAssoc` against live entities (deferred from I-2). No UI. | **done** |
 | **I-7** | **UI substrate + object inspector view** (first surface) — modal stack + input routing + turn-driver gating + list-with-cursor + atlas-icon DOM rendering; `I` hotkey opens inspector on hovered cell | **done** |
-| I-8 | avatar movement + NPC pathfinding — `C_1E0F_2D37` shared by both consumers; avatar input + camera follow + facing-on-step + facing-on-snap fold in | planned |
-| I-9 | object-action dispatch core — `Map<ObjectType, handler>` registries per action (USE / GET / LOOK / DROP); minimum handlers for "walk around without getting stuck" (door USE, LOOK on any, GET/DROP via inventory) | planned |
-| I-10 | talk trigger — adds TALK as a case in the I-9 dispatch + adjacency-pick logic | planned |
-| I-11 | dialog window — second surface on the I-7 substrate; opens when TALK fires | planned |
-| I-12 | conversation VM (adapt legacy `script.js`) — β reached: walk + talk works end-to-end. Give/take opcodes work because I-6 inventory data exists. | planned |
-| I-13 | status panel — third surface on the substrate; replaces the dev HUD's clock readout | planned |
-| I-14 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / moonstones / instruments / etc.); each handler tied to its owning subsystem when that subsystem lands | planned |
+| **I-8** | **avatar movement + party follow** — 8-dir avatar move (camera follow + facing-on-step + idle settle) + companion conga via `MoveFollowers` formation-greedy-step (avatar walks through followers; party settles when idle). Sub-steps a–e. Shares the single-step move kernel (`canStandAt` + `insertAtHead` + facing) with I-9; does **not** use the path builder. | **done** |
+| I-9 | **NPC pathfinding** — `C_1E0F_2D37` bucket-Dijkstra + `AI_FINDPATH`→`AI_ONPATH`→`__DoOnPath`; wires into the I-5 schedule trigger so NPCs **walk** to slots instead of teleporting (+ teleport-when-too-far `C_1E0F_291C`, first-tick alignment). Makes Britain feel live. | planned |
+| I-10 | object-action dispatch core — `Map<ObjectType, handler>` registries per action (USE / GET / LOOK / DROP); minimum handlers for "walk around without getting stuck" (door USE, LOOK on any, GET/DROP via inventory) | planned |
+| I-11 | talk trigger — adds TALK as a case in the I-10 dispatch + adjacency-pick logic | planned |
+| I-12 | dialog window — second surface on the I-7 substrate; opens when TALK fires | planned |
+| I-13 | conversation VM (adapt legacy `script.js`) — β reached: walk + talk works end-to-end. Give/take opcodes work because I-6 inventory data exists. | planned |
+| I-14 | status panel — third surface on the substrate; replaces the dev HUD's clock readout | planned |
+| I-15 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / moonstones / instruments / etc.); each handler tied to its owning subsystem when that subsystem lands | planned |
 
 **Why I-2 is the world-data system.** Loading the real world from `OBJBLK*`/
 `objlist` into ECS entities is the clone's core purpose — the reason for choosing
@@ -85,29 +80,36 @@ usage, so the substrate is battle-tested by a real surface rather than
 aspirationally general. To feed the inspector, the **inventory data layer** (I-6)
 lands first: parse CONTAINED/INVEN/EQUIP records into entities, resolve OBJBLK's
 in-file `GetAssoc` against the live entity space (the bit deferred from I-2).
-Avatar movement + NPC pathfinding then fold into one step (I-8) — both consumers
-share `C_1E0F_2D37` machinery, plus facing-on-step (pathfind walker) + facing-on-
-snap (schedule trigger) want the same direction logic.
+Avatar movement (I-8) and NPC pathfinding (I-9) then land as two adjacent steps.
+They share the **single-step move kernel** (`canStandAt` + `insertAtHead` +
+facing-set) — and facing-on-step (pathfind-walker) + facing-on-snap (schedule
+trigger) want the same direction logic — but **not** the path builder: a source
+read 2026-06-01 confirmed `C_1E0F_2D37` (bucket-Dijkstra) is used by NPC AI alone;
+the avatar steps on player input and companions trail via `MoveFollowers`' greedy
+step, neither of which path-builds. (An earlier draft of this ledger folded the
+two into one step "because both consumers share `C_1E0F_2D37`" — that was wrong,
+and is why they are now separate steps: one step = one squash commit, and the two
+have distinct payoffs + verification methods.)
 
-**Object-action dispatch (I-9) precedes talk trigger (I-10).** U6 doesn't have
+**Object-action dispatch (I-10) precedes talk trigger (I-11).** U6 doesn't have
 "USECODE" in the Ultima 7 sense — instead source uses two distinct mechanisms:
 a stack-based bytecode VM at `seg_1703.c` for NPC dialogue (the conversation
-VM, I-12) and a hardcoded C dispatch table at `seg_27a1.c` for object actions
+VM, I-13) and a hardcoded C dispatch table at `seg_27a1.c` for object actions
 (USE / GET / LOOK / DROP / PUSH / SEARCH per `OBJ_xxx`). The object-action
 dispatch is the more general primitive: TALK is just one case in the same
 "press a key, do X to the entity in front of me" pattern that USE/GET/LOOK
-share. So I-9 lays the dispatch infrastructure with a minimum handler set
+share. So I-10 lays the dispatch infrastructure with a minimum handler set
 (door USE, generic LOOK, GET/DROP via inventory) — enough to walk around
-without getting stuck. I-10 then adds TALK as a new case alongside, plus the
-adjacency-pick logic ("which NPC am I facing?"). I-14 (post-β) fills in the
+without getting stuck. I-11 then adds TALK as a new case alongside, plus the
+adjacency-pick logic ("which NPC am I facing?"). I-15 (post-β) fills in the
 rest of `seg_27a1.c`'s table (spellbooks → `C_27A1_2D8E`, moonstones →
 `C_27A1_3425`, instruments → `C_27A1_5935`, etc.), each gated on its owning
 subsystem becoming available.
 
-The β path (walk + talk) reaches at **I-12**, later than the prior plan, but
+The β path (walk + talk) reaches at **I-13**, later than the prior plan, but
 the conversation VM lands with full give/take semantics rather than stubbed
 inventory opcodes; the world feels alive sooner via inventory inspection
-before agency exists; and the object-action dispatch is in place from I-9 so
+before agency exists; and the object-action dispatch is in place from I-10 so
 β includes "USE on doors works" rather than requiring a follow-up step.
 
 **Binding design decisions for the substrate (decided 2026-05-31).**
@@ -292,7 +294,7 @@ misleading research-doc summary: `D_2C55` is the SUN-STRENGTH **input** to a per
 flood-fill lighting model, NOT a render-side ambient tint. A faithful port requires
 `AreaFlags[][]` + `AreaLight[][]` + `C_1100_0131` BFS + per-cell tile substitution
 (`TIL_0FF` / `TIL_1BC`) + obscurity overlay pass — all of which need (a) a
-player-position source (avatar from I-6), (b) richer tile flags than I-1/I-2 decoded
+player-position source (avatar from I-8), (b) richer tile flags than I-1/I-2 decoded
 (`IsTileWin`, `IsTileOpa`, `GetTileLight`), and (c) a render-path change. Defer to its
 own later step. Full decode: `research_map_render.md` §"Lighting + visibility model";
 correction trail: `research_game_loop.md` §"Time-advance" phase 9 + key takeaway.
@@ -316,7 +318,7 @@ correction trail: `research_game_loop.md` §"Time-advance" phase 9 + key takeawa
 
 **Out of scope (deferred to later steps):**
 
-- Ambient light render — its own later step after I-6 (avatar exists), with its own
+- Ambient light render — its own later step after I-8 (avatar exists), with its own
   pre-impl research. ~1-2 days on its own.
 - Spell-FX timers, powder keg, eruption — depend on combat / spell-FX components
   not landed.
@@ -401,9 +403,11 @@ without touching callers (`research_npc_ai.md` §"Movement legality").
 
 **Deferred (each owns a later step, with subsystem owner noted):**
 - swim / fly / amphibian / ethereal monster-class branches — boats → swim
-  (post-I-6 boats subsystem); combat → fly + ethereal; folded INTO
+  (post-I-8 boats subsystem); combat → fly + ethereal; folded INTO
   `canStandAt`'s body as class arms, NOT sibling functions
-- party-member pass-through (`D_17B2`) — no avatar party until I-6+
+- party-member pass-through (`D_17B2`) — avatar party arrives at I-8;
+  `MoveFollowers` (I-8c) may need this so companions don't treat each
+  other as hard blockers while repositioning — watch during I-8c verify
 - sacred-quest gate (`OBJ_1A0` + `VarInt['Q'-0x37]`) — no quest flags yet
 - fence directional pass (object's `TerrainType` bits `80/40/20/10`)
 - damage-tile flag (`TERRAIN_FLAG_08` + `D_17A9`) — no combat / hazard system
@@ -584,7 +588,7 @@ source comparison is in `research_map_render.md §"Painter's algorithm"`.
 **Deferred (each owns a later step):**
 
 - **Pathfinding** — bucket-Dijkstra walker per `C_1E0F_2D37`. Lands at
-  I-6 or later (avatar movement needs it too); until then, the
+  **I-9** (its own step, after I-8 avatar/party movement); until then, the
   schedule snap is teleport-not-walk.
 - **`NPCMode` component + action-driven sprite swap** — sleep/sit/eat
   pose sprites need an `NPCMode` (or equivalent) field on the NPC
@@ -681,7 +685,7 @@ inspector.js` are the natural cuts already legible in
 
 **Goal:** lay the shared UI substrate (modal stack + input routing +
 turn-driver gating + list-with-cursor + atlas-icon DOM rendering)
-that every later UI surface (dialog window I-11, status panel I-13,
+that every later UI surface (dialog window I-12, status panel I-14,
 save/load, spell select, conversation) will sit on, and battle-test
 it on its heaviest primitive consumer — the **object inspector**, one
 surface for any entity (sword / NPC / barrel / chest) with
@@ -815,12 +819,15 @@ used uniformly:
 
 - **NPC schedule snap** (today, `npc_schedule_system.tick`) → analog of
   `seg_1E0F.c:1206` `MoveObj`. ✓ uses `insertAtHead`.
-- **I-8 avatar step + NPC pathfinder** → analog of `seg_1E0F.c:1375` /
-  `seg_1E0F.c:921`. Must use `insertAtHead`.
-- **I-9 DROP** → analog of `MoveObj` on a previously-INVEN object
+- **I-8 avatar step + follower stepping** → analog of `seg_1E0F.c:921`
+  (active-member move) / `seg_1E0F.c:584` (`MoveFollowers`). Must use
+  `insertAtHead`.
+- **I-9 NPC pathfinder per-step** → analog of `seg_1E0F.c:1375` /
+  `seg_1E0F.c:1436` / `seg_1E0F.c:1487`. Must use `insertAtHead`.
+- **I-10 DROP** → analog of `MoveObj` on a previously-INVEN object
   becoming LOCXYZ, OR `AddMapObj` for a split stack. Both head-splice
   in source. Must use `insertAtHead`.
-- **I-9+ push / throw / teleport / magic move** → all `MoveObj`
+- **I-10+ push / throw / teleport / magic move** → all `MoveObj`
   equivalents. Must use `insertAtHead`.
 
 The NPC schedule snap's switch from `insert` → `insertAtHead` has no
@@ -850,11 +857,174 @@ guardrail.
   empty cell = no-op.
 
 **Deferred (each owns a later step):**
-- **Status panel** (I-13) — third substrate consumer, replaces the
+- **Status panel** (I-14) — third substrate consumer, replaces the
   dev HUD's clock readout. Substrate ready; consumer waits.
-- **Dialog window** (I-11) — second substrate consumer; opens when
-  TALK fires (I-10). Substrate ready; consumer waits.
-- **Inspector actions** (USE / GET / DROP buttons) — need I-9's
+- **Dialog window** (I-12) — second substrate consumer; opens when
+  TALK fires (I-11). Substrate ready; consumer waits.
+- **Inspector actions** (USE / GET / DROP buttons) — need I-10's
   object-action dispatch core; today's inspector is read-only.
 - **Object-action triggers from the inspector** (e.g. USE-on-selected
-  child) — same I-9 dependency.
+  child) — same I-10 dependency.
+
+## I-8 scope — avatar movement + party follow
+
+**Goal:** the player walks the Avatar around Britain with the camera
+following, and the three starting companions (Iolo / Shamino / Dupre)
+trail in formation. The first **agency** in the rebuild. **Landed a–e,
+all browser-verified on real U6 data.**
+
+**Source mechanism — see `research_npc_ai.md` §"Party follow + avatar
+movement" for the full decode.** Headline finding: **party-follow is NOT a
+case in the NPC per-mode dispatcher `C_1E0F_3E6A`** — it's skipped for
+`AI_COMMAND` (active member) and `AI_FOLLOW` (companions) at
+`seg_1E0F.c:2225`, and `AI_FOLLOW` is also excluded from move-point turn
+allocation (`seg_1E0F.c:2197`). Companions move through a dedicated routine,
+`MoveFollowers` (`C_1E0F_1193`, `seg_1E0F.c:501`), a **formation-offset greedy
+step** — not a trail buffer, not per-follower pathfinding. The avatar step and
+the follower step share only the **single-step move kernel** — `canStandAt`
+(I-4) + `insertAtHead` (I-7) + the shared facing/walk helper (`C_1E0F_0664`);
+the path builder `C_1E0F_2D37` belongs to I-9.
+
+**Sub-steps as landed** (a–e; each one save-point commit, squashed into one
+`impl I-8`):
+
+- **I-8a — Avatar move + camera + facing + idle settle**
+  (`systems/avatar_move_system.js`). 8-dir input (arrows = cardinals, numpad =
+  full 8-dir; `seg_0C9C.c:1069-1076` keymap, 0=N clockwise) → the
+  `C_1E0F_1B0E` /*[advance]*/ path: one legal step via `canStandAt`,
+  `insertAtHead` at the destination; a blocked cell bumps (no move). Camera
+  recenters on the Avatar each step. Facing-on-step = `MACRO_A` 8→4 facing +
+  diagonal hysteresis + the `C_1E0F_0664` humanoid walk cycle
+  (`frame = walk + facing<<2`). Idle settle: on an idle turn the walk cycle
+  relaxes to stand (source's `seg_0A33.c` idle pass, settle arm), gated on a
+  separate `IDLE_SETTLE_MS` (~500 ms) idle-detection delay so the Avatar holds
+  its stride briefly rather than snapping on the first 100 ms heartbeat.
+
+- **I-8b — `PartyMember` + `Party`** (`components.js`, `resources/party.js`).
+  `PartyMember { slotIndex }` tags each on-map actor whose objlist slot id is
+  in `objlist.party[]` (Avatar = slot 0, no distinct marker — source treats it
+  as `Party[0]`). `Party` resource holds the singleton `activeIndex` (= 0) +
+  `mode` (= 'follow'). `world.query(PartyMember)` sorted by slotIndex IS the
+  member list (no `members[]` array) — MoveFollowers walks it. Verified: 4
+  members in order (Avatar/Dupre/Shamino/Iolo) at their objlist start cells.
+
+- **I-8c — Foundations** (`systems/humanoid_anim.js`, `passability.js`).
+  (a) Extract the avatar's facing + walk-cycle into `humanoid_anim.js`
+  (`faceDir` / `walkStep` / `settleToStand`) and refactor the avatar to use it
+  — behavior-identical, regression-verified — so MoveFollowers reuses the same
+  animation. (b) Add the **party pass-through** option to `canStandAt`
+  (`{asPartyMember, leaderHandle}`, source `D_17B2` at `seg_1E0F.c:191-198`): a
+  moving party member walks through other party members; the active leader
+  stays solid.
+
+- **I-8d — `MoveFollowers` (the conga line)** (`systems/move_followers.js`).
+  Port `C_1E0F_1193`: per follower, compute the formation-slot target from
+  `D_17B8`/`D_17C3` rotated by leader facing; try all 8 directions, keep legal
+  cells (`canStandAt` with party-pass), score by the "eager" heuristic
+  (contiguity via `C_1E0F_1056` minus distance-to-slot), step the best. Two
+  passes; `aFlag` 0 = leader moved (loose trailing), 1 = stationary (tighten).
+  Per-follower walk state in a handle-keyed map; facing via `humanoid_anim`.
+  Wired off the avatar's `onMove` (camera recenter + follow). The Avatar
+  (leader) also walks THROUGH its followers (party-pass); when it steps onto a
+  follower's cell, MoveFollowers shuffles that follower aside — the same pair
+  source uses. `D_17A9` damage-tile reluctance dropped (no hazard subsystem).
+  **Bug found + fixed here:** `canStandAt` checked a follower's *sprite-tile*
+  impassable flag BEFORE the party-pass could skip it, so `blocked` stuck true
+  and the Avatar was wrongly blocked by its own followers. Moved the
+  Actor/party-pass check to run FIRST, before the tile-flag checks — matching
+  source's `c_04ed` (an NPC blocks for *being* an NPC, not for its sprite
+  tile's flags). Verified: companions trail onto exact formation slots;
+  reversing through the party never blocks the Avatar and never leaves a
+  follower stacked.
+
+- **I-8e — Party idle settle** (`move_followers.js` `settleParty`, avatar
+  `onIdle`). When the party is idle past `IDLE_SETTLE_MS`, the whole party —
+  Avatar (slot 0) + followers — settles its walk cycles to stand (facing
+  preserved). Generalizes the I-8a avatar settle: the avatar's idle branch fires
+  an `onIdle` callback (symmetric with `onMove`) wired to `settleParty(world)`,
+  which settles every `PartyMember` mid-stride. Verified: party holds its stride
+  ~500 ms after stopping, then plants its feet together.
+
+**How the avatar system and the follow/settle relate.** `moveFollowers` and
+`settleParty` are NOT registered sim systems — they're consequences the avatar
+move system triggers via callbacks (`onMove` after a successful step → recenter
++ follow; `onIdle` after the idle gate → party settle), composed in `main.js`.
+This mirrors source: `C_1E0F_1B0E` calls `MoveFollowers` at its tail
+(`seg_1E0F.c:933`), and the settle is the no-key idle path. Followers move only
+on the leader's turn; the party settles only on idle turns — turn-type mutual
+exclusion, the same the command-vs-idle loop gives source. The avatar system
+stays follower-agnostic (it just promises "I call onMove/onIdle"); the wiring
+site composes the rest. Active-member switching (later) only changes the
+`leaderHandle` passed to `moveFollowers`.
+
+**Time-model note (provisional).** A player move advances the world clock +1
+minute, AND the idle heartbeat advances it too (~10 game-min/sec) — so time
+passes whether or not the player acts. Source is strictly turn-based (time per
+move-point round; idle = frozen). Keeping the idle-advance ("world breathes") is
+a provisional lean (Zane 2026-06-01); it finalizes at I-9 when the move-point
+economy lands. See the I-9 scope.
+
+**Formation offset tables (verbatim from `seg_1E0F.c:62-63`):**
+```
+D_17B8[] = { 0,-1, 1, 0,-2, 2,-1, 1,-3, 3, 0};   // perpendicular
+D_17C3[] = { 0, 1, 1, 2, 2, 2, 3, 3, 3, 3, 1};   // behind
+```
+Indexed by `follow_pos` (1-based per follower). Slot 1 = back-left,
+2 = back-right, 3 = two-behind, 4/5 = wider, etc. — a diamond expanding
+behind the leader. Target rotation (`seg_1E0F.c:528-535`):
+`target_x = x − DirIncrX[facing]·behind − DirIncrY[facing]·perp`,
+`target_y = y + DirIncrX[facing]·perp − DirIncrY[facing]·behind`.
+
+**Deferred (each owns a later step):**
+- **NPC pathfinding** (`C_1E0F_2D37`) → **I-9**. Until it lands, the I-5
+  schedule snap stays teleport-not-walk; I-8 movement does not touch the
+  path builder.
+- **`[F]ollow` / `[S]olo` toggle** — the `Party.mode` slot exists but UI
+  doesn't expose it; solo mode defers with combat (post-β).
+- **Active-member cycle + party HUD line** — different active members
+  elicit different conversations; land a minimal dev-HUD "Active: <name>"
+  + `1`/`2`/`3` cycle at **I-11** (talk trigger) when it first matters.
+  Full party status panel is **I-14**.
+- **Teleport-when-too-far for stragglers** (`C_1E0F_291C`, 3/tick cap) —
+  shares the mechanism NPC pathfinding uses for off-area NPCs; lands with
+  **I-9**. Without it a badly-separated follower can strand; acceptable
+  for the I-8 demo (small rooms, short separations).
+- **Vehicle/boarding follow suppression** (`IN_VEHICLE` early-return in
+  `MoveFollowers`) — no boats/horses yet.
+
+## I-9 scope — NPC pathfinding
+
+**Planned, not started.** Full sub-step breakdown gets written here when
+I-9 opens, after a pre-impl research read of the trickiest piece — the
+bucket-Dijkstra search `C_1E0F_2D37` + the `__ComputeResistance` cost-map
+build (`seg_1E0F.c:1866`), which together are the heaviest single port in
+the I-8/I-9 pair (40×40 resistance grid with door/passthrough/2×2-footprint
+surcharges + meet-in-the-middle flood + RLE traceback + the
+`AI_FINDPATH`→`AI_ONPATH`→`AI_84/85/86`→re-find state machine). Decode
+already in `research_npc_ai.md` §"Pathfinding"; that section is the
+pre-impl research baseline.
+
+**Provisional scope (subject to the pre-impl read):** wire the pathfinder
+into the I-5 schedule trigger so NPCs **walk** to their slots instead of
+teleporting (`C_1E0F_5165` sets `AI_FINDPATH` → path service
+`C_1E0F_464A` builds a path → `__DoOnPath` walks it → `__AtDestination`
+on arrival sets the worktype) + facing-on-step; the off-area teleport
+`C_1E0F_291C` (3/tick cap) for both far NPCs and stranded followers; and
+the first-tick schedule alignment deferred from I-5. The 40×40 work area
++ 8-slot path throttle are kept as gameplay-faithful (see the note-branch
+I-8 warm-up + `research_npc_ai.md` §"Off-area handling"). **If `C_1E0F_2D37`
+balloons mid-step, split it further** — I-9 is fenced so that's cheap.
+
+**Time model — decide here (provisional; Zane leans "world breathes").**
+Surfaced during I-8a: the world clock currently advances on a player move
+(+1 min per turn) AND on the idle heartbeat (~10 game-min/sec), so time
+passes whether or not the player acts (verified 2026-06-01). Source is
+strictly turn-based — time advances one minute per move-point *round*
+(`C_0A33_1355(1)`, `seg_1E0F.c:2219`, fired when the round exhausts), driven
+by player actions through the NPC tick; standing idle passes no game-time.
+I-9 builds that move-point economy (`MovePts`/`DEXTE` + `C_1E0F_4E0A`), so
+it's the natural place to choose: strict turn-based (drop the idle
+auto-advance; 1 min/round) **vs** keep the idle-advance as a deliberate
+modern "world breathes while you watch" choice (per `CLAUDE.md`
+§"Modern-browser UX as architectural anchor"). **Zane's lean 2026-06-01:
+keep the idle-advance.** Provisional — finalize when the economy lands.

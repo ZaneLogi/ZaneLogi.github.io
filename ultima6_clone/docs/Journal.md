@@ -28,6 +28,118 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-01 — I-8 implemented: avatar movement + party conga (a–e)
+
+I-8 landed as five save-point sub-steps, all browser-verified on real U6 data via
+the preview MCP (synthetic `KeyboardEvent`s + reading `window.__U6` state). The
+player now walks Britain with the camera following, the sprite facing + animating,
+and the three companions trailing in formation.
+
+- **Built**:
+  - I-8a `systems/avatar_move_system.js` — 8-dir avatar move (`C_1E0F_1B0E`),
+    camera recenter, facing-on-step (`MACRO_A` + `C_1E0F_0664` walk cycle), idle
+    settle-to-stand gated on a ~500 ms `IDLE_SETTLE_MS` delay.
+  - I-8b `components.js` `PartyMember` + `resources/party.js` `Party`.
+  - I-8c `systems/humanoid_anim.js` (shared `faceDir`/`walkStep`/`settleToStand`;
+    avatar refactored onto it, behavior-identical) + `canStandAt` party pass-through
+    option (`D_17B2`).
+  - I-8d `systems/move_followers.js` — `MoveFollowers` (`C_1E0F_1193`)
+    formation-greedy step, wired off the avatar's `onMove`.
+  - I-8e `settleParty` + the avatar's `onIdle` callback — whole-party idle settle.
+- **Found / fixed**:
+  - `C_1E0F_1B0E` /*[advance]*/ is the GENERAL player move (sail is a sub-branch);
+    corrected a prior doc error that called it sail-only.
+  - The avatar is `OBJ_19A` — a humanoid sprite, so `frame = walk + facing<<2` with
+    a 4-facing / 3-step-walk layout (confirmed against live `baseTile`/`frame`).
+  - **canStandAt ordering bug**: NPC sprite tiles can carry the terrain-impassable
+    flag, and the original code checked it BEFORE the Actor/party-pass step — so a
+    passed-through follower left `blocked` set and wrongly blocked the Avatar.
+    Fixed by moving the Actor/party-pass check first, matching source's `c_04ed`
+    (NPC-ness is decided independent of the sprite tile's flags).
+  - The `[NpcSchedule]` console flood during testing is just the idle heartbeat
+    racing the clock through game-days (one log/hour) — not a bug, but it saturates
+    the CDP console and made `preview_eval` look like a 29 s hang. Red herring.
+  - Time model: a move advances the clock +1 min AND the idle heartbeat advances it
+    too (~10 game-min/sec). Source is strictly turn-based. Keeping the idle-advance
+    ("world breathes") is a provisional lean; finalize at I-9 (move-point economy).
+- **Design note**: `moveFollowers` and `settleParty` are not registered systems —
+  the avatar move system triggers them via `onMove`/`onIdle` callbacks composed in
+  `main.js`, so followers move only on the leader's turn and the party settles only
+  on idle turns (source's command-vs-idle mutual exclusion).
+- **Docs**: `progress.md` I-8 scope rewritten to the landed a–e; `research_npc_ai.md`
+  idle-settle generalization + the `c_04ed` ordering insight; CLAUDE.md +
+  DOCUMENTATION_INDEX status → I-8 complete.
+- **Open / next**: I-8a–e are save-point commits to **squash into one `impl I-8`**
+  before push. Then **I-9 (NPC pathfinding)** — its own pre-impl read of
+  `C_1E0F_2D37` + `__ComputeResistance` first.
+
+## 2026-06-01 — I-8 pre-impl read: party-follow mechanism + I-8/I-9 split
+
+Opened the I-8 (player movement) scope by reading the NPC dispatch first,
+the prerequisite the note-branch I-8 warm-up flagged before committing to a
+party-follow mechanism. The read fired a trip-wire: the warm-up note's
+central assumption was wrong, and the correct mechanism is a shape the note
+didn't enumerate.
+
+- **Read**:
+  - `seg_1E0F.c:1733 C_1E0F_3E6A` — the per-mode NPC dispatcher
+    (`switch(NPCMode)`); read the whole switch.
+  - `seg_1E0F.c:2147-2247 C_1E0F_4E0A` — the NPC tick; the dispatcher-call
+    guard at `:2225` and the move-point exclusion at `:2197`.
+  - `seg_1E0F.c:501-594 MoveFollowers` (`C_1E0F_1193`) + the formation
+    offset tables at `:62-63` (`D_17B8` / `D_17C3`).
+  - `seg_1E0F.c:66-160 C_1E0F_000F` — where `D_17A9` (damage-tile flag) is
+    set, read by `MoveFollowers`.
+  - `seg_1E0F.c:880-936` active-member move + `seg_0A33.c:1311-1322` pass
+    command; `MoveFollowers` call sites (`:933` aFlag 0, `seg_0A33.c:1322`
+    aFlag 1, `seg_101C.c:291` aFlag 1).
+- **Found**:
+  - **Party-follow is NOT a case in `C_1E0F_3E6A`.** The tick skips the
+    dispatcher entirely for `AI_COMMAND` (active member) and `AI_FOLLOW`
+    (companions) at `:2225`, and excludes `AI_FOLLOW` from move-point
+    allocation at `:2197`. The warm-up note's "party-follow is just another
+    `NPCMode` case in the dispatch" is falsified.
+  - **The real routine is `MoveFollowers` — a formation-offset greedy
+    step**, which is neither of the note's three guesses (trail-copy /
+    per-tick-pathfind / hybrid). Each follower owns a fixed diamond-formation
+    slot behind the leader (offset tables rotated by facing) and greedily
+    steps the best of 8 legal directions by an "eager" heuristic
+    (contiguity bonus − distance-to-slot). Two passes; `aFlag` = tightness
+    (0 = avatar moved/loose, 1 = stationary/tighten).
+  - **Three movers, one kernel.** Avatar step, follower step, and NPC
+    pathfind all share `C_1E0F_000F` + `MoveObj` + `C_1E0F_0664`; only NPC
+    AI uses the path builder `C_1E0F_2D37`. This **falsifies `progress.md`'s
+    "both consumers share `C_1E0F_2D37`"** — which was the stated reason for
+    folding avatar movement + pathfinding into one step.
+  - `D_17A9` = the `TERRAIN_FLAG_08` damage-tile flag (the one I-4 deferred);
+    followers are reluctant to step on hazards. `C_1E0F_1B0E`, previously
+    guessed as "player walk," is the sail/wind-move (called only for ships).
+- **Decision (with Zane)**: **split I-8 → I-8 (avatar + party follow) +
+  I-9 (NPC pathfinding)**. One step = one squash commit; "player walks
+  Britain" and "NPCs pathfind their schedules" are distinct payoffs with
+  distinct verification, so they can't share a commit. Renumbered the old
+  I-9…I-14 to I-10…I-15. Pathfinding (the heaviest single port in the pair)
+  is fenced as I-9 with its own pre-impl research read.
+- **Docs**:
+  - [`progress.md`](progress.md) — ledger split + renumber; new I-8 scope
+    (sub-steps a/b/c, formation tables, verification) + I-9 scope stub;
+    corrected the `C_1E0F_2D37` rationale; fixed the stale header Status
+    block (was "I-5 complete / Next I-6") and pre-existing "avatar from I-6"
+    leftovers.
+  - [`research_npc_ai.md`](research_npc_ai.md) — new §"Party follow + avatar
+    movement" (dispatcher exclusion, consumer structure, `MoveFollowers`
+    decode, `aFlag`, `D_17A9`, ECS shape); open-Q2 + deferrable list + status
+    header updated.
+- **Open**:
+  - I-8a needs a read of the player-command dispatch in `seg_0A33.c` —
+    whether the avatar moves 4- or 8-directionally.
+  - Party-member pass-through (`D_17B2`, deferred in I-4) may be needed in
+    I-8c so companions don't treat each other as hard blockers — watch
+    during I-8c verify.
+  - I-9 pre-impl read: `C_1E0F_2D37` + `__ComputeResistance` before coding.
+- **Next**: implement **I-8a** — avatar entity + single-step move + camera
+  follow + facing-on-step.
+
 ## 2026-05-31 — I-7 (UI substrate + object inspector) + cell-pick + render tie-break + LZNAMES correction
 
 I-7 lands the shared UI substrate (modal stack + input routing +

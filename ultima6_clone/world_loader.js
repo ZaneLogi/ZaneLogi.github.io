@@ -22,7 +22,7 @@ import { TileRegistry } from './resources/tile_registry.js';
 import { SpatialIndex } from './resources/spatial_index.js';
 import { Schedules } from './resources/schedules.js';
 import { ActorIndex } from './resources/actor_index.js';
-import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn } from './components/components.js';
+import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember } from './components/components.js';
 
 const LOCXYZ = CoordUse.LOCXYZ;
 
@@ -139,7 +139,10 @@ export function loadActors(world, objlist) {
   const spatial = world.getResource(SpatialIndex);
   const schedules = world.getResource(Schedules);
   const actorIndex = world.getResource(ActorIndex);
-  let actors = 0, scheduled = 0;
+  // I-8b: slot id -> 0-based party position (Avatar = 0), for PartyMember tagging.
+  const partyIndexBySlot = new Map();
+  for (let p = 0; p < objlist.partySize; p++) partyIndexBySlot.set(objlist.party[p], p);
+  let actors = 0, scheduled = 0, party = 0;
   for (const a of objlist.actors) {
     if (a.objNumber === 0 || (a.status & 0x18) !== LOCXYZ) continue;   // empty slot or off-map
     const e = spawnFromRecord(world, reg, spatial, a, true);
@@ -148,9 +151,13 @@ export function loadActors(world, objlist) {
       world.add(e, Schedule, { npcId: a.id });
       scheduled++;
     }
+    if (partyIndexBySlot.has(a.id)) {
+      world.add(e, PartyMember, { slotIndex: partyIndexBySlot.get(a.id) });
+      party++;
+    }
     actors++;
   }
-  return { actors, scheduled };
+  return { actors, scheduled, party };
 }
 
 // I-6a inspection helper. Walk query(ContainedIn), match by holder handle, return
