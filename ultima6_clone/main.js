@@ -40,8 +40,10 @@ import { forEachOccupiedCell } from './systems/tile_footprint.js';
 
 // Gating set for terrain + flags (I-1b) + world objects (I-2) + NPC schedules (I-5).
 // Names are the original U6 filenames, lowercased.
-const REQUIRED = ['maptiles.vga', 'objtiles.vga', 'tileindx.vga', 'masktype.vga', 'animmask.vga', 'animdata', 'u6pal', 'chunks', 'map', 'tileflag', 'basetile', 'objlist', 'schedule'];
-const OPTIONAL = ['look.lzd'];   // tile display names only (getTileLook); rendering doesn't need it
+const REQUIRED = ['maptiles.vga', 'objtiles.vga', 'tileindx.vga', 'masktype.vga', 'animmask.vga', 'animdata', 'u6pal', 'chunks', 'map', 'tileflag', 'basetile', 'objlist', 'schedule', 'look.lzd'];
+// look.lzd holds the display/look strings the inspector + NPC names need, so it's
+// REQUIRED (not just a rendering nice-to-have). OPTIONAL is empty for now.
+const OPTIONAL = [];
 
 // OBJBLK region files (64 surface objblk[col][row] + 5 dungeon objblk[level]i).
 // Demand-loaded per region from U6DB, so they gate by presence-count, not the
@@ -54,7 +56,6 @@ for (let d = 0; d < 5; d++) OBJBLK_NAMES.push(`objblk${String.fromCharCode(97 + 
 const KNOWN = new Set([...REQUIRED, ...OPTIONAL]);   // these + any objblk* are extracted from a dropped zip
 const isKnown = (base) => KNOWN.has(base) || base.startsWith('objblk');
 
-const dropzone = document.getElementById('dropzone');
 const checklistEl = document.getElementById('checklist');
 const checklistSummaryEl = document.getElementById('checklist-summary');
 const checklistBodyEl = document.getElementById('checklist-body');
@@ -76,18 +77,24 @@ async function updateChecklist() {
 
   let body = 'Required:\n';
   for (const n of REQUIRED) body += `  ${present[n] ? '✓' : '✗'} ${n}\n`;
-  body += '\nOptional:\n';
-  for (const n of OPTIONAL) body += `  ${present[n] ? '✓' : '—'} ${n}\n`;
+  if (OPTIONAL.length) {
+    body += '\nOptional:\n';
+    for (const n of OPTIONAL) body += `  ${present[n] ? '✓' : '—'} ${n}\n`;
+  }
   body += `\nOBJBLK regions: ${objblkCount}/${OBJBLK_NAMES.length}`;
   checklistBodyEl.textContent = body;
 
   const missing = REQUIRED.filter((n) => !present[n]).length;
   checklistSummaryEl.className = ready ? 'ok' : 'miss';
   checklistSummaryEl.textContent = ready
-    ? `✓ Ready · ${REQUIRED.length} required + ${objblkCount}/${OBJBLK_NAMES.length} regions`
-    : `✗ Missing ${missing} of ${REQUIRED.length} required files`;
+    ? `✓ Ready · ${REQUIRED.length} required + ${objblkCount}/${OBJBLK_NAMES.length} regions — click to update files`
+    : `✗ Missing ${missing} of ${REQUIRED.length} required files — drop them below`;
 
-  if (ready && !loaded) { loaded = true; checklistEl.open = false; await load(); }
+  // The panel doubles as the dropzone: expanded (showing the dropzone) while files
+  // are missing, collapsed to just the status line once ready. Click the summary to
+  // re-expand for updating.
+  checklistEl.open = !ready;
+  if (ready && !loaded) { loaded = true; await load(); }
 }
 
 async function buildFileMap() {
@@ -353,12 +360,15 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   log('\nRendering started — drag the map to pan. Hover a cell + press I to inspect.', 'ok');
 }
 
-// --- dropzone: store dropped files into IndexedDB (bring-your-own-data) ---
-dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag'); });
-dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
-dropzone.addEventListener('drop', async (e) => {
+// --- the status panel doubles as the dropzone (whole panel is a drop target, even
+//     collapsed). Dropping expands it + stores the files; if the app was already
+//     loaded, reload to apply the updated data. (bring-your-own-data) ---
+checklistEl.addEventListener('dragover', (e) => { e.preventDefault(); checklistEl.classList.add('drag'); });
+checklistEl.addEventListener('dragleave', (e) => { if (!checklistEl.contains(e.relatedTarget)) checklistEl.classList.remove('drag'); });
+checklistEl.addEventListener('drop', async (e) => {
   e.preventDefault();
-  dropzone.classList.remove('drag');
+  checklistEl.classList.remove('drag');
+  checklistEl.open = true;            // expand so the result is visible
   for (const file of e.dataTransfer.files) {
     const ext = file.name.split('.').pop().toLowerCase();
     if (ext === 'zip') {
@@ -379,6 +389,7 @@ dropzone.addEventListener('drop', async (e) => {
       log(`stored ${file.name.toLowerCase()} (${bytes.length} bytes)`);
     }
   }
+  if (loaded) { location.reload(); return; }   // already running → reload to apply the updated data
   await updateChecklist();
 });
 

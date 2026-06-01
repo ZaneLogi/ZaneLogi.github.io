@@ -8,13 +8,14 @@
   h1 { font-size: 16px; color: #e8c060; margin: 0 0 4px; }
   .sub { color: #8a7f66; margin: 0 0 16px; }
   #dropzone {
-    border: 2px dashed #6b5d3a; border-radius: 8px; padding: 20px; text-align: center;
-    color: #b8a878; background: #1c180f; margin-bottom: 12px;
+    border: 2px dashed #6b5d3a; border-radius: 8px; padding: 16px; text-align: center;
+    color: #b8a878; background: #1c180f; margin: 4px 0 10px;
   }
   #dropzone .dz-headline { color: #d8cdb4; }
   #dropzone .dz-sub { color: #8a7f66; font-size: 12px; margin-top: 4px; }
-  #dropzone.drag { border-color: #e8c060; background: #241d10; color: #e8c060; }
   #checklist { background: #0e0b07; border: 1px solid #2a2316; padding: 8px 12px; border-radius: 6px; }
+  /* The whole panel is a drop target (even collapsed) — highlight it while dragging. */
+  #checklist.drag { border-color: #e8c060; background: #1a1610; }
   #checklist > summary { cursor: pointer; user-select: none; list-style: none; }
   #checklist > summary::before { content: '▸ '; color: #6b5d3a; }
   #checklist[open] > summary::before { content: '▾ '; }
@@ -87,12 +88,12 @@
 </head>
 <body>
 <h1>Ultima VI — engine reimplementation</h1>
-<div id="dropzone">
-  <div class="dz-headline">Drop your Ultima VI data files here</div>
-  <div class="dz-sub">Bring your own data — files stay in your browser (IndexedDB) and are never uploaded.</div>
-</div>
 <details id="checklist" open>
   <summary id="checklist-summary">scanning…</summary>
+  <div id="dropzone">
+    <div class="dz-headline">Drop your Ultima VI data files here</div>
+    <div class="dz-sub">Bring your own data — files stay in your browser (IndexedDB) and are never uploaded.</div>
+  </div>
   <pre id="checklist-body"></pre>
 </details>
 <canvas id="screen" width="1024" height="640"></canvas>
