@@ -34,9 +34,11 @@ Britain 8-dir, camera follows, party trails via `MoveFollowers`. NPC pathfinding
 was split out into I-9 (decided 2026-06-01); the two share only the single-step
 move kernel (`canStandAt` + `insertAtHead` + facing), not the path builder.
 
-Next: the **post-I-9 deviation audit** (move-point economy, clock tuning, the
-idle-heartbeat keep-vs-revert fork, I-9f as a removal candidate — see the audit
-subsection in I-9 scope) and **I-10** (object-action dispatch core).
+Next: **I-10** (object-action dispatch core) — scoped 2026-06-03, see the I-10
+scope section below. The **post-I-9 deviation audit** (move-point economy, clock
+tuning, the idle-heartbeat keep-vs-revert fork, I-9f as a removal candidate — see
+the audit subsection in I-9 scope) is **deferred to after I-10** (Zane's call
+2026-06-03 — build the player-interaction surface first, audit NPC movement later).
 
 ---
 
@@ -53,7 +55,7 @@ subsection in I-9 scope) and **I-10** (object-action dispatch core).
 | **I-7** | **UI substrate + object inspector view** (first surface) — modal stack + input routing + turn-driver gating + list-with-cursor + atlas-icon DOM rendering; `I` hotkey opens inspector on hovered cell | **done** |
 | **I-8** | **avatar movement + party follow** — 8-dir avatar move (camera follow + facing-on-step + idle settle) + companion conga via `MoveFollowers` formation-greedy-step (avatar walks through followers; party settles when idle). Sub-steps a–e. Shares the single-step move kernel (`canStandAt` + `insertAtHead` + facing) with I-9; does **not** use the path builder. | **done** |
 | I-9 | **NPC pathfinding** — `C_1E0F_2D37` bucket-Dijkstra + `AI_FINDPATH`→`AI_ONPATH`→`__DoOnPath`→`__AtDestination`; wires into the I-5 schedule trigger so NPCs **walk** to slots (near the player) or **teleport** to them (far/off-screen, `C_1E0F_291C`), then settle the arrival worktype (+ edge-seek for far slots, humanoid door pass-through, teleport-to-previous on reschedule, first-tick alignment at load). Makes Britain feel live. | **done** (a–h; i dropped) |
-| I-10 | object-action dispatch core — `Map<ObjectType, handler>` registries per action (USE / GET / LOOK / DROP); minimum handlers for "walk around without getting stuck" (door USE, LOOK on any, GET/DROP via inventory) | planned |
+| I-10 | object-action dispatch core — `Map<ObjectType, handler>` registries per action (USE / GET / LOOK / DROP); minimum handlers for "walk around without getting stuck" (door USE, LOOK on any, GET/DROP via inventory) | **scoped** (see I-10 scope) |
 | I-11 | talk trigger — adds TALK as a case in the I-10 dispatch + adjacency-pick logic | planned |
 | I-12 | dialog window — second surface on the I-7 substrate; opens when TALK fires | planned |
 | I-13 | conversation VM (adapt legacy `script.js`) — β reached: walk + talk works end-to-end. Give/take opcodes work because I-6 inventory data exists. | planned |
@@ -1228,8 +1230,259 @@ architectural anchor"). Deferred until the port is functionally complete.
 
 ### Deferred to later steps (subsystem owners noted)
 
-- **Drawbridge / lever USE** (`OBJ_10D`/`OBJ_10C`) → **I-10** (object-action
-  dispatch). Until then bridge-gated NPCs teleport — correct given the closed bridge.
+- **Drawbridge USE** — the control is the **crank** `OBJ_120` (`C_27A1_433D`),
+  which toggles the drawbridge tiles `OBJ_10D`; **now scoped as I-10d** (NOT the
+  lever `OBJ_10C`, which is the portcullis control — the earlier note
+  misidentified it). Until landed, bridge-gated NPCs teleport — correct given the
+  closed bridge.
 - **Move-point economy** (`MovePts`/`DEXTE` priority interleave) → its own refinement.
 - **Object-seek pathfinding** (`AI_SEEKOBJ` / `PTH_object`) → when mice/animals seek.
 - **Swim/fly/ethereal movement classes** in `canStandAt` → boats / combat.
+
+## I-10 scope — object-action dispatch core
+
+**Goal:** a thin, paradigm-agnostic **command dispatcher** —
+`dispatch({verb, actor, target})` → look-up handler → validate →
+effect → cost — plus the minimum verb set for "wander Britain without
+getting stuck": **LOOK** (any), **GET**/**DROP** (inventory), **USE**
+(doors). TALK is I-11 (one more handler registration on this seam);
+MOVE / vehicles / spellbook-cast deferred. This is the front-end that
+I-11 (talk) and I-12 (dialog) sit on — see the
+[research_game_loop.md](research_game_loop.md) §"The shared targeting
+block" finding: in source, look/talk/get/drop/move/use all share one
+targeting front-end and differ only at the final switch, so building
+the dispatcher now makes TALK additive.
+
+**Why a dispatcher (not per-verb ad-hoc handlers, not a source port).**
+The clone today wires input ad-hoc: avatar move + the `I`-look hotkey
+are independent `keydown` handlers, each gated on `uiStack.isEmpty()`.
+Adding GET/USE/DROP that way copy-pastes the targeting glue per verb —
+exactly what source's shared block avoids. We lift the *structural
+economy* (verb-agnostic targeting + a verb→handler split), NOT source's
+substrate (the `CMD_*` opcode ints, the blocking double `CON_getch`,
+the global `Selection` struct, `MouseMode`/`D_04C2`, the giant switch).
+Per D2 + the modern-UX anchor, that machinery is 1990 input-loop
+residue; the mechanic is `(verb, actor, target) → validate → effect →
+cost` (the shared interaction contract,
+[research_object_interaction.md](research_object_interaction.md)
+§"The shared interaction pattern").
+
+### Locked UI decisions (Zane, 2026-06-03)
+
+- **#1 — message channel (NEW surface).** A gameplay scrolling text
+  area, the `CON_printf` analog. Carries verb results ("You see a
+  dagger. It weighs 0.1 stones.") and the canned refusals (`D_0DDC[]`:
+  "Out of range!", "Nothing!", + `WhatMsg` "What?"). Does NOT exist
+  today — `#log` is the dev/loading log, `#clock-hud` is the dev HUD.
+  This is the one genuinely-new UI in I-10. Layout (below / beside the
+  canvas), scrollback depth, and styling settled in I-10a.
+- **#2 — LOOK = line-default, modal-for-structured (option c).** Plain
+  look → a line in the message channel (source-faithful: source's LOOK
+  `C_27A1_0C67` is a scroll verb,
+  [research_object_interaction.md](research_object_interaction.md)
+  §"Look"). Escalate to the **existing inspector modal** only for
+  structured targets — containers (list contents), later spellbooks.
+  Mirrors source's own escalation (line → portrait/contents panel for
+  complex objects). Consequence: the `I` hotkey shifts from
+  "always-modal" to "line for simple / modal for structured" — a small
+  behavior tweak of the I-7 inspector entry, not a rewrite.
+- **#3 — targeting cue = visual, no text echo (option c).** When a verb
+  is pending, tag the existing `#probe-cell` hover box (recolor + a
+  small verb label); the **result** goes to the message channel. Drop
+  source's textual `"Look-"`/`"Use-"` echo — that prompt-echo existed
+  because a 1990 terminal had no better "you're aiming" cue; we have a
+  mouse-following cursor. Modern-UX anchor: source's text-echo + aim-box
+  envelope is substrate residue, the mechanic (verb → target → result)
+  is the spec. Bonus: a visual cue degrades cleanly across both
+  front-ends (cursor tag for verb-first, menu for target-first); a text
+  echo would be verb-first-only.
+
+### Dispatch-core seam (admits both front-ends)
+
+- **`pickAtCell(x, y) → entity | null`** — the shared target resolver,
+  generalized from the current `inspectAtCell` (main.js): the same
+  three-tier cell-pick (NPC > object > ignore-tile,
+  [research_object_interaction.md](research_object_interaction.md)
+  §"Cell-pick — `C_2337_08F1`"), but returning the pick instead of
+  opening a modal.
+- **`dispatch({verb, actorEntity, target})`** where `target = {entity,
+  x, y}` — the **local** intent value, the ECS analog of source's global
+  `Selection {x,y,obj}`. Pipeline = the shared interaction contract:
+  resolve → validate (adjacency `CLOSE_ENOUGH` + legality via I-4
+  `canStandAt` for placement verbs) → face the target (I-8 facing) →
+  effect → spend move-points / recompose (I-3/I-9 turn).
+- **Handler registry** — `Map<verb, handler>` for the single-function
+  verbs (LOOK/GET/DROP, later TALK/MOVE); **USE = `Map<ObjectType,
+  useHandler>`** (the additive dispatch table,
+  [research_object_interaction.md](research_object_interaction.md)
+  §"Use" + §"Per-verb modules"). Each new usable type registers without
+  touching the others.
+- **Front-ends both end at `dispatch(...)`:** verb-first (this step) +
+  target-first (deferred, below). The dispatcher never learns which one
+  called it.
+
+### USE handler implementation (the ~40-case branch)
+
+Source's USE switch (`C_27A1_6179`, ~40 cases) looks daunting but
+collapses to ~8 sub-patterns, and I-10 implements only 2 (door + crank).
+Three rules keep it tractable:
+
+1. **Registry, not switch.** `useHandlers: Map<ObjectType, fn>` +
+   `registerUse([types], fn)` (group-registration = source's case
+   fall-through, e.g. the door quartet `OBJ_129-12C` → one fn). Adding a
+   case is a one-liner that can't break the others.
+2. **Shared wrap in the dispatcher; handlers do ONLY the effect.**
+   Source proves the boundary — everything around the switch in
+   `C_27A1_6179` is written once. The USE verb-handler owns: head-resolve,
+   the re-pick (`C_27A1_0919`, skip NPC/Ignore), the usability gate (→
+   "Not possible!", ~`C_27A1_01DE`), adjacency + facing, the move-point
+   cost (`SubMov 5`), recompose. Each registered handler owns only its
+   type-specific effect.
+3. **Factor sub-patterns so cases stay 1–3 lines.** The ~40 cases are a
+   few shapes; one helper per shape:
+
+   | Sub-pattern | helper | source examples |
+   |---|---|---|
+   | local frame-toggle | `toggleFrame(obj)` | doors `129-12C`, simple lever `0BA/0C0` |
+   | quality-linked remote toggle | `qualToggle(ctrl, …)` | crank→`10D` (frame); lever→`136`, switch→`0AF` (add/del at `12D` markers) |
+   | consume | `consume(obj)` | food `073/074/075` |
+   | light source | `toggleLight(obj)` | lantern/candle/torch group |
+   | board / mount | `board(obj)` | ships, horse `1AF`, cannon `1AC` |
+   | level change | `changeLevel(obj)` | ladder `131` |
+
+   I-10 implements only `toggleFrame` (door, I-10c) + the crank's
+   quality-toggle (I-10d); the rest register later as one-liners.
+
+**Discipline:** the map holds only *ported* handlers — unregistered types
+fall to "Not possible!" (correct, not a gap). Keep source's full case
+list in [research_object_interaction.md](research_object_interaction.md)
+§"Use" as the to-do, and `console.warn` an un-ported-but-usable type
+during play so gaps stay visible. USE effects go through the **same**
+mutation primitives GET/DROP use (`setFrame` / add / delete) — no
+parallel USE-only mutation path. Each handler cites its `C_27A1_*`
+counterpart.
+
+### USE cases beyond I-10 — demand-driven, no batch milestone
+
+There is **no "implement all ~40 USE cases" step**, by design
+(`user_retro_port_goal`: stop at the learning goal, defer mechanical-
+completeness). The registry makes each case a one-liner added **when its
+owning subsystem enters scope** — not a backlog to burn down. The min
+scope ("wander Britain + talk to NPCs") is reached with just door + crank
+(USE) + LOOK/GET/DROP + I-11/I-12 talk; the rest are post-min-scope and
+may never land unless the scope grows. So when a future session asks
+"when do we finish USE?" — the answer is "per subsystem, incrementally,
+and most never."
+
+| Case(s) | Gated on | When |
+|---|---|---|
+| door `129-12C` | movement | **I-10c (now)** |
+| crank → drawbridge `120`/`10D` | castle access / NPC #12 | **I-10d (now)** |
+| lever/switch → portcullis `10C`/`0AE` | a gated area on the wander path | small follow-on, same pattern |
+| lantern/candle/torch | the lighting model (deferred) | with the lighting step |
+| ladder/grate `131` → level change | dungeons / map-level transitions | when leaving the overworld |
+| food / consume `073-075` | hunger / inventory-consume | quick add, only if it matters |
+| vehicles `19C/19E/19F/1A7/1AF/1AC` | the vehicle subsystem | its own step — likely out of min scope |
+| spellbook/scroll cast `03F/040` | magic (`C_1944_4C2F`, deferred) | when magic matters |
+| instruments / moonstone / clock / one-offs | music / moongate / misc | likely never, unless scope grows |
+
+### Sub-steps (each ≈ one save-point, browser-verified; squashed into one `impl I-10` per the I-7/I-8 default — unless kept separate like I-9)
+
+**USE-first ordering (Zane 2026-06-03):** build the dispatcher against
+its only table-dispatched consumer (USE), then the single-handler verbs
+(LOOK/GET/DROP) follow as level-1 registrations.
+
+- **I-10a — message channel.** New DOM surface + a `message(text)` API
+  + scrollback + styling (gold-on-black, matches the HUD palette).
+  Verify: lines render + scroll, survive a region stream/pan.
+- **I-10b — dispatch core (USE-shaped) + verb-first front-end +
+  targeting cue.** `pickAtCell` (generalize `inspectAtCell`); the
+  `dispatch` pipeline (validate/face/cost + the USE-specific re-pick
+  `C_27A1_0919`); **both dispatch levels** — verb→handler AND USE's
+  object-type map; the `pendingVerb` state + `#probe-cell` verb-tag
+  (#3) + Esc-cancel + the "What?" / "Out of range!" refusals. Proven
+  with a **trivial USE handler** (echo the object name / "Nothing
+  happens") so the plumbing is validated before any real effect.
+  Verify: press `U` → cursor tagged "Use" → confirm hovered cell →
+  echo line.
+- **I-10c — USE → door.** First real handler: the door (`C_27A1_2A44`,
+  `OBJ_129-12C`) — open/close + locked check, toggling the door frame
+  so the player can walk through. Closes the I-9/I-10 door seam (I-9
+  left player doors requiring USE; humanoid NPCs phase, player must
+  open). Verify: USE a closed door → opens → walk through; locked →
+  "It's locked.".
+- **I-10d — USE → crank (drawbridge).** The castle drawbridge control:
+  the **crank** `OBJ_120` → `C_27A1_433D` (seg_27a1.c:2056, "use
+  crank") — quality-matches the linked drawbridge tiles `OBJ_10D` and
+  toggles them (`C_27A1_3F47` + the "drawbridge related" helper at
+  seg_27a1.c:1898; "Open/Close the drawbridge."). Needs **`OBJ_10D`
+  frame-aware passability** so the bridge is crossable only when open —
+  which is also the piece relevant to the I-9 **NPC-#12** teleport-to-
+  dinner case (a closed/unmodeled bridge is why #12 teleports; a
+  modeled, open bridge lets it path). Sibling USE-driven quality-linked
+  controls — portcullis **lever** `OBJ_10C`→`C_27A1_4479`, and **switch**
+  `OBJ_0AE`→`C_27A1_4672` — are **deferred** and use a *different* target
+  mechanism: rather than frame-toggling a persistent object in place (the
+  crank → `OBJ_10D`), they **add/delete** an object (`OBJ_136` portcullis /
+  `OBJ_0AF`) at quality-matched `OBJ_12D` marker locations. So the crank is
+  the one with frame-aware passability; the siblings spawn/despawn the
+  blocker. Verified 2026-06-03: `OBJ_136` is created/destroyed ONLY in
+  `C_27A1_4479` (seg_27a1.c:2110/2118/2121) — not the conversation VM.
+- **I-10e — LOOK.** Follows the pattern as a single-handler verb (line
+  + modal-escalation, #2). Verify: `L` → cursor tagged "Look" → confirm
+  cell → "You see…" line; a container → inspector modal.
+- **I-10f — GET / DROP.** Inventory ops via the I-6 data layer
+  (`Container`/`ContainedIn`; the `GiveObj`/`TakeObj`/`InsertObj`/
+  `MoveObj` analogs — **audit `world_loader.js` for what exists first**)
+  + message feedback. Weight gate optional-faithful; **theft/karma
+  deferred** (no karma system yet). Verify: get a ground item →
+  inventory updated + "You get…"; drop → back on the ground.
+
+### Pre-impl reads needed first (research-before-impl convention)
+
+- **`C_27A1_2A44`** (door USE) — only tabulated in
+  [research_object_interaction.md](research_object_interaction.md)
+  §"Use", body not read: open/close/unlock logic + frame mapping for
+  `OBJ_129-12C`. Read before I-10c.
+- **`C_27A1_433D` (crank) + `C_27A1_3F47` + the "drawbridge related"
+  helper (seg_27a1.c:1898)** — the crank→`OBJ_10D` toggle geometry +
+  how the bridge's open/closed frame maps to passability. Read before
+  I-10d.
+- **`world_loader.js` mutation helpers** — confirm which of
+  `GiveObj`/`TakeObj`/`InsertObj`/`MoveObj` already exist (`inventoryOf`
+  does) before I-10f, per the no-reinvention rule.
+
+### Deferred (not in I-10)
+
+- **Target-first front-end** — click a cell (no pending verb) → context
+  menu of applicable verbs (`appliesTo(target)` predicates) → dispatch.
+  Architecturally free at the core (same `dispatch`), but its real cost
+  is the menu widget + predicates. Ships as a thin later front-end (its
+  own small step or I-10e), so I-10 isn't gated on it and verb-first
+  validates the core first. When it lands, TALK + every verb get the
+  second route for free.
+- **MOVE** (push furniture, `C_27A1_1E8B`) — puzzle verb, not needed to
+  wander. **Vehicle gate** (get/drop/move/cast blocked on a boat) — no
+  boats yet. **Theft/karma** coupling on GET/MOVE — no karma system.
+  **NPC portraits** on LOOK. **Full inventory panel view** (GET/DROP are
+  message + data only for now). **Portcullis lever / switch USE**
+  (`OBJ_10C`→`C_27A1_4479`; `OBJ_0AE`→`C_27A1_4672`) — the crank's sibling
+  USE-driven quality-linked controls, but with a *different* target
+  mechanism: they **add/delete** an object (`OBJ_136` portcullis / `OBJ_0AF`)
+  at quality-matched `OBJ_12D` markers, vs the crank's in-place **frame-toggle**
+  of the persistent `OBJ_10D` bridge. Deferred; fold in when those gates
+  matter. (The drawbridge **crank** `OBJ_120` itself is **I-10d**, not deferred.)
+  **Cast** (`C_1944_4C2F`) — when magic matters.
+
+### Reuse-from-existing (no reinvention)
+
+- `inspectAtCell` (main.js) → generalize to `pickAtCell`.
+- `openInspector` + `UIStack` (view/inspector.js, view/ui_stack.js) →
+  LOOK's structured escalation (#2).
+- `getTileLook` / inspector `nameFor` → the LOOK line's object name.
+- `inventoryOf` (world_loader.js:161) → GET/DROP list shape.
+- `canStandAt` (I-4 passability.js) → placement legality.
+- I-8 facing (humanoid_anim / `MACRO_A`) → face-the-target.
+- `TurnClock` suspend + `uiStack.isEmpty()` gating → centralized in the
+  dispatcher instead of repeated per handler.
+- `#probe-cell` (view/dev_probe.js) → the targeting cursor tag (#3).

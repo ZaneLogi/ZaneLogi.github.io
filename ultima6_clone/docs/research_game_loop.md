@@ -90,8 +90,8 @@ Big switch on the (possibly translated) `ch`. Action handlers:
 | `5`, `17`, `0x12D` | Exit to DOS | Y/N prompt → set `ch = 0x12D` to break loop |
 | `CMD_81` | Attack | `COMBAT_attack()` (seg_2337) |
 | `CMD_8A` | Begin/break combat | `COMBAT_breakOff()` / `COMBAT_begin()` |
-| `CMD_82` (cast) | Two-phase spell flow | sets `MouseMode = 1`, calls `C_1944_4C2F()` |
-| `CMD_83`-`88` (talk/look/get/drop/move/use) | Target selection then dispatch | After second `CON_getch`, if `di == CMD_8E` dispatch to `C_27A1_0C67` (look), `C_27A1_14DA` (drop), `C_27A1_18F5` (get), `C_27A1_1E8B` (move), `C_27A1_6179` (use), or `TALK_talkTo(Active, Selection.obj, 1)` (talk) — then `MUS_09A8()` |
+| `CMD_82`/`85`/`86`/`87` (cast/get/drop/move) | Vehicle-gated, then shared targeting | `IN_VEHICLE` → "not on ship" + break; else fall through into the shared block. Cast splits to `C_1944_4C2F()` (own targeting); get/drop/move take the `CMD_8E` path. See §"The shared targeting block". |
+| `CMD_83`/`84`/`88` (talk/look/use) | Shared targeting (no vehicle gate) | Fall-in target of the group above. After the second `CON_getch` returns `CMD_8E`, the inner switch on `D_04C2` dispatches: `C_27A1_0C67` look / `C_27A1_18F5` get / `C_27A1_14DA` drop / `C_27A1_1E8B` move / `C_27A1_6179` use / `TALK_talkTo(Active, Selection.obj, 1)` talk (then `MUS_09A8()`). See §"The shared targeting block". |
 | `CMD_89` (rest) | Sleep/heal | `C_3200_055D()` with music mute via `MUS_091A(8)` and unmute on completion |
 | `CMD_AA` (save) | Save game | Y/N prompt → `C_0C9C_089F()` |
 | `18` (^R) | Restore | Y/N prompt → `C_0C9C_0397()` |
@@ -105,9 +105,73 @@ Big switch on the (possibly translated) `ch`. Action handlers:
 | `215` (Alt 2 1 5) | +60 minutes debug | `C_0A33_1355(60)` with `AllowNPCTeleport` set, then `C_1E0F_464A()` |
 | default | Unknown | Prints `WhatMsg` |
 
-The two-phase "select target then act" commands (look/get/drop/move/
-use) re-enter `CON_getch` inside the handler — this is how mouse
-clicks / arrow-key cursor moves get bound to the original command.
+#### The shared targeting block (`seg_0A33.c:1231-1278`)
+
+Look / talk / get / drop / move — plus cast — are **one block**, not
+six separate handlers. The seven cases reach it through a deliberate C
+fall-through that splits them into two sub-groups:
+
+```c
+case CMD_82: case CMD_85: case CMD_86: case CMD_87:   // cast/get/drop/move
+    if(ch == CMD_82) { D_04B6 = D_04B5 = 0; }
+    if(IN_VEHICLE) { CON_printf("%s-",D_03A2[ch-CMD_81]); CON_printf(NotOnShipMsg); break; }
+    /*break;*/                                          // ← intentional: no break, fall through
+case CMD_83: case CMD_84: case CMD_88:                 // talk/look/use
+    MouseMode = 1;
+    D_04C2 = ch;                                        // the verb being targeted
+    CON_printf("%s-", D_03A2[ch - CMD_81]);             // "Look-", "Talk-", … (label table at :1006)
+    if(ch == CMD_82) C_1944_4C2F();                     // cast: its own spell-select + aim
+    else {
+        di = CON_getch();                               // second getch = run the target cursor
+        if(di == CMD_8E) switch(D_04C2) {               // CMD_8E = "selection locked"
+            case CMD_84: C_27A1_0C67(); break;          // look
+            case CMD_86: C_27A1_14DA(); break;          // drop
+            case CMD_85: C_27A1_18F5(); break;          // get
+            case CMD_87: C_27A1_1E8B(); break;          // move
+            case CMD_88: C_27A1_6179(); break;          // use
+            case CMD_83: TALK_talkTo(Active, Selection.obj, 1); MUS_09A8(); break;  // talk
+        } else CON_printf(WhatMsg);                     // "What?" on cancel
+    }
+```
+
+Three consequences:
+
+1. **Vehicle gate (the fall-through split).** `cast/get/drop/move`
+   (`CMD_82/85/86/87`) hit the `IN_VEHICLE` check and bail with "not
+   on ship"; `talk/look/use` (`CMD_83/84/88`) sit *below* it, so they
+   work from a boat. The `/*break;*/` comment at line 1244 marks the
+   omitted break that makes the first group fall into the block.
+2. **Cast is in the family but splits at dispatch.** It shares the
+   Phase-1 setup + this block's preamble, but `if(ch==CMD_82)
+   C_1944_4C2F()` runs its own spell-select + aim flow — it does NOT
+   use the `CMD_8E` / `Selection.obj` single-pick path.
+3. **Talk is one switch-case.** It differs from the `C_27A1_*` verb
+   handlers only by calling `TALK_talkTo(Active, Selection.obj, 1)`
+   instead of an object handler. Everything before the inner switch —
+   selector setup, the second `getch`, the `Selection` fill — is shared
+   infrastructure. (Walk `CMD_80` is NOT in this family: arrow keys
+   translate to `CMD_80`+`AdvanceDir` in the poller and dispatch to a
+   bare `C_1E0F_1B0E` with no targeting.)
+
+#### The `CMD_8E` / `Selection` hand-off contract
+
+The second `CON_getch` returns `CMD_8E` once a target is locked, with
+the global `Selection` struct filled (`u6.h:522`: `struct { int x, y,
+obj; } Selection`). Both input routes produce `CMD_8E` identically:
+
+- **Mouse click in the map** (`seg_0C9C.c:820`): `mouse_cmd = CMD_8E;
+  mkMouseSelection();`
+- **Keyboard Enter in SelectMode** (`seg_0C9C.c:1208`): `ch = CMD_8E;
+  … mkMouseSelection();`
+
+`mkMouseSelection` (`seg_0C9C.c:590`) sets `Selection.x/y` from the
+cursor and, for a cell holding an object/tile, `Selection.obj =
+C_2337_08F1(Party[Active], x, y)` (`seg_0C9C.c:598`) — the three-tier
+cell-pick (NPC > object > ignore-tile) decoded in
+[`research_object_interaction.md`](research_object_interaction.md)
+§"Cell-pick". `Selection` is thus the hand-off contract between the
+targeting layer and every verb handler; a verb fires only when the
+second `getch` came back `CMD_8E`, else prints "What?".
 
 ### End-of-iteration epilogue (`seg_0A33.c:1389-1403`)
 
@@ -400,9 +464,12 @@ resource.
    (`seg_1E0F.c:1733`), which switches on `NPCMode` to route each
    NPC's turn (combat handlers, wander, schedule movement, path
    following, etc.).
-4. **`C_1944_4C2F()` (Cast)** and the `C_27A1_*` action handlers
-   (look/get/drop/move/use) — six sibling functions. Each is a
-   separate `seg_27A1` decoding effort.
+4. **`C_1944_4C2F()` (Cast)** — the one verb in the shared targeting
+   block whose body is undecoded (its own spell-select + aim flow,
+   `seg_1944`). The `C_27A1_*` handlers (look/get/drop/move/use) are
+   decoded in
+   [`research_object_interaction.md`](research_object_interaction.md);
+   cast is deferred until magic matters.
 5. ~~**`TALK_talkTo(Active, Selection.obj, 1)`**~~ — **RESOLVED** in
    [`research_conversation_vm.md`](research_conversation_vm.md).
    Entry point to the conversation VM (`seg_16E1` → `seg_1703`).
@@ -419,6 +486,12 @@ resource.
   game-loop epilogue and ambient-light step.
 - [`research_animation.md`](research_animation.md) — the three
   animation channels driven by `CON_prompt`'s idle tick.
+- [`research_object_interaction.md`](research_object_interaction.md) —
+  the `C_27A1_*` verb handlers the shared targeting block dispatches
+  to; the three-tier cell-pick (`C_2337_08F1`) that fills `Selection`.
+- [`research_conversation_vm.md`](research_conversation_vm.md) —
+  `TALK_talkTo` (`CMD_83` talk case) is the entry into the
+  conversation VM.
 - [`../CLAUDE.md`](../CLAUDE.md) §"Modern-browser UX as architectural
   anchor" — why the rebuild's render-cadence doesn't follow source's
   on-demand pattern.

@@ -56,10 +56,14 @@ previous catch-up on reschedule), **settle into the slot's arrival worktype + fa
 (`__AtDestination`, I-9g), and **align to the current-hour slot at load** (first-tick
 alignment, I-9h). **I-9i (dev-HUD path overlay) was DROPPED** (fancy-not-must; live
 preview-eval of `window.__U6`/the `Paths` resource already covers path inspection).
-Next = the **post-I-9 deviation audit** (move-point economy, clock tuning, idle-heartbeat
+Next = **I-10** (object-action dispatch — scoped 2026-06-03, see `docs/progress.md
+§"I-10 scope"`: a paradigm-agnostic command dispatcher + a new gameplay message
+channel + LOOK/GET/DROP/USE-door; verb-first now, target-first later). The
+**post-I-9 deviation audit** (move-point economy, clock tuning, idle-heartbeat
 keep-vs-revert fork, I-9f removal-candidate — the central fork + the NPC-blocking research
 are in `docs/progress.md §"Post-I-9 — deviation audit"` + `docs/research_npc_ai.md
-§"Blocking + collision resolution"`) then **I-10** (object-action dispatch). The ledger
+§"Blocking + collision resolution"`) is **deferred to after I-10** (Zane 2026-06-03).
+The ledger
 + full I-9 scope (sub-step SHAs,
 decisions, deviations, remaining work) are in `docs/progress.md §"I-9 scope"`;
 the source-derived findings + kept deviations are in `docs/research_npc_ai.md
