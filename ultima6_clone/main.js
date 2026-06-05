@@ -37,6 +37,7 @@ import { installMoveFollowers, settleParty } from './systems/move_followers.js';
 import { loadActors, ensureRegionsInView, makeStreamingSystem, inventoryOf } from './world_loader.js';
 import { installDevHud } from './view/dev_hud.js';
 import { installDevProbe } from './view/dev_probe.js';
+import { installNpcInspect } from './view/dev_npc_inspect.js';
 import { UIStack } from './view/ui_stack.js';
 import { openInspector } from './view/inspector.js';
 import { openInventoryWindow } from './view/inventory_picker.js';
@@ -357,6 +358,11 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
     objlist, schedules,
     isVerbArmed: () => cmd?.isPending() ?? false,
   });
+
+  // Read-only NPC inspection helpers on window.__U6 (inspectNpc / scanDungeonSchedules /
+  // teleportSuppressed) — console/preview-eval tooling for schedules + the dungeon-safety
+  // and teleport-guard checks. See view/dev_npc_inspect.js.
+  installNpcInspect(world);
 
   // The inspector hotkey (I-7c) and the I-10b command dispatch share ONE cell
   // pick — the source-faithful 3-tier mkMouseSelection -> C_2337_08F1 rule now

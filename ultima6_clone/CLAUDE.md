@@ -111,9 +111,29 @@ world-data, schedule, passability, avatar move, move-followers, humanoid-anim,
 pathfinding, npc_path, npc_tick, ai_modes, **cell_pick, command_dispatch,
 use_handlers, use_drawbridge** (I-10), …), `resources/` also has **Commands**
 (dispatch registries) + **MessageLog**; `components/`, `view/` (WebGL renderer +
-dev HUD/inspector + **message_channel**), `world_loader.js` (world-object
-load + runtime add/delete/find primitives), `u6db.js` (BYO-data store),
+dev HUD/inspector + **message_channel** + **dev_npc_inspect**), `world_loader.js`
+(world-object load + runtime add/delete/find primitives), `u6db.js` (BYO-data store),
 `index.html`/`main.js` (app shell), `tests/`.
+
+**Dev console helpers** (`view/dev_npc_inspect.js`, on `window.__U6` — reuse, don't
+re-invent). READ-ONLY (never touch the sim): `inspectNpc(npcId)` (identity + position incl z
++ per-slot-z schedule + `dungeonSafe`), `scanDungeonSchedules()` (every loaded NPC on /
+scheduled to a dungeon level), `teleportSuppressed(npcId)` (would the I-9h visibility guard
+suppress its teleport at the live view center — the safe form of the spotlight check).
+CAMERA-only (write the view, not the sim): `lookAtNpc(npcId)` (pan once to center it),
+`followNpc(npcId)` (camera tracks it every frame, overriding manual pan), `stopFollow()`.
+**Dungeon caveat:** dungeon levels (z≠0) aren't loaded, so a dungeon-resident or
+dungeon-scheduled NPC won't render/tick (and would teleport onto an unloaded level if
+scheduled there); the camera helpers warn when the target is on z≠0. `scanDungeonSchedules()`
+currently reports **20** such NPCs (gargoyles/fighters/a horse on z=2..5) — check it before
+picking an NPC to drive in any experiment.
+
+**Invoking them** (Zane + Claude both use these): they're global on `window.__U6`, so call them
+straight from the browser **DevTools console** (F12 → Console) on the running game —
+`__U6.inspectNpc(100)`, `__U6.followNpc(100)` / `__U6.stopFollow()`, etc. (autocomplete after
+`__U6.`; `console.table(__U6.scanDungeonSchedules().rows)` for the scan as a table). Also
+reachable via preview-eval. A **boot-time `console.info` hint** listing the helpers is
+**deferred** — add on request (Zane will say when); keep the console quiet until then.
 
 **Key I-9 kept deviations from source** (so the next-session you doesn't
 "correct" them): per-NPC window (not player-centered); edge-seek accepts any

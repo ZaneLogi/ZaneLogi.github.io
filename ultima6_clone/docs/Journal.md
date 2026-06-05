@@ -28,6 +28,29 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-05 — Persistent NPC inspection helpers (dev tooling)
+
+While validating the render-to-fit teleport guard I'd been driving the live game with ad-hoc
+preview-eval (inspect an NPC's schedule, classify teleport vs snap, check dungeon levels).
+Zane: "the schedule inspection tool is good — if it's persistent you don't re-invent it."
+
+- **New `view/dev_npc_inspect.js`** (`installNpcInspect`, wired in `main.js` like
+  installDevHud/Probe) attaches helpers to `window.__U6`. READ-ONLY:
+  `inspectNpc(npcId)`, `scanDungeonSchedules()`, `teleportSuppressed(npcId)`. CAMERA-only
+  (Zane add-ons, write the view not the sim): `lookAtNpc(npcId)` (pan once),
+  `followNpc(npcId)` (track every frame via rAF) / `stopFollow()` — verified the follow loop
+  re-centers after a nudge and stop releases it.
+- **Dungeon caveat, quantified:** `scanDungeonSchedules()` reports **20** loaded NPCs that are
+  on a dungeon level now or scheduled to one (gargoyles z=5, a fighter z=4, a horse z=2, …).
+  Dungeon levels aren't loaded, so they don't render/tick and would teleport onto an unloaded
+  level — exactly Zane's caveat. The tool surfaces them before any experiment picks one.
+- `teleportSuppressed` models ONLY the visibility guard, not the unreachable-fallback snap
+  (which ignores the guard by design). Verified live: helpers present after boot, no console
+  errors, `inspectNpc(100)` = villager (406,604,z0, dungeonSafe).
+- **Next**: I-11 (talk), or the deferred post-I-9 deviation audit.
+
+---
+
 ## 2026-06-05 — Render-to-fit viewport (the shell fills the window)
 
 A layout pass before starting I-11, prompted by Zane: the fixed ~1312×800 shell overflowed
