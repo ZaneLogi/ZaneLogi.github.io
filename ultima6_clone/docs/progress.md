@@ -5,7 +5,18 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status:** **I-9 (NPC pathfinding) COMPLETE — sub-steps a–h landed
+**Status: I-11 (talk trigger) COMPLETE — sub-steps a–c landed + verified live
+(2026-06-05).** `T` → pick an NPC within reach 7 → the talkable filter + can-talk gate →
+a source-faithful result (a name-echo placeholder, or a canned refusal). **a** = the
+`Alignment` component carried from the objlist `NPCStatus` byte (which the clone otherwise
+drops); **b** = the `T` verb front-end (`pickAtCell` → Actor / shrine / statue filter →
+self-check → the `openConversation` seam, reach 7); **c** = the `canTalk` gate (asleep via
+`AIMode.AI_SLEEP`, evil/chaotic via the carried `Alignment`). The slice **stops before
+`LoadConversation`** — the dialog window is I-12, the conversation VM I-13. Kept as 3
+separate commits (per I-9). **Next: I-12 (dialog window)** swaps `openConversation`'s body
+for the second UI surface; the talk handler is final. Full detail in §"I-11 scope".
+
+**Prior — I-9 (NPC pathfinding) COMPLETE — sub-steps a–h landed
 (2026-06-01/02); i dropped.** NPCs now WALK to their schedule slots when near the
 player and **TELEPORT to them when far** (off-screen), then **settle into their
 arrival worktype** (stand/guard facing the right way): a per-NPC bucket-Dijkstra over
@@ -55,11 +66,12 @@ suppressed while a verb is armed) + the **windowed quality search** refinement
 (`findObjectsByTypeQuality` `near` box, matching source's active-area bound). **Commit
 state:** a–j are all on `origin/ultima6_clone` — a–h at `c8573e9`, i at `2903a8f`, j at
 `260e61e` (squashed from 5 save-points). See the "I-10x — landed" sections; the locked plan
-+ USE-case discipline in "I-10 scope". **Next:** the **post-I-9 deviation audit**
-(deferred to after I-10) or **I-11 (talk)** — DROP's `pendingDropItem` two-stage seam is
-reusable for TALK.
++ USE-case discipline in "I-10 scope". **I-11 (talk) is now landed** (2026-06-05, a–c —
+see the top status + §"I-11 scope"); TALK turned out single-stage + reach-7 (the source
+read corrected the earlier "two-stage seam" note). The **post-I-9 deviation audit** remains
+deferred.
 
-**Render-to-fit viewport (UI refinement, 2026-06-05 — local, uncommitted).** The game
+**Render-to-fit viewport (UI refinement, 2026-06-05 — committed `757cd86`).** The game
 shell now FILLS the browser window instead of the old fixed ~1312×800 frame: the canvas
 drawing buffer tracks its CSS cell size, so a bigger window shows more of Britain and a
 smaller one fewer tiles, always 1:1 crisp — no more page panning to reach the panels. This
@@ -94,7 +106,7 @@ later).
 | **I-8** | **avatar movement + party follow** — 8-dir avatar move (camera follow + facing-on-step + idle settle) + companion conga via `MoveFollowers` formation-greedy-step (avatar walks through followers; party settles when idle). Sub-steps a–e. Shares the single-step move kernel (`canStandAt` + `insertAtHead` + facing) with I-9; does **not** use the path builder. | **done** |
 | I-9 | **NPC pathfinding** — `C_1E0F_2D37` bucket-Dijkstra + `AI_FINDPATH`→`AI_ONPATH`→`__DoOnPath`→`__AtDestination`; wires into the I-5 schedule trigger so NPCs **walk** to slots (near the player) or **teleport** to them (far/off-screen, `C_1E0F_291C`), then settle the arrival worktype (+ edge-seek for far slots, humanoid door pass-through, teleport-to-previous on reschedule, first-tick alignment at load). Makes Britain feel live. | **done** (a–h; i dropped) |
 | I-10 | object-action dispatch core — `Map<verb,handler>` + `Map<ObjectType,useHandler>` registries; verb-first front-end + message channel + fixed UI shell; USE door/lever/switch/crank, LOOK + GET/DROP, MOVE push + give, the inventory window | **complete** (a–j — USE/LOOK/GET/DROP/MOVE-push/give + inventory window; further USE cases demand-driven) |
-| I-11 | talk trigger — adds TALK as a case in the I-10 dispatch + adjacency-pick logic | planned |
+| I-11 | talk trigger — adds TALK as a case in the I-10 dispatch (reach-7 target-pick + the can-talk gate; single-stage, stops before the conversation VM) | **done** (a–c) |
 | I-12 | dialog window — second surface on the I-7 substrate; opens when TALK fires | planned |
 | I-13 | conversation VM (adapt legacy `script.js`) — β reached: walk + talk works end-to-end. Give/take opcodes work because I-6 inventory data exists. | planned |
 | I-14 | status panel — third surface on the substrate; replaces the dev HUD's clock readout | planned |
@@ -2294,3 +2306,164 @@ green).
 two-column fluid grid handles narrow desktop widths on its own — map column shrinks, panel
 holds, no panning; a first attempt at a `max-width:900px` stacked media query starved the
 map and was dropped); the modern skin pass (still deferred from I-10a).
+
+---
+
+## Talk arc (I-11 → I-13)
+
+The three steps that complete the **β path** ("walk + talk works
+end-to-end"). They split the single act of talking to an NPC into a dispatch
+trigger, a UI surface, and the bytecode VM that drives it:
+
+- **I-11 — talk trigger.** TALK as a verb on the I-10 dispatch core: pick an
+  NPC within reach 7, run the can-talk gate, emit the result. No conversation
+  content yet — the slice ends exactly where `TalkDriver` would load the
+  script.
+- **I-12 — dialog window.** The second UI surface on the I-7 substrate; opens
+  when the talk trigger fires.
+- **I-13 — conversation VM.** Adapts the legacy `script.js` bytecode
+  interpreter; β reached — give/take opcodes work on the I-6 inventory data.
+
+**Source split:** TALK is a one-line case in the shared targeting block
+(`seg_0A33.c:1264`) → `TALK_talkTo` (`seg_16E1.c:60`) → `TalkDriver`
+(`seg_1703.c:1016`) → the conversation VM (`seg_1703`/`seg_16E1`). I-11 ports
+the front-end through the can-talk gate; I-13 ports the VM. Research:
+[research_object_interaction.md](research_object_interaction.md) §"Talk"
+(front-end + reach + gate) + [research_conversation_vm.md](research_conversation_vm.md)
+(the VM).
+
+## I-11 scope — talk trigger
+
+**Goal:** wire **TALK** as one more verb on the I-10 dispatch core so the
+player can `T` → point at an NPC (within reach 7) → get a source-faithful
+result: the talkable-filter + can-talk-gate outcome (a name echo / a placeholder
+where the dialog window will open, or one of the canned refusals). The slice
+ports `TALK_talkTo` (`seg_16E1.c:60`) + `TalkDriver`'s precondition block
+(`seg_1703.c:1022-1079`) and **stops before `LoadConversation`** — the actual
+conversation is I-12 (window) + I-13 (VM). Self-evident payoff: press `T` near
+an NPC and the right line appears in the message channel; press it on a wall,
+on yourself, or out of range and the matching refusal appears.
+
+**Source findings (decoded 2026-06-05, full detail in
+[research_object_interaction.md](research_object_interaction.md) §"Talk"):**
+
+- **Command path.** `T` (`seg_0A33.c:1061`) → `CMD_83`, `SelectMode = 1`,
+  `SelectRange = 7` → the shared targeting block dispatches
+  `TALK_talkTo(Active, Selection.obj, 1)` (`seg_0A33.c:1264`). TALK is the
+  only verb whose handler isn't in `seg_27a1.c`.
+- **Reach = 7, not adjacency-1.** `SelectRange = 7` (the DROP/ATTACK reach);
+  `TALK_talkTo`/`TalkDriver` add no `CLOSE_ENOUGH` check, so 7 is the effective
+  reach. Corrects the earlier "two-stage seam / adjacency-pick" framing — TALK
+  is **single-stage** (one pick → fire) and reach-7; it reuses DROP's
+  `VERB_REACH = 7` gate, nothing more.
+- **Talkable filter** (`seg_16E1.c:60-88`): NPC slot (`0 ≤ obj < 0x100`) or
+  shrine `OBJ_189` / statue `OBJ_18D-18F`, else `"nothing!"`; mounts
+  (`OBJ_1AE/1AF`) head-resolve first; the `aFlag=1` path prints the target-name
+  echo (met → `C_1703_0116`, first-time → `GetObjectString`).
+- **Can-talk gate** (`TalkDriver` early-exit, `seg_1703.c:1022-1079`): the
+  8-row precondition table (Not-on-screen / Not-in-solo-mode / seance-moan /
+  No-response[dead/asleep/paralyzed/vigilante/fear/retreat/arrest/evil/chaotic]
+  / Armageddon / Talking-to-yourself / Funny-no-response) — tabulated in the
+  research doc. I-11 ports the arms with a live clone signal (asleep, evil/
+  chaotic, talking-to-yourself); the rest defer with their subsystem.
+- **`NPCStatus` is parsed-then-dropped — alignment carried for the gate.** The
+  gate reads `IsAsleep`/`GetAlignment`/`IsDead`, all in the per-NPC `NPCStatus`
+  byte (`u6.h:113-155`) — a *different* array from the `Status` (ObjStatus) the
+  clone loads. The clone decodes the byte (`objlist.js:42`) but `world_loader.js`
+  drops it. Two bits have live clone signals: **asleep** is exactly
+  `AIMode.AI_SLEEP` (source sets `SetAsleep` + `NPCMode=AI_SLEEP` in lock-step at
+  `__AtDestination`, `seg_1E0F.c:1014-1033`), and **alignment** (`& 0x60`) is
+  carried into a new `Alignment` component at load — the TALK gate is its
+  first/only in-scope reader, so it's carried now, not dropped. Full
+  decomposition (all 7 bits → owning subsystem + consumers + the save-roundtrip
+  caveat) in [research_save_load.md](research_save_load.md) §"`NPCStatus`
+  decomposition". `dead`/`paralyzed`/`poisoned` stay deferred (no
+  death/combat/magic model to set them).
+
+**Reuse-from-existing (no reinvention):**
+
+- `pickAtCell` (command_dispatch / main.js) → the 3-tier cell-pick (NPCs are
+  tier 1) — same resolver LOOK/GET/USE use.
+- DROP's `VERB_REACH = 7` reach gate → TALK's reach (DROP is the existing
+  reach-7 precedent; "Out of range!" beyond 7).
+- `displayName` (view/inspector.js — the same name resolver GET/DROP/MOVE
+  use) → the target-name echo.
+- The message channel (I-10a) → all TALK output (echo + refusals).
+- `Actor` component → the talkable test; active-member ref (`avatarRef`) →
+  the "Talking to yourself?" self-check.
+- `AIMode.mode` (`components.js`, the worktype an NPC settles into at
+  `atDestination`) → the asleep gate arm (`=== AI_SLEEP`).
+- **new `Alignment` component** (loaded `NPCStatus & 0x60` in `loadActors`)
+  → the evil/chaotic gate arm. Load-only until its mutators land.
+
+**Deferred:**
+
+- **To I-13** (needs the script data / VM): `LoadConversation` of
+  `converse.a/.b`, the `"Funny, no response."` no-script refusal, the portrait
+  + `"You see "` description (both read from the script), and the whole
+  ask/answer loop. I-11 emits a placeholder where I-12's window will open.
+- **Facing the target** (`MkDirection` → `C_1E0F_0664`) — deferred, as in the
+  other I-10 handlers (the dispatch defers facing globally for now).
+- **Gate arms with no live clone signal** (one-line each, later): dead,
+  paralyzed, poisoned, the combat-mode arms (`AI_VIGILANTE/FEAR/RETREAT/ARREST`
+  — no setter yet), seance/`IsArmageddon`, solo-mode (`D_2CC3`), and
+  party-member-off-screen — tracked per-bit in the `NPCStatus` decomposition
+  ([research_save_load.md](research_save_load.md)) so they aren't forgotten
+  (same incremental pattern as GET's theft/karma and USE's case table).
+
+**Sub-steps** (locked 2026-06-05; each ≈ one save-point, browser-verified;
+squashed into one `impl I-11`):
+
+- **I-11a — `Alignment` component, carried from `NPCStatus`.** New
+  `Alignment { value: Uint8Array }` in `components.js`; `loadActors`
+  (`world_loader.js`) sets `value = a.npcStatus & 0x60` per NPC. Load-only
+  (no mutators yet) — the first concrete repair of the parsed-then-dropped
+  `NPCStatus` byte. *Verify:* preview-eval an NPC's `Alignment` matches its
+  objlist `npcStatus & 0x60`.
+- **I-11b — the `talk` verb front-end.** `t:'talk'` → `VERB_KEYS`, `talk:7`
+  → `VERB_REACH`; register `talk`: `pickAtCell` (3-tier) → talkable filter
+  (`Actor` ∨ shrine `OBJ_189` / statue `OBJ_18D-18F`, else "nothing!") →
+  self → "Talking to yourself?" → `canTalk(pick)` → on pass
+  `openConversation(pick)`. *Verify:* `T` on an NPC → name echo; wall/empty
+  → "nothing!"; self → self-line; >7 away → "Out of range!".
+- **I-11c — the `canTalk` gate + `openConversation` seam.** `canTalk(npc)` →
+  asleep (`AIMode.AI_SLEEP` → "asleep" line) + evil/chaotic (`Alignment &
+  0x60` → "No response"); the deferred arms as commented one-line slots
+  citing the `NPCStatus` decomposition. `openConversation(target)` → the
+  meaningful placeholder per type (NPC name "has nothing to say yet" /
+  shrine / statue) — the I-12/I-13 seam, the only thing I-12 + I-13 reopen.
+  *Verify:* a sleeping NPC at night → "asleep"; an evil-aligned NPC → "No
+  response"; a normal NPC → placeholder; a shrine → shrine line.
+
+**Kept deviations (record so a later session doesn't "correct" them):**
+
+- **Reach-7 is a post-confirm refusal, not a cursor cap.** Source hard-caps
+  the targeting cursor at 7 (`seg_0C9C.c:1237` — you can't point past it);
+  the clone's free mouse cursor confirms then refuses ("Out of range!").
+  Same reach, friendlier UX.
+- **asleep = `AIMode.AI_SLEEP`**, not `NPCStatus & ASLEEP` (the clone drops
+  that byte; the worktype is the lock-step proxy — see findings).
+- **`Alignment` is load-only** until its mutators (party join/leave in I-13,
+  charm/combat later) land — faithful while nothing yet changes alignment.
+- **Name echo = `displayName`** (tile-look) until I-13 loads `converse.*`'s
+  name section (source's `C_1703_0116`).
+
+**Landed (2026-06-05, a→b→c as separate commits — verified live on real Britain data):**
+**a** = `Alignment` carried (188 NPCs, `Alignment === npcStatus & 0x60`, 0 mismatches; 184
+NEUTRAL / 4 GOOD in the loaded set, no evil/chaotic). **b** = `T` arms (reach 7) →
+Dupre/jester "<name> has nothing to say yet."; self → "Talking to yourself?"; empty →
+"There is no one to talk to."; cheb 8 → "Out of range!". **c** = the gate, exercised by
+forcing the state (no NPC is naturally asleep/evil in the loaded overworld now):
+`AIMode.AI_SLEEP` → "<name> is fast asleep."; `Alignment` EVIL/CHAOTIC → "No response.";
+neutral + awake → the placeholder. No console errors. The talk handler is **final** —
+**I-12 (dialog window) swaps `openConversation`'s body next**; I-13 wires it to the VM.
+
+**Boot-time gotcha (recorded):** a new component must be added to `main.js`'s
+`registerComponent(...)` chain, or `world.add` throws "component not registered" and boot
+halts silently mid-`loadActors` (the page log stops at "Decoding…", no console error). Cost
+me a debug loop on I-11a; check the registration chain when adding any component.
+
+**Pre-impl research:** done — [research_object_interaction.md](research_object_interaction.md)
+§"Talk" + [research_save_load.md](research_save_load.md) §"`NPCStatus`
+decomposition" + the standing
+[research_conversation_vm.md](research_conversation_vm.md).

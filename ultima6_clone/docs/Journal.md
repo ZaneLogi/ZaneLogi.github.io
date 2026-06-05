@@ -28,6 +28,60 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-05 — I-11 implemented (talk trigger)
+
+Implemented the locked I-11 plan in one auto-mode pass (a = the `Alignment` carry, b = the
+`T` verb front-end, c = the `canTalk` gate), browser-verified each on real Britain data, and
+committed a/b/c as separate commits (per I-9; not pushed — Zane reviews first). The
+per-sub-step breakdown + the verification matrix live in `progress.md §"I-11 scope"` — this
+is the discovery note.
+
+- **Surprise (cost a debug loop):** a new component not added to `main.js`'s
+  `registerComponent(…)` chain makes `world.add` throw "component not registered" deep in
+  `loadActors`, and boot halts **silently** — the page log freezes at "Decoding…" with no
+  console error. The 11 already-set `__U6` keys pinned the stall to the exact `loadActors`
+  line; the fix is one `registerComponent(Alignment)`. Recorded in progress.md + CLAUDE.md.
+- **Confirmed against source while porting:** `IsAsleep` and the schedule worktype really are
+  set in lock-step at `__AtDestination` (`seg_1E0F.c:1014-1033`), so the `AIMode.AI_SLEEP`
+  proxy is exact, not a shortcut.
+- **Next**: I-12 (dialog window) — swap `openConversation`'s body for the second UI surface.
+
+---
+
+## 2026-06-05 — TALK branch + the NPCStatus drop (pre-I-11)
+
+Reading the TALK verb end-to-end before implementing I-11, then a detour Zane forced: the
+NPC status byte the clone parses but throws away.
+
+- **Read**: the full TALK path — `T`→`CMD_83` cursor setup (`seg_0A33.c:1061`), the shared
+  targeting block dispatch (`seg_0A33.c:1245-1267`), `TALK_talkTo` (`seg_16E1.c:60-88`),
+  `TalkDriver`'s precondition gate (`seg_1703.c:1022-1079`), the cell-pick `C_2337_08F1`
+  (`seg_2337.c:365`), the `SelectRange` cursor cap (`seg_0C9C.c:1229-1247`), and the
+  `NPCStatus` macros + writers/readers (`u6.h:113-155`, `seg_1E0F.c:1014-1033`, `seg_2337.c`,
+  `seg_1944.c`).
+- **Found**: (1) TALK's reach is **7** (`SelectRange=7`), the DROP/ATTACK reach — NOT
+  adjacency-1; `TalkDriver` adds no further range check. So TALK is single-stage + reach-7,
+  correcting the earlier "two-stage seam reusable for TALK" plan note. (2) `NPCStatus` is a
+  **distinct array from `ObjStatus`** — 7 packed concerns (PLRCONTROL / alignment / DEAD /
+  ASLEEP / POISONED / PARALYZED / PROTECTED). The clone *decodes* it (`objlist.js:42`) but
+  `world_loader.js` **drops it**. Two bits are already re-encoded (PLRCONTROL→PartyMember,
+  schedule-ASLEEP→`AIMode.AI_SLEEP` — source sets `SetAsleep` + `NPCMode=AI_SLEEP` in
+  lock-step at `__AtDestination`, so the worktype is an exact proxy). (3) **alignment** is the
+  only genuinely-dropped *static* shipped data; its ~40 readers are ~90% combat — the TALK
+  evil/chaotic gate is 1/38 and degenerate (you don't chat with trolls). So alignment is a
+  combat concept, deferred-with-combat — EXCEPT the talk gate is an in-scope reader now → carry
+  it now (cheap, data already parsed) to avoid a forgotten deferral.
+- **Docs**: `research_object_interaction.md` §"Talk" (new); `research_save_load.md` §"NPCStatus
+  decomposition" (new — 7-bit table → owning subsystem + consumers + save-roundtrip caveat);
+  `progress.md` Talk-arc header + locked I-11 sub-steps (a Alignment carry / b talk front-end /
+  c canTalk gate + openConversation seam) + kept deviations.
+- **Open**: the deferred gate arms (dead / paralyzed / poisoned / combat-mode) ride their
+  subsystems, tracked per-bit in the NPCStatus decomposition; `Alignment` is load-only until
+  its mutators (party join/leave I-13, charm/combat) land.
+- **Next**: implement I-11 a→b→c (auto mode), one commit per sub-step.
+
+---
+
 ## 2026-06-05 — Persistent NPC inspection helpers (dev tooling)
 
 While validating the render-to-fit teleport guard I'd been driving the live game with ad-hoc

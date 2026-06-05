@@ -25,7 +25,7 @@ import { makeTileAnimationSystem } from './systems/tile_animation_system.js';
 import { makePaletteCycleSystem } from './systems/palette_cycle_system.js';
 import { makeWorldRenderSystem } from './systems/world_render_system.js';
 import { makeWorldClockSystem } from './systems/world_clock_system.js';
-import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember, AIMode, Destination } from './components/components.js';
+import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember, AIMode, Destination, Alignment } from './components/components.js';
 import { Party } from './resources/party.js';
 import { Paths } from './resources/paths.js';
 import { Schedules } from './resources/schedules.js';
@@ -156,7 +156,8 @@ async function load() {
        .registerComponent(Schedule)
        .registerComponent(Container).registerComponent(ContainedIn)
        .registerComponent(PartyMember)
-       .registerComponent(AIMode).registerComponent(Destination);   // I-9: NPC pathfinding state
+       .registerComponent(AIMode).registerComponent(Destination)    // I-9: NPC pathfinding state
+       .registerComponent(Alignment);                               // I-11a: NPCStatus alignment (carried from objlist)
   world.setResource(new Party());                 // I-8b: singleton party state (activeIndex, mode)
   world.setResource(new Paths());                 // I-9c: per-NPC pathfinding state (handle -> {dirs, counter, ...})
   world.setResource(new MessageLog());            // I-10a: gameplay message channel (CON_printf analog)

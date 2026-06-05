@@ -1,4 +1,4 @@
-# Research: U6 player↔object interaction (Look / Get / Drop / Move / Use)
+# Research: U6 player↔object interaction (Look / Get / Drop / Move / Use / Talk)
 
 **Status:** decoded 2026-05-28. The five world-interaction commands
 in `seg_27a1.c` (the "game actions / object-type dispatch" module,
@@ -8,6 +8,13 @@ in `seg_27a1.c` (the "game actions / object-type dispatch" module,
 **target → validate → apply → recompose** pattern and the Use
 command's object-type dispatch table, not every per-object special
 case (there are ~40 in the Use switch alone).
+
+**Talk added 2026-06-05** (pre-I-11): the TALK verb shares this same
+targeting front-end but its handler lives in the conversation module —
+`TALK_talkTo` (`seg_16E1.c:60`) → `TalkDriver` (`seg_1703.c:1016`), reached
+from the shared targeting block (`seg_0A33.c:1264`). The command-path,
+reach, talkable-filter, and can-talk-gate are decoded in §"Talk" below; the
+conversation VM it leads into is [`research_conversation_vm.md`](research_conversation_vm.md).
 
 Citations use relative paths within the u6-decompiled clone (e.g.,
 `seg_27a1.c:472`). The clone's absolute path is per-PC; see
@@ -22,6 +29,7 @@ Phase 1 to a `CMD_*` opcode and sets up the **targeting cursor**
 
 | Key | CMD_* | Handler | Range |
 |-----|-------|---------|-------|
+| `T` talk | CMD_83 | `TALK_talkTo` → `TalkDriver` | 7 |
 | `L` look | CMD_84 | `C_27A1_0C67` | 1 (search) / viewport |
 | `G` get | CMD_85 | `C_27A1_18F5` | adjacent (1) |
 | `D` drop | CMD_86 | `C_27A1_14DA` | thrown arc |
@@ -588,6 +596,117 @@ The control is adjacent to the avatar on USE, so its quality-matched
 target is always in-window — the castle lever + crank stay correct.
 This is **more** faithful, not a deviation: it excludes only matches
 source could never make.
+
+## Talk — `TALK_talkTo` (`seg_16E1.c:60`) → `TalkDriver` (`seg_1703.c:1016`)
+
+TALK uses the **same targeting front-end** as the five `seg_27a1.c` verbs
+but its handler lives in the conversation module. Pressing `T`
+(`seg_0A33.c:1061`) sets `ch = CMD_83`, `SelectMode = 1`, `SelectRange = 7`;
+the shared targeting block (§"How a command reaches a handler") dispatches
+the made selection to `TALK_talkTo(Active, Selection.obj, 1)`
+(`seg_0A33.c:1264`). So TALK is the **only verb whose handler isn't in
+`seg_27a1.c`** — it's one case in the same switch, calling into
+`seg_16E1`/`seg_1703` instead of an object handler.
+
+### Reach — 7, not adjacency-1
+
+TALK's `SelectRange = 7` (`seg_0A33.c:1068`) is the **DROP/ATTACK reach**,
+not the USE/GET/MOVE adjacency-1. `TALK_talkTo` and `TalkDriver` add **no**
+further `CLOSE_ENOUGH` range check, so 7 is TALK's effective reach: you can
+hail an NPC up to 7 tiles away. (This pins down the I-11 ledger row's loose
+"adjacency-pick" shorthand — the pick is the shared 3-tier `C_2337_08F1`
+cell-pick, NPCs first, gated at **reach 7**, not at adjacency.)
+
+### Talkable filter — `TALK_talkTo` (`seg_16E1.c:60-88`)
+
+The wrapper decides whether the pick can be talked to at all:
+
+- Multi-tile mounts (`OBJ_1AE` creature-mount / `OBJ_1AF` horse) →
+  `COMBAT_getHead` resolves to the head slot first.
+- Talkable **iff** the target is an **NPC slot** (`0 ≤ objNum < 0x100`)
+  **or** a **shrine** (`OBJ_189`) / **statue** (`OBJ_18D`/`18E`/`18F`).
+  Anything else → `"nothing!\n"`.
+- `aFlag` (1 from the `T`-key path) prints the **target-name echo** before
+  the conversation opens: `"shrine"` / `"statue"` for those types, else the
+  NPC name — `C_1703_0116` if already met (`TalkFlags[npc] & 1`), else
+  `GetObjectString` (first meeting). The clone already has the name source
+  (`nameFor` / `getTileLook`, §"Display-name resolution").
+
+### Can-talk gate — `TalkDriver` early-exit (`seg_1703.c:1022-1079`)
+
+Once `TALK_talkTo` accepts the target, `TalkDriver` runs a precondition
+block **before** loading the script. Source order + message:
+
+| # | Condition | Message |
+|---|---|---|
+| 1 | party-member target off-screen (`IsPlrControl && !C_1703_0153`) | `"Not on screen."` |
+| 2 | not solo/default formation (`D_2CC3 ∉ {-1, 0}`) | `"Not in solo mode."` |
+| 3 | shrine/statue → conversation index = `GetQual` (a **redirect**, not a refusal) | — |
+| 4 | generic/dead target in seance (`==0 ‖ ≥0xE0`, `IsDead && SeanceFlag`) | `"You hear a deep moan."` |
+| 5 | dead-not-seance ‖ asleep ‖ paralyzed ‖ `AI_VIGILANTE/FEAR/RETREAT/ARREST` ‖ `EVIL`/`CHAOTIC` alignment | `"No response"` |
+| 6 | `IsArmageddon` | `"No response"` |
+| 7 | talker == addressee (`D_E796[1] == [0]`) | `"Talking to yourself?"` |
+| 8 | no script: `==0 ‖ (≥0xE0 & not Guard/Wisp/Gargoyle/`OBJ_16A`) ‖ !LoadConversation` | `"Funny, no response."` |
+
+After the gate it faces the target (`MkDirection` → `C_1E0F_0664`), reads
+the `$N` name, shows the portrait, prints `"You see "` + the `OP_DESC` body,
+and enters the ask/answer loop — all of which is the conversation VM. The
+full precondition semantics + the VM are in
+[`research_conversation_vm.md`](research_conversation_vm.md)
+§"Conversation-init pre-conditions". **I-11 stops at this gate**; the script
+load + VM are I-13.
+
+There is a second, **AI-driven** caller — `C_1E0F_3E08` →
+`TALK_talkTo(partyId, npc, 0)` (`seg_1E0F.c:1712`, an NPC worktype hailing
+the player; `aFlag = 0` so no name echo). Out of I-11 scope (player-
+initiated TALK only).
+
+### Clone correspondence — the `talk` verb-handler (I-11)
+
+`systems/command_dispatch.js` registers `talk` as a single-handler verb; all
+of it lands in I-11 *except* the conversation itself:
+
+- **Reach 7, single-stage** — reuse DROP's `VERB_REACH = 7` gate (not the
+  adjacency-1 `CLOSE_ENOUGH` path; beyond 7 → "Out of range!"). TALK picks
+  ONE target and fires — not a two-stage verb. (The earlier "reuse DROP's
+  `pendingDropItem` two-stage seam for TALK" note was loose: that seam is for
+  a future "use item X on target Y". TALK's only reuse from DROP is the
+  reach-7 gate.)
+- **Talkable filter** — `pickAtCell` (3-tier, NPCs first) accepts an `Actor`
+  **or** a shrine (`OBJ_189`) / statue (`OBJ_18D-18F`); anything else →
+  "nothing!". The active member itself → "Talking to yourself?". (Shrine /
+  statue are *recognized* now and routed to the placeholder; their real
+  conversation — `GetQual`-indexed generic scripts — is I-13.)
+- **`canTalk(npc)` gate** — the available arms of `TalkDriver`'s precondition
+  block, with two clone substitutions:
+  - **asleep** → `AIMode.mode === AI_SLEEP`, **not** source's `IsAsleep`
+    (`NPCStatus & ASLEEP`). The clone doesn't carry the `NPCStatus` byte (it's
+    parsed then dropped — [`research_save_load.md`](research_save_load.md)
+    §"`NPCStatus` decomposition"), but `__AtDestination` sets `NPCMode =
+    AI_SLEEP` and `SetAsleep` at the *same* arrival event (`seg_1E0F.c:
+    1014-1033` ↔ `npc_path.js:204`), so the worktype is an exact faithful
+    proxy for schedule-driven sleep → a meaningful "asleep" line.
+  - **evil/chaotic** → an **`Alignment` component carried from `NPCStatus &
+    0x60`** at load (load-only until its mutators land; see the decomposition
+    doc). The TALK gate is alignment's first/only in-scope reader, so the bit
+    is carried *now* rather than dropped — keeping this arm faithful instead
+    of a forgotten deferral → "No response".
+- **`openConversation(target)` seam** — on a passing gate the handler hands
+  the target to one function (the I-12/I-13 integration point), which at I-11
+  emits the meaningful placeholder (NPC name / "you approach the shrine").
+  I-12 swaps its body for the dialog window; I-13 drives it with the VM. The
+  talk handler is final at I-11.
+
+**Deferred to I-13** (needs the script/VM): `LoadConversation` of
+`converse.a/.b`, the `"Funny, no response."` no-script refusal, the portrait +
+`"You see "` description (both read from the script), and the ask/answer loop.
+**Deferred — facing** the target (`MkDirection` → `C_1E0F_0664`), consistent
+with the other handlers. **Deferred — gate arms with no live clone signal**
+(the `NPCStatus` transients + party/world flags): dead, paralyzed, poisoned,
+seance, `IsArmageddon`, solo-mode (`D_2CC3`), and the party-member-off-screen
+check — each a one-line arm when its subsystem lands, tracked per-bit in
+[`research_save_load.md`](research_save_load.md) §"`NPCStatus` decomposition"
+so they aren't forgotten.
 
 ## Supporting helpers (shared across the five commands)
 

@@ -150,6 +150,53 @@ status, the 6 RPG stats (STR/DEX/INT/HP/MAGIC/EXP/LEVEL), AI mode +
 combat mode + schedule index + leader + move points, talk flags,
 direction, name, and party membership.
 
+### `NPCStatus` (section 5) — decomposition by concern
+
+`NPCStatus[256]` packs **seven unrelated per-NPC concerns into one byte**
+(`u6.h:113-155`); source reads them through bit macros, never the raw
+array. Loaded/saved whole (`OSI_read/write(..., 0x100, NPCStatus)`,
+`seg_0C9C.c:301/376`); initialized at monster spawn from a class-default
+table (`seg_2E2D.c:139` `NPCStatus[o] = D_3522_0202[objClass]`). For the
+**named NPCs in the shipped `objlist`** the byte carries real per-NPC
+state — chiefly **alignment**.
+
+| bit | concern | source writers | consumers (~count) | clone mapping |
+|---|---|---|---|---|
+| `0x80` PLRCONTROL | party membership | Join/Leave (`seg_1703.c:236/262`) | 56 — render, targeting, talk on-screen, party iter | **re-encoded** → `PartyMember`, loaded from the party-slot list (`objlist 0x0fe0` → `world_loader.js:144-158`), not this bit |
+| `0x60` alignment | NEUTRAL/EVIL/GOOD/CHAOTIC | spawn-by-class (`seg_2E2D.c:139`), charm/combat (`seg_1944`, `seg_2337.c:72`), party join/leave (`seg_1703.c:238/265`) | ~40 — **≈26 combat** hostility (`seg_2337.c`), 7 magic, **1 talk gate** (`seg_1703.c:1050`), theft/spawn/rest | **carry → `Alignment` component** (load `& 0x60`; **load-only** until its mutators land — party join/leave in I-13, charm/combat later). Owner = combat; first/only in-scope reader = the TALK evil/chaotic gate (I-11). |
+| `0x10` DEAD | death | combat kill (`seg_2337.c:749/835`), resurrect (`seg_1944.c:1210`) | 27 | **defer → death/combat.** Consumers incl. the TALK dead arm (`seg_1703.c:1044`). |
+| `0x04` ASLEEP | unconscious | schedule arrival (`seg_1E0F.c:1017/1033`), sleep spell (`seg_1944.c:729`), VM SETMODE (`seg_1703.c:828`), combat wake (`seg_2337.c:705`) | 13 | **re-encoded (schedule path)** → `AIMode.AI_SLEEP`, set at the *same* arrival event (`npc_path.js:204`). Magical-sleep writers → magic. Consumer incl. the TALK asleep arm (`seg_1703.c:1045`). |
+| `0x08` POISONED | poison DoT | combat/terrain/spell (`seg_2337.c:1120`, `seg_27a1.c:1251`) | 8 | **defer → combat/magic.** |
+| `0x02` PARALYZED | paralysis | spell (`seg_1944.c:1091`) | 6 | **defer → combat/magic.** Consumer incl. the TALK paralyzed arm (`seg_1703.c:1045`). |
+| `0x01` PROTECTED | protection spell | spell (`seg_1944.c:1101`) | 11 | **defer → magic.** |
+
+**Don't resurrect the monolithic byte as one component.** The locked ECS
+architecture ([`architecture_ecs.md`](architecture_ecs.md)) splits status
+by concern + lifecycle: static-ish flags get a small component, combat
+transients that carry duration/severity get their own data components,
+and **the same concept is never stored twice**. So the byte decomposes per
+the table — two concerns are already re-encoded (`PartyMember`,
+`AIMode.AI_SLEEP`), `Alignment` is carried when its first in-scope reader
+appears (the TALK gate, I-11), and the four combat/magic transients land
+with their owning subsystem.
+
+**Recoverability of the deferred bits** (so a deferred status arm isn't
+silently forgotten): each is tracked **here** — the consumer column lists
+the TALK gate + every other reader — not only as a comment at the
+consuming site. When a future subsystem builds e.g. the death model, the
+`DEAD` row already says "wire the talk dead arm." The bits are also
+self-recovering: their subsystem **cannot be built without** confronting
+them (no combat without death/poison), at which point this table's
+consumer list is the wiring checklist.
+
+**Save-roundtrip caveat.** The byte is an **output format**, not the live
+store. On save the rebuild *reconstructs* it from the decomposed
+components (`PartyMember`→0x80, `Alignment`→0x60, `AIMode.AI_SLEEP`→0x04,
+the future combat-status components→the transient bits); on load it routes
+each bit to its component and drops bits whose subsystem isn't built yet.
+"Section 5 = combat status flags" in the catalog above is therefore a
+**derived** field, like `MapX/Y/Z` (line 67) — never the source of truth.
+
 ## Save — `C_0C9C_089F` (`seg_0C9C.c:357-405`)
 
 ```c

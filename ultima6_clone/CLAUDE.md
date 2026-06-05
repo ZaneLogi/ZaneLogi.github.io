@@ -46,7 +46,27 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 
 ## Project stage
 
-**Implementation phase — I-9 (NPC pathfinding) COMPLETE; sub-steps a–h
+**Implementation phase — I-11 (talk trigger) COMPLETE: sub-steps a–c landed +
+verified live (2026-06-05), kept as 3 separate commits (per I-9; NOT pushed yet —
+Zane reviews first).** `T` → pick an NPC within reach 7 → talkable filter (Actor OR
+shrine `OBJ_189` / statue `OBJ_18D-18F`, else "nothing!") → self-check → `canTalk` gate
+→ `openConversation`. **a** = a new `Alignment` component carried from the objlist
+`NPCStatus` byte (`& 0x60`) — that byte is otherwise **parsed-then-dropped**
+(`world_loader.js` only carried ObjStatus); load-only until charm/combat/party-join
+mutate it. **b** = the `T` verb front-end on the I-10 dispatch (`t`→`VERB_KEYS`, reach 7
+via `VERB_REACH`; `pickAtCell` 3-tier → filter → self → seam). **c** = the `canTalk` gate
+= `TalkDriver`'s precondition arms with a LIVE clone signal: asleep via `AIMode.AI_SLEEP`
+(the lock-step proxy for source's `IsAsleep`/`SetAsleep` at `__AtDestination`,
+`seg_1E0F.c:1014-1033`), evil/chaotic via `Alignment`. The slice **stops before
+`LoadConversation`** — `openConversation(target)` is the single seam **I-12 (dialog
+window)** reopens, then I-13 (VM) drives. Detail in `docs/progress.md §"I-11 scope"` +
+`docs/research_object_interaction.md §"Talk"`; the `NPCStatus` 7-bit decomposition (which
+bits are dropped / re-encoded / deferred) in `docs/research_save_load.md §"NPCStatus
+decomposition"`. **Boot gotcha recorded:** a new component MUST be added to `main.js`'s
+`registerComponent(…)` chain, or `world.add` throws "component not registered" and boot
+halts silently mid-`loadActors`.
+
+**Prior — I-9 (NPC pathfinding) COMPLETE; sub-steps a–h
 landed (2026-06-01/02), i dropped.** Steps I-1 → I-8 complete; I-9 a–h committed
 as SEPARATE commits (no squash — Zane's call; each is a verified milestone). NPCs
 now WALK to their schedule slots when near the player and **TELEPORT to them when
@@ -81,7 +101,7 @@ retired); **give** (MOVE Mode 2) = window `G` → `armGive` → recipient member
 click) → `moveToInventory` (in-window give key is `G` — "give" — not `M`). **All a–j PUSHED to `origin/ultima6_clone`** —
 a–h at `c8573e9`, i at `2903a8f`, j at `260e61e` (squashed from 5 auto-run save-points, 2026-06-05).
 
-**Render-to-fit viewport (UI refinement, 2026-06-05 — local, uncommitted).** The game shell
+**Render-to-fit viewport (UI refinement, 2026-06-05 — committed `757cd86`).** The game shell
 now FILLS the browser window instead of a fixed ~1312×800 frame: the canvas drawing buffer
 tracks its CSS cell size (`fitCanvas()` + a `ResizeObserver` in `main.js`), so a bigger
 window shows more of Britain and a smaller one fewer tiles, always 1:1 crisp — no more page
@@ -92,8 +112,9 @@ changes — the render systems already derive their visible cols/rows from `canv
 height`. New `resources/viewport.js` (`Viewport` resource: live `cols`/`rows` + `nearRadius`).
 Detail in `docs/progress.md §"Render-to-fit viewport"`.
 
-**Next = post-I-9 deviation audit (deferred to after I-10), or further verbs / TALK.**
-Per-sub-step detail in
+**Next = I-12 (dialog window)** — opened when TALK fires (swaps `openConversation`'s body
+for the second UI surface), then I-13 (conversation VM). The **post-I-9 deviation audit**
+(deferred to after I-10) and further USE verbs remain available. Per-sub-step detail in
 `docs/progress.md §"I-10x — landed"`; the locked plan in §"I-10 scope". The
 **post-I-9 deviation audit** (move-point economy, clock tuning, idle-heartbeat
 keep-vs-revert fork, I-9f removal-candidate — the central fork + the NPC-blocking research

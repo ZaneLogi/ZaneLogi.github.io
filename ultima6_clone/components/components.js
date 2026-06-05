@@ -38,6 +38,14 @@ export const AIMode = defineComponent('AIMode', { mode: Uint8Array });
 // direction, guard, sit/eat/sleep). Defaults 0 (AI_MOTIONLESS) until a slot fires.
 export const Destination = defineComponent('Destination', { x: Int16Array, y: Int16Array, z: Uint8Array, action: Uint8Array });
 
+// Alignment (I-11a): the per-NPC moral alignment — NEUTRAL(0) / EVIL(0x20) / GOOD(0x40)
+// / CHAOTIC(0x60), bits 0x60 of source's per-NPC NPCStatus byte (u6.h:115-121). The
+// clone carries it from objlist at load (loadActors: value = npcStatus & 0x60) into this
+// component rather than the dropped NPCStatus byte; LOAD-ONLY until its mutators (party
+// join/leave in I-13, charm/combat later) land. First in-scope reader: the TALK
+// evil/chaotic gate (I-11c). See docs/research_save_load.md §"NPCStatus decomposition".
+export const Alignment = defineComponent('Alignment', { value: Uint8Array });
+
 // PartyMember (I-8b): the player's party — Avatar + companions. slotIndex is the
 // 0-based position in source's Party[] array (Avatar = slot 0; no distinct avatar
 // marker — source treats the Avatar as just Party[0]). Membership IS this

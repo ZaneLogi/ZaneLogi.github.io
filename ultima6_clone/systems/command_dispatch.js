@@ -19,24 +19,26 @@
 // real USE effects (door, crank, …) and the other verbs land in I-10c+.
 
 import { Commands } from '../resources/commands.js';
-import { Position, ObjType, Actor, PartyMember } from '../components/components.js';
+import { Position, ObjType, Actor, PartyMember, AIMode, Alignment } from '../components/components.js';
 import { displayName } from '../view/inspector.js';
 import { MapLevel } from '../resources/map_level.js';
 import { moveToInventory, dropToMap, moveMapObject } from '../world_loader.js';
 import { canStandAt } from './passability.js';
 import { DIR_DX, DIR_DY, dirFromKeyEvent } from './avatar_move_system.js';
+import { AI_SLEEP } from './ai_modes.js';
 
 const CLOSE_ENOUGH = 1;                 // Chebyshev reach for adjacency verbs (USE etc.)
 const WORLD = 1024;                     // tile-torus width (matches the render/probe wrap)
+const ALIGN_EVIL = 0x20, ALIGN_CHAOTIC = 0x60;   // NPCStatus alignment bits (u6.h:116/118)
 
 // Verb-first key bindings. Extended as verbs land (U=use, L=look, G=get, M=move, …).
-const VERB_KEYS = { u: 'use', l: 'look', g: 'get', m: 'move' };
+const VERB_KEYS = { u: 'use', l: 'look', g: 'get', m: 'move', t: 'talk' };
 // Verbs that target anything in view rather than an adjacent cell. LOOK reads the
 // pointer cell with no adjacency gate (C_27A1_0C67); USE/GET/… stay adjacency-gated.
 const VIEWPORT_VERBS = new Set(['look']);
 // Per-verb Chebyshev reach (default CLOSE_ENOUGH=1). DROP throws to a cell up to
 // SelectRange=7 (seg_0A33.c:1095). LOOK is in VIEWPORT_VERBS (no reach check).
-const VERB_REACH = { drop: 7 };
+const VERB_REACH = { drop: 7, talk: 7 };   // talk = SelectRange 7 (seg_0A33.c:1068), the DROP/ATTACK reach
 
 // Indefinite article for a LOOK descriptor — approximates C_27A1_061E's a/an/the (its
 // exact per-tile article data is deferred): proper nouns (leading capital, e.g. named
@@ -72,6 +74,8 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
   const posStore = world.store(Position);
   const objStore = world.store(ObjType);
   const mapLevel = world.getResource(MapLevel);
+  const aiStore = world.store(AIMode);          // I-11c: asleep gate (AIMode.AI_SLEEP)
+  const alignStore = world.store(Alignment);    // I-11c: evil/chaotic gate (Alignment, carried from NPCStatus)
 
   // --- targeting cue (decision #3): a verb label pinned to the #probe-cell
   //     highlight + a recolor, instead of source's textual "Use-" prompt echo. ---
@@ -298,6 +302,64 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
     awaitingDir = true;
     label.textContent = 'Move…';
     message('Push it which way? (arrow / numpad keys)');
+  });
+
+  // --- openConversation — the seam I-12 (dialog window) + I-13 (conversation VM) reopen.
+  //     At I-11 it emits the meaningful placeholder where the window will appear: the
+  //     source-faithful target-name echo (TALK_talkTo aFlag=1, seg_16E1.c:70-82) plus a
+  //     "nothing to say yet" stand-in. I-12 swaps THIS body for the dialog window; I-13
+  //     wires the window to the VM — the talk handler never changes again. ---
+  function openConversation(target) {
+    const i = world.resolve(target);
+    if (i === -1) return;
+    const objNum = objStore.objNumber[i];
+    if (objNum === 0x189) { message('You approach the shrine.'); return; }                  // OBJ_189
+    if (objNum >= 0x18D && objNum <= 0x18F) { message('You approach the statue.'); return; } // OBJ_18D-18F
+    const name = displayName(world, target, { reg, objlist });
+    message(`${name} has nothing to say yet.`);   // → I-12 dialog window / I-13 conversation VM
+  }
+
+  // --- canTalk(npc) — TalkDriver's precondition gate (seg_1703.c:1022-1079), the arms with a
+  //     LIVE clone signal. Returns a refusal string, or null to proceed. Two substitutions
+  //     (docs/research_save_load.md §"NPCStatus decomposition"): source reads the NPCStatus byte
+  //     (asleep / dead / paralyzed / alignment) which the clone parses-then-drops, so we use
+  //     AIMode.AI_SLEEP for asleep (set in lock-step with SetAsleep at __AtDestination,
+  //     seg_1E0F.c:1014-1033) and the Alignment component (carried from NPCStatus & 0x60, I-11a).
+  //     The other arms (dead / paralyzed / poisoned / AI_VIGILANTE/FEAR/RETREAT/ARREST / seance /
+  //     IsArmageddon / solo-mode / party-off-screen) have no live signal yet — deferred with
+  //     their subsystem, tracked per-bit in that doc. ---
+  function canTalk(npc) {
+    const i = world.resolve(npc);
+    if (i === -1) return null;
+    if (world.has(npc, AIMode) && aiStore.mode[i] === AI_SLEEP)                      // IsAsleep (seg_1703.c:1045)
+      return `${displayName(world, npc, { reg, objlist })} is fast asleep.`;
+    if (world.has(npc, Alignment)) {
+      const a = alignStore.value[i];
+      if (a === ALIGN_EVIL || a === ALIGN_CHAOTIC) return 'No response.';            // EVIL/CHAOTIC (seg_1703.c:1050)
+    }
+    return null;
+  }
+
+  // --- TALK verb-handler (TALK_talkTo seg_16E1.c:60 → TalkDriver seg_1703.c:1016). The
+  //     ONLY verb whose handler isn't in seg_27a1.c. Reach 7 (VERB_REACH — the DROP/ATTACK
+  //     SelectRange, seg_0A33.c:1068; the reach gate lives in dispatch), single-stage (one
+  //     pick → fire). pickAtCell's 3-tier pick (NPCs first) is the target; the talkable
+  //     filter accepts an NPC (Actor) OR a shrine OBJ_189 / statue OBJ_18D-18F (else
+  //     "nothing!", TALK_talkTo:86). The active member itself → "Talking to yourself?"
+  //     (D_E796[1]==[0], seg_1703.c:1061). The canTalk gate (I-11c) runs for NPCs; on a
+  //     pass, openConversation is the I-12/I-13 seam. Facing (MkDirection→C_1E0F_0664) is
+  //     deferred, as in the other handlers.
+  commands.register('talk', ({ world, target, message }) => {
+    const pick = pickAtCell(target.x, target.y);                  // 3-tier pick, NPCs first
+    if (pick === null) { message('There is no one to talk to.', 'miss'); return; }
+    const i = world.resolve(pick);
+    const objNum = objStore.objNumber[i];
+    const isActor = world.has(pick, Actor);
+    const isShrineStatue = objNum === 0x189 || (objNum >= 0x18D && objNum <= 0x18F);
+    if (!isActor && !isShrineStatue) { message('There is no one to talk to.', 'miss'); return; }   // "nothing!"
+    if (isActor && i === world.resolve(avatarRef.handle)) { message('Talking to yourself?', 'miss'); return; }
+    if (isActor) { const refusal = canTalk(pick); if (refusal) { message(refusal, 'miss'); return; } }   // I-11c gate
+    openConversation(pick);
   });
 
   // --- verb-first front-end: arm a verb key, confirm the highlighted cell with
