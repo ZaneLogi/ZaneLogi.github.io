@@ -5,16 +5,29 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: I-11 (talk trigger) COMPLETE — sub-steps a–c landed + verified live
-(2026-06-05).** `T` → pick an NPC within reach 7 → the talkable filter + can-talk gate →
-a source-faithful result (a name-echo placeholder, or a canned refusal). **a** = the
-`Alignment` component carried from the objlist `NPCStatus` byte (which the clone otherwise
-drops); **b** = the `T` verb front-end (`pickAtCell` → Actor / shrine / statue filter →
-self-check → the `openConversation` seam, reach 7); **c** = the `canTalk` gate (asleep via
-`AIMode.AI_SLEEP`, evil/chaotic via the carried `Alignment`). The slice **stops before
-`LoadConversation`** — the dialog window is I-12, the conversation VM I-13. Kept as 3
-separate commits (per I-9). **Next: I-12 (dialog window)** swaps `openConversation`'s body
-for the second UI surface; the talk handler is final. Full detail in §"I-11 scope".
+**Status: I-12 (dialog window) COMPLETE — sub-steps a–c (+ a pre-step) landed + verified
+live (2026-06-05).** TALK now opens a self-contained **modal on the I-7 substrate** (the
+SECOND UI surface): a **live lazy-decoded portrait** + the speaker's name, a scrolling text
+region, inert keyword chips, and a "you say:" input — **ESC closes**. **pre-step** = portrait
+asset enablement (`portrait.{a,b,z}` → `OPTIONAL`, the project's first lazy asset) +
+[research_portraits.md](research_portraits.md), with the decode chain verified on real data
+first; **a** = the modal frame + the `openConversation` seam swap (opens for any talkable
+target — NPC / shrine / statue); **b** = the four-region layout (fixed centred, 460px; chips
++ input are **inert placeholders — no fakes**, per Zane); **c** = the real portrait
+(`assets/portrait.js` — `lib_32` → LZW → `u6pal`, decode-on-first-show cache, keyed by the
+Actor `npcId`). Conversation CONTENT (clickable chips, live input, the NPC's words) is
+**I-13**. Landed as a pre-step + a–c during the build, then **squashed into one `impl I-12`
+commit** (per the I-7/I-8 default). Full detail in §"I-12 scope".
+**Next: I-13 (conversation VM)** swaps the dialog's placeholder body for the bytecode VM
+(`converse.a/.b`) over the `openConversation` seam — the talk handler + window chrome are
+final.
+
+**Prior — I-11 (talk trigger) COMPLETE — sub-steps a–c (2026-06-05).** `T` → pick an NPC
+within reach 7 → talkable filter + `canTalk` gate → the `openConversation` seam. **a** = the
+`Alignment` component carried from the objlist `NPCStatus` byte (otherwise dropped); **b** =
+the `T` verb front-end; **c** = the gate (asleep via `AIMode.AI_SLEEP`, evil/chaotic via
+`Alignment`). Single-stage, reach-7, stops before `LoadConversation`. Kept as 3 separate
+commits. Full detail in §"I-11 scope".
 
 **Prior — I-9 (NPC pathfinding) COMPLETE — sub-steps a–h landed
 (2026-06-01/02); i dropped.** NPCs now WALK to their schedule slots when near the
@@ -107,8 +120,8 @@ later).
 | I-9 | **NPC pathfinding** — `C_1E0F_2D37` bucket-Dijkstra + `AI_FINDPATH`→`AI_ONPATH`→`__DoOnPath`→`__AtDestination`; wires into the I-5 schedule trigger so NPCs **walk** to slots (near the player) or **teleport** to them (far/off-screen, `C_1E0F_291C`), then settle the arrival worktype (+ edge-seek for far slots, humanoid door pass-through, teleport-to-previous on reschedule, first-tick alignment at load). Makes Britain feel live. | **done** (a–h; i dropped) |
 | I-10 | object-action dispatch core — `Map<verb,handler>` + `Map<ObjectType,useHandler>` registries; verb-first front-end + message channel + fixed UI shell; USE door/lever/switch/crank, LOOK + GET/DROP, MOVE push + give, the inventory window | **complete** (a–j — USE/LOOK/GET/DROP/MOVE-push/give + inventory window; further USE cases demand-driven) |
 | I-11 | talk trigger — adds TALK as a case in the I-10 dispatch (reach-7 target-pick + the can-talk gate; single-stage, stops before the conversation VM) | **done** (a–c) |
-| I-12 | dialog window — second surface on the I-7 substrate; opens when TALK fires | planned |
-| I-13 | conversation VM (adapt legacy `script.js`) — β reached: walk + talk works end-to-end. Give/take opcodes work because I-6 inventory data exists. | planned |
+| I-12 | dialog window — second surface on the I-7 substrate; opens when TALK fires (modal frame + four-region layout + real lazy-decoded portrait; chips/input inert — I-13 wires them) | **done** (pre-step + a–c) |
+| I-13 | conversation VM (adapt legacy `script.js`) — β reached: walk + talk works end-to-end. Give/take opcodes work because I-6 inventory data exists. Swaps the I-12 window's placeholder body for real lines + clickable chips + live input. | **next** |
 | I-14 | status panel — third surface on the substrate; replaces the dev HUD's clock readout | planned |
 | I-15 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / moonstones / instruments / etc.); each handler tied to its owning subsystem when that subsystem lands | planned |
 
@@ -2467,3 +2480,89 @@ me a debug loop on I-11a; check the registration chain when adding any component
 §"Talk" + [research_save_load.md](research_save_load.md) §"`NPCStatus`
 decomposition" + the standing
 [research_conversation_vm.md](research_conversation_vm.md).
+
+## I-12 scope — dialog window
+
+**Goal:** swap `openConversation`'s I-11 message-echo placeholder for the
+**dialog window** — the SECOND consumer of the I-7 UI substrate (after the object
+inspector), proving the modal stack generalises from a list-cursor surface to a
+text-I/O surface. **I-12 = the window's UI LAYOUT + open/close wiring + a real
+portrait, driven by STUB content** — NO script loading, NO conversation VM (I-13).
+Source shape: `TalkDriver` (`seg_1703.c:1016`) shows the target's portrait + name
+then runs the ask/answer loop; the clone splits portrait/name/frame (I-12) from the
+VM (I-13). The single seam is `openConversation(target)` (`systems/command_dispatch.js`)
+— I-12 swapped its body to `openDialog`; I-13 swaps the window's placeholder body for
+real lines. The talk handler + the window chrome never change again.
+
+**Decisions (settled with Zane 2026-06-05, before impl):**
+
+- **Modal on the I-7 stack** (option A), NOT a status-panel repurpose (option B —
+  what source does: `C_27A1_02D9` draws the portrait into the in-game status panel,
+  `seg_27a1.c:168`). Turn-driver suspended + avatar movement gated for the window's
+  lifetime — both free via `UIStack` (`view/ui_stack.js` + main.js `isBlocked`).
+  Conversation text lives INSIDE the window, not the world `#messages` channel.
+- **Four regions, top→bottom:** portrait box + name / scrolling text / keyword chips
+  / "you say:" input.
+- **Chips + input are INERT at I-12 — no fakes** (Zane): the layout commits the
+  surface, but clickable chips (= say the word), a live input, and the NPC's words
+  are all I-13. **ESC-close is the only working interaction.** (Decision earlier in
+  the discussion was "chip click = immediately say the keyword" — that BEHAVIOUR is
+  I-13; I-12 only renders the chips.)
+- **Portrait is REAL at I-12** (Zane wants it now). Fixed centred modal at a
+  **readable width** (460px) — it's text, not the map; a fixed column reads better
+  than scaling with the viewport (matches the inspector/inventory fixed-size modals).
+- **Opens for ALL talkable targets** the I-11 filter accepts (NPC / shrine `OBJ_189`
+  / statue `OBJ_18D-18F`) — automatic through the one seam.
+
+**Pre-step — portrait asset enablement + research.** Added
+`portrait.{a,b,z}` to `main.js`'s `OPTIONAL` set (stored raw + loaded, non-gating —
+the project's FIRST lazy-decoded asset; they must not block Britain from rendering)
+and wrote [research_portraits.md](research_portraits.md) (the full format + source
+decode of `C_2FC1_1C19`). **Decode chain verified live on Zane's real data BEFORE
+coding the window** (de-risking I-12c): `portrait.a`=98 / `portrait.b`=96 entries,
+all sampled blocks → 3584 = 56×64 px, 8 portraits rendered correctly through `u6pal`
+(`a[4]`=Lord British; `a[0]`=a horse/mount, resolving the off-by-one — named NPCs
+start at `a[1]`).
+
+**Sub-steps (each one save-point during the build, browser-verified; Zane reviewed +
+approved, then squashed into one `impl I-12` commit per the I-7/I-8 default):**
+
+- **I-12a — modal frame + seam swap.** New `view/dialog_window.js`
+  (`openDialog`); `openConversation`'s body → `openDialog`. Bare modal: name title +
+  placeholder body + ESC-close. *Verified:* clean boot, opens (UIStack depth 0→1),
+  titles real NPCs, ESC closes (→0) via the real substrate key path.
+- **I-12b — four-region layout.** `openDialog` builds portrait box +
+  name / scrolling text / inert chips (`name`/`job`/`bye`, muted) / disabled
+  "You say:" input; fixed centred 460px (CSS in `index.html`). *Verified:* all four
+  regions render for Dupre; input disabled; ESC closes.
+- **I-12c — real lazy-decoded portrait.** New `assets/portrait.js`
+  (`Portraits`): decode-on-first-show via the verified chain (`lib_32` offset table
+  → `decompressCompressedFile` → `u6pal` RGBA), `ImageData` cached per `npcId`.
+  Built in `main.js` from the `OPTIONAL` bytes + `reg.palette`, threaded through
+  `installCommandDispatch` → `openConversation` → `openDialog`, which blits the face
+  into the box. *Verified via the REAL wired path* (live `talk` handler at Dupre's
+  cell): Dupre/Shamino/Iolo show correct distinct faces (Dupre = `a[1]`, 3470/3584
+  non-blank px), ESC closes.
+
+**Key implementation facts (so a later session doesn't re-derive them):**
+
+- **Portrait key = the Actor `npcId` (the slot), NOT `ObjType.objNumber` (the type).**
+  `C_2FC1_1C19` takes the NPC number; `npcId 1` = the Avatar → `portrait.z[D_2CCB-1]`
+  (deferred — `D_2CCB` is the char-creation choice from the save, and the talk target
+  is never self). `npcId ≥ 2` → `a[npcId-1]` (`< 0x62`) or `b[…-0x62]`. Confirmed
+  live: Avatar=1→blank, Dupre/Shamino/Iolo=2/3/4→faces.
+- **No dedicated portrait palette** — portraits index the in-game `u6pal`
+  (research_portraits.md). The decoder forces opaque alpha (portraits are full
+  images; `u6pal`'s colourkey alpha is a tile concern).
+- **The portrait box is a native 56×64 `<canvas>`** scaled 2× by CSS
+  (`image-rendering: pixelated`), so `putImageData` writes at native res.
+
+**Deferred (→ I-13 unless noted):** clickable chips (= say the keyword) + the
+script's own `OP_KEY` keywords; the live input + Enter; the NPC's words (script load
++ VM); the pause / "▼ more" continue affordance (no text to page at I-12). **Blank
+portrait box (no live signal yet):** shrines/statues (source uses `GetQual`, no
+quality carried) and the Avatar's own face (`portrait.z` / `D_2CCB`).
+
+**Pre-impl research:** [research_portraits.md](research_portraits.md) (portrait
+format + decode) + the standing [research_conversation_vm.md](research_conversation_vm.md)
+(the I-13 VM the window will feed) + the substrate read recorded in this section.

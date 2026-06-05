@@ -158,6 +158,27 @@
   .ui-icon { image-rendering: pixelated; width: 32px; height: 32px; vertical-align: middle; }
   .ui-hint { color: #8a7f66; font-size: 11px; margin-top: 8px; padding-top: 6px; border-top: 1px solid #2a2316; }
   .ok { color: #6c6; } .miss { color: #c66; } .warn { color: #e8c060; }
+  /* I-12 dialog window: fixed centred, readable width (it's text, not the map —
+     a fixed column reads better than scaling with the viewport). Four regions:
+     portrait+name / scrolling text / keyword chips / "you say:" input. */
+  .dialog-window { width: 460px; min-width: 460px; max-width: 460px; }
+  .dialog-top { display: flex; gap: 12px; align-items: flex-start;
+    margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid #2a2316; }
+  .dialog-portrait { flex: 0 0 auto; width: 112px; height: 128px;
+    background: #100d08; border: 1px solid #3a3120; image-rendering: pixelated; }
+  .dialog-id { flex: 1 1 auto; }
+  .dialog-name { color: #e8c060; font-size: 16px; }
+  .dialog-text { min-height: 110px; max-height: 220px; overflow-y: auto;
+    padding: 2px 0; line-height: 1.5; white-space: pre-wrap; }
+  .dialog-keywords { display: flex; flex-wrap: wrap; gap: 6px;
+    margin: 8px 0; padding-top: 6px; border-top: 1px solid #2a2316; }
+  .dialog-chip { padding: 2px 9px; border: 1px solid #4a4029; border-radius: 11px;
+    background: #2a2316; color: #8a7f66; font-size: 12px; }   /* muted = inert at I-12 */
+  .dialog-input { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .dialog-prompt { color: #8a7f66; flex: 0 0 auto; }
+  .dialog-field { flex: 1 1 auto; background: #100d08; color: #d8cdb4;
+    border: 1px solid #3a3120; border-radius: 3px; padding: 3px 6px; font: 13px monospace; }
+  .dialog-field:disabled { color: #6a6049; }
 </style>
 </head>
 <body>

@@ -11,6 +11,7 @@ import { TileFlags } from './assets/tile_flags.js';
 import { AnimData } from './assets/anim.js';
 import { BaseTile } from './assets/basetile.js';
 import { decodeObjlist } from './assets/objlist.js';
+import { Portraits } from './assets/portrait.js';
 import { TileRegistry } from './resources/tile_registry.js';
 import { MapLevel } from './resources/map_level.js';
 import { SpatialIndex } from './resources/spatial_index.js';
@@ -52,8 +53,12 @@ import { registerUseHandlers } from './systems/use_handlers.js';
 // Names are the original U6 filenames, lowercased.
 const REQUIRED = ['maptiles.vga', 'objtiles.vga', 'tileindx.vga', 'masktype.vga', 'animmask.vga', 'animdata', 'u6pal', 'chunks', 'map', 'tileflag', 'basetile', 'objlist', 'schedule', 'look.lzd'];
 // look.lzd holds the display/look strings the inspector + NPC names need, so it's
-// REQUIRED (not just a rendering nice-to-have). OPTIONAL is empty for now.
-const OPTIONAL = [];
+// REQUIRED (not just a rendering nice-to-have).
+// OPTIONAL files are stored + loaded raw but do NOT gate readiness. portrait.{a,b,z}
+// hold the conversation portraits (56x64 one-byte-per-pixel, LZW blocks in a lib_32;
+// see docs/research_portraits.md); kept raw here and decoded lazily by the I-12 dialog
+// window — the project's first lazy-decoded asset, so they must not block Britain.
+const OPTIONAL = ['portrait.a', 'portrait.b', 'portrait.z'];
 
 // OBJBLK region files (64 surface objblk[col][row] + 5 dungeon objblk[level]i).
 // Demand-loaded per region from U6DB, so they gate by presence-count, not the
@@ -173,7 +178,14 @@ async function load() {
   const npcScheduleStats = installNpcScheduleSystem(world);
   window.__U6.npcScheduleStats = npcScheduleStats;
 
-  await startRender(world, { npcScheduleStats, objlist, schedules, uiStack });
+  // I-12c: conversation portraits — raw bytes (OPTIONAL set) decoded lazily by the
+  // dialog window through u6pal (research_portraits.md). Absent files -> blank box.
+  const portraits = new Portraits({
+    a: fileMap.get('portrait.a'), b: fileMap.get('portrait.b'), z: fileMap.get('portrait.z'),
+    palette,
+  });
+
+  await startRender(world, { npcScheduleStats, objlist, schedules, uiStack, portraits });
 }
 
 // I-6 verification: dump party inventories (I-6a) + a sampling of object
@@ -225,7 +237,7 @@ function verifyInventory(world, objlist) {
 // I-1c/I-2b: terrain + world objects on screen. Build the GPU atlas + palette, place
 // the camera at Britain's default origin, demand-load the OBJBLK regions in view, then
 // register CameraSystem + RenderSystem(s) and drive a continuous rAF loop. Drag to pan.
-async function startRender(world, { npcScheduleStats, objlist, schedules, uiStack } = {}) {
+async function startRender(world, { npcScheduleStats, objlist, schedules, uiStack, portraits } = {}) {
   const canvas = document.getElementById('screen');   // shown via the #app shell reveal in load()
 
   // I-10a: gameplay message channel. Render-flush installer (mirrors installDevHud);
@@ -377,7 +389,7 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   cmd = installCommandDispatch(world, {
     pickAtCell, probe, canvas,
     cellEl: document.getElementById('probe-cell'),
-    avatarRef, reg, objlist, message, uiStack,
+    avatarRef, reg, objlist, message, uiStack, portraits,
   });
   window.__U6.cmd = cmd;            // dev: live dispatch({verb, target}) + isPending()
   window.__U6.pickAtCell = pickAtCell;

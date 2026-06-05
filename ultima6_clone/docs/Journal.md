@@ -28,6 +28,40 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-05 — I-12 implemented (dialog window) + portrait pipeline
+
+Built the dialog window in one auto-mode pass after a research+verify pre-step. The
+per-sub-step detail lives in `progress.md §"I-12 scope"`; this is the discovery note.
+
+- **Read**: `seg_2FC1.c:734` `C_2FC1_1C19` (portrait loader) + its status-panel caller
+  `C_27A1_02D9` (`seg_27a1.c:168`) + the VM call sites (`seg_1703.c:932`/`:1094`);
+  `../ultima6/doc/u6tech.txt` §"Portraits"/"Libraries"/"LZW"/"Palettes"; the legacy port's
+  `PORTRAIT` opcode (`../ultima6/script.js`, `u6opcode.js`) — confirmed it never decodes
+  portrait *images*. The I-7 substrate (`view/ui_stack.js`, `ui_widgets.js`, `inspector.js`).
+- **Found**:
+  - **The design note's "portraits have their own palette" was WRONG.** The loader loads no
+    palette; pixels index the in-game `u6pal`. Two confirmations (loader + tech doc). Folded
+    into `research_portraits.md` (the higher-trust doc); the `note`-branch note left stale by
+    design (later/formal doc wins).
+  - **`a[0]` is a horse/mount, not an NPC** — resolved the off-by-one open item. Named NPCs
+    start at `a[1]` (`a[4]` renders as Lord British). The portrait key is the Actor `npcId`
+    (the slot), not `ObjType.objNumber`.
+  - **The I-7 substrate needs NO new widgets** for a text-I/O surface — a modal is just
+    `{el, onKey}` building its own DOM, and `ui_stack.js` already anticipated an in-modal
+    text field (the Esc-consume comment). So I-12 built window-local DOM, no substrate work.
+  - **De-risked I-12c before coding the window**: ran the full decode chain on Zane's real
+    data via preview-eval (98/96 entries, 8 portraits rendered correctly). The meatiest
+    sub-step was proven before a line of window code.
+- **Docs**: created `research_portraits.md` + nav row (pre-step); `progress.md §"I-12 scope"`
+  + status banner + ledger; this entry; CLAUDE.md "Project stage".
+- **Open / deferred (→ I-13)**: clickable chips (= say keyword) + `OP_KEY` keywords, the
+  live input + Enter, the NPC's words (VM), the pause/"▼ more" affordance. Blank box for
+  shrines/statues (`GetQual`) + the Avatar (`portrait.z`/`D_2CCB`).
+- **Next**: I-13 (conversation VM) — swap the window's placeholder body for the `converse.a/.b`
+  bytecode VM over the `openConversation` seam.
+
+---
+
 ## 2026-06-05 — I-11 implemented (talk trigger)
 
 Implemented the locked I-11 plan in one auto-mode pass (a = the `Alignment` carry, b = the

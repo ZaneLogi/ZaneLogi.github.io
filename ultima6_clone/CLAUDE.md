@@ -46,25 +46,36 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 
 ## Project stage
 
-**Implementation phase — I-11 (talk trigger) COMPLETE: sub-steps a–c landed +
-verified live (2026-06-05), kept as 3 separate commits (per I-9; NOT pushed yet —
-Zane reviews first).** `T` → pick an NPC within reach 7 → talkable filter (Actor OR
-shrine `OBJ_189` / statue `OBJ_18D-18F`, else "nothing!") → self-check → `canTalk` gate
-→ `openConversation`. **a** = a new `Alignment` component carried from the objlist
-`NPCStatus` byte (`& 0x60`) — that byte is otherwise **parsed-then-dropped**
-(`world_loader.js` only carried ObjStatus); load-only until charm/combat/party-join
-mutate it. **b** = the `T` verb front-end on the I-10 dispatch (`t`→`VERB_KEYS`, reach 7
-via `VERB_REACH`; `pickAtCell` 3-tier → filter → self → seam). **c** = the `canTalk` gate
-= `TalkDriver`'s precondition arms with a LIVE clone signal: asleep via `AIMode.AI_SLEEP`
-(the lock-step proxy for source's `IsAsleep`/`SetAsleep` at `__AtDestination`,
-`seg_1E0F.c:1014-1033`), evil/chaotic via `Alignment`. The slice **stops before
-`LoadConversation`** — `openConversation(target)` is the single seam **I-12 (dialog
-window)** reopens, then I-13 (VM) drives. Detail in `docs/progress.md §"I-11 scope"` +
-`docs/research_object_interaction.md §"Talk"`; the `NPCStatus` 7-bit decomposition (which
-bits are dropped / re-encoded / deferred) in `docs/research_save_load.md §"NPCStatus
-decomposition"`. **Boot gotcha recorded:** a new component MUST be added to `main.js`'s
-`registerComponent(…)` chain, or `world.add` throws "component not registered" and boot
-halts silently mid-`loadActors`.
+**Implementation phase — I-12 (dialog window) COMPLETE: pre-step + sub-steps a–c
+landed + verified live (2026-06-05), Zane-approved, squashed into one `impl I-12`
+commit (per the I-7/I-8 default; not yet pushed).** TALK opens a self-contained **modal on the I-7 substrate**
+(the SECOND UI surface): a **live lazy-decoded portrait** + the speaker's name, a
+scrolling text region, inert keyword chips, and a "you say:" input — **ESC closes**.
+The single seam is `openConversation(target)` (`systems/command_dispatch.js`): I-12
+swapped its body to `openDialog` (`view/dialog_window.js`); I-13 swaps the window's
+placeholder body for the VM. **pre-step** = portrait asset enablement (`portrait.{a,b,z}`
+→ `main.js` `OPTIONAL`, the project's FIRST lazy-decoded asset) + new
+`docs/research_portraits.md`, chain verified on real data first. **a** = modal frame +
+seam swap (opens for any talkable target). **b** = the four-region layout (fixed centred
+460px; chips + input **inert — no fakes**, per Zane). **c** = the real portrait
+(`assets/portrait.js` — `lib_32` → LZW → `u6pal`, decode-on-first-show cache).
+**Load-bearing facts:** the portrait key is the Actor **`npcId`** (the slot), NOT
+`ObjType.objNumber` — `npcId 1` = Avatar → `portrait.z` (deferred), `≥2` → `a[npcId-1]`
+/ `b`; **no dedicated portrait palette** (indexes the in-game `u6pal`); the substrate
+needed NO new widgets (a modal builds its own DOM). Detail in `docs/progress.md §"I-12
+scope"` + `docs/research_portraits.md`. Conversation CONTENT (clickable chips, live
+input, the NPC's words) + shrine/statue (`GetQual`) + Avatar (`portrait.z`/`D_2CCB`)
+portraits are **I-13 / deferred**. **Boot gotcha (still binding):** a new component MUST
+be in `main.js`'s `registerComponent(…)` chain or boot halts silently mid-`loadActors`.
+
+**Prior — I-11 (talk trigger) COMPLETE; sub-steps a–c (2026-06-05).** `T` → reach-7
+pick → talkable filter → self-check → `canTalk` gate → `openConversation`. **a** = the
+`Alignment` component carried from the objlist `NPCStatus` byte (otherwise
+parsed-then-dropped; load-only). **b** = the `T` verb front-end (reach 7 via
+`VERB_REACH`). **c** = the `canTalk` gate (asleep via `AIMode.AI_SLEEP`; evil/chaotic via
+`Alignment`). Single-stage, stops before `LoadConversation`. Detail in `docs/progress.md
+§"I-11 scope"` + `docs/research_object_interaction.md §"Talk"`; the `NPCStatus` 7-bit
+decomposition in `docs/research_save_load.md §"NPCStatus decomposition"`.
 
 **Prior — I-9 (NPC pathfinding) COMPLETE; sub-steps a–h
 landed (2026-06-01/02), i dropped.** Steps I-1 → I-8 complete; I-9 a–h committed
@@ -112,8 +123,9 @@ changes — the render systems already derive their visible cols/rows from `canv
 height`. New `resources/viewport.js` (`Viewport` resource: live `cols`/`rows` + `nearRadius`).
 Detail in `docs/progress.md §"Render-to-fit viewport"`.
 
-**Next = I-12 (dialog window)** — opened when TALK fires (swaps `openConversation`'s body
-for the second UI surface), then I-13 (conversation VM). The **post-I-9 deviation audit**
+**Next = I-13 (conversation VM)** — adapt the legacy `script.js` bytecode interpreter over
+`converse.a/.b`, swapping the I-12 dialog window's placeholder body for real lines + making
+the keyword chips clickable + the "you say:" input live. The **post-I-9 deviation audit**
 (deferred to after I-10) and further USE verbs remain available. Per-sub-step detail in
 `docs/progress.md §"I-10x — landed"`; the locked plan in §"I-10 scope". The
 **post-I-9 deviation audit** (move-point economy, clock tuning, idle-heartbeat
