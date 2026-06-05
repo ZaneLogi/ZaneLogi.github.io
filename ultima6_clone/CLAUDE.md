@@ -46,97 +46,13 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 
 ## Project stage
 
-**Implementation phase — I-12 (dialog window) COMPLETE: pre-step + sub-steps a–c
-landed + verified live (2026-06-05), Zane-approved, squashed into one `impl I-12`
-commit (per the I-7/I-8 default; not yet pushed).** TALK opens a self-contained **modal on the I-7 substrate**
-(the SECOND UI surface): a **live lazy-decoded portrait** + the speaker's name, a
-scrolling text region, inert keyword chips, and a "you say:" input — **ESC closes**.
-The single seam is `openConversation(target)` (`systems/command_dispatch.js`): I-12
-swapped its body to `openDialog` (`view/dialog_window.js`); I-13 swaps the window's
-placeholder body for the VM. **pre-step** = portrait asset enablement (`portrait.{a,b,z}`
-→ `main.js` `OPTIONAL`, the project's FIRST lazy-decoded asset) + new
-`docs/research_portraits.md`, chain verified on real data first. **a** = modal frame +
-seam swap (opens for any talkable target). **b** = the four-region layout (fixed centred
-460px; chips + input **inert — no fakes**, per Zane). **c** = the real portrait
-(`assets/portrait.js` — `lib_32` → LZW → `u6pal`, decode-on-first-show cache).
-**Load-bearing facts:** the portrait key is the Actor **`npcId`** (the slot), NOT
-`ObjType.objNumber` — `npcId 1` = Avatar → `portrait.z` (deferred), `≥2` → `a[npcId-1]`
-/ `b`; **no dedicated portrait palette** (indexes the in-game `u6pal`); the substrate
-needed NO new widgets (a modal builds its own DOM). Detail in `docs/progress.md §"I-12
-scope"` + `docs/research_portraits.md`. Conversation CONTENT (clickable chips, live
-input, the NPC's words) + shrine/statue (`GetQual`) + Avatar (`portrait.z`/`D_2CCB`)
-portraits are **I-13 / deferred**. **Boot gotcha (still binding):** a new component MUST
-be in `main.js`'s `registerComponent(…)` chain or boot halts silently mid-`loadActors`.
-
-**Prior — I-11 (talk trigger) COMPLETE; sub-steps a–c (2026-06-05).** `T` → reach-7
-pick → talkable filter → self-check → `canTalk` gate → `openConversation`. **a** = the
-`Alignment` component carried from the objlist `NPCStatus` byte (otherwise
-parsed-then-dropped; load-only). **b** = the `T` verb front-end (reach 7 via
-`VERB_REACH`). **c** = the `canTalk` gate (asleep via `AIMode.AI_SLEEP`; evil/chaotic via
-`Alignment`). Single-stage, stops before `LoadConversation`. Detail in `docs/progress.md
-§"I-11 scope"` + `docs/research_object_interaction.md §"Talk"`; the `NPCStatus` 7-bit
-decomposition in `docs/research_save_load.md §"NPCStatus decomposition"`.
-
-**Prior — I-9 (NPC pathfinding) COMPLETE; sub-steps a–h
-landed (2026-06-01/02), i dropped.** Steps I-1 → I-8 complete; I-9 a–h committed
-as SEPARATE commits (no squash — Zane's call; each is a verified milestone). NPCs
-now WALK to their schedule slots when near the player and **TELEPORT to them when
-far** (off-screen, `C_1E0F_291C` + a Chebyshev-40 distance gate; per-NPC 40×40
-bucket-Dijkstra + edge-seek + re-plan; humanoid door pass-through; teleport-to-
-previous catch-up on reschedule), **settle into the slot's arrival worktype + facing**
-(`__AtDestination`, I-9g), and **align to the current-hour slot at load** (first-tick
-alignment, I-9h). **I-9i (dev-HUD path overlay) was DROPPED** (fancy-not-must; live
-preview-eval of `window.__U6`/the `Paths` resource already covers path inspection).
-**I-10 (object-action dispatch) COMPLETE — sub-steps a–j landed + verified live
-(2026-06-03/05).** a=message channel + fixed UI shell (Fixed-Shell
-grid on a content/placement seam; Dynamic Dock a named later upgrade);
-b=dispatch core + verb-first front-end (arm a verb key → `#probe-cell` cue →
-Enter/Esc; `Map<verb,handler>` + `Map<ObjType,useHandler>`); c=USE→door (+ a
-TEMPORARY locked-door bypass — force-open, REVERT when I-13's conversation
-hands the key + a USE-inventory front-end exists); d=USE→lever/switch + the
-runtime map add/delete primitives (`addMapObject`/`deleteMapObject`/
-`findObjectsByTypeQuality`/`objAtCell`/`actorAtCell` in `world_loader.js`);
-e=USE→crank/drawbridge (delete+re-add geometry; **clone deviation** — span
-bounded by `isTerrainWet`, not source's `D_1D0A` shore whitelist);
-f=LOOK (line-only description, viewport-range; `I` stays a separate Inspect
-modal); g=GET (adjacent ground object → inventory; `TypeWeight==0` fixed gate
-via `reg.weightOf`); h=DROP (two-stage: recursive inventory picker → armed
-cursor reach 7 → `dropToMap`); **i=MOVE Mode 1 (push)** — arm `M` → pick
-adjacent object → press a **direction** (arrow/numpad); fixed gate + the
-verified `C_27A1_1DAB` diagonal corner-clearance (`canPushTo`); `moveMapObject`
-= `MoveObj`; shares `avatar_move_system`'s direction map; j=verb-aware **inventory
-window** (`view/inventory_picker.js` `openInventoryWindow`) opened by top-row digit
-keys (`1`..`PartySize`, dynamic; numpad stays avatar diagonals) + member-switch with
-unwind; **DROP migrated** onto the window's `D` (old `D` map-hotkey + `openInventoryPicker`
-retired); **give** (MOVE Mode 2) = window `G` → `armGive` → recipient member (digit or
-click) → `moveToInventory` (in-window give key is `G` — "give" — not `M`). **All a–j PUSHED to `origin/ultima6_clone`** —
-a–h at `c8573e9`, i at `2903a8f`, j at `260e61e` (squashed from 5 auto-run save-points, 2026-06-05).
-
-**Render-to-fit viewport (UI refinement, 2026-06-05 — committed `757cd86`).** The game shell
-now FILLS the browser window instead of a fixed ~1312×800 frame: the canvas drawing buffer
-tracks its CSS cell size (`fitCanvas()` + a `ResizeObserver` in `main.js`), so a bigger
-window shows more of Britain and a smaller one fewer tiles, always 1:1 crisp — no more page
-panning. `dpr` is pinned to 1 (a HiDPI dpr pass is the named follow-up), matching legacy
-`map_viewer.js`'s deliberate choice for a variable-viewport tile renderer. Only the CSS
-shell (`index.html` → fluid grid), the buffer sizing, and the I-9h teleport radius needed
-changes — the render systems already derive their visible cols/rows from `canvas.width/
-height`. New `resources/viewport.js` (`Viewport` resource: live `cols`/`rows` + `nearRadius`).
-Detail in `docs/progress.md §"Render-to-fit viewport"`.
-
-**Next = I-13 (conversation VM)** — adapt the legacy `script.js` bytecode interpreter over
-`converse.a/.b`, swapping the I-12 dialog window's placeholder body for real lines + making
-the keyword chips clickable + the "you say:" input live. The **post-I-9 deviation audit**
-(deferred to after I-10) and further USE verbs remain available. Per-sub-step detail in
-`docs/progress.md §"I-10x — landed"`; the locked plan in §"I-10 scope". The
-**post-I-9 deviation audit** (move-point economy, clock tuning, idle-heartbeat
-keep-vs-revert fork, I-9f removal-candidate — the central fork + the NPC-blocking research
-are in `docs/progress.md §"Post-I-9 — deviation audit"` + `docs/research_npc_ai.md
-§"Blocking + collision resolution"`) is **deferred to after I-10** (Zane 2026-06-03).
-The ledger
-+ full I-9 scope (sub-step SHAs,
-decisions, deviations, remaining work) are in `docs/progress.md §"I-9 scope"`;
-the source-derived findings + kept deviations are in `docs/research_npc_ai.md
-§"Clone port notes (I-9)"`. The ECS runtime-ground spec is
+**Implementation phase. Current status + the I-N step ledger live in
+[`docs/progress.md`](docs/progress.md)** — its top banner is the single source of truth
+(see that file's §"Doc maintenance"); this section is NOT a status mirror. As of
+2026-06-05: **I-12 (dialog window) COMPLETE; next I-13 (conversation VM).** What stays
+here is the durable, slowly-changing reference — the code layout, the dev console helpers,
+and the per-step **kept deviations** (so a later session doesn't "correct" them). The ECS
+runtime-ground spec is
 `docs/architecture_ecs.md`, implemented in `ecs/world.js` since I-1. Code layout:
 `ecs/` (runtime core), `assets/` (format decoders), `resources/` (TileRegistry,
 MapLevel, Camera, Viewport, Party, Paths, Schedules, …), `systems/` (render, camera,
@@ -400,9 +316,19 @@ structure.
   improves.
 - `docs/DOCUMENTATION_INDEX.md` — navigation map across research
   docs. Populated as `research_*.md` files accumulate.
-- `docs/progress.md` — **not yet created.** Lands when research
-  phase yields a research-stage doc plan (R-A / R-B / ... shape,
-  matching sibling projects) or when implementation phase opens.
+- `docs/progress.md` — **the implementation ledger.** The `I-N` step
+  table + a per-step **§"I-N scope"** section (the real per-step record),
+  with a one-line **status banner** at the top that is the project's single
+  source of truth for "where are we / what's next."
+
+**Doc maintenance (binding).** On completing a step, the only substantial doc
+writes are a new `progress.md §"I-N scope"` section + a terse `Journal.md`
+entry. Current status is the **one-line** `progress.md` banner; this file's
+"Project stage" section and `DOCUMENTATION_INDEX.md` **point** to that banner
+rather than mirroring it (the per-step mirroring is what bloated the docs and
+left `DOCUMENTATION_INDEX` stale at I-10). Everything else per step is a
+one-line touch (banner, ledger row, the two pointers, memory). Full convention:
+`docs/progress.md §"Doc maintenance"`.
 
 ## Conventions inherited from sibling projects
 

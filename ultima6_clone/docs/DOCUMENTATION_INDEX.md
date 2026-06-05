@@ -1,53 +1,11 @@
 # ultima6_clone — Documentation Index
 
-**Date:** 2026-06-05
-**Status:** Implementation phase — **I-12 (dialog window) COMPLETE (pre-step + a–c):
-TALK opens a modal on the I-7 substrate — live lazy-decoded portrait + name +
-scrolling text + inert keyword chips + "you say:" input; ESC closes. Conversation
-CONTENT (clickable chips, live input, the NPC's words) is I-13. See `research_portraits.md`
-+ `progress.md §"I-12 scope"`.** Prior: **I-11 (talk trigger) COMPLETE (a–c)** — TALK on
-the I-10 dispatch, reach-7, `canTalk` gate, the `openConversation` seam. **I-10
-(object-action dispatch) COMPLETE (a–j):** USE/LOOK/GET/DROP/MOVE-push/give + the
-verb-aware inventory window; further USE cases demand-driven. I-9 (NPC pathfinding)
-COMPLETE (a–h landed, i dropped).
-Steps I-1 → I-8 complete; I-9 a–h committed as separate
-commits (no squash). NPCs walk to schedule slots when near the player and teleport
-to them when far/off-screen (per-NPC bucket-Dijkstra + edge-seek + re-plan;
-`C_1E0F_291C` + Chebyshev-40 distance gate), settle into the arrival worktype/facing
-(`__AtDestination`, I-9g), and align to the current-hour slot at load (first-tick
-alignment, I-9h). I-9i (dev-HUD path overlay) dropped (covered by live preview-eval).
-Next = the post-I-9 deviation audit (move-points / clock / idle-heartbeat fork /
-I-9f), or TALK (I-11). See `progress.md §"I-10j"` + §"I-10 scope" + §"I-9
-scope" + `research_npc_ai.md §"Arrival —
-__AtDestination"` / §"Off-area handling" / §"Blocking + collision resolution" /
-§"Clone port notes (I-9)".
-The ECS runtime ground (spec in [architecture_ecs.md](architecture_ecs.md)) is
-implemented in `ecs/world.js`; the step ledger + per-step detail are in
-[progress.md](progress.md). The 9 source-research docs below remain the
-subsystem truth. **Game-loop + animation pipeline decoded**: source is turn-based blocking with a
-three-channel animation tick (palette cycling + animdata tile-pointer
-rewrite + hybrid tiles) firing in `CON_prompt`'s idle path. Modern-UX
-anchor principle captured in `../CLAUDE.md` §"Modern-browser UX as
-architectural anchor" — render-cadence in the rebuild is driven by
-display refresh + drag-scroll requirements, not source's polling
-cadence. **Conversation VM decoded** (2026-05-28): four-layer stack
-VM (TalkDriver → parse_statement → execute_op + parse_factor) over
-LZW-compressed `converse.a`/`converse.b` scripts; legacy port
-`script.js` is a ~1300-line reference implementation usable as the
-rebuild's starting point. **NPC AI decoded** (2026-05-28):
-action-economy turn scheduler (`C_1E0F_4E0A` + MovePts/DEXTE),
-per-mode state-machine dispatcher (`C_1E0F_3E6A`), hourly schedule
-transitions, and bucket-Dijkstra pathfinding — no legacy port
-exists for this subsystem. **Player↔object interaction +
-save/load decoded** (2026-05-28): the five world-interaction
-commands (look/get/drop/move/use, shared target→validate→apply
-pipeline, Use = object-type dispatch table) and the savegame
-composition (objlist actor arrays + D_2C4A global block + objblk*
-world objects; the format is throwaway, the state-set is the
-deliverable). The core engine — loop, render, world data,
-animation, conversation, NPC AI, interaction, save/load — is now
-broadly characterized. **Pillar-bug** root cause stays identified
-(legacy `drawObject` layer routing); see `research_map_render.md`.
+**Status & step ledger:** see [progress.md](progress.md) top banner — the single source
+of truth (this index is the **navigation map**, not a status mirror; convention in
+`progress.md §"Doc maintenance"`). As of 2026-06-05: **I-12 (dialog window) complete; next
+I-13 (conversation VM).** The ECS runtime ground is specified in
+[architecture_ecs.md](architecture_ecs.md) (implemented in `ecs/world.js`); the research
+docs below remain the subsystem truth.
 
 This index will be populated as research docs accumulate. Shape
 matches sibling projects (asteroids_clone, phoenix_clone) — Quick

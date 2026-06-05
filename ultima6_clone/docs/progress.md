@@ -5,103 +5,33 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: I-12 (dialog window) COMPLETE — sub-steps a–c (+ a pre-step) landed + verified
-live (2026-06-05).** TALK now opens a self-contained **modal on the I-7 substrate** (the
-SECOND UI surface): a **live lazy-decoded portrait** + the speaker's name, a scrolling text
-region, inert keyword chips, and a "you say:" input — **ESC closes**. **pre-step** = portrait
-asset enablement (`portrait.{a,b,z}` → `OPTIONAL`, the project's first lazy asset) +
-[research_portraits.md](research_portraits.md), with the decode chain verified on real data
-first; **a** = the modal frame + the `openConversation` seam swap (opens for any talkable
-target — NPC / shrine / statue); **b** = the four-region layout (fixed centred, 460px; chips
-+ input are **inert placeholders — no fakes**, per Zane); **c** = the real portrait
-(`assets/portrait.js` — `lib_32` → LZW → `u6pal`, decode-on-first-show cache, keyed by the
-Actor `npcId`). Conversation CONTENT (clickable chips, live input, the NPC's words) is
-**I-13**. Landed as a pre-step + a–c during the build, then **squashed into one `impl I-12`
-commit** (per the I-7/I-8 default). Full detail in §"I-12 scope".
-**Next: I-13 (conversation VM)** swaps the dialog's placeholder body for the bytecode VM
-(`converse.a/.b`) over the `openConversation` seam — the talk handler + window chrome are
-final.
+**Status: I-12 (dialog window) COMPLETE (2026-06-05). Next: I-13 (conversation VM)** — swap
+the dialog's placeholder body for the `converse.a/.b` bytecode VM over the `openConversation`
+seam (the talk handler + window chrome are final).
 
-**Prior — I-11 (talk trigger) COMPLETE — sub-steps a–c (2026-06-05).** `T` → pick an NPC
-within reach 7 → talkable filter + `canTalk` gate → the `openConversation` seam. **a** = the
-`Alignment` component carried from the objlist `NPCStatus` byte (otherwise dropped); **b** =
-the `T` verb front-end; **c** = the gate (asleep via `AIMode.AI_SLEEP`, evil/chaotic via
-`Alignment`). Single-stage, reach-7, stops before `LoadConversation`. Kept as 3 separate
-commits. Full detail in §"I-11 scope".
+This banner is the **single canonical current-status line** — `CLAUDE.md` and
+`DOCUMENTATION_INDEX.md` point here instead of mirroring it (convention: §"Doc maintenance").
+**Per-step detail** lives in each step's **§"I-N scope"** section below; **at-a-glance status**
+is the **ledger**. Standing cross-cutting items, each with its own section: the **post-I-9
+deviation audit** (move-point economy, clock tuning, idle-heartbeat fork, I-9f) stays
+**deferred** (§"Post-I-9 — deviation audit"); the **render-to-fit viewport** refinement landed
+2026-06-05 (§"Render-to-fit viewport").
 
-**Prior — I-9 (NPC pathfinding) COMPLETE — sub-steps a–h landed
-(2026-06-01/02); i dropped.** NPCs now WALK to their schedule slots when near the
-player and **TELEPORT to them when far** (off-screen), then **settle into their
-arrival worktype** (stand/guard facing the right way): a per-NPC bucket-Dijkstra over
-a 40×40 window, with edge-seek + re-plan for far slots, humanoid door pass-through, a
-teleport-to-previous-target catch-up on reschedule, `__AtDestination` worktype/facing
-on arrival, the off-area teleport + player-distance gate, and first-tick schedule
-alignment at load. 121/121 unit tests (`tests/test_pathfinding.html`) + live
-preview-eval verification on real Britain data. Steps I-1 → I-8 complete; I-9 a–h
-committed.
+## Doc maintenance — keep status in ONE place
 
-**I-9i (dev-HUD path overlay) DROPPED (Zane 2026-06-02).** A visual path trail is
-fancy-not-must: live `preview-eval` of `window.__U6` / the `Paths` resource already
-exposes any NPC's full path state (it's how I-9h was verified), so the overlay would
-only save Claude keystrokes on a debug task already covered. A real spatial-debug need
-later is a clean standalone add (a dedicated debug layer), not something bolted onto
-the probe cursor. **So I-9 is complete through a–h.** One **deferred** loose end (not
-blocking, → post-I-9 audit): idle-advance interval tuning.
+To avoid rewriting the same status prose in five files per step (the drift that left this
+banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 
-**No squash for I-9 (Zane's call 2026-06-02).** Unlike the sibling-project
-convention, the I-9 sub-step commits are KEPT as separate commits — each is a
-meaningful, individually-verified milestone worth preserving in history. See the
-I-9 scope section for the per-sub-step breakdown + SHAs.
-
-**Prior:** I-8 (avatar movement + party follow) complete — the Avatar walks
-Britain 8-dir, camera follows, party trails via `MoveFollowers`. NPC pathfinding
-was split out into I-9 (decided 2026-06-01); the two share only the single-step
-move kernel (`canStandAt` + `insertAtHead` + facing), not the path builder.
-
-**I-10 (object-action dispatch) — COMPLETE: sub-steps a–j landed + verified live
-(2026-06-03/05).** The dispatcher + message channel + the full verb set work; further
-USE object-type cases are demand-driven (no batch milestone). a = message channel +
-fixed UI shell; b = dispatch core + verb-first front-end; c = USE→door (+ temporary lock
-bypass); d = USE→lever/switch + the runtime map add/delete primitives; e =
-USE→crank/drawbridge (the geometry-heavy one); **f = LOOK** (single-handler verb — a
-source-faithful description line, viewport-range; no panel — the `I` hotkey stays a
-separate "Inspect" detail modal, so L and I are distinct); **g = GET** (pick up an
-adjacent ground object — `moveToInventory` = `InsertObj INVEN`; the `TypeWeight==0`
-fixed-object gate ported via `reg.weightOf`; carry-capacity + theft deferred); **h =
-DROP** (`dropToMap` to a cell, reach 7 — *later migrated onto the j inventory window*);
-**i = MOVE Mode 1 (push)** (push an adjacent ground object one tile in a chosen direction
-— two-stage object→direction, the verified `C_27A1_1DAB` corner-clearance); **j =
-verb-aware inventory window + DROP migration + give (MOVE Mode 2)** (a top-row digit
-`1`..`PartySize` opens a member's inventory window → highlight an item → `D` drop / `G`
-give → recipient member via a digit or a click; the old `D` map-hotkey +
-`openInventoryPicker` retired). The front-end also has **left-click confirm** (pan
-suppressed while a verb is armed) + the **windowed quality search** refinement
-(`findObjectsByTypeQuality` `near` box, matching source's active-area bound). **Commit
-state:** a–j are all on `origin/ultima6_clone` — a–h at `c8573e9`, i at `2903a8f`, j at
-`260e61e` (squashed from 5 save-points). See the "I-10x — landed" sections; the locked plan
-+ USE-case discipline in "I-10 scope". **I-11 (talk) is now landed** (2026-06-05, a–c —
-see the top status + §"I-11 scope"); TALK turned out single-stage + reach-7 (the source
-read corrected the earlier "two-stage seam" note). The **post-I-9 deviation audit** remains
-deferred.
-
-**Render-to-fit viewport (UI refinement, 2026-06-05 — committed `757cd86`).** The game
-shell now FILLS the browser window instead of the old fixed ~1312×800 frame: the canvas
-drawing buffer tracks its CSS cell size, so a bigger window shows more of Britain and a
-smaller one fewer tiles, always 1:1 crisp — no more page panning to reach the panels. This
-was the pre-I-11 layout pass (settled with Zane 2026-06-05). See §"Render-to-fit viewport"
-for the full write-up.
-
-**Live-validated end-to-end (Zane, 2026-06-04):** with the drawbridge lowered
-via the crank, scheduled NPCs **#11 and #12 walk into the castle to the dining
-room** instead of teleporting — the I-9 NPC-#12 "dinner teleport" known issue
-is resolved by the now-modeled, crossable bridge (gated on the bridge being
-open; NPC AI has no USE, so the player lowers it — faithful).
-
-The **post-I-9 deviation audit** (move-point economy, clock tuning, the
-idle-heartbeat keep-vs-revert fork, I-9f as a removal candidate — see the
-audit subsection in I-9 scope) stays **deferred to after I-10** (Zane
-2026-06-03 — build the player-interaction surface first, audit NPC movement
-later).
+- **This banner** is the single canonical current-status line — one line: `I-N (title)
+  COMPLETE; Next: I-N+1`, plus standing cross-cutting deferrals. Don't paste sub-step detail
+  here; it's in §"I-N scope".
+- **Per step, the only substantial writes are** a new **§"I-N scope"** section (the real
+  record — decisions, sub-steps, deviations) + a terse **Journal** entry (discoveries +
+  next). Everything else is a one-line touch: this banner, the **ledger row**, the
+  `CLAUDE.md` stage pointer, and the memory pointers.
+- **`CLAUDE.md` "Project stage"** and **`DOCUMENTATION_INDEX.md`** carry a pointer here, NOT
+  a status mirror. `CLAUDE.md`'s durable content (architecture, conventions, kept-deviations,
+  code layout) is what changes rarely and stays there.
 
 ---
 
