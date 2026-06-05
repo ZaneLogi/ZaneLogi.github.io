@@ -17,6 +17,7 @@ import { SpatialIndex } from './resources/spatial_index.js';
 import { unzip } from './assets/zip.js';
 import { TileRenderer } from './view/renderer.js';
 import { Camera } from './resources/camera.js';
+import { Viewport } from './resources/viewport.js';
 import { WorldClock } from './resources/world_clock.js';
 import { makeRenderSystem } from './systems/render_system.js';
 import { makeCameraSystem } from './systems/camera_system.js';
@@ -241,6 +242,28 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   // member's position (seg_1E0F.c:817-818). centerOn() is reused on every step.
   const camera = new Camera();
   world.setResource(camera);
+
+  // Render-to-fit (Design 1, dpr=1): size the canvas drawing buffer to its on-screen CSS
+  // box so the map fills the available space — more of Britain on a big window, fewer
+  // tiles on a small one, always 1:1 crisp (dpr pinned to 1, matching legacy
+  // map_viewer.js's deliberate choice for a variable-viewport tile renderer). The render
+  // systems already derive their visible cols/rows from canvas.width/height each frame, so
+  // resizing the buffer is all that's needed. The Viewport resource mirrors the extent for
+  // sim systems (the I-9h teleport guard). See resources/viewport.js.
+  const viewport = new Viewport();
+  world.setResource(viewport);
+  function fitCanvas() {
+    const w = Math.floor(canvas.clientWidth), h = Math.floor(canvas.clientHeight);
+    if (w === 0 || h === 0) return false;                  // not laid out yet (app still hidden)
+    if (w === canvas.width && h === canvas.height) return false;
+    canvas.width = w; canvas.height = h;                   // grows/shrinks the GL drawing buffer
+    renderer.resize(w, h);                                 // gl.viewport + u_resolution
+    viewport.cols = Math.ceil(w / ts);
+    viewport.rows = Math.ceil(h / ts);
+    return true;
+  }
+  fitCanvas();                                             // fit before the initial center + region load
+
   const actorIndex = world.getResource(ActorIndex);
   const avatarRef = { handle: actorIndex.get(objlist.party[0]) };
   const posStore = world.store(Position);
@@ -258,6 +281,19 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   window.__U6.renderer = renderer;
   window.__U6.camera = camera;
   window.__U6.avatarRef = avatarRef;
+
+  // Keep the buffer fitted as the window (or panel reflow) changes the map cell's size;
+  // recenter on the avatar so the view grows/shrinks symmetrically around the player. The
+  // rAF render loop redraws next frame and the streaming system loads newly-revealed regions.
+  const mapRegion = document.getElementById('map-region');
+  if (mapRegion && typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => {
+      if (!fitCanvas()) return;
+      const ai = avatarRef.handle !== undefined ? world.resolve(avatarRef.handle) : -1;
+      if (ai !== -1) centerOn(posStore.x[ai], posStore.y[ai]);
+    });
+    ro.observe(mapRegion);
+  }
 
   // Demand-load the OBJBLK regions overlapping the initial viewport, then the
   // StreamingSystem keeps loading regions as the camera pans into them.

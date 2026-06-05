@@ -14,7 +14,8 @@
 //
 // I-9h walk-near / teleport-far gate (source's C_1E0F_464A order): each turn, an
 // AI_FINDPATH NPC first tries the off-area teleport (tryTeleportToSlot) — which fires
-// only when the NPC is far enough from the avatar that the player can't see it. Far
+// only when the NPC is far enough from the VIEW CENTER (camera) that the player can't
+// see it (the clone drag-pans, so visibility tracks the camera, not the avatar). Far
 // NPCs teleport straight to their post (no path build); near NPCs fall through to the
 // pathfinder and walk visibly. The teleport is capped per turn (source's D_17A5 = 3).
 // A genuinely UNREACHABLE in-window slot (terrain/objects wall the NPC off) falls back
@@ -24,6 +25,8 @@
 import { AIMode, Position, Destination } from '../components/components.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
 import { Paths } from '../resources/paths.js';
+import { Camera } from '../resources/camera.js';
+import { Viewport } from '../resources/viewport.js';
 import { findPath } from './pathfinding.js';
 import { doOnPath, atDestination, tryTeleportToSlot } from './npc_path.js';
 import * as AI from './ai_modes.js';
@@ -50,13 +53,25 @@ export function installNpcTickSystem(world, { avatarRef } = {}) {
     const paths = world.getResource(Paths);
     let active = 0, finding = 0, walking = 0, teleported = 0, snapped = 0, blocked = 0, arrived = 0;
 
-    // Avatar position for the distance gate, resolved once per turn. Undefined -> gate off.
-    let avatarX, avatarY;
-    if (avatarRef && avatarRef.handle !== undefined) {
+    // View center for the I-9h visibility gate, resolved once per turn. The gate suppresses
+    // teleport for anything the player CAN SEE — and what's visible is the VIEWPORT (centered
+    // on the CAMERA), not the avatar. They coincide while the camera follows the avatar, but
+    // the clone's drag-to-pan (a modern-UX feature the source lacks) can move the view off the
+    // avatar, so the gate must track the camera to stay correct while panned. Falls back to the
+    // avatar position when there's no camera/viewport (the unit tests). Undefined -> gate off.
+    let viewX, viewY;
+    const cam = world.getResource(Camera);
+    const vp = world.getResource(Viewport);
+    if (cam && vp) {
+      // camera world-pixel origin -> top-left tile; + half the visible extent = center tile
+      // (16 = tile size px, matches renderer.tileSize). Wrapped onto the toroidal 1024 axis.
+      viewX = (Math.floor(cam.worldX / 16) + (vp.cols >> 1)) & 0x3ff;
+      viewY = (Math.floor(cam.worldY / 16) + (vp.rows >> 1)) & 0x3ff;
+    } else if (avatarRef && avatarRef.handle !== undefined) {
       const ai = world.resolve(avatarRef.handle);
-      if (ai !== -1) { avatarX = pos.x[ai]; avatarY = pos.y[ai]; }
+      if (ai !== -1) { viewX = pos.x[ai]; viewY = pos.y[ai]; }
     }
-    const gateOn = avatarX !== undefined;
+    const gateOn = viewX !== undefined;
 
     for (const i of world.query(AIMode)) {
       const mode = am.mode[i];
@@ -84,11 +99,11 @@ export function installNpcTickSystem(world, { avatarRef } = {}) {
         finding++;
         const tx = dest.x[i], ty = dest.y[i];   // tz is read inside tryTeleportToSlot
         // I-9h: off-area teleport first (source's C_1E0F_464A order). Fires only when the
-        // NPC is far from the avatar (off-screen) and under the per-turn cap; tryTeleportToSlot
-        // settles the worktype itself. Near NPCs are suppressed by its distance guard and fall
-        // through to the pathfinder below.
+        // NPC is far from the view center (off-screen) and under the per-turn cap;
+        // tryTeleportToSlot settles the worktype itself. Near NPCs are suppressed by its
+        // distance guard and fall through to the pathfinder below.
         if (gateOn && teleported < TELEPORT_CAP &&
-            tryTeleportToSlot(world, handle, avatarX, avatarY)) { teleported++; continue; }
+            tryTeleportToSlot(world, handle, viewX, viewY)) { teleported++; continue; }
         // Window centered on the NPC -> a per-NPC 40x40 work area. findPath walks an
         // in-window goal directly, or edge-seeks toward an off-window goal (then the
         // NPC re-plans at the edge). null = the goal is unreachable from here.
@@ -97,7 +112,7 @@ export function installNpcTickSystem(world, { avatarRef } = {}) {
           // Walled off from the goal in-window -> forced teleport onto the slot (allowVisible:
           // the I-5 unreachable fallback, regardless of distance). On the slot -> worktype
           // applied; if even the slot cell is blocked, give up until the next hour.
-          if (tryTeleportToSlot(world, handle, avatarX, avatarY, true)) snapped++;
+          if (tryTeleportToSlot(world, handle, viewX, viewY, true)) snapped++;
           else am.mode[i] = AI.AI_SCHEDULE;
         } else if (path.length === 0) {
           atDestination(world, handle); arrived++;   // already on the slot -> set the worktype

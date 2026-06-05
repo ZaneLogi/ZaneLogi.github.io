@@ -28,6 +28,41 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-05 — Render-to-fit viewport (the shell fills the window)
+
+A layout pass before starting I-11, prompted by Zane: the fixed ~1312×800 shell overflowed
+his screen, so he had to pan the page to reach the panels.
+
+- **Checked the legacy `ultima6/` port first.** Its `map_viewer.html` is a full-bleed
+  `100vw×100vh` canvas with draggable floating tool windows (the "Dynamic Dock" the clone
+  deferred at I-10a). More useful: `map_viewer.js`'s `resizeCanvas()` chose **render-to-fit**
+  (`mapW = ceil(canvas.width/tileSize)`) AND pinned `const dpr = 1`, with the
+  `devicePixelRatio` recipe staged-but-commented. We followed both choices.
+- **Decisions (Zane):** render-to-fit over scale-to-fit; Design-1 buffer=CSS / dpr=1 (a
+  HiDPI dpr pass is the named follow-up). The dpr=1 story: honoring dpr in a
+  variable-viewport tile renderer would double the tile count and thread a dpr-scaled tile
+  size through every pixel/mouse conversion — not worth it for nearest-neighbor pixel art,
+  which stays clean on integer-dpr displays via `image-rendering: pixelated`.
+- **Surprise: nearly free.** The render path was already viewport-driven —
+  `render_system.js` / `world_render_system.js` recompute cols/rows from `canvas.width/height`
+  each frame; only the fixed canvas buffer + the rigid CSS frame were "fixed."
+- **The one real coupling — the teleport visibility guard.** Two parts followed the
+  viewport: (1) the **radius** — hardcoded `TELEPORT_NEAR_RADIUS = 40` (its own comment said
+  "revisit if the canvas size changes") moved onto the new `Viewport` resource (`nearRadius`,
+  viewport-derived) so visible NPCs never pop on a big window. (2) the **center** — Zane's
+  follow-up: it was the avatar, but the clone **drag-pans** (source can't), so a visible NPC
+  in a panned-to region could pop. Re-centered the guard on the **camera's center tile**
+  (`npc_tick_system.js`); tests fall back to the avatar (no camera registered). The per-NPC
+  40×40 *pathfinding* window stays fixed (AI work-area, not a visibility bound).
+- **Verified** live on real U6 data via preview-eval: boots clean (no console errors),
+  `bufferMatchesCss` at every size, resize grows/shrinks the buffer (666×657 ↔ 1126×589),
+  no page panning at 742 / 980 / 1400 / 1440.
+- **Files:** new `resources/viewport.js`; `main.js` (fit + ResizeObserver); `index.html`
+  (fluid grid); `systems/npc_path.js` (radius from `Viewport`).
+- **Next**: I-11 (talk), or the deferred post-I-9 deviation audit.
+
+---
+
 ## 2026-06-05 — I-10j: inventory window + DROP migration + give (auto-run)
 
 - **Mode:** an auto-run session (Zane: auto-commit save-points, no squash, no push, terse

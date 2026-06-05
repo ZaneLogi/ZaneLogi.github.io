@@ -78,8 +78,20 @@ window** (`view/inventory_picker.js` `openInventoryWindow`) opened by top-row di
 keys (`1`..`PartySize`, dynamic; numpad stays avatar diagonals) + member-switch with
 unwind; **DROP migrated** onto the window's `D` (old `D` map-hotkey + `openInventoryPicker`
 retired); **give** (MOVE Mode 2) = window `G` → `armGive` → recipient member (digit or
-click) → `moveToInventory` (in-window give key is `G` — "give" — not `M`). **a–h PUSHED** (origin @ `c8573e9`); **i + j committed
-LOCAL-ONLY, NOT pushed** (I-10j = 5 save-point commits from `6a60ef1`, auto-run 2026-06-05).
+click) → `moveToInventory` (in-window give key is `G` — "give" — not `M`). **All a–j PUSHED to `origin/ultima6_clone`** —
+a–h at `c8573e9`, i at `2903a8f`, j at `260e61e` (squashed from 5 auto-run save-points, 2026-06-05).
+
+**Render-to-fit viewport (UI refinement, 2026-06-05 — local, uncommitted).** The game shell
+now FILLS the browser window instead of a fixed ~1312×800 frame: the canvas drawing buffer
+tracks its CSS cell size (`fitCanvas()` + a `ResizeObserver` in `main.js`), so a bigger
+window shows more of Britain and a smaller one fewer tiles, always 1:1 crisp — no more page
+panning. `dpr` is pinned to 1 (a HiDPI dpr pass is the named follow-up), matching legacy
+`map_viewer.js`'s deliberate choice for a variable-viewport tile renderer. Only the CSS
+shell (`index.html` → fluid grid), the buffer sizing, and the I-9h teleport radius needed
+changes — the render systems already derive their visible cols/rows from `canvas.width/
+height`. New `resources/viewport.js` (`Viewport` resource: live `cols`/`rows` + `nearRadius`).
+Detail in `docs/progress.md §"Render-to-fit viewport"`.
+
 **Next = post-I-9 deviation audit (deferred to after I-10), or further verbs / TALK.**
 Per-sub-step detail in
 `docs/progress.md §"I-10x — landed"`; the locked plan in §"I-10 scope". The
@@ -94,7 +106,7 @@ the source-derived findings + kept deviations are in `docs/research_npc_ai.md
 §"Clone port notes (I-9)"`. The ECS runtime-ground spec is
 `docs/architecture_ecs.md`, implemented in `ecs/world.js` since I-1. Code layout:
 `ecs/` (runtime core), `assets/` (format decoders), `resources/` (TileRegistry,
-MapLevel, Camera, Party, Paths, Schedules, …), `systems/` (render, camera,
+MapLevel, Camera, Viewport, Party, Paths, Schedules, …), `systems/` (render, camera,
 world-data, schedule, passability, avatar move, move-followers, humanoid-anim,
 pathfinding, npc_path, npc_tick, ai_modes, **cell_pick, command_dispatch,
 use_handlers, use_drawbridge** (I-10), …), `resources/` also has **Commands**
@@ -120,9 +132,17 @@ I-10e (2026-06-04):** the drawbridge is now modeled + crossable, so with the
 bridge lowered #11/#12 WALK to the dining room (verified live); they teleport
 only when it's raised (faithful — NPC AI has no USE action, so the player lowers
 it via the crank).
-**I-9h:** the off-area teleport's near-radius is Chebyshev-**40** (source's ±5 11×11
-viewport box widened for our 64×40 canvas — don't shrink it to ±5 or on-screen NPCs
-pop); the 3/turn teleport cap is kept source-faithful but is a throttle invisible
+**I-9h:** the off-area teleport's near-radius is **derived from the live viewport**
+(`Viewport.nearRadius` = half the visible extent + an 8-tile margin; ≈40 at the old 64×40
+canvas, smaller on a small window, larger on a big one) — render-to-fit (2026-06-05) made
+the visible extent vary, so a fixed value would pop on-screen NPCs on a large window. It
+must always exceed the on-screen half-extent; **don't replace it with a small fixed
+constant**. The old `TELEPORT_NEAR_RADIUS = 40` survives only as the unit-test fallback
+(the tests register no `Viewport`). The guard's **center is the CAMERA's center tile, not
+the avatar's** (`npc_tick_system.js` computes `floor(cam.worldX/16)+cols/2`): visibility
+tracks the camera because the clone **drag-pans** (source can't, so it gates on the avatar).
+They coincide while the camera follows; centering on the camera stops a visible NPC popping
+in a panned-to region. Tests fall back to the avatar position. The 3/turn teleport cap is kept source-faithful but is a throttle invisible
 behind the visibility guard (drop-candidate, not load-bearing); source's pathfind cap
 (`D_17A7`) is intentionally not ported. The unreachable-fallback snap is unified into
 `tryTeleportToSlot(..., allowVisible=true)` — there is no separate `snapToSlot`.

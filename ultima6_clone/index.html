@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <title>Ultima VI — engine reimplementation (bring your own data)</title>
 <style>
-  body { font: 14px/1.6 monospace; background: #14110c; color: #d8cdb4; margin: 0; padding: 20px; }
+  html, body { height: 100%; }
+  /* Full-height flex column: the header + checklist take their natural height, #app fills
+     the rest of the viewport. overflow:hidden so the page itself never scrolls/pans —
+     the map is render-to-fit and inner panels (messages/log) scroll on their own. */
+  body { font: 14px/1.6 monospace; background: #14110c; color: #d8cdb4; margin: 0; padding: 12px;
+         box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
   h1 { font-size: 16px; color: #e8c060; margin: 0 0 4px; }
   .sub { color: #8a7f66; margin: 0 0 16px; }
 
@@ -24,31 +29,41 @@
   #checklist[open] > summary { margin-bottom: 8px; }
   #checklist-body { margin: 0; white-space: pre; color: #d8cdb4; font: 14px monospace; }
 
-  /* ---- I-10a fixed game shell ----
-     A CSS-grid frame with three named regions: the map (canvas, unchanged size),
-     the message channel below it, and a right panel that spans both rows. Hidden
-     until load() reveals it. The canvas keeps its 1024x640 render target — the
-     panels sit around it (no render/camera-math change in a UI step). */
+  /* ---- game shell — render-to-fit CSS grid ----
+     Three named regions: the map (canvas), the message channel below it, and a right
+     panel spanning both rows. Hidden until load() reveals it. The grid FILLS the
+     viewport: the map column/row flex (minmax(0,1fr)) so the canvas fills the space
+     left by the fixed-width panel + message band, and main.js sizes the canvas drawing
+     buffer to match (render-to-fit). No fixed px frame -> nothing to pan to. */
   #app {
     display: none;                 /* load() sets this to 'grid' */
-    grid-template-columns: 1024px 280px;
-    grid-template-rows: 640px auto;
+    flex: 1 1 auto;                /* fill the viewport height left under the header */
+    min-height: 0;                 /* allow the grid to shrink below its content size */
+    grid-template-columns: minmax(0, 1fr) 280px;
+    grid-template-rows: minmax(0, 1fr) minmax(90px, 160px);
     grid-template-areas:
       "map  right"
       "msg  right";
     gap: 8px;
-    margin-top: 12px;
-    width: max-content;            /* frame hugs its content rather than the page */
+    margin-top: 8px;
   }
-  #map-region     { grid-area: map; }
-  #message-region { grid-area: msg; }
-  #right-panel    { grid-area: right; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  #map-region     { grid-area: map; min-width: 0; min-height: 0; }
+  #message-region { grid-area: msg; min-height: 0; }
+  #right-panel    { grid-area: right; display: flex; flex-direction: column; gap: 8px; min-width: 0; overflow: hidden; }
 
-  #screen { display: block; border: 1px solid #2a2316; image-rendering: pixelated; touch-action: none; }
+  /* Canvas fills its grid cell; main.js sets the drawing buffer = this CSS size (dpr=1).
+     border-box so the 1px border doesn't push the element past the cell. */
+  #screen { display: block; width: 100%; height: 100%; box-sizing: border-box;
+            border: 1px solid #2a2316; image-rendering: pixelated; touch-action: none; }
+
+  /* The two-column fluid grid handles narrow windows on its own — the map column
+     (minmax(0,1fr)) shrinks while the 280px panel holds, so the page never pans even
+     when the window is small. (A dedicated mobile/stacked reflow is deferred; this is a
+     desktop dev tool.) */
 
   /* message channel — the gameplay scroll (CON_printf analog). Bottom strip. */
   #messages {
-    height: 140px; overflow-y: auto;
+    height: 100%; box-sizing: border-box; overflow-y: auto;
     background: #0e0b07; border: 1px solid #2a2316; border-radius: 6px;
     padding: 8px 12px; font: 13px/1.5 monospace; color: #d8cdb4;
   }

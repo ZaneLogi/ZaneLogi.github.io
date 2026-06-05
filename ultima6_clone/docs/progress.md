@@ -53,11 +53,18 @@ give → recipient member via a digit or a click; the old `D` map-hotkey +
 `openInventoryPicker` retired). The front-end also has **left-click confirm** (pan
 suppressed while a verb is armed) + the **windowed quality search** refinement
 (`findObjectsByTypeQuality` `near` box, matching source's active-area bound). **Commit
-state:** a–h are on `origin/ultima6_clone` (`c8573e9`); i (`2903a8f`) + j (`89375a5`,
-squashed) are local-only, not pushed. See the "I-10x — landed" sections; the locked plan
+state:** a–j are all on `origin/ultima6_clone` — a–h at `c8573e9`, i at `2903a8f`, j at
+`260e61e` (squashed from 5 save-points). See the "I-10x — landed" sections; the locked plan
 + USE-case discipline in "I-10 scope". **Next:** the **post-I-9 deviation audit**
 (deferred to after I-10) or **I-11 (talk)** — DROP's `pendingDropItem` two-stage seam is
 reusable for TALK.
+
+**Render-to-fit viewport (UI refinement, 2026-06-05 — local, uncommitted).** The game
+shell now FILLS the browser window instead of the old fixed ~1312×800 frame: the canvas
+drawing buffer tracks its CSS cell size, so a bigger window shows more of Britain and a
+smaller one fewer tiles, always 1:1 crisp — no more page panning to reach the panels. This
+was the pre-I-11 layout pass (settled with Zane 2026-06-05). See §"Render-to-fit viewport"
+for the full write-up.
 
 **Live-validated end-to-end (Zane, 2026-06-04):** with the drawbridge lowered
 via the crank, scheduled NPCs **#11 and #12 walk into the castle to the dining
@@ -1541,11 +1548,9 @@ stats, probe, boot log); no console errors. Render-flush is next-frame
 (push is synchronous, DOM updates on the following rAF) — expected.
 
 **Deferred (Zane 2026-06-03):**
-- **Fit-to-window** — the shell is a fixed 1312px frame, so it
-  horizontal-scrolls on viewports narrower than ~1352px. *Intentional
-  for now*; a fit-to-width scale or responsive-map pass is a later
-  adjustment. Don't "fix" the overflow unprompted — it's a known,
-  accepted dev-build trade-off.
+- **Fit-to-window** — RESOLVED 2026-06-05 by the render-to-fit refinement: the canvas
+  drawing buffer now tracks its CSS cell size and the shell fills the window, so the page
+  no longer pans. Full write-up in §"Render-to-fit viewport".
 - **Modern skin pass** — clean-neutral palette/structure now; modern
   typography/spacing/visual language is a later CSS-only pass on the
   stable shell.
@@ -2042,7 +2047,7 @@ real `cmd.dispatch` stage-1 + an `Arrow*` keydown stage-2, world state restored 
 
 ### I-10j — landed (2026-06-05): verb-aware inventory window, DROP migration, MOVE Mode 2 (give)
 
-Landed 2026-06-05 (auto-run save-points, steps 1-4; later squashed to one commit `89375a5`). Plan settled with Zane 2026-06-04. **Two parts sharing one new surface:
+Landed 2026-06-05 (auto-run save-points, steps 1-4; squashed to one commit `260e61e`). Plan settled with Zane 2026-06-04. **Two parts sharing one new surface:
 migrate DROP onto a verb-aware inventory window FIRST, then add give (`M`).** Doing DROP
 first validates the window with a verb already built; give is then one extra key. Source
 for give: `C_27A1_1E8B`'s `else` branch (`seg_27a1.c:1044-1141`).
@@ -2208,3 +2213,84 @@ These were the pre-impl reads done before their sub-steps; all landed.
 - `TurnClock` suspend + `uiStack.isEmpty()` gating → centralized in the
   dispatcher instead of repeated per handler.
 - `#probe-cell` (view/dev_probe.js) → the targeting cursor tag (#3).
+
+---
+
+## Render-to-fit viewport — UI refinement (2026-06-05)
+
+A pre-I-11 layout pass. The game shell was a rigid pixel frame (1024×640 map + 280 panel
++ 8 gap ≈ 1312px wide, ~800px tall), so on a normal laptop it overflowed **both** axes and
+the user had to pan the page to reach the panels. Now the shell **fills the viewport** and
+the map is **render-to-fit**: the canvas drawing buffer tracks its on-screen cell, so a
+bigger window shows more of Britain and a smaller one fewer tiles — always 1:1 crisp, never
+panning.
+
+**Decision trail (with Zane 2026-06-05):**
+- **Render-to-fit (variable tiles), not scale-to-fit (letterboxed shrink).** The map
+  shows more/fewer tiles by window size at native resolution — the legacy `ultima6/
+  map_viewer.js` made the same choice (`mapW = ceil(canvas.width / tileSize)`).
+- **Design 1: buffer = CSS size, `dpr` pinned to 1.** The drawing buffer equals the CSS
+  layout size (no devicePixelRatio scaling), so every existing render/camera/mouse
+  calculation stays valid with zero unit-juggling. This matches legacy `map_viewer.js`,
+  which staged the `devicePixelRatio` recipe then deliberately hardcoded `dpr = 1` — for a
+  variable-viewport tile renderer, honoring dpr would double the tile count and thread a
+  dpr-scaled tile size through all the pixel math. **A HiDPI dpr pass is the named
+  follow-up** (only worth it if tiles look soft on a fractional-scaling display; integer
+  2× Retina is already clean via `image-rendering: pixelated`).
+
+**Why it was small:** the render pipeline was **already viewport-size-driven** —
+`render_system.js` and `world_render_system.js` recompute their visible `cols`/`rows` from
+`canvas.width/height` every frame, camera centering already divides by `canvas.width/height`,
+and `renderer.resize()` already set `gl.viewport` + `u_resolution`. Nothing ever changed the
+canvas's fixed 1024×640 buffer — that was the whole "fixed" feel.
+
+**What landed (4 files):**
+- **`resources/viewport.js`** (new) — `Viewport` ECS resource: live `cols`/`rows` + a
+  `nearRadius` getter (`ceil(max(cols,rows)/2) + 8`, = 40 at the old 64×40 view).
+- **`main.js`** — registers `Viewport`; `fitCanvas()` sets `canvas.width/height` to the
+  cell's CSS size + calls `renderer.resize()` + updates `viewport.cols/rows`; a
+  `ResizeObserver` on `#map-region` re-fits and recenters on the avatar as the window
+  changes. Initial `fitCanvas()` runs before the first region load so streaming covers the
+  real viewport.
+- **`index.html`** — the shell is now a fluid full-viewport grid (`minmax(0,1fr)` map
+  column/row, 280px panel, message band); body is a flex column with `overflow:hidden` so
+  the page never pans; `#screen` fills its cell (`width/height:100%`, `box-sizing:border-box`).
+- **`systems/npc_path.js`** — the I-9h teleport guard reads `Viewport.nearRadius` (the
+  visible extent now VARIES, so a fixed 40 would pop on-screen NPCs on a big window). The
+  `TELEPORT_NEAR_RADIUS = 40` constant survives only as the unit-test fallback (the tests
+  never register a `Viewport`).
+
+**The one game-logic coupling — the teleport radius AND its center.** The I-9h gate
+suppresses the off-area teleport when an NPC (or its slot) is within Chebyshev-`nearRadius`
+of the **view center**, so visible NPCs always walk. Two things had to follow the viewport:
+- **The radius** must exceed the on-screen half-extent, and with a variable viewport must
+  track the live size. `Viewport.nearRadius` reproduces the old 40 at 64×40 and scales
+  (smaller on a small window, larger on a big one).
+- **The center** is the **camera's center tile, not the avatar's.** They coincide while the
+  camera follows the avatar, but the clone's **drag-to-pan** (a modern-UX feature source
+  lacks — source always centers the view on the controlled member, so it could safely gate
+  on the avatar) can move the view off the avatar; centering on the camera keeps the gate
+  matching what's actually on screen, so a visible NPC in a panned-to region can't pop.
+  `npc_tick_system.js` computes the camera center (`floor(cam.worldX/16) + cols/2`, wrapped
+  on the toroidal axis) and passes it to `tryTeleportToSlot`; the unit tests register no
+  camera, so they fall back to the avatar position (preserving their setup + the radius-40
+  default).
+
+The per-NPC 40×40 *pathfinding* window in `pathfinding.js` is an AI work-area, not a
+visibility bound, so it was intentionally left fixed — NPCs outside the plan window
+edge-seek + re-plan and still walk visibly.
+
+**Verified live (preview-eval on real U6 data, 2026-06-05):** full game boots with no
+console errors through boot + multiple resizes; `canvas.width/height` == CSS size at every
+size (`bufferMatchesCss`); resizing 980px→1440px grew the buffer 666×657 (42×42 tiles) →
+1126×589 (71×37); `nearRadius` tracked it (29 → ~42); `document.documentElement.scrollWidth/
+Height` never exceeded the window (no page panning) at 742 / 980 / 1400 / 1440 widths. The
+gate's **view center** tracked the camera: (307,352) = the avatar's start cell while
+following, and moved to (347,352) after drag-panning 40 tiles east (the avatar stays at
+307). **121/121 unit tests pass** (the avatar fallback keeps the camera-less test setup
+green).
+
+**Deferred:** the HiDPI `dpr` pass (above); a dedicated mobile/stacked reflow (the
+two-column fluid grid handles narrow desktop widths on its own — map column shrinks, panel
+holds, no panning; a first attempt at a `max-width:900px` stacked media query starved the
+map and was dropped); the modern skin pass (still deferred from I-10a).

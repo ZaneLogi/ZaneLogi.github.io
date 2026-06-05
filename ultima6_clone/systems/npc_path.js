@@ -13,6 +13,7 @@ import { Position, Renderable, ObjType, AIMode, Destination } from '../component
 import { SpatialIndex } from '../resources/spatial_index.js';
 import { TileRegistry } from '../resources/tile_registry.js';
 import { Paths } from '../resources/paths.js';
+import { Viewport } from '../resources/viewport.js';
 import { canStandAt } from './passability.js';
 import { walkStep, isHumanoid } from './humanoid_anim.js';
 import { DIR_DX, DIR_DY } from './avatar_move_system.js';
@@ -111,12 +112,13 @@ function chebyshev(ax, ay, bx, by) {
 
 // Off-screen teleport "near" radius (I-9h). Source's C_1E0F_291C suppresses the teleport
 // when the NPC OR its slot is inside the 11x11 gameplay viewport (MapX/MapY +/-5). Our
-// canvas shows far more than 11x11 (1024x640 = 64x40 cells, avatar-centered -> ~32x20
-// visible half-extents), so a +/-5 box would pop NPCs the player can plainly see. We widen
-// the box to a Chebyshev radius that comfortably exceeds the visible half-width (32) plus a
-// scroll-in margin. Over-suppressing (a few far-but-not-that-far NPCs walk instead of
-// teleporting) is harmless; under-suppressing would let a visible NPC pop. Same wider-canvas
-// adaptation as the per-NPC pathfinding window. Revisit if the canvas size changes.
+// canvas shows far more than 11x11, so a +/-5 box would pop NPCs the player can plainly see;
+// we widen it to a Chebyshev radius exceeding the visible half-extent plus a scroll-in
+// margin. Since render-to-fit (resources/viewport.js) makes the visible extent VARY with the
+// window, the live radius comes from the Viewport resource (`nearRadius`, viewport-derived).
+// This constant is the fallback when no Viewport is registered (the unit tests) and equals
+// the value the old fixed 64x40 canvas used. Over-suppressing (a far-but-not-that-far NPC
+// walks instead of teleporting) is harmless; under-suppressing would let a visible NPC pop.
 const TELEPORT_NEAR_RADIUS = 40;
 
 // __off-area teleport (C_1E0F_291C, seg_1E0F.c:1181-1211) — place an NPC straight onto its
@@ -126,26 +128,32 @@ const TELEPORT_NEAR_RADIUS = 40;
 // arrive."
 //
 // Visibility guard (seg_1E0F.c:1188-1202): suppressed when the NPC OR the slot is within
-// TELEPORT_NEAR_RADIUS of the avatar, so on-screen NPCs always walk (visible, animated).
-// `allowVisible` is source's AllowNPCTeleport flag (set during rest / time-jumps, and by our
-// unreachable-fallback) — a forced teleport that ignores the guard.
+// nearRadius of the VIEW CENTER (`viewX,viewY`, passed by the caller = the camera's center
+// tile), so on-screen NPCs always walk (visible, animated). The caller centers on the camera
+// rather than the avatar because the clone can drag-pan the view off the avatar (a modern-UX
+// feature source lacks); the two coincide until the player pans. `allowVisible` is source's
+// AllowNPCTeleport flag (set during rest / time-jumps, and by our unreachable-fallback) — a
+// forced teleport that ignores the guard.
 //
 // Returns true if the NPC was placed on (or already sat on) its slot and settled, false if
 // the guard suppressed it (caller should pathfind) or the slot cell is blocked (caller gives
 // up till the next hour). Mirrors source minus the SubMov move-point spend (deferred) and the
 // D_17A5 per-turn cap (the caller owns that counter).
-export function tryTeleportToSlot(world, handle, avatarX, avatarY, allowVisible = false) {
+export function tryTeleportToSlot(world, handle, viewX, viewY, allowVisible = false) {
   const i = world.resolve(handle);
   if (i === -1) return false;
   const pos = world.store(Position);
   const dest = world.store(Destination);
   const tx = dest.x[i], ty = dest.y[i], tz = dest.z[i];
 
-  // Guard: don't teleport anything the player can see (NPC or its destination near the
-  // avatar). Source checks the NPC first, then the slot — both must be far.
+  // Guard: don't teleport anything the player can see (NPC or its destination within
+  // nearRadius of the view center). Source checks the NPC first, then the slot — both must
+  // be far. The radius tracks the live viewport (render-to-fit), falling back to the constant
+  // for tests.
+  const nearRadius = world.getResource(Viewport)?.nearRadius ?? TELEPORT_NEAR_RADIUS;
   if (!allowVisible &&
-      (chebyshev(pos.x[i], pos.y[i], avatarX, avatarY) <= TELEPORT_NEAR_RADIUS ||
-       chebyshev(tx, ty, avatarX, avatarY) <= TELEPORT_NEAR_RADIUS)) return false;
+      (chebyshev(pos.x[i], pos.y[i], viewX, viewY) <= nearRadius ||
+       chebyshev(tx, ty, viewX, viewY) <= nearRadius)) return false;
 
   // Already on the slot: no move (avoid needless chain churn), but still settle the worktype.
   if (pos.x[i] === tx && pos.y[i] === ty && pos.z[i] === tz) { atDestination(world, handle); return true; }
