@@ -21,7 +21,7 @@
 import { Commands } from '../resources/commands.js';
 import { Position, ObjType, Actor, PartyMember, AIMode, Alignment } from '../components/components.js';
 import { displayName } from '../view/inspector.js';
-import { openDialog } from '../view/dialog_window.js';
+import { makeConversationHost } from './conversation/conversation_system.js';
 import { MapLevel } from '../resources/map_level.js';
 import { moveToInventory, dropToMap, moveMapObject } from '../world_loader.js';
 import { canStandAt } from './passability.js';
@@ -70,7 +70,7 @@ function canPushTo(world, handle, ox, oy, dir) {
   return canStandAt(world, bx, by, { actorId: handle });
 }
 
-export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellEl, avatarRef, reg, objlist, message, uiStack, portraits }) {
+export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellEl, avatarRef, reg, objlist, message, uiStack, portraits, scripts }) {
   const commands = world.getResource(Commands);
   const posStore = world.store(Position);
   const objStore = world.store(ObjType);
@@ -311,9 +311,13 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
   //     I-11 filter accepts (NPC / shrine OBJ_189 / statue OBJ_18D-18F) — the window is
   //     automatic through this one seam. I-13 wires the window's body to the conversation
   //     VM; the talk handler never changes again. ---
+  // I-13: the conversation host owns the VM + dialog driver. openConversation just
+  // hands it the (already-gated) target; "Funny, no response." (no script) is the
+  // host's call. The talk handler below never changes again.
+  const conversationHost = makeConversationHost(world, { reg, objlist, portraits, uiStack, message, scripts, avatarRef });
   function openConversation(target) {
     if (world.resolve(target) === -1) return;
-    openDialog(world, target, uiStack, { reg, objlist, portraits });
+    conversationHost.start(target);
   }
 
   // --- canTalk(npc) — TalkDriver's precondition gate (seg_1703.c:1022-1079), the arms with a

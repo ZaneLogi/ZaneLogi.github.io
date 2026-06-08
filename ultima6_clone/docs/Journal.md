@@ -28,6 +28,111 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-08 — root-caused the I-13 stray-`unknownOp` scripts → indexed-table read
+
+Followed up the three "stray unknownOp" NPCs (35/123/135) + the "non-terminating" NPC 183
+left as deferrals at I-13. Drove the **real** VM in-browser over the user's loaded
+`converse.a/.b` (dynamic-`import()` the unmodified modules, read raw bytes from IndexedDB)
+rather than guessing — captured the exact offending byte + the bytecode around it.
+
+- **Read**: `seg_1703.c:688` `C_1703_1494` (the address-follow routine) end-to-end +
+  its `parse_factor()` call at :696 + the string-skip / value-index split at :700-705;
+  `execute_op` default (:938 `"Unknown command."`) and `parse_statement`'s ignore of its
+  return; decoded the live tables at the `PRINTSTR`/`LET` ADDRESS sites for NPCs 35/123/135.
+- **Found**: the stray op is **our port gap**, not an original bug / debug cruft / faithful
+  skip. `C_1703_1494` is an **indexed string/value-table read** — `PRINTSTR`/`LET ADDRESS`
+  takes a table offset *plus a computed index factor* and prints/assigns the si-th packed
+  entry (random `RND(0,2)` groan for wounded Artegal; the dog Kador's `RND(0,3)` bark shared
+  by 3 keyword responses; Ephemerides' state-driven `LET $0 = instruments[idx]`). Our
+  `_followAddress` stubbed the factor parse → always entry #0, and the unparsed factor bytes
+  (`d3 BYTE …`) leaked to statement level → `unknownOp`. **NPC 183** was a coverage-harness
+  artifact: its `bye`→LEAVE is gated by `IF TST(self,bit)`; a driver that hardwires flag
+  reads to 0 loops forever, but with `setFlag`→`TST` feedback (what the wired host does) it
+  exits. Also re-derived the **code-vs-data** property: scripts have no markers — a byte is
+  code or data purely by how the pc reaches it (the `0xb7` "STRSEARCH" I first saw in 183 was
+  its id byte), so you can't linearly disassemble and reachability bounds any coverage scan.
+- **Fixed**: ported `C_1703_1494` into `_followAddress` (now a generator; parses the index
+  factor, string-mode skips `si` NUL strings, value-mode offsets `si<<1`; `OP_CALL` = plain
+  pointer). Re-verified live: **200/200 scripts clean + terminating** (was 197/199); index
+  honored (`rng→lo`=groan #0, `rng→hi`=#2). Added an indexed-table regression test (27/27).
+- **Docs**: `research_conversation_vm.md` new §"Indexed string / value tables" + §"Code and
+  data share one address space"; corrected the `OP_PRINTSTR`/`OP_LET` dispatcher rows;
+  `progress.md` banner (→200/200) + I-13 scope "Indexed string/value tables — DONE".
+- **Next**: squash/commit on review; then I-14 (status panel). The value-mode `LET`-into-
+  script-data lvalue (self-modifying write) is implemented in `_followAddress` but its caller
+  (`_let` ADDRESS-target) still discards the write — fold in if a script needs it.
+
+## 2026-06-08 — I-13 implemented (conversation VM, a–g) — talk works end-to-end
+
+Built I-13 in one auto-mode pass as save-point commits (pre-step + a–g; not yet
+squashed, left for review). Per-sub-step detail + deferrals live in `progress.md
+§"I-13 scope"`; this is the discovery note.
+
+- **Read**: re-confirmed `seg_1703.c` (parse_statement/parse_factor/C_1703_1D01/
+  TalkDriver) + `seg_2FC1.c:783` LoadConversation (.a/.b split, LZW-or-raw block) +
+  `seg_16E1.c:14-37` TALK_initTalk (the var seed) against the legacy `script.js`;
+  `world_loader.js` mutation primitives (addMapObject/moveToInventory/deleteMapObject).
+- **Found**: the standalone-VM design held up cleanly — the generator + `yield*`
+  through `evaluate` makes mid-expression query suspension free and **deletes** the
+  legacy port's `current--`/`checkInputNumber` resume hack. The legacy keyword matcher
+  (`includes()`) is genuinely wrong vs source's per-word-prefix + `?` + `*`; ported the
+  source semantics. **A control-flow bug surfaced + fixed**: my `statement()` PEEKS the
+  terminator (doesn't consume), so source's trailing `pc--` over-rewinds → infinite
+  loop; removed it (the unit test caught this). Real-data coverage is the headline: all
+  200 NPC scripts decode + run; **197 fully clean, 199/200 terminate, 0 crashes**. The
+  3 stray-`unknownOp` scripts (35/123/135) are a factor leaking to statement level
+  (convo still completes) — needs per-script disasm, deferred.
+- **Docs**: `progress.md` §"I-13 scope" (architecture, a–g, kept decisions, deferrals)
+  + banner/ledger; this entry; CLAUDE.md stage pointer + code-layout; DOCUMENTATION_INDEX
+  banner. Design docs (research_i13 / research_conversation_vm / U6_對話系統) landed
+  2026-06-07.
+- **Open**: party `join`/`leave` ECS integration (highest-value follow-up — stubbed
+  with faithful codes, no membership change); trade UI / selectObject / resurrect /
+  moveObj / transferObj / rest-time-skip (stub-when-deferred); the 3 unknownOp scripts
+  + NPC 183 non-termination (likely a shop menu-loop). `$N`-literal-vs-`OP_VARSTR`
+  detection holds (inline literals work against real data).
+- **Next**: squash the I-13 save-points → `impl I-13` + push, on Zane's review. Then
+  I-14 (status panel) — or party-recruitment (`join`/`leave`) if prioritized.
+
+## 2026-06-07 — I-13 conversation-VM design settled (standalone effect interpreter)
+
+Design session, no code. Started from a re-read of the legacy port's conversation
+VM, ended with the I-13 architecture locked and the full effect taxonomy proven
+complete.
+
+- **Read**: `../ultima6/script.js` (1307 lines — `ScriptInterpreter`: `run` =
+  statement loop, `evaluate` = `parse_factor`, `getString`/`skipCodeBlock`, plus a
+  `formatScript` disassembler), `../ultima6/u6opcode.js` (Nuvie-name opcode table),
+  `../ultima6/library.js` (lib32 reader), `../ultima6/map_viewer.js:625-726,982`
+  (Talk-button driver + `converse.a` load). Re-derived `LoadConversation`
+  (`seg_2FC1.c:783`) and `TALK_initTalk` (`seg_16E1.c:11`) to ground the file-split
+  and variable-seed claims.
+- **Found**: legacy port is a working but test-harness-grade VM — faithful skeleton
+  (`evaluate` operand order, `0xeb` self-ref, flag/attr ops, lib32+LZW load) but
+  keyword match is wrong (`includes()` substring vs source's per-word-prefix + `?` +
+  `*` catch-all), several opcodes stubbed/faked (`OWNS`/`WHOSGOT`/`WEIGHT`, party
+  cap 16 not 8, `LEAVE` drops no inventory), and `GETSTR`/`GETCHR` + many exec
+  opcodes missing. Confirmed `converse.a`=99 / `converse.b`=125, keyed by NPC num,
+  split at 0x63 — matches the corrected `U6_對話系統.md`. `GETHORSE` only *spawns* a
+  horse (`OBJ_1AF`); mounting is a separate USE-system action, not a conversation
+  effect.
+- **Docs**: created `research_i13_conversation_vm.md` (standalone-VM decision,
+  generator wire protocol, **complete effect taxonomy** — every `seg_1703.c` opcode
+  → VM-internal/output/input/query/sink/read-write, with `RND` as an injected
+  capability; VM-owned `$`/`#` expansion + host-seeded init; gates-as-host-pre-flight;
+  host-as-thin-translation + stub-when-deferred; legacy reuse fix-list; ECS
+  placement; I-13a–g sub-step plan). Updated `research_conversation_vm.md`
+  §"Implications for the rebuild" (the old "start with the status-enum" recommendation
+  superseded → generator+effects, with a pointer to the design doc). Index row added.
+  (Earlier same day: corrected `U6_對話系統.md` against source — dead/séance gate
+  polarity, `JoinParty`/`LeaveParty` gear, keyword `?`/tokenization, full var table.)
+- **Open**: inherits the verification items in `research_conversation_vm.md`
+  §"Open questions" (`FUNC 0xd1` drop, `PREFIX 0xf3` semantics, `AND`/`OR` boolean
+  vs bitwise, `__BC`/`__BD`, string `EQU`, `REST` time-skip UX). `$N`-literal-vs-
+  `OP_VARSTR` detection to confirm at I-13a.
+- **Next**: implementation — I-13a (VM skeleton as a generator, effect-stream
+  unit-tested) when Zane gives the go.
+
 ## 2026-06-05 — I-12 implemented (dialog window) + portrait pipeline
 
 Built the dialog window in one auto-mode pass after a research+verify pre-step. The

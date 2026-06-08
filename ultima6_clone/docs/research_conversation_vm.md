@@ -76,9 +76,15 @@ Each uncompressed entry is structured:
 ```
 
 `0xFF` (OP__FF), `0xF1` (OP_DESC), `0xF2` (OP_MAIN) are the section
-markers. `0xF3` (OP_PREFIX in the legacy port) sometimes substitutes
-for `0xF2` — purpose still unknown per the tech doc. `TalkDriver`
-reads through both markers in sequence (`seg_1703.c:1085-1101`):
+markers. `0xF3` (OP_PREFIX in the legacy port) substitutes for `0xF2` as
+the body marker in some scripts. A scan of all 200 shipped scripts: **170
+use `0xF2`, 30 use `0xF3`** — the `0xF3` set is all 9 shrines (Honesty …
+Singularity, NPCs 192–200) plus 21 ordinary NPCs (Xiao, Rob, Nomaan,
+Nicodemus, Rudyom, Dr. Cat, Mondain, …), so it is *not* shrine-exclusive.
+The VM treats `0xF2`/`0xF3` identically as "start of the converse body"
+and all 200 scripts run correctly, so no runtime difference is exercised;
+any latent semantic distinction is uncharacterized and non-blocking.
+`TalkDriver` reads through both markers in sequence (`seg_1703.c:1085-1101`):
 
 ```c
 si = 2;  // skip 0xFF + NPC_num
@@ -194,6 +200,160 @@ opcode in both `run()` and `evaluate()` (`script.js:205, 212, 251,
 264, 282, 289, 295, 301, 307, 434, 446, 453, 460, 473, 495, 533,
 542, 551, 559, 567, 577`). Functionally equivalent.
 
+### Indexed string / value tables — `C_1703_1494` (`seg_1703.c:688`)
+
+The single subtlest mechanism in the talk VM. `OP_PRINTSTR`, the string
+form of `OP_LET`, and the `OP_ADDRESS`-lvalue form of `OP_LET` do **not**
+take a bare string pointer — they take a **table offset plus a computed
+index** and select the *index-th* entry. This is how an NPC says one of
+several random lines, or names a state-dependent string, with no
+engine-side data structure: the table is packed inline in the same script
+buffer, addressed by absolute offset.
+
+After the opcode's `OP_ADDRESS` tag the bytecode is one of two forms:
+
+```
+OP_ADDRESS <u32 table-offset> OP_CALL            ; plain pointer: entry #0, no index
+OP_ADDRESS <u32 table-offset> <index-factor> a7  ; INDEXED: parse_factor → si, pick entry si
+```
+
+`C_1703_1494(stringMode)` resolves it:
+
+1. Read the 4-byte table offset.
+2. Peek the next byte. If `OP_CALL` (0xb1): plain pointer, no index.
+   Otherwise an **index expression** follows — call `parse_factor()` for
+   `si`. Because it's a full RPN factor, the index can be `RND(lo,hi)`, a
+   `$`/`#` variable, an `OP__B4` array read, arithmetic, etc.
+3. Save the resume pc (just past the factor), then **relocate the program
+   counter into the table** at the offset.
+4. Index by `si`:
+   - **string mode** (PRINTSTR, LET-string): walk forward skipping `si`
+     NUL-terminated strings, landing the pc at the start of the si-th
+     string; the caller reads it until the NUL.
+   - **value mode** (LET-into-script-data lvalue): advance `si << 1` bytes
+     to address the si-th 16-bit slot.
+5. Restore the pc to the saved resume point and resume executing code.
+
+The elegant part is steps 3+5: there is **no separate data pointer**. The
+interpreter borrows its own `Talk_PC`, walks the data region, then puts it
+back — code and data share one cursor.
+
+**Worked example — Artegal (NPC 123), wounded.** Raw bytes:
+
+```
+b5            OP_PRINTSTR
+d2 8c000000   OP_ADDRESS, table @ 140
+d3 00 d3 02 a0 a7   index = BYTE 0, BYTE 2, RND, END  =  RND(0,2)
+```
+
+Table at offset 140 — three packed strings:
+
+```
+140: "Too many... There were too many of them..."\0
+185: "My head is pounding like a drum..."\0
+222: "Oh, the pain!"\0
+```
+
+So `RND(0,2)` picks one groan on each visit.
+
+**Table reuse — Kador (NPC 135), a dog.** Three different keyword
+responses all run `PRINTSTR table@1353, RND(0,3)` against one shared table
+(`"Arf!"` / `"Bow wow."` / `(licks your face)` / `"Woof, woof!"`), so any
+question gets a random bark. One table, many call sites — the bytecode
+equivalent of a shared constant.
+
+**State-driven selection — Ephemerides (NPC 35), the astronomer.** Uses
+the `OP_LET` string form: `LET $0 = table@4491[index]` where the table is
+`"sextant" / "telescope" / "crystal ball"` and the index is a `VarInt`-
+driven `OP__B4` array read, not `RND`. The chosen instrument name lands in
+`$0` and is interpolated into later lines — the same machinery driving
+deterministic, state-dependent text instead of random flavor.
+
+### Code and data share one address space — reachability is everything
+
+A talk script has **no markers separating code from data**. The string
+tables above sit in the same flat buffer as the opcodes, with no header,
+length field, or type tag. A byte's identity is decided purely by **how
+the program counter reaches it**:
+
+- reached as the next instruction → decoded as an opcode (code);
+- reached via an `OP_ADDRESS` jump (a table read) → consumed as data
+  (string chars / a 16-bit value), then the pc is restored.
+
+The *same byte value* is both, depending on path. In Artegal's table the
+byte `0xd3` is a character inside a string when read as data, but `0xd3`
+is `OP_BYTE` when executed as code. (A naive byte scan can't tell them
+apart — e.g. NPC 183's id byte is `0xb7`, the same value as
+`OP_STRSEARCH`.) Two consequences:
+
+- **You cannot linearly disassemble a script.** Sweeping every byte as an
+  opcode would decode `"Oh, the pain!"` as instructions. Correct
+  disassembly follows control flow; data regions are knowable as data
+  *only* because some `OP_ADDRESS` operand points into them.
+- **Reachability bounds what any test can see.** Execution-driven checks
+  (unit tests, the 200-script coverage scan) only validate the branches
+  their inputs traverse. A script can be clean on one input path yet
+  exercise an unported opcode on another; latent issues hide on branches
+  the driver never enters. Coverage figures are a function of the input
+  set, not a proof of total correctness.
+
+### Branch skipping — IF/ELSE and keyword dispatch (`seg_1703.c:783-803`, `:1003-1012`)
+
+Three sites need to **skip a region of bytecode without executing it**: a
+FALSE `IF` (skip the true-body), the `OP_ELSE` op after a true-body ran
+(skip the else-body), and a non-matching `OP_KEY` block (skip that answer
+to the next keyword). All three use the **same technique** — a linear
+forward byte scan to a terminating marker, leaving the pc just past it:
+
+| Skip site | Scan until | Source | Port |
+|---|---|---|---|
+| `IF` false | `OP_ELSE` or `OP_ENDIF` | `seg_1703.c:784-791` | `_skipIfBlock(true)` |
+| `OP_ELSE` (after true body) | `OP_ENDIF` | `seg_1703.c:795-802` | `_skipIfBlock(false)` |
+| `OP_KEY` non-match | next `OP_KEY` / `OP_ENDRES` / `OP_ID` | `seg_1703.c:1003-1012` | `keyword()` tail loop |
+
+A false `IF` that stops at `OP_ELSE` lands on the else-body (which then
+runs); one that stops at `OP_ENDIF` lands past the whole construct. The
+`OP_ELSE` op is reached only on the *true* path — after the true-body
+executed — and skips the else-body to `OP_ENDIF`.
+
+**Why the scan must step over operands.** This is a direct consequence of
+§"Code and data share one address space": the scanner hunts for the *byte
+values* `0xa2`/`0xa3`/`0xee`/…, but those values also occur as **operand
+data** — a `GOTO`'s 4-byte address, a `BYTE`'s 1-byte literal, a `WORD`'s
+2-byte literal. A naïve byte-at-a-time scan could stop on an operand byte
+that happens to equal a marker. So each skip loop special-cases the
+inline-operand opcodes and advances past their operands: `OP_GOTO` +4,
+`OP_BYTE` +1, `OP_WORD` +2.
+
+**Two limitations, faithful to source:**
+
+- **No nesting — the flat scan cannot handle a general nested IF/ELSE
+  inside a skipped branch.** It has no depth counter and stops at the
+  *first* marker, so a nested `IF … ELSE … ENDIF` in a *skipped* branch
+  makes it stop at the **inner** `ELSE`/`ENDIF` and misalign. (A nested
+  `IF` inside an *executed* true-branch is fine — it runs normally through
+  `execOp`; only nesting in the **skipped** region is at risk.) Source has
+  the identical flat loop, so this is a constraint the shipped data
+  respects, not just a port shortcut. **Empirically (all 200 scripts in
+  `converse.a/.b`): 199 are completely flat (max IF-depth ≤ 1); exactly one
+  (NPC 164) nests one level** — and it is laid out to survive the flat
+  skip: the inner `IF` has **no `ELSE`** and its `ENDIF` is **immediately
+  adjacent** to the outer `ENDIF`, so the flat scan stops at the inner
+  `ENDIF`, lands on the (no-op) outer `ENDIF`, and execution continues
+  identically (the flat landing is exactly one no-op byte short of a
+  correct depth-aware skip). So the flat skip handles **all 200 shipped
+  scripts** correctly — the flat-skip limitation visibly *shaped* the
+  bytecode. What would break it is a *hypothetical* nested block that is
+  non-adjacent (statements after the inner `ENDIF`) or carries an `ELSE`.
+  A depth-counting skip (as the legacy `../ultima6/script.js`
+  `skipCodeBlock` uses) would lift the limitation entirely if such a
+  script ever appears.
+- **`OP_ADDRESS` operands are not stepped.** The skip advances over
+  `GOTO`/`BYTE`/`WORD` but not `OP_ADDRESS` (0xd2, 4 bytes) — again
+  matching source. It holds because an `ADDRESS` inside a skippable body
+  carries a small table offset whose bytes don't collide with the markers
+  in practice.
+
 ## Statement parser (`parse_statement`)
 
 Top-level read loop. Reads one byte per iteration and dispatches:
@@ -235,8 +395,8 @@ The full ~30 opcodes handled in `execute_op`'s switch, grouped:
 ### Flow control
 | Source | Hex | Legacy | Behavior |
 |--------|-----|--------|----------|
-| `OP_IF`     | 0xA1 | `IF`     | Evaluate `parse_factor` → 0 → skip body until `OP_ELSE` or `OP_ENDIF`; non-zero → fall through |
-| `OP_ELSE`   | 0xA3 | `ELSE`   | Skip body until `OP_ENDIF` (entered only after the IF-true branch finishes) |
+| `OP_IF`     | 0xA1 | `IF`     | Evaluate `parse_factor` → 0 → skip body until `OP_ELSE` or `OP_ENDIF` (§"Branch skipping"); non-zero → fall through |
+| `OP_ELSE`   | 0xA3 | `ELSE`   | Skip body until `OP_ENDIF` (entered only after the IF-true branch finishes; §"Branch skipping") |
 | `OP_ENDIF`  | 0xA2 | `ENDIF`  | No-op (just marks end) |
 | `OP_GOTO`   | 0xB0 | `JUMP`   | Read 4-byte absolute offset, set `Talk_PC` to it |
 | `OP_LEAVE`  | 0xB6 | `BYE`    | Set `mustLeave = 1`, propagates up to outer loop |
@@ -246,12 +406,12 @@ The full ~30 opcodes handled in `execute_op`'s switch, grouped:
 | Source | Hex | Legacy | Behavior |
 |--------|-----|--------|----------|
 | (any printable byte 0x20-0x7A) | — | (inline) | `CON_putch` directly from `parse_statement` |
-| `OP_PRINTSTR` | 0xB5 | (inline) | If next byte is `OP_ADDRESS` → seek to absolute offset, print until null; if `OP__D5` (0xD5) → print VarStr[idx] |
+| `OP_PRINTSTR` | 0xB5 | (inline) | If next byte is `OP_ADDRESS` → resolve an indexed string table via `C_1703_1494` (§"Indexed string / value tables") and print the selected entry; if `OP__D5` (0xD5) → print VarStr[idx] |
 
 ### Variable assignment
 | Source | Hex | Legacy | Behavior |
 |--------|-----|--------|----------|
-| `OP_LET`       | 0xA6 | `DECL`   | Read index byte + type byte; if type is `OP_VARINT` (0xB2) → assign `parse_factor()` to `VarInt[idx]`; if `OP_VARSTR` (0xB3) → string assign (copy from constant address or from another VarStr); if type is `OP_ADDRESS` → write to absolute address in script (rare; used for script-table updates) |
+| `OP_LET`       | 0xA6 | `DECL`   | Read index byte + type byte; if type is `OP_VARINT` (0xB2) → assign `parse_factor()` to `VarInt[idx]`; if `OP_VARSTR` (0xB3) → string assign: from another VarStr, or an indexed string table via `C_1703_1494` (§"Indexed string / value tables"); if index byte is `OP_ADDRESS` → indexed write into a 16-bit script table (value mode of `C_1703_1494`; rare, self-modifying) |
 | `OP_LET_VALUE` | 0xA8 | `ASSIGN` | Sub-opcode required after `OP_LET`; terminates `parse_factor`'s read loop when reached |
 | `OP_END_OF_FACTOR` | 0xA7 | `EVAL` | Terminates `parse_factor` (no other side-effect) |
 
@@ -548,20 +708,26 @@ identifiers.
 
 ## Implications for the rebuild
 
+> **The rebuild design is settled — see
+> [research_i13_conversation_vm.md](research_i13_conversation_vm.md).**
+> The VM is a **standalone effect interpreter**: a generator that yields
+> typed effects `{type, ...params}` and is resumed with a value for reads,
+> with zero world/I-O imports. That doc carries the full effect taxonomy
+> (every opcode → bucket), the VM-owned `$`/`#` expansion + host-seeded
+> init, gates-as-host-pre-flight, and the I-13 sub-step plan. The
+> subsections below are the source-side observations that fed that
+> decision; where they differ from the design doc, the design doc wins.
+
 ### VM core fits a coroutine
 
-The legacy port's "return state + caller resumes" pattern is the
-right base. In the rebuild it becomes either:
-
-- A generator function (`function*`) that `yield`s with state at
-  each input/print boundary, or
-- A plain class with `run()` returning a status enum, as the legacy
-  port already does.
-
-Both work. The generator form is slightly nicer for nested calls
-(answers that re-invoke parse_statement), but plain enum is
-simpler. The rebuild should pick one — recommendation: start with
-the enum (legacy port's shape) since it's already proven.
+The legacy port's "return state + caller resumes" pattern is the right
+base. The rebuild realizes it as a **generator** (`function*`) — `run`
+and `evaluate` both, so a query mid-expression suspends with the operand
+stack intact (the generator's own call stack gives free suspend/resume,
+which also deletes the legacy port's `checkInputNumber`/`current--` resume
+hack). This was chosen over the simpler status-enum class because it makes
+the VM fully unit-testable (assert the effect stream) and unifies input,
+output, queries, and side-effects under one yield protocol.
 
 ### Separation of concerns
 
@@ -638,62 +804,40 @@ RESURRECT, HEAL, CURE, REST, ADDEXP/LVL/STR/INT/DEX (combat
 prerequisites), SHOW_INVENTORY / SHOW_CONVERSE (UI integration),
 GETHORSE, DELAY (animation timing).
 
-Drop-or-defer (need re-eval): `OP__BC` / `OP__BD` (constant 100,
-purpose unclear); the legacy port has known unhandled opcodes
-(0x9C, 0xDF, FUNC 0xD1) — verify against actual U6 scripts before
-labeling as drop.
+Opcode-coverage outcome (settled at I-13): `OP__BC` / `OP__BD` are
+implemented as pop-2/push-100 per source; `0x9C` is `GETHORSE` and `0xDF`
+is the `$Y`-name op (both implemented). **`FUNC` (`0xD1`) is NOT a U6
+conversation opcode** — there is no handler in either `execute_op` or
+`parse_factor`, and across all 200 shipped scripts it never executes (0
+`unknownOp` in full coverage); the 8 scripts that contain the raw byte
+carry it as data, not code. Dropped (it is a Savage-Empire / Martian-Dreams
+opcode per the legacy port's commented block).
 
 ## Open questions
 
-1. **`OP_FUNC` (0xD1)** — Not handled in source's `execute_op`
-   (no case for it). The legacy port commented it out with notes
-   about Savage Empire / Martian Dreams usage. Need to verify
-   whether U6 specifically uses `0xD1` anywhere; if not, drop. If
-   yes, decode case-by-case. Per `script.js:1113-1153` (commented
-   block): SE/MD have NPC-specific FUNC handlers; U6 may not need
-   any.
-2. **`OP_PREFIX` (0xF3 in legacy, no source name)** — used as a
-   section marker alternative to `OP_MAIN` (0xF2). `u6converse.txt`
-   §"f2 or f3" says "unknown what the difference is." Likely needs
-   per-NPC byte scan to find which NPCs use which; may be tied to a
-   shrine / shrine-prompt vs main-conversation distinction.
-3. **`OP_AND` / `OP_OR` semantics** — source uses *boolean*
-   coercion (`if(a && b) 1 else 0`); legacy port's `evaluate()` uses
-   *bitwise* (`arg1 | arg2 ? 1 : 0`). Equivalent when operands are
-   0/1, divergent otherwise. Need to scan scripts for non-boolean
-   operands — if any, port the source semantics.
-4. **Legacy port stubs / fakes** to verify against source:
-   - `OBJINPARTY` (0xC7) stubbed to push 0 (`script.js:466-470`).
-     Source's `OP_WHOSGOT` calls `C_1703_04C6` (real impl). Port
-     the real one.
-   - `OWNS` (0x9F) stubbed to push 0 (`script.js:530-538`). Source's
-     `OP_OWNS` calls `C_1944_0A43` (real impl). Port the real one.
-   - `WEIGHT` (0x9B) uses `typeWeight = 10` fake (`script.js:441`).
-     Source reads from `TypeWeight[]` table (real values). Port.
-   - `JOIN` / `LEAVE` party-size cap is `16` in the legacy port
-     (`script.js:483, 499`); source caps at `8` (per `JoinParty` in
-     `seg_1703.c:226`). The 8 is correct per U6's design — fix.
-   - `LEAVEPARTY` doesn't move NPC's inventory to ground in the
-     legacy port; source's `LeaveParty` at `seg_1703.c:266-271` does
-     (drops everything on the cell). Port.
-5. **`OP__BC` / `OP__BD`** — both push constant 100. Source comment
-   says "constant 100?" with question mark. Need to grep U6 scripts
-   for actual usage to confirm semantics (and whether they're
-   different in some subtle way).
-6. **String comparison in `OP_EQU`** — relies on `bp_58` flag set by
-   the most recent `OP_VARSTR` push. Legacy port's `evaluate()`
-   doesn't have an equivalent flag; only handles numeric `==`. Need
-   string-compare path for any script that does `if $Z == "yes"`.
-   Verify whether any actual scripts use string equality (vs.
-   keyword-block dispatch via `OP_KEY` / `OP_GET`).
-7. **`D_E7A1` non-zero** — source's `MK_0000(addr) = addr - D_E7A1`
-   is identity in shipped U6 because `D_E7A1 = 0` always. Confirm
-   no surprises; could remove the macro in the rebuild.
-8. **Pause/resume during NPC scheduling** — `OP_REST` advances time
-   to 5 AM via `C_0A33_1355(60)` in a loop. During the rebuild, this
-   could be hundreds of `WorldClockSystem` ticks; need to decide
-   whether to suspend rendering during the loop (source does,
-   because the loop blocks) or animate hours-flying-by (modern UX).
+The research-phase questions about opcode coverage and semantics were settled
+when the VM was built — their answers are folded into the sections above and the
+effect taxonomy in [research_i13_conversation_vm.md](research_i13_conversation_vm.md):
+`AND`/`OR` use source-faithful boolean coercion; `OP_EQU` has the `bp_58`
+string-compare path; `OP__BC`/`OP__BD` push 100; `FUNC` (0xD1) is not a U6 opcode
+(§"Implications" → coverage outcome); addresses are absolute offsets so the
+`D_E7A1` `MK_0000` subtraction is identity and dropped; and the legacy-port stubs
+(`OWNS`/`WHOSGOT`/`WEIGHT`/`JOIN`/`LEAVEPARTY`) are replaced by host effects, with
+`weight` and party `join`/`leave` membership tracked as I-13 deferrals. Two genuine
+unknowns remain:
+
+1. **`OP_PREFIX` (0xF3) vs `OP_MAIN` (0xF2) — latent semantic.** Characterized
+   (30/200 scripts use `0xF3`, incl. all 9 shrines + 21 NPCs; see §"Script
+   layout"), but the VM treats them identically with no observed runtime
+   difference. Whether `0xF3` carries a real distinction (shrine-prompt mode,
+   a no-greeting flag, or a compiler artifact) is undetermined — it does not
+   affect walk+talk, so it is parked until some behavior depends on it.
+2. **`OP_REST` time-skip — suspend vs animate.** `REST` advances time to 5 AM
+   via a `C_0A33_1355(60)` loop (hundreds of `WorldClockSystem` ticks). Source
+   blocks/suspends rendering during the loop; modern UX might animate the hours
+   flying by. The I-13 `rest` handler heals the party but does not yet jump the
+   clock (deferred) — a modern-browser-UX call (cf. `../CLAUDE.md` §"Modern-browser
+   UX as architectural anchor").
 
 ## Cross-references
 

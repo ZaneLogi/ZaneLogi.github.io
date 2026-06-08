@@ -12,6 +12,7 @@ import { AnimData } from './assets/anim.js';
 import { BaseTile } from './assets/basetile.js';
 import { decodeObjlist } from './assets/objlist.js';
 import { Portraits } from './assets/portrait.js';
+import { ConversationScripts } from './assets/converse.js';
 import { TileRegistry } from './resources/tile_registry.js';
 import { MapLevel } from './resources/map_level.js';
 import { SpatialIndex } from './resources/spatial_index.js';
@@ -49,16 +50,20 @@ import { makePickAtCell } from './systems/cell_pick.js';
 import { installCommandDispatch } from './systems/command_dispatch.js';
 import { registerUseHandlers } from './systems/use_handlers.js';
 
-// Gating set for terrain + flags (I-1b) + world objects (I-2) + NPC schedules (I-5).
-// Names are the original U6 filenames, lowercased.
-const REQUIRED = ['maptiles.vga', 'objtiles.vga', 'tileindx.vga', 'masktype.vga', 'animmask.vga', 'animdata', 'u6pal', 'chunks', 'map', 'tileflag', 'basetile', 'objlist', 'schedule', 'look.lzd'];
-// look.lzd holds the display/look strings the inspector + NPC names need, so it's
-// REQUIRED (not just a rendering nice-to-have).
-// OPTIONAL files are stored + loaded raw but do NOT gate readiness. portrait.{a,b,z}
-// hold the conversation portraits (56x64 one-byte-per-pixel, LZW blocks in a lib_32;
-// see docs/research_portraits.md); kept raw here and decoded lazily by the I-12 dialog
-// window — the project's first lazy-decoded asset, so they must not block Britain.
-const OPTIONAL = ['portrait.a', 'portrait.b', 'portrait.z'];
+// Gating set for terrain + flags (I-1b) + world objects (I-2) + NPC schedules (I-5) +
+// conversation portraits/scripts (I-12/I-13). Names are the original U6 filenames, lowercased.
+const REQUIRED = ['maptiles.vga', 'objtiles.vga', 'tileindx.vga', 'masktype.vga', 'animmask.vga', 'animdata', 'u6pal', 'chunks', 'map', 'tileflag', 'basetile', 'objlist', 'schedule', 'look.lzd', 'portrait.a', 'portrait.b', 'converse.a', 'converse.b'];
+// look.lzd holds the display/look strings the inspector + NPC names need. portrait.{a,b}
+// hold the NPC conversation portraits (56x64 one-byte-per-pixel, LZW blocks in a lib_32;
+// docs/research_portraits.md); converse.{a,b} hold the NPC conversation scripts (LZW lib_32,
+// keyed by NPC number — .a ids 0..0x62, .b 0x63..0xDF; docs/research_i13_conversation_vm.md).
+// Both are still decoded LAZILY per-NPC (decode-once on first talk) — but REQUIRED to be
+// PRESENT: I-13's conversation experience needs them, so a complete drop gates readiness
+// (decision 2026-06-07, Zane — supersedes I-12's "portraits are OPTIONAL/never block Britain").
+// OPTIONAL files are stored + loaded raw but do NOT gate readiness. portrait.z holds the
+// Avatar's own portrait (char-creation choice in the save); the talk target is never the
+// Avatar, so it stays deferred/optional (research_portraits.md).
+const OPTIONAL = ['portrait.z'];
 
 // OBJBLK region files (64 surface objblk[col][row] + 5 dungeon objblk[level]i).
 // Demand-loaded per region from U6DB, so they gate by presence-count, not the
@@ -185,7 +190,11 @@ async function load() {
     palette,
   });
 
-  await startRender(world, { npcScheduleStats, objlist, schedules, uiStack, portraits });
+  // I-13d: conversation scripts — raw converse.a/.b bytes, decoded lazily per-NPC
+  // by the conversation VM on talk (assets/converse.js).
+  const scripts = new ConversationScripts({ a: fileMap.get('converse.a'), b: fileMap.get('converse.b') });
+
+  await startRender(world, { npcScheduleStats, objlist, schedules, uiStack, portraits, scripts });
 }
 
 // I-6 verification: dump party inventories (I-6a) + a sampling of object
@@ -237,7 +246,7 @@ function verifyInventory(world, objlist) {
 // I-1c/I-2b: terrain + world objects on screen. Build the GPU atlas + palette, place
 // the camera at Britain's default origin, demand-load the OBJBLK regions in view, then
 // register CameraSystem + RenderSystem(s) and drive a continuous rAF loop. Drag to pan.
-async function startRender(world, { npcScheduleStats, objlist, schedules, uiStack, portraits } = {}) {
+async function startRender(world, { npcScheduleStats, objlist, schedules, uiStack, portraits, scripts } = {}) {
   const canvas = document.getElementById('screen');   // shown via the #app shell reveal in load()
 
   // I-10a: gameplay message channel. Render-flush installer (mirrors installDevHud);
@@ -389,7 +398,7 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   cmd = installCommandDispatch(world, {
     pickAtCell, probe, canvas,
     cellEl: document.getElementById('probe-cell'),
-    avatarRef, reg, objlist, message, uiStack, portraits,
+    avatarRef, reg, objlist, message, uiStack, portraits, scripts,
   });
   window.__U6.cmd = cmd;            // dev: live dispatch({verb, target}) + isPending()
   window.__U6.pickAtCell = pickAtCell;

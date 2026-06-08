@@ -49,7 +49,7 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 **Implementation phase. Current status + the I-N step ledger live in
 [`docs/progress.md`](docs/progress.md)** — its top banner is the single source of truth
 (see that file's §"Doc maintenance"); this section is NOT a status mirror. As of
-2026-06-05: **I-12 (dialog window) COMPLETE; next I-13 (conversation VM).** What stays
+2026-06-08: **I-13 (conversation VM) COMPLETE; next I-14 (status panel).** What stays
 here is the durable, slowly-changing reference — the code layout, the dev console helpers,
 and the per-step **kept deviations** (so a later session doesn't "correct" them). The ECS
 runtime-ground spec is
@@ -58,9 +58,12 @@ runtime-ground spec is
 MapLevel, Camera, Viewport, Party, Paths, Schedules, …), `systems/` (render, camera,
 world-data, schedule, passability, avatar move, move-followers, humanoid-anim,
 pathfinding, npc_path, npc_tick, ai_modes, **cell_pick, command_dispatch,
-use_handlers, use_drawbridge** (I-10), …), `resources/` also has **Commands**
-(dispatch registries) + **MessageLog**; `components/`, `view/` (WebGL renderer +
-dev HUD/inspector + **message_channel** + **dev_npc_inspect**), `world_loader.js`
+use_handlers, use_drawbridge** (I-10), **conversation/** (I-13: `conversation_vm.js`
+standalone effect VM + `opcodes.js` + `conversation_system.js` host), …),
+`assets/` also has **portrait.js** + **converse.js** (lazy lib_32 decoders);
+`resources/` also has **Commands** (dispatch registries) + **MessageLog**;
+`components/`, `view/` (WebGL renderer + dev HUD/inspector + **message_channel** +
+**dev_npc_inspect** + **dialog_window** (I-13 live conversation I/O)), `world_loader.js`
 (world-object load + runtime add/delete/find primitives), `u6db.js` (BYO-data store),
 `index.html`/`main.js` (app shell), `tests/`.
 

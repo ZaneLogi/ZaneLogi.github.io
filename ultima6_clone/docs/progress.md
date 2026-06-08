@@ -5,9 +5,14 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: I-12 (dialog window) COMPLETE (2026-06-05). Next: I-13 (conversation VM)** — swap
-the dialog's placeholder body for the `converse.a/.b` bytecode VM over the `openConversation`
-seam (the talk handler + window chrome are final).
+**Status: I-13 (conversation VM) COMPLETE (2026-06-08). Next: I-14 (status panel)** — the
+`converse.a/.b` bytecode VM is a **standalone generator that yields typed effects**
+(conversation_vm.js), driven by a host (conversation_system.js) into the now-live dialog
+window: portrait + streaming text + clickable `@`keywords/chips + input. Coverage: **200/200
+NPC scripts run clean + terminate, 0 crashes** (the 3 stray-`unknownOp` scripts + NPC 183
+resolved 2026-06-08 — see §"I-13 scope" → "Indexed string/value tables"). Party join/leave,
+trade UI, resurrect, and `rest`'s time-skip are **documented deferrals** (stub-when-deferred).
+See §"I-13 scope".
 
 This banner is the **single canonical current-status line** — `CLAUDE.md` and
 `DOCUMENTATION_INDEX.md` point here instead of mirroring it (convention: §"Doc maintenance").
@@ -51,7 +56,7 @@ banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 | I-10 | object-action dispatch core — `Map<verb,handler>` + `Map<ObjectType,useHandler>` registries; verb-first front-end + message channel + fixed UI shell; USE door/lever/switch/crank, LOOK + GET/DROP, MOVE push + give, the inventory window | **complete** (a–j — USE/LOOK/GET/DROP/MOVE-push/give + inventory window; further USE cases demand-driven) |
 | I-11 | talk trigger — adds TALK as a case in the I-10 dispatch (reach-7 target-pick + the can-talk gate; single-stage, stops before the conversation VM) | **done** (a–c) |
 | I-12 | dialog window — second surface on the I-7 substrate; opens when TALK fires (modal frame + four-region layout + real lazy-decoded portrait; chips/input inert — I-13 wires them) | **done** (pre-step + a–c) |
-| I-13 | conversation VM (adapt legacy `script.js`) — β reached: walk + talk works end-to-end. Give/take opcodes work because I-6 inventory data exists. Swaps the I-12 window's placeholder body for real lines + clickable chips + live input. | **next** |
+| I-13 | conversation VM — **standalone generator yielding typed effects** + host driver; swaps the I-12 window's placeholder body for real lines + clickable `@`keywords/chips + live input. β reached: walk + talk works end-to-end against real `converse.a/.b`. | **done** (pre-step + a–g + review; squashed) |
 | I-14 | status panel — third surface on the substrate; replaces the dev HUD's clock readout | planned |
 | I-15 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / moonstones / instruments / etc.); each handler tied to its owning subsystem when that subsystem lands | planned |
 
@@ -2492,6 +2497,119 @@ script's own `OP_KEY` keywords; the live input + Enter; the NPC's words (script 
 + VM); the pause / "▼ more" continue affordance (no text to page at I-12). **Blank
 portrait box (no live signal yet):** shrines/statues (source uses `GetQual`, no
 quality carried) and the Avatar's own face (`portrait.z` / `D_2CCB`).
+
+## I-13 scope — conversation VM (standalone effect interpreter)
+
+Adapts the legacy `../ultima6/script.js` VM into a **standalone generator that yields
+typed effects**, per [research_i13_conversation_vm.md](research_i13_conversation_vm.md)
+(the design + full effect taxonomy) over the [research_conversation_vm.md](research_conversation_vm.md)
+source decode. Built as save-point commits (pre-step + a–g + review polish + a
+post-review indexed-table fix), **squashed into one `impl I-13` commit** after Zane's
+review. Verified live against Zane's real `converse.a/.b`.
+
+**Architecture (the locked decision).** Three parties: a pure **`ConversationVM`**
+(`systems/conversation/conversation_vm.js`) with zero world/I-O imports; a **host**
+(`systems/conversation/conversation_system.js`) that seeds vars + drives the generator
++ applies effects; the **dialog window** (`view/dialog_window.js`) as the I/O surface.
+Wire protocol: `run()` is a `function*` that `yield`s `{type,…}`; the driver resumes
+with `.next(value)` — a value for reads (query/input/read-write), nothing for
+output/sink. `evaluate()` is also a generator (`yield*`) so a mid-expression query
+suspends with the operand stack intact — which is what deletes the legacy port's
+hand-rolled `current--`/`checkInputNumber` resume hack.
+
+**Sub-steps (each a save-point commit):**
+- **pre-step** (`fc42f9b`) — `converse.a/.b` + `portrait.a/.b` moved to REQUIRED in
+  `main.js` (Zane's call: the conversation experience needs them; supersedes I-12's
+  portraits-optional). Still lazy-decoded.
+- **a–c** (`9947d0d`) — `conversation_vm.js` + `opcodes.js`: statement loop,
+  RPN `evaluate`, keyword dispatch (**source-faithful** per-word-prefix + `?` wildcard
+  + `*` catch-all — fixes the legacy `includes()`), IF/GOTO, `$`/`#` expansion
+  (VM-owned) + host-seeded vars, inline-`*` pause. `tests/test_conversation_vm.*`
+  (23/23, no data needed).
+- **d** (`5d4d5c0`) — `assets/converse.js` loader (lib_32 `.a` 0..0x62 / `.b`
+  0x63..0xDF, LZW-or-raw, lazy); host seeds + drives; `dialog_window.js` rebuilt into
+  a live I/O controller (streaming text, input field, clickable chips, pause cue,
+  Esc-ends); wired `main.js` → `command_dispatch.openConversation`.
+- **e** (`807da31`) — query effects (world reads): `flag`(TST→`objlist.talkFlags`
+  bit), `wounded`, `poisoned`(`status&0x08`), `inParty`, `onScreen`(camera/viewport),
+  `isHorse`, `objType`, `canCarry`, `owns`/`hasObj`/`whosGot`(via `inventoryOf`),
+  `partyMember`.
+- **f** (`c42a7ba`) — sink + read-write: `set/clrFlag`, `add/subKarma`, `heal`,
+  `cure`, `setMode`, attribute trainers, `give`/`take`, `spawnHorse`, `rest`(heal).
+- **g** (`2562169`) — `OP_PREFIX` body marker; `@`keywords render gold + click-to-say;
+  CSS; coverage scan.
+- **review polish** (`c7ac53c`/`d9f9109`/`9d5fb8b`/`994d053`, Zane's review) — a `{pause}`
+  continue-cue (blinking "▾ click/press a key") + per-mode input hints (placeholder / key
+  prompts); the player's own input is **echoed** into the transcript as a blue `.dialog-you`
+  line (vs the NPC's sepia); only `.dialog-text` scrolls (the modal no longer double-scrolls
+  on a long convo); `window.__U6.inspectConversation()` dev hook snapshots the live VM
+  (npc/pc vars, lastInput, the current question, the upcoming KEY answer-keywords).
+- **post-review** — folded in here by the squash: the **indexed string/value-table read**
+  (`1af4593`, `C_1703_1494` → random/state-driven NPC lines, closes the last 3
+  stray-`unknownOp` scripts; see "Indexed string/value tables — DONE" below), the
+  **branch-skipping** mechanism + nested-IF limitation (`c5de6e6`; see "Known limitation"
+  below), the **open-questions resolution** (`b6d2912`), and `research_npc_scripts.md` — an
+  on-demand per-NPC decoded-script catalog (`529fe9e`, first entry: Lord British).
+
+**Effect-stream verification (the standalone-design payoff).** Headless coverage over
+**all 200 NPC scripts**: **200/200 clean + terminating, 0 crashes, 0 empty** (the
+indexed-table fix closed the last 3 stray-`unknownOp` scripts; NPC 183's non-termination
+was a coverage-harness artifact — see "Indexed string/value tables — DONE").
+Live (real wired path, talk at Dupre/Shamino/Iolo/Lord British cells): portrait + name
++ "You see …" + pause + greeting + keyword Q&A (name→"It's Dupre…", job→…) + `bye`
+closes the window and resumes the turn driver.
+
+**Key kept decisions (so a later session doesn't "correct" them):**
+- **Gates stay in `command_dispatch.canTalk`** (I-11c) as host pre-flight — the VM is
+  reached only when talk is allowed. Not duplicated in the host.
+- **`$`/`#` expansion is VM-owned** (the vars are VM state, seeded once via the
+  relocated `TALK_initTalk` then mutated mid-script). The `say` effect carries final
+  text; the host never sees `$N`. Text markup (`@`/`<>`/`/\`/`&&`) is passed through.
+- **`@`words are the askable keywords** — rendered gold + click-to-say, the live
+  evolution of the I-12 inert chips. Default chips stay `name`/`job`/`bye` (the
+  universal keywords); per-script keyword extraction is intentionally NOT done (U6
+  doesn't reveal an NPC's full keyword list).
+
+**Deferrals (stub-when-deferred — VM emits the complete effect; the host handler is a
+stub, fleshed out with zero VM edits when the subsystem lands):**
+- **Party `join`/`leave`** — needs ECS party + follower integration; returns
+  source-faithful codes but does NOT mutate membership yet (the highest-value
+  follow-up; companion-recruit NPCs are affected).
+- **`selectObject` / `showInventory` (trade UI)**, **`resurrect`** (corpse handling),
+  **`moveObj`/`transferObj`** (obj-ref resolution), **`rest` time-skip** (heals party,
+  no clock jump), **`owner`/`weight`** queries (GetAssoc / no `TypeWeight` table).
+**Indexed string/value tables — DONE (2026-06-08).** The 3 stray-`unknownOp` scripts (NPCs
+35/123/135) were the **unported `C_1703_1494` indexed-table read** — an NPC selecting one of
+N packed strings by a computed index (e.g. Artegal's `RND(0,2)` random groan, the dog Kador's
+`RND(0,3)` bark, Ephemerides' `LET $0 = instruments[idx]`). The old `_followAddress` read the
+table offset but never parsed the index factor, so it always printed entry #0 and **leaked the
+factor bytes to statement level** (the `0xd3 BYTE` → `unknownOp`). Faithful port: after the u32
+offset, if the next byte isn't `OP_CALL`, `evaluate()` the index factor then walk the table —
+string mode skips `si` NUL-terminated strings, value mode offsets `si<<1`. NPC 183's
+non-termination was a **coverage-harness artifact** (its `bye`→LEAVE sits behind `IF TST(self,
+bit)`; with the host's `setFlag`→`TST` feedback modeled, it exits — no code change needed).
+Re-verified live against real `converse.a/.b`: **200/200 scripts clean + terminating**, and the
+index is honored (`rng→lo` prints groan #0, `rng→hi` prints #2). Regression test added
+(`tests/test_conversation_vm.js` — indexed-table PRINTSTR + no-leak assertion). Mechanism +
+worked examples: `research_conversation_vm.md §"Indexed string / value tables"` + §"Code and
+data share one address space".
+
+**Known limitation — general nested IF/ELSE in a skipped branch.** The branch-skip
+(`_skipIfBlock`, and the keyword non-match skip) is a **flat linear scan** with no depth
+counter, so a *general* nested `IF/ELSE` in a *skipped* branch would make it stop at the inner
+`ELSE`/`ENDIF` and misalign. **Faithful to source** (`seg_1703.c:784-791` has the identical
+flat loop). **Empirically resolved for the shipped data:** a scan of all 200 scripts found
+**199 completely flat (IF-depth ≤ 1) and exactly one (NPC 164) nested one level** — and NPC
+164 is laid out to survive the flat skip (inner `IF` has no `ELSE`; inner `ENDIF` adjacent to
+the outer `ENDIF`; the flat landing is one no-op `ENDIF` byte short of a correct skip, absorbed
+harmlessly). So **all 200 shipped scripts skip correctly** — the limitation only bites a
+*hypothetical* non-adjacent / `ELSE`-bearing nested block. A depth-counting skip (as the legacy
+`ultima6/script.js` `skipCodeBlock` already uses) would lift it. Mechanism + evidence:
+`research_conversation_vm.md §"Branch skipping"`.
+
+**Pre-impl research:** [research_i13_conversation_vm.md](research_i13_conversation_vm.md)
+(design + taxonomy + sub-step plan) + [research_conversation_vm.md](research_conversation_vm.md)
+(source decode) + [U6_對話系統.md](U6_對話系統.md) (Chinese explainer, corrected vs source).
 
 **Pre-impl research:** [research_portraits.md](research_portraits.md) (portrait
 format + decode) + the standing [research_conversation_vm.md](research_conversation_vm.md)
