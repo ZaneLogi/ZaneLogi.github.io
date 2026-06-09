@@ -50,6 +50,7 @@ import { Commands } from './resources/commands.js';
 import { makePickAtCell } from './systems/cell_pick.js';
 import { installCommandDispatch } from './systems/command_dispatch.js';
 import { registerUseHandlers } from './systems/use_handlers.js';
+import { serializeWorld, restoreWorld } from './systems/persistence/snapshot.js';
 
 // Gating set for terrain + flags (I-1b) + world objects (I-2) + NPC schedules (I-5) +
 // conversation portraits/scripts (I-12/I-13). Names are the original U6 filenames, lowercased.
@@ -76,6 +77,35 @@ for (let d = 0; d < 5; d++) OBJBLK_NAMES.push(`objblk${String.fromCharCode(97 + 
 
 const KNOWN = new Set([...REQUIRED, ...OPTIONAL]);   // these + any objblk* are extracted from a dropped zip
 const isKnown = (base) => KNOWN.has(base) || base.startsWith('objblk');
+
+// save/load (systems/persistence/snapshot.js). A pending save dropped via Import is
+// stashed in U6DB under this reserved key and consumed once on the next boot; the '__'
+// prefix keeps it out of the artifact checklist + the zip basename filter.
+const RESTORE_KEY = '__pending_restore.json';
+
+// A cheap, stable fingerprint of the loaded data set (FNV-1a over objlist bytes), stamped
+// into each save so Import can warn when a save is loaded against different U6 files.
+function artifactStamp(fileMap) {
+  const b = fileMap.get('objlist');
+  if (!b) return null;
+  let h = 0x811c9dc5 >>> 0;
+  for (let i = 0; i < b.length; i++) { h ^= b[i]; h = Math.imul(h, 0x01000193); }
+  return `objlist:${b.length}:${(h >>> 0).toString(16)}`;
+}
+
+// Read + consume (one-shot) a pending save stashed by Import. Returns the parsed snapshot
+// or null. Deleting the key means a later plain reload starts a fresh game, not a re-restore.
+async function consumePendingRestore(stamp) {
+  const bytes = await U6DB.get(RESTORE_KEY);
+  if (!bytes) return null;
+  await U6DB.del(RESTORE_KEY);
+  let snap = null;
+  try { snap = JSON.parse(new TextDecoder().decode(bytes)); }
+  catch (err) { log(`save: could not parse pending save (${err.message}) — starting fresh`, 'miss'); return null; }
+  if (snap && snap.artifacts && stamp && snap.artifacts !== stamp)
+    log('⚠ this save was made against different U6 data files — restoring anyway', 'warn');
+  return snap;
+}
 
 const checklistEl = document.getElementById('checklist');
 const checklistSummaryEl = document.getElementById('checklist-summary');
@@ -127,10 +157,43 @@ async function buildFileMap() {
   return fileMap;
 }
 
+// Export = serialize the live world to a downloaded JSON file; Import = stash a chosen
+// JSON under RESTORE_KEY and reload, so the boot path's consumePendingRestore -> restoreWorld
+// applies it. (systems/persistence/snapshot.js; Blob-download pattern per ../ultima6/map_viewer.js.)
+function installSaveControls(world, stamp, objlist, notify) {
+  const root = document.getElementById('save-controls');
+  if (!root) return;
+  const exportBtn = root.querySelector('[data-act="export"]');
+  const importBtn = root.querySelector('[data-act="import"]');
+  const fileInput = document.getElementById('save-file');
+  if (exportBtn) exportBtn.addEventListener('click', () => {
+    const snap = serializeWorld(world, { artifactStamp: stamp, objlist });
+    const blob = new Blob([JSON.stringify(snap)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    a.href = url; a.download = `u6save-${ts}.json`; a.click();
+    URL.revokeObjectURL(url);
+    if (notify) notify(`Saved ${snap.entities.length} entities → ${a.download}`);
+  });
+  if (importBtn && fileInput) {
+    importBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      await U6DB.set(RESTORE_KEY, new Uint8Array(await file.arrayBuffer()));
+      log(`save: ${file.name} queued — reloading to restore…`, 'ok');
+      location.reload();
+    });
+  }
+}
+
 async function load() {
   document.getElementById('app').style.display = 'grid';   // reveal the shell (boot log lives in it now)
   log('Decoding…', 'warn');
   const fileMap = await buildFileMap();
+  const stamp = artifactStamp(fileMap);
+  const snapshot = await consumePendingRestore(stamp);   // null on a fresh boot
 
   const palette = decodePalette(fileMap.get('u6pal'), /* useTransparent */ true);
 
@@ -180,8 +243,18 @@ async function load() {
   const uiStack = new UIStack(world, document.getElementById('ui-root'));
   window.__U6 = { world, tileRegistry: world.getResource(TileRegistry), mapLevel: world.getResource(MapLevel), spatial: world.getResource(SpatialIndex), clock: world.getResource(WorldClock), party: world.getResource(Party), schedules, objlist, actorIndex: world.getResource(ActorIndex), inventoryOf: (h) => inventoryOf(world, h), uiStack };
 
-  const { actors, scheduled, party } = loadActors(world, objlist);
-  log(`\nLoaded ${actors} on-map NPCs from objlist (${scheduled} with schedules, ${party} party members).`, 'ok');
+  if (snapshot) {
+    // Restore replaces the artifact-derived entity load: the full snapshot is authoritative,
+    // and its loadedRegions gate the streamer so pristine objblk neither overwrites mutations
+    // nor resurrects deletions (research_save_load.md §"Object deletion"). NPCs + world objects
+    // come from the save; static content (tiles/map/schedule table) still comes from artifacts.
+    restoreWorld(world, snapshot, { objlist });
+    const clk = world.getResource(WorldClock);
+    log(`\nRestored save: ${snapshot.entities.length} entities, clock ${String(clk.Time_H).padStart(2, '0')}:${String(clk.Time_M).padStart(2, '0')}.`, 'ok');
+  } else {
+    const { actors, scheduled, party } = loadActors(world, objlist);
+    log(`\nLoaded ${actors} on-map NPCs from objlist (${scheduled} with schedules, ${party} party members).`, 'ok');
+  }
 
   // I-5e: NPC schedule system. Hooks WorldClock.onHour; snaps eligible NPCs to
   // their resolved slot position. Returned stats object is mutated each tick.
@@ -199,7 +272,7 @@ async function load() {
   // by the conversation VM on talk (assets/converse.js).
   const scripts = new ConversationScripts({ a: fileMap.get('converse.a'), b: fileMap.get('converse.b') });
 
-  await startRender(world, { npcScheduleStats, objlist, schedules, uiStack, portraits, scripts });
+  await startRender(world, { npcScheduleStats, objlist, schedules, uiStack, portraits, scripts, restored: !!snapshot, artifactStamp: stamp });
 }
 
 // I-6 verification: dump party inventories (I-6a) + a sampling of object
@@ -251,7 +324,7 @@ function verifyInventory(world, objlist) {
 // I-1c/I-2b: terrain + world objects on screen. Build the GPU atlas + palette, place
 // the camera at Britain's default origin, demand-load the OBJBLK regions in view, then
 // register CameraSystem + RenderSystem(s) and drive a continuous rAF loop. Drag to pan.
-async function startRender(world, { npcScheduleStats, objlist, schedules, uiStack, portraits, scripts } = {}) {
+async function startRender(world, { npcScheduleStats, objlist, schedules, uiStack, portraits, scripts, restored, artifactStamp } = {}) {
   const canvas = document.getElementById('screen');   // shown via the #app shell reveal in load()
 
   // I-10a: gameplay message channel. Render-flush installer (mirrors installDevHud);
@@ -491,8 +564,13 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   // — far NPCs teleport (off-screen, invisible), near ones walk. The world starts coherent.
   // (Source forces a full teleport-settle at time-jumps via AllowNPCTeleport; that forced
   // load-settle is deferred to save-load, when genuine mid-route NPCs exist to handle.)
+  // On a RESTORED game the saved AIMode/Destination already reflect the correct per-NPC
+  // state for the saved hour, so skip the load-time re-resolve (it would re-path mid-route
+  // NPCs). A fresh load still needs it to align NPCs to the current hour.
   const clock = world.getResource(WorldClock);
-  for (const cb of clock.hourlyHooks) cb(clock);
+  if (!restored) for (const cb of clock.hourlyHooks) cb(clock);
+
+  installSaveControls(world, artifactStamp, objlist, message);   // Export/Import buttons (save/load)
 
   let last = performance.now();
   (function loop(t) { world.frame(t - last, t); last = t; requestAnimationFrame(loop); })(last);
@@ -509,8 +587,10 @@ checklistEl.addEventListener('drop', async (e) => {
   e.preventDefault();
   checklistEl.classList.remove('drag');
   checklistEl.open = true;            // expand so the result is visible
+  let pendingSave = null;             // a dropped .json is a save to restore, not a U6 artifact
   for (const file of e.dataTransfer.files) {
     const ext = file.name.split('.').pop().toLowerCase();
+    if (ext === 'json') { pendingSave = new Uint8Array(await file.arrayBuffer()); log(`queued save ${file.name}`); continue; }
     if (ext === 'zip') {
       // Unpack the zip; store only entries we recognise (basename-matched).
       let entries;
@@ -528,6 +608,12 @@ checklistEl.addEventListener('drop', async (e) => {
       await U6DB.set(file.name, bytes);
       log(`stored ${file.name.toLowerCase()} (${bytes.length} bytes)`);
     }
+  }
+  if (pendingSave) {                            // stash the save (after any artifacts above) + restore on reload
+    await U6DB.set(RESTORE_KEY, pendingSave);
+    log('save queued — reloading to restore…', 'ok');
+    location.reload();
+    return;
   }
   if (loaded) { location.reload(); return; }   // already running → reload to apply the updated data
   await updateChecklist();

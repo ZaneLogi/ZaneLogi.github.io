@@ -98,12 +98,12 @@
   #probe-text { white-space: normal; overflow-wrap: anywhere; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2316; color: #b8a878; font-size: 12px; line-height: 1.45; }
   #probe-text.blocked { color: #c66; }
   #probe-text.pass { color: #6c6; }
-  #clock-hud button {
+  #dev-block button {
     background: #1c180f; color: #e8c060;
     border: 1px solid #6b5d3a; border-radius: 3px;
     font: 12px monospace; padding: 2px 6px; cursor: pointer;
   }
-  #clock-hud button:hover { background: #241d10; }
+  #dev-block button:hover { background: #241d10; }
 
   /* boot/dev log — folded into the dev block (was a full-width box under the canvas) */
   #log { white-space: pre-wrap; margin-top: 8px; padding-top: 6px; border-top: 1px solid #2a2316;
@@ -242,6 +242,11 @@
         </div>
         <div id="npc-stats">schedule: no hour ticked yet</div>
         <div id="probe-text">hover the map…</div>
+      </div>
+      <div id="save-controls" style="margin-top:6px; display:flex; gap:6px; align-items:center;">
+        <button data-act="export">⤓ export save</button>
+        <button data-act="import">⤒ load save</button>
+        <input id="save-file" type="file" accept=".json,application/json" style="display:none;">
       </div>
       <div id="log"></div>
     </details>

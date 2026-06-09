@@ -28,6 +28,56 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-10 — fix: save/load now snapshots `objlist` (conversation results persisted)
+
+Live bug Zane caught minutes after the feature landed: passed Lord British's questions, exported,
+reloaded, LB asked them again. Root cause — the conversation system mutates the **decoded
+`objlist`** IN PLACE (actors' `talkFlags` + trained stats, `globals.karma`), not via ECS
+components, and `objlist` is re-decoded pristine each boot; the snapshot only captured ECS
+components + WorldClock/Party, so talk state was dropped on reload.
+
+- **Found**: `conversation_system.js` is the **sole** runtime `objlist` mutator (grep confirmed) —
+  `setFlag`/`clrFlag`, the attribute trainers, `addKarma`. The "ECS mapping" in
+  `research_save_load.md` (TalkFlags → a component) is aspirational; talk state never moved off
+  `objlist`.
+- **Fix**: `serializeWorld`/`restoreWorld` now take `{ objlist }` and snapshot the full `objlist`
+  (actors + globals + party), re-applied **in place** on restore so the conversation host's
+  already-held reference sees it. Party join/leave (deferred I-13) mutates `objlist.party` → now
+  auto-covered.
+- **Verified**: `test_snapshot.html` 22/22 (added an objlist round-trip: talkFlags / trained stat
+  / karma / party); live vs real data — set `talkFlags`+`karma` on the objlist → export → reload →
+  both restored, no console errors.
+
+---
+
+## 2026-06-10 — implemented save/load (full-snapshot JSON persistence, `I-save/load`)
+
+Built the clone's save/restore on the decoded `research_save_load.md` spec ("the format is
+throwaway; the state set is the deliverable") — a **generic ECS snapshot**, not a native
+objblk/objlist writer. Verified live against Zane's uploaded data.
+
+- **Built**: `systems/persistence/snapshot.js` (`serializeWorld`/`restoreWorld`) +
+  `tests/test_snapshot.{html,js}`; `main.js` boot restore-hook (replaces `loadActors`) +
+  Export/Import + dropzone `.json`; `index.html` `#save-controls`; `u6db.js` `del`.
+- **Found**: no `ecs/world.js` change needed — `world.query()` (no-arg) already enumerates every
+  live entity, and the `components.js` catalog + `isRegistered()` cover component discovery. The
+  one real wrinkle (entity-handle refs) bounds to a single field, `ContainedIn.holder`
+  (`Float64Array`); the rule "a `Float64Array` field IS an entity reference, remap by save-id"
+  handles it generically + auto-grows. Object **deletion** needs no tombstones — full snapshot
+  + the restored `loadedRegions` gate suppresses pristine objblk.
+- **Docs**: `progress.md §"I-save/load scope"` + banner + ledger row; `research_save_load.md`
+  §"Object deletion" (the no-tombstone mechanism + the no-region-unload dependency Zane flagged).
+- **Verified**: `test_snapshot.html` 17/17; live 1052-entity world — mutate (clock→15:30, delete
+  obj 326 @ (365,265) in loaded region 18, add a torch) → snapshot (206 KB) → reload →
+  **1052/1052** restored, deletion **stayed dead** (region 18 gated, not resurrected), addition +
+  clock + loadedRegions restored, Export produced a valid JSON Blob — no console errors.
+- **Open**: when party join/leave lands (deferred from I-13), reconcile the conversation system's
+  `objlist.party` read with the live ECS party. Camera (session extra) is overridden by
+  startRender's recenter-on-avatar — acceptable.
+- **Next**: I-16 (arrival behaviors + direction).
+
+---
+
 ## 2026-06-08 — root-caused the I-13 stray-`unknownOp` scripts → indexed-table read
 
 Followed up the three "stray unknownOp" NPCs (35/123/135) + the "non-terminating" NPC 183

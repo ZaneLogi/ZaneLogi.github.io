@@ -41,6 +41,16 @@ export const U6DB = (() => {
 
   async function has(filename) { return (await get(filename)) != null; }
 
+  async function del(filename) {
+    const d = await open();
+    return new Promise((resolve, reject) => {
+      const tx = d.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).delete(filename.toLowerCase());
+      tx.oncomplete = () => resolve();
+      tx.onerror = (e) => reject(e);
+    });
+  }
+
   async function clear() {
     const d = await open();
     return new Promise((resolve, reject) => {
@@ -51,5 +61,5 @@ export const U6DB = (() => {
     });
   }
 
-  return { set, get, has, clear };
+  return { set, get, has, del, clear };
 })();

@@ -313,6 +313,45 @@ guessed.
   lazy loading. Recommendation: one blob for the rebuild's initial
   scope; partition only if profiling demands it.
 
+### Clone note — conversation state lives on `objlist`, not components
+
+In the rebuild the conversation system (`conversation_system.js`) mutates
+the **decoded `objlist`** in place — actors' `talkFlags`, trained stats,
+`globals.karma` — rather than ECS components (the §"ECS mapping" 1:1 above
+is aspirational; talk state never moved onto components). Because
+`objlist` is re-decoded pristine each boot, the clone's save
+(`systems/persistence/snapshot.js`) snapshots the **full `objlist`**
+(actors + globals + party) alongside the ECS component stores, and
+re-applies it in place on restore. Party join/leave (deferred from I-13)
+mutates `objlist.party`, so it is automatically covered. (Discovered
+2026-06-10 in live testing: without this, passing Lord British's questions
+was lost on reload.)
+
+### Object deletion — full-snapshot + region suppression (no tombstones)
+
+The rebuild's save (`systems/persistence/snapshot.js`, the `I-save/load`
+step) is a **full snapshot of the loaded world, authoritative for every
+loaded region** — not a delta over the pristine `objblk`. So an object
+destroyed during play (smashed barrel, drunk potion, killed NPC) needs no
+tombstone: it is simply **absent** from the dump, and on restore the saved
+`loadedRegions` are re-marked so `loadRegion` (`world_loader.js`)
+early-returns for them — the pristine `objblk` is never re-read to
+resurrect it.
+
+This is airtight by invariant: a world object can only be destroyed once
+it is a live entity, which requires its region loaded — so a deletion's
+region is **always** in `loadedRegions`. NPCs are global (loaded by
+`loadActors`), and restore **bypasses `loadActors`**, so a dead NPC absent
+from the snapshot is never recreated.
+
+**Dependency**: this rests on the resident-after-load rule
+(`project_ultima6_no_region_unload`) — every visited region stays
+resident, so the snapshot is complete for it. If region unloading is ever
+added, a visited+mutated region could be evicted, leave the snapshot
+incomplete, and (not being in `loadedRegions`) reload pristine —
+resurrecting deletions. That future would need per-region deltas + explicit
+tombstones.
+
 ### Atomicity
 
 Source's write-tmp-then-rename (`objblkXX.tmp` → `objblkXX`) is a

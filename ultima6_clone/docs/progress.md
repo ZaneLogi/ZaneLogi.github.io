@@ -5,7 +5,7 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: I-14 (NPC movement speed — DEXTE-paced accumulator) + I-15 (drunk-walk — `TryMoveTo`/`__TryDiagMove`) COMPLETE (2026-06-08), local — pending Zane review + squash (reviewing I-14/I-15 together). Next: I-16 (arrival behaviors + direction). NPC-movement arc I-14→I-17: speed model ✓ → drunk-walk ✓ → arrival-behaviors/direction (I-16) → AI behaviors (I-17); status panel/handlers pushed to I-18/I-19.** Prior: I-13 (conversation VM, pushed). — the
+**Status: save/load (full-snapshot JSON persistence) COMPLETE (2026-06-10) — a generic ECS snapshot (every live entity's components + the mutable resources) → a JSON file via Export, restored on Import; restore *replaces* `loadActors` and re-marks `loadedRegions`, so deletions stay dead and mutations survive with no tombstones. Non-numeric label (`I-save/load`) keeps the planned I-16…I-19 movement-arc numbers intact. Next: I-16 (arrival behaviors + direction). NPC-movement arc I-14→I-17: speed model ✓ → drunk-walk ✓ → arrival/direction (I-16) → AI (I-17); status panel/handlers at I-18/I-19. I-9/I-10/I-14/I-15 squashed + force-pushed in the 2026-06-09 commit cleanup.** Prior: I-13 (conversation VM, pushed). — the
 `converse.a/.b` bytecode VM is a **standalone generator that yields typed effects**
 (conversation_vm.js), driven by a host (conversation_system.js) into the now-live dialog
 window: portrait + streaming text + clickable `@`keywords/chips + input. Coverage: **200/200
@@ -59,8 +59,9 @@ banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 | I-11 | talk trigger — adds TALK as a case in the I-10 dispatch (reach-7 target-pick + the can-talk gate; single-stage, stops before the conversation VM) | **done** (a–c) |
 | I-12 | dialog window — second surface on the I-7 substrate; opens when TALK fires (modal frame + four-region layout + real lazy-decoded portrait; chips/input inert — I-13 wires them) | **done** (pre-step + a–c) |
 | I-13 | conversation VM — **standalone generator yielding typed effects** + host driver; swaps the I-12 window's placeholder body for real lines + clickable `@`keywords/chips + live input. β reached: walk + talk works end-to-end against real `converse.a/.b`. | **done** (pre-step + a–g + review; squashed) |
-| I-14 | **NPC movement speed (DEXTE-paced accumulator)** — replace I-9's flat step-rate with a per-actor `moveCredit` accumulator (DEXTE = speed meter, `SubTerrainMov` = step cost); a *modern rewrite* of the `MovePts`/`DEXTE` economy, NOT a `C_1E0F_4E0A` round-driver port. One master `WORLD_SPEED` slider, decoupled clock, snap tile-to-tile, fixed-brisk non-laggy player. Restores terrain-/dex-speed + staggering, fixes the flat-step thrash. Foundation for the NPC-movement arc. | **done** (a–e; local, pending review+squash) |
-| I-15 | **drunk-walk approach** — `TryMoveTo` greedy fallback chain + `__TryDiagMove` corner-clearance (the pathfinding-less move primitive for chase/flee). Rides on I-14. New `systems/drunk_walk.js`; no live consumer yet (I-17 wires it); dev hook `__U6.driveTo`. | **done** (a–c; local, pending review+squash) |
+| I-14 | **NPC movement speed (DEXTE-paced accumulator)** — replace I-9's flat step-rate with a per-actor `moveCredit` accumulator (DEXTE = speed meter, `SubTerrainMov` = step cost); a *modern rewrite* of the `MovePts`/`DEXTE` economy, NOT a `C_1E0F_4E0A` round-driver port. One master `WORLD_SPEED` slider, decoupled clock, snap tile-to-tile, fixed-brisk non-laggy player. Restores terrain-/dex-speed + staggering, fixes the flat-step thrash. Foundation for the NPC-movement arc. | **done** (a–e; squashed + pushed) |
+| I-15 | **drunk-walk approach** — `TryMoveTo` greedy fallback chain + `__TryDiagMove` corner-clearance (the pathfinding-less move primitive for chase/flee). Rides on I-14. New `systems/drunk_walk.js`; no live consumer yet (I-17 wires it); dev hook `__U6.driveTo`. | **done** (a–c + step-aside; squashed + pushed) |
+| I-save/load | **save/load — full-snapshot JSON persistence** — generic ECS snapshot (every live entity's components + mutable resources) → JSON; Export downloads, Import re-uploads + restores on reload. Restore *replaces* `loadActors` and re-marks `loadedRegions`, so deletions stay dead + mutations survive without tombstones (`research_save_load.md`). Non-numeric label keeps the I-16…I-19 arc intact. | **done** (a–g, 2026-06-10) |
 | I-16 | **arrival behaviors + direction system** — finish `__AtDestination` (`U6_NPC_排程與移動邏輯.md §七`): prop lookup for sit/sleep/eat/play (`C_1E0F_2184`) + fallbacks (sleep-on-spot, arrived-but-can't-sit), eating dynamic facing (`C_1E0F_2125`), and the `C_1E0F_0664` 8-dir / MACRO_A frame system + chair-overrides-facing + non-humanoid per-type facing. Builds on I-9g's worktype-settle + STAND/GUARD facing. Verifies §5.2. | planned |
 | I-17 | **NPC AI behaviors** — modes on top of I-14/I-15: persistent activities (`AI_WANDER`/`FARM`/`LOITER`/`GRAZE`) first, then guard/law-enforcement + thief (granularity scoped at I-17). (was I-16) | planned |
 | I-18 | status panel — third surface on the substrate; replaces the dev HUD's clock readout (was I-14→I-17) | planned |
@@ -2781,6 +2782,70 @@ reverse-skips-by-rand/zero-delta/wrap). Live vs real data: `__U6.driveTo(5, …)
 British tile-by-tile toward the target (greedy S-then-W), reached adjacent on open carpet
 (auto-stop at Chebyshev ≤ 1), and stalled against dense throne-room furniture — the correct
 drunk-walk limitation (nudges one blocker, doesn't route-plan).
+
+## I-save/load scope — full-snapshot JSON persistence
+
+**DONE (2026-06-10).** Save/restore the live game across sessions. Artifacts stay the static
+baseline (re-uploaded each session); the save is a clone-internal JSON carrying ONLY the mutable
+ECS state (`research_save_load.md`: "the format is throwaway; the state set is the deliverable").
+**Full snapshot**, not a delta — in an ECS the full dump is the cheapest correct form and it
+auto-captures future components. Non-numeric label by design so the planned `I-16`…`I-19`
+movement-arc numbers are untouched.
+
+**Files:** new `systems/persistence/snapshot.js` (serialize + restore) + `tests/test_snapshot.{html,js}`;
+edits to `main.js` (boot restore hook + Export/Import + dropzone `.json`), `index.html`
+(`#save-controls`), `u6db.js` (`del`).
+
+**Snapshot model (generic over the ECS).** No `ecs/world.js` change was needed: `world.query()`
+(no-arg) already yields every live entity, and the `components.js` catalog filtered by
+`world.isRegistered()` covers component discovery. Each live entity → `{ comps: { Name: {field:…} } }`,
+save-id = array index. **Entity references**: the only component field holding a raw handle is
+`ContainedIn.holder` (a `Float64Array`); convention = **a `Float64Array` field is an entity
+reference**, serialized as the referent's save-id and remapped to the fresh handle in a second
+pass on load (generic + auto-grows). `Actor.npcId`/`Schedule.npcId`/`PartyMember.slotIndex` are
+stable values, serialized as-is. Resources are an explicit whitelist — `WorldClock` + `Party`.
+`WorldSpeed`/`Camera` are deliberately NOT saved (the boot owns them: `dev_hud` re-applies the
+speed slider, `startRender` recenters the camera on the avatar), and everything else is static
+(TileRegistry/MapLevel/Schedules) or rebuilt (Paths/SpatialIndex/ActorIndex). **Conversation /
+NPC-record state**: the conversation system mutates the decoded `objlist` IN PLACE (actors'
+`talkFlags` + trained stats, `globals.karma`, and — later — party join/leave), not via ECS
+components, and `objlist` is re-decoded pristine each boot — so the snapshot also carries the
+full `objlist` (actors + globals + party), re-applied in place on restore. Without it, passing
+Lord British's questions was lost on reload (caught in live testing 2026-06-10). The snapshot also
+carries `loadedRegions` + a `version`
++ an `artifacts` stamp (FNV-1a over objlist bytes) for an import-mismatch warning.
+
+**Restore = replace `loadActors`.** On boot, `consumePendingRestore` reads a one-shot reserved
+U6DB key (`__pending_restore.json`); if present, `restoreWorld` runs **in place of** `loadActors`:
+recreate entities, remap `Float64Array` refs, rebuild `ActorIndex` + `SpatialIndex` (insert in
+save-id order — on-map entities are emitted in cell-chain order so cell-pick chains survive), set
+`loadedRegions`, restore resources. A restored boot **skips the first-tick schedule re-resolve**
+(the saved AIMode/Destination are already correct).
+
+**Object deletion needs no tombstones** (the case Zane raised). A destroyed object is simply
+absent from the dump, and restore re-marks its region loaded so the streamer never re-reads
+pristine objblk to resurrect it. Airtight by invariant: a world object can only be destroyed once
+its region is loaded, so a deletion's region is always in `loadedRegions`; NPCs are global and
+restore bypasses `loadActors`. **Dependency**: rests on no-region-unload
+(`project_ultima6_no_region_unload`) — see `research_save_load.md §"Object deletion"`.
+
+**Export / Import UI.** `#save-controls` in the dev block: Export → `serializeWorld` → Blob →
+`u6save-<ts>.json` download (the `../ultima6/map_viewer.js` Blob pattern); Import (button or a
+dropped `.json`) stashes the JSON under the reserved key + reloads, so the boot path restores it.
+
+**Sub-steps (save-point each):** (a) confirm no ECS change needed → (b) `serializeWorld` →
+(c) `restoreWorld` + unit round-trip test → (d) boot restore hook → (e) Export → (f) Import →
+(g) tests + docs.
+
+**Verification.** `tests/test_snapshot.html` **17/17** (round-trip deep-equality;
+`ContainedIn.holder` ref remap to fresh handles; resources; loadedRegions; cell-chain head order).
+Live vs real data (1052-entity world): mutate (clock→15:30, delete obj 326 @ (365,265) in loaded
+region 18, add a torch) → snapshot (206 KB) → reload → restore reproduced **1052/1052** entities,
+the **deletion stayed dead** (region 18 gated, not resurrected), the addition persisted, clock +
+`loadedRegions` restored, Export produced a valid JSON Blob — no console errors. **Talk-state
+(2026-06-10 fix):** set an NPC `talkFlags` bit + `globals.karma` on the live `objlist` → export →
+reload → both restored (the analog of "passed Lord British's questions stays passed"). Unit:
+`test_snapshot.html` adds an objlist round-trip (talkFlags / trained stat / karma / party) → 22/22.
 
 ## I-16 scope — arrival behaviors + direction system (§七)
 
