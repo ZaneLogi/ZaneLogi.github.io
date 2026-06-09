@@ -56,9 +56,33 @@ previous catch-up on reschedule), **settle into the slot's arrival worktype + fa
 (`__AtDestination`, I-9g), and **align to the current-hour slot at load** (first-tick
 alignment, I-9h). **I-9i (dev-HUD path overlay) was DROPPED** (fancy-not-must; live
 preview-eval of `window.__U6`/the `Paths` resource already covers path inspection).
-Next = **I-10** (object-action dispatch — scoped 2026-06-03, see `docs/progress.md
-§"I-10 scope"`: a paradigm-agnostic command dispatcher + a new gameplay message
-channel + LOOK/GET/DROP/USE-door; verb-first now, target-first later). The
+**I-10 (object-action dispatch) COMPLETE — sub-steps a–j landed + verified live
+(2026-06-03/05).** a=message channel + fixed UI shell (Fixed-Shell
+grid on a content/placement seam; Dynamic Dock a named later upgrade);
+b=dispatch core + verb-first front-end (arm a verb key → `#probe-cell` cue →
+Enter/Esc; `Map<verb,handler>` + `Map<ObjType,useHandler>`); c=USE→door (+ a
+TEMPORARY locked-door bypass — force-open, REVERT when I-13's conversation
+hands the key + a USE-inventory front-end exists); d=USE→lever/switch + the
+runtime map add/delete primitives (`addMapObject`/`deleteMapObject`/
+`findObjectsByTypeQuality`/`objAtCell`/`actorAtCell` in `world_loader.js`);
+e=USE→crank/drawbridge (delete+re-add geometry; **clone deviation** — span
+bounded by `isTerrainWet`, not source's `D_1D0A` shore whitelist);
+f=LOOK (line-only description, viewport-range; `I` stays a separate Inspect
+modal); g=GET (adjacent ground object → inventory; `TypeWeight==0` fixed gate
+via `reg.weightOf`); h=DROP (two-stage: recursive inventory picker → armed
+cursor reach 7 → `dropToMap`); **i=MOVE Mode 1 (push)** — arm `M` → pick
+adjacent object → press a **direction** (arrow/numpad); fixed gate + the
+verified `C_27A1_1DAB` diagonal corner-clearance (`canPushTo`); `moveMapObject`
+= `MoveObj`; shares `avatar_move_system`'s direction map; j=verb-aware **inventory
+window** (`view/inventory_picker.js` `openInventoryWindow`) opened by top-row digit
+keys (`1`..`PartySize`, dynamic; numpad stays avatar diagonals) + member-switch with
+unwind; **DROP migrated** onto the window's `D` (old `D` map-hotkey + `openInventoryPicker`
+retired); **give** (MOVE Mode 2) = window `G` → `armGive` → recipient member (digit or
+click) → `moveToInventory` (in-window give key is `G` — "give" — not `M`). **a–h PUSHED** (origin @ `c8573e9`); **i + j committed
+LOCAL-ONLY, NOT pushed** (I-10j = 5 save-point commits from `6a60ef1`, auto-run 2026-06-05).
+**Next = post-I-9 deviation audit (deferred to after I-10), or further verbs / TALK.**
+Per-sub-step detail in
+`docs/progress.md §"I-10x — landed"`; the locked plan in §"I-10 scope". The
 **post-I-9 deviation audit** (move-point economy, clock tuning, idle-heartbeat
 keep-vs-revert fork, I-9f removal-candidate — the central fork + the NPC-blocking research
 are in `docs/progress.md §"Post-I-9 — deviation audit"` + `docs/research_npc_ai.md
@@ -72,9 +96,12 @@ the source-derived findings + kept deviations are in `docs/research_npc_ai.md
 `ecs/` (runtime core), `assets/` (format decoders), `resources/` (TileRegistry,
 MapLevel, Camera, Party, Paths, Schedules, …), `systems/` (render, camera,
 world-data, schedule, passability, avatar move, move-followers, humanoid-anim,
-**pathfinding, npc_path, npc_tick, ai_modes**, …), `components/`, `view/` (WebGL
-renderer + dev HUD/inspector), `u6db.js` (BYO-data store), `index.html`/`main.js`
-(app shell), `tests/`.
+pathfinding, npc_path, npc_tick, ai_modes, **cell_pick, command_dispatch,
+use_handlers, use_drawbridge** (I-10), …), `resources/` also has **Commands**
+(dispatch registries) + **MessageLog**; `components/`, `view/` (WebGL renderer +
+dev HUD/inspector + **message_channel**), `world_loader.js` (world-object
+load + runtime add/delete/find primitives), `u6db.js` (BYO-data store),
+`index.html`/`main.js` (app shell), `tests/`.
 
 **Key I-9 kept deviations from source** (so the next-session you doesn't
 "correct" them): per-NPC window (not player-centered); edge-seek accepts any
@@ -87,8 +114,12 @@ NPC facing/walk animation is **humanoid-only** (`isHumanoid` gate in both
 the clone ported only its humanoid arm, so non-humanoid NPCs (gazer, animals)
 move/settle without animating (per-type arms deferred); don't "fix" a static
 non-humanoid sprite by feeding it the humanoid frame layout.
-NPC #12's teleport-to-dinner is a *correct* consequence of the unmodeled castle
-drawbridge (I-10), NOT a cost-cap bug — do not raise the 7-bit cost cap.
+NPC #12's teleport-to-dinner is a *correct* consequence of a CLOSED castle
+drawbridge — NOT a cost-cap bug; do not raise the 7-bit cost cap. **RESOLVED by
+I-10e (2026-06-04):** the drawbridge is now modeled + crossable, so with the
+bridge lowered #11/#12 WALK to the dining room (verified live); they teleport
+only when it's raised (faithful — NPC AI has no USE action, so the player lowers
+it via the crank).
 **I-9h:** the off-area teleport's near-radius is Chebyshev-**40** (source's ±5 11×11
 viewport box widened for our 64×40 canvas — don't shrink it to ±5 or on-screen NPCs
 pop); the 3/turn teleport cap is kept source-faithful but is a throttle invisible

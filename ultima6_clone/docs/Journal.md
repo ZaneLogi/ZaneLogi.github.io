@@ -28,6 +28,295 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-05 — I-10j: inventory window + DROP migration + give (auto-run)
+
+- **Mode:** an auto-run session (Zane: auto-commit save-points, no squash, no push, terse
+  bodies, docs folded into each commit). 4 steps → 5 commits (plan `6a60ef1` + steps 1-4).
+- **Built** the verb-aware **inventory window** (`view/inventory_picker.js`
+  `openInventoryWindow`, generalizing the I-10h picker): descriptive title (member /
+  container name), `↑↓` highlight, `Enter` recursive container drill-in, a verb key
+  (`D`/`M`) acts on the highlight via `onVerb(verb, item)` (pops the chain to root), a digit
+  switches member via `onDigit`. Then: **digit-key open** (`main.js` top-row `Digit1`..`9`
+  → `openMemberInventory`, dynamic to `PartySize`; numpad stays avatar diagonals);
+  **member-switch with unwind** (a digit at any nesting depth pops to root + re-opens);
+  **DROP migrated** off the `D` map-hotkey onto the window's `D` (→ `armDrop` → cell, the
+  downstream unchanged; old `openInventoryPicker` retired); **give** = the window's `M` →
+  `armGive(item, holder)` → recipient via a digit (main.js → `giveTo`) or a click on a
+  party member (command_dispatch → `giveTo`) → `moveToInventory`.
+- **Source basis:** number keys ARE party-member keys in U6 — `seg_0A33.c:1142`
+  (digit = switch controlled member / `0` = party mode) + `seg_0C9C.c:1298` (digit picks a
+  member during targeting). The clone has no solo/party-mode, so digits are **repurposed**
+  for inventory-open (decision deferred to if/when solo-mode lands). Give = `C_27A1_1E8B`
+  else-branch (`:1101-1118`); party members need no adjacency; refusals "yourself." / "Only
+  within the party!". Max party = 8 (`JoinParty`, `seg_1703.c:226`).
+- **Verified live** (preview-eval, real party Avatar/Dupre/Shamino/Iolo) at each step:
+  titles + nav + drill (1); `2`→Dupre, drill, `1`→unwind+Avatar, numpad opens nothing (2);
+  digit→window→`D`→drop Orb at a cell + restore (3); Dupre→Avatar give (digit) + Avatar→
+  Dupre give (click) + both refusals (4). No console errors.
+- **Deferred (faithful):** the `STREN×20` carry-weight gate, unequip-on-give,
+  put-item-into-a-container, the `0` party-roster window, breadcrumb titles, portraits.
+- **Next:** the post-I-9 deviation audit (deferred to after I-10), or further verbs / TALK.
+
+## 2026-06-04 — I-10i: MOVE Mode 1 (push a ground object)
+
+- **Verified source first** (the cross-PC note flagged "read `C_27A1_1DAB` at impl
+  time, don't trust the doc"): `seg_27a1.c:953` `C_27A1_1E8B` is **dual-mode** — a
+  `LOCXYZ` target = push (Mode 1), any other coord-use = give/transfer (Mode 2). Read
+  the corner-clearance `C_27A1_1DAB` (`:924`): the destination must be passable AND, for
+  a **diagonal**, ≥1 flanking cardinal passable (no squeeze through a wall corner);
+  `C_27A1_1330` is the `IsTileSu` table-surface accept (deferred). Also confirmed
+  `D_0DDC` (`seg_1944.c:372`) is the **terse result-code table** (Success/Failed/…/Blocked),
+  not the U6-flavored strings the research doc had paraphrased — fixed that.
+- **Impl** (Mode 1 only; Mode 2 = I-10j): `avatar_move_system.js` now **exports**
+  `KEY_DIR`/`CODE_DIR` + `dirFromKeyEvent` (one shared keyboard→direction map);
+  `world_loader.js` `moveMapObject` = source `MoveObj`; `command_dispatch.js` `m:'move'`
+  + the move handler (pick + the `TypeWeight==0` fixed gate → arm a push direction) +
+  `resolveMove` + `canPushTo` (the `C_27A1_1DAB` port) + a `confirm()` refactor + an
+  `awaitingDir` **stage-2** keydown branch that `stopPropagation`s the direction key so
+  the avatar (window listener, later in the bubble) doesn't also walk.
+- **New targeting shape**: two-stage **object → direction** (vs DROP's object→cell). Arm
+  `M` → pick the object (Enter/click) → an arrow/numpad key pushes it one tile.
+- **Verified live** (preview-eval, real data, Lord British's castle): a chair pushed west
+  one tile + "You move a chair."; the avatar stayed put through the direction key
+  (stage-2 suppression works); blocked-direction / fixed-object (carpet) / out-of-range /
+  `M`-arm-then-`Esc` all correct. World state restored after.
+- **Docs**: `progress.md` §"I-10i — landed" (+ plan bullet, MOVE moved out of deferred);
+  `research_object_interaction.md` §Move rewritten to the dual-mode truth + the verified
+  `D_0DDC` table; `CLAUDE.md` status line; this entry.
+- **Open**: Mode 2 (give) = I-10j; the `IsTileSu` surface accept + push-into-container +
+  cannonball (`OBJ_0DD`) facing-frame + `SubMov(5)` deferred. Post-I-9 deviation audit
+  still pending (deferred to after I-10).
+- **Next**: I-10j (MOVE Mode 2 — give/transfer a carried item), or the post-I-9
+  deviation audit.
+
+## 2026-06-04 — I-10h: DROP (D → inventory picker → map cell)
+
+- **Verified source first** (Zane asked "is the D→picker→cell flow like source?"):
+  `seg_0A33.c:1088-1101` — the `'D'` case sets `SelectMode=2`, **`SelectRange=7`**, and
+  `if (!IN_VEHICLE) StatusDisplay = CMD_92` — i.e. **pressing `D` switches the status
+  panel to the inventory** so you pick what to drop, then `C_27A1_14DA` prompts
+  "Location:" for a cell. So the flow IS source's: `D → inventory item → location`. The
+  clone's modal picker = source's panel-switch; the cell range is **7** (kept).
+- **Impl**: `world_loader.js` `dropToMap` (inverse of `moveToInventory` = `MoveObj`);
+  `view/inventory_picker.js` (modal "pick one carried item", reuses `UIStack` /
+  `makeListCursor` / `tileIcon` / `inventoryOf`); `command_dispatch.js` `armDrop` +
+  the `drop` handler (reach 7 via `VERB_REACH`; cell validated by `canStandAt` = the
+  `C_1E0F_000F` analog) + an `item` payload threaded through dispatch so the armed
+  confirm carries the picked item; `main.js` `D` hotkey → picker → `armDrop`.
+- **Member-targeting (Zane add-on)**: `D` opens the **hovered party member's** inventory
+  if the cursor is on one (`Actor` + `PartyMember`), else the avatar's — a clone QoL
+  convenience (source drops from the *active* member). Picker title shows the holder
+  name. Verified: hover Dupre + `D` → "Dupre — drop which item?"; empty cell → "Avatar
+  — …".
+- **Nested-container drop (Zane add-on)**: Zane found a real nested container — Dupre
+  carries a **bag** holding gold nuggets/coins — and confirmed the inspector drills into
+  nested containers. Source allows dropping any `CONTAINED` object at any depth (the
+  container view navigates the hierarchy: `seg_0C9C.c:1502` open = `D_E709=Selection.obj`
+  down, `:1495` close = `D_E709=GetAssoc` up). So made the picker **recursive**: a
+  carried container drills in (nested picker), and a pick at any depth pops the chain
+  back to the **base depth** captured at the root open (added `UIStack.depth()`; base-
+  depth pop, not `clear()` — which is blunt, only correct because `D` is gated on an
+  empty stack). Verified: drilled into Dupre's bag → picked gold nuggets → chain popped
+  to 0 → "You drop a gold nuggets." (on the map, gone from the bag); no errors.
+- **New seam**: DROP is the first verb whose first target isn't a map cell → the
+  dispatch gained `pendingDropItem` (arm-with-context → pick-a-cell). Reusable for TALK
+  + "use item on target". The picking-Enter doesn't double-fire (dispatch's keydown
+  listener registered before `UIStack`'s → sees the modal open → returns).
+- **Verified** (preview-eval): `D` opens the picker (sword equipped / Orb of the Moons /
+  ankh amulet); pick Orb + confirm a passable cell → "You drop Orb of the Moons."
+  (inventory 3→2, item on the map); >7 away → "Out of range!"; impassable → "You can't
+  drop it there."; click-confirm carries the armed item; no errors.
+- **Deferred**: throw-missile animation, break-if-far, quantity prompt, drop-into-
+  container, unequip-on-drop, SetOkToGet (anti-theft).
+- **Next**: I-10 core verbs (USE/LOOK/GET/DROP) done. Either the post-I-9 deviation
+  audit (deferred to after I-10) or I-11 (talk).
+
+---
+
+## 2026-06-04 — I-10g: GET (pick up → inventory); DROP split to I-10h
+
+- **Read**: `seg_27a1.c` — GET `C_27A1_18F5` (:815-922) + DROP `C_27A1_14DA` (:692-812).
+  GET: re-pick → LOCXYZ + adjacency gates → terrain-damage-on-grab → weight/strength
+  carry gate → place (stackable `GiveObj` / lit torch → hand / else `InsertObj INVEN`)
+  → **theft/karma** (un-owned overworld item: −1 karma; an awake neutral witness yells
+  "Stop Thief!!!" + turns hostile). DROP: a **two-target** verb — pick the carried item,
+  then a "Location:" cell; quantity prompt for stacks; thrown as a `COMBAT_Missile` arc;
+  outcomes ground / container / "It broke!" (fragile + far).
+- **Decision (Zane)**: split GET and DROP — DROP's inventory-item + location flow is
+  heavier in the current architecture (the verb-first front-end only targets a map cell;
+  DROP needs a "which carried item" source). **Do GET first; DROP = I-10h.**
+- **Audit** (`world_loader.js`, no-reinvention): `attachToHolder` (ContainedIn + Container
+  tag) + `inventoryOf` exist; the missing piece is "take an on-map object into inventory"
+  → added `moveToInventory` (`InsertObj INVEN`): drop `Position` + `spatial.remove`, then
+  `attachToHolder`.
+- **Impl**: `command_dispatch.js` `get` handler — forUse re-pick (skip NPC/ignore) →
+  on-ground check → `moveToInventory` into `avatarRef` → "You get …"; adjacency via the
+  dispatch gate; `G` key.
+- **Gettable gate (Zane flagged "are all objects gettable?")**: the first cut deferred
+  ALL weight handling → the clone got *everything*, incl. a carpet. Re-read confirmed
+  source gates gettability on **`TypeWeight[type]`** (`C_27A1_18F5:858` + `GetWeight`
+  `seg_155D.c:165`): `TypeWeight==0` = a **fixed object** (scenery/furniture), refused
+  for GET *and* MOVE (`seg_27a1.c:995`). **Key**: that data is already loaded — it's the
+  `tileflag` file's `TypeWeight` plane (@0x1000) which `tile_flags.js` deliberately
+  *skipped*. So I decoded it (`reg.weightOf(objType)`) and ported the gate
+  (`weight==0 || ==255 || OBJ_19B` → "You can't get that."). Only the carry-**capacity**
+  (`STREN*20`) gate stays deferred. Deferred otherwise: terrain-damage, theft/karma,
+  lit-torch-to-hand, stack-merge, per-type fixups, explicit `SubMov`.
+- **Verified** (preview-eval): `G` on the fixed carpet (obj 0x12f, `weightOf==0`) →
+  "You can't get that." (stays on the map); a real weight-12 item → "You get …" (leaves
+  the map, into the avatar inventory via the `I` Inspect modal); non-adjacent → "Out of
+  range!"; empty → "Nothing to get."; no errors.
+- **Next**: I-10h (DROP) — settle the item-selection UI with Zane first (likely via the
+  inventory modal).
+
+---
+
+## 2026-06-04 — verb-first front-end: left-click confirm (+ pan suppressed while armed)
+
+- **Impl** (Zane request): the verb-first targeting now confirms with a **left-click**
+  as well as `Enter`. `command_dispatch.js` adds a canvas `click` → dispatch the armed
+  verb at `probe.getLastCell()` + disarm; `dev_probe.js` gains an `isVerbArmed` gate
+  that **skips drag-to-pan while a verb is armed** (`main.js` forward-refs
+  `cmd.isPending()`). Zane's framing — the armed state expects a click, not a pan —
+  removed the click-vs-drag threshold I'd first proposed.
+- **Faithfulness**: this is the route the clone had skipped — source's primary
+  targeting IS the mouse click; keyboard `Enter` only synthesises one
+  (`seg_0C9C.c:1206-1217`, `research_object_interaction.md §"Mouse and keyboard …"`).
+- **Verified** (preview-eval): armed-Look + click → "Thou dost see …" at the cell +
+  disarm; a drag while armed → camera delta (0,0); `Enter` route unchanged; no errors.
+
+---
+
+## 2026-06-04 — I-10f: LOOK (line-only) + keeping `I` as a distinct Inspect tool
+
+Implemented the first single-function verb on the I-10b dispatch core — and, on a
+Zane source-check prompt, corrected what LOOK does with containers.
+
+- **Read**: `seg_27a1.c` — LOOK body `C_27A1_0C67` (:472-637): the "Thou dost see "
+  prefix, the empty/invisible → terrain-name + adjacent "Searching here…" branch, the
+  NPC/item `GetObjectString` branch, the `C_27A1_06D7`/`C_27A1_078F` branch, and the
+  weight / damage / spellbook / clock / sign / portrait / darkness extras.
+  `C_27A1_0841` (:355) — the count-prefix; `C_27A1_06D7` (:316, `CanRead?`) +
+  `C_27A1_06A2` (:304, `IsReadableSign?`) + `C_27A1_078F` (:335, `read book or sign?`).
+- **Found**: LOOK is **not** table-dispatched and is **viewport-range** (reads the
+  pointer cell, no adjacency gate). **The big correction:** LOOK does **not** open or
+  list a container — the branch that looked like "list contents" is `C_27A1_078F`,
+  which opens `BOOK.DAT` and prints **book/sign text**. So source LOOK is a pure
+  scroll verb that never opens a panel; container contents are a USE/GET interaction.
+  Also: `C_27A1_0841` is the count-prefix (QuanType-gated), not the article
+  (`C_27A1_061E`); the raw `Amount.quantity` is **not** a stack count for non-
+  stackables (a crate reads ×10), so prefixing it ("10 crate") is wrong — count
+  deferred with weight/stats.
+- **Decision (Zane 2026-06-04)**: `L` and `I` must be **distinct**. `L` = LOOK =
+  the faithful line; `I` = a separate clone-only **Inspect** tool = always open the
+  I-7 detail modal (obj#/status/contents). Revises the original decision #2
+  (LOOK-escalates-to-modal-for-containers), which the source re-check falsified.
+- **Impl**: `command_dispatch.js` — the `look` handler is **line-only** (terrain /
+  item / NPC / container all → a line; no modal); `withArticle` (article only);
+  `VIEWPORT_VERBS`; `L` key. `main.js` — the `I` hotkey **kept** as the always-open
+  inspector (restored), documented as LOOK's deliberate counterpart.
+- **Docs**: corrected `research_object_interaction.md` §"Look" (the wrong "lists
+  contents via C_27A1_078F" claim → book/sign reading) + its clone note; rewrote
+  `progress.md` decision #2 + §"I-10f — landed"; ledger/top-status to a–f.
+- **Verified** (preview-eval, real Britain data): LOOK → terrain "floor"/"grass"
+  (incl. 30 tiles away — viewport range), item "a flag", NPC "Avatar", crate
+  "a crate" — all **lines, no modal**; Inspect (`I`) on the same flag/crate → the
+  detail modal. `L` arms "Look" + Esc disarms; no console errors.
+- **Next**: I-10g (GET / DROP) — audit `world_loader.js` for the Give/Take/Insert/
+  Move analogs first (no-reinvention rule).
+
+---
+
+## 2026-06-04 — `SearchArea` resident-set bound → quality-search windowing
+
+Followed up the `note` `0d27e48` TODO: verify, from source, the exact window the
+clone's quality-linked-control search (`findObjectsByTypeQuality`) should use.
+
+- **Read**: `seg_1184.c` — `SearchArea` (`C_1184_09DE`, :369), `NextArea`
+  (`C_1184_090D`, :345), the anchor-node lookup `C_1184_02FA` (:139, both the
+  in-window `MapObjPtr` index path and the `else` Link[]-walk path :176-207),
+  the local-object area maintainer `C_1184_19AA` (:795), and `C_1184_2ECC`
+  (:1456, MapObjPtr rebuild). `seg_101C.c` — area refresh `C_101C_0306`
+  (:140; `AreaX/AreaY = (MapX-0x10)&0x3f8`, the 5×5-chunk tile load, the local
+  object re-place loop). `seg_27a1.c` — the three control handlers `C_27A1_433D`
+  (crank, :2056), `C_27A1_4479` (lever, :2092), `C_27A1_4672` (switch, :2140),
+  all using `SearchArea(0,0,0x3ff,0x3ff)`. `u6.h` — `AREA_W`/`AREA_H` = 40,
+  `MapObjPtr[40][40]`, `AreaX/AreaY`.
+- **Found**: `SearchArea` is **not** a map scan — it walks the resident `Link[]`
+  chain between two positional anchors; the anchors index `MapObjPtr[40][40]`.
+  The resident set is structurally bounded to the **40×40 active window** by
+  `C_1184_19AA`'s ±20-box eviction (40 wide = `AREA_W`) + OBJBLK streaming. So
+  `SearchArea(0,0,0x3ff,0x3ff)` is "**no coordinate filter**," not "scan the
+  world" — it returns only the ~40×40 loaded working set. **The note's open worry
+  (object window may differ from the tile window) resolves: it's the same 40×40.**
+  The canonical area search at `seg_2FC1.c:915` confirms the exact window:
+  `SearchArea(AreaX, AreaY, AreaX+39, AreaY+39)`. `NextArea` also filters
+  `z == MapZ` (:359) — a level filter the clone scan currently lacks.
+- **Docs**: `research_world_data.md` new §"Area-bounded object search —
+  `SearchArea`/`NextArea`" (mechanism + the resident-set bound + the clone
+  no-unload divergence); §"Open targets" item 1 augmented with the windowing
+  consequence. `research_object_interaction.md` new §"Quality-linked controls —
+  search scope" (lever/switch/crank handler table + the windowing fix); fixed the
+  stale `OBJ_120` dispatch row ("clock/device" → crank/drawbridge).
+- **Implemented** (same session): `findObjectsByTypeQuality(world, type, quality,
+  near)` gained an optional `near = {x,y,z}` window — a ±20 box on the control's
+  level (Zane's call: center±20, centered on the **control object's own cell**, not
+  a separate `AreaX/AreaY` resource), with the `NextArea` `z == MapZ` filter and a
+  `query(ObjType, Position)` LOCXYZ restriction. `useLever`/`useSwitch` (via
+  `markerToggle`) + `useCrank` (`findBridgeAnchor`) pass the control cell.
+- **Verified** (preview-eval, real Britain data), three ways: (1) **predicate** — the
+  windowed scan drops 25 of 34 quality-0 doorways (keeps the 9 with Chebyshev ≤ 20);
+  (2) **synthetic** in-world markers — ±20 is boundary-inclusive (Δ20 kept, Δ21
+  dropped), the z filter drops a same-xy z=1 marker, and the temp entities are
+  destroyed (world left clean); (3) **end-to-end on the real gate** — the LB-castle
+  lever (303,383, quality 1) toggles its portcullis at (307,384) open→close
+  (delete→re-add round-trip, "You hear a noise."), while the unrelated portcullis at
+  (351,407) — Chebyshev 48, out of window + different circuit — is untouched; lever
+  frame restored. The marker+portcullis live in **region 26** (the lever sits on the
+  18/26 boundary at y=384), which only OBJBLK-loads once you cross into it; loaded it
+  via `loadRegion(world, 26)` to reproduce the I-10d "regions 18+26" scenario. No
+  console errors throughout.
+- **Next**: commit (docs + impl); then I-10f (LOOK), I-10g (GET/DROP).
+
+---
+
+## 2026-06-04 — I-10a–e: USE dispatch + the castle gate (door / lever / crank)
+
+Built the object-action dispatch core and the first real USE handlers, ending with
+the geometry-heavy drawbridge. Each sub-step a save-point commit, none pushed
+(Zane's call — local-only through the session).
+
+- **Read**: `C_27A1_2A44` (door, seg_27a1.c:1280) + the USE switch (3066-3076);
+  `C_27A1_2D8E` (use key/lockpick, 1390) — OBJ_03F lockpick (quality-0 locks) vs
+  OBJ_040 key (quality-matched); `C_27A1_4479` (lever, 2092) + `C_27A1_4672`
+  (switch, 2140); `C_27A1_433D` (crank, 2056) → `C_27A1_3F47` (drawbridge, 1942) +
+  helpers `C_27A1_3E59`/`3E9A`/`3ED1`/`3EF6`; `GetTileAtXYZ` (seg_101C.c:485) +
+  `D_1D0A` shore-tile whitelist; obj.h door/control/marker constants.
+- **Found**: (1) **door frame model** — low 2 bits = orientation, bits 2-3 = state
+  (0 open · 1 closed · 2 key-locked · 3 magic-locked); plain USE toggles the
+  open/closed bit, refuses locked. (2) **The scope doc's "crank frame-toggles the
+  bridge" was wrong** — ALL of lever/switch/crank *add and delete* objects, not
+  frame-toggle (caught before building). Lever/switch add/delete a gate (portcullis
+  OBJ_136 / electric-field OBJ_0AF) at quality-matched OBJ_12D markers; the crank
+  delete/re-adds the whole OBJ_10D bridge run in a new shape (raised row ↔ lowered
+  span across the moat). (3) **Lock-key investigation**: the (304,382) steel door is
+  key-locked quality-1; no quality-1 key in the loaded start region (only a
+  quality-14 key + quality-0 lockpicks), because U6 hands that key via **Lord
+  British's conversation** (I-13 VM, not built) → temporary force-open bypass.
+- **Docs**: `progress.md` gained "I-10a–e — landed" sections + status/ledger update;
+  `CLAUDE.md` stage + code-layout + NPC-#12 known-issue (now RESOLVED) updated; this
+  entry. New code: `resources/{message_log,commands}.js`, `view/message_channel.js`,
+  `systems/{cell_pick,command_dispatch,use_handlers,use_drawbridge}.js`, runtime
+  primitives in `world_loader.js`.
+- **Found (live)**: with the bridge lowered, scheduled NPCs **#11/#12 walk to the
+  dining room** (Zane) — the modeled drawbridge resolves the I-9 #12 dinner-teleport.
+- **Open**: the real locked-door unlock (key via I-13 conversation + USE-inventory
+  front-end); the switch path + the crank's "can't open" clearance gate are ported
+  but untested (no reachable scenario); 5 local commits unpushed (push before any
+  cross-PC switch).
+- **Next**: **I-10f (LOOK)**, then **I-10g (GET/DROP)** — both reuse the dispatch
+  seam + the I-10d add/delete primitives.
+
 ## 2026-06-02 — I-9 wrap-up: NPC-blocking research + I-9i dropped → I-9 complete
 
 Post-I-9h discussion. Zane asked how the source handles an NPC blocked by another NPC /

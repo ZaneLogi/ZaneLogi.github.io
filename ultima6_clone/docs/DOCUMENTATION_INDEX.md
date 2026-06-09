@@ -1,15 +1,18 @@
 # ultima6_clone — Documentation Index
 
-**Date:** 2026-06-02
-**Status:** Implementation phase — **I-9 (NPC pathfinding) COMPLETE; sub-steps
-a–h landed, i dropped.** Steps I-1 → I-8 complete; I-9 a–h committed as separate
+**Date:** 2026-06-05
+**Status:** Implementation phase — **I-10 (object-action dispatch) COMPLETE (a–j):
+USE/LOOK/GET/DROP/MOVE-push/give + the verb-aware inventory window; further USE
+cases demand-driven.** I-9 (NPC pathfinding) COMPLETE (a–h landed, i dropped).
+Steps I-1 → I-8 complete; I-9 a–h committed as separate
 commits (no squash). NPCs walk to schedule slots when near the player and teleport
 to them when far/off-screen (per-NPC bucket-Dijkstra + edge-seek + re-plan;
 `C_1E0F_291C` + Chebyshev-40 distance gate), settle into the arrival worktype/facing
 (`__AtDestination`, I-9g), and align to the current-hour slot at load (first-tick
 alignment, I-9h). I-9i (dev-HUD path overlay) dropped (covered by live preview-eval).
-Next = post-I-9 deviation audit (move-points / clock / idle-heartbeat fork / I-9f)
-then I-10. See `progress.md §"I-9 scope"` + `research_npc_ai.md §"Arrival —
+Next = the post-I-9 deviation audit (move-points / clock / idle-heartbeat fork /
+I-9f), or TALK (I-11). See `progress.md §"I-10j"` + §"I-10 scope" + §"I-9
+scope" + `research_npc_ai.md §"Arrival —
 __AtDestination"` / §"Off-area handling" / §"Blocking + collision resolution" /
 §"Clone port notes (I-9)".
 The ECS runtime ground (spec in [architecture_ecs.md](architecture_ecs.md)) is

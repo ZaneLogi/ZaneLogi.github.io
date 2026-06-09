@@ -57,6 +57,7 @@ export class UIStack {
 
   top() { return this.stack[this.stack.length - 1] ?? null; }
   isEmpty() { return this.stack.length === 0; }
+  depth() { return this.stack.length; }
 
   // Pop all open modals (used by tests / dev console; not exercised by the
   // inspector flow, where the user unwinds Esc-by-Esc).

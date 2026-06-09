@@ -173,6 +173,155 @@ export function loadActors(world, objlist) {
   return { actors, scheduled, party };
 }
 
+// Runtime object-mutation primitive (I-10c+). Set an object's frame and refresh
+// its render tile to match — the shared path every USE effect (door/crank toggle,
+// later lever/lantern) and any other frame change goes through, mirroring source's
+// SetFrame. No SpatialIndex change (the object stays in its cell). Passability
+// follows for free: door open/closed is per-frame tile flags, not a special case,
+// and canStandAt reads the live tileId (research_map_render / I-4 passability).
+export function setObjectFrame(world, handle, frame) {
+  const i = world.resolve(handle);
+  if (i === -1) return;
+  const reg = world.getResource(TileRegistry);
+  const objs = world.store(ObjType);
+  const rend = world.store(Renderable);
+  objs.frame[i] = frame;
+  rend.tileId[i] = reg.tileForObject(objs.objNumber[i], frame);
+}
+
+// --- Runtime map-object primitives (I-10d+) -------------------------------------
+// add / delete / query world objects at runtime, mirroring source's AddObj /
+// DeleteObj / SearchArea. Shared by the USE quality-linked controls (lever→
+// portcullis, switch→electric-field, crank→drawbridge) and later GET/DROP.
+
+// Spawn a world object at (x,y,z) and splice it at the cell's chain HEAD (runtime
+// add = AddMapObj head-splice, the I-7 mutation discipline). Mirrors source AddObj
+// + ClrLocal (status 0 = not LOCAL/temporary). Returns the new handle.
+export function addMapObject(world, { objNumber, frame, x, y, z = 0, quality = 0, quantity = 1, status = 0 }) {
+  const reg = world.getResource(TileRegistry);
+  const spatial = world.getResource(SpatialIndex);
+  const e = world.create();
+  world.add(e, Position, { x, y, z });
+  world.add(e, ObjType, { objNumber, frame });
+  world.add(e, Status, { bits: status });
+  world.add(e, Amount, { quantity, quality });
+  world.add(e, Renderable, { tileId: reg.tileForObject(objNumber, frame) });
+  spatial.insertAtHead(x, y, e);
+  return e;
+}
+
+// Remove a world object (mirrors source DeleteObj): unlink from its cell, destroy
+// the entity. No-op if the handle is stale or off-map.
+export function deleteMapObject(world, handle) {
+  const i = world.resolve(handle);
+  if (i === -1 || !world.has(handle, Position)) return;
+  const pos = world.store(Position);
+  world.getResource(SpatialIndex).remove(pos.x[i], pos.y[i], handle);
+  world.destroy(handle);
+}
+
+// Move an on-map (LOCXYZ) object into a holder's inventory — source's
+// InsertObj(obj, holder, INVEN) for GET's non-stack path (C_27A1_18F5:882). Unlinks
+// the entity from the map (spatial + Position) and attaches it as
+// ContainedIn{holder, equipped:0}; Renderable/Amount stay (the inspector icon + qty).
+// Stack MERGING (source's GiveObj) is deferred — a got stack becomes one INVEN entity.
+// Returns false if the handle is stale.
+export function moveToInventory(world, itemHandle, holderHandle) {
+  const i = world.resolve(itemHandle);
+  if (i === -1) return false;
+  if (world.has(itemHandle, Position)) {
+    const pos = world.store(Position);
+    world.getResource(SpatialIndex).remove(pos.x[i], pos.y[i], itemHandle);
+    world.remove(itemHandle, Position);            // off-map now — the renderer skips it
+  }
+  attachToHolder(world, itemHandle, holderHandle, false);   // INVEN (not equipped)
+  return true;
+}
+
+// Drop an inventory item onto a map cell — the inverse of moveToInventory (source's
+// DROP placement, C_27A1_14DA: MoveObj the item to the cell). Strips ContainedIn,
+// adds Position{x,y,z}, and head-splices into the SpatialIndex (the I-7 mutation
+// discipline = AddMapObj/MoveObj order). Renderable/Amount carry over. Returns false
+// if the handle is stale. (Source SetOkToGet — anti-theft — is moot until karma lands.)
+export function dropToMap(world, itemHandle, x, y, z = 0) {
+  const i = world.resolve(itemHandle);
+  if (i === -1) return false;
+  if (world.has(itemHandle, ContainedIn)) world.remove(itemHandle, ContainedIn);
+  world.add(itemHandle, Position, { x, y, z });
+  world.getResource(SpatialIndex).insertAtHead(x, y, itemHandle);
+  return true;
+}
+
+// Relocate an on-map (LOCXYZ) object to another cell — source's MoveObj(obj, x, y, z).
+// Used by MOVE's push (I-10i) and reusable by any runtime relocate. Same chain-head
+// discipline as the avatar step (avatar_move_system): spatial.remove → update Position
+// → insertAtHead. No-op (returns false) on a stale handle or an off-map item (an
+// inventory item has no Position — put it on the map via dropToMap instead). z carries
+// over unless overridden.
+export function moveMapObject(world, handle, x, y, z) {
+  const i = world.resolve(handle);
+  if (i === -1 || !world.has(handle, Position)) return false;
+  const pos = world.store(Position);
+  const spatial = world.getResource(SpatialIndex);
+  spatial.remove(pos.x[i], pos.y[i], handle);
+  pos.x[i] = x; pos.y[i] = y;
+  if (z !== undefined) pos.z[i] = z;
+  spatial.insertAtHead(x, y, handle);
+  return true;
+}
+
+// All on-map objects of a given type, optionally filtered by quality (source's
+// SearchArea + type/quality test, e.g. C_27A1_433D / C_27A1_4479). Returns handles.
+//
+// `near` re-imposes source's area bound. SearchArea/NextArea (seg_1184.c:369/345)
+// walk the resident Link[] chain and keep each LOCXYZ object whose (x,y) is in a
+// bbox AND z == MapZ. The quality-linked controls pass SearchArea(0,0,0x3ff,0x3ff)
+// = "no coordinate filter" — but U6's resident set is only ~the 40x40 active area
+// (DOS streaming evicts the rest; research_world_data.md §"Area-bounded object
+// search"). The clone never unloads regions, so an unfiltered scan would see
+// same-quality objects across every visited castle/level — matches source can't
+// make. Pass `near = {x, y, z}` (the control's cell) to restrict to a ±20 box
+// (~the 40x40 active area) on the control's level — the z test is NextArea's
+// `z == MapZ`, a no-op while single-level (overworld) but load-bearing once
+// dungeons co-reside under no-unload. Omit `near` for a genuine global scan.
+export function findObjectsByTypeQuality(world, objNumber, quality, near = null) {
+  const objs = world.store(ObjType), amts = world.store(Amount);
+  const pos = near ? world.store(Position) : null;
+  const out = [];
+  // near → query(ObjType, Position) yields only on-map entities (the LOCXYZ analog;
+  // CONTAINED/INVEN/EQUIP items have no Position, like source's GetCoordUse filter).
+  for (const id of (near ? world.query(ObjType, Position) : world.query(ObjType))) {
+    if (objs.objNumber[id] !== objNumber) continue;
+    if (quality !== undefined && amts.quality[id] !== quality) continue;
+    if (near && (pos.z[id] !== near.z ||
+                 Math.abs(pos.x[id] - near.x) > 20 || Math.abs(pos.y[id] - near.y) > 20)) continue;
+    out.push(world.handleOf(id));
+  }
+  return out;
+}
+
+// First object of a given type at (x,y), or null (a spatial __SearchTypeAt analog).
+export function objAtCell(world, x, y, objNumber) {
+  const ents = world.getResource(SpatialIndex).at(x, y);
+  if (!ents) return null;
+  const objs = world.store(ObjType);
+  for (const h of ents) {
+    const i = world.resolve(h);
+    if (i !== -1 && objs.objNumber[i] === objNumber) return h;
+  }
+  return null;
+}
+
+// Is an actor (NPC / party member) standing at (x,y)? Source's occupancy gate uses
+// the actor/world-object index split (object index < 0x100 == an actor); the ECS
+// analog is "any entity here with the Actor component" (C_27A1_3E9A).
+export function actorAtCell(world, x, y) {
+  const ents = world.getResource(SpatialIndex).at(x, y);
+  if (!ents) return false;
+  for (const h of ents) if (world.has(h, Actor)) return true;
+  return false;
+}
+
 // I-6a inspection helper. Walk query(ContainedIn), match by holder handle, return
 // { entity, objNumber, frame, quantity, quality, equipped } for each item. Linear
 // scan — fine for inventories of single-digit-to-low-dozens size; if inventories

@@ -38,7 +38,13 @@ import { installDevHud } from './view/dev_hud.js';
 import { installDevProbe } from './view/dev_probe.js';
 import { UIStack } from './view/ui_stack.js';
 import { openInspector } from './view/inspector.js';
-import { forEachOccupiedCell } from './systems/tile_footprint.js';
+import { openInventoryWindow } from './view/inventory_picker.js';
+import { MessageLog } from './resources/message_log.js';
+import { installMessageChannel } from './view/message_channel.js';
+import { Commands } from './resources/commands.js';
+import { makePickAtCell } from './systems/cell_pick.js';
+import { installCommandDispatch } from './systems/command_dispatch.js';
+import { registerUseHandlers } from './systems/use_handlers.js';
 
 // Gating set for terrain + flags (I-1b) + world objects (I-2) + NPC schedules (I-5).
 // Names are the original U6 filenames, lowercased.
@@ -109,6 +115,7 @@ async function buildFileMap() {
 }
 
 async function load() {
+  document.getElementById('app').style.display = 'grid';   // reveal the shell (boot log lives in it now)
   log('Decoding…', 'warn');
   const fileMap = await buildFileMap();
 
@@ -150,6 +157,8 @@ async function load() {
        .registerComponent(AIMode).registerComponent(Destination);   // I-9: NPC pathfinding state
   world.setResource(new Party());                 // I-8b: singleton party state (activeIndex, mode)
   world.setResource(new Paths());                 // I-9c: per-NPC pathfinding state (handle -> {dirs, counter, ...})
+  world.setResource(new MessageLog());            // I-10a: gameplay message channel (CON_printf analog)
+  world.setResource(new Commands());              // I-10b: object-action dispatch registries
   const uiStack = new UIStack(world, document.getElementById('ui-root'));
   window.__U6 = { world, tileRegistry: world.getResource(TileRegistry), mapLevel: world.getResource(MapLevel), spatial: world.getResource(SpatialIndex), clock: world.getResource(WorldClock), party: world.getResource(Party), schedules, objlist, actorIndex: world.getResource(ActorIndex), inventoryOf: (h) => inventoryOf(world, h), uiStack };
 
@@ -214,8 +223,12 @@ function verifyInventory(world, objlist) {
 // the camera at Britain's default origin, demand-load the OBJBLK regions in view, then
 // register CameraSystem + RenderSystem(s) and drive a continuous rAF loop. Drag to pan.
 async function startRender(world, { npcScheduleStats, objlist, schedules, uiStack } = {}) {
-  const canvas = document.getElementById('screen');
-  canvas.style.display = 'block';
+  const canvas = document.getElementById('screen');   // shown via the #app shell reveal in load()
+
+  // I-10a: gameplay message channel. Render-flush installer (mirrors installDevHud);
+  // window.__U6.message lets the I-10b dispatcher + live preview-eval emit lines.
+  const message = installMessageChannel(world, { el: document.getElementById('messages') });
+  window.__U6.message = message;
 
   const reg = world.getResource(TileRegistry);
   const renderer = new TileRenderer(canvas, { tileSize: 16, tilesPerRow: 64, tileCount: 2048 });
@@ -298,74 +311,106 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
 
   // I-4d cell probe + I-5f per-NPC schedule line + canvas drag-to-pan.
   // Returned handle exposes isDragging() + getLastCell() for the I-7 hotkey.
+  // `isVerbArmed` forward-refs `cmd` (assigned below) so the probe suppresses
+  // drag-to-pan while a verb is armed — that state confirms with a click (I-10f).
+  let cmd;
   const probe = installDevProbe(world, {
     canvas, ts,
     probeEl: document.getElementById('probe-text'),
     cellEl:  document.getElementById('probe-cell'),
     objlist, schedules,
+    isVerbArmed: () => cmd?.isPending() ?? false,
   });
 
-  // I-7c: "look" hotkey. Hover any cell, press I -> inspector opens on the
-  // source-faithful pick for that cell. Gated on:
-  //   (a) UIStack is empty — when a modal is open, the substrate's own
-  //       keydown handler is in front and routes keys to the top modal.
-  //   (b) probe not mid-drag — no spurious inspect mid-pan.
-  //
-  // Pick rule, derived from source's mkMouseSelection -> C_2337_08F1
-  // (seg_2337.c:365) + COMBAT_canSee (seg_2337.c:340):
-  //   1. Gather candidates from 4 anchor cells (own + 3 SE neighbors whose
-  //      double-tile may extend back into (x,y)). Source's NextLoc
-  //      (seg_1184.c:211) walks a single chain that already includes these.
-  //   2. Within each candidate, iterate spatial.at FORWARD — spatial.at[0]
-  //      is the chain head, matching source's FindLoc first-walk order.
-  //      Under our insert rules: initial-load is in OBJBLK file order
-  //      (insert/push); runtime move is at-head (insertAtHead).
-  //   3. IsTileIgnore tiles are DEPRIORITIZED, not absolutely skipped — source's
-  //      C_2337_08F1 first-pass saves the first Ignore-flagged candidate as a
-  //      fallback (objNum_3) and only returns it if no canSee object is found
-  //      anywhere in the chain. So Ignore tiles act like "carpet under a sword"
-  //      — invisible to LOOK when there's a real target above, but pickable
-  //      when they're all the cell has (e.g. an egg sitting alone on the floor).
-  //   4. NPCs override objects — C_2337_08F1's second pass keeps walking for an
-  //      NPC and any NPC wins. We track firstNpc / firstObj / firstIgObj
-  //      separately and return firstNpc ?? firstObj ?? firstIgObj.
-  const rendStore = world.store(Renderable);
-  const inspectAtCell = (x, y) => {
-    const spatial = world.getResource(SpatialIndex);
-    let firstObj = null, firstNpc = null, firstIgObj = null;
-    for (let dy = 0; dy <= 1; dy++) {
-      for (let dx = 0; dx <= 1; dx++) {
-        const ents = spatial.at(x + dx, y + dy);
-        if (!ents) continue;
-        for (const handle of ents) {
-          const i = world.resolve(handle);
-          if (i === -1) continue;
-          let landedTile = -1;
-          forEachOccupiedCell(reg, rendStore.tileId[i], x + dx, y + dy,
-            (t, c, r) => { if (c === x && r === y) landedTile = t; });
-          if (landedTile === -1) continue;
-          if (world.has(handle, Actor)) {
-            if (firstNpc === null) firstNpc = handle;
-          } else if (reg.isTileIgnore(landedTile)) {
-            if (firstIgObj === null) firstIgObj = handle;
-          } else if (firstObj === null) {
-            firstObj = handle;
-          }
-        }
-      }
+  // The inspector hotkey (I-7c) and the I-10b command dispatch share ONE cell
+  // pick — the source-faithful 3-tier mkMouseSelection -> C_2337_08F1 rule now
+  // lives in systems/cell_pick.js (generalized from the old inline inspectAtCell).
+  const pickAtCell = makePickAtCell(world, reg);
+
+  // I-10b: object-action dispatch core + verb-first front-end. Press U to arm
+  // "Use" / L for "Look" (the #probe-cell highlight recolors + tags); confirm the
+  // highlighted cell with Enter OR a left-click, Esc cancels; results + refusals
+  // print to the message channel.
+  cmd = installCommandDispatch(world, {
+    pickAtCell, probe, canvas,
+    cellEl: document.getElementById('probe-cell'),
+    avatarRef, reg, objlist, message, uiStack,
+  });
+  window.__U6.cmd = cmd;            // dev: live dispatch({verb, target}) + isPending()
+  window.__U6.pickAtCell = pickAtCell;
+  window.__U6.openInventoryWindow = (holder, onVerb) =>     // dev: open the I-10j verb-aware window
+    openInventoryWindow(world, holder ?? avatarRef.handle, uiStack, { reg, objlist, onVerb: onVerb ?? ((v, i) => console.log('[inv]', v, i.handle)) });
+
+  // I-10c: register the USE object-type handlers (door now; crank etc. follow).
+  registerUseHandlers(world);
+  window.__U6.commands = world.getResource(Commands);                          // dev: inspect the registries
+  window.__U6.stores = { obj: world.store(ObjType), pos: world.store(Position), rend: world.store(Renderable), amount: world.store(Amount), status: world.store(Status) };
+  window.__U6.findByObj = (objNumber) => {                                     // dev: locate every entity of an obj type
+    const s = world.store(ObjType), ps = world.store(Position), as = world.store(Amount), cs = world.store(ContainedIn);
+    const r = [];
+    for (const id of world.query(ObjType)) {
+      if (s.objNumber[id] !== objNumber) continue;
+      const h = world.handleOf(id);
+      const onMap = world.has(h, Position);
+      r.push({ frame: s.frame[id], quality: as.quality[id], x: onMap ? ps.x[id] : undefined, y: onMap ? ps.y[id] : undefined, holder: world.has(h, ContainedIn) ? cs.holder[id] : undefined });
     }
-    const pick = firstNpc ?? firstObj ?? firstIgObj;
-    if (pick !== null) openInspector(world, pick, uiStack, { reg, objlist });
+    return r;
   };
+
+  // Inspect hotkey (I): hover any cell, press I -> the full detail inspector modal
+  // for the pick (NPC / item / container — obj#/status/position/contents). This is a
+  // CLONE tool, deliberately DISTINCT from LOOK (L): source's LOOK is a pure scroll
+  // verb (a description line, never a panel — C_27A1_0C67), so L prints a line and I
+  // owns the structured detail / inventory view. Gated on (a) no modal open, (b) not
+  // mid-pan, (c) no verb armed (the dispatch front-end owns the keyboard while aiming).
   document.addEventListener('keydown', (e) => {
     if (!uiStack.isEmpty()) return;
     if (probe.isDragging()) return;
+    if (cmd.isPending()) return;
     if (e.key.toLowerCase() !== 'i') return;
     const cell = probe.getLastCell();
     if (!cell) return;
-    inspectAtCell(cell.x, cell.y);
+    const pick = pickAtCell(cell.x, cell.y);
+    if (pick !== null) openInspector(world, pick, uiStack, { reg, objlist });
     e.preventDefault();
   });
+
+  // I-10j step 2 — digit-key inventory access. Top-row `1`..`PartySize` opens that party
+  // member's inventory window (1 = Avatar); the window's onDigit re-opens for member n
+  // (member switch — the window unwinds its own chain first, then we open the new member).
+  // `0` (party roster) is deferred. TOP-ROW only (`e.code` Digit*) so the NUMPAD digits
+  // stay avatar-diagonal movement. onVerb is a console placeholder until DROP migrates
+  // (step 3) / give lands (step 4).
+  function openMemberInventory(n) {                       // n = 1..PartySize
+    const idx = n - 1;
+    if (idx < 0 || idx >= objlist.partySize) return;      // dynamic bound (source ch-'1' < PartySize)
+    const holder = actorIndex.get(objlist.party[idx]);
+    if (holder === undefined) return;
+    openInventoryWindow(world, holder, uiStack, {
+      reg, objlist,
+      onDigit: openMemberInventory,                       // in-window member switch
+      onVerb: (verb, item) => {
+        if (verb === 'drop') cmd.armDrop(item.handle);              // D → arm the map cursor for the cell (reach 7)
+        else if (verb === 'give') cmd.armGive(item.handle, holder); // M → arm a recipient; holder = the giver member
+      },
+    });
+  }
+  document.addEventListener('keydown', (e) => {
+    if (!uiStack.isEmpty()) return;                       // a window owns digits while open (its onKey)
+    if (probe.isDragging()) return;
+    if (!/^Digit[1-9]$/.test(e.code)) return;             // top-row only; numpad = avatar diagonals
+    const n = parseInt(e.key, 10);
+    if (cmd.isAwaitingGiveRecipient()) {                  // I-10j give: digit = recipient member n
+      const idx = n - 1;
+      cmd.giveTo(idx < objlist.partySize ? (actorIndex.get(objlist.party[idx]) ?? null) : null);
+      e.preventDefault();
+      return;
+    }
+    if (cmd.isPending()) return;                          // a map verb is armed → digit inert
+    openMemberInventory(n);                               // open member n's inventory
+    e.preventDefault();
+  });
+  window.__U6.openMemberInventory = openMemberInventory;  // dev
 
   // I-9h first-tick alignment: the schedule system only fires on an hour ROLLOVER, so at
   // load NPCs sit at their objlist positions (doing nothing) until the clock crosses the
@@ -381,6 +426,7 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   let last = performance.now();
   (function loop(t) { world.frame(t - last, t); last = t; requestAnimationFrame(loop); })(last);
   log('\nRendering started — drag the map to pan. Hover a cell + press I to inspect.', 'ok');
+  message('Welcome to Britannia. Drag the map to explore; hover a cell and press I to inspect.');
 }
 
 // --- the status panel doubles as the dropzone (whole panel is a drop target, even

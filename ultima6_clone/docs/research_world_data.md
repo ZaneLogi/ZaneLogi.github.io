@@ -375,6 +375,101 @@ There are two suspicious `/*__unused__ => bug?*/` comments at lines
 but then used a hardcoded `0x3ff` mask. The Z-aware variant was apparently
 intended but dead. Not relevant to our use case (we control the rebuild).
 
+## Area-bounded object search — `SearchArea` / `NextArea`
+
+`SearchArea(x1, y1, x2, y2)` (`seg_1184.c:369`) + `NextArea()`
+(`seg_1184.c:345`) are the engine's bbox object iterator — the *read*
+side of the `Link[]` / `MapObjPtr` structures above. Callers include
+USE's quality-linked controls, gargoyle-egg cleanup, and several AI
+area scans.
+
+```c
+SearchArea(x1, y1, x2, y2) {
+    clamp x1,y1 ≥ 0;
+    D_BDCE[] = {x1, y1, x2, y2};        // the bbox filter
+    D_BDD8   = MapZ;                    // the level filter
+    D_0703 = C_1184_02FA(x1,   y1, 0);  // start anchor node in Link[]
+    D_0705 = C_1184_02FA(x2+1, y2, 0);  // end anchor node
+    return NextArea();
+}
+NextArea() {                           // walk Link[] from D_0703 toward
+    for (; D_0703 != end; D_0703 = Link[D_0703])   // D_0705, returning the
+        if (CoordUse==LOCXYZ &&        // next LOCXYZ object whose
+            x∈[x1,x2] && y∈[y1,y2] &&  // (x,y) ∈ bbox AND
+            z == D_BDD8) return it;    // z == MapZ
+}
+```
+
+**It is not a map scan** — it walks the in-memory sorted `Link[]`
+chain between two positional anchor nodes. `C_1184_02FA(x, y, 0)`
+(`seg_1184.c:139`) resolves a world coord to a chain node by indexing
+`MapObjPtr[40][40]` for in-window coords (`some_x < AREA_W &&
+some_y < AREA_H`; the flat bound `0x63f` = 40×40−1), or, for
+out-of-window coords, by walking `Link[]` from the dummy head
+`Link[0x100]` to the sort-order insertion point (the `else` branch,
+`seg_1184.c:176-207`). So the **search domain is whatever is resident
+in `Link[]`** — regardless of how wide the bbox is.
+
+### The resident set is bounded to the 40×40 active window
+
+Two mechanisms keep `Link[]` ≈ the 40×40 area (so the object working
+set is the **same** 40×40 as the tile working set — not larger):
+
+- **`MapObjPtr[40][40]`** only indexes objects whose area-local coords
+  fall in `[0,40)²` (`C_1184_2ECC`, above) — the anchor nodes for
+  `SearchArea` come from here.
+- **`C_1184_19AA(cx, cy, z)`** (`seg_1184.c:795`) — the local-object
+  area maintainer, called on each area shift with the window center
+  `(AreaX+20, AreaY+20)` (`seg_101C.c:174`). It deletes/resets any
+  local object outside a **±20 box** (`cx-20 > x || cx+20 <= x` → 40
+  wide = `AREA_W`), and OBJBLK map objects page to disk via the chunk
+  streamer (`C_1184_2722` writeback / `C_1184_2DEF` read). Objects in
+  unvisited or scrolled-out regions are **not in `Link[]`** — they are
+  bytes in `objblkXX` on disk.
+
+### A full-map bbox means "no coordinate filter," not "scan the world"
+
+Callers that want every resident object pass
+`SearchArea(0, 0, 0x3ff, 0x3ff)` (the whole 10-bit coordinate range)
+— e.g. the USE quality-linked controls (see
+[`research_object_interaction.md`](research_object_interaction.md)
+§"Quality-linked controls — search scope"). On a 286/386 that yields
+only the ~40×40 loaded working set, because nothing else is resident.
+The full-range bounds exist precisely to say "don't filter by
+position — take everything `Link[]` holds."
+
+**Window geometry** (for the clone, which must reproduce the bound
+explicitly): origin `AreaX = (MapX-0x10) & 0x3f8`,
+`AreaY = (MapY-0x10) & 0x3f8` (`seg_101C.c:145-147`) — chunk-aligned,
+~16 tiles up-left of the player; span `[AreaX, AreaX+39] ×
+[AreaY, AreaY+39]`; center `(AreaX+20, AreaY+20)`; player at local
+offset 16-23 (≈centered, leaning up-left). The canonical 40×40 area
+search appears verbatim at `seg_2FC1.c:915`:
+`SearchArea(AreaX, AreaY, AreaX+(AREA_W-1), AreaY+(AREA_H-1))`. Other
+callers use narrower windows (`seg_1184.c:1739` = `MapX±5` 11×11
+viewport; `seg_27a1.c:2266` = `x±20` 41×41) — the bbox is always a
+*sub-window of*, never wider than, the resident area.
+
+### Clone divergence — windowing is *more* faithful, not a deviation
+
+The clone deliberately **never unloads regions** (no DOS memory
+pressure; see §"Open targets" item 1 + [`../CLAUDE.md`](../CLAUDE.md)).
+So its resident object set only *grows* as the player explores — after
+visiting two castles, a global object scan sees *both* castles'
+objects at once, which source structurally cannot (the first would
+have streamed out before the second loaded). A clone search that
+filters by type+quality over *all* loaded entities is therefore an
+**unbounded superset** of source's effective scope, and can match a
+same-quality object in a far, previously-visited region (`quality` is
+only an 8-bit circuit ID; `quality 0` in particular recurs).
+Restoring the source bound: `findObjectsByTypeQuality` takes an
+optional `near = {x, y, z}` arg that windows the scan to a ±20 box on
+the control's level around the cell being USE'd (the z test is
+`NextArea`'s `z == MapZ`). That excludes only matches source itself
+could never make. Handler-side detail + the clone implementation shape
+are in [`research_object_interaction.md`](research_object_interaction.md)
+§"Quality-linked controls — search scope".
+
 ## Containment
 
 `GetCoordUse(i)` returns bits 0x18 of `ObjStatus[i]`:
@@ -550,6 +645,12 @@ These are the genuinely-unanswered items, in priority order:
    matters for the streaming-load systems but not for the
    demand-load + keep-loaded-for-session model the clone uses
    ([`../CLAUDE.md`](../CLAUDE.md) §"no region unloading in scope").
+   **But the keep-loaded model has a consequence for object search:**
+   because the clone never unloads, any "search all resident objects"
+   path must be **explicitly windowed** to stay faithful to source's
+   structurally-bounded resident set — see §"Area-bounded object
+   search". (Source gets the bound for free from streaming; the clone
+   must impose it.)
 2. **`C_1184_3B1D`** (`seg_1184.c:1849`) — major init called from
    main(); allocates the world arrays. Body unread.
 3. **Animation overlay timing** — when `animdata` rewrites

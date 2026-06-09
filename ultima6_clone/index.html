@@ -7,6 +7,8 @@
   body { font: 14px/1.6 monospace; background: #14110c; color: #d8cdb4; margin: 0; padding: 20px; }
   h1 { font-size: 16px; color: #e8c060; margin: 0 0 4px; }
   .sub { color: #8a7f66; margin: 0 0 16px; }
+
+  /* ---- pre-load gate: checklist doubles as the dropzone (unchanged) ---- */
   #dropzone {
     border: 2px dashed #6b5d3a; border-radius: 8px; padding: 16px; text-align: center;
     color: #b8a878; background: #1c180f; margin: 4px 0 10px;
@@ -21,40 +23,92 @@
   #checklist[open] > summary::before { content: '▾ '; }
   #checklist[open] > summary { margin-bottom: 8px; }
   #checklist-body { margin: 0; white-space: pre; color: #d8cdb4; font: 14px monospace; }
-  #log { white-space: pre-wrap; background: #0e0b07; border: 1px solid #2a2316; padding: 12px; border-radius: 6px; margin-top: 12px; min-height: 1.6em; }
-  #screen { display: none; margin-top: 12px; border: 1px solid #2a2316; image-rendering: pixelated; touch-action: none; }
-  #clock-hud {
-    position: fixed; bottom: 12px; right: 12px;
-    background: rgba(0,0,0,0.7); color: #e8c060;
-    font: 13px monospace; padding: 6px 10px;
-    border: 1px solid #6b5d3a; border-radius: 4px;
-    /* Fixed width so the HUD doesn't resize as the variable-length probe line
-       (cell objects) grows/shrinks between cells — long lines wrap instead.
-       Sized to fit the widest static line (the clock readout); border-box so the
-       value is the total on-screen width. */
-    box-sizing: border-box; width: 384px;
-    display: none; pointer-events: none;
+
+  /* ---- I-10a fixed game shell ----
+     A CSS-grid frame with three named regions: the map (canvas, unchanged size),
+     the message channel below it, and a right panel that spans both rows. Hidden
+     until load() reveals it. The canvas keeps its 1024x640 render target — the
+     panels sit around it (no render/camera-math change in a UI step). */
+  #app {
+    display: none;                 /* load() sets this to 'grid' */
+    grid-template-columns: 1024px 280px;
+    grid-template-rows: 640px auto;
+    grid-template-areas:
+      "map  right"
+      "msg  right";
+    gap: 8px;
+    margin-top: 12px;
+    width: max-content;            /* frame hugs its content rather than the page */
   }
-  #clock-hud.paused { border-color: #c66; }
+  #map-region     { grid-area: map; }
+  #message-region { grid-area: msg; }
+  #right-panel    { grid-area: right; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+  #screen { display: block; border: 1px solid #2a2316; image-rendering: pixelated; touch-action: none; }
+
+  /* message channel — the gameplay scroll (CON_printf analog). Bottom strip. */
+  #messages {
+    height: 140px; overflow-y: auto;
+    background: #0e0b07; border: 1px solid #2a2316; border-radius: 6px;
+    padding: 8px 12px; font: 13px/1.5 monospace; color: #d8cdb4;
+  }
+  #messages .msg { white-space: pre-wrap; }
+  #messages .msg.miss { color: #c66; }    /* refusals: "Out of range!", "What?" */
+  #messages .msg.ok   { color: #6c6; }
+  #messages .msg.warn { color: #e8c060; }
+
+  /* right panel: status placeholder (top, grows) + collapsible dev block (bottom) */
+  .panel { background: #0e0b07; border: 1px solid #2a2316; border-radius: 6px; padding: 10px 12px; }
+  .panel-label { color: #8a7f66; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+  #status-panel { flex: 1 1 auto; min-height: 0; }
+  #status-panel .panel-placeholder { color: #6b5d3a; font-size: 12px; margin-top: 6px; }
+
+  #dev-block { padding: 8px 12px; }
+  #dev-block > summary {
+    cursor: pointer; user-select: none; list-style: none;
+    color: #8a7f66; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  #dev-block > summary::before { content: '▸ '; }
+  #dev-block[open] > summary::before { content: '▾ '; }
+  #dev-block[open] > summary { margin-bottom: 8px; }
+
+  /* dev HUD content — was a fixed bottom-right overlay, now an in-panel block.
+     installDevHud / installDevProbe are unchanged; only the elements' home moved.
+     The pause indicator tints the clock readout instead of a fixed-box border. */
+  #clock-hud { display: none; color: #e8c060; font: 13px monospace; }
+  #clock-hud.paused #clock-text { color: #c66; }
   #clock-text { white-space: normal; }
-  #clock-controls { margin-top: 4px; display: flex; gap: 4px; }
-  #npc-stats { white-space: pre; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2316; color: #b8a878; font-size: 12px; line-height: 1.45; }
+  #clock-controls { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
+  #npc-stats  { white-space: pre; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2316; color: #b8a878; font-size: 12px; line-height: 1.45; }
   #probe-text { white-space: normal; overflow-wrap: anywhere; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2316; color: #b8a878; font-size: 12px; line-height: 1.45; }
   #probe-text.blocked { color: #c66; }
   #probe-text.pass { color: #6c6; }
   #clock-hud button {
-    pointer-events: auto;
     background: #1c180f; color: #e8c060;
     border: 1px solid #6b5d3a; border-radius: 3px;
-    font: 12px monospace; padding: 2px 6px;
-    cursor: pointer;
+    font: 12px monospace; padding: 2px 6px; cursor: pointer;
   }
   #clock-hud button:hover { background: #241d10; }
+
+  /* boot/dev log — folded into the dev block (was a full-width box under the canvas) */
+  #log { white-space: pre-wrap; margin-top: 8px; padding-top: 6px; border-top: 1px solid #2a2316;
+         color: #8a7f66; font-size: 11px; max-height: 120px; overflow-y: auto; }
+
+  /* probe cell highlight: a fixed map overlay (a cursor, not a panel). Doubles as
+     the I-10 targeting cue. Positioned from the canvas bounding rect by dev_probe. */
   #probe-cell {
     position: fixed; width: 16px; height: 16px;
     border: 2px solid #e8c060; box-sizing: border-box;
     outline: 1px solid #000;    /* dark halo so the yellow stands out on any tile */
     pointer-events: none; display: none;
+  }
+  /* I-10b targeting cue: when a verb is armed, recolor the probe box + show a verb
+     label pinned above it (decision #3 — visual cue, no textual prompt echo). */
+  #probe-cell.armed { border-color: #6cf; }
+  .probe-verb-label {
+    display: none; position: absolute; bottom: 100%; left: -2px; margin-bottom: 2px;
+    padding: 1px 5px; white-space: nowrap; border-radius: 3px;
+    background: #6cf; color: #06121a; font: bold 11px monospace;
   }
   /* I-7b UI substrate: root container holds the modal stack. Modals stack
      visually too (z-index by DOM order); UIStack appends in push order. */
@@ -93,6 +147,8 @@
 </head>
 <body>
 <h1>Ultima VI — engine reimplementation</h1>
+
+<!-- pre-load gate + persistent re-drop affordance (bring-your-own-data) -->
 <details id="checklist" open>
   <summary id="checklist-summary">scanning…</summary>
   <div id="dropzone">
@@ -101,22 +157,43 @@
   </div>
   <pre id="checklist-body"></pre>
 </details>
-<canvas id="screen" width="1024" height="640"></canvas>
+
+<!-- the fixed game shell; revealed by load() once data is ready -->
+<div id="app">
+  <div id="map-region">
+    <canvas id="screen" width="1024" height="640"></canvas>
+  </div>
+  <div id="message-region">
+    <div id="messages"></div>
+  </div>
+  <div id="right-panel">
+    <div id="status-panel" class="panel">
+      <div class="panel-label">status</div>
+      <div class="panel-placeholder">party &amp; status panel — lands at I-13</div>
+    </div>
+    <details id="dev-block" class="panel" open>
+      <summary>dev</summary>
+      <div id="clock-hud">
+        <div id="clock-text"></div>
+        <div id="clock-controls">
+          <button data-act="pause">⏸ pause</button>
+          <button data-act="m60">−1h</button>
+          <button data-act="m10">−10m</button>
+          <button data-act="p10">+10m</button>
+          <button data-act="p60">+1h</button>
+        </div>
+        <div id="npc-stats">schedule: no hour ticked yet</div>
+        <div id="probe-text">hover the map…</div>
+      </div>
+      <div id="log"></div>
+    </details>
+  </div>
+</div>
+
+<!-- fixed overlays: targeting/probe cursor on the map + the modal stack layer -->
 <div id="probe-cell"></div>
 <div id="ui-root"></div>
-<div id="clock-hud">
-  <div id="clock-text"></div>
-  <div id="clock-controls">
-    <button data-act="pause">⏸ pause</button>
-    <button data-act="m60">−1h</button>
-    <button data-act="m10">−10m</button>
-    <button data-act="p10">+10m</button>
-    <button data-act="p60">+1h</button>
-  </div>
-  <div id="npc-stats">schedule: no hour ticked yet</div>
-  <div id="probe-text">hover the map…</div>
-</div>
-<div id="log"></div>
+
 <script type="module" src="./main.js"></script>
 </body>
 </html>

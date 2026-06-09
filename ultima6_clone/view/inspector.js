@@ -56,6 +56,20 @@ function nameFor(world, id, handle, reg, objlist, store) {
   return `Item #${store.obj.objNumber[id]}`;
 }
 
+// Public name resolver for any entity (reused by the I-10 command dispatch echo).
+// Same GetObjectString-faithful path as the inspector header above.
+export function displayName(world, handle, { reg, objlist }) {
+  const id = world.resolve(handle);
+  if (id === -1) return '(gone)';
+  const store = {
+    rend:   world.store(Renderable),
+    amount: world.store(Amount),
+    actor:  world.store(Actor),
+    obj:    world.store(ObjType),
+  };
+  return nameFor(world, id, handle, reg, objlist, store);
+}
+
 export function openInspector(world, handle, uiStack, { reg, objlist }) {
   const id = world.resolve(handle);
   if (id === -1) return;

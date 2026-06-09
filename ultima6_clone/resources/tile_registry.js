@@ -31,4 +31,5 @@ export class TileRegistry {
   isTerrainWall(t)       { return this.flags.isTerrainWall(t); }       // IsTerrainWall
   isTerrainDamage(t)     { return this.flags.isTerrainDamage(t); }     // IsTerrainDamage
   terrainCost(t)         { return this.flags.terrainCost(t); }         // TerrainType[t] >> 4
+  weightOf(objType)      { return this.flags.weightOf(objType); }      // TypeWeight[type] — GET/MOVE gate
 }

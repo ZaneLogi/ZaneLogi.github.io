@@ -18,10 +18,11 @@ import { Renderable, Actor, Schedule } from '../components/components.js';
 import { Schedules } from '../resources/schedules.js';
 import { AiAction } from '../assets/schedule.js';
 
-export function installDevProbe(world, { canvas, ts, probeEl, cellEl, objlist, schedules }) {
+export function installDevProbe(world, { canvas, ts, probeEl, cellEl, objlist, schedules, isVerbArmed }) {
   // drag-to-pan
   let dragging = false, lastX = 0, lastY = 0;
   canvas.addEventListener('pointerdown', (e) => {
+    if (isVerbArmed && isVerbArmed()) return;                  // I-10f: armed targeting expects a click-to-confirm, not a pan
     dragging = true; lastX = e.clientX; lastY = e.clientY;
     canvas.setPointerCapture(e.pointerId);
     cellEl.style.display = 'none';                              // I-4d: hide the probe highlight during drag-pan

@@ -212,9 +212,17 @@ All five commands follow the same skeleton:
 6. Spend move points (SubMov(actor, N)) + recompose (C_1100_0306).
 ```
 
-The canned-message table `D_0DDC[]` holds the common refusals
-("Nothing!", "Out of range!", "You can't reach that!", "Not
-possible!", etc.), indexed by a small integer per failure case.
+The canned-message table `D_0DDC[]` (`seg_1944.c:372`, **verified**) holds
+terse result/status codes, indexed by a small integer per case:
+`{Success, Failed, No effect, Out of range, Blocked, nothing, Not
+possible, Done, On what:, On whom:, Location:, Not usable, …}`. (Earlier
+drafts of this doc paraphrased these as "Nothing!/You can't reach
+that!"-style strings — that was loose; the real table is the list above.)
+The handlers index it by case — MOVE uses `[3]` Out-of-range, `[4]`
+Blocked, `[5]` nothing, `[6]` Not-possible, `[1]` Failed. The clone
+**paraphrases** these into U6-flavored message lines ("You can't move
+it.", "You can't move it there.") rather than echoing the terse codes,
+the same choice GET makes ("You can't get that." for `[6]`).
 
 This skeleton is the **interaction contract** the rebuild should
 reproduce: a command is `(verb, targetObj | targetTile, actor)` →
@@ -237,13 +245,37 @@ armor / contents) are cosmetic branches inside the one function.
   when not in a vehicle.
 - **Item**: print name + **stats** — weight ("It weighs N.N
   stones"), damage points, armor points. Special handling for
-  spellbooks (opens the spell-list UI), containers (lists contents
-  via the quality/`C_27A1_078F` walk), readable signs (`TIL_4DC`/
-  `TIL_4DD` redirect to the adjacent text tile).
+  spellbooks (opens the spell-list UI), **readable books / signs /
+  scrolls** (`C_27A1_06D7` `CanRead?` → `C_27A1_078F` reads the text
+  from `BOOK.DAT` by quality index — this is *reading*, **not** a
+  container-contents list), sign-text tiles (`TIL_4DC`/`TIL_4DD`
+  redirect to the adjacent text tile). **LOOK does NOT open or list a
+  container** — seeing inside one is a USE / GET interaction (the
+  `D_E709` open-container view), never LOOK.
 - `D_B6DF` (darkness) short-circuits to "darkness." — you can't look
   without light.
 
 Look is the read-only probe; everything else mutates.
+
+### Clone correspondence — `look` (L) vs `inspect` (I)
+
+`systems/command_dispatch.js` registers `look` on the dispatch core: `pickAtCell`
+(3-tier, NPCs included — not the USE re-pick) → an empty/invisible cell names the
+terrain (`mapLevel.tileAt` + `getTileLook`) plus the adjacent "Searching here, you
+find nothing." line; everything else prints `Thou dost see <article><name>.`. LOOK
+is **line-only and source-faithful** — `C_27A1_0C67` is a pure scroll verb that
+never opens a panel (its one "structured" branch is book/sign *reading*, deferred),
+so the clone's LOOK does **not** escalate to a modal. It is **viewport-range** (the
+dispatcher's `VIEWPORT_VERBS` set skips the adjacency gate — source reads the pointer
+cell, no reach check). `withArticle` approximates `C_27A1_061E`'s a/an/the (per-tile
+article data deferred); the count-prefix (`C_27A1_0841`, QuanType-gated), weight,
+damage, book/sign text, spellbook, clock, portrait, and darkness branches are all
+deferred (each needs a subsystem the clone lacks).
+
+The **`I` hotkey is a separate clone tool — "Inspect"** (`main.js`), with no source
+LOOK counterpart: it always opens the I-7 detail inspector modal (obj# / status /
+position / container contents) for any pick. So `L` = the faithful description line,
+`I` = the structured detail / inventory view; they are deliberately distinct.
 
 ## Get — `C_27A1_18F5` (`seg_27a1.c:815-922`)
 
@@ -252,9 +284,17 @@ Move a world object into an NPC's inventory.
 - Target must be `LOCXYZ` (on the ground), adjacent.
 - **Terrain-damage guard**: getting an item out of fire/lava damages
   the actor (`TerrainDamage`).
-- **Weight gate**: refuses if `weight == 0 && !container`, weight ≥
-  10000, target is an NPC, or `STREN*20 < weight + WeightInven +
-  WeightEquip` ("The total is too heavy.").
+- **Weight / gettability gate**: `weight` is `TypeWeight[type] * qty`
+  (`GetWeight`, `seg_155D.c:165`). Refuses (`"You can't get that."`,
+  `D_0DDC[6]`) if `weight == 0 && !C_155D_063A(type)` — **`TypeWeight==0`
+  marks a fixed object** (scenery / furniture / walls; the
+  `C_155D_063A`/`D_081F` whitelist is the lightweight stackables
+  gold/gems/reagents, weight ÷10, not "containers") — or `weight ≥ 10000`
+  (the `255→10000` sentinel), or the target is an NPC (`< 0x100`), or
+  `OBJ_19B`. The same `TypeWeight==0` test also gates **Move**
+  (`seg_27a1.c:995`). Separately, the **carry-capacity** check refuses
+  `STREN*20 < weight + WeightInven + WeightEquip` ("The total is too
+  heavy.").
 - Placement:
   - **Stackable** (`QuanType`): `GiveObj(actor, type, Amount)` then
     `DeleteObj` the ground object.
@@ -270,6 +310,26 @@ Move a world object into an NPC's inventory.
 - Cost: `SubMov(actor, 3)`.
 
 Get is the canonical "world → inventory + consequences" verb.
+
+### Clone correspondence — the `get` verb-handler (I-10g)
+
+`systems/command_dispatch.js` registers `get`: `pickAtCell(…, forUse)` re-pick
+(objects only, skip NPC/ignore — `C_27A1_0919`) → must be on the ground (has
+`Position`) → the **`TypeWeight==0` fixed-object gate**
+(`reg.weightOf(objNum) === 0 || === 255 || objNum === OBJ_19B` → "You can't get
+that.") → `moveToInventory` (`world_loader.js` — source's `InsertObj INVEN`: drop
+`Position` + `spatial.remove`, attach `ContainedIn{holder, equipped:0}`) into the
+active member (`avatarRef`) → "You get <article><name>.". Adjacency is the
+dispatch's CLOSE_ENOUGH-1 gate (GET isn't a viewport verb).
+
+The gettable gate needs `TypeWeight`, which the clone **already loads** — it's the
+`tileflag` file's per-object-type plane (@0x1000), previously *skipped* by
+`assets/tile_flags.js`; I-10g decodes it and exposes `reg.weightOf(objType)`. This
+gate is load-bearing (it's what makes GET not pick up the floor), so it's ported
+rather than deferred. **Deferred** (absent subsystems): the carry-**capacity** check
+(`STREN*20`, needs strength + a running carried-weight total), terrain-damage-on-grab,
+**theft/karma** (no karma system), lit-torch-to-hand (no equip flow), stack-MERGE
+(`GiveObj` — a got stack becomes one INVEN entity), and the per-type frame fixups.
 
 ## Drop — `C_27A1_14DA` (`seg_27a1.c:692-812`)
 
@@ -292,26 +352,120 @@ Move an inventory/equipped object into the world (thrown).
   weapon → clears the off-hand).
 - Cost: `SubMov(actor, 3)`.
 
-## Move — `C_27A1_1E8B` (`seg_27a1.c:953-1100+`)
+**Item selection (the first target, before the handler):** pressing `D`
+(`seg_0A33.c:1088-1101`) sets up the targeting (`SelectMode=2`, `SelectRange=7`)
+AND **switches the status panel to the inventory** (`StatusDisplay = CMD_92`) so the
+player picks the carried item to drop → `Selection.obj`. The handler's "Location:"
+prompt is then the *second* target. So DROP is a two-stage select: **inventory item →
+cell (range 7)**.
 
-Push a world object one tile in a chosen direction (not pick it up).
+### Clone correspondence — the `drop` verb-handler (I-10h)
 
-- Target must be `LOCXYZ`, adjacent to the map center.
-- Prompts "To " then a direction key (`CMD_80` + `AdvanceDir`);
-  anything else → "nowhere."
-- Refuses: zero-weight / fixed objects (`TypeWeight == 0`,
-  `OBJ_19B`), self, certain NPC frames, blocked destinations.
-- **Destination resolution**:
-  - Into a container at the target cell → `InsertObj(obj, container,
-    CONTAINED)`.
-  - Onto passable ground (`C_27A1_1DAB` legality incl. diagonal
-    corner-clearance) → `MoveObj`. Directional objects (`OBJ_0DD`
-    cannonball / wheel) set their facing frame.
-  - Blocked → "You can't move it there." (`D_0DDC[4]`).
-- Cost: `SubMov(actor, 5)`.
+The two-stage flow ports as **`D` → modal inventory picker → armed map cursor → cell**.
+`main.js`'s `D` hotkey opens `view/inventory_picker.js` (`openInventoryPicker` — a "pick
+one carried item" modal reusing the I-7 substrate + `inventoryOf`), the clone's stand-in
+for source's panel-switch-to-inventory (no persistent inventory panel yet). The picker's
+holder is the **hovered party member** when the cursor is on one (`Actor` +
+`PartyMember`), else the avatar — a clone QoL convenience (source drops from the *active*
+member, switched via the party panel). The picker is **recursive** — selecting a carried
+container (a bag) drills into it via a nested picker, matching source's arbitrary
+container nesting (the `D_E709` view navigates the hierarchy: open = down
+`seg_0C9C.c:1502`, close = up via `GetAssoc` `:1495`), so an item nested at any depth is
+droppable; a pick pops the picker chain back to the root depth. The chosen
+item calls `command_dispatch.js`'s `armDrop(itemHandle)`, which arms the verb cursor with
+a `pendingDropItem`; the armed confirm (Enter/click, reach **7** per `VERB_REACH`) runs
+the `drop` handler: validate the cell (`canStandAt` = the `C_1E0F_000F` placement-legality
+analog) → `dropToMap` (`world_loader.js`, inverse of `moveToInventory` / source's
+`MoveObj`) → "You drop <name>.". This is the first **two-stage target** (arm with a
+context item → pick a cell) — a seam TALK and "use item on target" reuse. **Deferred**:
+the missile-arc throw animation, break-if-fragile-and-far, the quantity prompt,
+drop-into-container, unequip-on-drop, `SetOkToGet`.
 
-Move is the puzzle/furniture verb (push a crate onto a pressure
-plate, shove a barrel, reposition a cannon).
+## Move — `C_27A1_1E8B` (`seg_27a1.c:953-1145`)
+
+**MOVE is a dual-mode verb** — it splits on `GetCoordUse(Selection.obj)`
+(`:968`): a `LOCXYZ` target is a **ground object to push** (Mode 1); any
+other coord-use is a **carried item to give/transfer** (Mode 2). The
+second input differs between the modes — Mode 1's is a **direction**,
+Mode 2's is a **target entity** — which is what distinguishes MOVE from
+DROP (whose second input is a *cell*).
+
+### Mode 1 — push a ground object (`LOCXYZ` branch, `:968-1043`)
+
+Push a world object one tile in a chosen direction (not pick it up). The
+puzzle/furniture verb (shove a barrel, push a crate onto a pressure
+plate, reposition a cannon).
+
+- Target must be `LOCXYZ`, adjacent — `CLOSE_ENOUGH(1, Selection.x,
+  Selection.y, MapX, MapY)` (`:969`; `MapX/Y` = the active member /
+  view center), else "Out of range".
+- Prompts "To " then a **direction** key (`CMD_80` + `AdvanceDir`,
+  `:983`); anything else → "nowhere." **The second input is a
+  direction, not a target cell.**
+- **Fixed gate**: `TypeWeight[type] == 0 || type == OBJ_19B` → refuse
+  (`:995`) — the **same fixed-object gate as GET** (`:857`). Also
+  refuses self / certain held NPCs (`:999`).
+- **Destination** = the object's cell + `DirIncr[AdvanceDir]` (`:1009`):
+  - a container at that cell that accepts it (`C_27A1_00A9`) → `InsertObj
+    CONTAINED` (push it *into* a barrel), `:1012`;
+  - else `C_27A1_1DAB` legality (below) → `MoveObj` one tile, `:1035`;
+    directional objects (cannonball `OBJ_0DD`) set their facing frame
+    instead of moving, `:1023`;
+  - else → "You can't move it there." (`D_0DDC[4]` = "Blocked"), `:1016`.
+- Cost: `SubMov(actor, 5)` (`:1006`) — vs GET/DROP's 3.
+
+**`C_27A1_1DAB` — the move-blocked check** (`:924`, **verified from
+source**, returns 1 = blocked):
+
+```c
+dest = objCell + DirIncr[dir];
+if (!C_1E0F_000F(obj, dest) && !C_27A1_1330(dest))   // dest impassable AND no Su surface
+    return 1;                                        //   → blocked
+if (!(dir & 1)) return 0;                            // cardinal → clear (dest open is enough)
+// diagonal: don't squeeze through a wall corner —
+//   clear iff EITHER flanking cardinal (dir-1, dir+1) is passable
+if (passable(dir-1 flank)) return 0;
+if (passable(dir+1 flank)) return 0;
+return 1;                                            // both flanks blocked → corner-blocked
+```
+
+`C_27A1_1330` (`:639`) is "is there a `IsTileSu` table-surface tile here
+to receive the object?" — the path that lets MOVE drop an object onto a
+tabletop; returns 0 the moment it hits an `IsTerrainImpass` tile.
+
+### Mode 2 — give / transfer a carried item (`else` branch, `:1044-1141`)
+
+Point at an **inventory** item → "To " → select a target:
+
+- **another party member** → give it (`C_155D_16E7` remove +
+  `GiveObj`/`InsertObj INVEN`), gated by a `STREN×20` carry-weight check
+  ("Can't carry!", `:1101`); unequips it first if worn;
+- a **container** → put it inside (`InsertObj CONTAINED`, `:1122/1139`;
+  "not a container" / "another person's bag" refusals otherwise);
+- **yourself** → "yourself." (no-op).
+
+So MOVE = *rearrange*: shove world objects around **or** hand items
+between party members / into containers.
+
+### Clone correspondence — the `move` verb-handler (I-10i = Mode 1)
+
+`systems/command_dispatch.js` ships **Mode 1 (push) as I-10i**; **Mode 2
+(give) is I-10j**. Stage 1 (the `move` handler): `pickAtCell(forUse)`
+(objects only) → the `TypeWeight==0` fixed gate (`reg.weightOf`, shared
+with GET) → on success it **arms a push direction** (`pendingMoveObj` +
+`awaitingDir`) rather than completing — the clone's stand-in for source's
+"To " prompt. Stage 2 (`resolveMove`, fired by the next arrow/numpad key,
+sharing `avatar_move_system`'s `dirFromKeyEvent` map): `canPushTo` (the
+verified `C_27A1_1DAB` port — dest `canStandAt` + diagonal corner-
+clearance) → `moveMapObject` (= `MoveObj`) → "You move <name>.". The
+arrow key is captured at the `document` listener and `stopPropagation`'d
+so the avatar (whose handler is on `window`, later in the bubble) doesn't
+also walk. Adjacency is the dispatch's `CLOSE_ENOUGH-1` gate. **Deferred**
+(faithful, like GET/DROP): `SubMov(5)`, push-into-container, directional-
+object facing frames, the `IsTileSu` table-surface accept (`canPushTo`
+treats it as no surface), and source's target-then-refuse-an-NPC message
+(the `forUse` re-pick skips NPCs at the pick). Full notes in
+[`progress.md`](progress.md) §"I-10i — landed".
 
 ## Use — `C_27A1_6179` (`seg_27a1.c:2956-3160+`)
 
@@ -364,7 +518,7 @@ Representative dispatch cases (`seg_27a1.c:3016-3105+`):
 | `OBJ_07A/091/0A4/0CE/0FD` (lanterns, candles, torches) | `C_27A1_31F6` | light / extinguish |
 | `OBJ_129-12C` (doors) | `C_27A1_2A44` | open / close / unlock door |
 | `OBJ_062` (something openable, LOCXYZ-only) | `C_27A1_2BBC` | open |
-| `OBJ_120` | `C_27A1_433D` | (clock / device) |
+| `OBJ_120` (crank) | `C_27A1_433D` | raise/lower drawbridge — see §"Quality-linked controls" |
 | `OBJ_1AC/1AE/1AF` (cannon, creature mount, horse) | `C_27A1_36E7`/`5503`/`55F0` | fire cannon / mount |
 | `OBJ_03F/040` (spellbook / scroll) | `C_27A1_2D8E` | cast / read |
 | `OBJ_049` (moonstone) | `C_27A1_3425` | bury / use moongate |
@@ -377,6 +531,63 @@ post-effect tail (recompose + move-point cost) but the effect is
 fully type-specific. This is **not** a uniform "verb on noun"
 mechanic — Use is a dispatch table where each usable type defines
 its own verb semantics.
+
+### Quality-linked controls — search scope (lever / switch / crank)
+
+A subset of USE handlers operate a **remote target via a shared
+`quality` byte** — U6's "circuit ID." The control and its target
+carry the same quality; the handler finds the target by scanning for
+matching-quality objects (no pointers, no adjacency):
+
+| Control (USE) | Handler | Scans for | Target toggled |
+|---|---|---|---|
+| lever `OBJ_10C` | `C_27A1_4479` (`seg_27a1.c:2092`) | `OBJ_12D` doorway markers of matching quality | portcullis `OBJ_136` add/delete |
+| switch `OBJ_0AE` | `C_27A1_4672` (`:2140`) | same `OBJ_12D` markers | electric field `OBJ_0AF` add/delete |
+| crank `OBJ_120` | `C_27A1_433D` (`:2056`) → `C_27A1_3F47` | `OBJ_10D` bridge-corner tile of matching quality | drawbridge geometry extend/retract |
+
+The lever/switch link lives on the `OBJ_12D` marker (not the gate)
+because the gate is add/deleted — there is nothing to find when it is
+up; the crank link lives on the persistent bridge-corner tile. All
+three scan with **`SearchArea(0, 0, 0x3ff, 0x3ff)`** — the full
+coordinate range, i.e. *no position filter*: walk every resident
+object, keep the type+quality match. Per
+[`research_world_data.md`](research_world_data.md) §"Area-bounded
+object search", that resident set is structurally the ~40×40 active
+window — so a U6 "remote" trigger is remote only *within the loaded
+area*; a far, unloaded target was never reachable.
+
+**Clone correspondence + the windowing fix.** The clone's
+`findObjectsByTypeQuality(world, objType, quality)`
+([`world_loader.js`](../world_loader.js)) currently scans **all loaded
+`ObjType` entities** with no position or level filter. Because the
+clone never unloads regions ([`../CLAUDE.md`](../CLAUDE.md) +
+[`research_world_data.md`](research_world_data.md) §"Clone divergence"),
+that set grows unbounded and can match a same-quality object in a
+previously-visited region (`quality 0` especially recurs) — a
+collision source structurally avoids. So
+`findObjectsByTypeQuality(world, type, quality, near)` takes an
+optional **`near = {x, y, z}` window** that restores the source bound,
+and the three control handlers pass it:
+
+- `near` is the **control object's own cell** (the lever/switch/crank
+  being USE'd — adjacent to the avatar, so equivalent to centering on
+  the player). The scan keeps candidates within a **±20 box**
+  (`|Δx|,|Δy| ≤ 20`) — the I-9 `AREA = 40` work-area size, a symmetric
+  stand-in for source's chunk-aligned `AreaX = (MapX-16) & ~7` window
+  (`seg_2FC1.c:915`); the ≤4-tile anchor difference is immaterial for a
+  circuit search.
+- It also applies the **level/Z filter** `NextArea` uses (`z == MapZ`,
+  `seg_1184.c:359`) — a no-op while the clone is single-level
+  (overworld) but load-bearing once dungeons co-reside under no-unload
+  (the xy box doesn't exclude a same-xy object on another level).
+- `query(ObjType, Position)` restricts to on-map (`LOCXYZ`) entities,
+  matching `NextArea`'s `GetCoordUse == LOCXYZ` skip of
+  inventory/contained items.
+
+The control is adjacent to the avatar on USE, so its quality-matched
+target is always in-window — the castle lever + crank stay correct.
+This is **more** faithful, not a deviation: it excludes only matches
+source could never make.
 
 ## Supporting helpers (shared across the five commands)
 

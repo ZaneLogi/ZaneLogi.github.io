@@ -25,11 +25,21 @@ export const DIR_DY = [-1, -1, 0, 1, 1, 1, 0, -1];   // DirIncrY (seg_0903.c:21)
 
 // Keyboard → 8-direction. Arrow keys give the 4 cardinals; the numpad gives the
 // full 8 (NumLock-independent via e.code), the same split source's keymap uses.
-const KEY_DIR = { ArrowUp: 0, ArrowRight: 2, ArrowDown: 4, ArrowLeft: 6 };
-const CODE_DIR = {
+// Exported (with dirFromKeyEvent) so MOVE's stage-2 push-direction pick
+// (command_dispatch, I-10i) shares ONE keyboard→direction map with avatar movement.
+export const KEY_DIR = { ArrowUp: 0, ArrowRight: 2, ArrowDown: 4, ArrowLeft: 6 };
+export const CODE_DIR = {
   Numpad8: 0, Numpad9: 1, Numpad6: 2, Numpad3: 3,
   Numpad2: 4, Numpad1: 5, Numpad4: 6, Numpad7: 7,
 };
+
+// One keydown → direction (0..7) or -1. e.code (numpad, full 8-dir) takes priority
+// over e.key (arrows, 4 cardinals), matching the split above.
+export function dirFromKeyEvent(e) {
+  return (e.code in CODE_DIR) ? CODE_DIR[e.code]
+       : (e.key in KEY_DIR)  ? KEY_DIR[e.key]
+       : -1;
+}
 
 // How long after the LAST movement input the avatar holds its stride pose before
 // relaxing to stand. This is the idle-detection delay only — independent of the
@@ -60,9 +70,7 @@ export function installAvatarMovement(world, { avatarRef, onMove, onIdle, isBloc
 
   window.addEventListener('keydown', (e) => {
     if (isBlocked && isBlocked()) return;
-    const dir = (e.code in CODE_DIR) ? CODE_DIR[e.code]
-              : (e.key in KEY_DIR)  ? KEY_DIR[e.key]
-              : -1;
+    const dir = dirFromKeyEvent(e);
     if (dir === -1) return;
     e.preventDefault();                 // arrows would otherwise scroll the page
     pendingDir = dir;
