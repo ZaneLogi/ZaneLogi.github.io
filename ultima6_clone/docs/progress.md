@@ -5,7 +5,7 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: I-13 (conversation VM) COMPLETE (2026-06-08). Next: I-14 (NPC movement speed — DEXTE-paced accumulator — start of the NPC-movement arc I-14→I-17: speed model → drunk-walk → arrival-behaviors/direction → AI behaviors; status panel/handlers pushed to I-18/I-19)** — the
+**Status: I-14 (NPC movement speed — DEXTE-paced accumulator) + I-15 (drunk-walk — `TryMoveTo`/`__TryDiagMove`) COMPLETE (2026-06-08), local — pending Zane review + squash (reviewing I-14/I-15 together). Next: I-16 (arrival behaviors + direction). NPC-movement arc I-14→I-17: speed model ✓ → drunk-walk ✓ → arrival-behaviors/direction (I-16) → AI behaviors (I-17); status panel/handlers pushed to I-18/I-19.** Prior: I-13 (conversation VM, pushed). — the
 `converse.a/.b` bytecode VM is a **standalone generator that yields typed effects**
 (conversation_vm.js), driven by a host (conversation_system.js) into the now-live dialog
 window: portrait + streaming text + clickable `@`keywords/chips + input. Coverage: **200/200
@@ -59,8 +59,8 @@ banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 | I-11 | talk trigger — adds TALK as a case in the I-10 dispatch (reach-7 target-pick + the can-talk gate; single-stage, stops before the conversation VM) | **done** (a–c) |
 | I-12 | dialog window — second surface on the I-7 substrate; opens when TALK fires (modal frame + four-region layout + real lazy-decoded portrait; chips/input inert — I-13 wires them) | **done** (pre-step + a–c) |
 | I-13 | conversation VM — **standalone generator yielding typed effects** + host driver; swaps the I-12 window's placeholder body for real lines + clickable `@`keywords/chips + live input. β reached: walk + talk works end-to-end against real `converse.a/.b`. | **done** (pre-step + a–g + review; squashed) |
-| I-14 | **NPC movement speed (DEXTE-paced accumulator)** — replace I-9's flat step-rate with a per-actor `moveCredit` accumulator (DEXTE = speed meter, `SubTerrainMov` = step cost); a *modern rewrite* of the `MovePts`/`DEXTE` economy, NOT a `C_1E0F_4E0A` round-driver port. One master `WORLD_SPEED` slider, decoupled clock, snap tile-to-tile, fixed-brisk non-laggy player. Restores terrain-/dex-speed + staggering, fixes the flat-step thrash. Foundation for the NPC-movement arc. | planned |
-| I-15 | **drunk-walk approach** — `TryMoveTo` greedy fallback chain + `__TryDiagMove` corner-clearance (the pathfinding-less move primitive for chase/flee). Rides on I-14. | planned |
+| I-14 | **NPC movement speed (DEXTE-paced accumulator)** — replace I-9's flat step-rate with a per-actor `moveCredit` accumulator (DEXTE = speed meter, `SubTerrainMov` = step cost); a *modern rewrite* of the `MovePts`/`DEXTE` economy, NOT a `C_1E0F_4E0A` round-driver port. One master `WORLD_SPEED` slider, decoupled clock, snap tile-to-tile, fixed-brisk non-laggy player. Restores terrain-/dex-speed + staggering, fixes the flat-step thrash. Foundation for the NPC-movement arc. | **done** (a–e; local, pending review+squash) |
+| I-15 | **drunk-walk approach** — `TryMoveTo` greedy fallback chain + `__TryDiagMove` corner-clearance (the pathfinding-less move primitive for chase/flee). Rides on I-14. New `systems/drunk_walk.js`; no live consumer yet (I-17 wires it); dev hook `__U6.driveTo`. | **done** (a–c; local, pending review+squash) |
 | I-16 | **arrival behaviors + direction system** — finish `__AtDestination` (`U6_NPC_排程與移動邏輯.md §七`): prop lookup for sit/sleep/eat/play (`C_1E0F_2184`) + fallbacks (sleep-on-spot, arrived-but-can't-sit), eating dynamic facing (`C_1E0F_2125`), and the `C_1E0F_0664` 8-dir / MACRO_A frame system + chair-overrides-facing + non-humanoid per-type facing. Builds on I-9g's worktype-settle + STAND/GUARD facing. Verifies §5.2. | planned |
 | I-17 | **NPC AI behaviors** — modes on top of I-14/I-15: persistent activities (`AI_WANDER`/`FARM`/`LOITER`/`GRAZE`) first, then guard/law-enforcement + thief (granularity scoped at I-17). (was I-16) | planned |
 | I-18 | status panel — third surface on the substrate; replaces the dev HUD's clock readout (was I-14→I-17) | planned |
@@ -1288,7 +1288,27 @@ stays, a later study may add mechanisms the original LACKS (NPC-NPC swap, local 
 actor-aware/soft-cost re-planning) to make NPC movement feel right under auto-advance.
 Legitimate non-faithfulness: the original has no mechanism for a problem it doesn't have,
 so inventing one solves a clone-only problem (per CLAUDE.md §"Modern-browser UX as
-architectural anchor"). Deferred until the port is functionally complete.
+architectural anchor").
+
+**NPC step-aside — PULLED FORWARD (Zane 2026-06-08), the first such clone-only mechanism.**
+Surfaced reviewing I-14/I-15: under auto-advance an NPC blocked by another *actor* (NPC or
+party member) visibly stalls (source has no actor detour/swap and just waits — §5.1, invisible
+behind the turn-based freeze). Added to `doOnPath` (`systems/npc_path.js`): on the **first**
+block (`AI_ONPATH`), if an actor holds the next cell, `requestStepAside` nudges that blocker
+one cell **perpendicular to the mover's travel axis** (E/W mover → step the blocker N/S; N/S
+mover → E/W — clearing the exact lane; perpendicular-only, so a 1-wide corridor with both
+sides blocked falls through to the wait), then **both re-plan** (`AI_FINDPATH`, status `'aside'`). Gated to the first block only — a static block, a boxed-in
+blocker, or any later block (`84/85`) falls through to source's faithful `84/85/86` grace-wait.
+Only a **mid-journey** blocker (already in the pathfinding tier) is re-pathed — re-finding
+sends it toward its OWN goal, away from the contested cell. A **settled** blocker (worktype /
+schedule / party — modes outside 0x81..0x86) is **left where it stepped** and keeps its mode:
+its goal is the very cell it was pushed off (its schedule slot), so re-pathing it there caused
+an infinite push↔return loop (caught in review — LB vs the jester at a chokepoint). Left put,
+it re-snaps to its slot at the next schedule hour. The step-aside is a reactive "free" move
+(not accumulator-gated).
+**Still deferred:** full swap / actor-aware soft-cost re-planning (revisit if step-aside churns
+under real I-17 AI traffic). Detail: `progress.md §"I-15 scope"`; verified test_pathfinding 9
+step-aside cases + live two-NPC block.
 
 ### Deferred to later steps (subsystem owners noted)
 
@@ -2726,6 +2746,41 @@ coming only from the **hourly schedule target-switch** (§二) + the **off-scree
 **Sub-step e verifies the dropped-I-9f behavior against §5.1** (blocked = waited-out, not warped). The
 **§5.2** arrival-pose behaviors (arrived-but-can't-sit / sleep-on-spot when the prop sits at the player's
 feet; stand/guard settle adjacent) are an **I-16** concern (§七) and are verified there.
+
+## I-15 scope — drunk-walk approach (`TryMoveTo` + `__TryDiagMove`)
+
+**DONE (2026-06-08), local — pending review + squash (alongside I-14).** The pathfinding-LESS
+"head roughly toward a target, nudge around the one blocker in front of you" move primitive —
+`U6_NPC_排程與移動邏輯.md §4.3`'s "only ACTIVE detour." New `systems/drunk_walk.js`. Built on
+`npcStep` (= source's `TryStraightMove`); move-point spend stays at the I-14 tick level (the
+primitive just attempts a move + reports success, like `npcStep`). **No live consumer yet** —
+NPC AI behaviors (I-17) + combat drive it later; for now it's a tested primitive + a dev hook.
+
+**Sub-steps (one save-point each):**
+- **a** — `tryDiagMove` (`__TryDiagMove`, `seg_1E0F.c:3470`): step diagonally only if the
+  diagonal target is standable AND ≥1 orthogonal neighbour is clear (corner-cut prevention —
+  no squeezing between two solid corners). Diagonal-combine incl. the N+W→NW special case.
+- **b** — `tryMoveTo` (`C_1E0F_35A7`): one greedy step toward a target — pick the primary
+  axis (larger delta; random tie-break; distance-weighted random for far targets), then the
+  fallback chain **primary-straight → diagonal → other-straight → reverse-other (~50%)** (the
+  reverse fires only on source's `OSI_rand(0,1) || !TryStraightMove(..^4)` short-circuit).
+  Wrap-aware on the 1024 toroidal axis; RNG injectable (`randInt`) for deterministic tests.
+- **c** — dev hook `__U6.driveTo(npcId, x, y[, intervalMs])` / `__U6.stopDrive()`
+  (`view/dev_npc_inspect.js`): WRITES the sim (parks the NPC at `AI_MOTIONLESS`, drunk-walks
+  it on a fixed timer until adjacent) — a review tool; **deliberately bypasses the I-14
+  accumulator** (the real DEXTE/WORLD_SPEED-paced consumer is the NPC-AI step, I-17).
+
+**Kept deviations:** the move-point spend (`SubTerrainMov` inside source's TryStraightMove/
+__TryDiagMove/TryMoveTo) is NOT duplicated here — the I-14 accumulator owns it at the tick
+(same as `npcStep`). `__TryDiagMove`'s `D_17B2` party-pass toggle on the two clearance probes
+is dropped (plain `canStandAt`) — harmless until a party member drunk-walks.
+
+**Verification:** `tests/test_drunk_walk.html` **14/14** (8 `tryDiagMove`: clear/blocked-target/
+corner-cut/one-orthogonal/SW+NW combine; 6 `tryMoveTo`: approach/diagonal-detour/reverse-fires/
+reverse-skips-by-rand/zero-delta/wrap). Live vs real data: `__U6.driveTo(5, …)` walked Lord
+British tile-by-tile toward the target (greedy S-then-W), reached adjacent on open carpet
+(auto-stop at Chebyshev ≤ 1), and stalled against dense throne-room furniture — the correct
+drunk-walk limitation (nudges one blocker, doesn't route-plan).
 
 ## I-16 scope — arrival behaviors + direction system (§七)
 

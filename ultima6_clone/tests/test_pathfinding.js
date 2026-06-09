@@ -61,7 +61,8 @@ function setupWorld({ terrainAt = {}, tileFlags = {}, entities = [], moveSpeed =
     .registerComponent(ObjType)
     .registerComponent(Actor)
     .registerComponent(AIMode)
-    .registerComponent(Destination);
+    .registerComponent(Destination)
+    .registerComponent(PartyMember);                   // step-aside checks world.has(blocker, PartyMember)
   if (moveSpeed) world.registerComponent(MoveSpeed);   // I-14b: enable the DEXTE-paced accumulator
 
   const spatial = new SpatialIndex(1024);
@@ -470,6 +471,105 @@ function walkPath(sx, sy, dirs) {
   doOnPath(world, h);
   check('doOnPath: 3rd block -> AI_86 + path abandoned', am.mode[i] === AI.AI_86 && !paths.has(h));
   check('doOnPath: no path -> "idle"', doOnPath(world, h) === 'idle');
+}
+
+// ── step-aside (clone-only): an ACTOR blocker is nudged out of the way + both re-plan ──
+{
+  const { world, handles } = setupWorld({
+    entities: [
+      { x: 10, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_ONPATH },    // A (mover)
+      { x: 11, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_FINDPATH },   // B (blocker)
+    ],
+  });
+  const hA = handles[0], hB = handles[1], iA = world.resolve(hA), iB = world.resolve(hB);
+  const am = world.store(AIMode), pos = world.store(Position), paths = world.getResource(Paths);
+  paths.set(hA, [1, 1], 12, 10);                                  // A wants east; B sits at (11,10)
+  const r = doOnPath(world, hA);
+  check('step-aside: actor block → status "aside"', r === 'aside');
+  // E/W mover → blocker pushed PERPENDICULAR (N/S): same column x=11, off the mover's row y=10
+  check('step-aside: E-mover pushes blocker perpendicular (x stays 11, y leaves 10)',
+    pos.x[iB] === 11 && pos.y[iB] !== 10);
+  check('step-aside: blocked A re-plans (AI_FINDPATH)', am.mode[iA] === AI.AI_FINDPATH);
+  check('step-aside: non-party blocker B re-plans too (AI_FINDPATH)', am.mode[iB] === AI.AI_FINDPATH);
+  check('step-aside: A path cleared', !paths.has(hA));
+}
+// ── step-aside axis: an N/S mover pushes the blocker E/W (perpendicular) ──
+{
+  const { world, handles } = setupWorld({
+    entities: [
+      { x: 10, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_ONPATH },     // A
+      { x: 10, y: 11, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_FINDPATH },    // B due SOUTH
+    ],
+  });
+  const hA = handles[0], iB = world.resolve(handles[1]);
+  const pos = world.store(Position), paths = world.getResource(Paths);
+  paths.set(hA, [2, 2], 10, 12);                                  // 4-dir 2 = south; A wants to go S through B
+  const r = doOnPath(world, hA);
+  check('step-aside: S-mover pushes blocker perpendicular (y stays 11, x leaves 10)',
+    r === 'aside' && pos.y[iB] === 11 && pos.x[iB] !== 10);
+}
+// ── step-aside: a PARTY-member blocker also moves, but keeps its own mode (not FINDPATH) ──
+{
+  const { world, handles } = setupWorld({
+    entities: [
+      { x: 10, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_ONPATH },
+      { x: 11, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_FOLLOW },     // B = follower
+    ],
+  });
+  const hA = handles[0], hB = handles[1], iB = world.resolve(hB);
+  world.add(hB, PartyMember, { slotIndex: 1 });
+  const am = world.store(AIMode), pos = world.store(Position), paths = world.getResource(Paths);
+  paths.set(hA, [1, 1], 12, 10);
+  const r = doOnPath(world, hA);
+  check('step-aside: party-member blocker also steps aside', r === 'aside' && !(pos.x[iB] === 11 && pos.y[iB] === 10));
+  check('step-aside: party-member keeps its mode (AI_FOLLOW, not re-pathed)', am.mode[iB] === AI.AI_FOLLOW);
+}
+// ── step-aside loop fix: a SETTLED (worktype) blocker is moved but NOT re-pathed — so it
+//    doesn't immediately walk back to the cell it was pushed off (the push↔return loop). ──
+{
+  const { world, handles } = setupWorld({
+    entities: [
+      { x: 10, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_ONPATH },     // A (mover)
+      { x: 11, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_LOITER },      // B settled at its slot
+    ],
+  });
+  const hA = handles[0], iB = world.resolve(handles[1]);
+  const am = world.store(AIMode), pos = world.store(Position), paths = world.getResource(Paths);
+  paths.set(hA, [1, 1], 12, 10);
+  const r = doOnPath(world, hA);
+  check('step-aside: settled blocker steps aside', r === 'aside' && !(pos.x[iB] === 11 && pos.y[iB] === 10));
+  check('step-aside: settled blocker KEEPS its worktype (not re-pathed → no walk-back loop)', am.mode[iB] === AI.AI_LOITER);
+}
+// ── step-aside: a boxed-in blocker can't move → fall to the faithful 84/85/86 wait ──
+{
+  const walls = {};
+  for (const c of [[12, 10], [11, 9], [11, 11], [12, 9], [12, 11], [10, 9], [10, 11]]) walls[`${c[0]},${c[1]}`] = 99;
+  const { world, handles } = setupWorld({
+    tileFlags: { 99: { terrain: 0x02 } },
+    terrainAt: walls,                                              // box B in on every side but A's cell
+    entities: [
+      { x: 10, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_ONPATH },
+      { x: 11, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_FINDPATH },
+    ],
+  });
+  const hA = handles[0], iA = world.resolve(hA);
+  const am = world.store(AIMode), paths = world.getResource(Paths);
+  paths.set(hA, [1, 1], 12, 10);
+  const r = doOnPath(world, hA);
+  check('step-aside: boxed-in blocker → no aside, faithful wait (AI_84)', r === 'blocked' && am.mode[iA] === AI.AI_84);
+}
+// ── a STATIC block (no actor) never triggers step-aside → faithful wait ──
+{
+  const { world, handles } = setupWorld({
+    tileFlags: { 99: { terrain: 0x02 } },
+    terrainAt: { '11,10': 99 },                                   // a wall, not an actor
+    entities: [{ x: 10, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_ONPATH }],
+  });
+  const h = handles[0], i = world.resolve(h);
+  const am = world.store(AIMode), paths = world.getResource(Paths);
+  paths.set(h, [1, 1], 12, 10);
+  const r = doOnPath(world, h);
+  check('step-aside: static block → "blocked" (no aside), AI_84', r === 'blocked' && am.mode[i] === AI.AI_84);
 }
 
 // ============================================================================

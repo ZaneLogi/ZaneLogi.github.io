@@ -25,6 +25,8 @@ import { Schedules } from '../resources/schedules.js';
 import { Viewport } from '../resources/viewport.js';
 import { TileRegistry } from '../resources/tile_registry.js';
 import { Camera } from '../resources/camera.js';
+import { tryMoveTo } from '../systems/drunk_walk.js';
+import { AI_MOTIONLESS } from '../systems/ai_modes.js';
 
 // Wrap-aware Chebyshev on the toroidal 1024 overworld axis (matches npc_path.js).
 const cheby = (ax, ay, bx, by) => {
@@ -165,7 +167,39 @@ export function installNpcInspect(world) {
     return { stopped: true, wasFollowing: was };
   }
 
-  const api = { inspectNpc, scanDungeonSchedules, teleportSuppressed, lookAtNpc, followNpc, stopFollow };
+  // ── drunk-walk drive (I-15c) — WRITES the simulation: a review tool to watch the I-15
+  // drunk-walk live. Parks the NPC at AI_MOTIONLESS (so the schedule tick won't fight it),
+  // then each `intervalMs` takes one tryMoveTo step toward (x,y) until it's adjacent. This is
+  // a fixed-cadence dev driver — it deliberately bypasses the I-14 accumulator (the real
+  // consumer that paces drunk-walk by DEXTE/WORLD_SPEED is the NPC-AI step, I-17). ──
+  let driveTimer = null, driveNpcId = null;
+  function driveTo(npcId, x, y, intervalMs = 150) {
+    const handle = actorIndex?.get(npcId);
+    if (handle === undefined) return { error: `npc ${npcId} not instantiated` };
+    stopDrive();
+    driveNpcId = npcId;
+    const i0 = world.resolve(handle);
+    am.mode[i0] = AI_MOTIONLESS;                       // take it out of the schedule tick
+    let walking = false;
+    driveTimer = setInterval(() => {
+      const h = actorIndex?.get(driveNpcId);
+      const i = h !== undefined ? world.resolve(h) : -1;
+      if (i === -1) { stopDrive(); return; }
+      if (cheby(pos.x[i], pos.y[i], x, y) <= 1) { stopDrive(); return; }   // arrived (adjacent)
+      const r = tryMoveTo(world, h, x, y, walking);
+      if (r !== null) walking = r;
+    }, intervalMs);
+    return { driving: npcId, toward: { x, y }, stopWith: '__U6.stopDrive()',
+             note: 'dev tool — drunk-walks the NPC on a fixed timer (bypasses the I-14 accumulator); parks it at AI_MOTIONLESS' };
+  }
+  function stopDrive() {
+    const was = driveNpcId;
+    if (driveTimer !== null && typeof clearInterval !== 'undefined') clearInterval(driveTimer);
+    driveTimer = null; driveNpcId = null;
+    return { stopped: true, wasDriving: was };
+  }
+
+  const api = { inspectNpc, scanDungeonSchedules, teleportSuppressed, lookAtNpc, followNpc, stopFollow, driveTo, stopDrive };
   if (typeof window !== 'undefined' && window.__U6) Object.assign(window.__U6, api);
   return api;
 }

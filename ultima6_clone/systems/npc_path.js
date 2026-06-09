@@ -9,7 +9,7 @@
 // the escalation states AI_ONPATH->84->85->86 are kept so a blocked NPC still backs
 // off and re-finds rather than spinning on a stuck step.
 
-import { Position, Renderable, ObjType, AIMode, Destination } from '../components/components.js';
+import { Position, Renderable, ObjType, AIMode, Destination, Actor } from '../components/components.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
 import { TileRegistry } from '../resources/tile_registry.js';
 import { Paths } from '../resources/paths.js';
@@ -97,14 +97,70 @@ export function doOnPath(world, handle) {
     return 'step';
   }
 
-  // Blocked: escalate so the NPC waits a tick and eventually re-finds rather than
-  // hammering the same blocked cell. (Source also zeroes MovePts here to consume the
-  // turn — deferred with the move-point economy.)
+  // Blocked. CLONE-ONLY step-aside (not in source — source has no NPC detour/swap and just
+  // waits the blocker out, §5.1; the clone's auto-advance heartbeat makes a frozen stand-off
+  // visible, so on the FIRST block we actively unstick an ACTOR blocker). If the next cell is
+  // held by another actor, ask it to step aside, then re-plan BOTH (its old cell is now free).
+  // Only on the first block (AI_ONPATH); a static block, a boxed-in blocker, or any later
+  // block falls through to source's faithful 84/85/86 grace-wait.
   const mode = am.mode[i];
+  if (mode === AI.AI_ONPATH) {
+    const pos = world.store(Position);
+    const dir8 = (path.dirs[path.counter] & 3) << 1;
+    const nx = (pos.x[i] + DIR_DX[dir8]) & 0x3ff;
+    const ny = (pos.y[i] + DIR_DY[dir8]) & 0x3ff;
+    const blocker = actorHandleAt(world, nx, ny, handle);
+    if (blocker !== null && requestStepAside(world, blocker, dir8)) {
+      // Blocker vacated → re-plan THIS NPC from here. Re-path the blocker ONLY if it was
+      // itself MID-JOURNEY (pathfinding tier) — re-finding then sends it toward its own goal,
+      // away from the contested cell. A SETTLED blocker (worktype / SCHEDULE / party — modes
+      // outside 0x81..0x86) is LEFT where it stepped: its "goal" is the very cell it was
+      // pushed off (its schedule slot), so re-pathing it there caused an infinite
+      // push↔return loop. Left alone it stays put (its worktype doesn't drive movement) and
+      // re-snaps to its proper slot at the next schedule hour.
+      const bi = world.resolve(blocker);
+      if (bi !== -1 && am.mode[bi] >= AI.AI_FINDPATH && am.mode[bi] <= AI.AI_86)
+        am.mode[bi] = AI.AI_FINDPATH;
+      am.mode[i] = AI.AI_FINDPATH;
+      paths.delete(handle);
+      return 'aside';
+    }
+  }
+  // Source-faithful escalation: wait a tick, eventually re-find rather than hammering the
+  // same blocked cell. (Source also zeroes MovePts here to consume the turn — the I-14
+  // accumulator consumes it at the tick.)
   if (mode === AI.AI_ONPATH) am.mode[i] = AI.AI_84;
   else if (mode === AI.AI_84) am.mode[i] = AI.AI_85;
   else if (mode === AI.AI_85) { am.mode[i] = AI.AI_86; paths.delete(handle); }
   return 'blocked';
+}
+
+// Is there another actor (≠ self) standing at (x,y)? Returns its handle, or null. (The
+// SpatialIndex cell chain — same actor-occupancy test as world_loader.actorAtCell, but
+// returns the handle so the caller can act on the blocker.)
+function actorHandleAt(world, x, y, selfHandle) {
+  const ents = world.getResource(SpatialIndex).at(x, y);
+  if (!ents) return null;
+  for (const h of ents) {
+    if (h === selfHandle) continue;
+    if (world.has(h, Actor) && world.resolve(h) !== -1) return h;
+  }
+  return null;
+}
+
+// CLONE-ONLY courtesy move: the blocker steps ONE cell PERPENDICULAR to the mover's travel
+// axis — out of the lane it needs. `moverDir8` is the (cardinal) direction the blocked NPC
+// was trying to go: an E/W mover pushes the blocker N or S; an N/S mover pushes it E or W (so
+// it clears the exact row/column the mover walks). Perpendicular-ONLY: if both sideways cells
+// are blocked there's genuinely no room to make way (a 1-wide corridor), so return false and
+// let the faithful 84/85/86 wait handle it — never shove the blocker forward/backward (that
+// leapfrogs or doesn't clear the lane). Returns true if it moved. A reactive "free" step (not
+// accumulator-gated); source has no such mechanism. (Tries the first open side; a same-axis
+// bias is harmless — could randomise the side later.)
+function requestStepAside(world, blockerHandle, moverDir8) {
+  const perp = (moverDir8 === 2 || moverDir8 === 6) ? [0, 4] : [2, 6];   // E/W → N,S ; N/S → E,W
+  for (const d of perp) if (npcStep(world, blockerHandle, d, false) !== null) return true;
+  return false;
 }
 
 // Chebyshev distance on the wrapped 1024-cell overworld axis — source's

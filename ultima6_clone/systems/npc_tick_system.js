@@ -171,9 +171,11 @@ export function installNpcTickSystem(world, { avatarRef, now = () => performance
         // yet -> the NPC waits this tick. Arrival ('end') is free (no step taken).
         if (ms && ms.credit[i] < cost) continue;
         const r = doOnPath(world, handle);
-        if (ms && (r === 'step' || r === 'blocked')) ms.credit[i] -= cost;
+        // 'step'/'blocked'/'aside' all consume the move attempt; 'end'/'idle' don't. ('aside'
+        // = the step-aside clone path: the blocker was nudged and this NPC re-plans next tick.)
+        if (ms && (r === 'step' || r === 'blocked' || r === 'aside')) ms.credit[i] -= cost;
         if (r === 'step') walking++;
-        else if (r === 'blocked') blocked++;
+        else if (r === 'blocked' || r === 'aside') blocked++;
         else if (r === 'end') arrived++;
       }
     }

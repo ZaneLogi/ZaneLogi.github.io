@@ -49,15 +49,21 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 **Implementation phase. Current status + the I-N step ledger live in
 [`docs/progress.md`](docs/progress.md)** — its top banner is the single source of truth
 (see that file's §"Doc maintenance"); this section is NOT a status mirror. As of
-2026-06-08: **I-13 (conversation VM) COMPLETE; next I-14 (NPC movement speed — DEXTE-paced per-actor accumulator, a modern rewrite of the MovePts/DEXTE economy, NOT a round-driver port — start of the NPC-movement arc I-14→I-17: speed model → drunk-walk → arrival-behaviors/direction → AI behaviors; status panel/handlers pushed to I-18/I-19).** What stays
+2026-06-08: **I-14 (NPC movement speed — DEXTE-paced accumulator) + I-15 (drunk-walk —
+`TryMoveTo`/`__TryDiagMove`) COMPLETE (local, pending review + squash); next I-16 (arrival
+behaviors + direction). NPC-movement arc I-14→I-17: speed model ✓ → drunk-walk ✓ →
+arrival/direction (I-16) → AI behaviors (I-17); status panel/handlers pushed to I-18/I-19.**
+What stays
 here is the durable, slowly-changing reference — the code layout, the dev console helpers,
 and the per-step **kept deviations** (so a later session doesn't "correct" them). The ECS
 runtime-ground spec is
 `docs/architecture_ecs.md`, implemented in `ecs/world.js` since I-1. Code layout:
 `ecs/` (runtime core), `assets/` (format decoders), `resources/` (TileRegistry,
-MapLevel, Camera, Viewport, Party, Paths, Schedules, …), `systems/` (render, camera,
-world-data, schedule, passability, avatar move, move-followers, humanoid-anim,
-pathfinding, npc_path, npc_tick, ai_modes, **cell_pick, command_dispatch,
+MapLevel, Camera, Viewport, Party, Paths, Schedules, **WorldSpeed** (I-14d), …),
+`systems/` (render, camera, world-data, schedule, passability, avatar move,
+move-followers, humanoid-anim, pathfinding, npc_path, npc_tick, ai_modes, **move_economy**
+(I-14: DEXTE-paced accumulator — `rate`/`stepCostAt`/`PLAYER_STEP_MS`) + **drunk_walk**
+(I-15: `tryMoveTo`/`tryDiagMove` pathfinding-less primitive), **cell_pick, command_dispatch,
 use_handlers, use_drawbridge** (I-10), **conversation/** (I-13: `conversation_vm.js`
 standalone effect VM + `opcodes.js` + `conversation_system.js` host), …),
 `assets/` also has **portrait.js** + **converse.js** (lazy lib_32 decoders);
