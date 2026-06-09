@@ -1,6 +1,9 @@
 // In-memory verification for WorldClock (I-3a). No rendering — pure logic.
 // Open tests/test_clock.html through the dev server; results log to console + page.
 import { WorldClock } from '../resources/world_clock.js';
+import { World } from '../ecs/world.js';
+import { WorldSpeed } from '../resources/world_speed.js';
+import { makeWorldClockSystem, CLOCK_MIN_PER_REAL_SEC } from '../systems/world_clock_system.js';
 
 const results = [];
 let pass = 0, fail = 0;
@@ -111,6 +114,53 @@ function check(name, cond) {
   c.onHour(() => order.push('b'));
   c.advance(60);
   check('two hooks fire in registration order', order.join(',') === 'a,b');
+}
+
+// --- I-14d: decoupled clock system (real elapsed × rate × WORLD_SPEED) ---
+// Build a tiny world with just the WorldClock + WorldSpeed resources and an injected clock;
+// feed 100 ms heartbeats (each ≤ the elapsed clamp) and check the game clock advances by
+// elapsed-time, scaled by WORLD_SPEED — NOT once per call.
+function clockWorld(wsValue) {
+  const world = new World(8);
+  world.setResource(new WorldClock({ Time_H: 9, Time_M: 0 }));
+  world.setResource(new WorldSpeed(wsValue));
+  return world;
+}
+{
+  let T = 0; const now = () => T;
+  const world = clockWorld(1);
+  const sys = makeWorldClockSystem({ now });
+  sys(world);                                          // baseline (elapsed 0)
+  for (let k = 0; k < 6; k++) { T += 100; sys(world); } // 600 ms of heartbeats
+  const expect = Math.floor(0.6 * CLOCK_MIN_PER_REAL_SEC * 1);
+  check(`clock decoupled: 600 ms @ WS1 → +${expect} game-min (by elapsed, not per-call)`,
+    world.getResource(WorldClock).Time_M === expect);
+}
+{
+  let T = 0; const now = () => T;
+  const world = clockWorld(0);
+  const sys = makeWorldClockSystem({ now });
+  sys(world); for (let k = 0; k < 20; k++) { T += 200; sys(world); }   // 4 s, but WS 0
+  check('clock decoupled: WORLD_SPEED 0 freezes time', world.getResource(WorldClock).Time_M === 0);
+}
+{
+  let T = 0; const now = () => T;
+  const world = clockWorld(2);
+  const sys = makeWorldClockSystem({ now });
+  sys(world); for (let k = 0; k < 6; k++) { T += 100; sys(world); }    // 600 ms @ WS2
+  const expect = Math.floor(0.6 * CLOCK_MIN_PER_REAL_SEC * 2);
+  check(`clock decoupled: WORLD_SPEED 2 doubles the rate (+${expect} min in 600 ms)`,
+    world.getResource(WorldClock).Time_M === expect);
+}
+{
+  // A single huge gap (backgrounded tab) is clamped — time can't lurch forward.
+  let T = 0; const now = () => T;
+  const world = clockWorld(1);
+  const sys = makeWorldClockSystem({ now });
+  sys(world); T += 60000; sys(world);                        // a 60 s jump in one call
+  const maxByClamp = Math.ceil(0.25 * CLOCK_MIN_PER_REAL_SEC * 1) + 1;  // clamp = 250 ms
+  check('clock decoupled: huge gap clamped (≤ a minute, not 120)',
+    world.getResource(WorldClock).Time_M <= maxByClamp);
 }
 
 // --- report ---

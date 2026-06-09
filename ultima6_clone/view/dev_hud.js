@@ -8,6 +8,14 @@
 
 import { TurnClock } from '../ecs/world.js';
 import { WorldClock } from '../resources/world_clock.js';
+import { WorldSpeed } from '../resources/world_speed.js';
+
+// I-14d WORLD_SPEED slider mapping. The track is log-scaled so the default (×1) sits near
+// the middle and both calm and bustling paces are reachable; position 0 is a hard FROZEN
+// stop (rate 0). v in 0..100.
+const WS_MIN = 0.1, WS_MAX = 8;
+function sliderToWS(v) { return v <= 0 ? 0 : WS_MIN * Math.pow(WS_MAX / WS_MIN, (v - 1) / 99); }
+function wsLabel(ws) { return ws <= 0 ? 'frozen' : `×${ws < 1 ? ws.toFixed(2) : ws.toFixed(1)}`; }
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
@@ -33,11 +41,22 @@ function rewind(c, minutes) {
   c.recomputeD_2C55();
 }
 
-export function installDevHud(world, { hudEl, textEl, controlsEl, npcStatsEl, npcScheduleStats, npcTickStats }) {
+export function installDevHud(world, { hudEl, textEl, controlsEl, npcStatsEl, speedEl, speedLabelEl, npcScheduleStats, npcTickStats }) {
   const pauseBtn = controlsEl.querySelector('[data-act="pause"]');
   hudEl.style.display = 'block';
   const clock = world.getResource(WorldClock);
   const tc = world.getResource(TurnClock);
+
+  // I-14d: WORLD_SPEED master slider — scales NPC movement rate + the decoupled clock.
+  const ws = world.getResource(WorldSpeed);
+  if (speedEl && ws) {
+    const apply = () => {
+      ws.value = sliderToWS(+speedEl.value);
+      if (speedLabelEl) speedLabelEl.textContent = wsLabel(ws.value);
+    };
+    apply();                          // sync resource + label to the slider's initial position (×1)
+    speedEl.addEventListener('input', apply);
+  }
   let hourFires = 0;
   clock.onHour(() => hourFires++);
 

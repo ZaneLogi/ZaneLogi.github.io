@@ -36,7 +36,13 @@ export function npcStep(world, handle, dir8, walking) {
   const ox = pos.x[i], oy = pos.y[i];
   const nx = (ox + DIR_DX[dir8]) & 0x3ff;       // overworld wrap (source masks & 0x3ff)
   const ny = (oy + DIR_DY[dir8]) & 0x3ff;
-  if (!canStandAt(world, nx, ny, { actorId: handle, asHumanoidNpc: true })) return null;
+  // I-14e door-phasing fix: only HUMANOID NPCs walk through a closed-unlocked door (source
+  // gates this on the MONSTER_4000 class via GetMonsterClass, C_1E0F_000F:199-207). The
+  // clone has no monster-class table (D_3522_0242 is hardcoded C, not game data), so we use
+  // the same sprite-family isHumanoid proxy the animation arm already uses — non-humanoids
+  // (gazer, animals) are now correctly blocked by closed doors instead of phasing them. (Was
+  // `asHumanoidNpc: true` for every NPC.) Port D_3522_0242 here if real classes ever matter.
+  if (!canStandAt(world, nx, ny, { actorId: handle, asHumanoidNpc: isHumanoid(ot.objNumber[i]) })) return null;
 
   spatial.remove(ox, oy, handle);
   pos.x[i] = nx; pos.y[i] = ny;

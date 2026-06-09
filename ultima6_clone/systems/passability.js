@@ -102,7 +102,9 @@ export function canStandAt(world, x, y, { actorId, asPartyMember = false, leader
         // changed. The player takes the other branch (party-pass only) and IS blocked
         // by closed doors, so avatar/follower moves never set asHumanoidNpc. Locked
         // doors (frame>=8) fall through to the impassable check below and still block.
-        // All current NPCs are humanoid; non-humanoid monster classes arrive w/ combat.
+        // The CALLER decides asHumanoidNpc: npcStep (I-14e) passes isHumanoid(objNumber), so
+        // only humanoid NPCs phase doors — gazers/animals are blocked (source gates this on
+        // the MONSTER_4000 class; isHumanoid is the clone's sprite-family proxy).
         if (asHumanoidNpc) {
           const obj = ot.objNumber[id];
           if (((obj >= OBJ_DOOR_LO && obj <= OBJ_DOOR_HI) && ot.frame[id] < 8) ||

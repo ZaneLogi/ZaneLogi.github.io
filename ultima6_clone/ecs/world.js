@@ -98,6 +98,10 @@ export class World {
     this._components.set(def, { bit, store: new ComponentStore(def, this.capacity) });
     return this;
   }
+  // Is this component registered in this world? Lets a system degrade gracefully when an
+  // optional component is absent (e.g. the I-14 accumulator is disabled in the minimal
+  // unit-test worlds that don't register MoveSpeed) instead of throwing via _entry.
+  isRegistered(def) { return this._components.has(def); }
   _entry(def) {
     const e = this._components.get(def);
     if (!e) throw new Error(`component not registered: ${def && def.name}`);

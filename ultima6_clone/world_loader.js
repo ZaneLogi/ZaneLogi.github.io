@@ -22,7 +22,7 @@ import { TileRegistry } from './resources/tile_registry.js';
 import { SpatialIndex } from './resources/spatial_index.js';
 import { Schedules } from './resources/schedules.js';
 import { ActorIndex } from './resources/actor_index.js';
-import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember, AIMode, Destination, Alignment } from './components/components.js';
+import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember, AIMode, Destination, Alignment, MoveSpeed } from './components/components.js';
 import { AI_COMMAND, AI_FOLLOW, AI_SCHEDULE } from './systems/ai_modes.js';
 
 const LOCXYZ = CoordUse.LOCXYZ;
@@ -149,6 +149,7 @@ export function loadActors(world, objlist) {
     const e = spawnFromRecord(world, reg, spatial, a, true);
     actorIndex?.set(a.id, e);
     world.add(e, Alignment, { value: a.npcStatus & 0x60 });   // I-11a: carry NPCStatus alignment (else dropped)
+    world.add(e, MoveSpeed, { dexterity: a.dexterity, credit: 0 });   // I-14: DEXTE-paced accumulator state
     const isParty = partyIndexBySlot.has(a.id);
     if (schedules?.hasSchedule(a.id)) {
       world.add(e, Schedule, { npcId: a.id });

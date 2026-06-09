@@ -19,6 +19,7 @@ import { SpatialIndex } from '../resources/spatial_index.js';
 import { TileRegistry } from '../resources/tile_registry.js';
 import { canStandAt } from './passability.js';
 import { walkStep } from './humanoid_anim.js';
+import { stepCostAt, PLAYER_STEP_MS, BASE_COST } from './move_economy.js';
 
 export const DIR_DX = [0, 1, 1, 1, 0, -1, -1, -1];   // DirIncrX (seg_0903.c:20)
 export const DIR_DY = [-1, -1, 0, 1, 1, 1, 0, -1];   // DirIncrY (seg_0903.c:21)
@@ -59,6 +60,7 @@ export function installAvatarMovement(world, { avatarRef, onMove, onIdle, isBloc
   let pendingDir = -1;
   let walking = false;                  // avatar walk-cycle state (source IsWalking flag)
   let lastInputAt = -Infinity;          // performance.now() of the last movement input
+  let nextStepAt = -Infinity;           // I-14c: terrain cooldown gate (next allowed step time)
 
   // The avatar's tile = baseTile[objNumber] + frame; objNumber is stable, so cache
   // its base once. For humanoid sprites (the Avatar is OBJ_19A) the frame packs
@@ -97,6 +99,13 @@ export function installAvatarMovement(world, { avatarRef, onMove, onIdle, isBloc
       return;
     }
 
+    // I-14c: terrain cooldown — rate-limit SUSTAINED movement (fixed-brisk on open ground,
+    // slower through costly terrain) with NO input lag. Standing leaves nextStepAt in the
+    // past, so the first step after any pause is instant; while the cooldown runs we keep
+    // the pending dir and wait (the turn still ran the NPC/clock systems). Independent of
+    // WORLD_SPEED — the player stays responsive even when the ambient world is slowed.
+    if (performance.now() < nextStepAt) return;
+
     const dir = pendingDir;
     pendingDir = -1;
 
@@ -123,6 +132,11 @@ export function installAvatarMovement(world, { avatarRef, onMove, onIdle, isBloc
     walking = stepped.walking;
     ot.frame[i] = stepped.frame;
     world.store(Renderable).tileId[i] = baseTile + stepped.frame;
+
+    // I-14c: arm the cooldown from the cell just entered (cost to leave it next step) —
+    // PLAYER_STEP_MS on open ground, stretched by terrain. So wading into swamp slows the
+    // sustained pace, but the FIRST step in is never gated (this fires only after a step).
+    nextStepAt = performance.now() + PLAYER_STEP_MS * stepCostAt(world, nx, ny, pos.z[i]) / BASE_COST;
 
     if (onMove) onMove(nx, ny);
   };

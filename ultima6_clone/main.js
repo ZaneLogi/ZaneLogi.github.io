@@ -21,13 +21,14 @@ import { TileRenderer } from './view/renderer.js';
 import { Camera } from './resources/camera.js';
 import { Viewport } from './resources/viewport.js';
 import { WorldClock } from './resources/world_clock.js';
+import { WorldSpeed } from './resources/world_speed.js';
 import { makeRenderSystem } from './systems/render_system.js';
 import { makeCameraSystem } from './systems/camera_system.js';
 import { makeTileAnimationSystem } from './systems/tile_animation_system.js';
 import { makePaletteCycleSystem } from './systems/palette_cycle_system.js';
 import { makeWorldRenderSystem } from './systems/world_render_system.js';
 import { makeWorldClockSystem } from './systems/world_clock_system.js';
-import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember, AIMode, Destination, Alignment } from './components/components.js';
+import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember, AIMode, Destination, Alignment, MoveSpeed } from './components/components.js';
 import { Party } from './resources/party.js';
 import { Paths } from './resources/paths.js';
 import { Schedules } from './resources/schedules.js';
@@ -154,12 +155,15 @@ async function load() {
   world.setResource(new SpatialIndex());
   world.setResource(schedules);
   world.setResource(new ActorIndex());           // I-6a: slot-id -> NPC handle (populated by loadActors)
-  // I-3: turn-driver + game-clock. idleInterval = 100ms => 1 game-minute per
-  // 0.1s real => full game-day in ~2.4 min. Start date is a stand-in until
-  // save-load lands (research_save_load.md). D_2C55 is stored but unconsumed
-  // until the lighting step (research_map_render.md §"Lighting + visibility model").
+  // I-3: turn-driver heartbeat (idle sample interval). I-14d DECOUPLES the game clock from
+  // it — the clock now advances on its own real-time cadence scaled by WorldSpeed
+  // (world_clock_system.js CLOCK_MIN_PER_REAL_SEC), so the 100 ms heartbeat is just the
+  // sim-sampling rate, not the clock rate (the old "1 min per 0.1s" runaway is gone). Start
+  // date is a stand-in until save-load (research_save_load.md). D_2C55 is stored but
+  // unconsumed until the lighting step (research_map_render.md §"Lighting + visibility model").
   world.setResource(new TurnClock(100));
   world.setResource(new WorldClock({ Time_H: 9, Time_M: 0, Date_D: 1, Date_M: 1, Date_Y: 161 }));
+  world.setResource(new WorldSpeed(1));           // I-14d: master pace scalar (NPC rate + clock); slider-driven
   world.registerComponent(Position).registerComponent(Renderable)
        .registerComponent(ObjType).registerComponent(Status)
        .registerComponent(Amount).registerComponent(Actor)
@@ -167,7 +171,8 @@ async function load() {
        .registerComponent(Container).registerComponent(ContainedIn)
        .registerComponent(PartyMember)
        .registerComponent(AIMode).registerComponent(Destination)    // I-9: NPC pathfinding state
-       .registerComponent(Alignment);                               // I-11a: NPCStatus alignment (carried from objlist)
+       .registerComponent(Alignment)                                // I-11a: NPCStatus alignment (carried from objlist)
+       .registerComponent(MoveSpeed);                               // I-14: DEXTE-paced accumulator state
   world.setResource(new Party());                 // I-8b: singleton party state (activeIndex, mode)
   world.setResource(new Paths());                 // I-9c: per-NPC pathfinding state (handle -> {dirs, counter, ...})
   world.setResource(new MessageLog());            // I-10a: gameplay message channel (CON_printf analog)
@@ -364,6 +369,8 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
     textEl:       document.getElementById('clock-text'),
     controlsEl:   document.getElementById('clock-controls'),
     npcStatsEl:   document.getElementById('npc-stats'),
+    speedEl:      document.getElementById('world-speed'),         // I-14d WORLD_SPEED slider
+    speedLabelEl: document.getElementById('world-speed-label'),
     npcScheduleStats,
     npcTickStats: npcTick.stats,
   });

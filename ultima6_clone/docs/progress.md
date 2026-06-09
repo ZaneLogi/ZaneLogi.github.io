@@ -5,7 +5,7 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: I-13 (conversation VM) COMPLETE (2026-06-08). Next: I-14 (status panel)** — the
+**Status: I-13 (conversation VM) COMPLETE (2026-06-08). Next: I-14 (NPC movement speed — DEXTE-paced accumulator — start of the NPC-movement arc I-14→I-17: speed model → drunk-walk → arrival-behaviors/direction → AI behaviors; status panel/handlers pushed to I-18/I-19)** — the
 `converse.a/.b` bytecode VM is a **standalone generator that yields typed effects**
 (conversation_vm.js), driven by a host (conversation_system.js) into the now-live dialog
 window: portrait + streaming text + clickable `@`keywords/chips + input. Coverage: **200/200
@@ -18,9 +18,11 @@ This banner is the **single canonical current-status line** — `CLAUDE.md` and
 `DOCUMENTATION_INDEX.md` point here instead of mirroring it (convention: §"Doc maintenance").
 **Per-step detail** lives in each step's **§"I-N scope"** section below; **at-a-glance status**
 is the **ledger**. Standing cross-cutting items, each with its own section: the **post-I-9
-deviation audit** (move-point economy, clock tuning, idle-heartbeat fork, I-9f) stays
-**deferred** (§"Post-I-9 — deviation audit"); the **render-to-fit viewport** refinement landed
-2026-06-05 (§"Render-to-fit viewport").
+deviation audit** — idle-heartbeat fork **DECIDED (keep heartbeat; settled model = DEXTE-paced
+per-actor accumulator — a modern rewrite of the MovePts/DEXTE economy, NOT a round-driver port:
+one master `WORLD_SPEED` slider, decoupled clock, snap tile-to-tile, fixed-brisk non-laggy player,
+no auto-pass)**; the movement-model impl (I-14) + I-9f drop stay **deferred** (§"Post-I-9 — deviation
+audit"); the **render-to-fit viewport** refinement landed 2026-06-05 (§"Render-to-fit viewport").
 
 ## Doc maintenance — keep status in ONE place
 
@@ -57,8 +59,12 @@ banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 | I-11 | talk trigger — adds TALK as a case in the I-10 dispatch (reach-7 target-pick + the can-talk gate; single-stage, stops before the conversation VM) | **done** (a–c) |
 | I-12 | dialog window — second surface on the I-7 substrate; opens when TALK fires (modal frame + four-region layout + real lazy-decoded portrait; chips/input inert — I-13 wires them) | **done** (pre-step + a–c) |
 | I-13 | conversation VM — **standalone generator yielding typed effects** + host driver; swaps the I-12 window's placeholder body for real lines + clickable `@`keywords/chips + live input. β reached: walk + talk works end-to-end against real `converse.a/.b`. | **done** (pre-step + a–g + review; squashed) |
-| I-14 | status panel — third surface on the substrate; replaces the dev HUD's clock readout | planned |
-| I-15 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / moonstones / instruments / etc.); each handler tied to its owning subsystem when that subsystem lands | planned |
+| I-14 | **NPC movement speed (DEXTE-paced accumulator)** — replace I-9's flat step-rate with a per-actor `moveCredit` accumulator (DEXTE = speed meter, `SubTerrainMov` = step cost); a *modern rewrite* of the `MovePts`/`DEXTE` economy, NOT a `C_1E0F_4E0A` round-driver port. One master `WORLD_SPEED` slider, decoupled clock, snap tile-to-tile, fixed-brisk non-laggy player. Restores terrain-/dex-speed + staggering, fixes the flat-step thrash. Foundation for the NPC-movement arc. | planned |
+| I-15 | **drunk-walk approach** — `TryMoveTo` greedy fallback chain + `__TryDiagMove` corner-clearance (the pathfinding-less move primitive for chase/flee). Rides on I-14. | planned |
+| I-16 | **arrival behaviors + direction system** — finish `__AtDestination` (`U6_NPC_排程與移動邏輯.md §七`): prop lookup for sit/sleep/eat/play (`C_1E0F_2184`) + fallbacks (sleep-on-spot, arrived-but-can't-sit), eating dynamic facing (`C_1E0F_2125`), and the `C_1E0F_0664` 8-dir / MACRO_A frame system + chair-overrides-facing + non-humanoid per-type facing. Builds on I-9g's worktype-settle + STAND/GUARD facing. Verifies §5.2. | planned |
+| I-17 | **NPC AI behaviors** — modes on top of I-14/I-15: persistent activities (`AI_WANDER`/`FARM`/`LOITER`/`GRAZE`) first, then guard/law-enforcement + thief (granularity scoped at I-17). (was I-16) | planned |
+| I-18 | status panel — third surface on the substrate; replaces the dev HUD's clock readout (was I-14→I-17) | planned |
+| I-19 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / moonstones / instruments / etc.); each handler tied to its owning subsystem when that subsystem lands (was I-15→I-18) | planned |
 
 **Why I-2 is the world-data system.** Loading the real world from `OBJBLK*`/
 `objlist` into ECS entities is the clone's core purpose — the reason for choosing
@@ -1218,6 +1224,64 @@ hang off one fork: **keep the idle heartbeat** (then move-points + clock-tuning 
 land) vs **revert to player-action-only advance** (faithful; the frozen-NPC-while-idle
 problem disappears for free; move-points stay a nice-to-have for in-motion traffic). This
 reopens the idle-heartbeat call finalized 2026-06-01 — decide it in the audit.
+
+**FORK DECIDED (Zane 2026-06-08): KEEP the idle heartbeat — reverting to turn-based is NOT the
+expectation.** The audit's movement items therefore collapse into ONE settled model (below), not
+a deferred fork.
+
+**SETTLED MODEL — DEXTE-paced per-actor accumulator (Zane 2026-06-08, refined through a design pass; SUPERSEDES the earlier "faithful round-driver port + idle auto-pass" framing that `fcc3a1d` committed).**
+A **modern rewrite** of U6's `MovePts`/`DEXTE` economy as a **continuous per-actor accumulator** — NOT a
+port of the `C_1E0F_4E0A` round driver. Keep the *mechanic* (DEX = speed, terrain = cost); drop the
+turn-loop *substrate* (no shared pool, no refill event, no ratio-priority round-robin, no idle
+auto-pass). This is the correct call per this project's "modern rewrite" choice (`CLAUDE.md` →
+[[feedback_retro_port_translation_choice]]): the round-robin/refill/auto-pass driver is exactly the
+shape a single-threaded, blocking-input 1990 loop takes — forcing it onto the clone's continuous 100 ms
+heartbeat is what produced the "chaos" that drove this reframe. The same *observable* behavior (DEX
+speed-variation = staggering; terrain slowdown; overdraft delay) falls out of the accumulator
+continuously instead of bursting per round. (Source-mechanism reference still: `research_npc_ai.md
+§"Move-point economy"` + `U6_世界推進_回合節拍.md`; we reinterpret it, not transcribe it.)
+
+**The model:**
+- **Per actor, each heartbeat (100 ms fixed):** `moveCredit += rate(DEXTE) × WORLD_SPEED × dt`; when
+  `moveCredit ≥ stepCost`, **move one tile and subtract the cost**. Movement is **snap tile-to-tile, no
+  render interpolation** (faithful to source's per-pick redraw — Zane 2026-06-08). **Cap** a stationary
+  actor's credit at one step's cost (no banked multi-tile dash when it later gets a destination).
+- **`rate(DEXTE)` — DEXTE is a *speed meter*** (the dexterity stat, 1–30, `seg_0C9C.c:303` from objlist),
+  used for the relative ordering and **mapped into a feel-calibrated band, NOT its raw scale.** Anchor:
+  reference DEX ≈ 15 → ≈ 2.5 tiles/s on open ground (sets the slider default); **floor** effective DEX
+  (~6) so the slowest creature still ambles. NPCs keep the full spread (horse fast, slime slow) — it's
+  characterful ambient life. Source values are the *inputs*; the ms-per-tile mapping is ours, tuned live.
+- **`stepCost` = `SubTerrainMov`** (`seg_1E0F.c:1402` = `5 + Σ(TerrainType>>4)` over the actor's tile +
+  stacked objects; `SubMov` `seg_1E0F.c:441` modifiers: horse ½, slow/haste spell ½/×2, min 1).
+  **Per-location, shared by all actors on that tile** (NOT per-NPC). Diagonal cost lives in
+  `__TryDiagMove` — I-15.
+- **Player movement = fixed-brisk, never gated → zero input lag** (Zane 2026-06-08). The player does
+  **NOT** use DEX-scaling (a sluggish low-DEX avatar everywhere feels bad; the player-facing point is
+  terrain-speed, not avatar-DEX-speed). Design: **standing still leaves the player "ready" (credit
+  banked to one step), so a keypress after any pause steps instantly that frame**; a post-step
+  **cooldown = terrain-scaled** rate-limits *sustained* walking only. Open ground → cooldown < key-repeat
+  (continuous smooth walk); swamp → visibly slower, but the first step is always instant. The
+  distinction that dissolves the lag worry: "lag" = delay before responding (none here) vs "throttle" =
+  capped sustained rate (intended — it IS the terrain mechanic).
+- **Clock = DECOUPLED** (Zane 2026-06-08). Advances on its **own** real-time cadence, **not** tied to
+  rounds/refills (source's per-refill `C_0A33_1355(1)` tick is turn-loop convenience → dropped, a kept
+  clone deviation per the modern-UX anchor). Schedules read the independent clock. Why: a per-refill
+  clock would make time-of-day speed up in empty areas / slow down in crowds (an NPC-density artifact);
+  decoupling also auto-fixes today's runaway 600× idle clock.
+- **`WORLD_SPEED` = ONE master slider** (Zane 2026-06-08) in the world-clock UI — scales **every actor's
+  fill rate AND the decoupled clock together**: slow → everything ambles, **slow-end = frozen** (recovers
+  source's "world stops when idle" feel), fast → bustle. **Log-scaled.** The 100 ms heartbeat stays
+  fixed; the slider changes the *rate*, not the frame interval. Pairs with the world-clock surface
+  (dev-HUD clock now → **status panel I-18**).
+- **Staggering & blocking** emerge from independent per-actor credit phases (actors cross the threshold
+  on different heartbeats), so a blocker usually vacates before/after a blocked NPC, not simultaneously —
+  no global interleave needed. Residual blocks ride the existing `84/85/86` wait-and-replan
+  (`npc_path.js:98-100`); **build-time check:** confirm it still de-gridlocks. **I-9f
+  teleport-to-previous is a non-faithful band-aid → DROP it** once this lands; blocked-NPC behavior then
+  follows `U6_NPC_排程與移動邏輯.md §五` (waited-out, not warped — lenient Chebyshev ≤ 1 arrival; catch-up
+  via hourly schedule re-target §二 + off-screen visibility teleport §六).
+- **Data:** `assets/objlist.js` already decodes `a.dexterity` (0x0a00) — carry only that into a
+  component. `a.movePts` (0x14f1) is now **unused** (the accumulator needs no saved per-round budget).
 
 **After the full port — new-mechanism study (Zane 2026-06-02).** If the idle heartbeat
 stays, a later study may add mechanisms the original LACKS (NPC-NPC swap, local detour,
@@ -2614,3 +2678,73 @@ harmlessly). So **all 200 shipped scripts skip correctly** — the limitation on
 **Pre-impl research:** [research_portraits.md](research_portraits.md) (portrait
 format + decode) + the standing [research_conversation_vm.md](research_conversation_vm.md)
 (the I-13 VM the window will feed) + the substrate read recorded in this section.
+
+## I-14 scope — NPC movement speed (DEXTE-paced accumulator)
+
+**Planned (not started).** Pulled ahead of the old status-panel/handlers steps (now I-18/I-19)
+to start the **NPC-movement arc** (I-14 speed model → I-15 drunk-walk → I-16 arrival/direction →
+I-17 AI): the AI behaviors all ride on the movement model, so it goes first.
+
+**Goal:** replace I-9's **flat step-rate** with a **DEXTE-paced per-actor accumulator** — a *modern
+rewrite* of U6's `MovePts`/`DEXTE` economy, **NOT** a port of the `C_1E0F_4E0A` round driver — so NPC
+movement regains **terrain-speed**, **dexterity-speed**, and the **staggering** that keeps traffic
+un-gridlocked, fixing the "watch an NPC thrash" symptom and laying the substrate for I-15/I-16.
+**Full design + rationale (READ FIRST):** §"Post-I-9 — deviation audit" → "SETTLED MODEL — DEXTE-paced
+per-actor accumulator". **Source inputs (reinterpreted, not transcribed):** `SubTerrainMov`
+(`seg_1E0F.c:1402` = `5 + Σ(TerrainType>>4)`), `SubMov` (`:441`), `DEXTE` (`seg_0C9C.c:303`, objlist);
+the `C_1E0F_4E0A` round driver is studied for the mechanic but deliberately **not** ported. **Data:**
+`assets/objlist.js` already decodes `a.dexterity` (0x0a00) — carry that only; `a.movePts` (0x14f1) is
+unused under the accumulator.
+
+**Sub-steps (one save-point each):**
+- **a** — `MoveSpeed` component (`dexterity` from objlist + a `moveCredit` accumulator), added in
+  `world_loader.js`; `rate(DEXTE)` maps DEX into the calibrated band (reference DEX ≈ 15 → ≈ 2.5
+  tiles/s on open ground, floor ~6). Source scale is the *input*; ms-per-tile mapping is ours.
+- **b** — per-actor accumulator tick: each heartbeat `moveCredit += rate × WORLD_SPEED × dt`; step
+  **one tile** when `moveCredit ≥ stepCost` (**snap, no interpolation**); cap idle credit at one step.
+  **Replaces** the flat-step `npc_tick_system`. Staggering emerges from per-actor credit phases (no
+  round-robin, no auto-pass).
+- **c** — `stepCost = SubTerrainMov` (terrain weight; `SubMov` modifiers horse ½ / spells, min 1) as
+  the per-step threshold for NPCs. **Player:** **fixed-brisk** base (NOT DEX-scaled), **instant-first-
+  step + terrain cooldown** — standing leaves the player "ready" so a keypress steps instantly; a
+  post-step cooldown rate-limits *sustained* walking only → zero input lag, swamp visibly slows.
+- **d** — **`WORLD_SPEED` master slider** in the world-clock UI (dev-HUD clock now → status panel
+  I-18): scales **all actor rates + the decoupled clock together**; log-scaled; **slow end = frozen**.
+  The clock advances on its **own** cadence (**decoupled** — not per round/refill); the 100 ms
+  heartbeat stays fixed (the slider changes the *rate*, not the frame interval).
+- **e** — verify: staggering removes the flat-step thrash; player input never lags + swamp visibly
+  slows; the `84/85/86` escalation (`npc_path.js:98-100`) still de-gridlocks; live preview + unit tests.
+- **fold-in** — **door-phasing predicate fix** (`isHumanoid` → `MONSTER_4000` monster-class /
+  `GetMonsterClass`) so non-humanoids stop phasing closed doors — small, pathfinding-adjacent,
+  co-located here (§"Known issue — door-phasing predicate").
+
+**I-9f teleport-to-previous** was a **non-faithful band-aid** for the flat-step thrash → **drop it** once
+the economy lands; the resulting blocked-NPC behavior MUST follow `U6_NPC_排程與移動邏輯.md §五 "典型情境
+的行為結果"` — a blocked NPC is **waited out** (`84/85/86` → re-plan, still actor-blind), with catch-up
+coming only from the **hourly schedule target-switch** (§二) + the **off-screen visibility teleport**
+(§六), plus **lenient adjacent-arrival** (Chebyshev ≤ 1); it is **never warped to a previous target**.
+**Sub-step e verifies the dropped-I-9f behavior against §5.1** (blocked = waited-out, not warped). The
+**§5.2** arrival-pose behaviors (arrived-but-can't-sit / sleep-on-spot when the prop sits at the player's
+feet; stand/guard settle adjacent) are an **I-16** concern (§七) and are verified there.
+
+## I-16 scope — arrival behaviors + direction system (§七)
+
+**Planned (not started).** Finishes `__AtDestination` and the direction/frame system — the "what an NPC
+does once it arrives, and how it faces" layer. Spec: [U6_NPC_排程與移動邏輯.md](U6_NPC_排程與移動邏輯.md) §七
+("抵達目的地後的行為（`__AtDestination`）與方向系統") + `research_npc_ai.md §"Arrival"`. **Builds on I-9g**,
+which already ported the core of `__AtDestination` (`seg_1E0F.c:1002-1085`): worktype settle + `STAND_*`/
+`GUARD_*` facing + humanoid walk-frame animation. What remains (the richness I-9g deferred):
+
+- **§7.1 prop lookup + fallbacks** — `C_1E0F_2184` finds the chair/bed/table at the NPC's **own** feet for
+  `AI_SIT`/`AI_SLEEP`/`AI_EAT`/`AI_PLAY`; fallbacks: sleep→`SetTypeUnconscious` on the spot, sit/eat/play→
+  stand if no prop ("arrived-but-can't-sit"). The lenient `isAtDest` forcing for prop-actions vs the
+  re-find for `STAND`/`GUARD`. **Verifies §5.2** (the slice handed off from I-14).
+- **§7.2 eating dynamic facing** — `C_1E0F_2125` scans the four orthogonals for the plate (`OBJ_077`) and
+  faces the NPC toward it; also gates "is this a dining chair" (chair must have an adjacent plate).
+- **§7.3 direction / frame system** — `C_1E0F_0664` full port: 8-dir `DirIncrX/Y`, MACRO_A 8→4 fold,
+  per-creature-type frames-per-direction, and **chair-overrides-facing** (a seated NPC's facing comes from
+  the chair's map frame, not the passed `dir`); plus the deferred **non-humanoid per-type** facing arms
+  (gazer/animals) so they animate too. Removes the I-9g humanoid-only limitation.
+
+Persistent activities (`AI_FARM`/`WANDER`/`LOITER`/`GRAZE`) do **not** go through `__AtDestination` (§7.1
+note) — they're I-17 (NPC AI behaviors), not here. Sub-step plan detailed when the step is reached.

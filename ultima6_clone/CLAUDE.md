@@ -49,7 +49,7 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 **Implementation phase. Current status + the I-N step ledger live in
 [`docs/progress.md`](docs/progress.md)** — its top banner is the single source of truth
 (see that file's §"Doc maintenance"); this section is NOT a status mirror. As of
-2026-06-08: **I-13 (conversation VM) COMPLETE; next I-14 (status panel).** What stays
+2026-06-08: **I-13 (conversation VM) COMPLETE; next I-14 (NPC movement speed — DEXTE-paced per-actor accumulator, a modern rewrite of the MovePts/DEXTE economy, NOT a round-driver port — start of the NPC-movement arc I-14→I-17: speed model → drunk-walk → arrival-behaviors/direction → AI behaviors; status panel/handlers pushed to I-18/I-19).** What stays
 here is the durable, slowly-changing reference — the code layout, the dev console helpers,
 and the per-step **kept deviations** (so a later session doesn't "correct" them). The ECS
 runtime-ground spec is

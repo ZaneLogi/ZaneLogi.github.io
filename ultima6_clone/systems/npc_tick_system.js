@@ -21,14 +21,28 @@
 // A genuinely UNREACHABLE in-window slot (terrain/objects wall the NPC off) falls back
 // to a forced teleport (allowVisible — ignores the distance guard), matching the I-5
 // snap behavior; if even the slot cell is blocked, the NPC waits till the next hour.
+//
+// I-14b DEXTE-paced accumulator — the per-actor speed model (a modern rewrite of source's
+// MovePts/DEXTE round economy, NOT a round-driver port; see systems/move_economy.js +
+// progress.md §"I-14 scope"). Each tick integrates real elapsed time into every mobile
+// NPC's MoveSpeed.credit at its rate(dexterity); PLANNING (findpath / teleport / re-find)
+// is free, but an actual tile STEP is gated on the credit reaching the tile's stepCost
+// and spends it. Faster (higher-DEXTE) NPCs cross the threshold more often, and the
+// per-actor credit phases stagger the steps naturally — no global round-robin. The tick is
+// a sim system (so it inherits the turn-driver pause), but its credit integrates wall-clock
+// elapsed, clamped, so the cadence is right regardless of how often the turn fires; on
+// worlds without MoveSpeed (the unit-test worlds) the accumulator is OFF and NPCs step
+// every tick (the old flat rate), keeping the I-9 pathfinding tests valid.
 
-import { AIMode, Position, Destination } from '../components/components.js';
+import { AIMode, Position, Destination, MoveSpeed } from '../components/components.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
 import { Paths } from '../resources/paths.js';
 import { Camera } from '../resources/camera.js';
 import { Viewport } from '../resources/viewport.js';
+import { WorldSpeed } from '../resources/world_speed.js';
 import { findPath } from './pathfinding.js';
 import { doOnPath, atDestination, tryTeleportToSlot } from './npc_path.js';
+import { rate, stepCostAt, MAX_ELAPSED_MS } from './move_economy.js';
 import * as AI from './ai_modes.js';
 
 // Off-area teleports per turn (source's D_17A5 cap). A CPU throttle in source; here it's
@@ -42,8 +56,15 @@ const TELEPORT_CAP = 3;
 // pre-I-9h behavior + keeps the unit tests that don't model an avatar walking). Returns
 // { system, stats }: add `system` to the sim list, read `stats` (mutated each turn) from
 // the dev HUD.
-export function installNpcTickSystem(world, { avatarRef } = {}) {
+export function installNpcTickSystem(world, { avatarRef, now = () => performance.now() } = {}) {
   const stats = { active: 0, finding: 0, walking: 0, teleported: 0, snapped: 0, blocked: 0, arrived: 0 };
+
+  // I-14b accumulator state. `ms` is null on test worlds that don't register MoveSpeed →
+  // the accumulator is disabled (flat rate). `now` is injectable so the accumulator tests
+  // can advance time deterministically; in the app it's performance.now() (the tick is a
+  // sim system, called on each turn — its credit integrates real elapsed time, clamped).
+  const ms = world.isRegistered(MoveSpeed) ? world.store(MoveSpeed) : null;
+  let lastBeatAt = now();
 
   function system() {
     const am = world.store(AIMode);
@@ -52,6 +73,16 @@ export function installNpcTickSystem(world, { avatarRef } = {}) {
     const spatial = world.getResource(SpatialIndex);
     const paths = world.getResource(Paths);
     let active = 0, finding = 0, walking = 0, teleported = 0, snapped = 0, blocked = 0, arrived = 0;
+
+    // I-14b: real time since the last tick, fed into each NPC's movement credit below.
+    // Clamped so a backgrounded tab or a resumed modal (sim suspended → tick skipped)
+    // doesn't bank into a multi-tile jump. worldSpeed is the I-14d master scalar — 1 here
+    // until the slider resource lands.
+    const t = now();
+    let elapsed = t - lastBeatAt; lastBeatAt = t;
+    if (elapsed < 0) elapsed = 0; else if (elapsed > MAX_ELAPSED_MS) elapsed = MAX_ELAPSED_MS;
+    const wsRes = world.getResource(WorldSpeed);   // I-14d master scalar (1 if unset, e.g. tests)
+    const worldSpeed = wsRes ? wsRes.value : 1;
 
     // View center for the I-9h visibility gate, resolved once per turn. The gate suppresses
     // teleport for anything the player CAN SEE — and what's visible is the VIEWPORT (centered
@@ -88,6 +119,17 @@ export function installNpcTickSystem(world, { avatarRef } = {}) {
 
       const handle = world.handleOf(i);
 
+      // I-14b/c: this cell's step cost (SubTerrainMov — terrain-weighted) is both the
+      // accumulator's per-step price and the credit cap. Fill this actor's movement credit
+      // (DEXTE-paced) for every mobile NPC each tick; PLANNING below (findpath / teleport /
+      // re-find) is free, only an actual STEP spends it. Capping at the cell's cost means an
+      // NPC banks at most one step (no multi-tile burst) yet can still afford costly terrain.
+      const cost = stepCostAt(world, pos.x[i], pos.y[i], pos.z[i]);
+      if (ms) {
+        ms.credit[i] += rate(ms.dexterity[i], worldSpeed) * elapsed;
+        if (ms.credit[i] > cost) ms.credit[i] = cost;
+      }
+
       if (mode === AI.AI_86) {
         // Stuck (blocked 3x) — re-find next turn (source's path service promotes
         // AI_86 -> AI_FINDPATH). Path was already abandoned by doOnPath.
@@ -123,8 +165,13 @@ export function installNpcTickSystem(world, { avatarRef } = {}) {
           am.mode[i] = AI.AI_ONPATH; walking++;
         }
       } else {
-        // AI_ONPATH / AI_84 / AI_85 — take (or retry) a step.
+        // AI_ONPATH / AI_84 / AI_85 — take (or retry) a step, gated by movement credit
+        // (I-14b/c). A step (or a blocked retry — source spends the move-point attempt either
+        // way) costs `cost` (this cell's terrain-weighted SubTerrainMov). Not enough credit
+        // yet -> the NPC waits this tick. Arrival ('end') is free (no step taken).
+        if (ms && ms.credit[i] < cost) continue;
         const r = doOnPath(world, handle);
+        if (ms && (r === 'step' || r === 'blocked')) ms.credit[i] -= cost;
         if (r === 'step') walking++;
         else if (r === 'blocked') blocked++;
         else if (r === 'end') arrived++;

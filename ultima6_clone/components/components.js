@@ -38,6 +38,16 @@ export const AIMode = defineComponent('AIMode', { mode: Uint8Array });
 // direction, guard, sit/eat/sleep). Defaults 0 (AI_MOTIONLESS) until a slot fires.
 export const Destination = defineComponent('Destination', { x: Int16Array, y: Int16Array, z: Uint8Array, action: Uint8Array });
 
+// MoveSpeed (I-14): per-actor movement-speed state for the DEXTE-paced accumulator
+// (the modern-rewrite of source's MovePts/DEXTE economy — see progress.md §"I-14 scope").
+// `dexterity` is the source dexterity stat (objlist 0x0a00, 1..30), used as a SPEED METER:
+// rate(dexterity) (systems/move_economy.js) maps it into a calibrated tiles/sec band.
+// `credit` is the continuous accumulator (a moveCredit pool, fractional → Float32): each
+// heartbeat it gains rate × WORLD_SPEED × elapsed, and an NPC steps one tile when it
+// reaches the tile's stepCost. Carried onto every loaded Actor at loadActors. NOT source's
+// saved MovePts byte (unused under the accumulator).
+export const MoveSpeed = defineComponent('MoveSpeed', { dexterity: Uint8Array, credit: Float32Array });
+
 // Alignment (I-11a): the per-NPC moral alignment — NEUTRAL(0) / EVIL(0x20) / GOOD(0x40)
 // / CHAOTIC(0x60), bits 0x60 of source's per-NPC NPCStatus byte (u6.h:115-121). The
 // clone carries it from objlist at load (loadActors: value = npcStatus & 0x60) into this

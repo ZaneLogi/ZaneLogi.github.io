@@ -11,7 +11,7 @@ import { TileRegistry } from '../resources/tile_registry.js';
 import { World } from '../ecs/world.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
 import { MapLevel } from '../resources/map_level.js';
-import { Position, Renderable, ObjType, Actor, AIMode, Destination, Schedule, PartyMember } from '../components/components.js';
+import { Position, Renderable, ObjType, Actor, AIMode, Destination, Schedule, PartyMember, MoveSpeed } from '../components/components.js';
 import { computeResistance, findPath, AREA } from '../systems/pathfinding.js';
 import { Paths } from '../resources/paths.js';
 import { Schedules } from '../resources/schedules.js';
@@ -19,6 +19,7 @@ import { WorldClock } from '../resources/world_clock.js';
 import { canStandAt } from '../systems/passability.js';
 import { npcStep, doOnPath, atDestination } from '../systems/npc_path.js';
 import { installNpcTickSystem } from '../systems/npc_tick_system.js';
+import { stepCostAt, BASE_COST } from '../systems/move_economy.js';
 import { installNpcScheduleSystem } from '../systems/npc_schedule_system.js';
 import * as AI from '../systems/ai_modes.js';
 
@@ -35,7 +36,11 @@ function check(name, cond) {
 // (terrainAt lookup), SpatialIndex (populated with object/NPC entities).
 //   tileFlags[tileId] = { terrain, tile, flag2 } — bytes for the three planes.
 //   entities[] = { x, y, obj, frame, tile, actor } — obj = objNumber, tile = tileId.
-function setupWorld({ terrainAt = {}, tileFlags = {}, entities = [] } = {}) {
+// `moveSpeed: true` registers MoveSpeed and tags each actor entity with it (I-14b) —
+// off by default so the I-9 pathfinding tests keep the old flat one-step-per-tick rate
+// (the accumulator is disabled when MoveSpeed isn't registered). Per-entity `dex` sets
+// the dexterity (default 15 = the reference walker).
+function setupWorld({ terrainAt = {}, tileFlags = {}, entities = [], moveSpeed = false } = {}) {
   const data = new Uint8Array(0x1C00);
   for (const [tile, planes] of Object.entries(tileFlags)) {
     const t = Number(tile);
@@ -57,6 +62,7 @@ function setupWorld({ terrainAt = {}, tileFlags = {}, entities = [] } = {}) {
     .registerComponent(Actor)
     .registerComponent(AIMode)
     .registerComponent(Destination);
+  if (moveSpeed) world.registerComponent(MoveSpeed);   // I-14b: enable the DEXTE-paced accumulator
 
   const spatial = new SpatialIndex(1024);
   world.setResource(reg);
@@ -72,6 +78,7 @@ function setupWorld({ terrainAt = {}, tileFlags = {}, entities = [] } = {}) {
     world.add(h, Renderable, { tileId: e.tile ?? 0 });
     if (e.actor) world.add(h, Actor, { npcId: e.npcId ?? 0 });
     if (e.aimode !== undefined) world.add(h, AIMode, { mode: e.aimode });
+    if (moveSpeed && e.actor) world.add(h, MoveSpeed, { dexterity: e.dex ?? 15, credit: 0 });
     spatial.insert(e.x, e.y, h);
     handles.push(h);
   }
@@ -407,6 +414,25 @@ function walkPath(sx, sy, dirs) {
   check('npcStep: non-humanoid (gazer) still moves east', pos.x[i] === 11 && pos.y[i] === 10);
   check('npcStep: non-humanoid (gazer) frame left untouched (not humanoid-encoded)', ot.frame[i] === 6);
 }
+// ── I-14e door-phasing fix: npcStep gates door pass-through on isHumanoid (was always-on) ──
+{
+  // A humanoid NPC steps THROUGH a closed-unlocked door east of it; a non-humanoid (gazer)
+  // is BLOCKED by the same door (no longer phases it).
+  function stepIntoDoorWith(objNumber) {
+    const { world, handles } = setupWorld({
+      tileFlags: { 210: { terrain: 0x02 } },                                  // door sprite impassable
+      entities: [
+        { x: 10, y: 10, obj: objNumber, frame: 0, tile: 0, actor: true, aimode: AI.AI_ONPATH },
+        { x: 11, y: 10, obj: 0x129, frame: 4, tile: 210 },                    // closed-unlocked door east
+      ],
+    });
+    const h = handles[0], i = world.resolve(h), pos = world.store(Position);
+    npcStep(world, h, 2 /* east */, false);
+    return pos.x[i] === 11;                                                    // true = stepped onto the door cell
+  }
+  check('npcStep: humanoid NPC phases a closed-unlocked door', stepIntoDoorWith(0x19a) === true);
+  check('npcStep: non-humanoid (gazer) is blocked by a closed door (no phasing)', stepIntoDoorWith(0x162) === false);
+}
 
 // ── doOnPath: walks a 3-step path to the goal, then arrives -> __AtDestination ──
 {
@@ -502,6 +528,121 @@ function walkPath(sx, sy, dirs) {
   system();
   check('npcTick: unloaded-region NPC stays frozen (FINDPATH, unmoved)',
     am.mode[i] === AI.AI_FINDPATH && pos.x[i] === 20);
+}
+
+// ============================================================================
+// I-14b — DEXTE-paced accumulator (MoveSpeed + an injected clock)
+// ============================================================================
+// Walk a clear straight path east and count STEPS over a fixed wall-clock window;
+// the rate must track dexterity (the speed meter), and a tick with no elapsed time
+// (or too little credit) must not step.
+function walkEastStepsIn1000ms(dex) {
+  let T = 0; const now = () => T;
+  const { world, handles } = setupWorld({
+    entities: [{ x: 20, y: 20, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_FINDPATH, dex }],
+    moveSpeed: true,
+  });
+  world.getResource(SpatialIndex).loadedRegions.add(0);
+  const h = handles[0], i = world.resolve(h);
+  world.add(h, Destination, { x: 60, y: 20, z: 0 });   // far east → keeps walking (edge-seek)
+  const pos = world.store(Position);
+  const { system } = installNpcTickSystem(world, { now });
+  system();                                            // T=0: build path (free), no step
+  let steps = 0, prevX = pos.x[i], prevY = pos.y[i];
+  for (let k = 0; k < 10; k++) {                        // ten 100 ms heartbeats = 1000 ms
+    T += 100; system();
+    if (pos.x[i] !== prevX || pos.y[i] !== prevY) steps++;
+    prevX = pos.x[i]; prevY = pos.y[i];
+  }
+  return steps;
+}
+{
+  const s15 = walkEastStepsIn1000ms(15);
+  const s30 = walkEastStepsIn1000ms(30);
+  check(`accumulator: DEX 15 ≈ 2.5 tiles/s (got ${s15} steps in 1000ms, expect 2-3)`, s15 >= 2 && s15 <= 3);
+  check(`accumulator: DEX 30 ≈ 5 tiles/s (got ${s30} steps in 1000ms, expect 4-6)`, s30 >= 4 && s30 <= 6);
+  check('accumulator: higher DEX steps more often', s30 > s15);
+}
+{
+  // No elapsed time → no credit → no step; then exactly one step's worth of time → one step.
+  let T = 0; const now = () => T;
+  const { world, handles } = setupWorld({
+    entities: [{ x: 20, y: 20, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_FINDPATH, dex: 15 }],
+    moveSpeed: true,
+  });
+  world.getResource(SpatialIndex).loadedRegions.add(0);
+  const h = handles[0], i = world.resolve(h);
+  world.add(h, Destination, { x: 60, y: 20, z: 0 });
+  const pos = world.store(Position);
+  const { system } = installNpcTickSystem(world, { now });
+  system();                                            // build path (free)
+  const x0 = pos.x[i];
+  system(); system(); system();                        // T frozen → elapsed 0 → no steps
+  check('accumulator: no elapsed time → no step', pos.x[i] === x0);
+  // DEX 15 needs 400 ms of credit for one step (cost 5). Feed it as two 200 ms heartbeats
+  // (each ≤ the 250 ms elapsed clamp): the first is short of a step, the second crosses it.
+  T += 200; system();
+  check('accumulator: 200 ms (DEX 15) not yet a step', pos.x[i] === x0);
+  T += 200; system();
+  check('accumulator: cumulative 400 ms (DEX 15) → exactly one step', pos.x[i] === x0 + 1);
+}
+{
+  // The elapsed clamp (MAX_ELAPSED_MS) caps a single huge gap (backgrounded tab / resumed
+  // modal) to at most one step — never a multi-tile burst.
+  let T = 0; const now = () => T;
+  const { world, handles } = setupWorld({
+    entities: [{ x: 20, y: 20, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_FINDPATH, dex: 30 }],
+    moveSpeed: true,
+  });
+  world.getResource(SpatialIndex).loadedRegions.add(0);
+  const h = handles[0], i = world.resolve(h);
+  world.add(h, Destination, { x: 60, y: 20, z: 0 });
+  const pos = world.store(Position);
+  const { system } = installNpcTickSystem(world, { now });
+  system();                                            // build path (free)
+  const x0 = pos.x[i];
+  T += 10000; system();                                // a 10 s gap → clamped → at most one tile
+  check('accumulator: huge time gap → at most one step (no burst)', pos.x[i] - x0 <= 1);
+}
+
+// ============================================================================
+// I-14c — stepCostAt (SubTerrainMov: terrain-weighted step cost)
+// ============================================================================
+{
+  const { world } = setupWorld({
+    terrainAt: { '6,5': 7 },                                    // (6,5) is a costly terrain tile (id 7)
+    tileFlags: { 7: { terrain: 0x30 }, 9: { terrain: 0x20 } },  // terrainCost: tile7=3, tile9=2
+    entities: [{ x: 7, y: 5, obj: 0x0e8, frame: 0, tile: 9 }],  // an object (tile 9) stacked at (7,5)
+  });
+  check('stepCostAt: open ground = BASE_COST', stepCostAt(world, 5, 5) === BASE_COST);
+  check('stepCostAt: costly terrain adds its nibble (5+3)', stepCostAt(world, 6, 5) === BASE_COST + 3);
+  check('stepCostAt: stacked object adds its nibble (5+2)', stepCostAt(world, 7, 5) === BASE_COST + 2);
+}
+{
+  // Integration: same dexterity, costlier terrain → fewer steps over a fixed window. Uses a
+  // UNIFORM terrain (override tileAt) so the pathfinder can't route around it, an in-window
+  // goal (no edge-seek re-plans), and a modest cost (path stays under the pathfinder cap).
+  function stepsUniform(terrainTile, terrainByte) {
+    let T = 0; const now = () => T;
+    const { world, handles } = setupWorld({
+      tileFlags: { [terrainTile]: { terrain: terrainByte } },
+      entities: [{ x: 20, y: 20, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_FINDPATH, dex: 30 }],
+      moveSpeed: true,
+    });
+    world.getResource(MapLevel).tileAt = () => terrainTile;                 // uniform field
+    world.getResource(SpatialIndex).loadedRegions.add(0);
+    const h = handles[0], i = world.resolve(h);
+    world.add(h, Destination, { x: 38, y: 20, z: 0 });                      // in-window goal
+    const pos = world.store(Position);
+    const { system } = installNpcTickSystem(world, { now });
+    system();
+    let steps = 0, px = pos.x[i], py = pos.y[i];
+    for (let k = 0; k < 12; k++) { T += 200; system(); if (pos.x[i] !== px || pos.y[i] !== py) steps++; px = pos.x[i]; py = pos.y[i]; }
+    return steps;
+  }
+  const open = stepsUniform(0, 0x00);     // cost 5 (BASE)
+  const rough = stepsUniform(4, 0x20);    // terrain nibble 2 → cost 7
+  check(`stepCostAt: costlier terrain slows the walk (open ${open} > rough ${rough})`, open > rough);
 }
 
 // ============================================================================
