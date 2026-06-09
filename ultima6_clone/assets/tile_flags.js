@@ -37,4 +37,9 @@ export class TileFlags {
   isTerrainImpassable(t) { return (this.flags1[t] & 0x02) !== 0; }   // IsTerrainImpass
   isTerrainWall(t)       { return (this.flags1[t] & 0x04) !== 0; }   // IsTerrainWall    — blocks flight
   isTerrainDamage(t)     { return (this.flags1[t] & 0x08) !== 0; }   // IsTerrainDamage  — hazard tile
+
+  // Movement-cost nibble: source's `TerrainType[tile] >> 4` (the high nibble of the
+  // TerrainType plane). Used by SubTerrainMov (move-point spend) and the pathfinder
+  // cost map (__ComputeResistance, seg_1E0F.c:1880: resist = (TerrainType>>4) + 1).
+  terrainCost(t)         { return this.flags1[t] >> 4; }            // TerrainType[t] >> 4
 }

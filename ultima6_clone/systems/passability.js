@@ -23,8 +23,14 @@
 import { TileRegistry } from '../resources/tile_registry.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
 import { MapLevel } from '../resources/map_level.js';
-import { Renderable, Actor, PartyMember } from '../components/components.js';
+import { Renderable, Actor, PartyMember, ObjType } from '../components/components.js';
 import { forEachOccupiedCell } from './tile_footprint.js';
+
+// Door object range + the two pass-through object types (obj.h). A door's
+// open/closed/locked state is its frame: <8 = open or closed-unlocked (a humanoid
+// NPC walks through it), >=8 = locked (blocks everyone).
+const OBJ_DOOR_LO = 0x129, OBJ_DOOR_HI = 0x12c;
+const OBJ_PASS_A = 0x116, OBJ_PASS_B = 0x118;
 
 // Can the actor stand at (x, y)? actorId (entity handle, optional) excludes
 // the actor itself from the per-cell scan so it doesn't block its own
@@ -33,11 +39,12 @@ import { forEachOccupiedCell } from './tile_footprint.js';
 // members, but the active leader stays solid. Currently walks-class only;
 // signature is source-shaped so the swim/fly/ethereal branches grow inside
 // without touching callers.
-export function canStandAt(world, x, y, { actorId, asPartyMember = false, leaderHandle } = {}) {
+export function canStandAt(world, x, y, { actorId, asPartyMember = false, leaderHandle, asHumanoidNpc = false } = {}) {
   const reg = world.getResource(TileRegistry);
   const spatial = world.getResource(SpatialIndex);
   const mapLevel = world.getResource(MapLevel);
   const rend = world.store(Renderable);
+  const ot = asHumanoidNpc ? world.store(ObjType) : null;   // only needed for the door-passthrough check
 
   // 1. Base terrain. Walkers can't enter an impassable terrain tile unless an
   //    object on that cell wins via Breakthrough (seg_1E0F.c:88,
@@ -87,6 +94,19 @@ export function canStandAt(world, x, y, { actorId, asPartyMember = false, leader
         if (world.has(handle, Actor)) {
           if (asPartyMember && handle !== leaderHandle && world.has(handle, PartyMember)) continue;
           return false;
+        }
+
+        // Humanoid-NPC door pass-through (C_1E0F_000F:199-207): a non-player NPC of
+        // the humanoid (MONSTER_4000) class walks THROUGH a closed-unlocked door
+        // (frame<8) or a pass-through object as if open — the door frame is NOT
+        // changed. The player takes the other branch (party-pass only) and IS blocked
+        // by closed doors, so avatar/follower moves never set asHumanoidNpc. Locked
+        // doors (frame>=8) fall through to the impassable check below and still block.
+        // All current NPCs are humanoid; non-humanoid monster classes arrive w/ combat.
+        if (asHumanoidNpc) {
+          const obj = ot.objNumber[id];
+          if (((obj >= OBJ_DOOR_LO && obj <= OBJ_DOOR_HI) && ot.frame[id] < 8) ||
+              obj === OBJ_PASS_A || obj === OBJ_PASS_B) continue;
         }
 
         // Breakthrough — the object grants pass (overrides terrain block).

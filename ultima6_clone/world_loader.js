@@ -22,7 +22,8 @@ import { TileRegistry } from './resources/tile_registry.js';
 import { SpatialIndex } from './resources/spatial_index.js';
 import { Schedules } from './resources/schedules.js';
 import { ActorIndex } from './resources/actor_index.js';
-import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember } from './components/components.js';
+import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember, AIMode, Destination } from './components/components.js';
+import { AI_COMMAND, AI_FOLLOW, AI_SCHEDULE } from './systems/ai_modes.js';
 
 const LOCXYZ = CoordUse.LOCXYZ;
 
@@ -147,14 +148,26 @@ export function loadActors(world, objlist) {
     if (a.objNumber === 0 || (a.status & 0x18) !== LOCXYZ) continue;   // empty slot or off-map
     const e = spawnFromRecord(world, reg, spatial, a, true);
     actorIndex?.set(a.id, e);
+    const isParty = partyIndexBySlot.has(a.id);
     if (schedules?.hasSchedule(a.id)) {
       world.add(e, Schedule, { npcId: a.id });
       scheduled++;
     }
-    if (partyIndexBySlot.has(a.id)) {
-      world.add(e, PartyMember, { slotIndex: partyIndexBySlot.get(a.id) });
+    if (isParty) {
+      const slot = partyIndexBySlot.get(a.id);
+      world.add(e, PartyMember, { slotIndex: slot });
+      // Party AIMode keeps these OUT of the NPC tick (which only ticks 0x81..0x86);
+      // the avatar (slot 0) + companions move via player input / MoveFollowers (I-8).
+      world.add(e, AIMode, { mode: slot === 0 ? AI_COMMAND : AI_FOLLOW });
       party++;
+    } else if (schedules?.hasSchedule(a.id)) {
+      // Scheduled non-party NPC: drive it via the I-9 pathfinding state machine.
+      // Starts AI_SCHEDULE (awaiting the first hour-trigger); Destination is filled
+      // by the schedule system when a slot fires.
+      world.add(e, AIMode, { mode: AI_SCHEDULE });
+      world.add(e, Destination, { x: a.x, y: a.y, z: a.z });
     }
+    // Unscheduled non-party NPCs get no AIMode -> never ticked (they hold position).
     actors++;
   }
   return { actors, scheduled, party };

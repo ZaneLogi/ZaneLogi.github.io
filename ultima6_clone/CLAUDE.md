@@ -46,17 +46,51 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 
 ## Project stage
 
-**Implementation phase — I-8 (avatar movement + party follow) COMPLETE;
-I-9 (NPC pathfinding) next.** Steps I-1 → I-8 are landed and browser-verified;
-the ledger + per-step detail are in `docs/progress.md`. The ECS runtime-ground
-spec is `docs/architecture_ecs.md`, implemented in `ecs/world.js` since I-1. The
-player now walks Britain 8-directionally with the camera following, the sprite
-facing + animating, and the three companions trailing in formation (the conga
-line). Code layout: `ecs/` (runtime core), `assets/` (format decoders),
-`resources/` (TileRegistry, MapLevel, Camera, Party, …), `systems/` (render,
-camera, world-data, schedule, passability, avatar move, move-followers,
-humanoid-anim, …), `components/`, `view/` (WebGL renderer + dev HUD/inspector),
-`u6db.js` (BYO-data store), `index.html`/`main.js` (app shell), `tests/`.
+**Implementation phase — I-9 (NPC pathfinding) COMPLETE; sub-steps a–h
+landed (2026-06-01/02), i dropped.** Steps I-1 → I-8 complete; I-9 a–h committed
+as SEPARATE commits (no squash — Zane's call; each is a verified milestone). NPCs
+now WALK to their schedule slots when near the player and **TELEPORT to them when
+far** (off-screen, `C_1E0F_291C` + a Chebyshev-40 distance gate; per-NPC 40×40
+bucket-Dijkstra + edge-seek + re-plan; humanoid door pass-through; teleport-to-
+previous catch-up on reschedule), **settle into the slot's arrival worktype + facing**
+(`__AtDestination`, I-9g), and **align to the current-hour slot at load** (first-tick
+alignment, I-9h). **I-9i (dev-HUD path overlay) was DROPPED** (fancy-not-must; live
+preview-eval of `window.__U6`/the `Paths` resource already covers path inspection).
+Next = the **post-I-9 deviation audit** (move-point economy, clock tuning, idle-heartbeat
+keep-vs-revert fork, I-9f removal-candidate — the central fork + the NPC-blocking research
+are in `docs/progress.md §"Post-I-9 — deviation audit"` + `docs/research_npc_ai.md
+§"Blocking + collision resolution"`) then **I-10** (object-action dispatch). The ledger
++ full I-9 scope (sub-step SHAs,
+decisions, deviations, remaining work) are in `docs/progress.md §"I-9 scope"`;
+the source-derived findings + kept deviations are in `docs/research_npc_ai.md
+§"Clone port notes (I-9)"`. The ECS runtime-ground spec is
+`docs/architecture_ecs.md`, implemented in `ecs/world.js` since I-1. Code layout:
+`ecs/` (runtime core), `assets/` (format decoders), `resources/` (TileRegistry,
+MapLevel, Camera, Party, Paths, Schedules, …), `systems/` (render, camera,
+world-data, schedule, passability, avatar move, move-followers, humanoid-anim,
+**pathfinding, npc_path, npc_tick, ai_modes**, …), `components/`, `view/` (WebGL
+renderer + dev HUD/inspector), `u6db.js` (BYO-data store), `index.html`/`main.js`
+(app shell), `tests/`.
+
+**Key I-9 kept deviations from source** (so the next-session you doesn't
+"correct" them): per-NPC window (not player-centered); edge-seek accepts any
+toward-goal edge (not source's single dominant axis); teleport-to-previous-target
+on reschedule; flat step-rate (move-point economy deferred); arrival facing
+(I-9g) is frame-encoded (`(facing<<2)|1` stand frame), not a separate
+`SetDirection` field — a later GUARD-pacing step reads facing from `frame>>2`;
+NPC facing/walk animation is **humanoid-only** (`isHumanoid` gate in both
+`npcStep` and `atDestination`) — source's `C_1E0F_0664` is type-dispatched and
+the clone ported only its humanoid arm, so non-humanoid NPCs (gazer, animals)
+move/settle without animating (per-type arms deferred); don't "fix" a static
+non-humanoid sprite by feeding it the humanoid frame layout.
+NPC #12's teleport-to-dinner is a *correct* consequence of the unmodeled castle
+drawbridge (I-10), NOT a cost-cap bug — do not raise the 7-bit cost cap.
+**I-9h:** the off-area teleport's near-radius is Chebyshev-**40** (source's ±5 11×11
+viewport box widened for our 64×40 canvas — don't shrink it to ±5 or on-screen NPCs
+pop); the 3/turn teleport cap is kept source-faithful but is a throttle invisible
+behind the visibility guard (drop-candidate, not load-bearing); source's pathfind cap
+(`D_17A7`) is intentionally not ported. The unreachable-fallback snap is unified into
+`tryTeleportToSlot(..., allowVisible=true)` — there is no separate `snapToSlot`.
 
 The three phases (see local memory `feedback_project_phases`):
 

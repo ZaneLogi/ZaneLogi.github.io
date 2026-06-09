@@ -33,7 +33,7 @@ function rewind(c, minutes) {
   c.recomputeD_2C55();
 }
 
-export function installDevHud(world, { hudEl, textEl, controlsEl, npcStatsEl, npcScheduleStats }) {
+export function installDevHud(world, { hudEl, textEl, controlsEl, npcStatsEl, npcScheduleStats, npcTickStats }) {
   const pauseBtn = controlsEl.querySelector('[data-act="pause"]');
   hudEl.style.display = 'block';
   const clock = world.getResource(WorldClock);
@@ -52,15 +52,23 @@ export function installDevHud(world, { hudEl, textEl, controlsEl, npcStatsEl, np
     hudEl.classList.toggle('paused', tc.suspendCount > 0);
   });
 
-  // I-5f (A): schedule-stats line. Reads npcScheduleStats live each frame;
-  // stats are mutated in place by I-5e on every hour-tick, so the line
-  // shows the most recent tick's counts.
+  // I-5f (A) + I-9d/h: NPC stats — kept to a few narrow lines (the HUD lives in a
+  // screen corner) instead of one wide row. Three lines:
+  //   schedule, per hour-tick: NPCs sent to AI_FINDPATH / already on slot / reclaimed,
+  //     then the "didn't move" counts (no slot this hour / region not loaded).
+  //   tick, live per sim-turn: walking / finding / teleported / snapped / blocked.
+  // `#npc-stats` is white-space:pre so the \n breaks render. Both stat objects are
+  // mutated in place by their systems, so the lines are live.
   world.addRenderSystem(() => {
-    const s = npcScheduleStats;
-    if (!s || s.lastHour === null) return;     // pre-first-tick: leave placeholder text
-    npcStatsEl.textContent =
-      `schedule @ hour ${pad2(s.lastHour)}: ` +
-      `snap ${s.snapped} / block ${s.blocked} / idle ${s.noTrigger} / inactive ${s.inactive}`;
+    const s = npcScheduleStats, t = npcTickStats;
+    const lines = [];
+    if (s && s.lastHour !== null) {
+      lines.push(`sched @${pad2(s.lastHour)}: findpath ${s.triggered} · atSlot ${s.alreadyAtTarget} · reclaim ${s.reclaimed}`);
+      lines.push(`  · idle ${s.noTrigger} · inactive ${s.inactive}`);
+    }
+    if (t)
+      lines.push(`tick: walk ${t.walking} · find ${t.finding} · tp ${t.teleported} · snap ${t.snapped} · blk ${t.blocked}`);
+    if (lines.length) npcStatsEl.textContent = lines.join('\n');
   });
 
   let paused = false;

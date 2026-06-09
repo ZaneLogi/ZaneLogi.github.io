@@ -28,6 +28,188 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-02 — I-9 wrap-up: NPC-blocking research + I-9i dropped → I-9 complete
+
+Post-I-9h discussion. Zane asked how the source handles an NPC blocked by another NPC /
+party member mid-path, then (from game memory) pushed back on "it just waits forever" —
+the right instinct: re-derive, don't defend.
+
+- **Read**: the full block chain — `__DoOnPath` (`C_1E0F_387D`, seg_1E0F.c:1576-1608),
+  `TryStraightMove` + `C_1E0F_000F` (legality, 66-235), `__ComputeResistance` (cost map,
+  1866-1922), the per-mode dispatcher `C_1E0F_3E6A` (1733-1848), and the turn loop
+  `C_0A33_1CB4` (seg_0A33.c:1020-1404) + its `C_1E0F_4E0A` call (1395).
+- **Found**: (1) the planner **ignores actors** (cost map only `>= 0x100`), so paths run
+  through occupied cells; (2) `C_1E0F_000F` blocks at step time on actor-ness, not tile
+  flags; (3) `__DoOnPath` reacts by **wait + escalate `ONPATH→84→85→86` (`MovePts=0`) +
+  re-plan** — retries the SAME step, **no detour, no swap**; AI_86 isn't even in the
+  dispatcher switch (→ default wait, re-promoted to FINDPATH by the path service). **The
+  only swap in U6 is avatar↔party-member** in the *player* advance (`C_1E0F_1B0E:881-898`,
+  with an AI_FRONT push variant) — there is no NPC-NPC swap. Blocks stay rare/brief in the
+  original via **move-point staggering** (round-robin one-step-at-a-time re-pick + `DEXTE`
+  speed variation) + the **turn-based clock** (world advances only per player action;
+  `CON_getch` blocks, so idle = frozen and a stuck NPC is never *seen* stuck).
+- **Synthesis (Zane)**: our **auto-advance idle heartbeat** is the clone-only addition that
+  surfaces blocking the original hides; the faithful levers (move-point economy + slower /
+  player-action-only clock) are the real fix, and I-9f (teleport-to-previous) is a band-aid
+  for their absence. A clone-only problem may warrant a clone-only solution (NPC swap /
+  detour) — legitimate per the Modern-UX anchor — studied AFTER the port.
+- **Decision**: **I-9i (dev-HUD path overlay) DROPPED** — fancy-not-must; live preview-eval
+  of `window.__U6`/`Paths` already covers path inspection, and a visual trail would dirty
+  the DOM-cursor or the renderer for no real gain. **I-9 is complete through a–h.**
+- **Docs**: new `research_npc_ai.md §"Blocking + collision resolution"`; `progress.md`
+  status → I-9 complete + I-9i-dropped + the deviation-audit "central fork" (idle-heartbeat
+  keep-vs-revert) + post-port new-mechanism study; CLAUDE.md + DOCUMENTATION_INDEX status.
+- **Next**: post-I-9 deviation audit, then I-10 (object-action dispatch).
+
+## 2026-06-02 — I-9h: off-area teleport + distance gate + first-tick alignment
+
+The "walk-near, teleport-far" gate, plus aligning NPCs to their current-hour slot at
+load. SP1 (teleport + distance gate) and SP2 (first-tick alignment) landed as one
+sub-step (Zane's call); SP3 (idle-advance tuning) deferred. Zane's framing for the
+load case drove the design: rather than replay source's saved per-NPC path data, just
+pathfind/teleport NPCs to their known schedule destination — we have the same info
+source does, we just don't need its 8088 CPU-saving path cache.
+
+- **Read**: `C_1E0F_291C` (off-area teleport, seg_1E0F.c:1181-1211); the NPC-dispatcher
+  off-area arm (`C_1E0F_4E0A`, seg_1E0F.c:2186-2196); the path service `C_1E0F_464A`
+  (seg_1E0F.c:1924-1960); the three `AllowNPCTeleport=1` call sites (`seg_0A33.c:1377`
+  Alt-215 +1h, `seg_101C.c:432` rest-at-inn, `seg_1703.c:903` `OP_REST`).
+- **Found**: `C_1E0F_291C` is small + most of it the I-9g `atDestination` already does.
+  Its visibility guard is the gate: suppress the teleport if the NPC **or** its slot is
+  inside `MapX/MapY ±5` (the 11×11 viewport) unless `AllowNPCTeleport`. The service
+  order is **teleport-first, pathfind-if-suppressed** (1937–1943) — cheap test before
+  the expensive flood — with twin 3/turn caps (`D_17A5` teleport, `D_17A7` pathfind),
+  both reset per turn. `AllowNPCTeleport` is exactly the "force-settle at a time-jump"
+  flag — the source analog of our load-time first-tick alignment.
+- **Built**: `tryTeleportToSlot()` in `systems/npc_path.js` (Chebyshev-40 near radius
+  = the wider-canvas adaptation of source's ±5; `allowVisible` = `AllowNPCTeleport`);
+  the NPC tick tries it first, capped 3/turn, and the old local `snapToSlot` is folded
+  into it (`allowVisible=true` for the unreachable-fallback). `main.js` fires
+  `clock.hourlyHooks` once at load for first-tick alignment. `teleported` tick stat +
+  `tp` on the dev HUD.
+- **Calls (for the post-I-9 audit)**: kept the 3/turn cap source-faithful though it's a
+  throttle invisible behind the visibility guard (off-screen-only) — drop-candidate; did
+  NOT port the pathfind cap (`D_17A7`); kept a clone-defensive `canStandAt` on the
+  teleport target (source assumes authored-valid slots).
+- **Verified (real data, preview-eval)**: game boots + runs a day cycle, no errors;
+  first-tick alignment logs `[NpcSchedule] hour 09` at startup (before any rollover); a
+  far NPC (dist 50) **teleported 10 cells onto its slot in one turn**, settling STAND_S
+  (`teleported=1`); a near NPC (dist 4) was **suppressed and built a walk path**
+  (`teleported=0`, AI_ONPATH); normal play never teleported a visible NPC. 121/121 unit
+  cases (+13).
+- **Deferred**: idle-advance interval tuning (SP3 — one-line `TurnClock`, do when the
+  slower-clock feel is wanted); source's forced load-settle via `AllowNPCTeleport` →
+  to save-load (fresh-game OBJLIST is already at season-start slots, so the gap is
+  minimal today); the door-phasing predicate known-issue (`isHumanoid` ≠ `MONSTER_4000`)
+  untouched — the distance gate doesn't read it.
+- **Next**: I-9i (dev-HUD path overlay), the last I-9 sub-step. Then the consolidated
+  I-9 deviation audit.
+
+## 2026-06-02 — I-9g: arrival worktypes/facing (`__AtDestination`)
+
+Next sub-step after the a–f session. NPCs now don't just walk to their schedule slot —
+on arrival they **settle into the slot's worktype** and face the right way (a guard
+faces its post, a stander faces its set direction). Small, well-bounded port of
+`__AtDestination`; the pose/furniture half (sit/eat/sleep sprites) is a deliberate
+scope cut.
+
+- **Read**: `__AtDestination` (`C_1E0F_2276`, seg_1E0F.c:1002-1085) — re-derived from
+  primary source. The STAND/GUARD facing arm is `SetDirection + C_1E0F_0664` with dir8
+  `((action−AI_STAND_N)&3)<<1`; the SLEEP/SIT/PLAY/EAT/RINGBELL arms force `isAtDest`
+  and find furniture via `C_1E0F_2184` (read 978-1001) for the sprite swap. Confirmed
+  the call sites + arrival distance test in `__DoOnPath` (`COMBAT_getCathesus < 2`,
+  seg_1E0F.c:1582-1587) and the humanoid walk/face helper `C_1E0F_0664` (268-340).
+- **Found**: the arrival distance gate is `< 2` (Chebyshev ≤1), not exact-position —
+  the clone's a–f code used exact equality on the path goal, which is stricter and
+  would loop if the exact slot cell is occupied; switched to a wrap-aware Chebyshev so
+  a near-miss settles and an edge-seek path (whose `goalX/goalY` is the far slot, not
+  the window edge it walked to) still re-plans. Also: source routes even an
+  already-on-slot NPC through `AI_FINDPATH` → trivial path → `__AtDestination`, so the
+  clone's "already at target" schedule branch now sets `AI_FINDPATH` (lets the tick's
+  empty-path arm apply the worktype) instead of silently skipping.
+- **Built**: `atDestination(world, handle)` in `systems/npc_path.js` (+ a wrap-aware
+  Chebyshev helper); new `Destination.action` byte (the slot worktype); wired into
+  `doOnPath` end-of-path, the NPC tick's empty-path + post-snap branches, and the
+  schedule arm (stores `dest.action`, routes already-on-slot through FINDPATH).
+- **Found (the gazer NPC #9)**: Zane asked me to inspect NPC #9 — a **gazer** (obj 0x162)
+  with a 6-slot schedule (mostly AI_9A roaming, one STAND_N at 19:00). This surfaced a
+  real bug: my facing code applied the humanoid `frame = facing<<2 | 1` to *any* NPC, but
+  `C_1E0F_0664` is **type-dispatched** — the gazer's arm is `frame = facing` directly
+  (seg_1E0F.c:410), so STAND_N should be frame 0, not 1. And source calls `C_1E0F_0664`
+  at BOTH the walk (`TryStraightMove`:1439) and the arrival (`__AtDestination`:1075), so
+  the walk path (`npcStep`, landed I-9c) had the same latent mis-encoding. Added an
+  `isHumanoid` gate to both sites: non-humanoids move/settle without animating (valid
+  static sprite); their per-type facing arms join the deferred pile. 33 new unit cases
+  (108/108 total) incl. gazer arrival + gazer walk (frame untouched).
+- **Deviation kept**: facing is frame-encoded (`(facing<<2)|1` stand frame), no separate
+  `SetDirection` field — a later GUARD-pacing step reads facing from `frame>>2`.
+- **Deferred**: per-type non-humanoid facing arms (gazer direct-frame, animals, …);
+  furniture/pose sprite swaps (`C_1E0F_2184`) + ongoing GUARD pacing (`C_1E0F_3E6A`).
+  Modes set + position held; sprite unchanged.
+- **Verified (real data, preview-eval)**: Zane loaded U6 data into the preview, so I
+  ran a live pass. 40 scheduled NPCs carry STAND/GUARD worktypes (castle courtiers/
+  guards) → not dead code. `atDestination` on a real humanoid (obj 0x19a, baseTile
+  1776) produced valid facing sprites for all 4 cardinals (tiles 1777/1781/1785/1789;
+  GUARD_W = STAND_W) — confirms the frame→tile mapping the unit test stubs to 0. And
+  the live AIMode distribution already had arrived worktypes populated (SIT 4 / LOITER
+  6 / WANDER 3 / FARM 1 / PLAY 1 / RINGBELL 1), i.e. the schedule→walk→arrive→worktype
+  lifecycle fires end-to-end in the running game. And the non-humanoid gate checks out
+  on the real gazer NPC #9: STAND_N sets the mode but leaves its sprite frame untouched
+  (`isHumanoid` false), while a humanoid control still faces (STAND_S → frame 9). NPC
+  state snapshotted + restored so the live game wasn't disturbed.
+- **Next**: I-9h (off-area teleport + first-tick alignment + idle-interval tuning +
+  player↔NPC distance threshold), then I-9i (dev-HUD path overlay).
+
+## 2026-06-02 — I-9 implemented a–f: NPC pathfinding (NPCs walk their schedules)
+
+The big one: NPCs now **walk** to their schedule slots instead of teleporting.
+Landed as six SEPARATE commits — **no squash** (Zane's call: each sub-step is a
+verified milestone worth keeping). Pre-impl source read first (re-deriving the
+pathfinder from primary source rather than trusting the research doc), then a–f.
+The real-data verification (preview-eval driving the live game, since the U6 data
+is loaded in the preview browser) turned into the most valuable part — it surfaced
+the drawbridge finding below.
+
+- **Read**: `seg_1E0F.c` pathfinder — `C_1E0F_2D37` (search), `C_1E0F_2A74`
+  (relax), `C_1E0F_25F9` (traceback), `__ComputeResistance`/`C_1E0F_4265` (cost
+  map), `__DoOnPath`, `C_1E0F_464A` (path service), `C_1E0F_291C` (off-area
+  teleport), `C_1E0F_000F` (legality, esp. the door branch :199-207), `C_1E0F_5165`
+  (schedule arm), `C_1E0F_4E0A` (NPC tick). Door frames via `C_27A1_2A44`. Monster
+  class table `D_3522_0242` + `GetMonsterClass`. Drawbridge `OBJ_10D` + lever
+  `OBJ_10C`: `C_27A1_3F47`/`C_27A1_433D` (`seg_27a1.c:1898-2090`).
+- **Built**: `systems/pathfinding.js` (`computeResistance` + `findPath`),
+  `systems/npc_path.js` (`npcStep` + `doOnPath`), `systems/npc_tick_system.js`,
+  `systems/ai_modes.js`, `resources/paths.js`, `AIMode`/`Destination` components,
+  `terrainCost()` accessor, `asHumanoidNpc` door arm in `passability.js`, schedule-
+  arm rewire + teleport-to-previous in `npc_schedule_system.js`, HUD tick/reclaim
+  lines. 75/75 in `tests/test_pathfinding.html`. (Sub-step SHAs + per-step detail:
+  `progress.md §"I-9 scope"`.)
+- **Found / corrected**:
+  - **NPCs are NOT obstacles in the cost map** (source only spreads object slots
+    ≥0x100). NPC-vs-NPC blocking is per-step move-time only → bump/wait/re-plan.
+  - **Humanoid NPCs phase through closed-unlocked doors** (`MONSTER_4000` class is
+    the townsfolk/party sprite family; the player is blocked and must USE) —
+    corrects the note-branch "open door on arrival" guess.
+  - **NPC #12's teleport-to-dinner is the unmodeled castle drawbridge**, not a
+    cost-cap bug. The bridge (`OBJ_10D` at (303–310,385)) is raised (frames 6/7/8,
+    impassable) → her route detours through cost-15 forest → exceeds source's 7-bit
+    cost cap (127) → snap. With the bridge open (a quest step, I-10 lever USE) the
+    route is cheap and she walks. **Raising the cost cap would be the wrong fix**
+    (routes her through forest the original never uses). Dropped that idea.
+  - Source's single-favored-edge edge-seek (`PTH_direct`) snaps when the dominant-
+    axis edge is walled next to the NPC (common on real maps) → **deviation: accept
+    any toward-goal edge** (`edgeMask`).
+- **Kept deviations** (flagged so next-session-me doesn't "fix" them): per-NPC
+  window (not player-centered); multi-edge edge-seek; teleport-to-previous-target
+  on reschedule (I-9f); flat step-rate; frontier pool sized to grid (vs 256). All
+  in `research_npc_ai.md §"Clone port notes (I-9)"`.
+- **Decisions**: time model = keep idle-advance ("world breathes"), interval-tuning
+  is a remaining item; god-mode free-camera activating schedules out of quest
+  sequence is the source of "impossible destination" cases → accept the teleport there.
+- **Open / Next**: arrival worktypes/facing (`__AtDestination`); off-area teleport
+  + first-tick alignment + idle-interval tuning + player↔NPC distance threshold;
+  dev-HUD path overlay. Then I-10 (object actions, incl. drawbridge/lever USE).
+
 ## 2026-06-01 — I-8 implemented: avatar movement + party conga (a–e)
 
 I-8 landed as five save-point sub-steps, all browser-verified on real U6 data via

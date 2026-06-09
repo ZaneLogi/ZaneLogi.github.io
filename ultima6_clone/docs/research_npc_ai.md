@@ -561,6 +561,52 @@ So the schedule lifecycle is:
 AI_ONPATH walks it → on arrival __AtDestination sets the worktype
 mode → NPC performs the worktype until the next hourly transition.`
 
+#### Clone port (I-9g) — `atDestination` in `systems/npc_path.js`
+
+Ports the worktype-mode-set + the STAND_*/GUARD_* facing arm; the pose/furniture
+arms are deferred. Three call sites mirror source's: `doOnPath`'s end-of-path branch
+(source `__DoOnPath:1582-1587`, `COMBAT_getCathesus < 2` → arrive, else re-path — the
+clone uses a wrap-aware Chebyshev helper instead of the old exact-position check, so a
+path that ran out 1 tile short still settles and an edge-seek path that ran out far
+from the real slot re-plans), the NPC tick's empty-path branch (schedule fired while
+already on the slot), and the NPC tick's post-snap branch (an unreachable slot snapped
+onto). The slot's worktype is carried on a new `Destination.action` byte (set by the
+schedule arm alongside the xyz).
+
+**Facing is frame-encoded, not a separate `Direction` field (kept deviation).** Source
+calls `SetDirection(npc, dir8)` (a logical facing field) *and* `C_1E0F_0664(npc, dir8)`
+(advances the walk cycle). The clone encodes facing only in the sprite frame
+(`frame = walkCycle + facing<<2`), so STAND/GUARD sets the **stand** frame for the
+worktype direction — `facing = (action − AI_STAND_N) & 3`, `frame = (facing<<2)|1`
+(walk-cycle 1 = the planted-feet pose). A later GUARD-pacing step reads facing back
+from `frame>>2`; no separate field is needed yet. Choosing the stand frame over
+source's one walk-cycle-tick avoids leaving a stationary NPC frozen mid-stride (the
+clone doesn't run source's per-idle settle pass over non-party NPCs).
+
+**Humanoids only — `isHumanoid` gate at BOTH the walk and the arrival site
+(source-faithful; surfaced by inspecting the gazer NPC #9 on real data).** `C_1E0F_0664`
+is **type-dispatched** — source calls it from both `TryStraightMove` (the per-step walk,
+`seg_1E0F.c:1439`) and `__AtDestination`'s STAND/GUARD arm (`seg_1E0F.c:1075`), and it
+selects a frame arm by object type: humanoids (`OBJ_178..0x183`, `OBJ_199..0x19A`) use
+`walk + facing<<2`, but the **gazer family** (`OBJ_162`/`0x167`/`0x19E`/`0x184`) uses
+`frame = facing` *directly* (`seg_1E0F.c:410`), and animals (`OBJ_16A`/`0x16B`), beasts,
+etc. each have their own arm. The clone ported only the humanoid arm (`humanoid_anim.js`),
+so both clone sites — `npcStep` (walk) and `atDestination` (arrival) — gate on
+`isHumanoid(objNumber)` and **leave non-humanoid sprite frames untouched** (a valid
+static sprite) rather than mis-applying the humanoid `facing<<2` encoding. NPC #9 (a
+gazer) has a `STAND_N` slot at 19:00; without the gate its frame would be set to
+`(0<<2)|1 = 1` (= the gazer's *east* frame) instead of `0` (north). The per-type facing
+arms (gazer direct-frame, animal, etc.) are the deferred remainder of `C_1E0F_0664`.
+
+**Deferred (I-9g scope cut):** the per-type non-humanoid facing arms above; and the
+furniture/pose sprite swaps — SLEEP → bed `OBJ_0A3`
+(sleeping sprite `OBJ_092`), SIT/PLAY → chair (musician → lute sprite `OBJ_188`),
+EAT → table food-frame, RINGBELL → pull-chain, all via the furniture-find
+`C_1E0F_2184`. The modes are set and position held (source force-sets `isAtDest` for
+these, so a near-miss still settles), but the sprite isn't swapped. The ongoing GUARD
+up-and-down **pacing** patrol (the per-mode dispatcher `C_1E0F_3E6A`) is also deferred —
+here GUARD just plants the NPC facing its post, like STAND.
+
 ## Pathfinding
 
 A **bucket-priority Dijkstra** (uniform-cost search with a radix
@@ -582,13 +628,46 @@ typedef struct {
 
 Per cell: `PTH_resist = (TerrainType[tile] >> 4) + 1`, or `0xff`
 (impassable) for impassable terrain. Then objects in the work area
-add cost: doors (`OBJ_129`-`OBJ_12C`) add 1 if open-ish else block,
-and block the adjacent cell behind them; pass-through objects
+add cost: doors (`OBJ_129`-`OBJ_12C`) add 1 if `frame < 8` else
+block, and block the adjacent cell behind them; pass-through objects
 (`OBJ_116`/`OBJ_118`) add 1; large object tiles spread their block
 across their multi-tile footprint via `C_1E0F_4265` (handling the
 DoubleH `0x80` / DoubleV `0x40` tile flags — same auto-extension
 geometry as the render path in
 [`research_map_render.md`](research_map_render.md)).
+
+**NPCs are NOT obstacles in the cost map** (re-verified 2026-06-01
+for the I-9a port). The object loop only spreads resistance for
+`objNum >= 0x100` (map-object slots); NPC slots `< 0x100` are
+skipped entirely — the cost grid sees terrain + objects, never other
+NPCs. NPC-vs-NPC blocking is resolved later, at per-step move time
+(`TryStraightMove → C_1E0F_000F`), where a blocked NPC escalates
+`AI_84/85/86` and re-paths. So the planner cheerfully routes one NPC
+through a cell another NPC currently occupies; the conflict surfaces
+only when the walker actually arrives. The clone's `computeResistance`
+mirrors this by checking `!world.has(handle, Actor)` before spreading.
+
+**Door behind-block orientation** (`seg_1E0F.c:1894-1900`): a
+`DoubleV` door (`TileFlag & 0x40`) faces N/S, so the cell to the
+**north** (`area_y-1`) is force-blocked; otherwise the door faces
+E/W and the cell to the **west** (`area_x-1`) is blocked. This makes
+a pathing NPC approach the doorway head-on rather than trying to slip
+in from the side. The clone keys this off `reg.isDoubleHeight(doorTile)`.
+
+**Wet-tile rescue arm** of `C_1E0F_4265` (`seg_1E0F.c:1853-1855`):
+when a cell's base resistance is already `0xff` *and* the base
+terrain is **wet** (`IsTerrainWet`), a non-impassable object tile
+sitting on it makes the cell walkable again at the object's own cost
+`(TerrainType>>4)+1` — i.e. a plank / raft / bridge tile over deep
+water. (The first pass set the water cell to `0xff`; this arm undoes
+it where a walkable object covers the water.)
+
+**Door frame semantics** (decoded from `C_27A1_2A44` "use door",
+`seg_27a1.c:1279`): **0-3 open, 4-7 closed-unlocked, 8-11 locked,
+12-15 magically locked.** So the cost map's `frame < 8` = "open OR
+closed-unlocked, route through (+1)"; `frame >= 8` = "locked, route
+around (`0xff`)". This is the same threshold `C_1E0F_000F` uses at
+`seg_1E0F.c:201` (`GetFrame(i) < 8`).
 
 ### Search — `C_1E0F_2D37` (`seg_1E0F.c:1286-1389`) + `C_1E0F_2A74` (relax)
 
@@ -629,6 +708,83 @@ a block, escalate `AI_ONPATH → AI_84 → AI_85 → AI_86` (each forces
 the path is abandoned and re-found. On reaching the end of the path
 within 2 tiles of the goal → `__AtDestination`.
 
+#### Clone port notes (I-9, verified on real data 2026-06-01)
+
+**Edge-seek for far slots — `findPath` favored-direction port + a deviation.**
+Real NPC schedule slots are routinely 30–50 tiles apart (e.g. NPC #12: SIT home
+(288,394) → EAT (318,364) → SLEEP (267,362)), i.e. outside the per-NPC 40×40
+window. Source heads for the single dominant-axis window edge (`PTH_direct`,
+`seg_1E0F.c:1323-1327`); the NPC tick re-plans at the edge so the NPC walks across
+the map incrementally. **Deviation:** the clone accepts *any* window edge the goal
+lies beyond (an `edgeMask`), not just the dominant axis — because on real town maps
+the dominant-axis edge is often walled right next to the NPC and source's single
+choice then snaps (NPC #12: north edge walled, east open). Trace-divergence from
+source, justified by the walk-don't-teleport goal. Also: the frontier pool is sized
+to the whole grid (vs source's fixed 256) so an open-terrain edge-seek can't
+false-give-up. See `systems/pathfinding.js`.
+
+**`snapToSlot` is a fallback for genuinely-unreachable slots only.** With edge-seek,
+`findPath` returns null only when no toward-goal edge is reachable. The remaining
+real-world cause of that is an **unmodeled obstacle**, not a pathfinding defect — the
+canonical case is a **raised drawbridge** (`OBJ_10D`, frames 6/7/8 = closed/
+impassable; 0–5 = open/passable deck; lever-operated via `C_27A1_433D`→`C_27A1_3F47`,
+`seg_27a1.c:1898-2090`). NPC #12's EAT route crosses the castle drawbridge at
+(303–310,385); closed, it forces a cost-15 forest detour exceeding source's 7-bit
+cost cap (127) → snap. In normal play the Avatar opens that bridge (a quest step) and
+the NPC only matters once it's open, so the route is cheap and she walks. The clone's
+free-camera "god mode" activates schedules out of that sequence, surfacing the
+impossible-destination case — where the teleport is the correct outcome. The
+drawbridge/lever subsystem is **I-10** (object actions); do NOT "fix" this by raising
+the cost cap (that routes her through forest, a path the original never uses).
+
+**Stuck-NPC recovery — teleport-to-previous-target on reschedule (clone deviation,
+Zane 2026-06-02).** A NPC blocked by another NPC loops `ONPATH↔84/85/86↔FINDPATH`
+on the same target, standing still, until either the blocker moves OR its **next
+schedule slot fires**. At that reschedule, the clone does something source does NOT:
+if the NPC never reached its PREVIOUS slot (its current `Destination`), the schedule
+arm **snaps it onto that previous slot first**, then re-targets it to the new slot
+and sets `AI_FINDPATH` — so it "catches up" to where its schedule said it should be
+before walking on. Source instead re-paths from wherever it's stuck (leaving it
+behind schedule). This is a deliberate kept difference (one of several on the NPC-AI
+side) — recorded here so it can be reviewed/reverted later. The forced snap takes no
+`canStandAt` (the NPC is reclaiming its own assigned spot, like source's off-area
+teleport `C_1E0F_291C`). A NPC is never permanently frozen (slots cycle daily). The
+deferred move-point step-rate would reduce collision frequency in the first place
+(staggered NPCs vs the current flat all-step-same-turn). Stat: `reclaimed` on the
+schedule HUD line counts NPCs snapped this way per hour-tick.
+
+**Off-area teleport + player-distance gate (I-9h) — `C_1E0F_291C` port.**
+`tryTeleportToSlot(world, handle, avatarX, avatarY, allowVisible)` in
+`systems/npc_path.js` places a far NPC straight onto its slot (settling the worktype
+via `atDestination`) instead of pathfinding. The NPC tick tries it FIRST in the
+`AI_FINDPATH` branch — source's `C_1E0F_464A` order (teleport, then pathfind only if
+suppressed) — capped 3/turn (source's `D_17A5`). **The "near" radius is the one real
+deviation:** source suppresses the teleport when the NPC OR its slot is inside the
+±5 11×11 gameplay viewport (`seg_1E0F.c:1188-1202`); the clone widens that to a
+Chebyshev radius of **40** (`TELEPORT_NEAR_RADIUS`) because our 64×40-cell canvas
+shows ~32×20 half-extents — a ±5 box would teleport NPCs the player can plainly see.
+Over-suppressing is harmless (a few far-ish NPCs walk); under-suppressing pops a
+visible NPC. Same wider-canvas adaptation as the per-NPC pathfinding window.
+`allowVisible` is source's `AllowNPCTeleport` flag — here used only by the
+**unreachable-fallback**, which this helper now unifies (the old local `snapToSlot`
+is gone: the fallback is `tryTeleportToSlot(..., allowVisible=true)`). Two further
+calls vs source: the 3/turn cap is a CPU throttle that's invisible behind the
+visibility guard (off-screen-only) so it's a drop-candidate, not load-bearing; and
+source's pathfind cap (`D_17A7`) is not ported (capped-out far NPCs pathfind that
+turn rather than wait). Stat: `teleported` on the tick HUD line (`tp`).
+
+**First-tick schedule alignment (I-9h) — deferred from I-5.** Source resolves
+schedules only on an hour rollover (`C_1E0F_5165`), so at game-load NPCs would sit at
+their OBJLIST positions until the clock crossed the next hour. `main.js` fires
+`clock.hourlyHooks` once at load (`for (const cb of clock.hourlyHooks) cb(clock)`),
+running the schedule system for the CURRENT hour — each eligible NPC gets its
+`Destination` + `AI_FINDPATH` immediately, and the first turn resolves movement (far →
+teleport off-screen, near → walk), so the town starts coherent. Source forces a full
+teleport-settle at every time-jump via `AllowNPCTeleport` (rest/`OP_REST`,
+`seg_101C.c:432`, `seg_1703.c:903`); that forced load-settle is **deferred to
+save-load**, when genuine mid-route NPCs exist (a fresh-game OBJLIST is already at
+season-start slots, so the difference is minimal today).
+
 ### Movement legality — `C_1E0F_000F` (`seg_1E0F.c:66-235`)
 
 The big predicate "can this object stand at `(x,y)`?". Considers:
@@ -658,6 +814,101 @@ the Actor check ahead of the tile-flag checks — which is what `c_04ed` does.
 `MoveObj` + `SetDirection` + `C_1E0F_0664` (face & animate). `TryMoveTo`
 picks horizontal/vertical/diagonal order based on the delta to the
 target plus randomness, so NPCs don't all move identically.
+
+#### Doors: NPCs phase through, the player must USE (corrects the I-8 note)
+
+The 2026-06-01 note-branch chat guessed "the door gets toggled open
+before the step actually succeeds." **Source does it differently** —
+re-derived from `C_1E0F_000F:199-207` + the monster-class table for
+the I-9 door seam:
+
+- A **closed** door's *tile* is terrain-impassable, so any mover that
+  reaches the object-block path is blocked **unless** it matches the
+  door special-case at `seg_1E0F.c:199-207`: the mover is a
+  **non-player** object (`objNum < 0x100` = an NPC), the cell holds a
+  door with `GetFrame < 8` (open or closed-**unlocked**) or a
+  pass-through (`OBJ_116/118`), **and** the mover's monster class has
+  `IsMonster_4000`. Then it `goto c_04ed` — passes through. **The door
+  frame is never changed.**
+- `MONSTER_4000` is the **humanoid / townsfolk** class bit. Verified
+  via `GetMonsterClass` (`seg_2E2D.c:27` → index into `D_3522_0000`)
+  → `D_3522_0242[class]`: the Avatar (`OBJ_19A`, class `0x03`) and the
+  whole party/townsfolk sprite family (`OBJ_178..183`, `0x182`, …) all
+  map to `MONSTER_4000` classes. So **townsfolk slip through
+  closed-unlocked doors as if open**, leaving the door visibly closed.
+- The **player** (`IsPlrControl`) takes the *other* branch at
+  `seg_1E0F.c:191-198` (party pass-through only); a closed door isn't a
+  party member, so the player **is blocked** and must `USE` it
+  (`C_27A1_2A44`, which toggles the frame open↔closed↔locked). This is
+  the genuine U6 quirk: NPCs walk through closed doors, the player can't.
+- **Locked** doors (`frame >= 8`) block everyone (the cost map already
+  routes around them at `0xff`).
+
+**Port consequence (I-9):** the NPC door behaviour is a *pass-through
+arm in `canStandAt`* (humanoid NPC + door `frame < 8` → allow), **not**
+a separate "open the door" primitive — nothing mutates the door. The
+clone treats all current NPCs as humanoid (`MONSTER_4000`) for now;
+non-humanoid monster classes (which a closed door *does* block) arrive
+with combat. Player USE-on-door (frame toggle) is its own handler,
+deferred to **I-10** (Zane's call 2026-06-01: keep I-9 pure pathfinding).
+
+### Blocking + collision resolution (how source handles an NPC blocked by another actor)
+
+Re-derived from primary source 2026-06-02 (the I-9 deviation-audit prep). The question:
+when the pathfinder routes an NPC through a cell another NPC or a party member occupies,
+what happens? Three layers:
+
+1. **The planner ignores actors entirely.** `__ComputeResistance` (`C_1E0F_436A`,
+   `seg_1E0F.c:1866-1922`) only adds object resistance in its `else if(objNum >= 0x100)`
+   arm — actor slots (`< 0x100`) are skipped, contributing zero cost. So the bucket-
+   Dijkstra plans a straight route *through* occupied cells as if empty.
+2. **The legality check blocks at step time.** `__DoOnPath` → `TryStraightMove` →
+   `C_1E0F_000F` returns 0 when an actor sits in the target cell (the `c_04ed` hard-block,
+   `seg_1E0F.c:212-222`, for any `i < 0x100`). Exceptions: **party-through-party** when the
+   *mover* is player-controlled and `D_17B2` is set (`191-198`); humanoid door phasing
+   (actors only, never other actors).
+3. **The reaction is wait-then-re-plan — no detour, no swap.** `__DoOnPath`
+   (`seg_1E0F.c:1576-1608`) does NOT advance `PathCounter` on a failed step; it **retries
+   the same step** and escalates `AI_ONPATH → AI_84 → AI_85 → AI_86`, each setting
+   `MovePts = 0` (forfeit the turn = wait). At `AI_86` it abandons the path
+   (`PathObject = 0`); the path service re-promotes `AI_86 → AI_FINDPATH`
+   (`seg_1E0F.c:1953-1954`) → re-plan. Because the re-plan *also* ignores actors, it
+   yields the **same route** — the system never routes around a blocker. A final-step
+   block settles via `__AtDestination` ("close enough", line 1605-1606).
+
+**The only position swap in U6 is avatar↔party-member**, and it lives in the *player*
+advance, not the AI: `C_1E0F_1B0E:881-898` — walking the active member into a follower
+`MoveObj`s that follower to the avatar's old cell (a swap), or, for an `AI_FRONT` combat
+member, first tries to push it one cell forward (`TryMoveTo`). There is **no NPC-NPC swap
+and no NPC detour** anywhere.
+
+**So why doesn't the original visibly jam?** Two things the clone changed:
+- **Move-point economy (staggering).** `C_1E0F_4E0A` is a round-robin: pick the NPC with
+  the best `MovePts/DEXTE` ratio, move it **one** step, re-pick. So within a turn NPCs
+  advance one-step-at-a-time, interleaved, and faster NPCs (higher `DEXTE`) get more
+  steps. A following/converging blocker vacates its cell *before* the blocked NPC's step
+  is evaluated → most blocks never materialise. Only the exact head-on mutual swap (A↔B,
+  each wanting the other's cell in a 1-wide space) is unresolvable, and the hourly
+  schedule re-target breaks that. The clone deferred this (flat step-rate), losing the
+  staggering → more contention.
+- **Turn-based clock.** The original advances the world ONLY per player action
+  (`C_0A33_1CB4` blocks on `CON_getch`; `C_1E0F_4E0A` runs once per non-quit keypress,
+  `seg_0A33.c:1390-1395`). While the player presses nothing, *everything* is frozen — so a
+  blocked NPC is never *seen* stuck (there's nothing to watch between keystrokes). The
+  clone's **auto-advance idle heartbeat** is an addition that breaks this and surfaces the
+  blocking the original hides.
+
+**Clone implications.** The clone matches source's no-swap model (layers 1+2 + the
+escalation), but the deferred move-point economy + the added auto-advance are what make
+blocks frequent and *visible*. I-9f (teleport-to-previous-target on reschedule) was a
+band-aid for that — source has no such mechanism; its answer is "wait + re-plan, rely on
+the blocker moving." The faithful fix is to port the move-point economy and reconsider the
+idle heartbeat (keep → needs move-points + slower clock; revert to player-action-only →
+the visible-stuck-NPC problem disappears for free). All of this is parked for the post-I-9
+deviation audit (see `progress.md §"Post-I-9 — deviation audit"`). A post-port study may
+later add mechanisms the original lacks (NPC swap / detour / actor-aware re-planning) to
+serve the auto-advance system specifically — legitimate, since that's a clone-only problem
+the source never had to solve.
 
 ## Implications for the rebuild
 
@@ -702,11 +953,11 @@ substrate residue per the modern-UX anchor
 anchor"). The rebuild can path over a larger radius or the whole
 level (modern memory). **But** the off-area teleport
 (`C_1E0F_291C`) is partly a *gameplay* property (NPCs are at their
-scheduled spot when you arrive), not pure optimization — decide per
-design whether to keep instant placement for far-away NPCs or
-simulate them fully. Recommendation: keep instant placement for
-NPCs outside a generous simulation radius; it matches the original
-feel and is cheap.
+scheduled spot when you arrive), not pure optimization. **Decided +
+landed at I-9h:** keep instant placement for NPCs outside a generous
+simulation radius (Chebyshev-40 from the avatar) and walk the ones
+inside it — matches the original feel and is cheap. See §"Clone port
+notes (I-9)" → "Off-area teleport + player-distance gate".
 
 ### Minimum-scope subset for "wander Britain"
 

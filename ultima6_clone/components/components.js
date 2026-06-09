@@ -23,6 +23,21 @@ export const Actor = defineComponent('Actor', { npcId: Uint8Array });
 // NPCs without any schedule slots are not tagged.
 export const Schedule = defineComponent('Schedule', { npcId: Uint8Array });
 
+// AIMode (I-9): the NPCMode byte (ai.h / systems/ai_modes.js) driving the pathfinding
+// state machine — AI_SCHEDULE -> AI_FINDPATH -> AI_ONPATH -> (AI_84/85/86) -> worktype.
+// The per-NPC path itself (the direction array + cursor) lives in the Paths resource,
+// keyed by handle, not here (variable-length data doesn't fit the SoA store).
+export const AIMode = defineComponent('AIMode', { mode: Uint8Array });
+
+// Destination (I-9d): the xyz an NPC in AI_FINDPATH is heading toward — its current
+// active schedule slot. Set by the schedule system on an hour-trigger (the ECS analog
+// of source's SchedIndex pointing at the active Schedule[] entry); read by the NPC
+// tick to build/re-plan a path, and by doOnPath to tell "arrived" from "ran out".
+// `action` is the slot's worktype (an AI_* code >= 0x87) applied on arrival by
+// __AtDestination (I-9g) — what the NPC does once it reaches the slot (stand facing a
+// direction, guard, sit/eat/sleep). Defaults 0 (AI_MOTIONLESS) until a slot fires.
+export const Destination = defineComponent('Destination', { x: Int16Array, y: Int16Array, z: Uint8Array, action: Uint8Array });
+
 // PartyMember (I-8b): the player's party — Avatar + companions. slotIndex is the
 // 0-based position in source's Party[] array (Avatar = slot 0; no distinct avatar
 // marker — source treats the Avatar as just Party[0]). Membership IS this

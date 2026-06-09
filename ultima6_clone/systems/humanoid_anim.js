@@ -9,6 +9,18 @@
 // is passed in and returned — the caller owns its storage (a closure for the
 // singleton avatar, a per-follower map for followers).
 
+// The sprite family this module's facing/walk encoding (frame = walkCycle + facing<<2)
+// applies to: townsfolk (OBJ_178..0x183) + the avatar/companions (OBJ_199..0x19A).
+// Source's C_1E0F_0664 humanoid arm (seg_1E0F.c:293-296). C_1E0F_0664 dispatches facing
+// BY OBJECT TYPE — other NPC families have different frame layouts (gazer OBJ_162/167/
+// 19E/184 = frame is the facing directly, seg_1E0F.c:410; animals OBJ_16A/16B; etc.).
+// Those arms aren't ported, so callers (npcStep walk + atDestination arrival, the two
+// clone sites that mirror source's per-step + on-arrival C_1E0F_0664 calls) gate on this
+// and leave non-humanoid frames untouched rather than mis-applying the humanoid encoding.
+export function isHumanoid(objNumber) {
+  return (objNumber >= 0x178 && objNumber <= 0x183) || (objNumber >= 0x199 && objNumber <= 0x19a);
+}
+
 // 8-direction move → 4-way sprite facing (0=N, 1=E, 2=S, 3=W). Source MACRO_A
 // (seg_1E0F.c:268): cardinals map directly (facing = dir>>1); diagonals KEEP the
 // current facing unless it points more than a right angle away, then flip 180° —

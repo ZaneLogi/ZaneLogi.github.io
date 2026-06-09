@@ -118,7 +118,11 @@ export function installDevProbe(world, { canvas, ts, probeEl, cellEl, objlist, s
     }
 
     return {
-      text: `(${x},${y}) terrain t#${tT}${tFlags.length ? '[' + tFlags.join('+') + ']' : ''} · objs:${objs.length ? '[' + objs.join(' ') + ']' : 'none'}`,
+      // Split into two fields so the cell/terrain/stand summary and the
+      // variable-length object list render on separate lines (the objs line
+      // wraps within the fixed-width HUD instead of stretching it).
+      cell: `(${x},${y}) terrain t#${tT}${tFlags.length ? '[' + tFlags.join('+') + ']' : ''}`,
+      objs: objs.length ? '[' + objs.join(' ') + ']' : 'none',
       npcs,
       stand: canStandAt(world, x, y),
     };
@@ -135,13 +139,15 @@ export function installDevProbe(world, { canvas, ts, probeEl, cellEl, objlist, s
     const ty = (Math.floor((cam.worldY + sy) / ts) % W + W) % W;
     const d = describeCell(tx, ty);
     lastCell = { x: tx, y: ty };
-    // Cell line + per-NPC schedule lines (I-5f). innerHTML for the <br>;
-    // cell / NPC strings come from describeCell which doesn't accept user
-    // input, so we're not escaping for an external string here.
-    const headline = `${d.text} · stand=${d.stand ? 'YES' : 'NO'}`;
-    probeEl.innerHTML = d.npcs.length
-      ? headline + '<br>' + d.npcs.join('<br>')
-      : headline;
+    // Cell/stand line, then the objs line (variable length → its own line so a
+    // crowded cell wraps within the fixed-width HUD), then the NPC line(s) — always
+    // present ("NPC: none" when the cell has none) so the probe is a consistent
+    // height and the HUD doesn't jump as the cursor crosses NPC vs non-NPC cells
+    // (I-5f). innerHTML for the <br>; cell / NPC strings come from describeCell
+    // which doesn't accept user input, so we're not escaping for an external string.
+    const npcLines = d.npcs.length ? d.npcs : ['NPC: none'];
+    const lines = [`${d.cell} · stand=${d.stand ? 'YES' : 'NO'}`, `objs: ${d.objs}`, ...npcLines];
+    probeEl.innerHTML = lines.join('<br>');
     probeEl.classList.toggle('pass', d.stand);
     probeEl.classList.toggle('blocked', !d.stand);
     // Position the 1px highlight rectangle on the cell. Computed from the

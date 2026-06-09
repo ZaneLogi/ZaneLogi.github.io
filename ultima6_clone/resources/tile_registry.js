@@ -30,4 +30,5 @@ export class TileRegistry {
   isTerrainImpassable(t) { return this.flags.isTerrainImpassable(t); } // IsTerrainImpass
   isTerrainWall(t)       { return this.flags.isTerrainWall(t); }       // IsTerrainWall
   isTerrainDamage(t)     { return this.flags.isTerrainDamage(t); }     // IsTerrainDamage
+  terrainCost(t)         { return this.flags.terrainCost(t); }         // TerrainType[t] >> 4
 }

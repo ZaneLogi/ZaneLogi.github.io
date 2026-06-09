@@ -28,13 +28,18 @@
     background: rgba(0,0,0,0.7); color: #e8c060;
     font: 13px monospace; padding: 6px 10px;
     border: 1px solid #6b5d3a; border-radius: 4px;
+    /* Fixed width so the HUD doesn't resize as the variable-length probe line
+       (cell objects) grows/shrinks between cells — long lines wrap instead.
+       Sized to fit the widest static line (the clock readout); border-box so the
+       value is the total on-screen width. */
+    box-sizing: border-box; width: 384px;
     display: none; pointer-events: none;
   }
   #clock-hud.paused { border-color: #c66; }
-  #clock-text { white-space: nowrap; }
+  #clock-text { white-space: normal; }
   #clock-controls { margin-top: 4px; display: flex; gap: 4px; }
-  #npc-stats { white-space: nowrap; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2316; color: #b8a878; font-size: 12px; }
-  #probe-text { white-space: nowrap; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2316; color: #b8a878; font-size: 12px; }
+  #npc-stats { white-space: pre; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2316; color: #b8a878; font-size: 12px; line-height: 1.45; }
+  #probe-text { white-space: normal; overflow-wrap: anywhere; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2316; color: #b8a878; font-size: 12px; line-height: 1.45; }
   #probe-text.blocked { color: #c66; }
   #probe-text.pass { color: #6c6; }
   #clock-hud button {

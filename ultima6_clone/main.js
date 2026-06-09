@@ -24,11 +24,13 @@ import { makeTileAnimationSystem } from './systems/tile_animation_system.js';
 import { makePaletteCycleSystem } from './systems/palette_cycle_system.js';
 import { makeWorldRenderSystem } from './systems/world_render_system.js';
 import { makeWorldClockSystem } from './systems/world_clock_system.js';
-import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember } from './components/components.js';
+import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember, AIMode, Destination } from './components/components.js';
 import { Party } from './resources/party.js';
+import { Paths } from './resources/paths.js';
 import { Schedules } from './resources/schedules.js';
 import { ActorIndex } from './resources/actor_index.js';
 import { installNpcScheduleSystem } from './systems/npc_schedule_system.js';
+import { installNpcTickSystem } from './systems/npc_tick_system.js';
 import { installAvatarMovement } from './systems/avatar_move_system.js';
 import { installMoveFollowers, settleParty } from './systems/move_followers.js';
 import { loadActors, ensureRegionsInView, makeStreamingSystem, inventoryOf } from './world_loader.js';
@@ -144,8 +146,10 @@ async function load() {
        .registerComponent(Amount).registerComponent(Actor)
        .registerComponent(Schedule)
        .registerComponent(Container).registerComponent(ContainedIn)
-       .registerComponent(PartyMember);
+       .registerComponent(PartyMember)
+       .registerComponent(AIMode).registerComponent(Destination);   // I-9: NPC pathfinding state
   world.setResource(new Party());                 // I-8b: singleton party state (activeIndex, mode)
+  world.setResource(new Paths());                 // I-9c: per-NPC pathfinding state (handle -> {dirs, counter, ...})
   const uiStack = new UIStack(world, document.getElementById('ui-root'));
   window.__U6 = { world, tileRegistry: world.getResource(TileRegistry), mapLevel: world.getResource(MapLevel), spatial: world.getResource(SpatialIndex), clock: world.getResource(WorldClock), party: world.getResource(Party), schedules, objlist, actorIndex: world.getResource(ActorIndex), inventoryOf: (h) => inventoryOf(world, h), uiStack };
 
@@ -265,6 +269,13 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
       })
     : null;
   if (avatarMoveSystem) world.addSimSystem(avatarMoveSystem);     // consume the pending step
+  // I-9d: NPC pathfinding tick. Each turn, AI_FINDPATH NPCs build a path in their own
+  // 40x40 window and walk it (AI_ONPATH); far/unreachable slots snap. Sim-list system
+  // so it inherits the turn-driver gating (breathe<->pause). Runs after the avatar
+  // step (so NPCs react in the same turn) and before the clock advance.
+  const npcTick = installNpcTickSystem(world, { avatarRef });
+  world.addSimSystem(npcTick.system);
+  window.__U6.npcTickStats = npcTick.stats;
   world.addSimSystem(makeWorldClockSystem());                      // per turn: clock.advance(1)
   world.addRenderSystem(makeTileAnimationSystem());                // advance animdata -> reg.animDirty
   world.addRenderSystem(makePaletteCycleSystem(renderer));         // rotate water/lava palette (shimmer)
@@ -282,6 +293,7 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
     controlsEl:   document.getElementById('clock-controls'),
     npcStatsEl:   document.getElementById('npc-stats'),
     npcScheduleStats,
+    npcTickStats: npcTick.stats,
   });
 
   // I-4d cell probe + I-5f per-NPC schedule line + canvas drag-to-pan.
@@ -354,6 +366,17 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
     inspectAtCell(cell.x, cell.y);
     e.preventDefault();
   });
+
+  // I-9h first-tick alignment: the schedule system only fires on an hour ROLLOVER, so at
+  // load NPCs sit at their objlist positions (doing nothing) until the clock crosses the
+  // next hour — wrong if their current-hour slot differs from where they loaded. Fire the
+  // hourly hooks once for the CURRENT hour: resolveSlotAt sets each eligible NPC's
+  // Destination + AI_FINDPATH, and the first turn (<=idleInterval later) resolves movement
+  // — far NPCs teleport (off-screen, invisible), near ones walk. The world starts coherent.
+  // (Source forces a full teleport-settle at time-jumps via AllowNPCTeleport; that forced
+  // load-settle is deferred to save-load, when genuine mid-route NPCs exist to handle.)
+  const clock = world.getResource(WorldClock);
+  for (const cb of clock.hourlyHooks) cb(clock);
 
   let last = performance.now();
   (function loop(t) { world.frame(t - last, t); last = t; requestAnimationFrame(loop); })(last);
