@@ -57,7 +57,7 @@ banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 | I-save/load | **save/load — full-snapshot JSON persistence** — generic ECS snapshot (every live entity's components + mutable resources) → JSON; Export downloads, Import re-uploads + restores on reload. Restore *replaces* `loadActors` and re-marks `loadedRegions`, so deletions stay dead + mutations survive without tombstones (`research_save_load.md`). Non-numeric label keeps the I-16…I-19 arc intact. | **done** (a–g, 2026-06-10) |
 | I-16 | **arrival behaviors + direction system** — `__AtDestination` prop lookup for sit/sleep/eat/play (`C_1E0F_2184` + `FindLoc`/`NextLoc` multi-tile footprint + `D_0658`) + fallbacks, eating dynamic facing (`C_1E0F_2125`), the `C_1E0F_0664` frame system (humanoid + non-humanoid per-type arms) + chair-overrides-facing, sprite-restore-on-wake, and (d) `AI_SCHEDULE` continuous-settle (`resolveActiveSlot` + per-tick `__AtDestination`). | **done** (a–c + 2 review fixes + d; carries the AI-mode dispatch coverage table) |
 | I-17 | **NPC AI behaviors** — the moving worktypes as active per-turn behaviors: `WANDER`/`GRAZE` (`C_1E0F_37DB`), `LOITER`/`FARM` (`C_1E0F_33C4`), `GUARD` pacing, via the probability×accumulator contract; + **I-17d** displaced settle-in-place NPCs stand aside on a shove & return to post + re-pose when the slot clears. `RINGBELL` split to its own later step; thief/law + combat deferred by design. See §"I-17 scope". | **done** (a–d) |
-| I-18 | status panel — third surface on the substrate; replaces the dev HUD's clock readout (was I-14→I-17) | planned |
+| I-18 | **party status UI — on-demand, NOT a fixed panel.** `P` → roster (icon/name/HP) → member digit → ZSTATS → `Tab` ⇄ inventory, all on the UIStack. Wire a `Stats` component at load (HP/STR/INT/MAGIC/LEVEL/EXP, decoded-but-dropped today) + port `MaxHP`/`MaxMagic`. Refactor GIVE → an in-stack recipient-picker modal (retires the bare-map give path + the direct digit-inventory shortcut). Layout refactor: fixed status panel removed, clock → persistent strip, dev HUD → floating show/hide. (was "replaces the dev-HUD clock readout") | planned (design settled 2026-06-11) |
 | I-19 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / moonstones / instruments / etc.); each handler tied to its owning subsystem when that subsystem lands (was I-15→I-18) | planned |
 
 **Why I-2 is the world-data system.** Loading the real world from `OBJBLK*`/
@@ -3046,3 +3046,162 @@ terrain than source's flat 5) — invisible in play, simplest reset.
 All deterministic tests use an injected `rand` (the `drunk_walk` pattern). test_pathfinding **194/194**; WANDER +
 LOITER live-verified moving on real data (gentle 1/8 drift, no console errors). The handlers carry their
 `// C_1E0F_*` citations.
+
+## I-18 scope — party status UI (on-demand) + dev-HUD/clock layout refactor
+
+**Status: PLANNED — design settled 2026-06-11 (this is the pre-impl plan; the per-sub-step
+record + as-built notes fill in as a–e land).** Grounded against `seg_0A33.c` `RefreshStatus`
+(`C_0A33_1AB7`) and the panel-mode routines in `seg_155D.c`. Supersedes I-18's original "fixed
+status panel that replaces the dev-HUD clock readout" charter.
+
+**The reframe (Zane's call, 2026-06-11).** Source's status display is a *fixed right-hand panel*
+— `RefreshStatus` switches `StatusDisplay` between party / stats / inventory modes in place. The
+clone deliberately does **not** reproduce that: a fixed panel mostly earns its keep in *combat*
+(glanceable party HP), which is deferred, so a persistent panel would carry weight we don't use
+yet. Per the modern-UX anchor (`CLAUDE.md §"Modern-browser UX"`), status becomes **on-demand**,
+freeing the screen for the map. This is a UX-*feel* decision, not a mechanic change — source
+stays the spec for *what* the numbers are, not *how* they're surfaced.
+
+**Source mapping — the four `RefreshStatus` modes and what the clone adopts:**
+
+| Source mode | Routine | Shows | Clone |
+|---|---|---|---|
+| `CMD_91` party roster (default) | `C_155D_000C` (`seg_155D.c:25`) | up to 5 members: **down-facing actor sprite** (`OBJ_MakeDirFrame(OrigShapeType,4)`, *not* the portrait) + HP (poison-green / <10-red) + name | **adopt** → the `P` roster modal |
+| `CMD_90` ZSTATS | `C_155D_028A` (`:84`) | name + **portrait** + STR/DEX/INT + Magic cur/max + Health cur/max + Level/Exp | **adopt** → per-member ZSTATS |
+| `CMD_92` inventory paperdoll | `C_155D_1065` (`:404`) | equip slots + backpack + weight/encumbrance | **not ported as a paperdoll** — reuse the existing I-10j inventory window via the `Tab` toggle (the equip-slot layout + weight overlaps the inventory window + I-7 inspector) |
+| `CMD_9E` object/action view | `C_27A1_02D9` | object-action subsystem view | **out of scope** (object-action dispatch, I-19) |
+
+### Navigation (all on the I-7 UIStack)
+
+`P` → **roster** (icon + name + HP) → press a member **digit** → that member's **ZSTATS** →
+`Tab` toggles the member-view body **ZSTATS ⇄ inventory**. Esc unwinds. As UIStack modals these
+suspend `TurnClock` for the stack lifetime (world frozen while browsing — HP can't change under
+you, so the combat-era "live panel" need is moot until combat).
+
+- **`P` is a clone coinage** — source has no "open roster" key because the roster *was* the
+  always-on panel.
+- **Digit keys are relocated, not deleted.** Today top-row `1`..`PartySize` opens a member's
+  inventory directly from the bare map (`main.js:528-556`). I-18 retires that map-level entry;
+  "digit = select member N" now lives inside the roster modal's `onKey` (→ open that member's
+  ZSTATS), where a visible member list makes the mapping meaningful. In-window `onDigit`
+  member-switch is kept for fluidity.
+
+### GIVE → recipient-picker modal (refactor of landed I-10j)
+
+Today GIVE leaves the UI entirely: `G` in the inventory closes the whole window chain back to the
+bare map, then you pick a recipient by digit/click (`armGive`/`pendingGive` + the map-digit branch
+`main.js:547-552` + the canvas-click branch `command_dispatch.js:410-419`). I-18 replaces that
+with an **in-stack recipient-picker modal**: `G` pushes a picker listing the party **minus the
+giver** (the shared widget below); selecting a member calls `giveTo(recipient)` directly; Esc
+cancels back to the inventory.
+
+- **Recipients are party members only** — already enforced in `giveTo` (self → "yourself.",
+  non-party → "Only within the party!", `command_dispatch.js:146-161`). The picker offers only
+  valid members, so those refusals become unreachable-by-construction; keep `giveTo`'s validation
+  anyway as belt-and-suspenders — the **stale-item check** still matters (item can move between
+  open and select).
+- **After a successful give**, pop the picker, **rebuild the giver's inventory list** (item now
+  gone), and stay there so you can give again (better than today's "back to the map").
+- **Party of one** (only the Avatar) → no valid recipient → **gray out `G`**.
+- **Deletes** the entire bare-map give apparatus (`armGive`/`pendingGive`/`isAwaitingGiveRecipient`
+  / the armed cue / the map-Esc-cancel + the map-digit and canvas-click give branches). Combined
+  with the digit-entry retirement above, **the whole top-row-digit map handler is removed** —
+  bare-map top-row digits become unused (numpad stays avatar diagonals).
+- **Cross-PC note:** intentional behavior change to landed I-10j — the map-give path is *retired*,
+  not lost. Modern-UX-anchor consistent: source's MOVE-to-actor targets the map, but the clone's
+  give is already party-only (a clone construct), so a modal list picker is a legit rewrite, not a
+  faithfulness regression.
+
+### DROP asymmetry — accepted (Zane, 2026-06-11)
+
+GIVE stays tidy/in-stack (picker), but DROP targets a *map cell*, so it still **detonates the
+chain** (roster + ZSTATS + inventory all close) to arm the map cursor (reach 7). The asymmetry is
+inherent — you can't pick a ground location from a list — and it is the same close-to-map behavior
+I-10j's DROP already had. Accepted; not special-cased. (Net consequence: with the direct digit
+entry gone, dropping is reached only by detonating out of the roster path — accepted.)
+
+### Data wiring — the `Stats` component (no-fakes)
+
+The per-character stats are **decoded but dropped at load**: `objlist.js:42-71` parses
+`strength/dexterity/intelligence/exp/hp/level/mp`, but `world_loader.js:151-152` carries only
+`dexterity` (into `MoveSpeed`) + `Alignment`. I-18 adds a **`Stats` component** wired from the
+already-decoded fields — per `feedback_no_fakes_during_scaffolding`, port the real values even
+though combat (which would mutate HP) isn't in yet. The generic ECS snapshot picks it up for free
+(save/load).
+
+- **`MaxHP()` / `MaxMagic()` are derived in source** (functions, not stored bytes) — port the two
+  formulas (small `research_*.md` note); store base stats + current HP/Magic, compute max for the
+  cur/max display.
+- **HP coloring:** `<10` → red now; **poison-green deferred** to a combat/poison subsystem. Poison
+  is only a status bit (`0x08`) read off the objlist by the conversation VM
+  (`conversation_system.js:27,145`), not a clean ECS flag — wiring it is out of scope here.
+- **ZSTATS shows no weight/encumbrance** — that is the inventory/paperdoll view; `C_155D_028A` has
+  STR/DEX/INT/Magic/Health/Level/Exp only.
+
+### Shared widget — `makePartyMemberList`
+
+The roster and the give-picker are the *same* widget — a party-member list with icon + name (+
+optional HP) rows, cursor-select, Esc back-out — so build one:
+`makePartyMemberList({ world, reg, objlist, exclude, showHp, onSelect })` on top of
+`ui_widgets.makeListCursor` + `ui_icons.tileIcon`. Roster =
+`{ exclude: [], showHp: true, onSelect: openZStats }`; picker =
+`{ exclude: [giver], onSelect: giveTo }`. One home for the two fiddly bits — the **down-facing
+sprite-frame icon** (dir-4 frame off `origObjNumber`, reusing the I-16 frame system) and the **HP
+`<10`-red rule**. Decided over a roster-specific widget (the divergence is low and fully
+parameterizable — not premature abstraction).
+
+### Layout refactor — clock strip + floating dev HUD (resolves "point 1")
+
+I-18's original "replaces the dev-HUD clock readout" charter is **dropped**. Instead the screen
+chrome is restructured (`index.html` + `view/dev_hud.js`):
+
+- **Remove the fixed status panel.** `#status-panel` (the reserved 280px-column placeholder,
+  `index.html:223-226`) is deleted. With both right-column occupants gone, the grid collapses
+  **two columns → one**: the **map canvas reclaims full window width**, message band full-width
+  below it.
+- **Persistent clock strip** above `#app` (below the dropzone): date/time/sun (`D_2C55`) + the
+  existing `.paused` tint. The genuinely-useful "what time is it / is the world running" readout
+  stays always-visible (schedule testing needs it).
+- **Float the dev HUD.** `#dev-block` (pause, ±time, WORLD_SPEED slider, NPC schedule/tick stats,
+  probe line, save/load, boot log) lifts into a **floating, show/hide** panel (toggle button + a
+  hotkey; fixed-position, draggable is optional polish). `installDevHud`'s internals are
+  unchanged — only its DOM home + a toggle.
+- **The floating dev panel must NOT be a UIStack modal** — UIStack suspends `TurnClock` + captures
+  the keyboard, but the dev panel must coexist with a *live, ticking* world (watching NPC stats
+  update) and not eat keys. It stays a plain render-system-driven div (as it already is); UIStack
+  is reserved for the player surfaces.
+
+### Sub-step plan (each ≈ one save-point commit, browser-verified; squashed into one `impl I-18` per the I-7/I-8 default unless kept separate)
+
+- **a — layout refactor (chrome only, no new surfaces).** Remove `#status-panel`; collapse grid to
+  one column; add the persistent clock strip; float `#dev-block` with show/hide. No behavior change
+  to dev-HUD internals. Verify: map full-width, clock ticks in the strip, dev panel toggles + still
+  updates live (not suspended), modals still open over the map.
+- **b — `Stats` component + load wiring + `MaxHP`/`MaxMagic`.** Define `Stats`, register it in
+  `main.js`'s `registerComponent` chain (boot-halt gotcha — see I-11a), wire from `objlist` in
+  `world_loader.js`, port the two max formulas. No UI. Verify via `__U6` inspect + snapshot
+  round-trip.
+- **c — `makePartyMemberList` + the `P` roster.** Shared widget; `P` opens the roster (icon + name
+  + HP, `<10`-red); member digit → opens ZSTATS (step d). Retires the map-level direct-inventory
+  digit branch.
+- **d — ZSTATS surface + `Tab` toggle.** Per-member stats view (name + portrait via
+  `assets/portrait.js` + STR/DEX/INT + Magic cur/max + Health cur/max + Level/Exp); `Tab` toggles
+  the member-view body ZSTATS ⇄ the existing inventory window; member nav within.
+- **e — GIVE → recipient-picker.** Replace the bare-map give path with the picker modal (shared
+  widget, exclude giver); refresh-after-give; gray-out for party-of-one; delete the give apparatus
+  + the now-unused top-row-digit map handler. Document the I-10j behavior change.
+
+### Deferred / not in I-18
+
+- **Inventory paperdoll** (`CMD_92` equip-slot layout + weight/encumbrance) — reuse the existing
+  inventory window via `Tab`; not ported as a separate paperdoll view.
+- **Poison-green HP color** — needs a combat/poison subsystem; `<10`-red only for now.
+- **Persistent at-a-glance party HP** (the combat-era value of a fixed panel) — N/A until combat;
+  the on-demand roster suffices.
+- **`CMD_9E` object/action view** — object-action subsystem (I-19).
+- **Draggable dev panel** — fixed-position + toggle is enough for v1.
+
+### Open (settle at impl)
+
+- Dev-panel toggle mechanism — hotkey choice (backtick / `~` vs a corner button); pick when a
+  lands.

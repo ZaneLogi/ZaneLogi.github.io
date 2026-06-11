@@ -28,6 +28,34 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-11 — I-18 design (status UI: on-demand party surfaces, not a fixed panel)
+
+Design session with Zane (no new port code) settling the I-18 scope. Grounded the U6 status
+display against source before deciding the clone's shape.
+
+- **Read**: `seg_0A33.c` `RefreshStatus` (`C_0A33_1AB7`) — the `StatusDisplay` switch over four
+  panel modes; `seg_155D.c` panel-mode routines `C_155D_000C` (`:25`, party roster — down-facing
+  sprite + HP + name), `C_155D_028A` (`:84`, ZSTATS — portrait + STR/DEX/INT/Magic/Health/Level/
+  Exp), `C_155D_1065` (`:404`, inventory paperdoll). Checked the clone's data readiness:
+  `objlist.js:42-71` decodes all stats but `world_loader.js:151-152` drops everything except
+  `dexterity`.
+- **Found / decided**: (1) **Drop source's fixed panel** — status becomes on-demand UIStack
+  modals (`P` → roster → member digit → ZSTATS → `Tab` ⇄ inventory); a fixed panel only pays off
+  in deferred combat, and dropping it frees the map to full width. (2) **GIVE refactor** — `G`
+  becomes an in-stack recipient-picker modal (party minus giver), retiring the entire bare-map
+  give apparatus + the direct digit-inventory shortcut → the whole top-row-digit map handler is
+  deleted. (3) **DROP asymmetry accepted** — give stays modal, drop still detonates the stack to
+  reach the map (inherent — can't pick a ground cell from a list). (4) **`Stats` component** to be
+  wired at load (no-fakes) + `MaxHP`/`MaxMagic` formula port; `<10`-red HP now, poison-green
+  deferred. (5) **Layout refactor** — remove the fixed status panel, persistent clock strip above
+  the canvas, dev HUD → floating show/hide (NOT a UIStack modal — must coexist with live ticking).
+  (6) Shared `makePartyMemberList` widget for roster + picker.
+- **Docs**: new `progress.md §"I-18 scope"` (full design + a–e sub-step plan + deferrals); updated
+  the I-18 ledger row. Banner unchanged (I-17 still COMPLETE / next I-18).
+- **Open**: dev-panel toggle mechanism (hotkey backtick/`~` vs a corner button) — settle at I-18a.
+- **Next**: implement **I-18a** (layout refactor — chrome only: remove fixed panel, clock strip,
+  float the dev HUD), browser-verify, then **b** (`Stats` wiring + `MaxHP`/`MaxMagic`).
+
 ## 2026-06-11 — impl I-17 (NPC AI behaviors: WANDER/LOITER/GUARD pacing + displaced-settled return)
 
 Turned the moving schedule worktypes from idle leaf states into active per-turn behaviors,
