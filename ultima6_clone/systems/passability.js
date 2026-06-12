@@ -44,6 +44,7 @@ export function canStandAt(world, x, y, { actorId, asPartyMember = false, leader
   const spatial = world.getResource(SpatialIndex);
   const mapLevel = world.getResource(MapLevel);
   const activeZ = mapLevel.level ?? 0;                      // I-19b: collide only with the active level's entities (?? 0 = test stub / overworld)
+  const wrap = activeZ === 0 ? 1024 : 256;                  // toroidal width — wrap the lookup so a seam-crossing scan still sees edge objects (see world_render_system)
   const pos = world.store(Position);
   const rend = world.store(Renderable);
   const ot = asHumanoidNpc ? world.store(ObjType) : null;   // only needed for the door-passthrough check
@@ -67,7 +68,7 @@ export function canStandAt(world, x, y, { actorId, asPartyMember = false, leader
   //    Breakthrough short-circuit's interaction with a stack at the same cell.
   for (let dy = 0; dy <= 1; dy++) {
     for (let dx = 0; dx <= 1; dx++) {
-      const ents = spatial.at(x + dx, y + dy);
+      const ents = spatial.at(((x + dx) % wrap + wrap) % wrap, ((y + dy) % wrap + wrap) % wrap);
       if (!ents) continue;
       for (let k = ents.length - 1; k >= 0; k--) {
         const handle = ents[k];

@@ -754,6 +754,30 @@ same chain entry being the "player-visible" thing. See
 [`research_object_interaction.md`](research_object_interaction.md)
 §"Cell-pick (`C_2337_08F1`)" for the pick side.
 
+### Toroidal wrap — the object query must wrap, like terrain (fixed 2026-06-13)
+
+The map is a torus: standing near an edge, the view shows the opposite edge across the
+seam. **Terrain** handles this — `MapLevel.tileAt` does `% width` (1024 overworld / 256
+dungeon) so the wrapped terrain draws. **Objects** did NOT: the per-cell painter scans
+screen-logical cells `(col, row)` that, past the seam, EXCEED the map width, and
+`spatial.at(col, row)` then keyed an out-of-range / wrong cell → edge objects vanished
+when viewed across the seam. (Latent since I-2c; on the 1024-wide overworld the seam is
+far from explored areas, so it only surfaced with I-19's **256-wide dungeons**, where the
+seam is a few tiles away — Zane spotted it walking a dungeon. The legacy `../ultima6`
+port wraps objects too: `collectObjectsInSurface/Dungeon` test each object's visibility
+against the view with an `ox + 1024` / `ox + 256` offset.)
+
+**Fix:** wrap ONLY the spatial-query coordinate to the active level's width —
+`spatial.at((col+dx) % wrap, (row+dy) % wrap)` (`world_render_system.js`). The
+`forEachOccupiedCell` **anchor** (`col+dx`) and the **screen-draw position** (`col-tileX`)
+stay UN-wrapped: a single tile's hotspot at screen-logical `col` maps to world `col%wrap`
+for the lookup but draws at `col-tileX`; a 2×2 object straddling the seam has its hotspot
+and extension land on **adjacent** screen cells (`col`, `col-1`) that wrap to world
+`0`/`width-1` — correct. **The same query wrap is in `cell_pick` and `passability`** (so
+USE / LOOK / movement also see edge objects across the seam). `wrap = activeZ===0 ? 1024 :
+256`. Note the `SpatialIndex` key width stays **1024** regardless — wrapping brings coords
+into `[0, width)` which is always within the 1024-wide key space, so the key still matches.
+
 ### NPC-vs-object — type priority overrides
 
 When the cell has an NPC + objects (e.g. Lord British on a throne whose 2-wide

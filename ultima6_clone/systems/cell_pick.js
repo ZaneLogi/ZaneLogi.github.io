@@ -33,10 +33,11 @@ export function makePickAtCell(world, reg) {
   return function pickAtCell(x, y, { forUse = false } = {}) {
     const spatial = world.getResource(SpatialIndex);
     const activeZ = world.getResource(MapLevel)?.level ?? 0;   // I-19b: only pick the active level's entities (?? 0 = no/stub MapLevel)
+    const wrap = activeZ === 0 ? 1024 : 256;                   // toroidal width — wrap the lookup so a seam-crossing cell still picks (see world_render_system)
     let firstObj = null, firstNpc = null, firstIgObj = null;
     for (let dy = 0; dy <= 1; dy++) {
       for (let dx = 0; dx <= 1; dx++) {
-        const ents = spatial.at(x + dx, y + dy);
+        const ents = spatial.at(((x + dx) % wrap + wrap) % wrap, ((y + dy) % wrap + wrap) % wrap);
         if (!ents) continue;
         for (const handle of ents) {
           const i = world.resolve(handle);

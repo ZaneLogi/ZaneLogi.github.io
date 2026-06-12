@@ -60,6 +60,7 @@ export function makeWorldRenderSystem(renderer) {
     const pos = world.store(Position);
     const rend = world.store(Renderable);
     const activeZ = world.getResource(MapLevel)?.level ?? 0;   // I-19b: only draw the active level's entities (?? 0 = no/stub MapLevel)
+    const wrap = activeZ === 0 ? 1024 : 256;                   // active level's toroidal width (overworld / dungeon)
     const remap = reg.anim ? reg.anim.tileIndexMap : null;
     const rm = remap ? (t) => remap[t] : (t) => t;
 
@@ -88,7 +89,12 @@ export function makeWorldRenderSystem(renderer) {
         // research_world_data.md.
         for (let dy = 0; dy <= 1; dy++) {
           for (let dx = 0; dx <= 1; dx++) {
-            const ents = spatial.at(col + dx, row + dy);
+            // Wrap the query to the active level's toroidal width so objects past the map
+            // seam still render (terrain wraps via tileAt; objects must too). Only the
+            // SPATIAL lookup wraps — the footprint anchor (col+dx) + screen position
+            // (col-tileX) stay un-wrapped, which keeps a 2×2 object straddling the seam
+            // correct (its hotspot/extension land on adjacent screen cells).
+            const ents = spatial.at((col + dx) % wrap, (row + dy) % wrap);
             if (!ents) continue;
             // Reverse iter so older entities (chain head — file-order push +
             // runtime insertAtHead) emit later within their zPri tier, get

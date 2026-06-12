@@ -28,6 +28,27 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-13 — render fix: wrap the OBJECT query across the toroidal seam
+
+- **Symptom (Zane, walking a dungeon):** the map is wrap-scrolling — near an edge you see the
+  opposite edge across the seam. Terrain renders right (it has the `% width` math), but **objects**
+  loaded from OBJBLK don't appear across the seam; the legacy `../ultima6` port doesn't suffer.
+- **Cause:** the per-cell object painter scans screen-logical cells `(col,row)` that EXCEED the map
+  width past the seam, and `spatial.at(col,row)` then keyed an out-of-range cell → edge objects
+  missing. Terrain wraps via `MapLevel.tileAt`; objects never did. Latent since I-2c; only obvious
+  in I-19's **256-wide dungeons** (seam is close). Legacy port wraps via an `ox+1024`/`ox+256` test.
+- **Fix:** wrap ONLY the spatial-query coord — `spatial.at((col+dx)%wrap, (row+dy)%wrap)` — keeping
+  the footprint anchor + screen-draw position un-wrapped (worked through it: 2×2-at-seam stays
+  correct, hotspot/extension on adjacent screen cells). Same wrap added to `cell_pick` + `passability`
+  so USE/LOOK/movement see edge objects too. `wrap = activeZ===0 ? 1024 : 256`; the SpatialIndex key
+  width stays 1024 (wrapped coords are always < width ≤ 1024, so keys still match). Doc'd in
+  `research_map_render.md §"Toroidal wrap"`.
+- **Verified:** objects render across a dungeon seam (avatar at x=249, objects at x≤20 appear on the
+  right); `pickAtCell(5,129)==pickAtCell(261,129)==pickAtCell(517,129)` (all → world 5); suite 446/446.
+- **Not an I-19 bug** (object render untouched by I-19) — pre-existing, surfaced by the small dungeons.
+
+---
+
 ## 2026-06-13 — render fix: pixel-snap the camera (inter-tile bleed lines)
 
 - **Symptom (Zane):** faint vertical/horizontal lines between tiles — "the rightmost line and
