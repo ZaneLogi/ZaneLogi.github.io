@@ -28,6 +28,38 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-11 — impl I-17 (NPC AI behaviors: WANDER/LOITER/GUARD pacing + displaced-settled return)
+
+Turned the moving schedule worktypes from idle leaf states into active per-turn behaviors,
+landed as four save-point commits (a–d) then squashed to one `impl I-17`.
+
+- **Read**: re-verified the worktype dispatch arms in `seg_1E0F.c` against the source before
+  porting — `C_1E0F_37DB` (`:1558-1574`, WANDER/GRAZE), `C_1E0F_33C4` (`:1448-1462`, LOITER/FARM)
+  + the geometric-random `C_1E0F_31C7` (`:1391-1398`), and the GUARD/`AI_0F`/`AI_10` pacing arm
+  in `C_1E0F_3E6A` (`:1820-1834`).
+- **Found**: (1) the **probability × accumulator** insight — source rate-limits these *twice*
+  (DEXTE turn-grant + a per-turn 1/8/50% die whose *idle branch also spends* move points). The
+  I-14 accumulator already gives limiter #1; the handlers add limiter #2 by rolling the die on
+  each credit beat and **spending stepCost on idle too** (else the duty cycle collapses + becomes
+  framerate-coupled). (2) The in-scope arms use `TryStraightMove` (= `npcStep`), **not** the I-15
+  drunk-walk `tryMoveTo` (that's for the deferred BRAWL/CONVERSE/THIEF). (3) Live on Zane's data:
+  the **castle mouse** (npcId 9, `OBJ_162`) carries worktype `0x9a` → `COMBAT_AI_Retreat`
+  (`:1760`), a *combat* flee handler — NOT an I-17 activity; its "wanders at night, gone by day"
+  is slot-reachability + unported flee AI, **not** a z/dungeon thing (all its slots are z=0).
+- **Found (I-17d, Zane's refinement)**: the clone-only step-aside left a shoved settled NPC frozen
+  mid-stride until the next schedule hour. Now a shoved settle-in-place NPC **stands up** (→
+  `AI_STAND`) and **returns to post + re-poses** once the slot cell clears — gated on slot-clear to
+  avoid the push↔return loop the original step-aside comment warned about. Source has neither
+  step-aside nor return; clone-only, serving the auto-advance heartbeat.
+- **Docs**: new `progress.md §"I-17 scope"` (the probability×accumulator contract + a–d + the
+  deferred list incl. the `AI_9A`/mouse trap note); banner + ledger + the AI-mode dispatch coverage
+  table updated to ported; `CLAUDE.md` kept-deviations + code-layout (`npc_behaviors.js`).
+- **Open**: RINGBELL needs an on-demand "trigger a specific tile's animation" hook (its own later
+  step); combat/thief/law modes (incl. the mouse's flee) deferred by design; live round-trip of the
+  I-17d shove→stand→return is unit-verified but not yet staged in-app (hard to force a pathfinding
+  NPC through a seated one on demand).
+- **Next**: I-18 (status panel — third UI surface on the I-7 substrate, replaces the dev-HUD clock).
+
 ## 2026-06-10 — fix: save/load now snapshots `objlist` (conversation results persisted)
 
 Live bug Zane caught minutes after the feature landed: passed Lord British's questions, exported,

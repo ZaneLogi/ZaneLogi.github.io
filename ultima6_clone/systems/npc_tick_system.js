@@ -43,8 +43,9 @@ import { WorldSpeed } from '../resources/world_speed.js';
 import { WorldClock } from '../resources/world_clock.js';
 import { Schedules } from '../resources/schedules.js';
 import { findPath } from './pathfinding.js';
-import { doOnPath, atDestination, tryTeleportToSlot, chebyshev, TELEPORT_NEAR_RADIUS } from './npc_path.js';
+import { doOnPath, atDestination, tryTeleportToSlot, chebyshev, TELEPORT_NEAR_RADIUS, actorHandleAt } from './npc_path.js';
 import { rate, stepCostAt, MAX_ELAPSED_MS } from './move_economy.js';
+import { dispatchWorktype, randInt } from './npc_behaviors.js';
 import * as AI from './ai_modes.js';
 
 // Off-area teleports per turn (source's D_17A5 cap). A CPU throttle in source; here it's
@@ -58,7 +59,7 @@ const TELEPORT_CAP = 3;
 // pre-I-9h behavior + keeps the unit tests that don't model an avatar walking). Returns
 // { system, stats }: add `system` to the sim list, read `stats` (mutated each turn) from
 // the dev HUD.
-export function installNpcTickSystem(world, { avatarRef, now = () => performance.now() } = {}) {
+export function installNpcTickSystem(world, { avatarRef, now = () => performance.now(), rand = randInt } = {}) {
   const stats = { active: 0, finding: 0, walking: 0, teleported: 0, snapped: 0, blocked: 0, arrived: 0 };
 
   // I-14b accumulator state. `ms` is null on test worlds that don't register MoveSpeed →
@@ -141,10 +142,19 @@ export function installNpcTickSystem(world, { avatarRef, now = () => performance
         continue;
       }
 
-      // Only the pathfinding tier ticks below (0x81..0x86). Party (COMMAND/FOLLOW), MOTIONLESS,
-      // and the stationary worktypes are skipped — party moves via the avatar/MoveFollowers,
-      // the rest are idle until their schedule re-fires.
-      if (mode < AI.AI_FINDPATH || mode > AI.AI_86) continue;
+      // Two tiers tick below: the pathfinding tier (0x81..0x86 — walk to a slot) and, since
+      // I-17, the active MOVING worktypes (WANDER/GRAZE/LOITER/FARM/GUARD pacing). Party
+      // (COMMAND/FOLLOW), MOTIONLESS, and the idle/pose worktypes (STAND/SLEEP/SIT/EAT/PLAY)
+      // are skipped — party moves via the avatar/MoveFollowers, the rest sit until their
+      // schedule re-fires. (AI_SCHEDULE is handled+continued above.)
+      const pathTier = mode >= AI.AI_FINDPATH && mode <= AI.AI_86;
+      const worktypeActive = AI.isActiveWorktype(mode);   // I-17 moving worktypes
+      // I-17d: a settle-in-place NPC needs the tick only when DISPLACED — shoved off its slot by
+      // a passing NPC's step-aside (which left it standing, mode AI_STAND, off its post). On its
+      // slot it's idle (skipped). Then it returns to post once the slot cell clears.
+      const displaced = AI.isSettleInPlace(mode) &&
+        (pos.x[i] !== dest.x[i] || pos.y[i] !== dest.y[i] || pos.z[i] !== dest.z[i]);
+      if (!pathTier && !worktypeActive && !displaced) continue;
 
       // Active-area gate: NPCs whose region isn't loaded are frozen (same predicate as
       // the schedule system). Keeps the expensive path builds bounded to the explored
@@ -153,6 +163,17 @@ export function installNpcTickSystem(world, { avatarRef, now = () => performance
       active++;
 
       const handle = world.handleOf(i);
+
+      // I-17d return-to-post: a displaced settle-in-place NPC (it stood aside for a passing NPC)
+      // walks back to its post once the slot cell is CLEAR. Gating on slot-clear (not immediate)
+      // waits the passer out — breaking the push↔return loop — and the walk-back re-poses on
+      // arrival (atDestination applies Destination.action, e.g. sits back down). While the slot
+      // is still occupied it keeps standing aside (waits). Clone-only: source's settled NPCs
+      // never move, so this serves the clone's step-aside.
+      if (displaced) {
+        if (actorHandleAt(world, dest.x[i], dest.y[i], handle) === null) am.mode[i] = AI.AI_FINDPATH;
+        continue;
+      }
 
       // I-14b/c: this cell's step cost (SubTerrainMov — terrain-weighted) is both the
       // accumulator's per-step price and the credit cap. Fill this actor's movement credit
@@ -163,6 +184,21 @@ export function installNpcTickSystem(world, { avatarRef, now = () => performance
       if (ms) {
         ms.credit[i] += rate(ms.dexterity[i], worldSpeed) * elapsed;
         if (ms.credit[i] > cost) ms.credit[i] = cost;
+      }
+
+      // I-17: active worktype behaviors (npc_behaviors.js — WANDER/GRAZE now; LOITER/FARM +
+      // GUARD pacing in I-17b/c). The credit gate IS the accumulator beat; on a beat the
+      // handler rolls source's per-turn die and steps or idles. We spend stepCost on EVERY
+      // outcome — step, blocked, OR idle — so a high-DEXTE NPC that keeps rolling idle can't
+      // bank beats into a burst (mirrors source's idle SubMov(5)). The probability×accumulator
+      // contract: progress.md §"I-17 scope".
+      if (worktypeActive) {
+        if (ms && ms.credit[i] < cost) continue;            // not a beat yet → wait
+        const r = dispatchWorktype(world, handle, mode, dest, i, rand);
+        if (ms) ms.credit[i] -= cost;                       // spend on step AND idle
+        if (r === 'step') walking++;
+        else if (r === 'blocked') blocked++;
+        continue;
       }
 
       if (mode === AI.AI_86) {

@@ -48,12 +48,9 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 
 **Implementation phase. Current status + the I-N step ledger live in
 [`docs/progress.md`](docs/progress.md)** — its top banner is the single source of truth
-(see that file's §"Doc maintenance"); this section is NOT a status mirror. As of
-2026-06-08: **I-14 (NPC movement speed — DEXTE-paced accumulator) + I-15 (drunk-walk —
-`TryMoveTo`/`__TryDiagMove`) COMPLETE (local, pending review + squash); next I-16 (arrival
-behaviors + direction). NPC-movement arc I-14→I-17: speed model ✓ → drunk-walk ✓ →
-arrival/direction (I-16) → AI behaviors (I-17); status panel/handlers pushed to I-18/I-19.**
-What stays
+(see that file's §"Doc maintenance"); this section is NOT a status mirror — see the banner
+for where we are now. The NPC-movement arc I-14→I-17 is **complete** (speed model → drunk-walk
+→ arrival/direction → AI behaviors); the status panel + handler expansion are I-18/I-19. What stays
 here is the durable, slowly-changing reference — the code layout, the dev console helpers,
 and the per-step **kept deviations** (so a later session doesn't "correct" them). The ECS
 runtime-ground spec is
@@ -63,7 +60,8 @@ MapLevel, Camera, Viewport, Party, Paths, Schedules, **WorldSpeed** (I-14d), …
 `systems/` (render, camera, world-data, schedule, passability, avatar move,
 move-followers, humanoid-anim, pathfinding, npc_path, npc_tick, ai_modes, **move_economy**
 (I-14: DEXTE-paced accumulator — `rate`/`stepCostAt`/`PLAYER_STEP_MS`) + **drunk_walk**
-(I-15: `tryMoveTo`/`tryDiagMove` pathfinding-less primitive), **cell_pick, command_dispatch,
+(I-15: `tryMoveTo`/`tryDiagMove` pathfinding-less primitive) + **npc_behaviors** (I-17:
+WANDER/LOITER/GUARD worktype handlers + displaced-settled stand-aside/return), **cell_pick, command_dispatch,
 use_handlers, use_drawbridge** (I-10), **conversation/** (I-13: `conversation_vm.js`
 standalone effect VM + `opcodes.js` + `conversation_system.js` host), …),
 `assets/` also has **portrait.js** + **converse.js** (lazy lib_32 decoders);
@@ -106,6 +104,15 @@ NPC facing/walk animation: I-9g ported only `C_1E0F_0664`'s humanoid arm, but
 gazers/animals now face + animate too — `npcStep`/`atDestination` are no longer
 humanoid-gated (the `isHumanoid` test survives only inside `setDirection`'s
 type dispatch). This deviation is **lifted**, not kept.
+**I-17 kept deviations:** (1) the **probability×accumulator contract** — a worktype's
+per-turn die (1/8 WANDER/LOITER, 1/2 GUARD) is rolled on each accumulator beat, and the
+tick spends `stepCost` on **idle as well as step** (mirrors source's idle `SubMov`). Don't
+"optimize" idle to skip the spend — it collapses the gentle-drift duty cycle and re-couples
+motion to framerate (the bug I-14's wall-clock integration exists to kill). (2) **Displaced
+settled stand-aside/return (I-17d)** — a settle-in-place NPC shoved off its slot becomes
+`AI_STAND` and returns to re-pose only once the slot cell **clears** (not immediately); the
+clear-gate is what prevents the push↔return loop. Both are **clone-only** (source has neither
+step-aside/return nor a second rate-limiter beyond move-points). See `progress.md §"I-17 scope"`.
 NPC #12's teleport-to-dinner is a *correct* consequence of a CLOSED castle
 drawbridge — NOT a cost-cap bug; do not raise the 7-bit cost cap. **RESOLVED by
 I-10e (2026-06-04):** the drawbridge is now modeled + crossable, so with the

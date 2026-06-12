@@ -5,14 +5,7 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: I-16 (arrival behaviors + direction system) COMPLETE (2026-06-10) — `__AtDestination` prop lookup (`C_1E0F_2184` with the `FindLoc`/`NextLoc` multi-tile footprint + `D_0658`), the `C_1E0F_0664` direction/frame system (humanoid + non-humanoid per-type arms), sprite-restore-on-wake, and (I-16d) `AI_SCHEDULE` continuous-settle (`resolveActiveSlot` + per-tick `__AtDestination`, `seg_1E0F.c:2198`). Lord British now loads sitting + facing his throne; NPCs settle their current worktype at load instead of waiting for the next hour. See §"I-16 scope" + its AI-mode dispatch coverage table (the I-16/I-17 boundary record). Next: I-17 (NPC AI behaviors — `WANDER`/`GRAZE`/`LOITER`/`FARM` persistent activities via `C_1E0F_37DB`/`C_1E0F_33C4`, then `GUARD` pacing + `RINGBELL` anim; thief/law granularity scoped there). NPC-movement arc I-14→I-17: speed ✓ → drunk-walk ✓ → arrival/direction ✓ → AI behaviors (I-17); status panel/handlers at I-18/I-19. I-9/I-10/I-14/I-15 squashed + force-pushed in the 2026-06-09 commit cleanup.** Prior: I-13 (conversation VM, pushed). — the
-`converse.a/.b` bytecode VM is a **standalone generator that yields typed effects**
-(conversation_vm.js), driven by a host (conversation_system.js) into the now-live dialog
-window: portrait + streaming text + clickable `@`keywords/chips + input. Coverage: **200/200
-NPC scripts run clean + terminate, 0 crashes** (the 3 stray-`unknownOp` scripts + NPC 183
-resolved 2026-06-08 — see §"I-13 scope" → "Indexed string/value tables"). Party join/leave,
-trade UI, resurrect, and `rest`'s time-skip are **documented deferrals** (stub-when-deferred).
-See §"I-13 scope".
+**Status: I-17 (NPC AI behaviors) COMPLETE (2026-06-11) — the moving schedule worktypes are now active per-turn behaviors: `WANDER`/`GRAZE` (`C_1E0F_37DB`), `LOITER`/`FARM` (`C_1E0F_33C4`), `GUARD` pacing (`:1820`), all riding the I-14 accumulator via the probability×accumulator contract (the credit gate is the beat; source's per-turn die picks step-vs-idle; idle spends too, so a high-DEXTE NPC can't bank beats into a burst). Plus I-17d: a displaced settle-in-place NPC (shoved aside by a passing NPC's step-aside) stands up, then returns to post + re-poses once the slot cell clears. `RINGBELL` (on-demand bell tile-anim) split to its own later step; combat/thief/law deferred by design. test_pathfinding 194/194; WANDER+LOITER live-verified on real data. See §"I-17 scope". Next: I-18 (status panel).** Prior: I-16 (arrival behaviors + direction system, §"I-16 scope") and the conversation system I-12/I-13 (walk + talk end-to-end, §"I-13 scope").
 
 This banner is the **single canonical current-status line** — `CLAUDE.md` and
 `DOCUMENTATION_INDEX.md` point here instead of mirroring it (convention: §"Doc maintenance").
@@ -63,7 +56,7 @@ banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 | I-15 | **drunk-walk approach** — `TryMoveTo` greedy fallback chain + `__TryDiagMove` corner-clearance (the pathfinding-less move primitive for chase/flee). Rides on I-14. New `systems/drunk_walk.js`; no live consumer yet (I-17 wires it); dev hook `__U6.driveTo`. | **done** (a–c + step-aside; squashed + pushed) |
 | I-save/load | **save/load — full-snapshot JSON persistence** — generic ECS snapshot (every live entity's components + mutable resources) → JSON; Export downloads, Import re-uploads + restores on reload. Restore *replaces* `loadActors` and re-marks `loadedRegions`, so deletions stay dead + mutations survive without tombstones (`research_save_load.md`). Non-numeric label keeps the I-16…I-19 arc intact. | **done** (a–g, 2026-06-10) |
 | I-16 | **arrival behaviors + direction system** — `__AtDestination` prop lookup for sit/sleep/eat/play (`C_1E0F_2184` + `FindLoc`/`NextLoc` multi-tile footprint + `D_0658`) + fallbacks, eating dynamic facing (`C_1E0F_2125`), the `C_1E0F_0664` frame system (humanoid + non-humanoid per-type arms) + chair-overrides-facing, sprite-restore-on-wake, and (d) `AI_SCHEDULE` continuous-settle (`resolveActiveSlot` + per-tick `__AtDestination`). | **done** (a–c + 2 review fixes + d; carries the AI-mode dispatch coverage table) |
-| I-17 | **NPC AI behaviors** — modes on top of I-14/I-15: persistent activities (`AI_WANDER`/`FARM`/`LOITER`/`GRAZE`) first, then guard/law-enforcement + thief (granularity scoped at I-17). (was I-16) | planned |
+| I-17 | **NPC AI behaviors** — the moving worktypes as active per-turn behaviors: `WANDER`/`GRAZE` (`C_1E0F_37DB`), `LOITER`/`FARM` (`C_1E0F_33C4`), `GUARD` pacing, via the probability×accumulator contract; + **I-17d** displaced settle-in-place NPCs stand aside on a shove & return to post + re-pose when the slot clears. `RINGBELL` split to its own later step; thief/law + combat deferred by design. See §"I-17 scope". | **done** (a–d) |
 | I-18 | status panel — third surface on the substrate; replaces the dev HUD's clock readout (was I-14→I-17) | planned |
 | I-19 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / moonstones / instruments / etc.); each handler tied to its owning subsystem when that subsystem lands (was I-15→I-18) | planned |
 
@@ -2898,7 +2891,7 @@ settle (`tests/test_pathfinding.js`, **157/157**).
 ### AI-mode dispatch coverage — the I-16 / I-17 boundary record
 
 The full `NPCMode` dispatch is the `switch(NPCMode)` at `seg_1E0F.c:1748` (per-NPC AI turn) + `__AtDestination`
-(`:1002`) for arrivals + the `AI_SCHEDULE`→`__AtDestination` settle (`:2198`). Coverage as of I-16:
+(`:1002`) for arrivals + the `AI_SCHEDULE`→`__AtDestination` settle (`:2198`). Coverage as of I-17:
 
 | Mode(s) | Source handler | Clone status |
 |---|---|---|
@@ -2906,10 +2899,10 @@ The full `NPCMode` dispatch is the `switch(NPCMode)` at `seg_1E0F.c:1748` (per-N
 | `AI_FINDPATH`/`ONPATH`/`84`/`85`/`86` 0x81–86 | pathfind + `__DoOnPath` | ported (I-9) |
 | `AI_STAND_N..W` 0x87–8a | arrival facing | ported (I-9g / I-16) |
 | `AI_SLEEP`/`SIT`/`EAT`/`PLAY` 0x91–95 | arrival pose + idle | ported (I-16; multi-tile + wake-restore fixed) |
-| `AI_GUARD_N..W` 0x8b–8e | arrival facing **+ pacing** (`:1820`) | facing ported; **pacing → I-17** |
-| `AI_WANDER`/`GRAZE` 0x8f | `C_1E0F_37DB` (1/8 → one random cardinal step) | **not ported → I-17** |
-| `AI_LOITER`/`FARM` 0x90/94 | `C_1E0F_33C4` (1/8 → one step drifting near the slot) | **not ported → I-17** |
-| `AI_RINGBELL` 0x98 | arrival + bell tile anim (`:1835`) | arrival ported; **bell anim → I-17** |
+| `AI_GUARD_N..W` 0x8b–8e | arrival facing **+ pacing** (`:1820`) | facing ported (I-9g/I-16); **pacing ported (I-17c)** |
+| `AI_WANDER`/`GRAZE` 0x8f | `C_1E0F_37DB` (1/8 → one random cardinal step) | **ported (I-17a)** |
+| `AI_LOITER`/`FARM` 0x90/94 | `C_1E0F_33C4` (1/8 → one step drifting near the slot) | **ported (I-17b)** |
+| `AI_RINGBELL` 0x98 | arrival + bell tile anim (`:1835`) | arrival ported; **bell anim → its own later step** (on-demand tile-anim trigger) |
 | `AI_SEEKOBJ` 0x82 | seek a chair/bed | not ported (rarely a schedule action) |
 | `AI_CONVERSE`/`THIEF` 0x96/97 | approach player → talk/steal | deferred (player-interaction) |
 | `AI_BRAWL`/`9A`/`VIGILANTE`/`ARREST` + all `COMBAT_AI_*` | combat subsystem | deferred by design (no combat yet) |
@@ -2918,6 +2911,138 @@ The full `NPCMode` dispatch is the `switch(NPCMode)` at `seg_1E0F.c:1748` (per-N
 feature the ledger already called done* (the throne `D_0658` footprint; the wake-time sprite restore), and the
 `AI_SCHEDULE`-settle gap (I-16d) was a whole dispatch arm the clone silently skipped. The cheap defense is to
 enumerate the source dispatch arms a step claims to cover and mark each **ported / deferred-with-reason** — this
-table. I-17 picks up the `→ I-17` rows: persistent activities first (`WANDER`/`GRAZE` via `C_1E0F_37DB`,
-`LOITER`/`FARM` via `C_1E0F_33C4`, both riding the I-14/I-15 move primitives), then `GUARD` pacing + `RINGBELL`
-animation; combat-AI and thief/law modes stay deferred by design (educational-port scope, `user_retro_port_goal`).
+table. I-17 picks up three of the `→ I-17` rows: the persistent moving worktypes `WANDER`/`GRAZE` (via
+`C_1E0F_37DB`), `LOITER`/`FARM` (via `C_1E0F_33C4`), and `GUARD` pacing, all riding the I-14/I-15 move primitives.
+`RINGBELL` is **split to its own later step** (it needs an on-demand "trigger a specific tile's animation" hook the
+clone doesn't have yet — see §"I-17 scope"); combat-AI and thief/law modes stay deferred by design (educational-port
+scope, `user_retro_port_goal`).
+
+## I-17 scope — NPC AI behaviors (persistent moving worktypes + guard pacing)
+
+**Status: COMPLETE (2026-06-11).** The moving schedule worktypes are now active per-turn behaviors (a–c), plus
+I-17d (displaced settle-in-place NPCs stand aside on a shove + return to post). test_pathfinding **194/194**;
+WANDER + LOITER live-verified moving on real data. Spec:
+[U6_NPC_排程與移動邏輯.md](U6_NPC_排程與移動邏輯.md) + `research_npc_ai.md §"Per-mode dispatcher"`.
+
+Turns the **moving** schedule worktypes from idle leaf states (where I-16's `__AtDestination` parks them on arrival)
+into **active per-turn behaviors**. The clone analog of the worktype cases in source's per-mode dispatcher
+`C_1E0F_3E6A` (`seg_1E0F.c:1733-1848`). Builds entirely on existing primitives — the I-14 DEXTE accumulator
+(`move_economy.js`), the I-15 `tryMoveTo`/`npcStep` move kernel (`drunk_walk.js` / `npc_path.js`), and the I-16c
+non-humanoid facing (so animals/gazers face + animate). **No new pathfinding.** Worklist = the `→ I-17` rows of the
+§"I-16 scope" AI-mode dispatch coverage table.
+
+**In scope — the three non-combat moving worktypes (verified against source 2026-06-11):**
+
+| Worktype | Source | Behavior |
+|---|---|---|
+| `WANDER`/`GRAZE` 0x8f / 0x0c | `C_1E0F_37DB` (`seg_1E0F.c:1558-1574`) | 1/8 → one step in a random cardinal (`OSI_rand(0,3)<<1`), else idle |
+| `LOITER`/`FARM` 0x90 / 0x94 | `C_1E0F_33C4` (`:1448-1462`) + `C_1E0F_31C7` (`:1391`) | 1/8 → one geometric-random-biased step *toward the slot*, else idle |
+| `GUARD_N..W` 0x8b–8e | dispatcher arm `:1820-1834` | 50% idle; else march guard-axis (on-slot) or current facing, reverse `dir^4` on a block |
+
+`GRAZE` (0x0c) shares `C_1E0F_37DB` with `WANDER` (`:1810-1811`) but is set as an animal *disposition*, not a
+schedule action — covered for free by the same handler once the 0x0c routing is added.
+
+**Plus — I-17d: displaced settle-in-place NPCs (stand aside on a shove + return to post).** Completes the
+clone-only step-aside (I-9). When a passing NPC's step-aside shoves a settle-in-place NPC
+(STAND/SIT/SLEEP/EAT/PLAY) off its slot, it now **stands up** — mode → `AI_STAND` facing the shove + a plain stand
+pose, any SLEEP/PLAY sprite swap restored — instead of freezing mid-stride or leaving a sit pose stranded on empty
+floor. It keeps its `Destination` (slot + original worktype) and **walks back + re-poses** (sits/sleeps again) once
+the slot cell **clears**. The clear-slot gate is the key: it waits the passer out, so there's no push↔return loop
+(the loop the original step-aside comment warned about). Moving worktypes (WANDER/LOITER/FARM) and GUARD are left to
+their own handlers — not converted. **Clone-only mechanism** — source has neither step-aside nor return (its settled
+NPCs never move); it serves the clone's auto-advance heartbeat, the kind the post-I-9 audit calls legitimate.
+
+**Split out / deferred (decided 2026-06-11):**
+- **`RINGBELL` (0x98) → its own later I-step.** Source `SetTileAnimation(BaseTile[OBJ_0EC], 1)` (`:1841`) is an
+  *on-demand* tile animation; the clone's `tile_animation_system.js` is always-on for animdata-flagged tiles, so
+  this needs a "start/stop a specific tile's animation" extension that doesn't exist yet. The mode + chime-count
+  logic (`MUS_Bell = Time_H % 12`, 0→12) is trivial; the missing piece is the triggered visual swing.
+- **`THIEF`/`ARREST`/`VIGILANTE`/`BRAWL` + all `COMBAT_AI_*`** — deferred by design (no combat subsystem;
+  educational-port scope, `user_retro_port_goal`).
+- **`AI_9A` (0x9a) skittish-creature flee — NOT an I-17 activity (verified live 2026-06-11).** Trap to record: a
+  schedule worktype can *look* like an I-17 persistent activity yet dispatch to combat AI. The **castle mouse**
+  (npcId 9, `OBJ_162`) carries worktype `0x9a` on 5 of its 6 slots, but source routes `0x9a` (with
+  `AI_RETREAT`/`SHY`/`FEAR`) to **`COMBAT_AI_Retreat`** (`seg_1E0F.c:1760`) — a flee/scurry handler in the deferred
+  combat subsystem, not `C_1E0F_37DB`/`33C4`. So I-17's `WANDER`/`LOITER`/`GUARD` arms **do not** cover it; the mouse
+  stays idle/stuck after I-17 (expected, not a regression — making it scurry needs `COMBAT_AI_Retreat`). **Not a z
+  case:** all six mouse slots are z=0. Its "scurries the castle at night, missing by day" is fully explained by
+  slot-reachability + the unported flee AI: night slots are central & reachable (h0/h19/h21 within ~9 of the castle
+  center → the FINDPATH walk is the only motion the clone gives it → visible), day slots are peripheral & blocked
+  (h7/h12/h14 at dist 17–28; the path fails and, being **in view**, the 2026-06-10 rule correctly refuses to teleport
+  it → it parks motionless in `AI_SCHEDULE`/`AI_86`). A clean instance of the "in-view + unreachable slot → frozen
+  NPC" interaction the post-I-9 audit flagged.
+- **The `IsPlrControl` wander-toward-player arm** of `C_1E0F_37DB` (`:1561-1567`, 1/4 → `TryMoveTo(MapX,MapY)`) —
+  needs NPC player-control/charm, which doesn't exist; dropped with a note.
+
+### Design preamble — the probability × accumulator contract
+
+Source rate-limits these behaviors **twice**, and the clone reproduces only one of the two for free. The contract
+is how I-17 re-introduces the second on top of the I-14 accumulator.
+
+**Limiter #1 — how often the NPC gets a turn (DEXTE-paced).** The round scheduler `C_1E0F_4E0A` grants turns by the
+`MovePts/DEXTE` ratio, so high-`DEXTE` NPCs act more often per game-minute. This is the NPC's *clock rate*.
+
+**Limiter #2 — the per-turn dice roll (duty cycle).** Inside the handler, even on a granted turn the NPC usually
+does nothing — `WANDER`: `if(OSI_rand(0,7)==0) TryStraightMove(...); else SubMov(5)`. The decisive detail: **both
+branches spend move points** (`TryStraightMove`→`SubMov` internally; the idle branch calls `SubMov(5)` explicitly),
+so the budget drains either way and skipped turns can't bank into a later burst. The roll only decides whether
+*this* turn's expenditure produces visible motion. Net feel: the NPC gets many turns but only shuffles a step on
+~1/8 of them — the gentle townsfolk drift.
+
+**What the clone already has.** The I-14 accumulator reproduces **limiter #1** faithfully and refresh-rate-
+independently: `credit += rate(dexterity)·elapsed`, capped at the cell's `stepCost`; a step is allowed only when
+`credit ≥ stepCost` and subtracts it. It does **not** reproduce limiter #2 — "step whenever credit allows" would
+walk a continuous random walk every eligible beat, losing the 1/8.
+
+**The contract — slot the source roll between eligibility and spend, and spend on BOTH outcomes:**
+
+```
+on each tick, for a worktype-active NPC:
+  if credit < stepCost:  wait                         // limiter #1 (accumulator beat)
+  else:
+    if roll(source_probability) hits:                 // limiter #2 (source's coin)
+        attempt move (tryStraightMove / tryMoveTo);  spend stepCost
+    else:
+        idle;                                         spend stepCost   ← load-bearing
+```
+
+**Why the idle branch must also spend** (mirrors source's `else SubMov(5)`): if a miss didn't spend, `credit` stays
+`≥ stepCost`, so the handler re-rolls on the *next render tick* (~16 ms) and keeps re-rolling until it hits — the
+first step lands within a few ms instead of on the next DEXTE beat, collapsing the duty cycle toward ~100% (constant
+walking). Worse, it'd be **framerate-coupled** (144 Hz rolls more often than 60 Hz → faster wandering on a faster
+monitor) — the exact bug I-14's wall-clock integration exists to kill. Spending on a miss forces the NPC to wait for
+the accumulator to refill before its next roll. So: **the accumulator decides the beats; on each beat the NPC flips
+the source coin to decide step-vs-stand.** Both limiters preserved at once. Dropping either changes the feel (no
+accumulator → wrong/refresh-coupled speed; no probability → constant walking, no idle shuffle).
+
+**Not a new invention.** This is the same gate the path-walker already uses — `npc_tick_system.js` waits on
+`credit < cost` and spends cost on `step`/`blocked`/`aside` alike (a *blocked* path step already spends, same
+"no-progress turns still cost" principle). The contract just inserts the source probability roll between the
+eligibility check and the spend; the move-economy gate itself is unchanged.
+
+**Kept deviation:** source's idle spends a flat 5 move points; a step spends terrain-weighted `SubTerrainMov`. The
+clone caps `credit` at the cell's `stepCost`, so idle and step "cost" the same here (idle marginally pricier on heavy
+terrain than source's flat 5) — invisible in play, simplest reset.
+
+### Sub-steps (landed a–d)
+
+- **a — WANDER/GRAZE** (`C_1E0F_37DB`) **+ the dispatch seam.** New `systems/npc_behaviors.js` holds the active
+  worktype handlers (separately unit-testable, mirroring how `npc_path.js` holds `doOnPath`/`atDestination`).
+  `npc_tick_system` lets the active-worktype modes through the mode gate, shares the I-14 credit-fill + step-gate
+  with the path-walkers, and dispatches via `dispatchWorktype`. `wander()` = 1/8 random cardinal, else idle;
+  `AI_GRAZE` (0x0c) + `isActiveWorktype` added to `ai_modes`. The probability×accumulator wrapper (spend stepCost on
+  step AND idle) lives in the tick. The `IsPlrControl`-toward-player arm is dropped (noted above).
+- **b — LOITER/FARM** (`C_1E0F_33C4` + the geometric-random `C_1E0F_31C7`). `loiter()` = 1/8 → one jittered step
+  toward the `Destination` slot, else idle.
+- **c — GUARD pacing** (dispatcher `:1820-1834`). `guardPace()` = 50% idle; else march the guard cardinal on-post /
+  the current frame-facing off-post (consumes the I-9g/I-16 "read facing from `frame>>2`" hook), reversing
+  (`dir^4`) on a block.
+- **d — displaced settled NPCs: stand aside + return to post** (see the I-17d paragraph above). `isSettleInPlace`
+  added; the `npc_path.js` step-aside converts a shoved settle-in-place blocker to `AI_STAND` + stand pose (sprite
+  restored), keeping its `Destination`; `requestStepAside` returns the shove dir; `actorHandleAt` exported. The
+  `npc_tick_system` return-to-post branch sends a displaced settle-in-place NPC back (`AI_FINDPATH`) once
+  `actorHandleAt` shows the slot cell clear, re-posing on arrival via `atDestination`.
+
+All deterministic tests use an injected `rand` (the `drunk_walk` pattern). test_pathfinding **194/194**; WANDER +
+LOITER live-verified moving on real data (gentle 1/8 drift, no console errors). The handlers carry their
+`// C_1E0F_*` citations.

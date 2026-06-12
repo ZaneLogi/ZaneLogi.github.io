@@ -106,17 +106,31 @@ export function doOnPath(world, handle) {
     const nx = (pos.x[i] + DIR_DX[dir8]) & 0x3ff;
     const ny = (pos.y[i] + DIR_DY[dir8]) & 0x3ff;
     const blocker = actorHandleAt(world, nx, ny, handle);
-    if (blocker !== null && requestStepAside(world, blocker, dir8)) {
-      // Blocker vacated → re-plan THIS NPC from here. Re-path the blocker ONLY if it was
-      // itself MID-JOURNEY (pathfinding tier) — re-finding then sends it toward its own goal,
-      // away from the contested cell. A SETTLED blocker (worktype / SCHEDULE / party — modes
-      // outside 0x81..0x86) is LEFT where it stepped: its "goal" is the very cell it was
-      // pushed off (its schedule slot), so re-pathing it there caused an infinite
-      // push↔return loop. Left alone it stays put (its worktype doesn't drive movement) and
-      // re-snaps to its proper slot at the next schedule hour.
+    const asideDir = blocker !== null ? requestStepAside(world, blocker, dir8) : -1;
+    if (asideDir !== -1) {
+      // Blocker vacated → re-plan THIS NPC from here. The blocker's follow-up depends on what it
+      // was doing:
+      //   - MID-JOURNEY (pathfinding tier 0x81..0x86) → AI_FINDPATH: re-find toward its OWN goal,
+      //     away from the contested cell.
+      //   - SETTLE-IN-PLACE worktype (STAND/SIT/SLEEP/EAT/PLAY/RINGBELL) → STAND UP (I-17d): set
+      //     mode AI_STAND facing the shove + a plain stand pose (undoing any SLEEP/PLAY sprite
+      //     swap), leaving its Destination (slot + original worktype) intact. It walks back and
+      //     re-poses once the slot clears (the return-to-post branch in npc_tick_system). NOT
+      //     re-pathed here — the immediate walk-back caused a push↔return loop; the clear-slot
+      //     gate breaks it. (Standing up also fixes the visual: no frozen mid-stride / no sit
+      //     pose stranded on empty floor.)
+      //   - anything else (WANDER/LOITER/FARM/GUARD/party/SCHEDULE) → left to its own handler.
       const bi = world.resolve(blocker);
-      if (bi !== -1 && am.mode[bi] >= AI.AI_FINDPATH && am.mode[bi] <= AI.AI_86)
-        am.mode[bi] = AI.AI_FINDPATH;
+      if (bi !== -1) {
+        if (am.mode[bi] >= AI.AI_FINDPATH && am.mode[bi] <= AI.AI_86) {
+          am.mode[bi] = AI.AI_FINDPATH;
+        } else if (AI.isSettleInPlace(am.mode[bi])) {
+          const ot = world.store(ObjType);
+          ot.objNumber[bi] = ot.origObjNumber[bi];          // undo SLEEP/PLAY sprite swap (no-op otherwise)
+          am.mode[bi] = AI.AI_STAND_N + (asideDir >> 1);    // stand, facing the shove direction
+          setDirection(world, blocker, asideDir, null);     // arrival arm → plain stand frame + tileId
+        }
+      }
       am.mode[i] = AI.AI_FINDPATH;
       paths.delete(handle);
       return 'aside';
@@ -133,8 +147,9 @@ export function doOnPath(world, handle) {
 
 // Is there another actor (≠ self) standing at (x,y)? Returns its handle, or null. (The
 // SpatialIndex cell chain — same actor-occupancy test as world_loader.actorAtCell, but
-// returns the handle so the caller can act on the blocker.)
-function actorHandleAt(world, x, y, selfHandle) {
+// returns the handle so the caller can act on the blocker.) Exported for the I-17d
+// return-to-post slot-clear check in npc_tick_system.
+export function actorHandleAt(world, x, y, selfHandle) {
   const ents = world.getResource(SpatialIndex).at(x, y);
   if (!ents) return null;
   for (const h of ents) {
@@ -150,13 +165,13 @@ function actorHandleAt(world, x, y, selfHandle) {
 // it clears the exact row/column the mover walks). Perpendicular-ONLY: if both sideways cells
 // are blocked there's genuinely no room to make way (a 1-wide corridor), so return false and
 // let the faithful 84/85/86 wait handle it — never shove the blocker forward/backward (that
-// leapfrogs or doesn't clear the lane). Returns true if it moved. A reactive "free" step (not
-// accumulator-gated); source has no such mechanism. (Tries the first open side; a same-axis
-// bias is harmless — could randomise the side later.)
+// leapfrogs or doesn't clear the lane). Returns the cardinal dir it moved (0/2/4/6), or -1 if it
+// couldn't make way. A reactive "free" step (not accumulator-gated); source has no such
+// mechanism. (Tries the first open side; a same-axis bias is harmless — could randomise later.)
 function requestStepAside(world, blockerHandle, moverDir8) {
   const perp = (moverDir8 === 2 || moverDir8 === 6) ? [0, 4] : [2, 6];   // E/W → N,S ; N/S → E,W
-  for (const d of perp) if (npcStep(world, blockerHandle, d, false) !== null) return true;
-  return false;
+  for (const d of perp) if (npcStep(world, blockerHandle, d, false) !== null) return d;   // the dir it moved
+  return -1;                                                                              // couldn't make way
 }
 
 // Chebyshev distance on the wrapped 1024-cell overworld axis — source's

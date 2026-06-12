@@ -23,6 +23,7 @@ import { npcStep, doOnPath, atDestination } from '../systems/npc_path.js';
 import { installNpcTickSystem } from '../systems/npc_tick_system.js';
 import { stepCostAt, BASE_COST } from '../systems/move_economy.js';
 import { installNpcScheduleSystem } from '../systems/npc_schedule_system.js';
+import { wander, loiter, guardPace, dispatchWorktype } from '../systems/npc_behaviors.js';
 import * as AI from '../systems/ai_modes.js';
 
 const results = [];
@@ -1157,6 +1158,274 @@ function setupGateWorld({ npc, avatar, dest, action = AI.AI_STAND_N, terrainAt =
   check('I-9h first-tick: load alignment sets the current-hour Destination (60,60)', dest.x[i] === 60 && dest.y[i] === 60);
   check('I-9h first-tick: load alignment kicks AI_FINDPATH', am.mode[i] === AI.AI_FINDPATH);
   check('I-9h first-tick: one NPC triggered', stats.triggered === 1);
+}
+
+// ============================================================================
+// I-17a — WANDER / GRAZE (C_1E0F_37DB): 1/8 random cardinal step, else idle
+// ============================================================================
+// A deterministic RNG: returns queued values in order, ignoring the (a,b) bounds, so a test
+// drives source's OSI_rand sequence exactly. Falls back to the last value once drained.
+function mkRand(seq) {
+  let k = 0;
+  return () => (k < seq.length ? seq[k++] : seq[seq.length - 1]);
+}
+
+// 7/8 turns: the (0,7) roll misses → idle, no move.
+{
+  const { world, handles } = setupWorld({
+    entities: [{ x: 10, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_WANDER }],
+  });
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position);
+  const r = wander(world, h, mkRand([1]));            // rand(0,7)=1 ≠ 0 → idle
+  check('I-17a wander: miss roll → idle, no move', r === 'idle' && pos.x[i] === 10 && pos.y[i] === 10);
+}
+// 1/8 turns: hit → one step in the random cardinal (rand(0,3)=1 → dir 2 = E).
+{
+  const { world, handles } = setupWorld({
+    entities: [{ x: 10, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_WANDER }],
+  });
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position);
+  const r = wander(world, h, mkRand([0, 1]));         // hit; cardinal index 1 → dir 2 (E)
+  check('I-17a wander: hit roll → steps a random cardinal (east)', r === 'step' && pos.x[i] === 11 && pos.y[i] === 10);
+}
+// Hit but the chosen cardinal is walled → 'blocked', no move.
+{
+  const { world, handles } = setupWorld({
+    tileFlags: { 99: { terrain: 0x02 } },
+    terrainAt: { '11,10': 99 },                        // wall directly east
+    entities: [{ x: 10, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_WANDER }],
+  });
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position);
+  const r = wander(world, h, mkRand([0, 1]));         // hit + pick E (blocked)
+  check('I-17a wander: hit but blocked → blocked, no move', r === 'blocked' && pos.x[i] === 10 && pos.y[i] === 10);
+}
+// GRAZE (0x0c, animal disposition) routes to the same handler via dispatchWorktype.
+{
+  const { world, handles } = setupWorld({
+    entities: [{ x: 10, y: 10, obj: 0x16a, frame: 7, tile: 0, actor: true, aimode: AI.AI_GRAZE }],
+  });
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position), dest = world.store(Destination);
+  world.add(h, Destination, { x: 10, y: 10, z: 0, action: AI.AI_GRAZE });
+  const r = dispatchWorktype(world, h, AI.AI_GRAZE, dest, i, mkRand([0, 0]));   // hit; index 0 → dir 0 (N)
+  check('I-17a GRAZE: routes to wander (steps north)', r === 'step' && pos.x[i] === 10 && pos.y[i] === 9);
+}
+// Tick seam: a WANDER NPC dispatches THROUGH the tick, gated by the accumulator beat, and
+// idle still SPENDS credit (the probability×accumulator contract — no banking into a burst).
+{
+  let T = 0; const now = () => T;
+  const { world, handles } = setupWorld({
+    entities: [{ x: 20, y: 20, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_WANDER, dex: 15 }],
+    moveSpeed: true,
+  });
+  world.getResource(SpatialIndex).loadedRegions.add(0);
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position), ms = world.store(MoveSpeed);
+  world.add(h, Destination, { x: 20, y: 20, z: 0, action: AI.AI_WANDER });
+  const { system, stats } = installNpcTickSystem(world, { now, rand: mkRand([1]) });   // always-miss roll
+  T += 1000; system();                                 // a full beat's credit, rolled idle
+  check('I-17a tick: WANDER is now an active worktype (counted, not skipped)', stats.active === 1);
+  check('I-17a tick: idle roll → no move', pos.x[i] === 20 && pos.y[i] === 20);
+  check('I-17a tick: idle still spends credit (no banking)', ms.credit[i] < stepCostAt(world, 20, 20, 0));
+}
+
+// ============================================================================
+// I-17b — LOITER / FARM (C_1E0F_33C4): 1/8 geom-random step toward the slot, else idle
+// ============================================================================
+// miss roll → idle
+{
+  const { world, handles } = setupWorld({
+    entities: [{ x: 20, y: 20, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_LOITER }],
+  });
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position);
+  const r = loiter(world, h, 25, 20, mkRand([1]));     // gate roll misses
+  check('I-17b loiter: miss roll → idle, no move', r === 'idle' && pos.x[i] === 20 && pos.y[i] === 20);
+}
+// hit, slot due EAST → horizontal axis, step E toward it (all-0 rand → geom 0 → straight bias)
+{
+  const { world, handles } = setupWorld({
+    entities: [{ x: 20, y: 20, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_LOITER }],
+  });
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position);
+  const r = loiter(world, h, 25, 20, mkRand([0]));
+  check('I-17b loiter: steps toward an east slot (E)', r === 'step' && pos.x[i] === 21 && pos.y[i] === 20);
+}
+// hit, slot due NORTH → vertical axis, step N toward it
+{
+  const { world, handles } = setupWorld({
+    entities: [{ x: 20, y: 20, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_LOITER }],
+  });
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position);
+  const r = loiter(world, h, 20, 15, mkRand([0]));
+  check('I-17b loiter: steps toward a north slot (N)', r === 'step' && pos.x[i] === 20 && pos.y[i] === 19);
+}
+// hit but the toward-slot cell is walled → blocked, no move
+{
+  const { world, handles } = setupWorld({
+    tileFlags: { 99: { terrain: 0x02 } },
+    terrainAt: { '21,20': 99 },                          // wall east (the toward-slot cell)
+    entities: [{ x: 20, y: 20, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_LOITER }],
+  });
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position);
+  const r = loiter(world, h, 25, 20, mkRand([0]));
+  check('I-17b loiter: hit but blocked → blocked, no move', r === 'blocked' && pos.x[i] === 20);
+}
+// FARM routes to the same handler via dispatchWorktype, reading the slot from Destination
+{
+  const { world, handles } = setupWorld({
+    entities: [{ x: 20, y: 20, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_FARM }],
+  });
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position), dest = world.store(Destination);
+  world.add(h, Destination, { x: 25, y: 20, z: 0, action: AI.AI_FARM });
+  const r = dispatchWorktype(world, h, AI.AI_FARM, dest, i, mkRand([0]));
+  check('I-17b FARM: routes to loiter (steps toward slot, E)', r === 'step' && pos.x[i] === 21);
+}
+
+// ============================================================================
+// I-17c — GUARD pacing (dispatcher :1820-1834): 50% idle; else march, reverse on a block
+// ============================================================================
+// 50% of beats: idle.
+{
+  const { world, handles } = setupWorld({
+    entities: [{ x: 20, y: 20, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_GUARD_E }],
+  });
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position);
+  const r = guardPace(world, h, AI.AI_GUARD_E, 20, 20, mkRand([0]));   // coin = 0 → idle
+  check('I-17c guard: 50% idle (coin 0) → no move', r === 'idle' && pos.x[i] === 20 && pos.y[i] === 20);
+}
+// On the home post: march along the guard cardinal (GUARD_E → east).
+{
+  const { world, handles } = setupWorld({
+    entities: [{ x: 20, y: 20, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_GUARD_E }],
+  });
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position);
+  const r = guardPace(world, h, AI.AI_GUARD_E, 20, 20, mkRand([1]));   // coin = 1 → march; on post → E
+  check('I-17c guard: on post marches the guard axis (E)', r === 'step' && pos.x[i] === 21 && pos.y[i] === 20);
+}
+// Blocked along the axis → reverse and step the other way.
+{
+  const { world, handles } = setupWorld({
+    tileFlags: { 99: { terrain: 0x02 } },
+    terrainAt: { '21,20': 99 },                          // wall east; west (19,20) is clear
+    entities: [{ x: 20, y: 20, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_GUARD_E }],
+  });
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position);
+  const r = guardPace(world, h, AI.AI_GUARD_E, 20, 20, mkRand([1]));   // E blocked → reverse → W
+  check('I-17c guard: blocked → reverses and steps the other way (W)', r === 'step' && pos.x[i] === 19 && pos.y[i] === 20);
+}
+// Off the home post: continue the CURRENT facing read from the frame (facing W = frame 13).
+{
+  const { world, handles } = setupWorld({
+    entities: [{ x: 20, y: 20, obj: 0x19a, frame: 13, tile: 0, actor: true, aimode: AI.AI_GUARD_N }],
+  });
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position);
+  // slot far away (25,25) → off post → dir = facingDir8 = ((13>>2)&3)<<1 = 6 (W).
+  const r = guardPace(world, h, AI.AI_GUARD_N, 25, 25, mkRand([1]));
+  check('I-17c guard: off post continues current facing (frame W → steps W)', r === 'step' && pos.x[i] === 19 && pos.y[i] === 20);
+}
+// Boxed in both ways → blocked, no move (faithful: tries axis, reverses, gives up).
+{
+  const { world, handles } = setupWorld({
+    tileFlags: { 99: { terrain: 0x02 } },
+    terrainAt: { '21,20': 99, '19,20': 99 },             // walls both east and west
+    entities: [{ x: 20, y: 20, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_GUARD_E }],
+  });
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position);
+  const r = guardPace(world, h, AI.AI_GUARD_E, 20, 20, mkRand([1]));
+  check('I-17c guard: boxed in → blocked, no move', r === 'blocked' && pos.x[i] === 20 && pos.y[i] === 20);
+}
+// GUARD_S routes via dispatchWorktype, reading the post from Destination (on post → south).
+{
+  const { world, handles } = setupWorld({
+    entities: [{ x: 20, y: 20, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_GUARD_S }],
+  });
+  const h = handles[0], i = world.resolve(h), pos = world.store(Position), dest = world.store(Destination);
+  world.add(h, Destination, { x: 20, y: 20, z: 0, action: AI.AI_GUARD_S });
+  const r = dispatchWorktype(world, h, AI.AI_GUARD_S, dest, i, mkRand([1]));
+  check('I-17c GUARD_S: routes to guardPace (on post marches S)', r === 'step' && pos.y[i] === 21 && pos.x[i] === 20);
+}
+
+// ============================================================================
+// I-17d — displaced settle-in-place NPC: stand aside on a shove, return + re-pose when clear
+// ============================================================================
+// A passing NPC shoves a SITTING NPC off its slot → it STANDS UP (mode AI_STAND, off-slot,
+// stand pose) but keeps its Destination (slot + original SIT worktype) for the return.
+{
+  const { world, handles } = setupWorld({
+    entities: [
+      { x: 10, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_ONPATH },              // mover, east
+      { x: 11, y: 10, obj: 0x19a, frame: (2 << 2) | 3, tile: 0, actor: true, aimode: AI.AI_SIT },      // A sitting on its slot
+    ],
+  });
+  const hMover = handles[0], hA = handles[1], iA = world.resolve(hA);
+  const am = world.store(AIMode), pos = world.store(Position), ot = world.store(ObjType), paths = world.getResource(Paths);
+  world.add(hA, Destination, { x: 11, y: 10, z: 0, action: AI.AI_SIT });
+  paths.set(hMover, [1, 1], 13, 10);
+  const r = doOnPath(world, hMover);
+  check('I-17d: settle-in-place blocker shoved → status aside', r === 'aside');
+  check('I-17d: shoved SIT NPC stands up (mode AI_STAND_*)', am.mode[iA] >= AI.AI_STAND_N && am.mode[iA] <= AI.AI_STAND_W);
+  check('I-17d: shoved NPC is off its slot', !(pos.x[iA] === 11 && pos.y[iA] === 10));
+  check('I-17d: a plain stand pose (low 2 frame bits = 1, not mid-stride)', (ot.frame[iA] & 3) === 1);
+  check('I-17d: Destination keeps the original worktype (SIT) for the return', world.store(Destination).action[iA] === AI.AI_SIT);
+}
+// A SLEEPING NPC (sprite swapped to OBJ_092) shoved → real sprite restored + stands up.
+{
+  const { world, handles } = setupWorld({
+    entities: [
+      { x: 10, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_ONPATH },             // mover
+      { x: 11, y: 10, obj: 0x092, frame: 0, tile: 0, actor: true, aimode: AI.AI_SLEEP },              // A asleep (bed sprite)
+    ],
+  });
+  const hMover = handles[0], hA = handles[1], iA = world.resolve(hA);
+  const am = world.store(AIMode), ot = world.store(ObjType), paths = world.getResource(Paths);
+  ot.origObjNumber[iA] = 0x19a;                                          // real sprite (SLEEP swapped objNumber→0x092)
+  world.add(hA, Destination, { x: 11, y: 10, z: 0, action: AI.AI_SLEEP });
+  paths.set(hMover, [1, 1], 13, 10);
+  doOnPath(world, hMover);
+  check('I-17d: shoved SLEEP NPC restores its real sprite (objNumber → origObjNumber)', ot.objNumber[iA] === 0x19a);
+  check('I-17d: shoved SLEEP NPC stands up (AI_STAND_*)', am.mode[iA] >= AI.AI_STAND_N && am.mode[iA] <= AI.AI_STAND_W);
+}
+// Return-to-post: a displaced NPC whose slot cell is CLEAR → the tick sends it back (AI_FINDPATH).
+{
+  const { world, handles } = setupWorld({
+    entities: [{ x: 10, y: 11, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_STAND_S }],
+  });
+  world.getResource(SpatialIndex).loadedRegions.add(0);
+  const h = handles[0], i = world.resolve(h);
+  world.add(h, Destination, { x: 10, y: 10, z: 0, action: AI.AI_SIT });   // slot (10,10) is empty
+  const am = world.store(AIMode);
+  const { system } = installNpcTickSystem(world);
+  system();
+  check('I-17d return: displaced NPC + clear slot → AI_FINDPATH (walks back)', am.mode[i] === AI.AI_FINDPATH);
+}
+// Return-to-post wait: the slot is still OCCUPIED → the displaced NPC keeps standing aside.
+{
+  const { world, handles } = setupWorld({
+    entities: [
+      { x: 10, y: 11, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_STAND_S },     // displaced (slot 10,10)
+      { x: 10, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_STAND_N },     // squatter on (10,10) = its own slot → idle
+    ],
+  });
+  world.getResource(SpatialIndex).loadedRegions.add(0);
+  const h = handles[0], i = world.resolve(h);
+  world.add(h, Destination, { x: 10, y: 10, z: 0, action: AI.AI_SIT });
+  world.add(handles[1], Destination, { x: 10, y: 10, z: 0, action: AI.AI_STAND_N });
+  const am = world.store(AIMode);
+  const { system } = installNpcTickSystem(world);
+  system();
+  check('I-17d return: slot occupied → displaced NPC waits (stays standing aside)', am.mode[i] === AI.AI_STAND_S);
+}
+// A WANDER blocker is NOT converted to STAND on a shove (it keeps roaming — its own handler).
+{
+  const { world, handles } = setupWorld({
+    entities: [
+      { x: 10, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_ONPATH },     // mover
+      { x: 11, y: 10, obj: 0x19a, frame: 0, tile: 0, actor: true, aimode: AI.AI_WANDER },      // wandering blocker
+    ],
+  });
+  const hMover = handles[0], iB = world.resolve(handles[1]);
+  const am = world.store(AIMode), paths = world.getResource(Paths);
+  paths.set(hMover, [1, 1], 12, 10);
+  doOnPath(world, hMover);
+  check('I-17d: a WANDER blocker is NOT converted to STAND (keeps roaming)', am.mode[iB] === AI.AI_WANDER);
 }
 
 // ── render ──
