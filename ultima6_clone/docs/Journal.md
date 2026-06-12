@@ -28,6 +28,30 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-13 — render fix: pixel-snap the camera (inter-tile bleed lines)
+
+- **Symptom (Zane):** faint vertical/horizontal lines between tiles — "the rightmost line and
+  bottommost line in a tile aren't rendering correctly"; the legacy `../ultima6` port doesn't.
+- **Diagnosis** (compared the two WebGL renderers as Zane suggested): the vertex shaders are
+  byte-identical EXCEPT the clone's adds `- u_scroll` (sub-tile pan). Render-to-fit makes the
+  canvas **odd** (683×285) → `centerOn`'s `- canvas.width/2` puts the camera on a **half-pixel**
+  → fractional `u_scroll` (2.5, 9.5). The atlas is **NEAREST**-sampled with **edge-to-edge** UVs,
+  so a tile's right/bottom edge then samples across the atlas-tile boundary into the neighbour =
+  the bleed lines. The legacy `map_viewer_renderer.js` has **no `u_scroll`** (integer tile
+  positions) → never bleeds. **dpr handling is IDENTICAL** in both (`dpr = 1`), so that's not the
+  difference (the 1.5× softness is shared, separate).
+- **Fix:** `CameraSystem` already wraps the camera each frame before the renderers — made it also
+  `Math.round` to whole pixels. NEAREST quantises to whole pixels anyway → no smoothness lost;
+  matches the legacy port's pixel-perfect rendering. Doc'd in `progress.md §"Render-to-fit
+  viewport"` with the **invariant** (camera must stay pixel-aligned given NEAREST + edge-to-edge
+  UVs; a future sub-pixel-camera "improvement" must also inset the UVs by a half texel).
+- **Verified:** camera integer at boot on the odd canvas + re-snaps a forced +0.5 nudge; clean
+  screenshot; pixel A/B (+0.5 scroll) perturbs most at column 15 (the tile's right edge).
+- **Lesson:** NOT an I-19 bug (renderer untouched by I-19) — a latent render-to-fit consequence
+  only visible on an odd canvas. Surfaced during the I-19 review.
+
+---
+
 ## 2026-06-13 — I-19 IMPLEMENTED (a–f, one-strike) — level change works end-to-end
 
 - **Built** the whole subsystem in one session (Zane: "start I-19 in one strike … commit each substep"),

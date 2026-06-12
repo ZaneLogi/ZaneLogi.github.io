@@ -2329,6 +2329,26 @@ following, and moved to (347,352) after drag-panning 40 tiles east (the avatar s
 307). **121/121 unit tests pass** (the avatar fallback keeps the camera-less test setup
 green).
 
+**Pixel-snap — inter-tile bleed fix (2026-06-13).** The "always 1:1 crisp" above was only
+true when the canvas dimensions were **even**. Render-to-fit sizes the buffer to the CSS
+cell, which is often **odd** (e.g. 683×285), and `centerOn` does `tx*16 + 8 - canvas.width/2`
+— so on an odd canvas the camera lands on a **half-pixel** and the shader's sub-tile scroll
+(`u_scroll = worldX mod 16`) is **fractional** (e.g. 2.5). The tile shader samples the R8
+atlas with **NEAREST** over **edge-to-edge** tile UVs (`view/renderer.js`), so a fractional
+offset makes a tile's **right/bottom edge** pixel sample *across* the atlas-tile boundary
+into the **neighbouring** atlas tile → faint 1px vertical/horizontal **lines between tiles**
+(Zane spotted them 2026-06-13). **The difference from the legacy `../ultima6` port:** its
+`map_viewer_renderer.js` has **no `u_scroll`** — tiles sit at integer positions only, so it
+never bleeds (the clone added `u_scroll` for sub-tile pan smoothness). **Fix:** `CameraSystem`
+(which already wraps the camera each frame, *before* the render systems) now also **rounds the
+camera to whole pixels** (`systems/camera_system.js`). NEAREST quantises to whole pixels
+regardless, so the snap costs **no** scroll smoothness, and it makes the clone pixel-perfect
+like the legacy port. **INVARIANT (don't break):** the atlas is NEAREST-sampled with
+edge-to-edge UVs, so **the camera must stay pixel-aligned** — do NOT reintroduce a fractional
+/ sub-pixel camera (e.g. for "smoother" panning) without ALSO insetting the tile UVs by a half
+texel, or the edge bleed returns. (The dpr-1.5 *softness* is a separate, shared-with-legacy
+matter — see the HiDPI deferral.)
+
 **Deferred:** the HiDPI `dpr` pass (above); a dedicated mobile/stacked reflow (the
 two-column fluid grid handles narrow desktop widths on its own — map column shrinks, panel
 holds, no panning; a first attempt at a `max-width:900px` stacked media query starved the
