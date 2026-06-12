@@ -9,7 +9,10 @@ export const Renderable = defineComponent('Renderable', { tileId: Uint16Array })
 // World-object / NPC data (I-2). ObjType is the object's type identity (resolves its
 // tile via basetile, and drives interaction later); Status is the packed ObjStatus
 // byte; Amount is stack quantity + quality. Actor is a tag for the 256 NPC slots.
-export const ObjType = defineComponent('ObjType', { objNumber: Uint16Array, frame: Uint8Array });
+// origObjNumber mirrors source's OrigShapeType (seg_1E0F.c): saved at load = objNumber,
+// restored on wakeup / pose-exit so pose worktypes (SLEEP → OBJ_092 sprite; PLAY →
+// OBJ_188 instrument sprite) don't permanently change the NPC's identity.
+export const ObjType = defineComponent('ObjType', { objNumber: Uint16Array, frame: Uint8Array, origObjNumber: Uint16Array });
 export const Status = defineComponent('Status', { bits: Uint8Array });
 export const Amount = defineComponent('Amount', { quantity: Uint8Array, quality: Uint8Array });
 // Actor — tag for the 256 objlist NPC slots. Carries the objlist slot id

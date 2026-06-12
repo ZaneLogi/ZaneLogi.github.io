@@ -75,7 +75,7 @@ function setupWorld({ terrainAt = {}, tileFlags = {}, entities = [], moveSpeed =
   for (const e of entities) {
     const h = world.create();
     world.add(h, Position, { x: e.x, y: e.y, z: 0 });
-    world.add(h, ObjType, { objNumber: e.obj ?? 0, frame: e.frame ?? 0 });
+    world.add(h, ObjType, { objNumber: e.obj ?? 0, frame: e.frame ?? 0, origObjNumber: e.obj ?? 0 });
     world.add(h, Renderable, { tileId: e.tile ?? 0 });
     if (e.actor) world.add(h, Actor, { npcId: e.npcId ?? 0 });
     if (e.aimode !== undefined) world.add(h, AIMode, { mode: e.aimode });
@@ -403,9 +403,9 @@ function walkPath(sx, sy, dirs) {
   check('npcStep: blocked step does not move', pos.x[i] === 10 && pos.y[i] === 10);
 }
 {
-  // Non-humanoid NPC (gazer OBJ_162) moves but is NOT humanoid-frame-animated (its
-  // per-type facing arm isn't ported; it keeps a valid static sprite). Same gate as
-  // atDestination — mirrors source routing both walk + arrival through C_1E0F_0664.
+  // Non-humanoid NPC (gazer OBJ_162): moves AND faces its travel direction. I-16c ported
+  // C_1E0F_0664's gazer arm (seg_1E0F.c:410-413) where the frame IS the 4-dir facing
+  // (faceDir(frame, dir8)) — distinct from the humanoid walkCycle+(facing<<2) encoding.
   const { world, handles } = setupWorld({
     entities: [{ x: 10, y: 10, obj: 0x162, frame: 6, tile: 0, actor: true, aimode: AI.AI_ONPATH }],
   });
@@ -413,7 +413,7 @@ function walkPath(sx, sy, dirs) {
   const pos = world.store(Position), ot = world.store(ObjType);
   npcStep(world, h, 2 /* east */, false);
   check('npcStep: non-humanoid (gazer) still moves east', pos.x[i] === 11 && pos.y[i] === 10);
-  check('npcStep: non-humanoid (gazer) frame left untouched (not humanoid-encoded)', ot.frame[i] === 6);
+  check('npcStep: non-humanoid (gazer) frame = facing E (1) via the gazer arm', ot.frame[i] === 1);
 }
 // ── I-14e door-phasing fix: npcStep gates door pass-through on isHumanoid (was always-on) ──
 {
@@ -768,7 +768,7 @@ function setupScheduleWorld({ npcId, pos, dest, mode, slot }) {
   world.setResource(clock);
   const h = world.create();
   world.add(h, Position, { x: pos.x, y: pos.y, z: 0 });
-  world.add(h, ObjType, { objNumber: 0x19a, frame: 0 });
+  world.add(h, ObjType, { objNumber: 0x19a, frame: 0, origObjNumber: 0x19a });
   world.add(h, Renderable, { tileId: 0 });
   world.add(h, Actor, { npcId });
   world.add(h, AIMode, { mode });
@@ -806,6 +806,94 @@ function setupScheduleWorld({ npcId, pos, dest, mode, slot }) {
   check('reschedule: NPC already at prev target is NOT reclaimed', stats.reclaimed === 0);
   check('reschedule: stays put then re-targets to new slot', pos.x[i] === 50 && pos.y[i] === 50 && dest.x[i] === 70 && dest.y[i] === 70);
   check('reschedule: mode set to AI_FINDPATH (control)', am.mode[i] === AI.AI_FINDPATH);
+}
+
+// ============================================================================
+// I-16d — AI_SCHEDULE continuous-settle (resolveActiveSlot + tick settle)
+// ============================================================================
+// resolveActiveSlot: the slot an NPC is CURRENTLY in (most recent fired ≤ now, wrapping).
+{
+  const sch = Object.create(Schedules.prototype);
+  sch.byNpc = [];
+  sch.byNpc[5] = [   // LB-like: SIT@8, EAT@12, SIT@14, SLEEP@21 (day 0 = any day)
+    { time: 8,  action: 0x92, hour: 8,  day: 0, x: 307, y: 348, z: 0 },
+    { time: 12, action: 0x93, hour: 12, day: 0, x: 316, y: 367, z: 0 },
+    { time: 14, action: 0x92, hour: 14, day: 0, x: 307, y: 348, z: 0 },
+    { time: 21, action: 0x91, hour: 21, day: 0, x: 297, y: 350, z: 0 },
+  ];
+  check('resolveActiveSlot: 09:00 -> most-recent 08:00 SIT', sch.resolveActiveSlot(5, 9, 1)?.hour === 8);
+  check('resolveActiveSlot: 08:00 exact -> the 08:00 slot', sch.resolveActiveSlot(5, 8, 1)?.hour === 8);
+  check('resolveActiveSlot: 13:00 -> 12:00 EAT', sch.resolveActiveSlot(5, 13, 1)?.action === 0x93);
+  const wrap = sch.resolveActiveSlot(5, 2, 1);   // 02:00 wraps to the previous day's 21:00
+  check('resolveActiveSlot: 02:00 wraps to prev-day 21:00 SLEEP', wrap?.hour === 21 && wrap?.action === 0x91);
+  sch.byNpc[7] = [{ time: 10, action: 0x8f, hour: 10, day: 3, x: 0, y: 0, z: 0 }];   // day-3-only slot
+  check('resolveActiveSlot: day-specific, same day', sch.resolveActiveSlot(7, 11, 3)?.hour === 10);
+  check('resolveActiveSlot: day-specific, wraps back to its day', sch.resolveActiveSlot(7, 11, 4)?.hour === 10);
+  sch.byNpc[6] = [];
+  check('resolveActiveSlot: no slots -> null', sch.resolveActiveSlot(6, 9, 1) === null);
+}
+// Tick settle: an NPC loaded mid-period (clock past its slot's exact hour) settles into its
+// active worktype on the next tick, without waiting for the hourly rollover.
+{
+  const reg = new TileRegistry({ tiles: null, flags: new TileFlags(new Uint8Array(0x1C00)), palette: new Uint8Array(0) });
+  reg.baseTile = { objToTile: new Uint16Array(0x400) };
+  const mapLevel = Object.create(MapLevel.prototype); mapLevel.tileAt = () => 0;
+  const world = new World(1024)
+    .registerComponent(Position).registerComponent(Renderable).registerComponent(ObjType)
+    .registerComponent(Actor).registerComponent(AIMode).registerComponent(Destination)
+    .registerComponent(Schedule).registerComponent(PartyMember);
+  const spatial = new SpatialIndex(1024);
+  world.setResource(reg); world.setResource(spatial); world.setResource(mapLevel); world.setResource(new Paths());
+  spatial.loadedRegions.add(0);   // region of (20,20)
+  const schedules = Object.create(Schedules.prototype);
+  schedules.byNpc = []; schedules.byNpc[3] = [{ time: 8, action: AI.AI_GUARD_S, hour: 8, day: 0, x: 20, y: 20, z: 0 }];
+  world.setResource(schedules);
+  world.setResource(new WorldClock({ Time_H: 10, Time_M: 0, Date_D: 1 }));   // 10:00, past the 08:00 slot
+  const h = world.create();
+  world.add(h, Position, { x: 20, y: 20, z: 0 });   // standing ON its slot
+  world.add(h, ObjType, { objNumber: 0x19a, frame: 0, origObjNumber: 0x19a });
+  world.add(h, Renderable, { tileId: 0 });
+  world.add(h, Actor, { npcId: 3 });
+  world.add(h, AIMode, { mode: AI.AI_SCHEDULE });
+  world.add(h, Destination, { x: 20, y: 20, z: 0, action: 0 });
+  world.add(h, Schedule, { npcId: 3 });
+  spatial.insert(20, 20, h);
+  const i = world.resolve(h), am = world.store(AIMode), ot = world.store(ObjType);
+  const { system } = installNpcTickSystem(world);
+  system();
+  check('tick settle: on-slot AI_SCHEDULE mid-period -> worktype applied (GUARD_S)', am.mode[i] === AI.AI_GUARD_S);
+  check('tick settle: faces the worktype dir (S, frame (2<<2)|1)', ot.frame[i] === ((2 << 2) | 1));
+}
+// Off-slot AI_SCHEDULE mid-period -> kicked to AI_FINDPATH to walk to the active slot.
+{
+  const reg = new TileRegistry({ tiles: null, flags: new TileFlags(new Uint8Array(0x1C00)), palette: new Uint8Array(0) });
+  reg.baseTile = { objToTile: new Uint16Array(0x400) };
+  const mapLevel = Object.create(MapLevel.prototype); mapLevel.tileAt = () => 0;
+  const world = new World(1024)
+    .registerComponent(Position).registerComponent(Renderable).registerComponent(ObjType)
+    .registerComponent(Actor).registerComponent(AIMode).registerComponent(Destination)
+    .registerComponent(Schedule).registerComponent(PartyMember);
+  const spatial = new SpatialIndex(1024);
+  world.setResource(reg); world.setResource(spatial); world.setResource(mapLevel); world.setResource(new Paths());
+  spatial.loadedRegions.add(0);
+  const schedules = Object.create(Schedules.prototype);
+  schedules.byNpc = []; schedules.byNpc[3] = [{ time: 8, action: AI.AI_GUARD_S, hour: 8, day: 0, x: 25, y: 20, z: 0 }];
+  world.setResource(schedules);
+  world.setResource(new WorldClock({ Time_H: 10, Time_M: 0, Date_D: 1 }));
+  const h = world.create();
+  world.add(h, Position, { x: 20, y: 20, z: 0 });   // NOT on its slot (25,20)
+  world.add(h, ObjType, { objNumber: 0x19a, frame: 0, origObjNumber: 0x19a });
+  world.add(h, Renderable, { tileId: 0 });
+  world.add(h, Actor, { npcId: 3 });
+  world.add(h, AIMode, { mode: AI.AI_SCHEDULE });
+  world.add(h, Destination, { x: 20, y: 20, z: 0, action: 0 });
+  world.add(h, Schedule, { npcId: 3 });
+  spatial.insert(20, 20, h);
+  const i = world.resolve(h), am = world.store(AIMode), dest = world.store(Destination);
+  const { system } = installNpcTickSystem(world);
+  system();
+  check('tick settle: off-slot AI_SCHEDULE -> AI_FINDPATH', am.mode[i] === AI.AI_FINDPATH);
+  check('tick settle: off-slot sets Destination to the active slot (25,20)', dest.x[i] === 25 && dest.y[i] === 20 && dest.action[i] === AI.AI_GUARD_S);
 }
 
 // ============================================================================
@@ -848,16 +936,14 @@ function setupArrivalNpc({ pos, dest, action, frame = 0, obj = 0x19a }) {
   check('atDestination: off-slot STAND still set the facing frame (N)', ot.frame[i] === ((0 << 2) | 1));
 }
 
-// ── non-humanoid NPC (gazer OBJ_162): STAND sets the mode but NOT the humanoid frame ──
-// Source C_1E0F_0664 dispatches facing by type; the gazer's arm is frame=facing directly
-// (seg_1E0F.c:410), not the humanoid walk+facing<<2. We've only ported the humanoid arm,
-// so a non-humanoid keeps its sprite (per-type facing deferred) instead of mis-encoding.
+// ── non-humanoid NPC (gazer OBJ_162): STAND sets the mode AND the per-type facing (I-16c) ──
+// Source C_1E0F_0664 dispatches facing by type; the gazer's arm is frame = facing directly
+// (seg_1E0F.c:410-413), not the humanoid walk+(facing<<2). STAND_N -> dir8 0 -> facing N (0).
 {
   const { world, h, i, am, ot } = setupArrivalNpc({ pos: { x: 10, y: 10 }, dest: { x: 10, y: 10 }, action: AI.AI_STAND_N, obj: 0x162, frame: 6 });
-  const before = ot.frame[i];
   atDestination(world, h);
   check('atDestination: non-humanoid (gazer) STAND -> worktype mode set', am.mode[i] === AI.AI_STAND_N);
-  check('atDestination: non-humanoid (gazer) sprite frame left untouched', ot.frame[i] === before && before === 6);
+  check('atDestination: non-humanoid (gazer) faces N (frame 0) via the gazer arm', ot.frame[i] === 0);
 }
 
 // ── pose worktypes force isAtDest even when off the exact slot (sprite swap deferred) ──

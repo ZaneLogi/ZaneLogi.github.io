@@ -15,7 +15,7 @@ import { TileRegistry } from '../resources/tile_registry.js';
 import { Paths } from '../resources/paths.js';
 import { Viewport } from '../resources/viewport.js';
 import { canStandAt } from './passability.js';
-import { walkStep, isHumanoid } from './humanoid_anim.js';
+import { walkStep, isHumanoid, faceDir } from './humanoid_anim.js';
 import { DIR_DX, DIR_DY } from './avatar_move_system.js';
 import * as AI from './ai_modes.js';
 
@@ -48,15 +48,11 @@ export function npcStep(world, handle, dir8, walking) {
   pos.x[i] = nx; pos.y[i] = ny;
   spatial.insertAtHead(nx, ny, handle);          // runtime move -> chain head (MoveObj)
 
-  // Source's TryStraightMove faces via C_1E0F_0664 (seg_1E0F.c:1439), which dispatches
-  // by object type. We've only ported its humanoid arm, so animate humanoids; other NPC
-  // families (gazer OBJ_162, animals, …) move without animating (a valid static sprite)
-  // rather than getting mis-encoded humanoid frames — their per-type facing is deferred.
-  if (!isHumanoid(ot.objNumber[i])) return walking;
-  const stepped = walkStep(ot.frame[i], dir8, walking);   // face the move dir + cycle legs
-  ot.frame[i] = stepped.frame;
-  rd.tileId[i] = reg.baseTile.objToTile[ot.objNumber[i]] + stepped.frame;
-  return stepped.walking;
+  // Source's TryStraightMove faces via C_1E0F_0664 (seg_1E0F.c:1439), dispatching by
+  // object type. setDirection is now the full port (I-16c); types without a walking state
+  // return null, so we fall back to the incoming flag for those.
+  const newWalking = setDirection(world, handle, dir8, walking || false);
+  return newWalking !== null ? newWalking : (walking || false);
 }
 
 // Walk one step of the NPC's current path. Returns a status string for the
@@ -233,20 +229,180 @@ export function tryTeleportToSlot(world, handle, viewX, viewY, allowVisible = fa
   return true;
 }
 
-// __AtDestination (C_1E0F_2276, seg_1E0F.c:1002-1085) — runs when an NPC reaches the end
-// of its path within 1 tile of the goal (doOnPath above), is already on its slot when the
-// schedule fires (npc tick, empty path), or was snapped onto an otherwise-unreachable
-// slot (npc tick, snapToSlot). Reads the worktype from the NPC's active schedule slot
-// (Destination.action) and sets NPCMode to it; for STAND_*/GUARD_* it also faces the NPC
-// the right way (a standing pose). If the NPC isn't actually on the slot, it reverts to
-// AI_FINDPATH so it keeps walking the last step(s).
+// C_1E0F_2125 port — scan the 4 orthogonal neighbors of (x,y) for a plate (OBJ_077).
+// Returns si+1 (1=N, 3=E, 5=S, 7=W) or 0 if no plate found. The +1 encoding lets callers
+// distinguish "found north" from "not found" while carrying the direction in one value.
+function findPlateDir(world, x, y) {
+  const spatial = world.getResource(SpatialIndex);
+  const objs = world.store(ObjType);
+  for (let si = 0; si < 8; si += 2) {
+    const nx = (x + DIR_DX[si]) & 0x3ff;
+    const ny = (y + DIR_DY[si]) & 0x3ff;
+    const cell = spatial.at(nx, ny);
+    if (!cell) continue;
+    for (const h of cell) {
+      const idx = world.resolve(h);
+      if (idx !== -1 && objs.objNumber[idx] === 0x077) return si + 1;
+    }
+  }
+  return 0;
+}
+
+// D_0658 (seg_1184.c:13) — the NPC's tile offset within a multi-tile furniture footprint,
+// set by the most recent findPropAtCell scan (0 = the object's own anchor cell). The chair
+// and bed predicates test `frame - D_0658`; the SLEEP handler reads it for the bed sub-frame.
+// Mirrors source's global: set by FindLoc/NextLoc, read by the immediately-following caller.
+let propD0658 = 0;
+
+// C_1E0F_2184 + FindLoc/NextLoc (seg_1184.c:211-291) port — find a prop of the given type
+// whose footprint covers the NPC's cell (x,y). A single-tile prop sits on the own cell
+// (D_0658=0); a multi-tile prop's ANCHOR is down/right of the cells it visually covers, so we
+// also scan loc_right (x+1,y, double-H → D_0658=1), loc_down (x,y+1, double-V → D_0658 =
+// double-H?2:1) and loc_dn_rt (x+1,y+1, 2×2 → D_0658=3). This is what lets an NPC sit on a
+// 2-wide throne (OBJ_147): the throne anchor is one cell east, frame-D_0658==2 selects the
+// seat half. propType: 0=chair (OBJ_0FC, or OBJ_147 throne where frame-D_0658==2), 1=bed
+// (OBJ_0A3 frame-D_0658 0/6), 3=pullchain (OBJ_1A3). Returns the handle (sets propD0658) or null.
+function findPropAtCell(world, x, y, propType) {
+  const spatial = world.getResource(SpatialIndex);
+  const objs = world.store(ObjType);
+  const reg = world.getResource(TileRegistry);
+  const tf = reg.flags;
+  const base = reg.baseTile.objToTile;
+
+  // {dx,dy}: cell to scan relative to (x,y); gate(tile): the multi-tile flag an anchor there
+  // must carry for its footprint to reach back over (x,y). Own cell has no gate. (seg_1184.c:234-266)
+  const CELLS = [
+    { dx: 0, dy: 0, gate: null },                                                      // own cell
+    { dx: 1, dy: 0, gate: tile => tf.isDoubleWidth(tile) },                            // loc_right
+    { dx: 0, dy: 1, gate: tile => tf.isDoubleHeight(tile) },                           // loc_down
+    { dx: 1, dy: 1, gate: tile => tf.isDoubleWidth(tile) && tf.isDoubleHeight(tile) }, // loc_dn_rt
+  ];
+
+  for (const c of CELLS) {
+    const ents = spatial.at((x + c.dx) & 0x3ff, (y + c.dy) & 0x3ff);
+    if (!ents) continue;
+    for (const h of ents) {
+      const idx = world.resolve(h);
+      if (idx === -1) continue;
+      const type = objs.objNumber[idx];
+      const frame = objs.frame[idx];
+      const tile = base[type] + frame;
+      if (c.gate && !c.gate(tile)) continue;
+      // D_0658: 0 on the own cell; 3 for a 2×2 anchor; for loc_down, 2 when also double-H else 1; else 1.
+      const d = (c.dx === 0 && c.dy === 0) ? 0
+              : (c.dx === 1 && c.dy === 1) ? 3
+              : (c.dy === 1) ? (tf.isDoubleWidth(tile) ? 2 : 1)
+              : 1;
+      let match = false;
+      if (propType === 0) match = type === 0x0FC || (type === 0x147 && frame - d === 2);
+      else if (propType === 1) match = type === 0x0A3 && (frame - d === 0 || frame - d === 6);
+      else if (propType === 3) match = type === 0x1A3;
+      if (match) { propD0658 = d; return h; }
+    }
+  }
+  propD0658 = 0;
+  return null;
+}
+
+// 2-frame family types (seg_1E0F.c:341-377): frame = walk-bit + (facing<<1).
+function isTwoFrameFamily(t) {
+  return t === 0x15A || t === 0x15C || t === 0x15D || t === 0x15E || t === 0x15F ||
+         t === 0x156 || t === 0x166 || t === 0x169 || t === 0x188 ||
+         (t >= 0x16F && t <= 0x174) || t >= 0x1AA;
+}
+
+// C_1E0F_0664 full port — set frame/facing for an NPC at its current cell.
+// dir8: desired facing (0=N,2=E,4=S,6=W for cardinals). walking=null = arrival
+// (snap to stand/sit); walking=bool = walk-step (advance cycle). Returns the new
+// walking flag (null if the type has no walking state — caller preserves its own).
+function setDirection(world, handle, dir8, walking = null) {
+  const i = world.resolve(handle);
+  if (i === -1) return null;
+  const ot = world.store(ObjType);
+  const rd = world.store(Renderable);
+  const reg = world.getResource(TileRegistry);
+  const pos = world.store(Position);
+  const type = ot.objNumber[i];
+  let frame = ot.frame[i];
+  let newWalking = null;
+
+  if (isHumanoid(type)) {
+    // Chair-override: sit pose (cycle 3) facing the chair's direction.
+    // OBJ_0FC: use chair.frame (its own facing); OBJ_147 (bench): always face S (dir=2).
+    const chairH = findPropAtCell(world, pos.x[i], pos.y[i], 0 /*CHAIR*/);
+    if (chairH !== null) {
+      const ci = world.resolve(chairH);
+      const dirFram = ot.objNumber[ci] === 0x147 ? 2 : ot.frame[ci];
+      frame = (dirFram << 2) | 3;   // seg_1E0F.c:297-302
+    } else if (walking === null) {
+      const facing = faceDir(frame >> 2, dir8);
+      frame = (facing << 2) | 1;
+    } else {
+      const stepped = walkStep(frame, dir8, walking);
+      frame = stepped.frame;
+      newWalking = stepped.walking;
+    }
+  } else if (type === 0x162 || type === 0x167 || type === 0x19E || type === 0x184) {
+    // Gazer: frame IS the 4-dir facing directly — seg_1E0F.c:411-413
+    frame = faceDir(frame, dir8);
+  } else if (type === 0x16A) {
+    // 12 frames/dir (horse-like): walk cycle uses frames 3,7,11 within each 12-block.
+    // Arrival: snap to 7 (mid-stride). Step: 7→11(SetWalking)→7→3(ClrWalking)→7→…
+    const dirFram = faceDir(Math.floor(frame / 12), dir8);
+    if (walking === null) {
+      frame = 7 + dirFram * 12;
+    } else {
+      const walkCyc = frame % 12;
+      newWalking = walking;
+      let wc;
+      switch (walkCyc) {
+        case 3:  newWalking = false; wc = 7;  break;
+        case 7:  wc = walking ? 3 : 11;       break;
+        case 11: newWalking = true;  wc = 7;  break;
+        default: wc = 7;
+      }
+      frame = wc + dirFram * 12;
+    }
+  } else if (type === 0x164) {
+    frame = Math.floor(Math.random() * 3);   // seg_1E0F.c:327-328
+  } else if (type === 0x16B) {
+    // 3 frames/dir: same walk-cycle pattern as humanoid but frame = cycle + dir*3.
+    const dirFram = faceDir(Math.floor(frame / 3), dir8);
+    if (walking === null) {
+      frame = 1 + dirFram * 3;
+    } else {
+      const walkCyc = frame % 3;
+      newWalking = walking;
+      let wc;
+      switch (walkCyc) {
+        case 0: newWalking = false; wc = 1; break;
+        case 1: wc = walking ? 0 : 2;      break;
+        case 2: newWalking = true;  wc = 1; break;
+        default: wc = 1;
+      }
+      frame = wc + dirFram * 3;
+    }
+  } else if (isTwoFrameFamily(type)) {
+    // 2 frames/dir: frame = walk-bit + (facing<<1). Arrival: bit=1; step: toggle.
+    const dirFram = faceDir(frame >> 1, dir8);
+    const walkBit = (walking === null) ? 1 : ((frame & 1) ^ 1);
+    frame = walkBit + (dirFram << 1);
+  }
+  // else: unrecognised type (OBJ_19C serpent, OBJ_19B, OBJ_1A8 cyclops, …) — leave frame.
+
+  ot.frame[i] = frame;
+  rd.tileId[i] = reg.baseTile.objToTile[type] + frame;
+  return newWalking;
+}
+
+// __AtDestination (C_1E0F_2276, seg_1E0F.c:1002-1085) — runs when an NPC reaches its
+// scheduled slot (doOnPath end-of-path), is already there when the schedule fires, or
+// was snapped onto the slot (tryTeleportToSlot). Sets NPCMode to the worktype and applies
+// the per-worktype sprite + facing for the furniture pose worktypes.
 //
-// I-9g scope: worktype mode + STAND/GUARD facing only. The pose/furniture worktypes
-// (SLEEP / SIT / EAT / PLAY / RINGBELL — source finds the bed/chair/table/pull-chain via
-// C_1E0F_2184 and swaps the sprite to the in-furniture pose) are DEFERRED: they set the
-// mode and hold position (isAtDest forced true, matching source) but skip the sprite swap.
-// The ongoing GUARD up-and-down pacing (the per-mode dispatcher C_1E0F_3E6A) is a separate
-// later step — here GUARD just plants the NPC facing its post, like STAND.
+// I-16b scope: setDirection (C_1E0F_0664) humanoid arm with chair-override (sit-pose cycle 3
+// facing the chair's direction) wired into SIT/EAT/STAND/GUARD. Non-humanoid arms (gazer,
+// 2-frame family, OBJ_16A/16B) and npcStep non-humanoid facing are I-16c. GUARD pacing later.
 export function atDestination(world, handle) {
   const i = world.resolve(handle);
   if (i === -1) return;
@@ -258,28 +414,81 @@ export function atDestination(world, handle) {
   const reg = world.getResource(TileRegistry);
 
   const action = dest.action[i];
-  // isAtDest: exactly on the scheduled slot. The stationary pose worktypes force it true
-  // (the NPC settles wherever it stopped near the furniture); STAND/GUARD + the motion
-  // worktypes keep the position check, so a not-quite-arrived NPC re-paths.
-  let isAtDest = pos.x[i] === dest.x[i] && pos.y[i] === dest.y[i] && pos.z[i] === dest.z[i];
+  const x = pos.x[i], y = pos.y[i];
+  // isAtDest: exactly on the scheduled slot. Pose worktypes (SLEEP/SIT/EAT/PLAY/RINGBELL)
+  // force it true — the NPC settles wherever it stopped near the furniture.
+  let isAtDest = x === dest.x[i] && y === dest.y[i] && pos.z[i] === dest.z[i];
 
   am.mode[i] = action;
 
-  if (action === AI.AI_SLEEP || action === AI.AI_SIT || action === AI.AI_PLAY ||
-      action === AI.AI_EAT || action === AI.AI_RINGBELL) {
-    isAtDest = true;                                 // pose worktypes hold position (sprite swap deferred)
-  } else if (action >= AI.AI_STAND_N && action <= AI.AI_GUARD_W && isHumanoid(ot.objNumber[i])) {
-    // Source: SetDirection + C_1E0F_0664 with dir8 ((action-AI_STAND_N)&3)<<1. C_1E0F_0664
-    // dispatches by object type; we've ported only its humanoid arm, so only humanoids
-    // face here (other families — gazer OBJ_162, animals — keep their sprite; per-type
-    // facing deferred, same gate as npcStep). The clone encodes facing in the sprite frame
-    // (frame = walkCycle + facing<<2), so face the worktype direction in the stand pose
-    // (walk-cycle 1). No separate Direction field: a later GUARD-pacing step reads facing
-    // back from frame>>2.
-    const facing = (action - AI.AI_STAND_N) & 3;     // STAND/GUARD N/E/S/W -> 0/1/2/3
-    ot.frame[i] = (facing << 2) | 1;
-    rd.tileId[i] = reg.baseTile.objToTile[ot.objNumber[i]] + ot.frame[i];
+  if (action === AI.AI_SLEEP) {
+    isAtDest = true;
+    if (isHumanoid(ot.origObjNumber[i])) {
+      // Source: SetAsleep + C_1E0F_2184(1=BED) → OBJ_092 sleeping sprite aligned to the bed.
+      // Bed frame 0 = head-N (NPC frame 0); bed frame 6 = rotated 180° (NPC frame 1).
+      const bedH = findPropAtCell(world, x, y, 1 /*BED*/);
+      ot.objNumber[i] = 0x092;
+      ot.frame[i] = (bedH !== null && (ot.frame[world.resolve(bedH)] - propD0658) !== 0) ? 1 : 0;
+      rd.tileId[i] = reg.baseTile.objToTile[0x092] + ot.frame[i];
+    }
+  } else {
+    // Restore original sprite (source: ClrAsleep + ObjShapeType[objNum] = OrigShapeType[objNum]).
+    // Guards with !== so a non-sleeping NPC (already correct) skips the tileId update.
+    if (ot.objNumber[i] !== ot.origObjNumber[i]) {
+      ot.objNumber[i] = ot.origObjNumber[i];
+      rd.tileId[i] = reg.baseTile.objToTile[ot.objNumber[i]] + ot.frame[i];
+    }
+
+    if (action === AI.AI_SIT) {
+      isAtDest = true;
+      // Source: C_1E0F_2184(0=CHAIR) → if found → C_1E0F_0664(objNum, 0).
+      // setDirection finds the chair and switches to the sit pose (cycle 3) facing the
+      // chair's own direction; no chair → stand unchanged (setDirection returns early).
+      if (findPropAtCell(world, x, y, 0 /*CHAIR*/) !== null)
+        setDirection(world, handle, 0);
+    } else if (action === AI.AI_PLAY) {
+      isAtDest = true;
+      if (isHumanoid(ot.objNumber[i])) {
+        // Source: C_1E0F_2184(0=CHAIR) → SetFrame(chair, 2) + C_1E0F_0664(S) + ObjShapeType=OBJ_188 frame 4.
+        // C_1E0F_0664 here is overwritten immediately by SetFrame(objNum,4), so skip setDirection.
+        const chairH = findPropAtCell(world, x, y, 0 /*CHAIR*/);
+        if (chairH !== null) {
+          const ci = world.resolve(chairH);
+          ot.frame[ci] = 2;
+          rd.tileId[ci] = reg.baseTile.objToTile[ot.objNumber[ci]] + 2;
+          ot.objNumber[i] = 0x188;
+          ot.frame[i] = 4;
+          rd.tileId[i] = reg.baseTile.objToTile[0x188] + 4;
+        }
+      }
+    } else if (action === AI.AI_EAT) {
+      isAtDest = true;
+      if (isHumanoid(ot.objNumber[i])) {
+        // Source: C_1E0F_2125 (plate dir) → SetFrame(chair, plateDir>>1) + C_1E0F_0664(plateDir-1).
+        // Chair frame is updated BEFORE setDirection so the chair-override picks up the plate-facing
+        // direction. If no plate: C_1E0F_0664(4) = face S (or sit-S if chair found at cell).
+        const plateDir = findPlateDir(world, x, y);
+        if (plateDir > 0) {
+          const chairH = findPropAtCell(world, x, y, 0 /*CHAIR*/);
+          if (chairH !== null) {
+            const ci = world.resolve(chairH);
+            const cf = plateDir >> 1;   // 0=N,1=E,2=S,3=W
+            ot.frame[ci] = cf;
+            rd.tileId[ci] = reg.baseTile.objToTile[ot.objNumber[ci]] + cf;
+          }
+          setDirection(world, handle, plateDir - 1);
+        } else {
+          setDirection(world, handle, 4);
+        }
+      }
+    } else if (action === AI.AI_RINGBELL) {
+      isAtDest = true;   // bell animation (C_1E0F_2BEA series) deferred to I-17
+    } else if (action >= AI.AI_STAND_N && action <= AI.AI_GUARD_W) {
+      // Source: SetDirection + C_1E0F_0664. Non-humanoid arms deferred to I-16c.
+      const dir8 = ((action - AI.AI_STAND_N) & 3) << 1;
+      setDirection(world, handle, dir8);
+    }
   }
 
-  if (!isAtDest) am.mode[i] = AI.AI_FINDPATH;         // short of the slot -> keep walking
+  if (!isAtDest) am.mode[i] = AI.AI_FINDPATH;
 }

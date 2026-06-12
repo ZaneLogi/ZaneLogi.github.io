@@ -16,7 +16,8 @@
 import { WorldClock } from '../resources/world_clock.js';
 import { Schedules } from '../resources/schedules.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
-import { Position, Schedule, AIMode, Destination, PartyMember } from '../components/components.js';
+import { TileRegistry } from '../resources/tile_registry.js';
+import { Position, Schedule, AIMode, Destination, PartyMember, ObjType, Renderable } from '../components/components.js';
 import { AI_FINDPATH } from './ai_modes.js';
 
 // Per-tick counters, read by the dev HUD (I-5f) every frame; mutated in place by each
@@ -44,6 +45,9 @@ function tick(world, clock, stats) {
   const sched = world.store(Schedule);
   const am = world.store(AIMode);
   const dest = world.store(Destination);
+  const ot = world.store(ObjType);
+  const rend = world.store(Renderable);
+  const reg = world.getResource(TileRegistry);
 
   const hour = clock.Time_H;
   const dayOfWeek = Schedules.dayOfWeek(clock.Date_D);
@@ -84,6 +88,19 @@ function tick(world, clock, stats) {
       pos.x[i] = dest.x[i]; pos.y[i] = dest.y[i]; pos.z[i] = dest.z[i];
       spatial.insertAtHead(dest.x[i], dest.y[i], handle);
       reclaimed++;
+    }
+
+    // Wake / un-pose: an NPC leaving a pose worktype to WALK to a new slot must drop its
+    // pose sprite (SLEEP→OBJ_092 bed, PLAY→OBJ_188 instrument) and restore its real body —
+    // otherwise it walks the whole route as a bed. Source restores on wake, not arrival:
+    // the status-decay loop (seg_0A33.c:837-840) does ClrAsleep + ObjShapeType=OrigShapeType
+    // once NPCMode has left AI_SLEEP, and the schedule arm restores the PLAY sprite likewise
+    // (seg_1E0F.c:2287). The on-arrival restore in __AtDestination (atDestination) is too late
+    // for the walk. (alreadyAtTarget NPCs skip this — they don't walk, and __AtDestination
+    // there keeps a re-firing SLEEP as OBJ_092.)
+    if (ot.objNumber[i] !== ot.origObjNumber[i]) {
+      ot.objNumber[i] = ot.origObjNumber[i];
+      rend.tileId[i] = reg.baseTile.objToTile[ot.objNumber[i]] + ot.frame[i];
     }
 
     // Record the new destination (xyz + arrival worktype) + kick pathfinding. The NPC

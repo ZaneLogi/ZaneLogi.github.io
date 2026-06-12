@@ -99,11 +99,12 @@ toward-goal edge (not source's single dominant axis); teleport-to-previous-targe
 on reschedule; flat step-rate (move-point economy deferred); arrival facing
 (I-9g) is frame-encoded (`(facing<<2)|1` stand frame), not a separate
 `SetDirection` field — a later GUARD-pacing step reads facing from `frame>>2`;
-NPC facing/walk animation is **humanoid-only** (`isHumanoid` gate in both
-`npcStep` and `atDestination`) — source's `C_1E0F_0664` is type-dispatched and
-the clone ported only its humanoid arm, so non-humanoid NPCs (gazer, animals)
-move/settle without animating (per-type arms deferred); don't "fix" a static
-non-humanoid sprite by feeding it the humanoid frame layout.
+NPC facing/walk animation: I-9g ported only `C_1E0F_0664`'s humanoid arm, but
+**I-16c added the non-humanoid per-type arms** (gazer `OBJ_162`/`167`/`19E`/`184`
+= frame-is-facing; `OBJ_16A` 12-frame; `OBJ_16B` 3-frame; 2-frame family), so
+gazers/animals now face + animate too — `npcStep`/`atDestination` are no longer
+humanoid-gated (the `isHumanoid` test survives only inside `setDirection`'s
+type dispatch). This deviation is **lifted**, not kept.
 NPC #12's teleport-to-dinner is a *correct* consequence of a CLOSED castle
 drawbridge — NOT a cost-cap bug; do not raise the 7-bit cost cap. **RESOLVED by
 I-10e (2026-06-04):** the drawbridge is now modeled + crossable, so with the

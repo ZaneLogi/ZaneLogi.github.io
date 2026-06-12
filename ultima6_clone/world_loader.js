@@ -47,7 +47,7 @@ export function regionsInView(cam, canvas, tileSize) {
 function spawnFromRecord(world, reg, spatial, rec, isActor) {
   const e = world.create();
   world.add(e, Position, { x: rec.x, y: rec.y, z: rec.z });
-  world.add(e, ObjType, { objNumber: rec.objNumber, frame: rec.frame });
+  world.add(e, ObjType, { objNumber: rec.objNumber, frame: rec.frame, origObjNumber: rec.objNumber });
   world.add(e, Status, { bits: rec.status });
   world.add(e, Renderable, { tileId: reg.tileForObject(rec.objNumber, rec.frame) });
   if (isActor) world.add(e, Actor, { npcId: rec.id });
@@ -61,7 +61,7 @@ function spawnFromRecord(world, reg, spatial, rec, isActor) {
 // query(Position) and the renderer skip these naturally.
 function spawnOffMapItem(world, reg, rec) {
   const e = world.create();
-  world.add(e, ObjType, { objNumber: rec.objNumber, frame: rec.frame });
+  world.add(e, ObjType, { objNumber: rec.objNumber, frame: rec.frame, origObjNumber: rec.objNumber });
   world.add(e, Status, { bits: rec.status });
   world.add(e, Amount, { quantity: rec.quantity, quality: rec.quality });
   world.add(e, Renderable, { tileId: reg.tileForObject(rec.objNumber, rec.frame) });
@@ -204,7 +204,7 @@ export function addMapObject(world, { objNumber, frame, x, y, z = 0, quality = 0
   const spatial = world.getResource(SpatialIndex);
   const e = world.create();
   world.add(e, Position, { x, y, z });
-  world.add(e, ObjType, { objNumber, frame });
+  world.add(e, ObjType, { objNumber, frame, origObjNumber: objNumber });
   world.add(e, Status, { bits: status });
   world.add(e, Amount, { quantity, quality });
   world.add(e, Renderable, { tileId: reg.tileForObject(objNumber, frame) });

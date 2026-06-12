@@ -34,12 +34,14 @@
 // worlds without MoveSpeed (the unit-test worlds) the accumulator is OFF and NPCs step
 // every tick (the old flat rate), keeping the I-9 pathfinding tests valid.
 
-import { AIMode, Position, Destination, MoveSpeed } from '../components/components.js';
+import { AIMode, Position, Destination, MoveSpeed, Schedule } from '../components/components.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
 import { Paths } from '../resources/paths.js';
 import { Camera } from '../resources/camera.js';
 import { Viewport } from '../resources/viewport.js';
 import { WorldSpeed } from '../resources/world_speed.js';
+import { WorldClock } from '../resources/world_clock.js';
+import { Schedules } from '../resources/schedules.js';
 import { findPath } from './pathfinding.js';
 import { doOnPath, atDestination, tryTeleportToSlot } from './npc_path.js';
 import { rate, stepCostAt, MAX_ELAPSED_MS } from './move_economy.js';
@@ -104,11 +106,41 @@ export function installNpcTickSystem(world, { avatarRef, now = () => performance
     }
     const gateOn = viewX !== undefined;
 
+    // AI_SCHEDULE continuous-settle inputs (source seg_1E0F.c:2198). Null-safe: the unit-test
+    // tick worlds register no clock/schedules/Schedule, so the settle in the loop stays off there.
+    const clock = world.getResource(WorldClock);
+    const schedules = world.getResource(Schedules);
+    const sched = world.isRegistered(Schedule) ? world.store(Schedule) : null;
+    const settleSchedule = !!(clock && schedules && sched);
+    const nowHour = clock ? clock.Time_H : 0;
+    const nowDow = clock ? Schedules.dayOfWeek(clock.Date_D) : 0;
+
     for (const i of world.query(AIMode)) {
       const mode = am.mode[i];
-      // Only the pathfinding tier ticks here (0x81..0x86). Party (COMMAND/FOLLOW),
-      // MOTIONLESS, AI_SCHEDULE (awaiting the next hour), and the stationary worktypes
-      // are all skipped — party moves via the avatar/MoveFollowers, the rest are idle.
+
+      // AI_SCHEDULE continuous-settle (source seg_1E0F.c:2198 — __AtDestination runs for every
+      // AI_SCHEDULE NPC each active tick, reading its current slot from the save-persisted
+      // SchedIndex). The clone re-derives the current slot with resolveActiveSlot, because the
+      // hourly arm only fires on exact-hour rollovers — without this an NPC loaded or streamed
+      // in mid-period shows its raw pose/position until the next hour (e.g. Lord British loads
+      // STANDING instead of sitting on his throne). On its slot -> atDestination applies the
+      // worktype pose/facing; off it -> AI_FINDPATH walks there.
+      if (mode === AI.AI_SCHEDULE) {
+        const handle = world.handleOf(i);
+        if (settleSchedule && world.has(handle, Schedule) && spatial.hasRegionAt(pos.x[i], pos.y[i])) {
+          const slot = schedules.resolveActiveSlot(sched.npcId[i], nowHour, nowDow);
+          if (slot) {
+            dest.x[i] = slot.x; dest.y[i] = slot.y; dest.z[i] = slot.z; dest.action[i] = slot.action;
+            if (pos.x[i] === slot.x && pos.y[i] === slot.y && pos.z[i] === slot.z) atDestination(world, handle);
+            else am.mode[i] = AI.AI_FINDPATH;
+          }
+        }
+        continue;
+      }
+
+      // Only the pathfinding tier ticks below (0x81..0x86). Party (COMMAND/FOLLOW), MOTIONLESS,
+      // and the stationary worktypes are skipped — party moves via the avatar/MoveFollowers,
+      // the rest are idle until their schedule re-fires.
       if (mode < AI.AI_FINDPATH || mode > AI.AI_86) continue;
 
       // Active-area gate: NPCs whose region isn't loaded are frozen (same predicate as

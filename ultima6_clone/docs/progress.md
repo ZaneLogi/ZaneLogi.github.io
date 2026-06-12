@@ -5,7 +5,7 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: save/load (full-snapshot JSON persistence) COMPLETE (2026-06-10) — a generic ECS snapshot (every live entity's components + the mutable resources) → a JSON file via Export, restored on Import; restore *replaces* `loadActors` and re-marks `loadedRegions`, so deletions stay dead and mutations survive with no tombstones. Non-numeric label (`I-save/load`) keeps the planned I-16…I-19 movement-arc numbers intact. Next: I-16 (arrival behaviors + direction). NPC-movement arc I-14→I-17: speed model ✓ → drunk-walk ✓ → arrival/direction (I-16) → AI (I-17); status panel/handlers at I-18/I-19. I-9/I-10/I-14/I-15 squashed + force-pushed in the 2026-06-09 commit cleanup.** Prior: I-13 (conversation VM, pushed). — the
+**Status: I-16 (arrival behaviors + direction system) COMPLETE (2026-06-10) — `__AtDestination` prop lookup (`C_1E0F_2184` with the `FindLoc`/`NextLoc` multi-tile footprint + `D_0658`), the `C_1E0F_0664` direction/frame system (humanoid + non-humanoid per-type arms), sprite-restore-on-wake, and (I-16d) `AI_SCHEDULE` continuous-settle (`resolveActiveSlot` + per-tick `__AtDestination`, `seg_1E0F.c:2198`). Lord British now loads sitting + facing his throne; NPCs settle their current worktype at load instead of waiting for the next hour. See §"I-16 scope" + its AI-mode dispatch coverage table (the I-16/I-17 boundary record). Next: I-17 (NPC AI behaviors — `WANDER`/`GRAZE`/`LOITER`/`FARM` persistent activities via `C_1E0F_37DB`/`C_1E0F_33C4`, then `GUARD` pacing + `RINGBELL` anim; thief/law granularity scoped there). NPC-movement arc I-14→I-17: speed ✓ → drunk-walk ✓ → arrival/direction ✓ → AI behaviors (I-17); status panel/handlers at I-18/I-19. I-9/I-10/I-14/I-15 squashed + force-pushed in the 2026-06-09 commit cleanup.** Prior: I-13 (conversation VM, pushed). — the
 `converse.a/.b` bytecode VM is a **standalone generator that yields typed effects**
 (conversation_vm.js), driven by a host (conversation_system.js) into the now-live dialog
 window: portrait + streaming text + clickable `@`keywords/chips + input. Coverage: **200/200
@@ -62,7 +62,7 @@ banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 | I-14 | **NPC movement speed (DEXTE-paced accumulator)** — replace I-9's flat step-rate with a per-actor `moveCredit` accumulator (DEXTE = speed meter, `SubTerrainMov` = step cost); a *modern rewrite* of the `MovePts`/`DEXTE` economy, NOT a `C_1E0F_4E0A` round-driver port. One master `WORLD_SPEED` slider, decoupled clock, snap tile-to-tile, fixed-brisk non-laggy player. Restores terrain-/dex-speed + staggering, fixes the flat-step thrash. Foundation for the NPC-movement arc. | **done** (a–e; squashed + pushed) |
 | I-15 | **drunk-walk approach** — `TryMoveTo` greedy fallback chain + `__TryDiagMove` corner-clearance (the pathfinding-less move primitive for chase/flee). Rides on I-14. New `systems/drunk_walk.js`; no live consumer yet (I-17 wires it); dev hook `__U6.driveTo`. | **done** (a–c + step-aside; squashed + pushed) |
 | I-save/load | **save/load — full-snapshot JSON persistence** — generic ECS snapshot (every live entity's components + mutable resources) → JSON; Export downloads, Import re-uploads + restores on reload. Restore *replaces* `loadActors` and re-marks `loadedRegions`, so deletions stay dead + mutations survive without tombstones (`research_save_load.md`). Non-numeric label keeps the I-16…I-19 arc intact. | **done** (a–g, 2026-06-10) |
-| I-16 | **arrival behaviors + direction system** — finish `__AtDestination` (`U6_NPC_排程與移動邏輯.md §七`): prop lookup for sit/sleep/eat/play (`C_1E0F_2184`) + fallbacks (sleep-on-spot, arrived-but-can't-sit), eating dynamic facing (`C_1E0F_2125`), and the `C_1E0F_0664` 8-dir / MACRO_A frame system + chair-overrides-facing + non-humanoid per-type facing. Builds on I-9g's worktype-settle + STAND/GUARD facing. Verifies §5.2. | planned |
+| I-16 | **arrival behaviors + direction system** — `__AtDestination` prop lookup for sit/sleep/eat/play (`C_1E0F_2184` + `FindLoc`/`NextLoc` multi-tile footprint + `D_0658`) + fallbacks, eating dynamic facing (`C_1E0F_2125`), the `C_1E0F_0664` frame system (humanoid + non-humanoid per-type arms) + chair-overrides-facing, sprite-restore-on-wake, and (d) `AI_SCHEDULE` continuous-settle (`resolveActiveSlot` + per-tick `__AtDestination`). | **done** (a–c + 2 review fixes + d; carries the AI-mode dispatch coverage table) |
 | I-17 | **NPC AI behaviors** — modes on top of I-14/I-15: persistent activities (`AI_WANDER`/`FARM`/`LOITER`/`GRAZE`) first, then guard/law-enforcement + thief (granularity scoped at I-17). (was I-16) | planned |
 | I-18 | status panel — third surface on the substrate; replaces the dev HUD's clock readout (was I-14→I-17) | planned |
 | I-19 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / moonstones / instruments / etc.); each handler tied to its owning subsystem when that subsystem lands (was I-15→I-18) | planned |
@@ -2849,22 +2849,75 @@ reload → both restored (the analog of "passed Lord British's questions stays p
 
 ## I-16 scope — arrival behaviors + direction system (§七)
 
-**Planned (not started).** Finishes `__AtDestination` and the direction/frame system — the "what an NPC
-does once it arrives, and how it faces" layer. Spec: [U6_NPC_排程與移動邏輯.md](U6_NPC_排程與移動邏輯.md) §七
-("抵達目的地後的行為（`__AtDestination`）與方向系統") + `research_npc_ai.md §"Arrival"`. **Builds on I-9g**,
-which already ported the core of `__AtDestination` (`seg_1E0F.c:1002-1085`): worktype settle + `STAND_*`/
-`GUARD_*` facing + humanoid walk-frame animation. What remains (the richness I-9g deferred):
+**Done (a–c + two review fixes + d, 2026-06-10).** Finished `__AtDestination` and the direction/frame system —
+"what an NPC does on arrival, and how it faces." Spec: [U6_NPC_排程與移動邏輯.md](U6_NPC_排程與移動邏輯.md) §七 +
+`research_npc_ai.md §"Arrival"`. Built on I-9g (worktype settle + `STAND`/`GUARD` facing + humanoid walk frames).
 
-- **§7.1 prop lookup + fallbacks** — `C_1E0F_2184` finds the chair/bed/table at the NPC's **own** feet for
-  `AI_SIT`/`AI_SLEEP`/`AI_EAT`/`AI_PLAY`; fallbacks: sleep→`SetTypeUnconscious` on the spot, sit/eat/play→
-  stand if no prop ("arrived-but-can't-sit"). The lenient `isAtDest` forcing for prop-actions vs the
-  re-find for `STAND`/`GUARD`. **Verifies §5.2** (the slice handed off from I-14).
-- **§7.2 eating dynamic facing** — `C_1E0F_2125` scans the four orthogonals for the plate (`OBJ_077`) and
-  faces the NPC toward it; also gates "is this a dining chair" (chair must have an adjacent plate).
-- **§7.3 direction / frame system** — `C_1E0F_0664` full port: 8-dir `DirIncrX/Y`, MACRO_A 8→4 fold,
-  per-creature-type frames-per-direction, and **chair-overrides-facing** (a seated NPC's facing comes from
-  the chair's map frame, not the passed `dir`); plus the deferred **non-humanoid per-type** facing arms
-  (gazer/animals) so they animate too. Removes the I-9g humanoid-only limitation.
+**Sub-steps:**
+- **a — `origObjNumber` + arrival branches.** New `ObjType.origObjNumber` (mirrors source `OrigShapeType`):
+  set = objNumber at load; restored on pose-exit so `SLEEP`→`OBJ_092` / `PLAY`→`OBJ_188` don't permanently change
+  identity. `atDestination` `SLEEP`/`SIT`/`EAT`/`PLAY`/`RINGBELL` branches — `C_1E0F_2184` prop lookup, `C_1E0F_2125`
+  plate-facing for `EAT`, sleep-on-spot fallback.
+- **b — `setDirection` humanoid arm + chair-override.** `C_1E0F_0664` humanoid: sit pose (cycle 3) facing the
+  chair's direction (`OBJ_0FC` = chair frame; `OBJ_147` throne = face S); stand `(facing<<2)|1`; walk via `walkStep`.
+- **c — full `setDirection` + non-humanoid walk facing.** Per-type arms: gazer (frame IS facing,
+  `OBJ_162`/`167`/`19E`/`184`), `OBJ_16A` (12 frames/dir, cycles 3/7/11), `OBJ_16B` (3/dir), `OBJ_164` (random),
+  2-frame family (frame = walkbit + `facing<<1`). `npcStep` no longer humanoid-gated. (This **lifts** the I-9
+  "non-humanoid animation deferred" deviation — gazers/animals now face + animate.)
 
-Persistent activities (`AI_FARM`/`WANDER`/`LOITER`/`GRAZE`) do **not** go through `__AtDestination` (§7.1
-note) — they're I-17 (NPC AI behaviors), not here. Sub-step plan detailed when the step is reached.
+**Two fixes from the live review (commits `0121f8e`, `3474856`):**
+- **Multi-tile furniture footprint** (`0121f8e`). `findPropAtCell` (`C_1E0F_2184`) only checked the NPC's OWN cell,
+  so a seated NPC never found a 2-wide throne (`OBJ_147`) whose anchor is the cell to the EAST → Lord British faced
+  north and never took the sit pose. Ported `FindLoc`/`NextLoc` (`seg_1184.c:211-291`): also scan `loc_right`
+  (double-H), `loc_down` (double-V), `loc_dn_rt` (2×2) with the `D_0658` footprint offset; chair test is
+  `frame - D_0658 == 2`, `SLEEP` bed sub-frame likewise. **Decode gotcha:** source `TileFlag`/DoubleH/V is the
+  clone's `flags2` plane (`TileFlag` @0x800), NOT `flags1` (`TerrainType` @0).
+- **Restore sprite on wake, not arrival** (`3474856`). A sleeping NPC kept its bed sprite (`OBJ_092`) for the WHOLE
+  walk to its next slot (restore was on arrival only). Restore `origObjNumber` when the schedule sends a posed NPC
+  (`SLEEP`/`PLAY`) off to a new slot — source restores on **wake**: `seg_0A33.c:837-840` (ClrAsleep + ObjShapeType =
+  OrigShapeType once mode left `AI_SLEEP`) + the PLAY-exit restore in the schedule arm (`seg_1E0F.c:2287`).
+
+**d — `AI_SCHEDULE` continuous-settle.** Source calls `__AtDestination` for every `AI_SCHEDULE` NPC each active
+tick (`seg_1E0F.c:2198`), acting on the **save-persisted** `SchedIndex` (`seg_0C9C.c:311` reads it from the save).
+The clone settled only on the hourly arm, and `resolveSlotAt` is exact-hour-only, so an NPC loaded/streamed
+mid-period showed its raw pose until the next exact-hour event — Lord British loaded **standing** instead of
+sitting on his throne. Fix: new `Schedules.resolveActiveSlot(npc, hour, dow)` (most-recent slot ≤ now, day-matched,
+wrapping midnight — re-derives `SchedIndex` without persisting it; 7×24 bound) + an `AI_SCHEDULE` branch in
+`npc_tick_system`: on-slot → `atDestination` (apply the worktype pose/facing), off-slot → `AI_FINDPATH` (walk
+there). Null-safe (off on the unit-test worlds). Tests: `resolveActiveSlot` wrap/day cases + on-/off-slot tick
+settle (`tests/test_pathfinding.js`, **157/157**).
+
+**Kept deviations / decisions:**
+- `findPropAtCell` scans own + right/down/dn-rt only (the source `FindLoc`/`NextLoc` footprint) and returns the
+  first match — there is normally one relevant prop per cell.
+- `resolveActiveSlot` **re-derives** the active slot each call instead of porting the save-persisted `SchedIndex`
+  byte — the clone drops re-derivable save state (same principle as `MovePts`→accumulator).
+- The `AI_SCHEDULE` settle is per-tick but **transient**: an NPC leaves `AI_SCHEDULE` after one settle (→ worktype
+  or `FINDPATH`), so it fires ~once per load/region-load, not every tick (no pathfinder hammering).
+
+### AI-mode dispatch coverage — the I-16 / I-17 boundary record
+
+The full `NPCMode` dispatch is the `switch(NPCMode)` at `seg_1E0F.c:1748` (per-NPC AI turn) + `__AtDestination`
+(`:1002`) for arrivals + the `AI_SCHEDULE`→`__AtDestination` settle (`:2198`). Coverage as of I-16:
+
+| Mode(s) | Source handler | Clone status |
+|---|---|---|
+| `AI_SCHEDULE` 0x80 | `__AtDestination` every tick (`:2198`) | **ported (I-16d)** — `resolveActiveSlot` + tick settle |
+| `AI_FINDPATH`/`ONPATH`/`84`/`85`/`86` 0x81–86 | pathfind + `__DoOnPath` | ported (I-9) |
+| `AI_STAND_N..W` 0x87–8a | arrival facing | ported (I-9g / I-16) |
+| `AI_SLEEP`/`SIT`/`EAT`/`PLAY` 0x91–95 | arrival pose + idle | ported (I-16; multi-tile + wake-restore fixed) |
+| `AI_GUARD_N..W` 0x8b–8e | arrival facing **+ pacing** (`:1820`) | facing ported; **pacing → I-17** |
+| `AI_WANDER`/`GRAZE` 0x8f | `C_1E0F_37DB` (1/8 → one random cardinal step) | **not ported → I-17** |
+| `AI_LOITER`/`FARM` 0x90/94 | `C_1E0F_33C4` (1/8 → one step drifting near the slot) | **not ported → I-17** |
+| `AI_RINGBELL` 0x98 | arrival + bell tile anim (`:1835`) | arrival ported; **bell anim → I-17** |
+| `AI_SEEKOBJ` 0x82 | seek a chair/bed | not ported (rarely a schedule action) |
+| `AI_CONVERSE`/`THIEF` 0x96/97 | approach player → talk/steal | deferred (player-interaction) |
+| `AI_BRAWL`/`9A`/`VIGILANTE`/`ARREST` + all `COMBAT_AI_*` | combat subsystem | deferred by design (no combat yet) |
+
+**Why this boundary entry exists (the discipline it records).** Both I-16 review bugs were *missing sub-paths in a
+feature the ledger already called done* (the throne `D_0658` footprint; the wake-time sprite restore), and the
+`AI_SCHEDULE`-settle gap (I-16d) was a whole dispatch arm the clone silently skipped. The cheap defense is to
+enumerate the source dispatch arms a step claims to cover and mark each **ported / deferred-with-reason** — this
+table. I-17 picks up the `→ I-17` rows: persistent activities first (`WANDER`/`GRAZE` via `C_1E0F_37DB`,
+`LOITER`/`FARM` via `C_1E0F_33C4`, both riding the I-14/I-15 move primitives), then `GUARD` pacing + `RINGBELL`
+animation; combat-AI and thief/law modes stay deferred by design (educational-port scope, `user_retro_port_goal`).
