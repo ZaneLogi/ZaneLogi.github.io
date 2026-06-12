@@ -240,6 +240,28 @@ export function moveToInventory(world, itemHandle, holderHandle) {
   return true;
 }
 
+// Toggle an inventory item between worn (EQUIP) and carried (INVEN) — source's InsertObj
+// EQUIP/INVEN coord-use flip (C_155D ready/unready). The item stays in the holder's inventory;
+// only ContainedIn.equipped changes (the I-18h split key + the snapshot persists it). No-op if
+// the handle is stale or the item isn't contained. I-18j.
+export function setEquipped(world, itemHandle, equipped) {
+  const i = world.resolve(itemHandle);
+  if (i === -1 || !world.has(itemHandle, ContainedIn)) return false;
+  world.store(ContainedIn).equipped[i] = equipped ? 1 : 0;
+  return true;
+}
+
+// Ready an item onto a holder as EQUIP (worn) — source's InsertObj(item, di, EQUIP) in the Ready
+// path (C_155D_144B:581), where `di` is the item's OUTERMOST holder (the party member). Re-parents
+// the item to `holderHandle` + marks it equipped, so readying an item nested in a bag pulls it out
+// onto the member (the bagged-equip case the source UI never reaches but the function handles).
+// No-op if the handle is stale. I-18j/B.
+export function readyItem(world, itemHandle, holderHandle) {
+  if (world.resolve(itemHandle) === -1) return false;
+  attachToHolder(world, itemHandle, holderHandle, true);
+  return true;
+}
+
 // Drop an inventory item onto a map cell — the inverse of moveToInventory (source's
 // DROP placement, C_27A1_14DA: MoveObj the item to the cell). Strips ContainedIn,
 // adds Position{x,y,z}, and head-splices into the SpatialIndex (the I-7 mutation

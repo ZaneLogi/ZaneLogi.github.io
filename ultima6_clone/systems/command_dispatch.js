@@ -19,11 +19,12 @@
 // real USE effects (door, crank, …) and the other verbs land in I-10c+.
 
 import { Commands } from '../resources/commands.js';
-import { Position, ObjType, Actor, PartyMember, AIMode, Alignment } from '../components/components.js';
+import { Position, ObjType, ContainedIn, Actor, PartyMember, AIMode, Alignment } from '../components/components.js';
 import { displayName } from '../view/inspector.js';
 import { makeConversationHost } from './conversation/conversation_system.js';
 import { MapLevel } from '../resources/map_level.js';
-import { moveToInventory, dropToMap, moveMapObject } from '../world_loader.js';
+import { moveToInventory, dropToMap, moveMapObject, inventoryOf, setEquipped, readyItem } from '../world_loader.js';
+import { equipSlotForTile, buildEquipment, resolveReadySlot } from './equip_slots.js';
 import { canStandAt } from './passability.js';
 import { DIR_DX, DIR_DY, dirFromKeyEvent } from './avatar_move_system.js';
 import { AI_SLEEP } from './ai_modes.js';
@@ -88,10 +89,8 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
   let pendingDropItem = null;            // the carried item awaiting a DROP location
   let pendingMoveObj = null;             // the ground object awaiting a MOVE push direction (stage 2)
   let awaitingDir = false;               // MOVE stage 2: the next key is a push direction, not a cell
-  let pendingGive = null;                // I-10j give: { item, giver } awaiting a recipient (a party member)
-  // The #probe-cell targeting cue (armed recolor + a verb label) — shared by the
-  // cell/direction verbs (arm/disarm) AND the give recipient pick (armGive/giveTo), so
-  // give shows the same armed rectangle while you point at a party member.
+  // The #probe-cell targeting cue (armed recolor + a verb label): the cell/direction verbs
+  // (arm/disarm) recolor the probe rectangle + show a verb label while you point at a cell.
   function showCue(text) {
     cellEl.classList.add('armed');
     label.textContent = text;
@@ -129,35 +128,56 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
     arm('drop');
   }
 
-  // --- I-10j give (MOVE Mode 2): the inventory window's `M` hand-off. armGive records the
-  //     item + its giver (the member whose window it came from); the recipient is then a
-  //     party member — a top-row digit (resolved in main.js → giveTo) or a click on a party
-  //     member (the canvas handler below → giveTo). giveTo is the effect: source's give =
-  //     remove from the giver + InsertObj INVEN to the recipient (C_27A1_1E8B else-branch,
-  //     :1101-1118). Party members need no adjacency (always "around"). Refusals mirror
-  //     source: yourself → "yourself.", non-party → "Only within the party!". Deferred
-  //     (faithful, as GET/DROP): the STREN*20 carry-weight gate, unequip-on-give,
-  //     put-into-a-container. ---
-  function armGive(itemHandle, giverHandle) {
-    pendingGive = { item: itemHandle, giver: giverHandle };
-    showCue('Give');                       // the armed rectangle + label while pointing at a recipient
-    message('Give to whom? (press a member number, or click a party member)');
-  }
-  function giveTo(recipientHandle) {
-    if (!pendingGive) return;
-    const { item, giver } = pendingGive;
-    pendingGive = null;
-    hideCue();
-    if (recipientHandle == null || world.resolve(recipientHandle) === -1) { message('nobody.', 'miss'); return; }
-    if (recipientHandle === giver) { message('yourself.', 'miss'); return; }                // give to self = no-op (:1140)
-    if (!(world.has(recipientHandle, Actor) && world.has(recipientHandle, PartyMember))) {
-      message('Only within the party!', 'miss'); return;                                    // C_27A1_1E8B:1118
+  // --- I-18e give: the inventory window's `G` opens an in-stack recipient-picker (the party minus
+  //     the giver — view/party_status.js openRecipientPicker); selecting a member calls giveItem
+  //     directly. Source's give = remove from the giver + InsertObj INVEN to the recipient
+  //     (C_27A1_1E8B else-branch, :1101-1118); party members need no adjacency. Refusals mirror
+  //     source: self → "yourself.", non-party → "Only within the party!". The picker offers only
+  //     valid recipients, so those are belt-and-suspenders — but the stale-item check still matters
+  //     (the item can move between opening the picker and selecting). Deferred (faithful, as
+  //     GET/DROP): STREN*20 carry-weight, unequip-on-give, put-into-a-container. (I-18e replaced the
+  //     old armGive/giveTo bare-map recipient dance — progress.md §"I-18 scope".) ---
+  function giveItem(item, giver, recipient) {
+    if (recipient == null || world.resolve(recipient) === -1) { message('nobody.', 'miss'); return; }
+    if (recipient === giver) { message('yourself.', 'miss'); return; }                       // give to self = no-op (:1140)
+    if (!(world.has(recipient, Actor) && world.has(recipient, PartyMember))) {
+      message('Only within the party!', 'miss'); return;                                     // C_27A1_1E8B:1118
     }
-    if (item == null || world.resolve(item) === -1) { message('What?', 'miss'); return; }   // stale item
+    if (item == null || world.resolve(item) === -1) { message('What?', 'miss'); return; }    // stale item
     const name = displayName(world, item, { reg, objlist });
-    const who = displayName(world, recipientHandle, { reg, objlist });
-    moveToInventory(world, item, recipientHandle);
+    const who = displayName(world, recipient, { reg, objlist });
+    moveToInventory(world, item, recipient);
     message(`You give ${withArticle(name)} to ${who}.`);
+  }
+
+  // --- I-18j equip toggle: the inventory window's `E` readies (worn) or unreadies (carried) the
+  //     highlighted item. Source's "Ready"/"Unready" (C_155D_144B / C_155D_1738) with the same gates:
+  //     not-equippable, too-heavy (equip weight + the item > STR×10, :546), and a FULL target slot
+  //     REFUSES ("No place to put!", :569 — source does NOT swap). The 2-hand / ring / hand spill is
+  //     resolveReadySlot. **Ready RE-PARENTS the item to the member** (`readyItem` = source's
+  //     `InsertObj(item, di=outermost-holder, EQUIP)`, :572-581), so readying an item nested in a bag
+  //     pulls it out onto the member — hence `E` works on a bagged equippable too (the item is read
+  //     from the stores, not the member's direct inventory). General move-in/out for non-equip items
+  //     is I-18k. Cursed-item lock (OBJ_04C) + the ring/cloak magic FX are deferred. ---
+  function equipToggle(itemHandle, holder, str) {
+    const i = itemHandle != null ? world.resolve(itemHandle) : -1;
+    if (i === -1 || !world.has(itemHandle, ContainedIn)) { message('What?', 'miss'); return; }
+    const objs = world.store(ObjType), ci = world.store(ContainedIn);
+    const name = displayName(world, itemHandle, { reg, objlist });
+    if (ci.equipped[i]) {                                                                     // Unready (C_155D_1738)
+      setEquipped(world, itemHandle, false);                                                  // worn -> carried; the holder (member) is unchanged
+      message(`You remove ${withArticle(name)}.`);
+      return;
+    }
+    const slot = equipSlotForTile(reg.tileForObject(objs.objNumber[i], objs.frame[i]));       // Ready (C_155D_144B)
+    if (slot === -1) { message(`You can't ready ${withArticle(name)}.`, 'miss'); return; }    // :544 Can't be readied!
+    const equipped = inventoryOf(world, holder).filter((it) => it.equipped);                  // the member's current worn set
+    const wEquip = equipped.reduce((s, it) => s + reg.weightOf(it.objNumber), 0);
+    if (reg.weightOf(objs.objNumber[i]) + wEquip > (str | 0) * 10) { message('Too heavy!', 'miss'); return; }   // :546
+    const eq = buildEquipment(equipped, reg);
+    if (eq[resolveReadySlot(slot, eq)]) { message('No place to put it!', 'miss'); return; }   // :569 refuse (no swap)
+    readyItem(world, itemHandle, holder);                                                     // :581 re-parent to the member + EQUIP (pulls a bagged item out)
+    message(`You ready ${withArticle(name)}.`);
   }
 
   function avatarPos() {
@@ -371,12 +391,6 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
   document.addEventListener('keydown', (e) => {
     if (!uiStack.isEmpty()) return;          // a modal owns the keyboard
     if (probe.isDragging()) return;
-    // I-10j give: awaiting a recipient. Esc cancels; the digit-recipient is resolved by
-    // main.js's digit listener (it owns the party mapping → cmd.giveTo), so other keys pass.
-    if (pendingGive) {
-      if (e.key === 'Escape') { message('Never mind.', 'miss'); pendingGive = null; hideCue(); e.preventDefault(); }
-      return;
-    }
     // MOVE stage 2 (C_27A1_1E8B): an object is picked, awaiting a push direction. Capture
     // arrow/numpad HERE and stopPropagation so the avatar's window-level keydown (which
     // fires AFTER this document-level one in the bubble) doesn't also walk on the same key.
@@ -408,22 +422,12 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
   // dev_probe suppresses drag-to-pan while armed (isVerbArmed), so no drag/click
   // disambiguation is needed.
   canvas.addEventListener('click', () => {
-    // I-10j give: a click on a party member is the recipient (the targeting digit-or-click
-    // pair, source seg_0C9C.c:1298). pickAtCell returns the member; giveTo validates it.
-    if (pendingGive) {
-      if (uiStack.isEmpty()) {
-        const cell = probe.getLastCell();
-        giveTo(cell ? pickAtCell(cell.x, cell.y) : null);
-      }
-      return;
-    }
     if (!pendingVerb || !uiStack.isEmpty() || awaitingDir) return;   // stage 2 takes a direction key, not a click
     confirm(probe.getLastCell());
   });
 
   return {
-    dispatch, armDrop, armGive, giveTo,
-    isAwaitingGiveRecipient: () => pendingGive !== null,
-    isPending: () => pendingVerb !== null || pendingGive !== null,
+    dispatch, armDrop, giveItem, equipToggle,
+    isPending: () => pendingVerb !== null,
   };
 }

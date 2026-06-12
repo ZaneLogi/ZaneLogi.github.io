@@ -16,16 +16,16 @@
 import { ConversationVM } from './conversation_vm.js';
 import { OP } from './opcodes.js';
 import { createDialogUI } from '../../view/dialog_window.js';
-import { Actor, Amount, Position, ObjType, AIMode } from '../../components/components.js';
+import { Actor, Amount, Position, ObjType, AIMode, MoveSpeed } from '../../components/components.js';
 import { WorldClock } from '../../resources/world_clock.js';
 import { ActorIndex } from '../../resources/actor_index.js';
 import { Camera } from '../../resources/camera.js';
 import { Viewport } from '../../resources/viewport.js';
 import { inventoryOf, addMapObject, moveToInventory, deleteMapObject } from '../../world_loader.js';
+import { maxHP } from '../stat_formulas.js';
 
 const OBJ_HORSE = 0x1af;                 // ridable horse object type (seg_1703.c HORSED/GETHORSE)
 const POISONED = 0x08;                   // NPCStatus poison bit (u6.h:128)
-const maxHP = (a) => Math.max(1, Math.min(255, (a && a.level ? a.level : 0) * 30));
 
 // --- dev introspection helpers (for the window.__U6.inspectConversation hook) ---
 const OPNAME = Object.fromEntries(Object.entries(OP).map(([k, v]) => [v, k]));
@@ -87,6 +87,17 @@ export function makeConversationHost(world, deps) {
   // --- world access helpers (slot id -> entity) ---
   const A = (slot) => objlist.actors[slot] || {};
   const handleOf = (slot) => world.getResource(ActorIndex).get(slot);
+  // MoveSpeed.dexterity is a hot-path CACHE of the canonical objlist dexterity (move_economy's
+  // rate() reads it per tick). A dex-training effect must refresh the cache too, or trained
+  // dexterity never reaches the accumulator and the NPC's movement speed never changes (the
+  // latent bug this fixes). The objlist stays the source of truth; this just re-syncs the cache.
+  function refreshMoveSpeedDex(slot, dex) {
+    const h = handleOf(slot);
+    if (h === undefined || !world.isRegistered(MoveSpeed)) return;
+    const i = world.resolve(h);
+    if (i === -1 || !world.has(h, MoveSpeed)) return;
+    world.store(MoveSpeed).dexterity[i] = dex;
+  }
   function entObjType(slot) {                       // object type of an NPC's entity, or -1
     const h = handleOf(slot); if (h === undefined) return -1;
     const id = world.resolve(h); return id === -1 ? -1 : world.store(ObjType).objNumber[id];
@@ -141,7 +152,7 @@ export function makeConversationHost(world, deps) {
       case 'npcName': return A(eff.npc).name || 'someone';
       // --- queries (I-13e) ---
       case 'flag': return ((A(eff.npc).talkFlags || 0) >> eff.bit) & 1;
-      case 'wounded': return maxHP(A(eff.npc)) > (A(eff.npc).hp || 0) ? 1 : 0;
+      case 'wounded': return maxHP(A(eff.npc).level) > (A(eff.npc).hp || 0) ? 1 : 0;
       case 'poisoned': return (A(eff.npc).status & POISONED) ? 1 : 0;
       case 'inParty': return inParty(eff.npc) ? 1 : 0;
       case 'onScreen': return onScreen(eff.npc) ? 1 : 0;
@@ -163,7 +174,7 @@ export function makeConversationHost(world, deps) {
       case 'addLvl': { const a = A(eff.npc); a.level = (a.level || 0) + eff.n; return a.level; }
       case 'addStr': { const a = A(eff.npc); a.strength = Math.min(30, (a.strength || 0) + eff.n); return a.strength; }
       case 'addInt': { const a = A(eff.npc); a.intelligence = Math.min(30, (a.intelligence || 0) + eff.n); return a.intelligence; }
-      case 'addDex': { const a = A(eff.npc); a.dexterity = Math.min(30, (a.dexterity || 0) + eff.n); return a.dexterity; }
+      case 'addDex': { const a = A(eff.npc); a.dexterity = Math.min(30, (a.dexterity || 0) + eff.n); refreshMoveSpeedDex(eff.npc, a.dexterity); return a.dexterity; }
       // join/leave need ECS party + follower integration → DEFERRED (stub-when-deferred,
       // research_i13_conversation_vm.md). Membership is NOT mutated; codes keep dialogue sane.
       case 'join': return inParty(eff.npc) ? 3 : 0;     // 3=already in party, 0=success (not actually added)
@@ -175,13 +186,13 @@ export function makeConversationHost(world, deps) {
       case 'clrFlag': { const a = A(eff.npc); a.talkFlags = (a.talkFlags || 0) & ~(1 << eff.bit); return 0; }
       case 'addKarma': { objlist.globals.karma = Math.min(99, (objlist.globals.karma || 0) + eff.n); return 0; }
       case 'subKarma': { objlist.globals.karma = Math.max(0, (objlist.globals.karma || 0) - eff.n); return 0; }
-      case 'heal': { const a = A(eff.npc); a.hp = maxHP(a); return 0; }
+      case 'heal': { const a = A(eff.npc); a.hp = maxHP(a.level); return 0; }
       case 'cure': { const a = A(eff.npc); a.status = (a.status || 0) & ~POISONED; return 0; }
       case 'setMode': setNpcMode(eff.npc, eff.mode); return 0;
       case 'give': giveObj(eff.npc, eff.obj, eff.qual, eff.qty); return 0;
       case 'take': takeObj(eff.npc, eff.obj, eff.qty); return 0;
       case 'spawnHorse': { const at = avatarCell(); if (at) addMapObject(world, { objNumber: OBJ_HORSE, frame: 0, x: at.x, y: at.y, z: at.z, quality: 0, quantity: 1 }); return 0; }
-      case 'rest': { for (const slot of objlist.party.slice(0, objlist.partySize)) { const a = A(slot); a.hp = maxHP(a); } return 0; }   // time-skip deferred
+      case 'rest': { for (const slot of objlist.party.slice(0, objlist.partySize)) { const a = A(slot); a.hp = maxHP(a.level); } return 0; }   // time-skip deferred
       // resurrect / moveObj / transferObj → deferred (corpse handling / obj-ref resolution).
       default: return 0;
     }

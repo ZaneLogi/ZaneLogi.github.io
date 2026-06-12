@@ -5,7 +5,7 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: I-17 (NPC AI behaviors) COMPLETE (2026-06-11) — the moving schedule worktypes are now active per-turn behaviors: `WANDER`/`GRAZE` (`C_1E0F_37DB`), `LOITER`/`FARM` (`C_1E0F_33C4`), `GUARD` pacing (`:1820`), all riding the I-14 accumulator via the probability×accumulator contract (the credit gate is the beat; source's per-turn die picks step-vs-idle; idle spends too, so a high-DEXTE NPC can't bank beats into a burst). Plus I-17d: a displaced settle-in-place NPC (shoved aside by a passing NPC's step-aside) stands up, then returns to post + re-poses once the slot cell clears. `RINGBELL` (on-demand bell tile-anim) split to its own later step; combat/thief/law deferred by design. test_pathfinding 194/194; WANDER+LOITER live-verified on real data. See §"I-17 scope". Next: I-18 (status panel).** Prior: I-16 (arrival behaviors + direction system, §"I-16 scope") and the conversation system I-12/I-13 (walk + talk end-to-end, §"I-13 scope").
+**Status: I-18 (status panel) COMPLETE (2026-06-12) — on-demand party UI on the I-7 UIStack: `P` roster → ZSTATS (portrait + STR/DEX/INT + Magic/Health cur/MAX + Lvl/Exp) → `Tab`⇄inventory, plus an in-stack GIVE recipient-picker. All stats read from the **objlist** (NO `Stats` component — the objlist is the canonical persisted stat store; `MoveSpeed.dexterity` is a derived cache refreshed on dex-training). Layout refactored (fixed status panel removed → map full-width; persistent clock strip; floating NON-modal dev panel); the bare-map digit-inventory + map-give paths retired. 6 sub-steps a–f, all verified live on real data; the Avatar ZSTATS portrait defaults to `portrait.z[6]` (D_2CCB 7, a male face matching the factory `avatarSex` 0) for factory/uncreated data (`D_2CCB==0` — no char-creation flow), a real save (`D_2CCB>0`) shows the player's pick. No snapshot bump (stays v2). See §"I-18 scope". **Extended a–f → a–k (COMPLETE): I-18g–k add the equipped-equipment view + equip/unequip + container move** — the de-scoped paperdoll (a labeled equip-slot list beside the full item list + a weight/STR gauge, GAME.EXE slot words; `systems/equip_slots.js` + `view/equip_list.js`), the `E` equip/unequip toggle (source gates incl. bagged-equip take-out via re-parent), and the `M` "move to…" picker (move items in/out of bags both directions) — see §"I-18g–j scope" + §"I-18k scope". **Next: I-19** (object-action handlers expansion).** Prior: I-17 (NPC AI behaviors, §"I-17 scope"), I-16 (arrival + direction, §"I-16 scope"), conversation I-12/I-13 (walk + talk end-to-end, §"I-13 scope").
 
 This banner is the **single canonical current-status line** — `CLAUDE.md` and
 `DOCUMENTATION_INDEX.md` point here instead of mirroring it (convention: §"Doc maintenance").
@@ -57,7 +57,7 @@ banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 | I-save/load | **save/load — full-snapshot JSON persistence** — generic ECS snapshot (every live entity's components + mutable resources) → JSON; Export downloads, Import re-uploads + restores on reload. Restore *replaces* `loadActors` and re-marks `loadedRegions`, so deletions stay dead + mutations survive without tombstones (`research_save_load.md`). Non-numeric label keeps the I-16…I-19 arc intact. | **done** (a–g, 2026-06-10) |
 | I-16 | **arrival behaviors + direction system** — `__AtDestination` prop lookup for sit/sleep/eat/play (`C_1E0F_2184` + `FindLoc`/`NextLoc` multi-tile footprint + `D_0658`) + fallbacks, eating dynamic facing (`C_1E0F_2125`), the `C_1E0F_0664` frame system (humanoid + non-humanoid per-type arms) + chair-overrides-facing, sprite-restore-on-wake, and (d) `AI_SCHEDULE` continuous-settle (`resolveActiveSlot` + per-tick `__AtDestination`). | **done** (a–c + 2 review fixes + d; carries the AI-mode dispatch coverage table) |
 | I-17 | **NPC AI behaviors** — the moving worktypes as active per-turn behaviors: `WANDER`/`GRAZE` (`C_1E0F_37DB`), `LOITER`/`FARM` (`C_1E0F_33C4`), `GUARD` pacing, via the probability×accumulator contract; + **I-17d** displaced settle-in-place NPCs stand aside on a shove & return to post + re-pose when the slot clears. `RINGBELL` split to its own later step; thief/law + combat deferred by design. See §"I-17 scope". | **done** (a–d) |
-| I-18 | **party status UI — on-demand, NOT a fixed panel.** `P` → roster (icon/name/HP) → member digit → ZSTATS → `Tab` ⇄ inventory, all on the UIStack. Wire a `Stats` component at load (HP/STR/INT/MAGIC/LEVEL/EXP, decoded-but-dropped today) + port `MaxHP`/`MaxMagic`. Refactor GIVE → an in-stack recipient-picker modal (retires the bare-map give path + the direct digit-inventory shortcut). Layout refactor: fixed status panel removed, clock → persistent strip, dev HUD → floating show/hide. (was "replaces the dev-HUD clock readout") | planned (design settled 2026-06-11) |
+| I-18 | **party status UI — on-demand, NOT a fixed panel.** `P` → roster (icon/name/HP) → member digit → ZSTATS (portrait + STR/DEX/INT + Magic/Health cur/MAX + Lvl/Exp) → `Tab` ⇄ inventory, all on the UIStack; stats read straight from the **objlist** (NO `Stats` component — Option B; `MaxHP`/`MaxMagic` ported to `stat_formulas.js`). GIVE → in-stack recipient-picker (bare-map give + direct digit-inventory paths retired). Layout: fixed status panel removed → map full-width, clock → persistent strip, dev HUD → floating show/hide. Avatar portrait via `D_2CCB` (factory data → `z[6]`/D_2CCB 7 male-face default). **g/h/i** = equipped-equipment view (de-scoped paperdoll): equip-slot list beside the carried list + weight gauge + `E` equip/unequip (source gates, bagged-equip re-parents out) + **k** `M` "move to…" picker (move items in/out of bags, both directions). | **done** (a–k, 2026-06-12) |
 | I-19 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / moonstones / instruments / etc.); each handler tied to its owning subsystem when that subsystem lands (was I-15→I-18) | planned |
 
 **Why I-2 is the world-data system.** Loading the real world from `OBJBLK*`/
@@ -1266,7 +1266,7 @@ continuously instead of bursting per round. (Source-mechanism reference still: `
   fill rate AND the decoupled clock together**: slow → everything ambles, **slow-end = frozen** (recovers
   source's "world stops when idle" feel), fast → bustle. **Log-scaled.** The 100 ms heartbeat stays
   fixed; the slider changes the *rate*, not the frame interval. Pairs with the world-clock surface
-  (dev-HUD clock now → **status panel I-18**).
+  (at I-18 the clock moved to the persistent strip; the slider still rides the floating dev HUD).
 - **Staggering & blocking** emerge from independent per-actor credit phases (actors cross the threshold
   on different heartbeats), so a blocker usually vacates before/after a blocked NPC, not simultaneously —
   no global interleave needed. Residual blocks ride the existing `84/85/86` wait-and-replan
@@ -2722,8 +2722,9 @@ unused under the accumulator.
   the per-step threshold for NPCs. **Player:** **fixed-brisk** base (NOT DEX-scaled), **instant-first-
   step + terrain cooldown** — standing leaves the player "ready" so a keypress steps instantly; a
   post-step cooldown rate-limits *sustained* walking only → zero input lag, swamp visibly slows.
-- **d** — **`WORLD_SPEED` master slider** in the world-clock UI (dev-HUD clock now → status panel
-  I-18): scales **all actor rates + the decoupled clock together**; log-scaled; **slow end = frozen**.
+- **d** — **`WORLD_SPEED` master slider** in the world-clock UI (at I-18 the clock moved to the
+  persistent strip; the slider still rides the floating dev HUD): scales **all actor rates + the
+  decoupled clock together**; log-scaled; **slow end = frozen**.
   The clock advances on its **own** cadence (**decoupled** — not per round/refill); the 100 ms
   heartbeat stays fixed (the slider changes the *rate*, not the frame interval).
 - **e** — verify: staggering removes the flat-step thrash; player input never lags + swamp visibly
@@ -3049,10 +3050,13 @@ LOITER live-verified moving on real data (gentle 1/8 drift, no console errors). 
 
 ## I-18 scope — party status UI (on-demand) + dev-HUD/clock layout refactor
 
-**Status: PLANNED — design settled 2026-06-11 (this is the pre-impl plan; the per-sub-step
-record + as-built notes fill in as a–e land).** Grounded against `seg_0A33.c` `RefreshStatus`
-(`C_0A33_1AB7`) and the panel-mode routines in `seg_155D.c`. Supersedes I-18's original "fixed
-status panel that replaces the dev-HUD clock readout" charter.
+**Status: COMPLETE (2026-06-12) — all sub-steps a–f landed (a layout refactor · b stat helpers + dex-cache
+fix · c `P` roster + shared widget · d ZSTATS + `Tab`⇄inventory · e GIVE picker + bare-map-path retirement
+· f avatar portrait), all verified live on real data; data-layer = objlist-canonical (NO `Stats` component
+— see "Data layer" below); no snapshot bump (stays v2).** Grounded against `seg_0A33.c`
+`RefreshStatus` (`C_0A33_1AB7`) and the panel-mode routines in `seg_155D.c`. Supersedes I-18's
+original "fixed status panel that replaces the dev-HUD clock readout" charter. The per-sub-step
+as-built notes fill in as a–e land.
 
 **The reframe (Zane's call, 2026-06-11).** Source's status display is a *fixed right-hand panel*
 — `RefreshStatus` switches `StatusDisplay` between party / stats / inventory modes in place. The
@@ -3120,21 +3124,40 @@ inherent — you can't pick a ground location from a list — and it is the same
 I-10j's DROP already had. Accepted; not special-cased. (Net consequence: with the direct digit
 entry gone, dropping is reached only by detonating out of the roster path — accepted.)
 
-### Data wiring — the `Stats` component (no-fakes)
+### Data layer — the objlist record is canonical (no new `Stats` component) [REVISED 2026-06-11 on review]
 
-The per-character stats are **decoded but dropped at load**: `objlist.js:42-71` parses
-`strength/dexterity/intelligence/exp/hp/level/mp`, but `world_loader.js:151-152` carries only
-`dexterity` (into `MoveSpeed`) + `Alignment`. I-18 adds a **`Stats` component** wired from the
-already-decoded fields — per `feedback_no_fakes_during_scaffolding`, port the real values even
-though combat (which would mutate HP) isn't in yet. The generic ECS snapshot picks it up for free
-(save/load).
+The original plan added a `Stats` ECS component "because the stats are decoded but dropped at load."
+On review that premise was wrong: the stats are **not** dropped — they live on the **`objlist` actor
+records** (`objlist.js` parses `strength/dexterity/intelligence/exp/hp/level/mp` into `a.*`), which is a
+**mutable, persisted, conversation-VM-facing** store. The conversation VM reads them
+(`conversation_system.js`: `#A` dex / `#I` int / `#P` hp / `#S` str / `#E` exp) and **writes** them
+(`addDex` → `objlist.actors[slot].dexterity`), and `snapshot.js` serializes the full `objlist` as save
+state (it explicitly calls these "trained stats"). What was "dropped" is only the ECS-component
+projection. `world_loader.js` carries only `dexterity` (into `MoveSpeed`) + `Alignment` onto the entity.
 
+A `Stats` component would therefore be a **second** persisted home for the same numbers → drift (`addDex`
+writes the objlist; a `Stats` mirror wouldn't update → ZSTATS shows stale trained stats), double-
+persistence, and the exact duplication the single-source-of-truth rule forbids. **Decision (Zane
+2026-06-11): no `Stats` component.**
+
+- **ZSTATS reads the objlist directly** — `objlist.actors[objlist.party[di]]`, the same pattern the
+  conversation VM already uses. Single source of truth; covers all actors for free (the objlist holds
+  them all); **no snapshot bump** — the objlist already round-trips through save/load, so
+  `SNAPSHOT_VERSION` stays 2.
+- **`MoveSpeed` is a derived cache of dexterity, not a second source.** `MoveSpeed.dexterity` stays (the
+  accumulator reads it hot per tick), but it is a **cache** of the canonical `objlist` value, refreshed
+  at load **and on dex-training**: the dex-training path (`conversation_system.js addDex`) must also
+  update `MoveSpeed.dexterity[entity]` (via `ActorIndex.get(slot)`) so trained dexterity actually
+  changes movement speed. This fixes a pre-existing latent bug — today `addDex` writes the objlist but
+  not the MoveSpeed copy, so training never affected speed. One source (objlist), one cache (MoveSpeed),
+  single writer. STR/INT/HP/Exp training don't feed the accumulator, so they need no cache refresh;
+  ZSTATS reads them live from the objlist.
 - **`MaxHP()` / `MaxMagic()` are derived in source** (functions, not stored bytes) — port the two
-  formulas (small `research_*.md` note); store base stats + current HP/Magic, compute max for the
-  cur/max display.
-- **HP coloring:** `<10` → red now; **poison-green deferred** to a combat/poison subsystem. Poison
-  is only a status bit (`0x08`) read off the objlist by the conversation VM
-  (`conversation_system.js:27,145`), not a clean ECS flag — wiring it is out of scope here.
+  formulas into a small `systems/stat_formulas.js`, cited to `seg_2337.c:226/237`: `maxHP =
+  clamp(level*30, 1, 255)`; `maxMagic` = a type-keyed multiple of INT (`OBJ_19A` 2×, `OBJ_17A` 1×,
+  `OBJ_179`/`OBJ_182` ½×, else 0). Computed on display from the objlist's level/int/objType — not stored.
+- **HP coloring:** `<10` → red now; **poison-green deferred** to a combat/poison subsystem (poison is a
+  status bit `0x08` on the objlist, not a clean ECS flag — out of scope here).
 - **ZSTATS shows no weight/encumbrance** — that is the inventory/paperdoll view; `C_155D_028A` has
   STR/DEX/INT/Magic/Health/Level/Exp only.
 
@@ -3173,28 +3196,109 @@ chrome is restructured (`index.html` + `view/dev_hud.js`):
 
 ### Sub-step plan (each ≈ one save-point commit, browser-verified; squashed into one `impl I-18` per the I-7/I-8 default unless kept separate)
 
-- **a — layout refactor (chrome only, no new surfaces).** Remove `#status-panel`; collapse grid to
-  one column; add the persistent clock strip; float `#dev-block` with show/hide. No behavior change
-  to dev-HUD internals. Verify: map full-width, clock ticks in the strip, dev panel toggles + still
-  updates live (not suspended), modals still open over the map.
-- **b — `Stats` component + load wiring + `MaxHP`/`MaxMagic`.** Define `Stats`, register it in
-  `main.js`'s `registerComponent` chain (boot-halt gotcha — see I-11a), wire from `objlist` in
-  `world_loader.js`, port the two max formulas. No UI. Verify via `__U6` inspect + snapshot
-  round-trip.
-- **c — `makePartyMemberList` + the `P` roster.** Shared widget; `P` opens the roster (icon + name
-  + HP, `<10`-red); member digit → opens ZSTATS (step d). Retires the map-level direct-inventory
-  digit branch.
-- **d — ZSTATS surface + `Tab` toggle.** Per-member stats view (name + portrait via
-  `assets/portrait.js` + STR/DEX/INT + Magic cur/max + Health cur/max + Level/Exp); `Tab` toggles
-  the member-view body ZSTATS ⇄ the existing inventory window; member nav within.
-- **e — GIVE → recipient-picker.** Replace the bare-map give path with the picker modal (shared
-  widget, exclude giver); refresh-after-give; gray-out for party-of-one; delete the give apparatus
-  + the now-unused top-row-digit map handler. Document the I-10j behavior change.
+- **a — layout refactor (chrome only, no new surfaces). LANDED 2026-06-11.** Removed `#status-panel`
+  + `#right-panel`; `#app` grid collapsed two columns → one (`"map"`/`"msg"`, map reclaims full window
+  width). Bottom message band also shortened (`minmax(90px,160px)` → `minmax(56px,100px)`). New
+  persistent `#clock-strip` (holds `#clock-text` + the `dev` toggle button; carries the
+  `.paused` tint). `#dev-block` lifted out of the grid into a floating `position:fixed` bottom-right
+  panel (`z-index:90` < `#ui-root`'s `100` so player modals stack above), `hidden` until `load()`
+  reveals it (so the boot log shows); toggle via the strip button **or backtick** (skips typing into
+  inputs). `dev_hud.js` is **UNCHANGED** — it's parameterized by element refs, so `main.js` just passes
+  `hudEl=#clock-strip`/`textEl=#clock-text`, and `installDevHud`'s `hudEl.style.display='block'` reveals
+  the strip while `.paused` toggles on it. **Open item settled:** dev-toggle = backtick + a strip button
+  (resolves the plan's hotkey-choice open item). **Verified live on Zane's real data (a restored save, world ticking, port 8083):** clean boot (no
+  console errors); map full-width (682/706px); the clock readout ticks in the strip (47→51 hours fired
+  across the checks); **pause** tints `#clock-text` red (`rgb(204,102,102)`) + freezes the clock, resume
+  restarts it; the **dev toggle** works via both the strip button and **backtick** (both directions, and
+  correctly ignored while a text input is focused); the panel floats over the map and the **world keeps
+  ticking with it open** (proof it's not a suspending modal); a player **modal opens centered over the
+  full-width map** (`#ui-root` z-index 100 above the dev panel's 90), Esc closes it.
+- **b — stat-read helpers (no new component). LANDED 2026-06-11.** Per the revised data layer: NO
+  `Stats` component. New `systems/stat_formulas.js` — `maxHP(level)` (`clamp(level*30,1,255)`) +
+  `maxMagic(objType,int)` (`0x19a`→2×, `0x17a`→1×, `0x179`/`0x182`→½×, else 0), cited `seg_2337.c:226/237`;
+  also consolidated the conversation host's inline `maxHP` into it (heal/rest/wounded now import the shared
+  fn — one source of truth). `addDex` (`conversation_system.js`) now calls a new `refreshMoveSpeedDex` to
+  re-sync the `MoveSpeed.dexterity` cache (objlist = source of truth; `MoveSpeed.dexterity` = the cache the
+  accumulator reads hot per tick) — fixes the latent bug where trained dexterity never reached movement
+  speed. No new persisted state, no snapshot bump (stays v2). **Verified live on Zane's real data:**
+  `maxHP`/`maxMagic` match source both synthetically and on the avatar (level 8 → 240; `0x19a`, INT 15 →
+  30); the avatar entity has `MoveSpeed` with `dexterity` synced to the objlist at load, and the
+  train-then-refresh path updates the cache (mutate+restore, no lasting change). Clean boot, no console
+  errors. (`node` not on this PC → unit suites not re-run; the change is mechanical + live-verified.)
+- **c — `makePartyMemberList` + the `P` roster. LANDED 2026-06-11.** New `view/party_status.js`:
+  `makePartyMemberList({reg,objlist,exclude,showHp,onSelect})` (the shared widget — down-facing sprite
+  icon [humanoid south stand frame `(2<<2)|1`=9, `OBJ_MakeDirFrame(type,4)`], name, HP cur/MAX via
+  `stat_formulas.maxHP` with the `<10`-red rule; `↑↓`/Enter/digit select; reads the objlist) +
+  `openPartyRoster(uiStack,{...})` (the `P` modal — CMD_91 `C_155D_000C`). `P` keydown in `main.js`,
+  same gate as `I` (no modal / not panning / no verb armed). **Scoping calls:** (1) `onSelect` opens a
+  read-only **inventory-browse placeholder** for now — I-18d swaps it for the member's ZSTATS; (2) the
+  map-level direct-inventory **digit-retirement is DEFERRED to I-18e** (bundled with the give-apparatus
+  removal) — c is purely additive, so the existing top-row-digit path is untouched (no half-removal).
+  **Verified live on real data:** `P` opens the roster (Avatar 90/240, Dupre/Shamino/Iolo 90/90 — per-
+  member maxHP: avatar L8→240, companions L3→90), each with its down-facing sprite; `↑↓` moves the
+  cursor; Enter AND digit both select → that member's inventory opens as a stacked modal; Esc unwinds
+  (inventory→roster→closed). Clean boot, no console errors. (`maxMagic` is unused until ZSTATS in d.)
+- **d — ZSTATS surface + `Tab` toggle. LANDED 2026-06-11.** `openZStats` in `view/party_status.js` —
+  per-member stats modal: name + **portrait** (the I-12 `Portraits.imageData(slot)` lazy decoder, blitted
+  to a reused `.dialog-portrait` canvas; Avatar slot → blank box, split to **I-18f** below) + STR/DEX/INT +
+  **Magic cur/MAX** (`mp`/`maxMagic`) + **Health cur/MAX** (`hp`/`maxHP`, `<10`-red) + Level/Exp, all read
+  from `objlist.actors[slot]` + the `stat_formulas` helpers (no `Stats` component). Source: `CMD_90`
+  `C_155D_028A`. **Stacks on the roster** (Zane's call — Esc peels ZSTATS → roster → close). `Tab` opens
+  that member's inventory window (`openInventoryWindow` gained a `tabBack` opt: `Tab` there pops back to
+  ZSTATS; `Esc` does too) — the toggle is push/pop on the stack, not an in-place body swap (consistent
+  with the chosen "stack" model + reuses the full recursive/verb inventory window). A **digit switches
+  member** in place (pop the ZSTATS, re-open for member n; roster preserved). main.js `openMemberView`
+  wires it; the roster `onSelect` now points here (replacing the c inventory placeholder). **Verified live
+  on real data:** Dupre ZSTATS (STR 26/DEX 20/INT 17/Magic 0/0 [fighter → 0]/Health 90/90/Lvl 3/Exp 374),
+  portrait drew; Tab → inventory → Tab/Esc back; digit 3 → Shamino; Esc cascade roster→close; clean boot,
+  no errors. **Long-list scroll fix (Zane, found via Iolo's inventory):** `.ui-list` now scrolls within
+  itself (capped 56vh) so a long list keeps the modal header + hint/operation line PINNED instead of the
+  whole modal scrolling them off the 80vh fold — applies to every list modal (inventory / roster / picker).
+  **Member-switch fix (Zane):** the Tab'd inventory's "1-N switch" hint was a dead promise (no `onDigit`
+  passed). Member-switch is now wired into BOTH faces — a digit from ZSTATS or from the Tab'd inventory
+  unwinds the member view to the roster and opens member n's ZSTATS (`switchMember`).
+- **e — GIVE → recipient-picker + retire the bare-map paths. LANDED 2026-06-11.** `G` in the inventory
+  now opens an **in-stack** `openRecipientPicker` (party minus the giver — the shared `makePartyMemberList`,
+  `view/party_status.js`); selecting a member calls a new `cmd.giveItem(item, giver, recipient)` (extracted
+  from the old `giveTo` — same self/non-party/stale refusals), then the picker pops and the giver's
+  inventory rebuilds (item gone, stay there). Party-of-one → an empty-state picker ("(no one else to give
+  to)"), in place of "gray out `G`" (functionally equivalent, simpler). `G` is wired via a new `onGive`
+  inventory-window hook that does NOT close the chain (so the picker stacks); `D` still detonates the whole
+  chain to the bare map + arms the drop cursor (the accepted asymmetry). **Deletions:** the bare-map give
+  apparatus (`pendingGive`/`armGive`/`giveTo`/`isAwaitingGiveRecipient` + the keydown give-Esc branch + the
+  canvas-click give branch + the give cue, `command_dispatch.js`); and the **bare-map top-row-digit
+  inventory handler** (`openMemberInventory` + its keydown listener + `__U6` hook, `main.js`) — inventory
+  access is now P → roster → ZSTATS → `Tab` only; bare-map top-row digits are inert (numpad stays avatar
+  diagonals). **Behavior change to landed I-10j:** the map-give path is retired (modern-UX consistent — give
+  was already party-only, a clone construct, so a modal list is a legit rewrite, not a faithfulness
+  regression). e also finally wires `G`/`D` into the ZSTATS-opened inventory (inert in d). **Verified live on
+  real data:** Avatar `G` on the Orb → picker (Dupre/Shamino/Iolo, Avatar excluded) → pick Dupre → "You give
+  Orb of the Moons to Dupre.", Orb leaves Avatar + arrives in Dupre, inventory rebuilt; `D` detonates to the
+  armed map cursor; bare-map digit `1` opens nothing; Esc cascade; clean boot.
+- **f — avatar ZSTATS portrait. LANDED 2026-06-12.** `objlist.js` now parses `avatarPortrait = g(0x2ccb)`
+  (source `D_2CCB`, the char-creation portrait choice) into globals; `portrait.js`'s Avatar branch decodes
+  `portrait.z[D_2CCB-1]` (`C_2FC1_1C19`, `seg_2FC1.c:755`); `main.js` passes it to `new Portraits`.
+  `openZStats` needed **no change** — it already calls `portraits.imageData(slot)`, which now resolves the
+  Avatar. **Investigation (Zane's data is a pristine factory copy — no save):** `D_2CCB` reads **0**, and that
+  is **genuine, not a bug**. The globals block *is* in the objlist — source reads it LAST (`seg_0C9C.c:321`:
+  the `0x2C4A..0x2CCC` block), which lands at file offset **`0x1bf1`**, **exactly** the clone's offset
+  (verified by summing every prior section — not misread). It's all-zeros because no character has been
+  created: the real game detects `D_2CCB==0` (`seg_0903.c:594`) and hands off to the **separate
+  `ultima6.exe` char-creation program** (absent from this `GAME.EXE` decompile) which sets `D_2CCB`/name/sex
+  + writes a save. The clone loads factory data with no creation flow, so `D_2CCB` is **always 0** here →
+  **default to `portrait.z[6]`** (D_2CCB 7, a male face matching the factory `avatarSex` 0 — Zane's call)
+  so the Avatar has a face; a real save (`D_2CCB>0`) shows the player's actual portrait. (Same factory-data
+  origin explains `karma`/`avatarSex` reading 0; the world globals — clock/karma — are now seeded from the
+  `D_2C4A.c` defaults when zero via `applyGlobalDefaults`, so a factory boot starts 08:00 D4/M7/Y161 with
+  karma 75 rather than a hardcoded stand-in — see `research_save_load.md §"New-game initialization"`.) **No
+  snapshot bump** — `avatarPortrait` rides the flexible `objlist.globals` blob and is re-read from the fresh
+  objlist each boot (static). **Verified live:** Avatar ZSTATS shows the `z[6]` male face; clean boot, no errors.
 
 ### Deferred / not in I-18
 
-- **Inventory paperdoll** (`CMD_92` equip-slot layout + weight/encumbrance) — reuse the existing
-  inventory window via `Tab`; not ported as a separate paperdoll view.
+- **Inventory paperdoll** — was deferred (reuse the `Tab` inventory list); **built as **I-18g–k** as a
+  de-scoped **equipped-equipment slot list** + equip/unequip + container move (not the visual doll). See
+  the §"I-18g–j scope" + §"I-18k scope" subsections below.
 - **Poison-green HP color** — needs a combat/poison subsystem; `<10`-red only for now.
 - **Persistent at-a-glance party HP** (the combat-era value of a fixed panel) — N/A until combat;
   the on-demand roster suffices.
@@ -3205,3 +3309,87 @@ chrome is restructured (`index.html` + `view/dev_hud.js`):
 
 - Dev-panel toggle mechanism — hotkey choice (backtick / `~` vs a corner button); pick when a
   lands.
+
+## I-18g–j scope — equipped-equipment view + ready/unready (the de-scoped paperdoll)
+
+Picks up the "Inventory paperdoll" deferral. Source's status-panel inventory (`CMD_92` /
+`C_155D_1065`) is a body-positioned **doll** + a 4×3 carried grid + a weight footer. The clone
+keeps the **slot mechanism** but **drops the doll graphic** for a **labeled slot list** beside the
+carried list (Zane's call — the doll positioning is cosmetic; an explicit "Left Hand: (none)" is
+clearer than an empty doll cell, and fits the educational-not-pixel-faithful goal). Four sub-steps,
+each one save-point commit + its doc touch (kept **un-squashed**, like I-18 a–f):
+
+- **I-18g — equip-slot classifier + builder (pure, no UI).** `systems/equip_slots.js`:
+  `equipSlotForTile(tile)` (verbatim `STAT_GetEquipSlot`, seg_155D.c:129 — the `TIL_*` ranges +
+  the 33-entry `D_07DD` one-hander table; `TIL_NNN == 0xNNN` so they port as hex literals) +
+  `buildEquipment(equippedItems, reg)` → an 8-slot array (`SLOT.*`-indexed) applying `C_155D_07E0`'s
+  collision rules (two-handed → RHND + `BLOCKED` LHND; second one-hander → spill RHND↔LHND; ring →
+  first free finger RFNG/LFNG). `SLOT_LABEL` uses **GAME.EXE's words** (Head / Neck / Chest /
+  Right Hand / Left Hand / Right Finger / Left Finger / Feet, u6.h:290-297), not Nuvie's
+  Body/Hand/Arm. **Verified (preview-eval):** classifier correct incl. 0x219→Neck (before Chest),
+  two-hander→transient 8, ring→transient 9, non-equippable→−1; builder places two rings in both
+  fingers, a two-hander as RHND + LHND-BLOCKED, dual-wield as RHND/LHND. **LANDED.**
+
+- **I-18h — slot-list widget + two-column view + carried split.** The 8 `SLOT_ORDER` rows
+  (`tileIcon` + name, or `(none)`; LHND-BLOCKED → "(two-handed)") rendered beside the carried list;
+  the carried list filtered to **non-equipped** items and the inline `equipped` tag dropped. Wired
+  through the existing ZSTATS `Tab` toggle. New `view/equip_list.js` (`makeEquipList`) +
+  `inventory_picker.js` two-column restructure (equip column **only at the member root**, not a
+  drilled-in bag — a bag has no equip slots) + `.inv-body`/`.equip-*` CSS in `index.html`.
+  **Verified live (Dupre):** Equipped = Head iron helm / Chest plate mail / Right Hand sword /
+  Left Hand kite shield / Feet leather boots / Neck+fingers (none); Carried = bag/ale/meat/mug
+  (equipped items now absent from the list); clean two-column render, no console errors. **LANDED.**
+
+- **I-18i — weight/STR encumbrance footer.** The two stone readouts (`equipped/STR`, `total/STR×2`,
+  `C_155D_0CF5`:374-383) via `GetWeight` (`C_155D_0661`: `weightOf×qty`, `÷10` for the D_081F
+  coin-like types) + a recursive bag-contents walk (`Encumbrance`) + the `C_155D_0CB6` tenths→stones
+  round. The member's STR is threaded from `main.js`'s `openInv` (`holderStr`), so the footer shows
+  only on the root member view. Display-only — eye candy now; the encumbrance *mechanic* (carry-cap
+  gate, penalties) lands with combat/inventory later. **Verified live (Dupre, STR 26):**
+  `Weight — equipped 20/26 · total 25/52 st`; no console errors. **LANDED.**
+
+- **I-18j — equip/unequip (`E` toggle) + revert the right column to the full tagged list.** Per Zane's
+  redesign: the right column reverts to **all** items (worn ones tagged `equipped`, as before I-18h's
+  split) so everything's actionable from one list; the left slot list stays the read-only "what's worn
+  where". `E` on the highlight toggles ready/unready. **Source gates** (`C_155D_144B` / `C_155D_1738`):
+  not-equippable → "You can't ready X."; **too heavy** (equip weight + the item > STR×10, :546) → "Too
+  heavy!"; a **full target slot REFUSES** ("No place to put it!", :569 — source does NOT swap; the
+  2-hand / ring / hand spill is `resolveReadySlot`). **Ready RE-PARENTS the item to the member** (`readyItem`
+  = source's `InsertObj(item, di=outermost-holder, EQUIP)`, :572-581) — so `E` on an equippable nested in a
+  **bag pulls it out onto the member** + equips (the item is read from the stores, not the member's direct
+  inventory; the `E` handler unwinds the inventory chain to baseDepth and reopens the member view). Unequip
+  flips back to carried (holder unchanged). New `cmd.equipToggle` (`command_dispatch.js`) + `setEquipped` +
+  **`readyItem`** (`world_loader.js`) + `resolveReadySlot` (`equip_slots.js`); `main.js` wires `onEquip`.
+  **Verified live (Dupre, real save):** unequip / re-equip sword round-trips (slot + tag + messages);
+  `E` on ale → "You can't ready an ale." (refused); full-slot refuse confirmed synthetically; **bagged equip
+  (B):** moving the sword into the bag then `E` from the bag view pulled it out onto Dupre + equipped it
+  (Right Hand: sword, bag emptied to gold), landing back at the member view. No console errors.
+  **LANDED — I-18g–j COMPLETE.**
+
+**Reused:** the `item.equipped` flag (`ContainedIn.equipped`, set on EQUIP records at load) is the
+split key + the I-18j toggle target — no new component/state (the snapshot persists it). **Dropped
+(not ported):** the doll draw `C_155D_08F4` + the 4×3 grid coords + the `TIL_19A/19B` doll tiles; the
+**swap-on-full-slot** (source refuses). **Deferred:** the cursed-item unready lock (`OBJ_04C`), the
+ring/cloak equip magic FX, and the encumbrance *mechanic* beyond the ready-time weight gate. **→ I-18k:**
+general **move-in/out for non-equip items** (a "move to…" destination picker — the in/out symmetry the
+bagged-equip half doesn't cover; see the I-18k stub below).
+
+## I-18k scope — general container management (move items in/out of containers)
+
+**COMPLETE (2026-06-12).** The mirror of I-18j/B's bagged-equip take-out, generalised to **any** item:
+move an item between a member's top-level inventory and a container (bag), **both directions** —
+source's inventory **drag-drop** (`InsertObj` with INVEN ↔ CONTAINED coord-use), reimagined for the
+clone (no drag) as **one "move to…" action**. `M` on the highlighted item opens `openMovePicker`
+(`view/inventory_picker.js`): a destination list of **the member top-level "Inventory (carried)" (only
+when the item is currently nested) + the member's direct containers** (minus the item itself + its
+current holder). Picking one re-parents via `moveToInventory` (= `attachToHolder`, equipped cleared);
+the `E`/`M` unwind-to-baseDepth + reopen rebuilds the member view (works the same from a drilled bag,
+so take-out lands back at the member). Feedback: "You put X in the Y." / "You take X." `M` wired in the
+inventory window's onKey; `main.js` `onMove` **refuses an equipped item** ("You must unready it first." —
+a worn item can't go straight into a container; unready via `E` first), opens the picker otherwise (or
+messages "Nowhere to put it." when a top-level item has no containers). **Why separate from I-18j:** the equip take-out is source-faithful
+*equip* (re-parent on ready); general move-in/out is its own interaction (the inventory drag-drop), no
+equip semantics. **Verified live (Dupre, real save):** put-in (ale → bag, gone from top-level) +
+take-out (drill into bag → `M` → "Inventory (carried)" → ale back) both land on the rebuilt member
+view with the right messages; no console errors. **Deferred refinements:** nested-container
+destinations (only the member's *direct* bags are offered) + a count/quantity split on move.

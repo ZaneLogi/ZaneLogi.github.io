@@ -92,6 +92,7 @@ export function decodeObjlist(bytes) {
     dateYear: g(0x2c50),
     karma: g(0x2c52),
     avatarSex: g(0x2cca),
+    avatarPortrait: g(0x2ccb),     // D_2CCB — the Avatar's char-creation portrait choice (1-based; 0 = uncreated)
   };
 
   // Name the placed party members.
@@ -103,4 +104,46 @@ export function decodeObjlist(bytes) {
   }
 
   return { actors, party, partySize, globals };
+}
+
+// New-game initialization for an UNCREATED factory copy (gated on D_2CCB==0).
+//
+// GAME.EXE has no character-creation code — it execs the external ultima6.exe when
+// D_2CCB==0 (seg_0903.c:594), which isn't in the decompile and which writes the avatar's
+// chosen stats + the initial world state. A pristine U6 copy therefore boots with zeroed
+// world globals (karma/clock) AND a PLACEHOLDER avatar slot (STR/DEX/INT 15/15/15 but
+// EXP 9999 / level 8). This synthesizes the new-game starting state so the clone — which
+// has no creation flow — presents a sensible freshly-created avatar.
+//
+// Keyed on D_2CCB (the char-creation portrait choice; 0 == "not yet created"). A CREATED
+// character — i.e. ANY real save (D_2CCB>0) — is left completely untouched, so its real
+// karma (even a legitimate 0), clock (even midnight 00:00), and stats all survive. A clone
+// snapshot restores its saved actors/globals over the top regardless (snapshot.js restore).
+
+// World-global defaults = GAME.EXE's D_2C4A.c program-start initializers (the "blank slate"
+// the objlist overwrites). Filled only where the objlist read zero. Full table (MapX/Y
+// 307/352, D_2C55 7, …) in research_save_load.md §"New-game initialization".
+export const D_2C4A_DEFAULTS = Object.freeze({
+  karma: 75,
+  timeMinute: 0, timeHour: 8,
+  dateDay: 4, dateMonth: 7, dateYear: 161,
+});
+
+// U6's Avatar is objlist actor slot 1 (GAME.EXE + Nuvie use fixed slot-1 offsets: STR 0x901,
+// EXP 0xc02, level 0xff2). Nuvie's update_objlist_for_new_game_u6 (save/SaveGame.cpp) writes
+// a created avatar's EXP 0x172 (=370) + level 3; STR/DEX/INT keep the template's 15/15/15
+// base, and magic/HP derive from the stat formulas. See the reference_nuvie_source memory.
+const AVATAR_SLOT = 1;
+const NEWGAME_AVATAR_EXP = 0x172;   // 370
+const NEWGAME_AVATAR_LEVEL = 3;
+
+// Apply the new-game starting state to an uncreated factory objlist. Mutates + returns it.
+export function applyNewGameDefaults(objlist) {
+  if (objlist.globals.avatarPortrait !== 0) return objlist;   // D_2CCB>0 -> real character; leave everything
+  for (const [k, v] of Object.entries(D_2C4A_DEFAULTS)) {
+    if (!objlist.globals[k]) objlist.globals[k] = v;           // world globals: fill where the objlist read zero
+  }
+  const avatar = objlist.actors[AVATAR_SLOT];                  // avatar stats: hard-set (the placeholder is non-zero)
+  if (avatar) { avatar.exp = NEWGAME_AVATAR_EXP; avatar.level = NEWGAME_AVATAR_LEVEL; }
+  return objlist;
 }

@@ -39,27 +39,24 @@
     display: none;                 /* load() sets this to 'grid' */
     flex: 1 1 auto;                /* fill the viewport height left under the header */
     min-height: 0;                 /* allow the grid to shrink below its content size */
-    grid-template-columns: minmax(0, 1fr) 280px;
-    grid-template-rows: minmax(0, 1fr) minmax(90px, 160px);
+    grid-template-columns: minmax(0, 1fr);   /* I-18a: single column — dev panel floats, status is on-demand */
+    grid-template-rows: minmax(0, 1fr) minmax(56px, 100px);   /* I-18a: shorter message band */
     grid-template-areas:
-      "map  right"
-      "msg  right";
+      "map"
+      "msg";
     gap: 8px;
     margin-top: 8px;
   }
   #map-region     { grid-area: map; min-width: 0; min-height: 0; }
   #message-region { grid-area: msg; min-height: 0; }
-  #right-panel    { grid-area: right; display: flex; flex-direction: column; gap: 8px; min-width: 0; overflow: hidden; }
 
   /* Canvas fills its grid cell; main.js sets the drawing buffer = this CSS size (dpr=1).
      border-box so the 1px border doesn't push the element past the cell. */
   #screen { display: block; width: 100%; height: 100%; box-sizing: border-box;
             border: 1px solid #2a2316; image-rendering: pixelated; touch-action: none; }
 
-  /* The two-column fluid grid handles narrow windows on its own — the map column
-     (minmax(0,1fr)) shrinks while the 280px panel holds, so the page never pans even
-     when the window is small. (A dedicated mobile/stacked reflow is deferred; this is a
-     desktop dev tool.) */
+  /* Single-column fluid grid (I-18a): the map fills the window width, the message band
+     sits below it. (A dedicated mobile/stacked reflow is deferred; this is a desktop dev tool.) */
 
   /* message channel — the gameplay scroll (CON_printf analog). Bottom strip. */
   #messages {
@@ -72,26 +69,31 @@
   #messages .msg.ok   { color: #6c6; }
   #messages .msg.warn { color: #e8c060; }
 
-  /* right panel: status placeholder (top, grows) + collapsible dev block (bottom) */
+  /* shared panel chrome (used by the floating dev block) */
   .panel { background: #0e0b07; border: 1px solid #2a2316; border-radius: 6px; padding: 10px 12px; }
   .panel-label { color: #8a7f66; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
-  #status-panel { flex: 1 1 auto; min-height: 0; }
-  #status-panel .panel-placeholder { color: #6b5d3a; font-size: 12px; margin-top: 6px; }
 
-  #dev-block { padding: 8px 12px; }
-  #dev-block > summary {
-    cursor: pointer; user-select: none; list-style: none;
-    color: #8a7f66; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
-  }
-  #dev-block > summary::before { content: '▸ '; }
-  #dev-block[open] > summary::before { content: '▾ '; }
-  #dev-block[open] > summary { margin-bottom: 8px; }
+  /* I-18a: persistent clock strip — the always-visible date/time/sun readout (schedule
+     testing needs it without expanding the dev panel). installDevHud reveals it (sets
+     display:block) and toggles .paused on it; #clock-text lives inside it. */
+  #clock-strip { display: none; background: #0e0b07; border: 1px solid #2a2316; border-radius: 6px;
+                 padding: 4px 12px; margin: 4px 0 0; color: #e8c060; font: 13px monospace; }
+  #clock-strip.paused #clock-text { color: #c66; }
+  #clock-strip #dev-toggle { float: right; background: #1c180f; color: #e8c060;
+    border: 1px solid #6b5d3a; border-radius: 3px; font: 12px monospace; padding: 1px 8px; cursor: pointer; }
+  #clock-strip #dev-toggle:hover { background: #241d10; }
 
-  /* dev HUD content — was a fixed bottom-right overlay, now an in-panel block.
-     installDevHud / installDevProbe are unchanged; only the elements' home moved.
-     The pause indicator tints the clock readout instead of a fixed-box border. */
-  #clock-hud { display: none; color: #e8c060; font: 13px monospace; }
-  #clock-hud.paused #clock-text { color: #c66; }
+  /* I-18a: the dev block is now a FLOATING, toggleable overlay (was the right-column
+     panel). NOT a UIStack modal — it must coexist with a live, ticking world (watch NPC
+     stats update) and never capture keys, so it's a plain show/hide div. z-index below
+     #ui-root (100) so player modals stack above it. Revealed by load() so boot-log is visible. */
+  #dev-block { position: fixed; bottom: 12px; right: 12px; width: 320px; max-height: 78vh;
+               overflow-y: auto; z-index: 90; padding: 8px 12px; }
+  #dev-block[hidden] { display: none; }
+
+  /* dev HUD content. installDevHud / installDevProbe are unchanged; only the elements'
+     home moved (clock readout → the strip above; controls/stats/probe → the dev block).
+     The pause tint lives on #clock-strip (see above). */
   #clock-text { white-space: normal; }
   #clock-controls { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
   #npc-stats  { white-space: pre; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2316; color: #b8a878; font-size: 12px; line-height: 1.45; }
@@ -149,7 +151,10 @@
   .ui-header { color: #e8c060; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #2a2316; display: flex; align-items: center; gap: 8px; }
   .ui-header .ui-icon { flex: 0 0 32px; }
   .ui-meta { color: #8a7f66; font-size: 12px; margin: 2px 0; }
-  .ui-list { margin-top: 8px; }
+  /* The list scrolls WITHIN itself (capped), so a long inventory keeps the modal's header +
+     hint/operation line pinned and visible instead of pushing them past the modal's 80vh scroll.
+     makeListCursor's scrollIntoView keeps the cursor row in view inside this scroller. */
+  .ui-list { margin-top: 8px; max-height: 56vh; overflow-y: auto; }
   .ui-row { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 3px; }
   .ui-row.ui-cursor { background: #3a2f15; color: #e8c060; }
   .ui-row .ui-icon { flex: 0 0 32px; }
@@ -157,6 +162,18 @@
   .ui-row .ui-tags { color: #8a7f66; font-size: 11px; }
   .ui-icon { image-rendering: pixelated; width: 32px; height: 32px; vertical-align: middle; }
   .ui-hint { color: #8a7f66; font-size: 11px; margin-top: 8px; padding-top: 6px; border-top: 1px solid #2a2316; }
+  /* I-18h: two-column inventory — the equipped-slot list (de-scoped paperdoll) beside the carried list. */
+  /* The member view (inv-window) is forced wider than the default modal so the two columns breathe. */
+  .ui-modal.inv-window { width: min(720px, 92vw); max-width: min(720px, 92vw); }
+  .inv-body { display: flex; gap: 16px; align-items: flex-start; }
+  .inv-carried { flex: 1 1 auto; min-width: 0; }
+  .equip-list { flex: 0 0 auto; min-width: 208px; }
+  .equip-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; min-height: 20px; }
+  .equip-label { color: #8a7f66; flex: 0 0 104px; }
+  .equip-item { flex: 1 1 auto; min-width: 0; }
+  .equip-none { color: #5c5444; font-style: italic; }
+  .equip-row .ui-icon { width: 16px; height: 16px; flex: 0 0 16px; }
+  .equip-weight { color: #8a7f66; font-size: 11px; margin-top: 8px; padding-top: 6px; border-top: 1px solid #2a2316; }
   .ok { color: #6c6; } .miss { color: #c66; } .warn { color: #e8c060; }
   /* I-12 dialog window: fixed centred, readable width (it's text, not the map —
      a fixed column reads better than scaling with the viewport). Four regions:
@@ -211,7 +228,14 @@
   <pre id="checklist-body"></pre>
 </details>
 
-<!-- the fixed game shell; revealed by load() once data is ready -->
+<!-- I-18a: persistent clock strip (date/time/sun) — always visible above the shell.
+     installDevHud reveals it + writes #clock-text + toggles .paused on it. -->
+<div id="clock-strip">
+  <button id="dev-toggle" title="toggle dev panel (`)">dev</button>
+  <span id="clock-text"></span>
+</div>
+
+<!-- the game shell; revealed by load() once data is ready -->
 <div id="app">
   <div id="map-region">
     <canvas id="screen" width="1024" height="640"></canvas>
@@ -219,38 +243,32 @@
   <div id="message-region">
     <div id="messages"></div>
   </div>
-  <div id="right-panel">
-    <div id="status-panel" class="panel">
-      <div class="panel-label">status</div>
-      <div class="panel-placeholder">party &amp; status panel — lands at I-13</div>
-    </div>
-    <details id="dev-block" class="panel" open>
-      <summary>dev</summary>
-      <div id="clock-hud">
-        <div id="clock-text"></div>
-        <div id="clock-controls">
-          <button data-act="pause">⏸ pause</button>
-          <button data-act="m60">−1h</button>
-          <button data-act="m10">−10m</button>
-          <button data-act="p10">+10m</button>
-          <button data-act="p60">+1h</button>
-        </div>
-        <div id="speed-controls" style="margin-top:4px; display:flex; align-items:center; gap:6px;">
-          <span style="font-size:12px;">world</span>
-          <input id="world-speed" type="range" min="0" max="100" value="53" style="flex:1; min-width:90px;">
-          <span id="world-speed-label" style="font-size:12px; min-width:56px; text-align:right;">×1.0</span>
-        </div>
-        <div id="npc-stats">schedule: no hour ticked yet</div>
-        <div id="probe-text">hover the map…</div>
-      </div>
-      <div id="save-controls" style="margin-top:6px; display:flex; gap:6px; align-items:center;">
-        <button data-act="export">⤓ export save</button>
-        <button data-act="import">⤒ load save</button>
-        <input id="save-file" type="file" accept=".json,application/json" style="display:none;">
-      </div>
-      <div id="log"></div>
-    </details>
+</div>
+
+<!-- I-18a: floating, toggleable dev panel (NOT a modal — coexists with a live world).
+     Hidden until load() reveals it; toggle via the strip "dev" button or the backtick key. -->
+<div id="dev-block" class="panel" hidden>
+  <div class="panel-label">dev</div>
+  <div id="clock-controls">
+    <button data-act="pause">⏸ pause</button>
+    <button data-act="m60">−1h</button>
+    <button data-act="m10">−10m</button>
+    <button data-act="p10">+10m</button>
+    <button data-act="p60">+1h</button>
   </div>
+  <div id="speed-controls" style="margin-top:4px; display:flex; align-items:center; gap:6px;">
+    <span style="font-size:12px;">world</span>
+    <input id="world-speed" type="range" min="0" max="100" value="53" style="flex:1; min-width:90px;">
+    <span id="world-speed-label" style="font-size:12px; min-width:56px; text-align:right;">×1.0</span>
+  </div>
+  <div id="npc-stats">schedule: no hour ticked yet</div>
+  <div id="probe-text">hover the map…</div>
+  <div id="save-controls" style="margin-top:6px; display:flex; gap:6px; align-items:center;">
+    <button data-act="export">⤓ export save</button>
+    <button data-act="import">⤒ load save</button>
+    <input id="save-file" type="file" accept=".json,application/json" style="display:none;">
+  </div>
+  <div id="log"></div>
 </div>
 
 <!-- fixed overlays: targeting/probe cursor on the map + the modal stack layer -->

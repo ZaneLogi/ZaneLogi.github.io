@@ -28,6 +28,260 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-12 17:35 — I-18k: general container management (the `M` "move to…" picker)
+
+- **Why**: I-18j/B's bagged-equip take-out only covers *equipment*; Zane flagged the mirror gap — no way to
+  move a **non-equip** item out of (or into) a bag without the give/drop dance. I-18k is the general
+  capability (source's inventory drag-drop), reimagined as a destination picker since the clone has no drag.
+- **Built**: `openMovePicker` (`view/inventory_picker.js`) — `M` on the highlight lists destinations =
+  the member top-level "Inventory (carried)" (only when the item is nested) + the member's **direct
+  containers** (minus the item itself + its current holder); picking one re-parents via `moveToInventory`
+  (`attachToHolder`, equipped cleared) and the unwind-to-baseDepth + reopen rebuilds the member view (works
+  from a drilled bag too, so take-out lands back at the member). `M` wired in onKey + the hint; `main.js`
+  `onMove` **refuses an equipped item** ("You must unready it first." — Zane follow-up: a worn item can't go
+  straight into a container) and opens the picker otherwise (or "Nowhere to put it." for a top-level item with
+  no bags). Feedback: "You put X in the Y." / "You take X.". Reuses the GIVE picker shape.
+- **Verified live (Dupre, real save)**: put-in (`M` on ale → bag → ale in the bag, gone from top-level,
+  "You put ale in the bag.") + take-out (drill into bag → `M` on ale → "Inventory (carried)" → ale back at
+  top-level, "You take ale.") — both land on the rebuilt Dupre view; picker renders cleanly; no console errors.
+- **Follow-up (Zane review)**: equip/unequip (`E`) now **keeps the cursor on the toggled item** across the
+  rebuild (`cursorHandle` threaded to `openInventoryWindow` → `listCursor.select`), instead of snapping to
+  the top of the list. Verified (Dupre): cursor stays on "sword" through unequip→re-equip.
+- **Deferred**: nested-container destinations (only *direct* bags offered), a quantity-split on move.
+  **I-18k COMPLETE.** Also committed `d154782` (wider two-column inventory window). Next: I-19 (object-action handlers).
+
+## 2026-06-12 16:41 — I-18j: equip/unequip (`E` toggle) + revert the right column to the full tagged list
+
+- **Read**: `seg_155D.c` ready/unready — `C_155D_144B` (:531, "Ready": gates = not-equippable :544,
+  too-heavy `TypeWeight+WeightEquip > STR×10` :546, slot-resolution :549-568, **full slot REFUSES**
+  "No place to put!" :569 — **source does NOT swap**), `C_155D_1738` (:637, "Unready": clears the slot;
+  cursed `OBJ_04C` won't come off). Confirmed source refuses-not-swaps; Zane took refuse + the weight gate.
+- **Design (Zane's re-think)**: left paperdoll stays; the **right column reverts to the FULL item list**
+  (worn items tagged `equipped`, undoing I-18h's split) so everything's actionable from one list; **`E`**
+  toggles ready/unready on the highlight. Cleaner than navigating the slot grid for unequip.
+- **Built**: `cmd.equipToggle` (`command_dispatch.js`) — the source gates + messages (You ready / remove /
+  can't ready / Too heavy! / No place to put it!); `setEquipped` + **`readyItem`** (`world_loader.js`);
+  `resolveReadySlot` (`equip_slots.js`, the C_155D_144B slot resolution); `inventory_picker.js` reverted to
+  the full list + restored the `equipped` tag + the `E` handler; `main.js` `onEquip`. The weight footer
+  (I-18i) is now **load-bearing** — its `equipped/STR` is exactly the ready-time cap.
+- **B (Zane's bag follow-up — equipping from a bag)**: source's Ready does `InsertObj(item, di, EQUIP)`
+  (:572-581) where `di` unwinds `GetAssoc` to the **outermost holder** (the member) — so ready **re-parents**
+  the item to the member. `readyItem` ports that, so `E` on an equippable nested in a bag **pulls it out**
+  onto the member + equips (the item is read from the stores, not the member's direct inventory; the `E`
+  handler unwinds the chain to baseDepth + reopens the member view). Makes "equip from a bag" both work AND
+  source-faithful — Zane's instinct, confirmed by the source function. General move-in/out for *non-equip*
+  items is **I-18k**.
+- **Verified live (Dupre, real save)**: unequip→re-equip sword round-trips; `E` on ale → "You can't ready
+  an ale." (refused); full-slot refuse confirmed synthetically; **B**: moved the sword into the bag, then
+  `E` from the bag view pulled it out onto Dupre + equipped it (Right Hand: sword, bag emptied to gold),
+  landing back at the member view. No console errors.
+- **Deferred → I-18k**: general **move-in/out for non-equip items** (a "move to…" destination picker — the
+  in/out symmetry the bagged-equip half doesn't cover). Also deferred: cursed-item unready lock (`OBJ_04C`),
+  ring/cloak equip magic FX, the encumbrance mechanic beyond the ready-gate. **I-18g–j COMPLETE.** Next: I-18k.
+
+## 2026-06-12 15:20 — I-18g/h/i: equipped-equipment view (the de-scoped paperdoll)
+
+- **Read**: `seg_155D.c` — `STAT_GetEquipSlot` (:129, tile→slot classifier), `C_155D_07E0` (:219,
+  Equipment[8] builder + collision rules), `C_155D_08F4` (:261, the doll draw — NOT ported),
+  `C_155D_0CF5` (:374, weight readouts), `C_155D_0CB6` (tenths→stones), `C_155D_0661` (GetWeight);
+  `u6.h:290-297` (SLOT_*); `tile.h` (confirmed `TIL_NNN == 0xNNN`). Nuvie cross-checked the slot words
+  (Actor.h ACTOR_* = Body/Hand/Arm) — chose **GAME.EXE's** Head/Neck/Chest/Right·Left Hand/Right·Left
+  Finger/Feet as clearer for a list.
+- **Design (Zane)**: drop the visual doll; show a **labeled equipped-slot list beside the carried list**
+  (split, option a) — captures the slot mechanism without the cosmetic body positioning, fits the
+  educational-not-pixel-faithful goal. Three un-squashed sub-steps, each committed with its doc.
+- **Built**:
+  - **I-18g** `systems/equip_slots.js` — `equipSlotForTile` (verbatim, the TIL_* ranges + 33-entry
+    one-hander table) + `buildEquipment` (the C_155D_07E0 collisions: 2-handed→RHND+BLOCKED LHND;
+    one-hander spill RHND↔LHND; ring→first free finger). Pure; verified via preview-eval.
+  - **I-18h** `view/equip_list.js` (`makeEquipList`) + `inventory_picker.js` two-column restructure
+    (equip column **only at the member root**, not a drilled bag) + `.inv-body`/`.equip-*` CSS. The
+    `item.equipped` flag is the split key — carried list now non-equipped only, the inline `equipped`
+    tag gone. Verified live on Dupre (helm/plate/sword/shield/boots in slots, bag/ale/meat/mug carried).
+  - **I-18i** weight/STR footer in `inventory_picker.js` (GetWeight + recursive Encumbrance + the
+    ÷10 round; STR threaded as `holderStr` from main.js). `Weight — equipped 20/26 · total 25/52 st`.
+- **Dropped (not ported):** the doll graphic (`C_155D_08F4`), the 4×3 grid coords, `TIL_19A/19B`.
+  **Deferred:** ready/unready interaction (needs the equip-legality gate).
+- **Next**: I-19 (object-action handlers). Push the I-18g/h/i commits when Zane's ready.
+
+## 2026-06-12 13:44 — consolidate uncreated-character defaults into one D_2CCB==0-gated function (+ avatar EXP 370/level 3 from Nuvie)
+
+- **Read (Nuvie, `D:/tmp/nuvie`)**: `save/SaveGame.cpp` `update_objlist_for_new_game_u6` (created avatar:
+  EXP `0x172`=370 @0xc02, level 3 @0xff2, magic INT×2, STR/DEX/INT gypsy base 0xf); `Player.cpp` (karma
+  ctor 0 → load objlist 0x1bf9, no default); `GameClock.cpp` (clock load objlist 0x1bf3, no default);
+  `data/scripts/u6/intro.lua` (gypsy base 15/15/15 + adjustment tables). GAME.EXE `D_2C4A.c` (`unsigned char
+  KARMA = 75`), `seg_0903.c:594` (D_2CCB==0 → exec ultima6.exe).
+- **Found**: Nuvie reads karma + clock straight from the objlist, NO code defaults, and char-creation
+  patches neither; the avatar's factory EXP/level are a **non-zero placeholder** (9999/8), not a zeroed
+  global — so they need a hard-set, not a fill-if-zero. Karma is **unsigned 0–99** in both engines.
+- **Built**: `applyGlobalDefaults` → **`applyNewGameDefaults(objlist)`** (`assets/objlist.js`), **gated on
+  `D_2CCB==0`** (Zane's call — one place for all uncreated-character defaults): fills zeroed world globals
+  (karma 75, clock 08:00·4/7/161, `D_2C4A_DEFAULTS`) **+** hard-sets Avatar (slot 1) **EXP 370 / level 3**
+  (Nuvie new-game values). `main.js` call + import updated. **Bonus correctness:** the `D_2CCB` gate means a
+  real save (D_2CCB>0) is never touched, fixing a latent bug where the old fill-if-zero would bump a
+  legitimately-zero karma or a midnight clock. Snapshot restore Object.assigns saved actors/globals over the
+  top, so a clone save-from-factory keeps gained XP (verified snapshot.js persists full actor records).
+- **Docs**: `research_save_load.md` §"New-game initialization" rewritten (gated fn + avatar stats + Nuvie
+  cross-check); `reference_nuvie_source` memory added.
+- **Next**: verify live (factory → EXP 370/L3, karma 75; real save untouched), then commit. Open: document
+  decision settled; inventory paperdoll still parked.
+
+## 2026-06-12 11:11 — default the uncreated-avatar portrait to a male face (D_2CCB 7, not z[0])
+
+- **Change**: `portrait.js` `_pixels` — the Avatar fallback when `D_2CCB==0` (factory/uncreated) is now
+  `portrait.z[6]` (`(avatarPortrait || 7) - 1`) instead of `z[0]`. Zane's call: `z[6]` is a male face, which
+  matches the factory `avatarSex` (D_2CCA 0 = male). This is a clone presentation choice, NOT a D_2C4A.c
+  default (D_2CCA/D_2CCB have no compile-time initializer — they're char-creation choices); kept at the render
+  layer, not in `applyGlobalDefaults`.
+- **Verified live (real data)**: built a throwaway `Portraits` from the loaded `portrait.z` + `u6pal` — the
+  default path (`avatarPortrait` 0) decodes **pixel-identical** to an explicit D_2CCB 7 (z[6]) and **differs**
+  from the old z[0]; renders 56×64; no console errors.
+- **Docs**: swept the now-stale `z[0]` claim from the currently-true surfaces (banner, I-18 ledger row, I-18
+  scope, `research_save_load.md`); also corrected the I-18-scope "clock hardcoded @ 09:00" clause left stale by
+  the 10:55 globals-seeding commit. Journal I-18f entries left as the historical record.
+- **Next**: post-I-18 polish/wrap as Zane directs.
+
+## 2026-06-12 10:55 — seed world globals from D_2C4A.c defaults (implement the I-18f rebuild guidance)
+
+- **Read**: the `ec574d0` `research_save_load.md` §"New-game initialization" table (D_2C4A.c program-start
+  defaults), `main.js:214/230` (objlist decode + the hardcoded `WorldClock`), `assets/objlist.js:85` (the
+  `globals` shape), `systems/conversation/conversation_system.js:82/187` (`#K` karma reads/writes), `systems/
+  persistence/snapshot.js:140/223` (globals + WorldClock round-trip on restore).
+- **Built**: `assets/objlist.js` — `D_2C4A_DEFAULTS` table + `applyGlobalDefaults(globals)` (zeroed field →
+  its D_2C4A.c default, non-zero kept). `main.js` calls it after decode and seeds `WorldClock` from
+  `objlist.globals` instead of the `{9,0,1,1,161}` stand-in. A restored save overwrites both (snapshot
+  Object.assigns the saved globals + restores the WorldClock resource), so the fallback only bites a fresh
+  factory boot. Approach **B** (source-faithful flow), Zane's call — favors the real data flow even when the
+  data is zero today ([[feedback_no_fakes_during_scaffolding]]).
+- **Found / verified (live, real factory data)**: globals seed to `karma 75 / 08:00 / day 4·7·161` (was
+  `0 / 09:00 / 1·1·161`); the clock now boots at 08:00 day 4/7/161 (sun byte D_2C55 = 7), karma 75;
+  created-save values are preserved (eval test: 14:30 / day 12·3·161 / karma 50 untouched). No console errors.
+  Side effect: NPCs now resolve schedule slots for dayOfWeek 4 / 08:00 at boot (the faithful start).
+- **Docs**: `research_save_load.md` §"New-game initialization" "Rebuild guidance" → **Implemented** (lifted the
+  stale "today the clone hardcodes the clock" note). Not a numbered step — a polish fix off Zane's note.
+- **Next**: continue the post-I-18 polish/wrap basket as Zane directs (deviation-audit close-out + dev-HUD
+  disposition still available; I-19 handler expansion is the next ledger step).
+
+## 2026-06-12 01:08 — I-18f avatar ZSTATS portrait + the D_2CCB / factory-data resolution (I-18 COMPLETE)
+
+- **Read**: `seg_2FC1.c:755` (Avatar portrait = `portrait.z[D_2CCB-1]`), `D_2C4A.c` (the `0x2C4A..0x2CCC`
+  globals block + its non-zero defaults), `seg_0C9C.c:296-322` (the objlist load sequence), `seg_0903.c:594`
+  (`D_2CCB==0` → "must create a character" → `execl ultima6.exe`).
+- **Investigation (Zane: his U6 copy is a pristine factory copy, no save)**: `D_2CCB` reads **0** — and that
+  is **correct**, not a bug. I had wrongly suspected the `objlist.globals` offset; re-checking the source's
+  read sequence, the globals block is read LAST and lands at file `0x1bf1` — *exactly* the clone's offset.
+  The zeros are genuine: no character has been created, so the player's choices (`D_2CCB`/name/sex/karma)
+  are all 0. The real game forces char creation (a separate `ultima6.exe`, not in this decompile); the clone
+  loads factory data with no creation flow, so `D_2CCB` is always 0. This also explains `karma`/`avatarSex`=0
+  and why the clock is hardcoded (`main.js:230`). **Lesson reinforced** ([[feedback_no_unfounded_suspect_flags]]):
+  verify an offset against the source read sequence before calling it a bug.
+- **Built**: `objlist.js` parses `avatarPortrait = g(0x2ccb)`; `portrait.js` Avatar branch → `z[D_2CCB-1]`,
+  with `D_2CCB==0` → default `z[0]` (Zane's call — Avatar gets a face); `main.js` passes it to `Portraits`.
+  `openZStats` unchanged. No snapshot bump (rides the flexible `objlist.globals` blob; re-read each boot).
+- **Verified live**: Avatar ZSTATS shows the `z[0]` face (3371 px); clean boot. **I-18 COMPLETE (a–f).**
+- **Next**: I-19 (object-action handlers expansion). Push a–f to origin when Zane's ready.
+
+## 2026-06-12 00:29 — I-18e GIVE recipient-picker + retire the bare-map inventory/give paths
+
+- **Read**: `command_dispatch.js` (armGive/giveTo/pendingGive + the keydown/canvas give branches + the
+  give cue), `main.js` (the openMemberInventory map-digit handler + the give-recipient-digit branch),
+  `inventory_picker.js` onKey (the D/G verb hand-off).
+- **Built**: `cmd.giveItem(item, giver, recipient)` (extracted from giveTo); `openRecipientPicker`
+  (party_status.js, reuses makePartyMemberList exclude:[giver], empty-state for party-of-one); an
+  `onGive` hook in the inventory window (G → picker, no chain-close); `openMemberView.openInv` wires
+  `onGive` (→ picker → giveItem → pop + rebuild) + `onVerb` drop (→ detonate to map + armDrop).
+- **Deleted**: the whole bare-map give apparatus (pendingGive/armGive/giveTo/isAwaitingGiveRecipient +
+  the two give event-branches + cue) and the bare-map top-row-digit inventory handler (openMemberInventory
+  + listener + `__U6` hook). Inventory access is now P → roster → ZSTATS → Tab only; map digits inert.
+- **Behavior change to I-10j** (intentional, modern-UX-consistent): the map-give path is retired for the
+  in-stack picker; give was already party-only (a clone construct), so it's a legit rewrite.
+- **Verified (live, real data)**: Avatar `G` on the Orb → picker (Avatar excluded) → Dupre → "You give Orb
+  of the Moons to Dupre.", Orb leaves Avatar + arrives in Dupre, inventory rebuilt; `D` detonates to the
+  armed map cursor; bare-map digit `1` inert; Esc cascade; clean boot, no console errors.
+- **Next**: I-18f (avatar ZSTATS portrait — the last sub-step). Review with Zane first.
+
+## 2026-06-11 23:52 — I-18d ZSTATS surface + Tab⇄inventory toggle
+
+- **Read**: `assets/portrait.js` (`Portraits.imageData(npcId)` → 56×64 ImageData, slot-keyed; Avatar
+  deferred → null), `view/dialog_window.js` (portrait blit pattern), `view/inventory_picker.js` (onKey),
+  `seg_155D.c:84` (CMD_90 ZSTATS `C_155D_028A` field list: name/portrait/STR/DEX/INT/Magic cur-max/
+  Health cur-max/Level/Exp); `portraits` is already threaded into `startRender`.
+- **Built**: `openZStats` in `view/party_status.js` (the stats modal, reuses the `.dialog-portrait`
+  box + `maxHP`/`maxMagic`); `main.js` `openMemberView` wires it as the roster's `onSelect` (replacing
+  c's inventory placeholder); `openInventoryWindow` gained a `tabBack` opt so `Tab` from the inventory
+  side pops back to ZSTATS.
+- **Decision (Zane)**: roster → ZSTATS **stacks** (not replace-in-place). The Tab⇄inventory toggle is
+  therefore push/pop on the stack (reuses the full recursive/verb inventory window), not an in-place
+  body swap.
+- **Verified (live, real data)**: Dupre ZSTATS (STR26/DEX20/INT17/Magic 0/0 [fighter]/Health 90/90/Lvl3/
+  Exp374) + portrait drew; Tab → inventory → Tab/Esc back; digit 3 → Shamino in place; Esc cascade
+  ZSTATS→roster→close. Clean boot, no console errors.
+- **Post-review fixes (Zane-found)**: (1) long-list scroll — `.ui-list` scrolls within itself so the
+  modal header + hint stay pinned (Iolo's 12-item inventory); (2) the Tab'd inventory's "1-N switch"
+  hint was dead (no `onDigit`) — member-switch now wired into both faces.
+- **Avatar face split to I-18f (Zane)**: ZSTATS shows companions' real portraits, but the Avatar's box
+  is blank — its face is `portrait.z[D_2CCB-1]` and `D_2CCB` (char-creation choice) isn't in the loaded
+  objlist (only `avatarSex`). Made the LAST I-18 sub-step rather than fixing inline.
+- **Next**: I-18e (GIVE → in-stack recipient-picker reusing `makePartyMemberList` + retire the map
+  top-row-digit inventory path), then I-18f (avatar portrait). Review each with Zane first.
+
+## 2026-06-11 23:36 — I-18c the `P` party roster + shared member-list widget
+
+- **Read**: `view/ui_widgets.js` (`makeListCursor`), `view/ui_icons.js` (`tileIcon`),
+  `view/inventory_picker.js` (`openInventoryWindow` modal pattern + `uiStack.push({el,onKey})`),
+  `systems/humanoid_anim.js` (frame = walkCycle+(facing<<2), facing 2 = south → stand frame 9),
+  `assets/basetile.js` / `tileForObject` (objNumber+frame → tile), `seg_155D.c:25` (CMD_91 roster
+  `C_155D_000C` uses `OBJ_MakeDirFrame(OrigShapeType,4)` = the down-facing sprite).
+- **Built**: `view/party_status.js` — `makePartyMemberList` (shared widget: down-facing sprite icon +
+  name + HP cur/MAX[<10 red], ↑↓/Enter/digit select, objlist-sourced) + `openPartyRoster` (the `P`
+  modal); `main.js` `P` keydown (gated like `I`). Reuses the existing UIStack/widgets — no new CSS.
+- **Scoping**: onSelect = a read-only inventory-browse placeholder (d → ZSTATS); the map-digit-inventory
+  retirement is deferred to e (additive step, no half-removal). `makePartyMemberList` is built to be
+  reused by e's GIVE recipient-picker.
+- **Verified (live, real data)**: `P` → roster (Avatar 90/240, companions 90/90, per-member maxHP),
+  down-facing sprites render; ↑↓ nav; Enter + digit both select → member inventory (stacked modal);
+  Esc unwinds. Clean boot, no console errors.
+- **Next**: review I-18 d (ZSTATS surface + Tab toggle) before implementing, per Zane.
+
+## 2026-06-11 23:25 — I-18b stat helpers + dex-training MoveSpeed cache fix
+
+- **Read**: `seg_2337.c:226/237` (`MaxHP`/`MaxMagic`), `obj.h` (0x19a/0x17a/0x179/0x182 = the four
+  spellcasting body types; `seg_0A33.c:879` gates the magic display on the same four),
+  `conversation_system.js` effect handlers (`addDex`/`heal`/`rest`/`wounded` + the inline `maxHP`).
+- **Found**: `MaxMagic` is a body-type-keyed multiple of INT (avatar `0x19a` = 2×, `0x17a` = 1×,
+  `0x179`/`0x182` = ½×, else 0). The host already had an inline `maxHP` — consolidated it.
+- **Docs/code**: new `systems/stat_formulas.js` (`maxHP`/`maxMagic`, pure, cited); host imports it +
+  drops the inline copy; `addDex` now refreshes the `MoveSpeed.dexterity` cache via `refreshMoveSpeedDex`
+  (objlist = source of truth, MoveSpeed = the hot-path cache) — fixes trained-dex-never-changed-speed.
+  `progress.md §"I-18 scope"` sub-step b → landed.
+- **Verified (live, real data)**: formulas match source synthetically + on the avatar (L8→240; 0x19a,
+  INT15→30); avatar has `MoveSpeed`, cache synced to objlist at load, train+refresh updates it
+  (mutate+restore). Clean boot, no console errors. (No `node` here → unit suites not re-run.)
+- **Next**: review I-18 c (`makePartyMemberList` + `P` roster) before implementing, per Zane.
+
+## 2026-06-11 22:55 — I-18a layout refactor (chrome) + I-18 data-layer plan revised on review
+
+- **Read**: `index.html` (shell grid + dev block), `view/dev_hud.js` (element-ref parameterized — no
+  hard-coded ids), `main.js` (`load()` reveal + `installDevHud` wiring), `systems/persistence/snapshot.js`
+  (the `objlist` is serialized as save state — its own comment calls these "trained stats"),
+  `conversation_system.js` (reads `#A`/`#I`/`#P`/`#S`/`#E` + `addDex` writes stats on the `objlist`
+  records), `seg_2337.c:226/237` (`MaxHP = clamp(Level*30,1,255)`, `MaxMagic` = type-keyed multiple of INT).
+- **Found**: the committed I-18 plan's premise "stats are decoded but dropped at load" was imprecise —
+  they live on the **persisted, conversation-VM-mutated `objlist` records**, so a `Stats` ECS component
+  would be a *second* home for the same numbers (drift on `addDex`, double-persist). Also a latent bug:
+  `addDex` updates the objlist but never the load-time `MoveSpeed.dexterity` copy, so training never
+  changed movement speed.
+- **Docs**: `progress.md §"I-18 scope"` — "Data wiring (Stats component)" rewritten to "Data layer —
+  objlist is canonical (no `Stats` component)"; `MoveSpeed.dexterity` reframed as a cache refreshed on
+  dex-training; **no snapshot bump** (objlist already round-trips); sub-steps b/d revised; sub-step a
+  marked **landed** with as-built. Banner → I-18 in progress.
+- **Verified (live)**: Zane loaded his real data into the preview — a confirmed on a restored save with
+  the world ticking: clock readout ticks in the strip, pause tints it red + freezes it, dev toggle works
+  via button + backtick (input-guarded), the world keeps ticking with the panel open, and a modal opens
+  centered over the full-width map (z-index above the dev panel). No console errors.
+- **Next**: I-18b (`stat_formulas.js` + the `addDex` → `MoveSpeed.dexterity` cache refresh), then review
+  c–e before implementing (per Zane's one-by-one review).
+
 ## 2026-06-11 — I-18 design (status UI: on-demand party surfaces, not a fixed panel)
 
 Design session with Zane (no new port code) settling the I-18 scope. Grounded the U6 status

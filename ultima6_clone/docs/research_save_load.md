@@ -76,8 +76,9 @@ below). Contents:
 | `InCombat`, `D_2CC3`, `D_2CC4` | combat / solo-mode flags |
 | `DefaultCommand` | the ALT-letter default action |
 | `D_2CC6`-`D_2CC9` | two moon phases |
-| `D_2CCA` | avatar gender |
-| `D_2CCB`, `D_2CCC` | tail / end marker |
+| `D_2CCA` | avatar gender (set at char creation) |
+| `D_2CCB` | avatar char-creation **portrait** choice — `portrait.z` index, 1-based; 0 = uncreated (`C_2FC1_1C19`, `seg_2FC1.c:755`; see "New-game initialization") |
+| `D_2CCC` | end marker |
 
 The blob is written with
 `OSI_write(si, -1, (&D_2CCC - &obj_2C4A), &obj_2C4A)` — i.e., "from
@@ -368,14 +369,70 @@ rebuild should mirror this: load static content from bundled assets;
 persist only the mutable game state. Don't bake schedule/basetile
 into the savegame (source doesn't, and it keeps saves small).
 
-### New-game initialization
+### New-game initialization — and where the global defaults come from
 
-A fresh game ships with an initial `savegame\` directory (the
-"starting state" objlist + objblk set). The rebuild needs an
-equivalent **initial-state asset** — either bundle the original U6
-starting savegame and parse it once, or author a fresh-start state.
-Parsing the original starting `objlist` + `objblk*` is the faithful
-path and reuses the same loader the save/load uses.
+A fresh game ships with an initial `savegame\` directory (the "starting state" objlist + objblk
+set). The rebuild needs an equivalent **initial-state asset** — either bundle the original U6
+starting savegame and parse it once, or author a fresh-start state. Parsing the original starting
+`objlist` + `objblk*` is the faithful path and reuses the same loader the save/load uses.
+
+**The `D_2C4A` block has two value sources: compile-time initializers, then the save.** `D_2C4A.c`
+declares the block with C static initializers, loaded into the data segment **at program start** —
+these are the built-in defaults:
+
+| Global | Default (`D_2C4A.c`) |
+|---|---|
+| `KARMA` | **75** |
+| `Time_H` / `Time_M` | **8** / 0 |
+| `Date_D` / `Date_M` / `Date_Y` | **4** / **7** / **161** |
+| `MapX` / `MapY` / `MapZ` | **0x133** / **0x160** / 0  (= 307, 352) |
+| `D_2C55` (ambient light) | **7** |
+| `InCombat` 1 · `D_2CC3` −1 · `DefaultCommand` 0xFF · `SoundFlag` 1 | (non-zero misc) |
+| `Active`, `WindDir`, `IsOnQuest`, `NextSleep`, `D_2CCA`/`D_2CCB`, … | **0** |
+
+These are **live only until the first load**: `C_0C9C_042A` overwrites the whole block from
+`savegame\objlist` (`seg_0C9C.c:321`, mirror-saved at `:396`). `GAME.EXE` has **no new-game reset**
+of the block — the only `KARMA` writes are runtime clamps (`seg_0A33.c:29/37`, `seg_1703.c:850/857`)
+— so after a load the saved values are authoritative and the `D_2C4A.c` initializers are just the
+pre-load blank slate.
+
+**A pristine ("factory") U6 copy has all-zero globals in its starting `objlist`** — `D_2CCB`,
+`KARMA`, `D_2CCA`, dates, etc. all 0 — because **no character has been created yet**. The real game
+detects this (`seg_0903.c:594`: `if(D_2CCB == 0)` → *"You must first create or transfer a
+character"* → `execl("ultima6.exe")`) and hands off to the **separate char-creation program**
+(`ultima6.exe`, *not* in this `GAME.EXE` decompile), which sets name / sex (`D_2CCA`) / portrait
+(`D_2CCB`) + the gypsy-determined stats and writes a real save; play proceeds from that save.
+
+**Rebuild guidance.** The clone loads the factory `objlist` directly and has no char-creation flow,
+so its globals read all-zero. The intended new-game default for each zeroed global is exactly its
+`D_2C4A.c` initializer above (karma 75, date 161/7/4, time 08:00, start position 307/352) — so the
+clean approach is to apply those new-game defaults to an **uncreated** copy. **Implemented** —
+`applyNewGameDefaults(objlist)` (`assets/objlist.js`) is **gated on `D_2CCB==0`** (the "not yet
+created" signal, `seg_0903.c:594`): for a pristine copy it (a) fills each **zeroed world global**
+with its `D_2C4A.c` default (`D_2C4A_DEFAULTS` — karma 75, clock 08:00 day 4/7/161) and (b)
+hard-sets the **Avatar's** (objlist slot 1) **EXP `0x172`=370 / level 3** — the values Nuvie's
+`update_objlist_for_new_game_u6` writes at creation (`save/SaveGame.cpp`; the avatar's factory
+placeholder is a *non-zero* 9999 / level 8, so a fill-if-zero wouldn't catch it). STR/DEX/INT keep
+the template's 15/15/15 base; magic/HP derive from the stat formulas; `main.js` seeds the
+`WorldClock` from `objlist.globals`. **A created character — any real save (`D_2CCB>0`) — is left
+entirely untouched**, so its real karma (even a legitimate 0), midnight clock, and stats survive; a
+clone snapshot restores its saved actors/globals over the top regardless (`snapshot.js`). So a
+factory copy boots 08:00 day 4/7/161, karma 75, Avatar at EXP 370 / level 3, while a real save keeps
+its own values.
+
+**Nuvie cross-check.** Nuvie reads karma (objlist `0x1bf9`) and the clock (`0x1bf3`) **straight from
+the objlist with no code default**, and its char-creation patches neither — so it yields karma 0 for
+a zeroed template and relies on the shipped objlist already holding the start time. The clone instead
+uses GAME.EXE's authored `D_2C4A.c` values for the zeroed template (karma 75 is the source's own
+number, not invented) — the one deliberate divergence from Nuvie. Karma is **unsigned 0–99** in both
+(`unsigned char KARMA = 75` / `uint8 karma`).
+The avatar portrait defaults to `portrait.z[6]` (D_2CCB 7, a male face matching the factory `avatarSex` 0)
+at the render layer (`portrait.js` `_pixels`); unlike the clock/karma globals, `D_2CCA`/`D_2CCB` have no
+compile-time `D_2C4A.c` default — they're char-creation player choices, so this is a clone presentation
+choice (a sensible face for an uncreated avatar), not a source default. A future minimal char-creation step (gypsy
+questions → stats + name/sex/portrait), or bundling a real created save, would replace these
+defaults with the player's actual choices; the external `ultima6.exe` + Nuvie's creation scene are
+the references for that.
 
 ## Open questions
 

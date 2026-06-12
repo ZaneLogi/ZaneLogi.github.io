@@ -2,8 +2,7 @@
 
 **Status & step ledger:** see [progress.md](progress.md) top banner — the single source
 of truth (this index is the **navigation map**, not a status mirror; convention in
-`progress.md §"Doc maintenance"`). As of 2026-06-08: **I-13 (conversation VM) complete; next
-I-14 (move-point economy — NPC-movement arc I-14→I-17: economy → drunk-walk → arrival-behaviors/direction (§七) → AI behaviors; status panel/handlers pushed to I-18/I-19).** The ECS runtime ground is specified in
+`progress.md §"Doc maintenance"`). The ECS runtime ground is specified in
 [architecture_ecs.md](architecture_ecs.md) (implemented in `ecs/world.js`); the research
 docs below remain the subsystem truth.
 

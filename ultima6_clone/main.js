@@ -10,7 +10,7 @@ import { U6Map } from './assets/map.js';
 import { TileFlags } from './assets/tile_flags.js';
 import { AnimData } from './assets/anim.js';
 import { BaseTile } from './assets/basetile.js';
-import { decodeObjlist } from './assets/objlist.js';
+import { decodeObjlist, applyNewGameDefaults } from './assets/objlist.js';
 import { Portraits } from './assets/portrait.js';
 import { ConversationScripts } from './assets/converse.js';
 import { TileRegistry } from './resources/tile_registry.js';
@@ -43,7 +43,8 @@ import { installDevProbe } from './view/dev_probe.js';
 import { installNpcInspect } from './view/dev_npc_inspect.js';
 import { UIStack } from './view/ui_stack.js';
 import { openInspector } from './view/inspector.js';
-import { openInventoryWindow } from './view/inventory_picker.js';
+import { openInventoryWindow, openMovePicker } from './view/inventory_picker.js';
+import { openPartyRoster, openZStats, openRecipientPicker } from './view/party_status.js';
 import { MessageLog } from './resources/message_log.js';
 import { installMessageChannel } from './view/message_channel.js';
 import { Commands } from './resources/commands.js';
@@ -189,7 +190,8 @@ function installSaveControls(world, stamp, objlist, notify) {
 }
 
 async function load() {
-  document.getElementById('app').style.display = 'grid';   // reveal the shell (boot log lives in it now)
+  document.getElementById('app').style.display = 'grid';   // reveal the shell
+  document.getElementById('dev-block').hidden = false;     // I-18a: reveal the floating dev panel (boot log lives in it)
   log('Decoding…', 'warn');
   const fileMap = await buildFileMap();
   const stamp = artifactStamp(fileMap);
@@ -210,6 +212,7 @@ async function load() {
 
   const baseTile = new BaseTile(fileMap.get('basetile'));
   const objlist = decodeObjlist(fileMap.get('objlist'));
+  applyNewGameDefaults(objlist);   // uncreated factory copy (D_2CCB==0) -> new-game state: globals (karma 75, clock) + avatar EXP 370/level 3 (research_save_load.md)
   const schedules = Schedules.fromBytes(fileMap.get('schedule'));
 
   const world = new World();
@@ -221,11 +224,15 @@ async function load() {
   // I-3: turn-driver heartbeat (idle sample interval). I-14d DECOUPLES the game clock from
   // it — the clock now advances on its own real-time cadence scaled by WorldSpeed
   // (world_clock_system.js CLOCK_MIN_PER_REAL_SEC), so the 100 ms heartbeat is just the
-  // sim-sampling rate, not the clock rate (the old "1 min per 0.1s" runaway is gone). Start
-  // date is a stand-in until save-load (research_save_load.md). D_2C55 is stored but
-  // unconsumed until the lighting step (research_map_render.md §"Lighting + visibility model").
+  // sim-sampling rate, not the clock rate (the old "1 min per 0.1s" runaway is gone). The
+  // start time/date are SEEDED from the objlist globals (D_2C4A.c defaults for a factory
+  // copy: 08:00, day 4/7/161); a restored save overwrites this WorldClock below. D_2C55 is
+  // stored but unconsumed until the lighting step (research_map_render.md §"Lighting").
   world.setResource(new TurnClock(100));
-  world.setResource(new WorldClock({ Time_H: 9, Time_M: 0, Date_D: 1, Date_M: 1, Date_Y: 161 }));
+  world.setResource(new WorldClock({
+    Time_H: objlist.globals.timeHour, Time_M: objlist.globals.timeMinute,
+    Date_D: objlist.globals.dateDay, Date_M: objlist.globals.dateMonth, Date_Y: objlist.globals.dateYear,
+  }));
   world.setResource(new WorldSpeed(1));           // I-14d: master pace scalar (NPC rate + clock); slider-driven
   world.registerComponent(Position).registerComponent(Renderable)
        .registerComponent(ObjType).registerComponent(Status)
@@ -265,7 +272,7 @@ async function load() {
   // dialog window through u6pal (research_portraits.md). Absent files -> blank box.
   const portraits = new Portraits({
     a: fileMap.get('portrait.a'), b: fileMap.get('portrait.b'), z: fileMap.get('portrait.z'),
-    palette,
+    palette, avatarPortrait: objlist.globals.avatarPortrait,   // I-18f: D_2CCB -> the Avatar's ZSTATS face
   });
 
   // I-13d: conversation scripts — raw converse.a/.b bytes, decoded lazily per-NPC
@@ -438,7 +445,7 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   // I-3 dev HUD: clock text + ±/pause controls + I-5f schedule-stats line.
   // Permanent dev affordance per CLAUDE.md §"Modern-browser UX".
   installDevHud(world, {
-    hudEl:        document.getElementById('clock-hud'),
+    hudEl:        document.getElementById('clock-strip'),   // I-18a: readout + .paused tint live in the strip now
     textEl:       document.getElementById('clock-text'),
     controlsEl:   document.getElementById('clock-controls'),
     npcStatsEl:   document.getElementById('npc-stats'),
@@ -447,6 +454,22 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
     npcScheduleStats,
     npcTickStats: npcTick.stats,
   });
+
+  // I-18a: dev-panel toggle (strip "dev" button + backtick key). Plain show/hide — the panel
+  // is NOT a UIStack modal (it must keep updating while the world ticks + never grab keys).
+  const devBlock = document.getElementById('dev-block');
+  const devToggle = document.getElementById('dev-toggle');
+  const syncDevToggle = () => { if (devToggle) devToggle.textContent = devBlock.hidden ? 'dev ▸' : 'dev ▾'; };
+  const toggleDev = () => { devBlock.hidden = !devBlock.hidden; syncDevToggle(); };
+  if (devToggle) devToggle.addEventListener('click', toggleDev);
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '`') return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;   // don't steal typing
+    toggleDev();
+    e.preventDefault();
+  });
+  syncDevToggle();
 
   // I-4d cell probe + I-5f per-NPC schedule line + canvas drag-to-pan.
   // Returned handle exposes isDragging() + getLastCell() for the I-7 hotkey.
@@ -519,42 +542,73 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
     e.preventDefault();
   });
 
-  // I-10j step 2 — digit-key inventory access. Top-row `1`..`PartySize` opens that party
-  // member's inventory window (1 = Avatar); the window's onDigit re-opens for member n
-  // (member switch — the window unwinds its own chain first, then we open the new member).
-  // `0` (party roster) is deferred. TOP-ROW only (`e.code` Digit*) so the NUMPAD digits
-  // stay avatar-diagonal movement. onVerb is a console placeholder until DROP migrates
-  // (step 3) / give lands (step 4).
-  function openMemberInventory(n) {                       // n = 1..PartySize
-    const idx = n - 1;
-    if (idx < 0 || idx >= objlist.partySize) return;      // dynamic bound (source ch-'1' < PartySize)
-    const holder = actorIndex.get(objlist.party[idx]);
-    if (holder === undefined) return;
-    openInventoryWindow(world, holder, uiStack, {
-      reg, objlist,
-      onDigit: openMemberInventory,                       // in-window member switch
-      onVerb: (verb, item) => {
-        if (verb === 'drop') cmd.armDrop(item.handle);              // D → arm the map cursor for the cell (reach 7)
-        else if (verb === 'give') cmd.armGive(item.handle, holder); // M → arm a recipient; holder = the giver member
-      },
-    });
+  // I-18c/d/e — `P` opens the on-demand party roster (icon + name + HP). Selecting a member opens its
+  // ZSTATS, stacked on the roster; `Tab` from ZSTATS opens that member's inventory (Tab/Esc returns), a
+  // digit switches member in place, and in the inventory `D` drops / `G` gives. Gate matches `I`.
+  function openMemberView(slot, rosterDepth) {
+    // digit n → switch to member n: unwind the member view (ZSTATS + any open inventory) back to the
+    // roster, then open member n's ZSTATS. Wired into BOTH faces — ZSTATS's onMember and the inventory's
+    // onDigit — so the inventory's "1-N switch" hint is honoured. rosterDepth = the roster's stack depth.
+    const switchMember = (n) => {
+      const s = objlist.party[n - 1];
+      if (s === undefined || n - 1 >= objlist.partySize) return;
+      while (uiStack.depth() > rosterDepth) uiStack.pop();
+      openMemberView(s, rosterDepth);
+    };
+    // The inventory is the `Tab` face of the member view. D → drop (detonate the whole modal chain to
+    // the bare map, then arm the drop cursor — the accepted DROP asymmetry). G → an in-stack recipient
+    // picker (party minus this giver); on a pick, give + rebuild this list (item gone) and stay here.
+    const openInv = (cursorHandle) => {
+      const holder = actorIndex.get(slot);
+      if (holder === undefined) return;
+      openInventoryWindow(world, holder, uiStack, {
+        reg, objlist, tabBack: true, onDigit: switchMember, cursorHandle,
+        holderStr: objlist.actors[slot]?.strength,   // I-18i: STR for the weight/encumbrance footer (root member only)
+        onEquip: (item) => {                          // I-18j: `E` toggles ready/unready (the picker unwound to baseDepth first)
+          cmd.equipToggle(item.handle, holder, objlist.actors[slot]?.strength);
+          openInv(item.handle);                       // reopen the member view, rebuilt — keep the cursor on this item
+        },
+        onMove: (item, baseDepth) => {                // I-18k: `M` opens the "move to…" picker (move item in/out of a bag)
+          if (item.equipped) { message('You must unready it first.', 'miss'); return; }   // a worn item can't go straight into a container
+          const opened = openMovePicker(uiStack, world, {
+            reg, objlist, item, holder, message,
+            onMoved: () => { while (uiStack.depth() > baseDepth) uiStack.pop(); openInv(); },   // unwind the inv chain + reopen rebuilt
+          });
+          if (!opened) message('Nowhere to put it.', 'miss');   // top-level item + no containers
+        },
+        onVerb: (verb, item) => {
+          if (verb !== 'drop') return;
+          while (uiStack.depth() > 0) uiStack.pop();            // detonate the chain back to the map
+          cmd.armDrop(item.handle);
+        },
+        onGive: (item) => {
+          openRecipientPicker(uiStack, {
+            reg, objlist, giverSlot: slot,
+            onPick: (recipientSlot) => {
+              cmd.giveItem(item.handle, holder, actorIndex.get(recipientSlot));
+              uiStack.pop();        // the picker
+              uiStack.pop();        // the now-stale inventory
+              openInv();            // rebuild the giver's inventory (item gone), stay here
+            },
+          });
+        },
+      });
+    };
+    openZStats(uiStack, { reg, objlist, portraits, slot, onTab: openInv, onMember: switchMember });
   }
   document.addEventListener('keydown', (e) => {
-    if (!uiStack.isEmpty()) return;                       // a window owns digits while open (its onKey)
+    if (!uiStack.isEmpty()) return;
     if (probe.isDragging()) return;
-    if (!/^Digit[1-9]$/.test(e.code)) return;             // top-row only; numpad = avatar diagonals
-    const n = parseInt(e.key, 10);
-    if (cmd.isAwaitingGiveRecipient()) {                  // I-10j give: digit = recipient member n
-      const idx = n - 1;
-      cmd.giveTo(idx < objlist.partySize ? (actorIndex.get(objlist.party[idx]) ?? null) : null);
-      e.preventDefault();
-      return;
-    }
-    if (cmd.isPending()) return;                          // a map verb is armed → digit inert
-    openMemberInventory(n);                               // open member n's inventory
+    if (cmd.isPending()) return;
+    if (e.key.toLowerCase() !== 'p') return;
     e.preventDefault();
+    openPartyRoster(uiStack, { reg, objlist, onSelect: (slot) => openMemberView(slot, uiStack.depth()) });
   });
-  window.__U6.openMemberInventory = openMemberInventory;  // dev
+
+  // I-18e: the bare-map top-row-digit inventory handler + the whole map-give apparatus
+  // (armGive/giveTo/isAwaitingGiveRecipient) were RETIRED here. Inventory access is now P → roster →
+  // ZSTATS → Tab, and GIVE is the in-stack recipient-picker (openMemberView above). Bare-map top-row
+  // digits are now unused (numpad stays avatar diagonals).
 
   // I-9h first-tick alignment: the schedule system only fires on an hour ROLLOVER, so at
   // load NPCs sit at their objlist positions (doing nothing) until the clock crosses the

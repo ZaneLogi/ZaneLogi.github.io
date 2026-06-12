@@ -50,7 +50,8 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 [`docs/progress.md`](docs/progress.md)** — its top banner is the single source of truth
 (see that file's §"Doc maintenance"); this section is NOT a status mirror — see the banner
 for where we are now. The NPC-movement arc I-14→I-17 is **complete** (speed model → drunk-walk
-→ arrival/direction → AI behaviors); the status panel + handler expansion are I-18/I-19. What stays
+→ arrival/direction → AI behaviors), and the status UI (I-18) has landed; object-action handler
+expansion is I-19. What stays
 here is the durable, slowly-changing reference — the code layout, the dev console helpers,
 and the per-step **kept deviations** (so a later session doesn't "correct" them). The ECS
 runtime-ground spec is
@@ -63,11 +64,15 @@ move-followers, humanoid-anim, pathfinding, npc_path, npc_tick, ai_modes, **move
 (I-15: `tryMoveTo`/`tryDiagMove` pathfinding-less primitive) + **npc_behaviors** (I-17:
 WANDER/LOITER/GUARD worktype handlers + displaced-settled stand-aside/return), **cell_pick, command_dispatch,
 use_handlers, use_drawbridge** (I-10), **conversation/** (I-13: `conversation_vm.js`
-standalone effect VM + `opcodes.js` + `conversation_system.js` host), …),
+standalone effect VM + `opcodes.js` + `conversation_system.js` host) + **stat_formulas**
+(I-18: `maxHP`/`maxMagic`, objlist-canonical) + **equip_slots** (I-18g: `equipSlotForTile` /
+`buildEquipment` / `resolveReadySlot` — the C_155D equip-slot machinery), …),
 `assets/` also has **portrait.js** + **converse.js** (lazy lib_32 decoders);
 `resources/` also has **Commands** (dispatch registries) + **MessageLog**;
 `components/`, `view/` (WebGL renderer + dev HUD/inspector + **message_channel** +
-**dev_npc_inspect** + **dialog_window** (I-13 live conversation I/O)), `world_loader.js`
+**dev_npc_inspect** + **dialog_window** (I-13 live conversation I/O) + **party_status**
+(I-18: `P` roster / ZSTATS / GIVE recipient-picker) + **inventory_picker** (I-10j inventory
+window + the I-18 `E` equip/`M` move pickers) + **equip_list** (I-18h equipped-slot list)), `world_loader.js`
 (world-object load + runtime add/delete/find primitives), `u6db.js` (BYO-data store),
 `index.html`/`main.js` (app shell), `tests/`.
 

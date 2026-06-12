@@ -47,11 +47,12 @@ class PortraitLib {
 export class Portraits {
   // { a, b, z } are the raw file bytes (Uint8Array | undefined); palette is the
   // RGBA Uint8Array(256*4) from assets/palette.js (reg.palette).
-  constructor({ a, b, z, palette } = {}) {
+  constructor({ a, b, z, palette, avatarPortrait = 0 } = {}) {
     this.a = new PortraitLib(a);
     this.b = new PortraitLib(b);
     this.z = new PortraitLib(z);
     this.palette = palette || null;
+    this.avatarPortrait = avatarPortrait | 0;   // D_2CCB — the Avatar's char-creation portrait choice (I-18f)
     this.cache = new Map();   // npcId -> ImageData | null (null = no portrait, cached)
   }
 
@@ -74,12 +75,22 @@ export class Portraits {
     return img;
   }
 
-  // npcId -> {file, index} per C_2FC1_1C19 (seg_2FC1.c:734) — the a/b split.
-  // Deferred (return null): npcId 1 = the Avatar (portrait.z[D_2CCB-1], where
-  // D_2CCB is the char-creation choice from the save — not loaded, and the talk
-  // target is never the Avatar). a[0] is a generic mount, not an NPC (verified).
+  // npcId -> {file, index} per C_2FC1_1C19 (seg_2FC1.c:734/755) — the a/b split for NPCs;
+  // the Avatar (npcId 1) -> portrait.z[D_2CCB-1], where D_2CCB (this.avatarPortrait) is the
+  // char-creation portrait choice from the objlist globals (I-18f). D_2CCB==0 (an uncreated
+  // character, as in factory data) -> the clone falls back to a default male face (see _pixels);
+  // source returns no portrait. a[0] is a generic mount, not an NPC (verified).
   _pixels(npcId) {
-    if (npcId === 1) return null;               // Avatar -> portrait.z, deferred
+    if (npcId === 1) {                           // Avatar -> portrait.z[D_2CCB-1] (seg_2FC1.c:755)
+      // D_2CCB is the char-creation portrait choice. In a real save it's 1-based and picks the
+      // player's portrait. The clone loads *factory* U6 data (no char-creation flow), where D_2CCB
+      // is 0 ("character not yet created" — the real game forces creation at seg_0903.c:594). So
+      // 0 -> default to D_2CCB 7 (portrait.z[6]), a male face that matches the factory avatarSex
+      // (D_2CCA 0 = male), giving the Avatar a sensible face instead of a blank box. A real save
+      // (D_2CCB > 0) shows the player's actual portrait.
+      const idx = (this.avatarPortrait || 7) - 1;
+      return this.z.decode(idx);
+    }
     let idx = npcId;
     if (idx) idx -= 1;                           // 1-based NPC -> 0-based (0 stays 0)
     if (idx >= 0x62) return this.b.decode(idx - 0x62);
