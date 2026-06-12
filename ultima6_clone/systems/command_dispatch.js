@@ -71,7 +71,7 @@ function canPushTo(world, handle, ox, oy, dir) {
   return canStandAt(world, bx, by, { actorId: handle });
 }
 
-export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellEl, avatarRef, reg, objlist, message, uiStack, portraits, scripts }) {
+export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellEl, avatarRef, reg, objlist, message, uiStack, portraits, scripts, recenter, moveFollowers }) {
   const commands = world.getResource(Commands);
   const posStore = world.store(Position);
   const objStore = world.store(ObjType);
@@ -234,7 +234,10 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
     if (pick === null) { message('Nothing happens.'); return; }
     const objNum = objStore.objNumber[world.resolve(pick)];
     const fn = commands.useHandlers.get(objNum);
-    if (fn) { fn({ world, target: { ...target, entity: pick }, message }); return; }
+    // Most USE handlers need only {world, target, message}; the ladder (I-19d) also reads
+    // avatarRef/recenter/moveFollowers to teleport the party + follow the camera. Threaded
+    // into every USE call; the other handlers ignore the extras.
+    if (fn) { fn({ world, target: { ...target, entity: pick }, message, avatarRef, recenter, moveFollowers }); return; }
     const name = displayName(world, pick, { reg, objlist });
     message(`Nothing happens. (${name})`);
     console.warn(`USE: no handler for obj #${objNum} (${name})`);

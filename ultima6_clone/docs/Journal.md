@@ -28,6 +28,72 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-13 — I-19 IMPLEMENTED (a–f, one-strike) — level change works end-to-end
+
+- **Built** the whole subsystem in one session (Zane: "start I-19 in one strike … commit each substep"),
+  6 save-point commits a–f, browser-verified at each step on real U6 data. Detail: `progress.md §"I-19 scope"`.
+- **The de-risk held:** terrain for all 6 levels was already decoded (`assets/map.js`) and `MapLevel.tileAt`
+  already dispatched to dungeons — so **a** (active-level plumbing) was small, and terrain rendered on a
+  dungeon level the moment `MapLevel.level` could change.
+- **Verified surprises / findings:**
+  - The "green/blue blob" I flagged as surface-object bleed in **a** was actually **dungeon terrain**
+    (underground water/moss) — `entCount 0` in the dungeon view proved the z-filter (**b**) has no bleed.
+    Lesson: confirm "is this terrain or an entity?" before calling something a bug.
+  - **d** round-trips EXACTLY: a Britain surface ladder (291,347) → dungeon (75,83) via `÷4`, and the
+    dungeon up-ladder (quality 12) → back to (291,347) via `×4 + quality bits (+8+16 on y)`. The
+    quality-bit reconstruction of the entrance cell is strong evidence the `C_101C_089E` port is faithful.
+  - **e**: descending to dungeon-5 flipped the NPC tick cohort **6→13** (gargoyles live) with surface NPCs
+    gated out — the active-level gate works. The old `hasRegionAt` would have FROZEN dungeon NPCs (it maps
+    their low coords to an unloaded NW surface region) → needed the level-aware active-area predicate.
+  - **f**: first cut DERIVED `loadedDungeons` from entity z and got `[1,2,3,4,5]` on restore — wrong,
+    because dungeon NPCs sit at z2–5 without their objblk being loaded. Switched to **persisting**
+    `loadedDungeons` (`|| []` → no version bump); restore now gives `[1]` correctly.
+- **Decisions held:** single `SpatialIndex` + active-z filter (per-level index = named upgrade); dungeon
+  NPCs live; hard-cut transition. All recorded as kept-deviations in `CLAUDE.md`.
+- **Tests 446/446 (0 fail).** node isn't on this PC, but each `tests/test_*.html` is *also* a browser
+  harness (loads the `.js` as a module, writes pass/fail to `#out`) — so the suite runs in the preview
+  server, no node. **This is how to run `tests/` on a node-less PC** (the prior sessions' "couldn't run
+  tests" was unnecessary). **Regression caught DURING this verification** (Zane asked me to explain the
+  "no node" caveat → I ran the harnesses → 61 `test_pathfinding` failures): the active-z guards read
+  `mapLevel.level`, but the tests stub `MapLevel` with `Object.create(MapLevel.prototype)` (constructor
+  bypassed → `level` undefined), so `mapLevel ? mapLevel.level : 0` returned `undefined` and skipped every
+  z=0 entity. Fixed `mapLevel?.level ?? 0`. **Lesson: a `truthy ? .field : default` guard does NOT cover an
+  object whose field is undefined — use `?? default`.** The momentary follower-stack-then-spread on a level
+  change is cosmetic (`MoveFollowers` re-forms).
+- **Next:** I-20 (object-action handlers expansion, demand-driven). Britain's dungeons are now reachable +
+  inhabited — the walk-side gap that blocked story traversal is closed.
+
+---
+
+## 2026-06-12 20:30 — I-19 reframed → level change (`USE ladder`); research + scope locked
+
+- **Why**: Zane reframed I-19 from "object-action handlers expansion" (mechanical table-fill) to a
+  *story-critical-path* rule. Discussion arc: candidate **A** ("make conversation consequential") was the
+  headline, but the walk-side gap won — `USE ladder` is really a **level-change subsystem**, and reaching
+  story NPCs/areas needs it. Old handler-expansion re-homed to **I-20**. "Complete the game story" as a
+  north star is re-discussed *after* I-19.
+- **Read** (3 references, per `feedback_consult_legacy_ultima6_port`): u6-decompiled `seg_27a1.c:3097-3102`
+  (OBJ_131 USE → `C_101C_089E`, gated `D_2CC3==-1` not-solo), `seg_101C.c:325-366` (`C_101C_089E` — z_incr
+  direction + coordinate rescale + reload/recompose), `obj.h:636-643/571-579` (Ladder 0x131, Hole 0x134,
+  Steps 0x110/0x114); legacy `../ultima6/u6map.js` + `map_viewer.js:129-148/857-909` (working JS blueprint:
+  `mapZ` + `dungeonTileIndex` + the ladder right-click transform, faithful to source); clone
+  `assets/map.js:34-67`, `resources/map_level.js:6-32`.
+- **Found**: the clone **already decodes all 6 levels** (`dungeonChunks[5][32][32]`) and `MapLevel.tileAt`
+  already dispatches to `dungeonTileIndex` — the dungeon terrain is **dormant, not absent**. So I-19 is
+  *activation*, not a new engine. Verified the source ladder transform verbatim (÷4 down / ×4+quality-bits
+  up). The legacy port's transform matches source — cross-check confirms the port target.
+- **Docs**: NEW `research_level_change.md` (source mechanism + legacy blueprint + clone state + chosen
+  architecture + the exact coordinate math); `progress.md` §"I-19 scope" (sub-step plan a–f + the 2 locked
+  decisions); ledger row retitled + I-20 added; banner "Next" updated.
+- **Decisions (locked)**: single `SpatialIndex` + active-z filter (per-level index = named upgrade if it
+  sprawls — Zane accepted with flagged uncertainty → reversible); dungeon NPCs go live (combat-types
+  wander/idle, combat deferred).
+- **Open**: camera/bounds must switch surface(1024-wrap)↔dungeon(256-wrap); save/load must persist/re-derive
+  the active level (`Position.z` already snapshotted — verify in sub-step f).
+- **Next**: implement sub-step **a** (active-level plumbing) — pending Zane's go on starting code.
+
+---
+
 ## 2026-06-12 17:35 — I-18k: general container management (the `M` "move to…" picker)
 
 - **Why**: I-18j/B's bagged-equip take-out only covers *equipment*; Zane flagged the mirror gap — no way to

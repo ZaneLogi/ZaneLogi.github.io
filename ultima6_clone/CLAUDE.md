@@ -50,8 +50,9 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 [`docs/progress.md`](docs/progress.md)** — its top banner is the single source of truth
 (see that file's §"Doc maintenance"); this section is NOT a status mirror — see the banner
 for where we are now. The NPC-movement arc I-14→I-17 is **complete** (speed model → drunk-walk
-→ arrival/direction → AI behaviors), and the status UI (I-18) has landed; object-action handler
-expansion is I-19. What stays
+→ arrival/direction → AI behaviors), the status UI (I-18) and the **level-change subsystem (I-19 —
+`USE ladder` → multi-z dungeons)** have landed; object-action handler expansion is now I-20 (demand-driven).
+What stays
 here is the durable, slowly-changing reference — the code layout, the dev console helpers,
 and the per-step **kept deviations** (so a later session doesn't "correct" them). The ECS
 runtime-ground spec is
@@ -66,7 +67,9 @@ WANDER/LOITER/GUARD worktype handlers + displaced-settled stand-aside/return), *
 use_handlers, use_drawbridge** (I-10), **conversation/** (I-13: `conversation_vm.js`
 standalone effect VM + `opcodes.js` + `conversation_system.js` host) + **stat_formulas**
 (I-18: `maxHP`/`maxMagic`, objlist-canonical) + **equip_slots** (I-18g: `equipSlotForTile` /
-`buildEquipment` / `resolveReadySlot` — the C_155D equip-slot machinery), …),
+`buildEquipment` / `resolveReadySlot` — the C_155D equip-slot machinery) + **level_change**
+(I-19: `setActiveLevel` — switch the active map level) + **use_ladder** (I-19d: `C_101C_089E`
+port — `USE OBJ_131` changes level), …),
 `assets/` also has **portrait.js** + **converse.js** (lazy lib_32 decoders);
 `resources/` also has **Commands** (dispatch registries) + **MessageLog**;
 `components/`, `view/` (WebGL renderer + dev HUD/inspector + **message_channel** +
@@ -142,6 +145,18 @@ reschedule reclaim above — it now fires **only off-screen** (2026-06-10): an i
 whose slot is walled off WAITS in `AI_SCHEDULE` rather than popping onto it. So both
 on-screen NPC teleports (reschedule reclaim + unreachable-fallback) follow source in view
 (re-path / wait) and only teleport once the NPC is off-screen.
+**I-19 kept deviations (level change):** (1) **single `SpatialIndex` + active-z filter**, NOT a
+per-level index — render/passability/cell-pick/npc-tick all skip `Position.z != MapLevel.level`.
+The per-level index is the *named upgrade* if the z-checks ever sprawl; don't pre-build it.
+(2) **Hard cut** — no `PartyEnter`/`PartyExit` choreography; the party teleports (active-z filter
+hides them on the old level, `MoveFollowers` re-forms them). Don't "add the missing animation"
+unless asked. (3) The `D_2CC3` **solo-mode gate is skipped** (`seg_27a1.c:3098`) — the clone has no
+solo/party-split mode. (4) Dungeon NPCs **tick only on the active level**; the active-area predicate
+is level-aware (whole-dungeon vs the surface region grid — the raw `hasRegionAt` would freeze dungeon
+NPCs by mis-mapping their low coords to an unloaded NW surface region). (5) **`loadedDungeons` is
+persisted** in the snapshot (not derived from entity z) so save/load neither re-loads a visited level
+nor resurrects deletions; `|| []` keeps pre-I-19 saves loadable (no version bump). Full record:
+`progress.md §"I-19 scope"` + `research_level_change.md`.
 
 The three phases (see local memory `feedback_project_phases`):
 

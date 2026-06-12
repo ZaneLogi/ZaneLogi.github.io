@@ -23,13 +23,16 @@
 // usable object, not an NPC standing on the cell.
 
 import { SpatialIndex } from '../resources/spatial_index.js';
-import { Renderable, Actor } from '../components/components.js';
+import { MapLevel } from '../resources/map_level.js';
+import { Position, Renderable, Actor } from '../components/components.js';
 import { forEachOccupiedCell } from './tile_footprint.js';
 
 export function makePickAtCell(world, reg) {
   const rendStore = world.store(Renderable);
+  const posStore = world.store(Position);
   return function pickAtCell(x, y, { forUse = false } = {}) {
     const spatial = world.getResource(SpatialIndex);
+    const activeZ = world.getResource(MapLevel)?.level ?? 0;   // I-19b: only pick the active level's entities (?? 0 = no/stub MapLevel)
     let firstObj = null, firstNpc = null, firstIgObj = null;
     for (let dy = 0; dy <= 1; dy++) {
       for (let dx = 0; dx <= 1; dx++) {
@@ -38,6 +41,7 @@ export function makePickAtCell(world, reg) {
         for (const handle of ents) {
           const i = world.resolve(handle);
           if (i === -1) continue;
+          if (posStore.z[i] !== activeZ) continue;   // I-19b: skip other-level entities
           let landedTile = -1;
           forEachOccupiedCell(reg, rendStore.tileId[i], x + dx, y + dy,
             (t, c, r) => { if (c === x && r === y) landedTile = t; });

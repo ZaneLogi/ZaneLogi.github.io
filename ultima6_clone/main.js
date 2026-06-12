@@ -51,6 +51,7 @@ import { Commands } from './resources/commands.js';
 import { makePickAtCell } from './systems/cell_pick.js';
 import { installCommandDispatch } from './systems/command_dispatch.js';
 import { registerUseHandlers } from './systems/use_handlers.js';
+import { setActiveLevel } from './systems/level_change.js';
 import { serializeWorld, restoreWorld } from './systems/persistence/snapshot.js';
 
 // Gating set for terrain + flags (I-1b) + world objects (I-2) + NPC schedules (I-5) +
@@ -382,6 +383,10 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   const avatarIdx = avatarRef.handle !== undefined ? world.resolve(avatarRef.handle) : -1;
   if (avatarIdx !== -1) {
     centerOn(posStore.x[avatarIdx], posStore.y[avatarIdx]);
+    // I-19f: a save made in a dungeon restores the avatar at z>0 — bring the active level
+    // with it (else terrain/render show the surface). loadedDungeons was re-marked by
+    // restoreWorld, so this won't re-load the (already-restored) dungeon objects.
+    if (restored && posStore.z[avatarIdx] !== 0) setActiveLevel(world, posStore.z[avatarIdx]);
   } else {
     camera.worldX = 276 * ts; camera.worldY = 367 * ts;     // fall back to Britain's default origin
     log('Avatar not on-map (party slot 0) — camera at default origin; movement disabled.', 'warn');
@@ -389,6 +394,23 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   window.__U6.renderer = renderer;
   window.__U6.camera = camera;
   window.__U6.avatarRef = avatarRef;
+
+  // I-19a dev hook: jump the active level (and optionally the avatar's cell) to eyeball
+  // dungeon terrain before the ladder handler exists. setLevel(z[, x, y]) sets the active
+  // level + the avatar's Position.z, moves it (if x/y given) and recenters. Object loading
+  // (I-19c) + the z-filter (I-19b) are not wired yet, so on a dungeon level you see terrain
+  // (correct, 256-wrap) possibly with surface objects bleeding through until I-19b lands.
+  window.__U6.setLevel = (z, x, y) => {
+    setActiveLevel(world, z);
+    const ai = avatarRef.handle !== undefined ? world.resolve(avatarRef.handle) : -1;
+    if (ai !== -1) {
+      if (x !== undefined) posStore.x[ai] = x;
+      if (y !== undefined) posStore.y[ai] = y;
+      posStore.z[ai] = z;
+      centerOn(posStore.x[ai], posStore.y[ai]);
+    }
+    return `active level → ${z}`;
+  };
 
   // Keep the buffer fitted as the window (or panel reflow) changes the map cell's size;
   // recenter on the avatar so the view grows/shrinks symmetrically around the player. The
@@ -436,7 +458,7 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   world.addSimSystem(makeWorldClockSystem());                      // per turn: clock.advance(1)
   world.addRenderSystem(makeTileAnimationSystem());                // advance animdata -> reg.animDirty
   world.addRenderSystem(makePaletteCycleSystem(renderer));         // rotate water/lava palette (shimmer)
-  world.addRenderSystem(makeCameraSystem(1024 * 16, 1024 * 16));   // clamp camera to world bounds
+  world.addRenderSystem(makeCameraSystem(ts));                     // wrap camera to the ACTIVE level (I-19a: 1024/256-tile torus)
   world.addRenderSystem(makeStreamingSystem(canvas, ts));          // load regions entering the view
   world.addRenderSystem(makeRenderSystem(renderer));               // terrain: layers 0 (water base) + 1 (shore)
   world.addRenderSystem(makeWorldRenderSystem(renderer));          // objects + NPCs: per-cell painter, layers 2-5
@@ -502,6 +524,7 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
     pickAtCell, probe, canvas,
     cellEl: document.getElementById('probe-cell'),
     avatarRef, reg, objlist, message, uiStack, portraits, scripts,
+    recenter: centerOn, moveFollowers,          // I-19d: the ladder handler teleports the party + follows the camera
   });
   window.__U6.cmd = cmd;            // dev: live dispatch({verb, target}) + isPending()
   window.__U6.pickAtCell = pickAtCell;

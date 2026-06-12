@@ -5,7 +5,7 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: I-18 (status panel) COMPLETE (2026-06-12) — on-demand party UI on the I-7 UIStack: `P` roster → ZSTATS (portrait + STR/DEX/INT + Magic/Health cur/MAX + Lvl/Exp) → `Tab`⇄inventory, plus an in-stack GIVE recipient-picker. All stats read from the **objlist** (NO `Stats` component — the objlist is the canonical persisted stat store; `MoveSpeed.dexterity` is a derived cache refreshed on dex-training). Layout refactored (fixed status panel removed → map full-width; persistent clock strip; floating NON-modal dev panel); the bare-map digit-inventory + map-give paths retired. 6 sub-steps a–f, all verified live on real data; the Avatar ZSTATS portrait defaults to `portrait.z[6]` (D_2CCB 7, a male face matching the factory `avatarSex` 0) for factory/uncreated data (`D_2CCB==0` — no char-creation flow), a real save (`D_2CCB>0`) shows the player's pick. No snapshot bump (stays v2). See §"I-18 scope". **Extended a–f → a–k (COMPLETE): I-18g–k add the equipped-equipment view + equip/unequip + container move** — the de-scoped paperdoll (a labeled equip-slot list beside the full item list + a weight/STR gauge, GAME.EXE slot words; `systems/equip_slots.js` + `view/equip_list.js`), the `E` equip/unequip toggle (source gates incl. bagged-equip take-out via re-parent), and the `M` "move to…" picker (move items in/out of bags both directions) — see §"I-18g–j scope" + §"I-18k scope". **Next: I-19** (object-action handlers expansion).** Prior: I-17 (NPC AI behaviors, §"I-17 scope"), I-16 (arrival + direction, §"I-16 scope"), conversation I-12/I-13 (walk + talk end-to-end, §"I-13 scope").
+**Status: I-19 (level change — `USE ladder` → multi-z dungeons) COMPLETE (2026-06-13, a–f).** Activated the already-decoded dungeon levels + ported `C_101C_089E`: the active level follows the avatar's `Position.z` (terrain / camera clamp+wrap / move-wrap, 1024↔256); a single `SpatialIndex` + active-z filter hides off-level entities (render / passability / cell-pick); a dungeon's objblk loads whole-level on entry (`loadDungeonLevel`, resident); `USE` a ladder (`OBJ_131`) changes level — z_incr + the ÷4/×4+quality coordinate rescale + party teleport + camera follow, **hard cut** (no PartyEnter/Exit); dungeon NPCs go live on their level (tick/schedule gate to the active level); and a save made in a dungeon restores there (`loadedDungeons` persisted, `|| []` keeps old saves — **no snapshot bump, stays v2**). Verified live on real data incl. an EXACT surface↔dungeon round-trip (the up-ladder's quality bits reconstruct the entrance cell). Decisions: single index + active-z filter (per-level index = named upgrade); live dungeon NPCs; hard-cut transition. See §"I-19 scope" + `research_level_change.md`. **Tests 446/446 pass** (run via the `tests/*.html` browser harnesses — no node needed; caught + fixed a `MapLevel`-stub null-safety regression mid-review). **Next: I-20** (object-action handlers expansion — demand-driven). Prior: I-18 (party status UI a–k, §"I-18 scope"), I-17 (NPC AI behaviors, §"I-17 scope"), I-16 (arrival + direction, §"I-16 scope").
 
 This banner is the **single canonical current-status line** — `CLAUDE.md` and
 `DOCUMENTATION_INDEX.md` point here instead of mirroring it (convention: §"Doc maintenance").
@@ -58,7 +58,8 @@ banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 | I-16 | **arrival behaviors + direction system** — `__AtDestination` prop lookup for sit/sleep/eat/play (`C_1E0F_2184` + `FindLoc`/`NextLoc` multi-tile footprint + `D_0658`) + fallbacks, eating dynamic facing (`C_1E0F_2125`), the `C_1E0F_0664` frame system (humanoid + non-humanoid per-type arms) + chair-overrides-facing, sprite-restore-on-wake, and (d) `AI_SCHEDULE` continuous-settle (`resolveActiveSlot` + per-tick `__AtDestination`). | **done** (a–c + 2 review fixes + d; carries the AI-mode dispatch coverage table) |
 | I-17 | **NPC AI behaviors** — the moving worktypes as active per-turn behaviors: `WANDER`/`GRAZE` (`C_1E0F_37DB`), `LOITER`/`FARM` (`C_1E0F_33C4`), `GUARD` pacing, via the probability×accumulator contract; + **I-17d** displaced settle-in-place NPCs stand aside on a shove & return to post + re-pose when the slot clears. `RINGBELL` split to its own later step; thief/law + combat deferred by design. See §"I-17 scope". | **done** (a–d) |
 | I-18 | **party status UI — on-demand, NOT a fixed panel.** `P` → roster (icon/name/HP) → member digit → ZSTATS (portrait + STR/DEX/INT + Magic/Health cur/MAX + Lvl/Exp) → `Tab` ⇄ inventory, all on the UIStack; stats read straight from the **objlist** (NO `Stats` component — Option B; `MaxHP`/`MaxMagic` ported to `stat_formulas.js`). GIVE → in-stack recipient-picker (bare-map give + direct digit-inventory paths retired). Layout: fixed status panel removed → map full-width, clock → persistent strip, dev HUD → floating show/hide. Avatar portrait via `D_2CCB` (factory data → `z[6]`/D_2CCB 7 male-face default). **g/h/i** = equipped-equipment view (de-scoped paperdoll): equip-slot list beside the carried list + weight gauge + `E` equip/unequip (source gates, bagged-equip re-parents out) + **k** `M` "move to…" picker (move items in/out of bags, both directions). | **done** (a–k, 2026-06-12) |
-| I-19 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / moonstones / instruments / etc.); each handler tied to its owning subsystem when that subsystem lands (was I-15→I-18) | planned |
+| I-19 | **level change — `USE ladder` → multi-z dungeons.** Activate the already-decoded dungeon levels (`assets/map.js` decodes all 6; `MapLevel.dungeonTileIndex` ready; `Position.z` exists) + port `C_101C_089E` (z_incr direction + coordinate rescale + avatar reposition + reload/recompose). Single `SpatialIndex` + active-z filter; dungeon NPCs live; camera/bounds switch surface(1024-wrap)↔dungeon(256-wrap) per level. **Reframed 2026-06-12** (was "object-action handlers expansion" → re-homed to I-20). See §"I-19 scope" + `research_level_change.md`. | **done** (a–f, 2026-06-13) |
+| I-20 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / moonstones / instruments / etc.); demand-driven, each handler tied to its owning subsystem when that subsystem lands (was I-19 until 2026-06-12) | planned |
 
 **Why I-2 is the world-data system.** Loading the real world from `OBJBLK*`/
 `objlist` into ECS entities is the clone's core purpose — the reason for choosing
@@ -3393,3 +3394,81 @@ equip semantics. **Verified live (Dupre, real save):** put-in (ale → bag, gone
 take-out (drill into bag → `M` → "Inventory (carried)" → ale back) both land on the rebuilt member
 view with the right messages; no console errors. **Deferred refinements:** nested-container
 destinations (only the member's *direct* bags are offered) + a count/quantity split on move.
+
+## I-19 scope — level change (`USE ladder` → multi-z dungeons) — COMPLETE 2026-06-13 (a–f)
+
+**Reframe (Zane's call 2026-06-12).** I-19 was "object-action handlers expansion" (mechanically
+fill `seg_27a1.c`'s dispatch table). That's demand-driven per `user_retro_port_goal`, so instead of
+a batch table-fill, I-19's organizing rule becomes **"what the game-story critical path needs to
+progress"** — and the first such need is **`USE ladder` → descend into dungeons** (reach NPCs/areas
+the story requires). The old handler-expansion re-homes to **I-20** (still demand-driven). "Complete
+the game story" as a north star is re-discussed *after* I-19 lands.
+
+**The de-risk (why this is activation, not a new engine).** The terrain for all 6 levels is already
+decoded at load (`assets/map.js:34-67` → `dungeonChunks[5][32][32]`), `MapLevel.tileAt` already
+dispatches to `dungeonTileIndex` when `level!==0` (`resources/map_level.js:19-31`), and `Position`
+already carries `z`. The dungeon data is dormant, not absent. Full grounding (source + legacy port +
+clone state + the coordinate transform) in **`research_level_change.md`**.
+
+**Locked design decisions:**
+1. **Single `SpatialIndex` + active-z filter** (NOT per-level index). Entities of all levels share the
+   one index; queries filter by the avatar's active `z`. Lean option; a forgotten filter is obvious on
+   first descent (a surface object in a cave), not silent. **Named upgrade:** per-level `SpatialIndex`
+   (build-once, swap-on-entry) if z-checks sprawl. *(Zane accepted, flagging uncertainty — hence the
+   reversible/named-upgrade framing.)*
+2. **Dungeon NPCs go live.** The schedule/AI systems already tick every loaded actor, so a level's NPCs
+   animate for free once loaded + z-visible ("static render" would mean *adding* a suppression gate).
+   Combat-type dwellers wander/idle (combat stays deferred) — dungeons are *inhabited, not dangerous*.
+3. **Level transition = HARD CUT** (Zane 2026-06-12, matching the legacy `../ultima6/` port). No
+   `PartyEnter`/`PartyExit` choreography — the *mechanic* still holds (party vanishes from the old level via
+   the active-z filter + re-gathers on the new level via `MoveFollowers`); only the gather/vanish/spread
+   *animation* is dropped (deferred polish; add only if the cut feels abrupt). See `research_level_change.md §6`.
+
+**Sub-steps (landed a–f, each a save-point commit; squashed at the end). All browser-verified live on
+Zane's real U6 data.**
+- **a — active-level plumbing.** `MapLevel.level` mutable + per-level extent (`tilesWide`/`wrapMask`,
+  1024↔256); `camera_system` wrap + `avatar_move_system` move-wrap follow it; `systems/level_change.js`
+  `setActiveLevel` + `__U6.setLevel(z[,x,y])` dev hook. Terrain render follows for free (`tileAt`
+  dispatches). *Verified:* dungeon-1 terrain renders at 256-wrap; surface unchanged.
+- **b — z-aware visibility.** Active-z filter in `world_render_system`, `passability`, `cell_pick` (skip
+  `Position.z != MapLevel.level`); level-change rebuild triggers in both render systems. *Verified:* a
+  surface object `pickAtCell` resolves on level 0 → **null** once a dungeon is active. **Finding:** the
+  "green/blue blob" first read as object bleed was actually **dungeon terrain** (underground water/moss);
+  the z-filter has no bleed (entCount 0 in the dungeon view).
+- **c — dungeon object loading.** `loadDungeonLevel` loads `objblk[a-e]i` (one file/level), spawning LOCXYZ
+  objects at `z=level` via the shared two-pass spawn (factored out of `loadRegion`); cached in
+  `SpatialIndex.loadedDungeons` (load-once + resident). `setActiveLevel` fire-and-forget triggers it; the
+  surface streamer gates to level 0. *Verified:* entering dungeon 1 loads **1527** z=1 objects; a room
+  renders with its contents.
+- **d — `USE OBJ_131` handler.** `systems/use_ladder.js` ports `C_101C_089E`: z_incr + the §5 rescale +
+  party teleport + camera recenter, **hard cut**; `command_dispatch` threads `avatarRef`/`recenter`/
+  `moveFollowers` into every USE handler. *Verified:* a Britain surface ladder round-trips **down→up to the
+  EXACT entrance cell** — the up-ladder's quality bits (`12 → +8+16 on y`) reconstruct it, proving the port
+  is faithful.
+- **e — dungeon NPCs on the active level.** `npc_tick` + `npc_schedule` gate to the active level (skip
+  `z != activeLevel`) + a **level-aware active-area** predicate (the old `hasRegionAt` mis-maps dungeon
+  coords to an unloaded surface region) + a level-wrapped teleport view-center; null-safe for the test
+  worlds. *Verified:* descending to dungeon-5 switches the ticking cohort **6→13** (gargoyles go live;
+  surface NPCs gated out, "inactive 162"); surface unchanged on return.
+- **f — save/load the active level.** A save in a dungeon restores there: the boot sets the active level
+  from the restored avatar's `z`, and the snapshot **persists `loadedDungeons`** (not derived from entity z
+  — a dungeon NPC at z2 doesn't mean L2's objblk loaded; `|| []` keeps pre-I-19 saves loadable, **no
+  version bump, v2**). *Verified:* save at (75,83,z1) → reload restores the avatar there, active level 1,
+  `loadedDungeons [1]`, 1527 objects (no duplication).
+
+**Tests: 446/446 pass** (all 12 `tests/*.html`, 0 failures — pathfinding 194, passability 51, core 29,
+conversation_vm 27, schedules 25, active_area 24, clock 24, snapshot 24, schedule 18, drunk_walk 14,
+move_economy 10, zip 6). **node isn't installed on this PC**, but the tests are *also* browser harnesses
+(each `test_*.html` loads its `.js` as a module + writes pass/fail to `#out`), so they run in the preview
+server with no node — **this is the way to run `tests/` on a node-less PC**. **A real regression was caught
+here:** the active-z guards read `mapLevel.level`, but the tests stub `MapLevel` via
+`Object.create(MapLevel.prototype)` (constructor bypassed → `level` is `undefined`), so a `mapLevel ?
+mapLevel.level : 0` guard returned `undefined` and `z !== undefined` skipped EVERY z=0 entity (NPCs never
+ticked, doors never blocked) — 61 `test_pathfinding` failures. Fixed to `mapLevel?.level ?? 0` + deriving
+the wrap mask from that (separate `fix I-19` commit; game behavior unchanged — `level` is always defined
+there).
+
+**Deferred:** Hole (`OBJ_134`) / Steps (`OBJ_110`/`114`) — one-line adds when a location needs them;
+moongate/gate-travel; combat; solo-mode gate; the PartyEnter/Exit transition animation (hard cut chosen);
+the momentary follower-stack-then-spread on a level change (cosmetic — `MoveFollowers` re-forms them).
+See `research_level_change.md §6`.

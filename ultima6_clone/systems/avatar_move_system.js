@@ -17,6 +17,7 @@ import { TurnClock } from '../ecs/world.js';
 import { Position, ObjType, Renderable } from '../components/components.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
 import { TileRegistry } from '../resources/tile_registry.js';
+import { MapLevel } from '../resources/map_level.js';
 import { canStandAt } from './passability.js';
 import { walkStep } from './humanoid_anim.js';
 import { stepCostAt, PLAYER_STEP_MS, BASE_COST } from './move_economy.js';
@@ -111,9 +112,10 @@ export function installAvatarMovement(world, { avatarRef, onMove, onIdle, isBloc
 
     const pos = world.store(Position);
     const spatial = world.getResource(SpatialIndex);
+    const mask = world.getResource(MapLevel).wrapMask;   // I-19a: 0x3ff overworld / 0xff dungeon
     const ox = pos.x[i], oy = pos.y[i];
-    const nx = (ox + DIR_DX[dir]) & 0x3ff;   // overworld wrap; source masks & 0x3ff
-    const ny = (oy + DIR_DY[dir]) & 0x3ff;
+    const nx = (ox + DIR_DX[dir]) & mask;    // toroidal wrap of the ACTIVE level
+    const ny = (oy + DIR_DY[dir]) & mask;
 
     // Bump: no move, no turn — source faces (C_1E0F_0664) only on a successful step.
     // The avatar is the active leader, so it walks THROUGH its followers (party

@@ -20,6 +20,7 @@ import { decodeObjblk, CoordUse } from './assets/objblk.js';
 import { Camera } from './resources/camera.js';
 import { TileRegistry } from './resources/tile_registry.js';
 import { SpatialIndex } from './resources/spatial_index.js';
+import { MapLevel } from './resources/map_level.js';
 import { Schedules } from './resources/schedules.js';
 import { ActorIndex } from './resources/actor_index.js';
 import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember, AIMode, Destination, Alignment, MoveSpeed } from './components/components.js';
@@ -44,9 +45,9 @@ export function regionsInView(cam, canvas, tileSize) {
   return ids;
 }
 
-function spawnFromRecord(world, reg, spatial, rec, isActor) {
+function spawnFromRecord(world, reg, spatial, rec, isActor, zOverride) {
   const e = world.create();
-  world.add(e, Position, { x: rec.x, y: rec.y, z: rec.z });
+  world.add(e, Position, { x: rec.x, y: rec.y, z: zOverride ?? rec.z });
   world.add(e, ObjType, { objNumber: rec.objNumber, frame: rec.frame, origObjNumber: rec.objNumber });
   world.add(e, Status, { bits: rec.status });
   world.add(e, Renderable, { tileId: reg.tileForObject(rec.objNumber, rec.frame) });
@@ -89,9 +90,40 @@ export async function loadRegion(world, id) {
   spatial.loadedRegions.add(id);                 // mark before await: guards concurrent calls
   const bytes = await U6DB.get(objblkName(id));
   if (!bytes) return { objects: 0, items: 0, contained: 0 };
+  return spawnObjblkRecords(world, decodeObjblk(bytes), objblkName(id));   // surface: z from each record
+}
+
+// Dungeon OBJBLK file for level 1..5: objblkai..objblkei (one file per level).
+export function dungeonObjblkName(level) { return `objblk${String.fromCharCode(96 + level)}i`; }
+
+// Load a dungeon LEVEL's world objects (I-19c). One OBJBLK file per level, so EVERY
+// LOCXYZ object in it belongs to that level — z is forced to `level` (the file's
+// packed pos.z is single-valued; off-map INVEN/EQUIP/CONTAINED items ignore z).
+// Cached in loadedDungeons (load-once + resident — the no-region-unload rule), and
+// fire-and-forget from setActiveLevel: objects pop in when the async decode lands
+// (spatial.insert flags a render rebuild). Returns { objects, items, contained }.
+export async function loadDungeonLevel(world, level) {
+  if (level < 1 || level > 5) return { objects: 0, items: 0, contained: 0 };
+  const spatial = world.getResource(SpatialIndex);
+  if (spatial.loadedDungeons.has(level)) return { objects: 0, items: 0, contained: 0 };
+  spatial.loadedDungeons.add(level);             // mark before await: guards concurrent entries
+  const name = dungeonObjblkName(level);
+  const bytes = await U6DB.get(name);
+  if (!bytes) return { objects: 0, items: 0, contained: 0 };
+  return spawnObjblkRecords(world, decodeObjblk(bytes), name, level);
+}
+
+// Two-pass spawn of one OBJBLK file's records (shared by surface loadRegion +
+// dungeon loadDungeonLevel). `levelZ` (dungeon only) forces LOCXYZ objects onto that
+// level; omit it on the surface to use each record's own packed z.
+//   Pass 1: spawn every record (LOCXYZ + INVEN/EQUIP + CONTAINED-without-holder),
+//           record handle by in-file index. INVEN/EQUIP attach to NPC holders
+//           (ActorIndex — NPCs are global) in this pass.
+//   Pass 2: attach each CONTAINED item to its parent via the in-file-index → handle map.
+function spawnObjblkRecords(world, records, label, levelZ) {
   const reg = world.getResource(TileRegistry);
+  const spatial = world.getResource(SpatialIndex);
   const actorIndex = world.getResource(ActorIndex);
-  const records = decodeObjblk(bytes);
   const handleByInFileIdx = new Array(records.length);
   let objects = 0, items = 0, contained = 0;
 
@@ -99,7 +131,7 @@ export async function loadRegion(world, id) {
   for (let i = 0; i < records.length; i++) {
     const rec = records[i];
     if (rec.coordUse === LOCXYZ) {
-      handleByInFileIdx[i] = spawnFromRecord(world, reg, spatial, rec, false);
+      handleByInFileIdx[i] = spawnFromRecord(world, reg, spatial, rec, false, levelZ);
       objects++;
     } else if (rec.coordUse === CoordUse.INVEN || rec.coordUse === CoordUse.EQUIP) {
       const holder = actorIndex?.get(rec.assoc);
@@ -120,7 +152,7 @@ export async function loadRegion(world, id) {
     const itemHandle = handleByInFileIdx[i];
     const holderHandle = handleByInFileIdx[rec.assoc];
     if (holderHandle === undefined) {
-      console.warn(`CONTAINED record ${i} in ${objblkName(id)}: parent in-file idx ${rec.assoc} has no spawned entity — dropping`);
+      console.warn(`CONTAINED record ${i} in ${label}: parent in-file idx ${rec.assoc} has no spawned entity — dropping`);
       world.destroy(itemHandle);
       continue;
     }
@@ -387,6 +419,7 @@ export async function ensureRegionsInView(world, cam, canvas, tileSize) {
 // async decode lands and SpatialIndex.insert flags a render rebuild.
 export function makeStreamingSystem(canvas, tileSize) {
   return (world) => {
+    if (world.getResource(MapLevel).level !== 0) return;   // I-19c: surface regions stream only on the overworld; a dungeon loads whole-level on entry
     const spatial = world.getResource(SpatialIndex);
     for (const id of regionsInView(world.getResource(Camera), canvas, tileSize))
       if (!spatial.loadedRegions.has(id)) loadRegion(world, id);

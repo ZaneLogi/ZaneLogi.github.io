@@ -45,12 +45,13 @@
 import { Camera } from '../resources/camera.js';
 import { TileRegistry } from '../resources/tile_registry.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
+import { MapLevel } from '../resources/map_level.js';
 import { Position, Renderable, Actor } from '../components/components.js';
 import { forEachOccupiedCell } from './tile_footprint.js';
 
 export function makeWorldRenderSystem(renderer) {
   const ts = renderer.tileSize;
-  let lastTileX = NaN, lastTileY = NaN;
+  let lastTileX = NaN, lastTileY = NaN, lastLevel = -1;
 
   return (world) => {
     const cam = world.getResource(Camera);
@@ -58,6 +59,7 @@ export function makeWorldRenderSystem(renderer) {
     const spatial = world.getResource(SpatialIndex);
     const pos = world.store(Position);
     const rend = world.store(Renderable);
+    const activeZ = world.getResource(MapLevel)?.level ?? 0;   // I-19b: only draw the active level's entities (?? 0 = no/stub MapLevel)
     const remap = reg.anim ? reg.anim.tileIndexMap : null;
     const rm = remap ? (t) => remap[t] : (t) => t;
 
@@ -65,10 +67,11 @@ export function makeWorldRenderSystem(renderer) {
     const cols = Math.ceil(renderer.canvas.width / ts) + 1;
     const rows = Math.ceil(renderer.canvas.height / ts) + 1;
 
-    // Rebuild only on camera move, animation, or a spatial change (e.g. a region just
-    // streamed in). Movement (I-5e) sets spatial.dirty so NPC snaps trigger rebuild.
-    if (tileX === lastTileX && tileY === lastTileY && !reg.animDirty && !spatial.dirty) return;
-    lastTileX = tileX; lastTileY = tileY; spatial.dirty = false;
+    // Rebuild only on camera move, animation, a spatial change (e.g. a region just
+    // streamed in), or a LEVEL change (I-19b — a ladder may switch level without moving
+    // the camera origin). Movement (I-5e) sets spatial.dirty so NPC snaps trigger rebuild.
+    if (tileX === lastTileX && tileY === lastTileY && activeZ === lastLevel && !reg.animDirty && !spatial.dirty) return;
+    lastTileX = tileX; lastTileY = tileY; lastLevel = activeZ; spatial.dirty = false;
 
     const bg = [], normal = [], fgHot = [], fgExt = [];   // flat [tileId, col, row, ...]
 
@@ -95,6 +98,7 @@ export function makeWorldRenderSystem(renderer) {
               const handle = ents[k];
               const i = world.resolve(handle);
               if (i === -1) continue;
+              if (pos.z[i] !== activeZ) continue;   // I-19b: hide other-level entities (no surface bleed in a dungeon)
               // Extract just the tile this entity contributes at (col, row), if any.
               let landed = -1;
               forEachOccupiedCell(reg, rend.tileId[i], col + dx, row + dy, (t, c, r) => {

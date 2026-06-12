@@ -39,6 +39,7 @@ import { SpatialIndex } from '../resources/spatial_index.js';
 import { Paths } from '../resources/paths.js';
 import { Camera } from '../resources/camera.js';
 import { Viewport } from '../resources/viewport.js';
+import { MapLevel } from '../resources/map_level.js';
 import { WorldSpeed } from '../resources/world_speed.js';
 import { WorldClock } from '../resources/world_clock.js';
 import { Schedules } from '../resources/schedules.js';
@@ -77,6 +78,21 @@ export function installNpcTickSystem(world, { avatarRef, now = () => performance
     const paths = world.getResource(Paths);
     let active = 0, finding = 0, walking = 0, teleported = 0, snapped = 0, blocked = 0, arrived = 0;
 
+    // I-19e: only the ACTIVE level's NPCs tick — a surface NPC must not pathfind on dungeon
+    // terrain (tileAt/passability are active-level-bound) while the avatar is below, and a
+    // dungeon's NPCs come alive when the avatar is on their level. levelMask wraps the view
+    // center to the active level (1024 overworld / 256 dungeon). Null-safe for the unit-test
+    // tick worlds: `?? 0` covers BOTH no MapLevel AND the test's `Object.create(MapLevel.prototype)`
+    // stub (which bypasses the constructor → `.level` is undefined) → overworld defaults.
+    const mapLevel = world.getResource(MapLevel);
+    const activeLevel = mapLevel?.level ?? 0;
+    const levelMask = activeLevel === 0 ? 0x3ff : 0xff;
+    // "Active area" predicate: the overworld is region-streamed (freeze NPCs in unloaded
+    // regions), but a dungeon loads whole-level on entry — so on a dungeon level the area is
+    // simply "this level is loaded" (true once entered), NOT the surface region grid (whose
+    // ids would mis-map the dungeon's low coords to an unloaded NW region and freeze it).
+    const inActiveArea = (x, y) => activeLevel === 0 ? spatial.hasRegionAt(x, y) : spatial.loadedDungeons.has(activeLevel);
+
     // I-14b: real time since the last tick, fed into each NPC's movement credit below.
     // Clamped so a backgrounded tab or a resumed modal (sim suspended → tick skipped)
     // doesn't bank into a multi-tile jump. worldSpeed is the I-14d master scalar — 1 here
@@ -99,8 +115,8 @@ export function installNpcTickSystem(world, { avatarRef, now = () => performance
     if (cam && vp) {
       // camera world-pixel origin -> top-left tile; + half the visible extent = center tile
       // (16 = tile size px, matches renderer.tileSize). Wrapped onto the toroidal 1024 axis.
-      viewX = (Math.floor(cam.worldX / 16) + (vp.cols >> 1)) & 0x3ff;
-      viewY = (Math.floor(cam.worldY / 16) + (vp.rows >> 1)) & 0x3ff;
+      viewX = (Math.floor(cam.worldX / 16) + (vp.cols >> 1)) & levelMask;
+      viewY = (Math.floor(cam.worldY / 16) + (vp.rows >> 1)) & levelMask;
     } else if (avatarRef && avatarRef.handle !== undefined) {
       const ai = world.resolve(avatarRef.handle);
       if (ai !== -1) { viewX = pos.x[ai]; viewY = pos.y[ai]; }
@@ -121,6 +137,7 @@ export function installNpcTickSystem(world, { avatarRef, now = () => performance
 
     for (const i of world.query(AIMode)) {
       const mode = am.mode[i];
+      if (pos.z[i] !== activeLevel) continue;   // I-19e: skip NPCs not on the active level
 
       // AI_SCHEDULE continuous-settle (source seg_1E0F.c:2198 — __AtDestination runs for every
       // AI_SCHEDULE NPC each active tick, reading its current slot from the save-persisted
@@ -131,7 +148,7 @@ export function installNpcTickSystem(world, { avatarRef, now = () => performance
       // worktype pose/facing; off it -> AI_FINDPATH walks there.
       if (mode === AI.AI_SCHEDULE) {
         const handle = world.handleOf(i);
-        if (settleSchedule && world.has(handle, Schedule) && spatial.hasRegionAt(pos.x[i], pos.y[i])) {
+        if (settleSchedule && world.has(handle, Schedule) && inActiveArea(pos.x[i], pos.y[i])) {
           const slot = schedules.resolveActiveSlot(sched.npcId[i], nowHour, nowDow);
           if (slot) {
             dest.x[i] = slot.x; dest.y[i] = slot.y; dest.z[i] = slot.z; dest.action[i] = slot.action;
@@ -158,8 +175,8 @@ export function installNpcTickSystem(world, { avatarRef, now = () => performance
 
       // Active-area gate: NPCs whose region isn't loaded are frozen (same predicate as
       // the schedule system). Keeps the expensive path builds bounded to the explored
-      // cohort near the player.
-      if (!spatial.hasRegionAt(pos.x[i], pos.y[i])) continue;
+      // cohort near the player. Level-aware (I-19e): surface region grid vs whole-dungeon.
+      if (!inActiveArea(pos.x[i], pos.y[i])) continue;
       active++;
 
       const handle = world.handleOf(i);

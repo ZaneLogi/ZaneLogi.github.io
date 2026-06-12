@@ -126,6 +126,7 @@ export function serializeWorld(world, opts = {}) {
     entities,
     resources,
     loadedRegions: spatial ? [...spatial.loadedRegions] : [],
+    loadedDungeons: spatial ? [...spatial.loadedDungeons] : [],   // I-19f: dungeon levels whose objblk is loaded
   };
 
   // The decoded `objlist` is the NPC-record + global save state that the conversation
@@ -203,6 +204,12 @@ export function restoreWorld(world, snapshot, opts = {}) {
       spatial.insert(p.x[i], p.y[i], h);
     }
     spatial.loadedRegions = new Set(snapshot.loadedRegions);
+    // I-19f: restore the loaded-dungeon set so a later setActiveLevel/ladder neither re-loads
+    // a visited level (duplicating objects) nor resurrects deletions (same role loadedRegions
+    // plays for the surface), while an UNvisited level still loads on first entry. Persisted,
+    // not derived from entity z — a dungeon NPC at z=2 doesn't mean level 2's objblk was loaded.
+    // `|| []` keeps pre-I-19 saves (no field) loadable without a SNAPSHOT_VERSION bump.
+    spatial.loadedDungeons = new Set(snapshot.loadedDungeons || []);
     spatial.dirty = true;
   }
 

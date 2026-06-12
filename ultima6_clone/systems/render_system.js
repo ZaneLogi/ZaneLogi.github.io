@@ -29,7 +29,7 @@ export function makeRenderSystem(renderer) {
   let cols = 0, rows = 0;
   let basePos = null, baseIdx = null;       // layer 0: full grid
   let shoreIdx = null, shorePos = null;     // layer 1: sparse (shore cells only)
-  let lastTileX = NaN, lastTileY = NaN;
+  let lastTileX = NaN, lastTileY = NaN, lastLevel = -1;
 
   return (world) => {
     const cam = world.getResource(Camera);
@@ -62,7 +62,7 @@ export function makeRenderSystem(renderer) {
     const tileY = Math.floor(cam.worldY / ts);
     renderer.setScroll(cam.worldX - tileX * ts, cam.worldY - tileY * ts);
 
-    if (relayout || animChanged || tileX !== lastTileX || tileY !== lastTileY) {
+    if (relayout || animChanged || tileX !== lastTileX || tileY !== lastTileY || map.level !== lastLevel) {
       let sc = 0;
       for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
         let t = map.tileAt(tileX + c, tileY + r);
@@ -78,7 +78,7 @@ export function makeRenderSystem(renderer) {
       else renderer.updateLayer(0, baseIdx);
       // Shore overlay count varies with the view, so (re)create it each fill.
       renderer.setLayer(1, shoreIdx.subarray(0, sc), shorePos.subarray(0, sc * 2));
-      lastTileX = tileX; lastTileY = tileY;
+      lastTileX = tileX; lastTileY = tileY; lastLevel = map.level;
     }
     // Layers 0/1 set here; the entity system sets 2/3; a present step renders.
   };

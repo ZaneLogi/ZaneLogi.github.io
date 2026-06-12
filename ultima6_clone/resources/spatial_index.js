@@ -11,7 +11,8 @@ export class SpatialIndex {
   constructor(worldWidth = 1024) {
     this.width = worldWidth;
     this.cells = new Map();          // y*width + x  ->  entity handle[]
-    this.loadedRegions = new Set();  // region ids whose OBJBLK has been loaded
+    this.loadedRegions = new Set();  // surface region ids whose OBJBLK has been loaded
+    this.loadedDungeons = new Set(); // dungeon levels (1..5) whose OBJBLK has been loaded (I-19c)
     this.dirty = true;               // a render rebuild is needed (set on insert)
   }
 

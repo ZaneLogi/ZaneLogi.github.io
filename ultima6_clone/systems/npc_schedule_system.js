@@ -19,6 +19,7 @@ import { SpatialIndex } from '../resources/spatial_index.js';
 import { TileRegistry } from '../resources/tile_registry.js';
 import { Camera } from '../resources/camera.js';
 import { Viewport } from '../resources/viewport.js';
+import { MapLevel } from '../resources/map_level.js';
 import { Position, Schedule, AIMode, Destination, PartyMember, ObjType, Renderable } from '../components/components.js';
 import { AI_FINDPATH } from './ai_modes.js';
 import { chebyshev } from './npc_path.js';
@@ -57,12 +58,21 @@ function tick(world, clock, stats) {
   // CAMERA's center tile (the clone drag-pans, so visibility tracks the camera, not the
   // avatar). No camera/viewport (unit-test worlds) -> gate off -> every NPC treated as
   // off-screen (preserves the I-9 reclaim tests, which register neither).
+  // I-19e: level-aware active area + view-center wrap (mirrors npc_tick_system). Only the
+  // active level's NPCs are scheduled; a dungeon's area is "the level is loaded", not the
+  // surface region grid. `?? 0` covers BOTH no MapLevel AND the test's Object.create stub
+  // (constructor bypassed → `.level` undefined) → overworld defaults.
+  const mapLevel = world.getResource(MapLevel);
+  const activeLevel = mapLevel?.level ?? 0;
+  const levelMask = activeLevel === 0 ? 0x3ff : 0xff;
+  const inActiveArea = (x, y) => activeLevel === 0 ? spatial.hasRegionAt(x, y) : spatial.loadedDungeons.has(activeLevel);
+
   const cam = world.getResource(Camera);
   const vp = world.getResource(Viewport);
   let viewX, viewY, nearRadius;
   if (cam && vp) {
-    viewX = (Math.floor(cam.worldX / 16) + (vp.cols >> 1)) & 0x3ff;
-    viewY = (Math.floor(cam.worldY / 16) + (vp.rows >> 1)) & 0x3ff;
+    viewX = (Math.floor(cam.worldX / 16) + (vp.cols >> 1)) & levelMask;
+    viewY = (Math.floor(cam.worldY / 16) + (vp.rows >> 1)) & levelMask;
     nearRadius = vp.nearRadius;
   }
   const gateOn = viewX !== undefined;
@@ -75,10 +85,11 @@ function tick(world, clock, stats) {
   for (const i of world.query(Schedule, Position)) {
     const handle = world.handleOf(i);
     if (world.has(handle, PartyMember)) continue;   // player-controlled — not schedule-driven
+    if (pos.z[i] !== activeLevel) { inactive++; continue; }   // I-19e: only the active level's NPCs schedule
 
     // Active-area gate, keyed off CURRENT position (not target). NPCs whose region
-    // isn't loaded are frozen until the player visits that region.
-    if (!spatial.hasRegionAt(pos.x[i], pos.y[i])) { inactive++; continue; }
+    // isn't loaded are frozen until the player visits that region (level-aware, I-19e).
+    if (!inActiveArea(pos.x[i], pos.y[i])) { inactive++; continue; }
 
     const slot = schedules.resolveSlotAt(sched.npcId[i], hour, dayOfWeek);
     if (slot === null) { noTrigger++; continue; }   // between events — stays in its current mode

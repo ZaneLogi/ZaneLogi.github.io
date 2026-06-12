@@ -23,7 +23,7 @@
 import { TileRegistry } from '../resources/tile_registry.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
 import { MapLevel } from '../resources/map_level.js';
-import { Renderable, Actor, PartyMember, ObjType } from '../components/components.js';
+import { Position, Renderable, Actor, PartyMember, ObjType } from '../components/components.js';
 import { forEachOccupiedCell } from './tile_footprint.js';
 
 // Door object range + the two pass-through object types (obj.h). A door's
@@ -43,6 +43,8 @@ export function canStandAt(world, x, y, { actorId, asPartyMember = false, leader
   const reg = world.getResource(TileRegistry);
   const spatial = world.getResource(SpatialIndex);
   const mapLevel = world.getResource(MapLevel);
+  const activeZ = mapLevel.level ?? 0;                      // I-19b: collide only with the active level's entities (?? 0 = test stub / overworld)
+  const pos = world.store(Position);
   const rend = world.store(Renderable);
   const ot = asHumanoidNpc ? world.store(ObjType) : null;   // only needed for the door-passthrough check
 
@@ -72,6 +74,7 @@ export function canStandAt(world, x, y, { actorId, asPartyMember = false, leader
         if (actorId !== undefined && handle === actorId) continue;
         const id = world.resolve(handle);
         if (id === -1) continue;
+        if (pos.z[id] !== activeZ) continue;   // I-19b: skip other-level entities (surface obj never blocks a dungeon move)
 
         // Per-cell tile id at (x,y) for THIS entity's footprint, if it covers
         // (x,y) at all. -1 = footprint misses (x,y), skip the entity.

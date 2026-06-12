@@ -6,8 +6,16 @@
 export class MapLevel {
   constructor(u6map, level = 0) {
     this.map = u6map;
-    this.level = level;
+    this.level = level;   // ACTIVE level (I-19a, mutable): 0 = overworld, 1..5 = dungeons.
+                          // Driven by the avatar's Position.z via setActiveLevel (systems/level_change.js).
   }
+
+  // Extent of the ACTIVE level, in tiles. The overworld is a 1024-tile torus;
+  // dungeons are 256. Drives the camera wrap (camera_system) + the avatar move
+  // wrap (avatar_move_system); render's tileAt already wraps per-level. `wrapMask`
+  // is the power-of-two AND mask source uses (`& 0x3ff` overworld / `& 0xff` dungeon).
+  get tilesWide() { return this.level === 0 ? 1024 : 256; }
+  get wrapMask()  { return this.level === 0 ? 0x3ff : 0xff; }
 
   worldTileIndex(xtile, ytile) {
     const x = ((xtile % 1024) + 1024) % 1024;
