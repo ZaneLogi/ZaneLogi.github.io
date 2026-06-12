@@ -162,7 +162,7 @@ function requestStepAside(world, blockerHandle, moverDir8) {
 // Chebyshev distance on the wrapped 1024-cell overworld axis — source's
 // COMBAT_getCathesus (the larger of |dx|,|dy|, the natural 8-dir step count). Wrap-aware
 // so a goal across the x=0/y=0 map seam doesn't read as far.
-function chebyshev(ax, ay, bx, by) {
+export function chebyshev(ax, ay, bx, by) {
   const dx = Math.min((ax - bx) & 0x3ff, (bx - ax) & 0x3ff);
   const dy = Math.min((ay - by) & 0x3ff, (by - ay) & 0x3ff);
   return Math.max(dx, dy);
@@ -177,7 +177,7 @@ function chebyshev(ax, ay, bx, by) {
 // This constant is the fallback when no Viewport is registered (the unit tests) and equals
 // the value the old fixed 64x40 canvas used. Over-suppressing (a far-but-not-that-far NPC
 // walks instead of teleporting) is harmless; under-suppressing would let a visible NPC pop.
-const TELEPORT_NEAR_RADIUS = 40;
+export const TELEPORT_NEAR_RADIUS = 40;
 
 // __off-area teleport (C_1E0F_291C, seg_1E0F.c:1181-1211) — place an NPC straight onto its
 // scheduled slot and settle the worktype, INSTEAD of pathfinding. This is the "teleport-far"

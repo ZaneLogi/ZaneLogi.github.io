@@ -71,14 +71,17 @@ const A = buildWorld();
   spatial.insert(100, 100, avatar);
   A.getResource(ActorIndex).set(0, avatar);
 
-  // A scheduled NPC at (105,100), sharing nothing.
+  // A scheduled NPC at (105,100), currently ASLEEP: its sprite is the bed (OBJ_092) but
+  // origObjNumber holds its real body (OBJ_142) so the wake-restore can recover it. This
+  // exercises a NON-ZERO origObjNumber (the I-16a field) distinct from objNumber through the
+  // round-trip — proving the field is preserved independently, not just mirroring objNumber.
   const npc = A.create();
   A.add(npc, Position, { x: 105, y: 100, z: 0 });
-  A.add(npc, ObjType, { objNumber: 0x142, frame: 1 });
+  A.add(npc, ObjType, { objNumber: 0x092, frame: 1, origObjNumber: 0x142 });
   A.add(npc, Status, { bits: 0x00 });
   A.add(npc, Actor, { npcId: 12 });
   A.add(npc, Schedule, { npcId: 12 });
-  A.add(npc, AIMode, { mode: 0x80 });
+  A.add(npc, AIMode, { mode: 0x91 });   // AI_SLEEP
   A.add(npc, Destination, { x: 110, y: 110, z: 0, action: 0x87 });
   spatial.insert(105, 100, npc);
   A.getResource(ActorIndex).set(12, npc);
@@ -147,7 +150,7 @@ check('round-trip: snapshot is byte-identical after restore + re-serialize',
   JSON.stringify(snapA) === JSON.stringify(snapB));
 
 // ── structure ──
-check('envelope: version 1', snapA.version === 1);
+check('envelope: version 2', snapA.version === 2);
 check('envelope: artifact stamp carried', snapA.artifacts === 'test-stamp');
 check('entities: all 8 live entities serialized', snapA.entities.length === 8);
 check('restore: B has 8 live entities', [...B.query()].length === 8);
@@ -169,6 +172,12 @@ const equippedToAvatar = [...B.query(ContainedIn)].filter(
 check('ref remap: 1 equipped item resolves to the avatar', equippedToAvatar.length === 1);
 check('ref remap: avatar handle is freshly allocated (differs from source world)',
   avatarB !== null);
+
+// ── I-16a origObjNumber: a non-zero pose-restore field round-trips (the sleeping NPC) ──
+const npcB = findHandle(B, Actor, (i) => B.store(Actor).npcId[i] === 12);
+const npcBi = B.resolve(npcB);
+check('origObjNumber: sleeping NPC keeps its bed sprite (objNumber 0x092)', objB.objNumber[npcBi] === 0x092);
+check('origObjNumber: real body (0x142) restored, distinct from objNumber', objB.origObjNumber[npcBi] === 0x142);
 
 // ── resources ──
 const clockB = B.getResource(WorldClock);

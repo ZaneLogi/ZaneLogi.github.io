@@ -96,7 +96,8 @@ reachable via preview-eval. A **boot-time `console.info` hint** listing the help
 **Key I-9 kept deviations from source** (so the next-session you doesn't
 "correct" them): per-NPC window (not player-centered); edge-seek accepts any
 toward-goal edge (not source's single dominant axis); teleport-to-previous-target
-on reschedule; flat step-rate (move-point economy deferred); arrival facing
+on reschedule (**now visibility-gated** 2026-06-10 — snap only off-screen; in view,
+re-path from where it's stuck, as source does); flat step-rate (move-point economy deferred); arrival facing
 (I-9g) is frame-encoded (`(facing<<2)|1` stand frame), not a separate
 `SetDirection` field — a later GUARD-pacing step reads facing from `frame>>2`;
 NPC facing/walk animation: I-9g ported only `C_1E0F_0664`'s humanoid arm, but
@@ -123,8 +124,12 @@ tracks the camera because the clone **drag-pans** (source can't, so it gates on 
 They coincide while the camera follows; centering on the camera stops a visible NPC popping
 in a panned-to region. Tests fall back to the avatar position. The 3/turn teleport cap is kept source-faithful but is a throttle invisible
 behind the visibility guard (drop-candidate, not load-bearing); source's pathfind cap
-(`D_17A7`) is intentionally not ported. The unreachable-fallback snap is unified into
-`tryTeleportToSlot(..., allowVisible=true)` — there is no separate `snapToSlot`.
+(`D_17A7`) is intentionally not ported. The unreachable-fallback snap is
+`tryTeleportToSlot(..., allowVisible=true)` (no separate `snapToSlot`), but — like the
+reschedule reclaim above — it now fires **only off-screen** (2026-06-10): an in-view NPC
+whose slot is walled off WAITS in `AI_SCHEDULE` rather than popping onto it. So both
+on-screen NPC teleports (reschedule reclaim + unreachable-fallback) follow source in view
+(re-path / wait) and only teleport once the NPC is off-screen.
 
 The three phases (see local memory `feedback_project_phases`):
 

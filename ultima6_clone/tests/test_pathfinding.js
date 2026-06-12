@@ -16,6 +16,8 @@ import { computeResistance, findPath, AREA } from '../systems/pathfinding.js';
 import { Paths } from '../resources/paths.js';
 import { Schedules } from '../resources/schedules.js';
 import { WorldClock } from '../resources/world_clock.js';
+import { Camera } from '../resources/camera.js';
+import { Viewport } from '../resources/viewport.js';
 import { canStandAt } from '../systems/passability.js';
 import { npcStep, doOnPath, atDestination } from '../systems/npc_path.js';
 import { installNpcTickSystem } from '../systems/npc_tick_system.js';
@@ -750,7 +752,7 @@ function walkEastStepsIn1000ms(dex) {
 // ============================================================================
 // Builds a minimal world with WorldClock + a synthetic Schedules and fires an
 // hour-rollover so installNpcScheduleSystem's tick runs.
-function setupScheduleWorld({ npcId, pos, dest, mode, slot }) {
+function setupScheduleWorld({ npcId, pos, dest, mode, slot, view }) {
   const reg = new TileRegistry({ tiles: null, flags: new TileFlags(new Uint8Array(0x1C00)), palette: new Uint8Array(0) });
   reg.baseTile = { objToTile: new Uint16Array(0x400) };
   const mapLevel = Object.create(MapLevel.prototype); mapLevel.tileAt = () => 0;
@@ -766,6 +768,12 @@ function setupScheduleWorld({ npcId, pos, dest, mode, slot }) {
   world.setResource(schedules);
   const clock = new WorldClock({ Time_H: slot.hour - 1, Time_M: 59, Date_D: 1 });
   world.setResource(clock);
+  // Optional camera/viewport so the reschedule reclaim's visibility gate is live (without
+  // these the gate is off -> every NPC treated as off-screen -> always snaps).
+  if (view) {
+    world.setResource(new Camera(view.worldX ?? 0, view.worldY ?? 0));
+    world.setResource(new Viewport(view.cols ?? 64, view.rows ?? 40));
+  }
   const h = world.create();
   world.add(h, Position, { x: pos.x, y: pos.y, z: 0 });
   world.add(h, ObjType, { objNumber: 0x19a, frame: 0, origObjNumber: 0x19a });
@@ -806,6 +814,38 @@ function setupScheduleWorld({ npcId, pos, dest, mode, slot }) {
   check('reschedule: NPC already at prev target is NOT reclaimed', stats.reclaimed === 0);
   check('reschedule: stays put then re-targets to new slot', pos.x[i] === 50 && pos.y[i] === 50 && dest.x[i] === 70 && dest.y[i] === 70);
   check('reschedule: mode set to AI_FINDPATH (control)', am.mode[i] === AI.AI_FINDPATH);
+}
+{
+  // Reclaim visibility gate (Zane 2026-06-10) — IN VIEW: a stuck NPC follows SOURCE and does
+  // NOT snap; it re-paths from where it's stuck (no on-screen teleport pop). Same fixture as
+  // the blocked-en-route case, plus a camera centered on-screen: Camera(0,0) + 64x40 viewport
+  // -> center tile (32,20), nearRadius 40; NPC at (45,50) is cheby 30 -> visible.
+  const { world, clock, h, stats } = setupScheduleWorld({
+    npcId: 7, pos: { x: 45, y: 50 }, dest: { x: 50, y: 50 }, mode: AI.AI_86,
+    slot: { time: 19, action: 0x93, hour: 19, day: 0, x: 60, y: 60, z: 0 },
+    view: { worldX: 0, worldY: 0, cols: 64, rows: 40 },
+  });
+  const i = world.resolve(h), pos = world.store(Position), am = world.store(AIMode), dest = world.store(Destination);
+  clock.advance(1);
+  check('reschedule (in view): NOT reclaimed — no on-screen pop', stats.reclaimed === 0);
+  check('reschedule (in view): stays put at (45,50) to re-path from there', pos.x[i] === 45 && pos.y[i] === 50);
+  check('reschedule (in view): re-targeted to the new slot (60,60)', dest.x[i] === 60 && dest.y[i] === 60);
+  check('reschedule (in view): mode set to AI_FINDPATH', am.mode[i] === AI.AI_FINDPATH);
+}
+{
+  // Reclaim visibility gate — OFF-SCREEN: the same stuck NPC still snaps to its previous slot
+  // (the player can't see the jump). Camera centered far away (world-tile ~(432,420)); NPC at
+  // (45,50) is cheby >> nearRadius -> off-screen.
+  const { world, clock, h, stats } = setupScheduleWorld({
+    npcId: 8, pos: { x: 45, y: 50 }, dest: { x: 50, y: 50 }, mode: AI.AI_86,
+    slot: { time: 19, action: 0x93, hour: 19, day: 0, x: 60, y: 60, z: 0 },
+    view: { worldX: 16 * 400, worldY: 16 * 400, cols: 64, rows: 40 },
+  });
+  const i = world.resolve(h), pos = world.store(Position), am = world.store(AIMode), dest = world.store(Destination);
+  clock.advance(1);
+  check('reschedule (off-screen): reclaimed == 1 — snap is invisible', stats.reclaimed === 1);
+  check('reschedule (off-screen): snapped to PREVIOUS slot (50,50)', pos.x[i] === 50 && pos.y[i] === 50);
+  check('reschedule (off-screen): then re-targeted to the new slot (60,60)', dest.x[i] === 60 && dest.y[i] === 60);
 }
 
 // ============================================================================
@@ -1057,6 +1097,21 @@ function setupGateWorld({ npc, avatar, dest, action = AI.AI_STAND_N, terrainAt =
   system();
   check('I-9h gate: slot near avatar (NPC far) -> no teleport', stats.teleported === 0);
   check('I-9h gate: NPC walks in toward the on-screen slot (AI_ONPATH)', am.mode[i] === AI.AI_ONPATH);
+}
+
+// ── in-view NPC whose slot is UNREACHABLE -> wait (AI_SCHEDULE), don't pop on-screen
+//    (Zane 2026-06-10: the visible unreachable-fallback now waits instead of force-teleporting) ──
+{
+  const tileFlags = { 99: { terrain: 0x02 } };
+  const terrainAt = { '67,60': 99, '69,60': 99, '68,59': 99, '68,61': 99 };   // wall the slot (68,60) off
+  const { i, system, stats, am, pos } = setupGateWorld({
+    npc: { x: 65, y: 60 }, avatar: { x: 60, y: 60 }, dest: { x: 68, y: 60 }, action: AI.AI_STAND_E,
+    terrainAt, tileFlags,
+  });
+  system();
+  check('I-9h gate: in-view unreachable slot -> NOT snapped (no on-screen pop)',
+    stats.snapped === 0 && pos.x[i] === 65 && pos.y[i] === 60);
+  check('I-9h gate: in-view unreachable -> waits in AI_SCHEDULE', am.mode[i] === AI.AI_SCHEDULE);
 }
 
 // ── per-turn teleport cap: 5 far NPCs, at most 3 teleport in one turn (source's D_17A5) ──

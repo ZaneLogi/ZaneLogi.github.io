@@ -24,7 +24,22 @@ import { ActorIndex } from '../../resources/actor_index.js';
 import { WorldClock } from '../../resources/world_clock.js';
 import { Party } from '../../resources/party.js';
 
-export const SNAPSHOT_VERSION = 1;
+// Save-format version. restoreWorld REJECTS any snapshot whose version != this, so a stale
+// save fails cleanly instead of silently mis-restoring. Bump on EVERY persisted-schema change:
+// a new saved component field, a new SAVED_RESOURCES field, a renamed/removed/retyped field.
+//
+// No migration framework lives in the clone (deliberate — Zane 2026-06-10): the format is
+// throwaway and upgrading an old save is one-off transform work, not maintained code. When an
+// old save must load on a newer build, ask Claude to migrate it: given the changelog below,
+// Claude derives the version delta, patches the plain JSON, and bumps its `version`. THE RULE:
+// every bump MUST append a one-line "what changed (+ how to migrate)" entry here, or that delta
+// becomes unrecoverable and the on-demand migration breaks.
+//
+// Schema changelog (oldest first):
+//   v1 → v2  (I-16a)  added ObjType.origObjNumber. Migrate: set origObjNumber = objNumber on
+//                     every entity's ObjType. A v1 save predates the pose-sprite swaps, so its
+//                     objNumber is always the real body — this fill is exact + lossless.
+export const SNAPSHOT_VERSION = 2;
 
 // The mutable singleton resources that count as save state (research_save_load.md
 // §"Implications"). Everything else is static (TileRegistry/MapLevel/Schedules/Commands

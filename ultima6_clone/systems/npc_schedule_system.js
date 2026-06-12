@@ -17,8 +17,11 @@ import { WorldClock } from '../resources/world_clock.js';
 import { Schedules } from '../resources/schedules.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
 import { TileRegistry } from '../resources/tile_registry.js';
+import { Camera } from '../resources/camera.js';
+import { Viewport } from '../resources/viewport.js';
 import { Position, Schedule, AIMode, Destination, PartyMember, ObjType, Renderable } from '../components/components.js';
 import { AI_FINDPATH } from './ai_modes.js';
+import { chebyshev } from './npc_path.js';
 
 // Per-tick counters, read by the dev HUD (I-5f) every frame; mutated in place by each
 // hour-tick. `triggered` = NPCs sent to AI_FINDPATH this hour (was I-5's `snapped`).
@@ -49,6 +52,21 @@ function tick(world, clock, stats) {
   const rend = world.store(Renderable);
   const reg = world.getResource(TileRegistry);
 
+  // View center + radius for the reclaim visibility gate — the SAME "visible" definition the
+  // off-area teleport uses (npc_tick_system / tryTeleportToSlot): within nearRadius of the
+  // CAMERA's center tile (the clone drag-pans, so visibility tracks the camera, not the
+  // avatar). No camera/viewport (unit-test worlds) -> gate off -> every NPC treated as
+  // off-screen (preserves the I-9 reclaim tests, which register neither).
+  const cam = world.getResource(Camera);
+  const vp = world.getResource(Viewport);
+  let viewX, viewY, nearRadius;
+  if (cam && vp) {
+    viewX = (Math.floor(cam.worldX / 16) + (vp.cols >> 1)) & 0x3ff;
+    viewY = (Math.floor(cam.worldY / 16) + (vp.rows >> 1)) & 0x3ff;
+    nearRadius = vp.nearRadius;
+  }
+  const gateOn = viewX !== undefined;
+
   const hour = clock.Time_H;
   const dayOfWeek = Schedules.dayOfWeek(clock.Date_D);
 
@@ -76,14 +94,22 @@ function tick(world, clock, stats) {
       continue;
     }
 
-    // Teleport-to-previous-target on reschedule (clone deviation, Zane 2026-06-02):
-    // if the NPC never reached its PREVIOUS slot (blocked en route by another NPC, or
-    // its route was impossible), snap it to that previous slot first — then it paths
-    // from there to the new slot. Keeps NPCs on-schedule despite transient blocking
-    // (source instead re-paths from wherever it's stuck). The previous slot is the
-    // NPC's current Destination (set by the last slot that fired); a forced snap (no
-    // canStandAt — it's reclaiming its own assigned spot, like source's teleport).
-    if (pos.x[i] !== dest.x[i] || pos.y[i] !== dest.y[i] || pos.z[i] !== dest.z[i]) {
+    // Reschedule reclaim — visibility-gated (clone deviation, Zane 2026-06-02; gated on
+    // visibility 2026-06-10). If the NPC never reached its PREVIOUS slot (its current
+    // Destination — blocked en route by another NPC, or an impossible route):
+    //   - IN the view area -> follow SOURCE: do NOT snap. The re-target + AI_FINDPATH below
+    //     re-paths it from where it's stuck (its current position), so the player never sees
+    //     a teleport pop. (Source has no reclaim; it always re-plans from where it ended up.)
+    //   - OFF-screen -> snap it onto the previous slot first so it stays on-schedule, then
+    //     path from there to the new slot. A forced snap (no canStandAt — it's reclaiming its
+    //     own assigned spot, like source's off-area teleport); invisible to the player.
+    // "Visible" = the SAME test the off-area teleport uses: the NPC's CURRENT cell OR the snap
+    // target (prev slot) within nearRadius of the view center — a pop shows if either end is
+    // on-screen. gateOff (no camera/viewport, unit tests) -> off-screen -> snap.
+    const reclaimVisible = gateOn &&
+      (chebyshev(pos.x[i], pos.y[i], viewX, viewY) <= nearRadius ||
+       chebyshev(dest.x[i], dest.y[i], viewX, viewY) <= nearRadius);
+    if (!reclaimVisible && (pos.x[i] !== dest.x[i] || pos.y[i] !== dest.y[i] || pos.z[i] !== dest.z[i])) {
       spatial.remove(pos.x[i], pos.y[i], handle);
       pos.x[i] = dest.x[i]; pos.y[i] = dest.y[i]; pos.z[i] = dest.z[i];
       spatial.insertAtHead(dest.x[i], dest.y[i], handle);

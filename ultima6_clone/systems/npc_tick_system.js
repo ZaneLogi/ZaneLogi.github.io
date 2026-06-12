@@ -43,7 +43,7 @@ import { WorldSpeed } from '../resources/world_speed.js';
 import { WorldClock } from '../resources/world_clock.js';
 import { Schedules } from '../resources/schedules.js';
 import { findPath } from './pathfinding.js';
-import { doOnPath, atDestination, tryTeleportToSlot } from './npc_path.js';
+import { doOnPath, atDestination, tryTeleportToSlot, chebyshev, TELEPORT_NEAR_RADIUS } from './npc_path.js';
 import { rate, stepCostAt, MAX_ELAPSED_MS } from './move_economy.js';
 import * as AI from './ai_modes.js';
 
@@ -105,6 +105,9 @@ export function installNpcTickSystem(world, { avatarRef, now = () => performance
       if (ai !== -1) { viewX = pos.x[ai]; viewY = pos.y[ai]; }
     }
     const gateOn = viewX !== undefined;
+    // Same nearRadius tryTeleportToSlot uses, hoisted so the unreachable-fallback below can
+    // run the identical visibility test (NPC/slot within nearRadius of the view center).
+    const nearRadius = vp ? vp.nearRadius : TELEPORT_NEAR_RADIUS;
 
     // AI_SCHEDULE continuous-settle inputs (source seg_1E0F.c:2198). Null-safe: the unit-test
     // tick worlds register no clock/schedules/Schedule, so the settle in the loop stays off there.
@@ -183,10 +186,18 @@ export function installNpcTickSystem(world, { avatarRef, now = () => performance
         // NPC re-plans at the edge). null = the goal is unreachable from here.
         const path = findPath(world, pos.x[i], pos.y[i], tx, ty, pos.x[i], pos.y[i]);
         if (path === null) {
-          // Walled off from the goal in-window -> forced teleport onto the slot (allowVisible:
-          // the I-5 unreachable fallback, regardless of distance). On the slot -> worktype
-          // applied; if even the slot cell is blocked, give up until the next hour.
-          if (tryTeleportToSlot(world, handle, viewX, viewY, true)) snapped++;
+          // Walled off from the goal in-window. OFF-SCREEN -> forced teleport onto the slot
+          // (allowVisible — place it where its schedule says, like source's off-area teleport).
+          // IN VIEW -> do NOT pop: wait in AI_SCHEDULE (the settle re-derives the slot next tick;
+          // once the NPC scrolls off-screen the off-area teleport above takes over, or the next
+          // hour gives it a new, maybe-reachable slot). "Visible" = the same test the teleport
+          // guard uses: NPC's cell OR the slot within nearRadius of the view center. gateOff
+          // (no view info / unit tests) -> off-screen -> teleport (preserves the I-9 snap test).
+          // If even the slot cell is blocked, the forced teleport returns false -> also waits.
+          const visible = gateOn &&
+            (chebyshev(pos.x[i], pos.y[i], viewX, viewY) <= nearRadius ||
+             chebyshev(tx, ty, viewX, viewY) <= nearRadius);
+          if (!visible && tryTeleportToSlot(world, handle, viewX, viewY, true)) snapped++;
           else am.mode[i] = AI.AI_SCHEDULE;
         } else if (path.length === 0) {
           atDestination(world, handle); arrived++;   // already on the slot -> set the worktype

@@ -737,21 +737,27 @@ impossible-destination case — where the teleport is the correct outcome. The
 drawbridge/lever subsystem is **I-10** (object actions); do NOT "fix" this by raising
 the cost cap (that routes her through forest, a path the original never uses).
 
-**Stuck-NPC recovery — teleport-to-previous-target on reschedule (clone deviation,
-Zane 2026-06-02).** A NPC blocked by another NPC loops `ONPATH↔84/85/86↔FINDPATH`
-on the same target, standing still, until either the blocker moves OR its **next
-schedule slot fires**. At that reschedule, the clone does something source does NOT:
-if the NPC never reached its PREVIOUS slot (its current `Destination`), the schedule
-arm **snaps it onto that previous slot first**, then re-targets it to the new slot
-and sets `AI_FINDPATH` — so it "catches up" to where its schedule said it should be
-before walking on. Source instead re-paths from wherever it's stuck (leaving it
-behind schedule). This is a deliberate kept difference (one of several on the NPC-AI
-side) — recorded here so it can be reviewed/reverted later. The forced snap takes no
-`canStandAt` (the NPC is reclaiming its own assigned spot, like source's off-area
-teleport `C_1E0F_291C`). A NPC is never permanently frozen (slots cycle daily). The
-deferred move-point step-rate would reduce collision frequency in the first place
-(staggered NPCs vs the current flat all-step-same-turn). Stat: `reclaimed` on the
-schedule HUD line counts NPCs snapped this way per hour-tick.
+**Stuck-NPC recovery — teleport-to-previous-target on reschedule, VISIBILITY-GATED
+(clone deviation, Zane 2026-06-02; gated 2026-06-10).** A NPC blocked by another NPC
+loops `ONPATH↔84/85/86↔FINDPATH` on the same target, standing still, until either the
+blocker moves OR its **next schedule slot fires**. At that reschedule, if the NPC never
+reached its PREVIOUS slot (its current `Destination`), what the clone does now depends on
+whether the player can see it:
+
+- **Off-screen** → **snap it onto that previous slot first** (a forced move, no
+  `canStandAt` — it reclaims its own assigned spot, like source's off-area teleport
+  `C_1E0F_291C`), then re-target to the new slot + `AI_FINDPATH`, so it "catches up" to
+  where its schedule said it should be. The player never sees the jump.
+- **In view** → do **NOT** snap; just re-target + `AI_FINDPATH`, which **re-paths from
+  where it's stuck** — i.e. follow source, which has no reclaim mechanism and always
+  re-plans from wherever the NPC ended up. Avoids an on-screen teleport pop.
+
+"Visible" = the same test the off-area teleport guard uses: the NPC's current cell OR the
+snap target (prev slot) within `nearRadius` of the **view center** (the camera's center
+tile, not the avatar — the clone drag-pans). No camera/viewport (unit-test worlds) →
+treated as off-screen → snap (preserves the I-9 reclaim tests). A NPC is never permanently
+frozen (slots cycle daily). Stat: `reclaimed` on the schedule HUD line counts NPCs snapped
+(off-screen) this way per hour-tick. Implemented in `systems/npc_schedule_system.js`.
 
 **Off-area teleport + player-distance gate (I-9h) — `C_1E0F_291C` port.**
 `tryTeleportToSlot(world, handle, avatarX, avatarY, allowVisible)` in
@@ -765,13 +771,19 @@ Chebyshev radius of **40** (`TELEPORT_NEAR_RADIUS`) because our 64×40-cell canv
 shows ~32×20 half-extents — a ±5 box would teleport NPCs the player can plainly see.
 Over-suppressing is harmless (a few far-ish NPCs walk); under-suppressing pops a
 visible NPC. Same wider-canvas adaptation as the per-NPC pathfinding window.
-`allowVisible` is source's `AllowNPCTeleport` flag — here used only by the
-**unreachable-fallback**, which this helper now unifies (the old local `snapToSlot`
-is gone: the fallback is `tryTeleportToSlot(..., allowVisible=true)`). Two further
-calls vs source: the 3/turn cap is a CPU throttle that's invisible behind the
-visibility guard (off-screen-only) so it's a drop-candidate, not load-bearing; and
-source's pathfind cap (`D_17A7`) is not ported (capped-out far NPCs pathfind that
-turn rather than wait). Stat: `teleported` on the tick HUD line (`tp`).
+`allowVisible` is source's `AllowNPCTeleport` flag — the forced teleport that ignores
+the distance guard. It backs the **unreachable-fallback** (the old local `snapToSlot` is
+gone: the fallback is `tryTeleportToSlot(..., allowVisible=true)`), but the tick now fires
+it **only when the NPC is off-screen** (Zane 2026-06-10): if `findPath` returns null for an
+**in-view** NPC, the tick leaves it in `AI_SCHEDULE` to wait (re-deriving its slot each
+tick) rather than popping it onto a walled-off slot — it teleports only once it scrolls
+off-screen, or gets a reachable slot at the next hour. The in-view test is the same
+NPC-cell-OR-slot `nearRadius` check; gateOff (no view info / unit tests) → off-screen →
+forced teleport, preserving the snap behavior. Two further calls vs source: the 3/turn cap
+is a CPU throttle that's invisible behind the visibility guard (off-screen-only) so it's a
+drop-candidate, not load-bearing; and source's pathfind cap (`D_17A7`) is not ported
+(capped-out far NPCs pathfind that turn rather than wait). Stat: `teleported` on the tick
+HUD line (`tp`); `snapped` counts the off-screen unreachable-fallback teleports.
 
 **First-tick schedule alignment (I-9h) — deferred from I-5.** Source resolves
 schedules only on an hour rollover (`C_1E0F_5165`), so at game-load NPCs would sit at
