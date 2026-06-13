@@ -28,6 +28,58 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-14 — egg-spawn clone design decided (research_egg.md §9.1)
+
+- **Decided** (discussion with Zane) how the egg/spawn system maps onto the clone's god-view +
+  no-region-unload model; recorded in `research_egg.md §9.1`:
+  1. **Trigger = avatar, not camera** — hatch on avatar entry into new territory; camera pan
+     renders but never hatches ("loaded for render" ≠ "eggs hatched").
+  2. **Spawn proximity = avatar-centered viewport `nearRadius`** (replaces source's literal 8;
+     `LOCAL` eggs bypass — the throne ambush spawns on the avatar, in view).
+  3. **Camera ignored for placement** — scatter stays avatar-relative; accept the rare pop-in
+     if you pan onto a hatching egg.
+  4. **Cull + re-arm** (avatar-keyed pass ≈ `C_1184_19AA`): cull spawned (`LOCAL`/temporary)
+     creatures past a cull radius **larger than** `nearRadius` (two-radius ring; spawns only —
+     never permanent NPCs/party); re-arm non-`LOCAL` eggs / delete `LOCAL` eggs.
+- **Resolves** the §9 "no wilderness respawn" fork — the cull pass restores source's steady
+  state (populate near avatar → reap on leave → regenerate on return) without region streaming.
+- **Next**: I-20 (or the egg port when scheduled).
+
+## 2026-06-14 — egg / creature-spawn system research (research-only, no code)
+
+- **Read**: the whole EGG module `seg_2E2D.c` (`EGG_generate` C_2E2D_0499, `EGG_hatches`
+  C_2E2D_0760, `EGG_hatchArea` C_2E2D_0DFE); the object-table manager `seg_1184.c`
+  (`AddMonster`/`AddMapObj`/`DeleteObj`, the free-list init `C_1184_3B1D:1849`, the
+  stream-out `C_1184_19AA:795`); the monster-class tables `seg_3522.c:14-90`; `BSS.ASM`
+  array sizes; `ai.h` (AI_ASSAULT=8). 3 Explore agents fanned out for breadth (all egg-
+  routine call sites; the `D_3522` tables; respawn/Armageddon/`COMBAT_TryTeleport`/slot
+  model) — every load-bearing number re-grepped against primary source per CLAUDE.md.
+- **Found / confirmed**: (1) the opening throne gargoyles are **egg-spawned, not char-
+  creation** — the `(307,350)` `LOCAL` egg (`Quan=100,Qual=2`, embryo gargoyle
+  `Quan=3,Qual=8`) force-hatches 3 EVIL AI_ASSAULT `OBJ_16B` into slots 224-226 at game
+  start; every spawn field is an `EGG_generate` fingerprint (EXP=100, `mkRandom` stats off
+  the `seg_3522` gargoyle base, `Level=(HP+29)/30`). (2) **One flag, two lifetimes**:
+  `C_1184_19AA` *deletes* a `LOCAL` egg on stream-out (→ one-time) but *clears HATCHED* on a
+  non-`LOCAL` egg (→ wilderness respawn). (3) object table is **0xC00=3072**, but creature
+  stat arrays are only **0x100=256** → only 0-255 can be statted creatures; 0xe0-0xff is the
+  32-slot temporary-monster pool (`D_BDD6=0xe0` init), which is why the gargoyles got
+  224/225/226. (4) **The loaded data is a *played* DOSBox save** — one gargoyle's HP=12 is
+  below `mkRandom(30)`'s floor of 15, i.e. mid-ambush combat damage (spawn stats survive,
+  HP is current). (5) `IsArmageddon`/day-night/pacification gates; gargoyle `AI_GRAZE` via
+  Amulet of Submission `OBJ_04C` or a gargoyle party member. (6) **Factory-vs-played
+  verified live both ways** (Zane dropped each data set, read-only): factory (`D_2CCB=0`) has
+  the egg at status **`0x20` (LOCAL, un-hatched)** with slots 224-226 **empty**; the played
+  save (`D_2CCB=5`) has the *same* egg at **`0x62` (`LOCAL|HATCHED|INVISIBLE`)** + the 3
+  gargoyles — the only delta is the status byte + the filled slots, so the gargoyles come
+  purely from the start-time force-hatch, and `LOCAL` is authored pre-hatch.
+- **Docs**: created `docs/research_egg.md` (moongate-doc shape: data model · hatch trigger ·
+  hatch logic · monster-gen seam · slot model · respawn · throne worked example · factory-
+  vs-save · clone/ECS mapping incl. the **no-region-unload respawn fork** · port-step shape
+  · open items).
+- **Open**: dragon egg `OBJ_417/418` is a *separate* object, not `OBJ_14F` (verify its
+  mechanism); full `D_3522` tables + `C_2E2D_00BE` loot left as the monster/combat seam.
+- **Next**: Zane's call — discuss/refine `research_egg.md`, or resume I-20.
+
 ## 2026-06-13 — I-moongate review: 6 follow-up fixes (UI + conversation + level-change)
 
 - **Reviewed** I-moongate live with Zane (red moongate + UI confirmed by hand; blue gate left to
