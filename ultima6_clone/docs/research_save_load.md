@@ -434,6 +434,21 @@ questions → stats + name/sex/portrait), or bundling a real created save, would
 defaults with the player's actual choices; the external `ultima6.exe` + Nuvie's creation scene are
 the references for that.
 
+**Empirical — starting karma + stats are gypsy-dependent, not a fixed value (verified).** Two real
+created saves (DOSBox new games saved at the very start, read live + read-only from the user's data
+via the clone's IndexedDB) confirm the split between fixed and char-creation-determined globals: the
+**fixed** globals matched the `D_2C4A.c` defaults *exactly* in both — date 4/7/161, time 08:0x,
+start `0x133,0x160` — but **karma read 75 on one character and 81 on the other**, with different
+avatar stats (e.g. STR/DEX/INT 16/20/23 vs the 15/15/15 template) and different sex/portrait. So
+character creation (`ultima6.exe`, not in the decompile) sets karma + stats from the gypsy Q&A:
+**there is no single "new-game karma"** — it's a range (observed 75–81; true bounds unknown without
+more samples). Consequences: (1) the `D_2C4A.c` `KARMA = 75` is *one valid* new-game outcome — one
+created character landed on exactly it — so the clone's `applyNewGameDefaults` karma 75 is a
+defensible placeholder, but it is not *the* canonical value; (2) the date/time/position defaults
+above are, by contrast, now **confirmed exact**; (3) full karma/stat fidelity would require the
+gypsy flow itself (Nuvie / community reimplementation, since `ultima6.exe` is absent) — fill-with-75
+is the standing simplification until then.
+
 ## Open questions
 
 1. **`C_1184_33CA` (flush-all-dirty)** body not read — confirms how

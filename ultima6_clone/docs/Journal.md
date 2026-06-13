@@ -28,6 +28,67 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-13 — moongate system research (research-only, no code)
+
+- **Read**: the whole moonstone/moongate path in u6-decompiled — `C_27A1_3425`
+  (bury, `seg_27a1.c:1563`), the USE dispatch (`seg_27a1.c:3088-3158`), `C_0A33_121A`
+  (blue spawn/despawn, `seg_0A33.c:621`), the phase recompute + `D_036A` 28-day calendar
+  (`seg_0A33.c:684-713,907-910`), `C_1E0F_184D` gate-entry (`seg_1E0F.c:712-790`),
+  `GateTravel`/`PartyTeleport` (`seg_101C.c:301-376`), the Orb red-gate handler
+  `C_27A1_5789` + `D_171C/174E/1780` dest tables (`seg_27a1.c:2642`, `seg_1E0F.c:12-34`),
+  the Vortex-Cube endgame `C_27A1_5FAC` (`seg_27a1.c:2882`), sky render `C_2FC1_19C5`
+  (`seg_2FC1.c:677`), tile/obj defs. Breadth-swept by an Explore agent, every cited
+  region re-read directly.
+- **Found**: **two unrelated networks.** Blue (`OBJ_055`) = the `D_2C74` 8-endpoint,
+  phase-routed, *player-mutable* network (ships pre-populated, slot 6 at z=1); burying
+  only relocates an endpoint. Red (`OBJ_054`) = the Orb's *fixed ROM* (`D_171C`),
+  *single-use* network (deleted at the source tile by `PartyTeleport` on every teleport).
+  The **Vortex Cube is the endgame device, not a gate** (corrected my earlier
+  conflation, and the user's). 8 moonstone frames = 8 lunar phases; the sky glyph =
+  the destination slot. `USE moonstone` is ladder-class (~25 lines); the weight is the
+  blue runtime. **Hard prerequisite (hour/day calendar) already exists** in the clone's
+  `WorldClock` (`Time_H`/`Date_D`/`onHour`). Legacy `../ultima6/` has the object IDs
+  only — no gate logic (verified).
+- **Docs**: created `research_moongate.md` (full mechanism + clone-reuse map + suggested
+  sub-step shape + open items); added its DOCUMENTATION_INDEX row.
+- **Resolved (follow-up pass)**: `D_0658` = not moongate state — it's the `FindLoc`
+  multi-tile sub-cell index (`seg_1184.c`), so the `D_0658==0` guard = "trigger only from
+  the gate's anchor tile" (blue gate is 2-wide); my "debounce" guess was wrong. Red
+  dead-slots (`D_171C[11..13]`) = unreachable padding — they map to `Qual` 12/13/14 = the
+  self+horizontal-adjacent cells that `C_27A1_5789:2662` remaps to `Qual=0` first. Both
+  folded into `research_moongate.md §5/§2.2`.
+- **Verified (live, against Zane's factory U6 data via the running preview + IndexedDB,
+  read-only)**: factory `objlist` `D_2C74` = **all-zero** (7539-byte pristine, all globals
+  zeroed, `D_2CCB`=0 uncreated — matches `research_save_load.md`); but all **8 moonstone
+  objects** are pre-placed in `objblk*` (frames 0–7, `LOCXYZ`), at the compiled `D_2C74`
+  slots with **x/z identical, y consistently +1** (frame 6 in a dungeon, z=1). ⇒ the live
+  network is seeded at new-game-init (external `ultima6.exe`), not shipped in the factory
+  template — so the **clone must seed `D_2C74` itself** (it has the stones, empty
+  registry). Folded into `research_moongate.md §2.1/§8.1`.
+- **Resolved (created-save read)**: Zane played a DOSBox new game + saved at the start;
+  that `objlist` (`D_2CCB`=11, karma 81, clock 08:01 day 4/7/161, LB-castle start, 7283 B)
+  has **`D_2C74` fully populated = the compiled `D_2C4A.c` constants (the `y` values), all
+  8, none at the stones' `y+1`**. ⇒ a started game's network is **pre-active** and char-
+  creation seeds the **constants** (stones sit one tile south). Clone decision: seed
+  `D_2C74` from the constants. Bonus: the save's `D_2CC6/7/8/9 = 6/4/6/6` reproduces §3's
+  phase formula exactly (day 4/hr 8). Folded into `§2.1/§3/§8.1`.
+- **Also (tangent, off the moongate path)**: reading those created saves surfaced that
+  **starting karma + stats are gypsy-dependent, not fixed** — two characters read karma
+  **75 and 81** (different stats/sex/portrait), while the fixed globals (date/time/start
+  pos) matched the `D_2C4A.c` defaults exactly. ⇒ no single "new-game karma"; the clone's
+  `applyNewGameDefaults` 75 is a valid placeholder, not canonical. Recorded in
+  `research_save_load.md §"New-game initialization"` (this correction, not the moongate doc).
+  follow it; confirm via LB script later). `D_2CC3` solo-mode skipped. `§10`.
+- **Plan (with Zane)**: §9 extended with the player-facing UI layer — **(g)** gate + phase
+  readout → dev-HUD diagnostics; **(h)** composited **sky view** → a row beneath the clock
+  line, faithful in-game tiles via `view/ui_icons.js tileIcon`, surface/cave branch per §7
+  (`MapLevel.level` 0/5 → sky base+sun+moons+mountain, 1–4 → cave). Split by dep: sun +
+  backdrops land without the phase clock (b), moons need it. §7 enriched with the full
+  scene (was sun/moons-only; added the `TIL_19B` sky base, `TIL_160+` mountain, `TIL_174/5`
+  cave variant). Dev HUD stays player-visible as-is (clone ≠ 1:1 of the original).
+- **Next**: none committed — research only. Blue-gate runtime is the meaty step if picked;
+  bury + Orb are lighter riders; the g/h UI layer rides on (b) (h1 not even on that).
+
 ## 2026-06-13 — render fix: wrap the OBJECT query across the toroidal seam
 
 - **Symptom (Zane, walking a dungeon):** the map is wrap-scrolling — near an edge you see the
