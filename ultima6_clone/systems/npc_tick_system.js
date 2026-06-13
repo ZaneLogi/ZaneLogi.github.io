@@ -34,8 +34,9 @@
 // worlds without MoveSpeed (the unit-test worlds) the accumulator is OFF and NPCs step
 // every tick (the old flat rate), keeping the I-9 pathfinding tests valid.
 
-import { AIMode, Position, Destination, MoveSpeed, Schedule } from '../components/components.js';
+import { AIMode, Position, Destination, MoveSpeed, Schedule, ObjType, Renderable } from '../components/components.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
+import { TileRegistry } from '../resources/tile_registry.js';
 import { Paths } from '../resources/paths.js';
 import { Camera } from '../resources/camera.js';
 import { Viewport } from '../resources/viewport.js';
@@ -44,7 +45,7 @@ import { WorldSpeed } from '../resources/world_speed.js';
 import { WorldClock } from '../resources/world_clock.js';
 import { Schedules } from '../resources/schedules.js';
 import { findPath } from './pathfinding.js';
-import { doOnPath, atDestination, tryTeleportToSlot, chebyshev, TELEPORT_NEAR_RADIUS, actorHandleAt } from './npc_path.js';
+import { doOnPath, atDestination, tryTeleportToSlot, chebyshev, TELEPORT_NEAR_RADIUS, actorHandleAt, reconcilePoseBody } from './npc_path.js';
 import { rate, stepCostAt, MAX_ELAPSED_MS } from './move_economy.js';
 import { dispatchWorktype, randInt } from './npc_behaviors.js';
 import * as AI from './ai_modes.js';
@@ -74,6 +75,11 @@ export function installNpcTickSystem(world, { avatarRef, now = () => performance
     const am = world.store(AIMode);
     const pos = world.store(Position);
     const dest = world.store(Destination);
+    // Null-safe (like the MoveSpeed/Schedule grabs): a minimal unit-test tick world may not
+    // register ObjType/Renderable/TileRegistry — then the pose reconciliation below is skipped.
+    const ot = world.isRegistered(ObjType) ? world.store(ObjType) : null;
+    const rd = world.isRegistered(Renderable) ? world.store(Renderable) : null;
+    const reg = world.getResource(TileRegistry);
     const spatial = world.getResource(SpatialIndex);
     const paths = world.getResource(Paths);
     let active = 0, finding = 0, walking = 0, teleported = 0, snapped = 0, blocked = 0, arrived = 0;
@@ -138,6 +144,12 @@ export function installNpcTickSystem(world, { avatarRef, now = () => performance
     for (const i of world.query(AIMode)) {
       const mode = am.mode[i];
       if (pos.z[i] !== activeLevel) continue;   // I-19e: skip NPCs not on the active level
+
+      // Un-pose a stale body sprite every tick (seg_0A33.c:837-840): an NPC that left a pose
+      // worktype (SLEEP/PLAY) via a path the per-branch restores miss — AI_SCHEDULE-settle or
+      // alreadyAtTarget — would otherwise walk to its new slot still wearing the bed/instrument
+      // (the "LB asleep at the throne" bug) until arrival. Restores it to the real body here.
+      if (ot && rd && reg) reconcilePoseBody(i, mode, ot, rd, reg);
 
       // AI_SCHEDULE continuous-settle (source seg_1E0F.c:2198 — __AtDestination runs for every
       // AI_SCHEDULE NPC each active tick, reading its current slot from the save-persisted

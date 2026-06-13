@@ -507,3 +507,25 @@ export function atDestination(world, handle) {
 
   if (!isAtDest) am.mode[i] = AI.AI_FINDPATH;
 }
+
+// Pose-body sprites → the worktype mode each belongs to. OBJ_092 = the bed/sleep body the
+// SLEEP arm swaps in; OBJ_188 = the seated-instrument body the PLAY arm swaps in.
+const POSE_BODY_MODE = new Map([[0x092, AI.AI_SLEEP], [0x188, AI.AI_PLAY]]);
+
+// reconcilePoseBody — port of the per-tick status-decay restore (seg_0A33.c:837-840):
+// source does `ClrAsleep + ObjShapeType = OrigShapeType` once an NPC's NPCMode has LEFT its
+// pose worktype (IsAsleep && NPCMode != AI_SLEEP), EVERY tick, regardless of how it left.
+// The clone's per-branch restores (schedule-departure npc_schedule_system + atDestination
+// arrival) miss the AI_SCHEDULE-settle and alreadyAtTarget wake paths, so a woken NPC walks
+// to its new slot still wearing its bed/instrument until it arrives (the "LB sleeping at the
+// throne" bug). This reconciliation — called from the NPC tick for every active NPC — closes
+// every path: a pose body whose mode no longer matches it is restored to the real body.
+// Generalises source's sleep-only loop to all pose bodies (the PLAY pose has the same gap).
+// Operates on the entity index directly (hot per-NPC path); returns true if it restored.
+export function reconcilePoseBody(i, mode, ot, rd, reg) {
+  const poseMode = POSE_BODY_MODE.get(ot.objNumber[i]);
+  if (poseMode === undefined || mode === poseMode) return false;
+  ot.objNumber[i] = ot.origObjNumber[i];
+  rd.tileId[i] = reg.baseTile.objToTile[ot.objNumber[i]] + ot.frame[i];
+  return true;
+}

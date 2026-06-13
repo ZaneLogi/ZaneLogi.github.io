@@ -19,7 +19,7 @@ import { WorldClock } from '../resources/world_clock.js';
 import { Camera } from '../resources/camera.js';
 import { Viewport } from '../resources/viewport.js';
 import { canStandAt } from '../systems/passability.js';
-import { npcStep, doOnPath, atDestination } from '../systems/npc_path.js';
+import { npcStep, doOnPath, atDestination, reconcilePoseBody } from '../systems/npc_path.js';
 import { installNpcTickSystem } from '../systems/npc_tick_system.js';
 import { stepCostAt, BASE_COST } from '../systems/move_economy.js';
 import { installNpcScheduleSystem } from '../systems/npc_schedule_system.js';
@@ -631,6 +631,38 @@ function walkPath(sx, sy, dirs) {
   system();
   check('npcTick: unloaded-region NPC stays frozen (FINDPATH, unmoved)',
     am.mode[i] === AI.AI_FINDPATH && pos.x[i] === 20);
+}
+
+// ============================================================================
+// reconcilePoseBody — un-pose a stale body sprite (seg_0A33.c:837-840 port). The
+// per-tick restore the NPC tick calls so a woken NPC doesn't walk to its slot still
+// wearing the bed/instrument (the "LB asleep at the throne" bug).
+// ============================================================================
+{
+  const { world, handles } = setupWorld({ entities: [
+    { x: 5, y: 5, obj: 0x092, frame: 0, actor: true },   // sleep body, mode left SLEEP -> restore
+    { x: 6, y: 6, obj: 0x092, frame: 0, actor: true },   // sleep body, still AI_SLEEP  -> keep
+    { x: 7, y: 7, obj: 0x188, frame: 4, actor: true },   // play body, mode left PLAY   -> restore
+    { x: 8, y: 8, obj: 0x199, frame: 1, actor: true },   // real body                   -> no-op
+  ]});
+  const ot = world.store(ObjType), rd = world.store(Renderable), reg = world.getResource(TileRegistry);
+  const ix = handles.map(h => world.resolve(h));
+  ot.origObjNumber[ix[0]] = 0x199;   // the real body each posed NPC restores to
+  ot.origObjNumber[ix[1]] = 0x199;
+  ot.origObjNumber[ix[2]] = 0x182;
+
+  const r0 = reconcilePoseBody(ix[0], AI.AI_FINDPATH, ot, rd, reg);
+  check('reconcilePoseBody: sleep body + non-SLEEP mode -> restored to real body',
+    r0 === true && ot.objNumber[ix[0]] === 0x199);
+  const r1 = reconcilePoseBody(ix[1], AI.AI_SLEEP, ot, rd, reg);
+  check('reconcilePoseBody: sleep body + AI_SLEEP -> left asleep (OBJ_092)',
+    r1 === false && ot.objNumber[ix[1]] === 0x092);
+  const r2 = reconcilePoseBody(ix[2], AI.AI_FINDPATH, ot, rd, reg);
+  check('reconcilePoseBody: play body + non-PLAY mode -> restored',
+    r2 === true && ot.objNumber[ix[2]] === 0x182);
+  const r3 = reconcilePoseBody(ix[3], AI.AI_FINDPATH, ot, rd, reg);
+  check('reconcilePoseBody: real body -> no-op (returns false, unchanged)',
+    r3 === false && ot.objNumber[ix[3]] === 0x199);
 }
 
 // ============================================================================
