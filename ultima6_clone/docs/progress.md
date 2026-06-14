@@ -5,7 +5,7 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: I-moongate (blue + red moongate subsystem) COMPLETE (2026-06-13, a–e + g/h; f out of scope).** Two unrelated networks sharing the moon idiom — **blue** (`OBJ_055`): the `D_2C74` 8-endpoint, lunar-phase-routed, *player-mutable* network (seeded from the `D_2C4A.c` constants; hourly spawn-reconcile `C_0A33_121A`; walk-in `GateTravel` `C_101C_0A3A` with the `|7-phase|` tiebreak + the 00:00 Shrine-of-Spirituality override; `USE moonstone` `C_27A1_3425` relocates an endpoint + GET clears it); **red** (`OBJ_054`): the Orb's (`OBJ_057`) *fixed-ROM* (`D_171C/174E/1780`), *single-use* network (cast `C_27A1_5789` via a 5×5 directional pad → `Qual`; consumed by `PartyTeleport` `C_101C_0828` at the source tile). Plus the player-facing UI: a faithful composited **sky strip** (`C_2FC1_19C5` — sun/two-moon-glyphs/mountain or cave, arc-placed via `D_2BFA`, eclipse-aware) on the clock panel, and a gate/phase **dev readout**. Moon phases recompute hourly (`seg_0A33.c:907-910`) off the existing `WorldClock`; `D_2C74` persists via `MoonGates` SAVED_RESOURCES (graceful absence, **no snapshot bump**). Kept deviations: dropped source's `AreaX` spawn bound (spawn-reconcile at *all* active-level slots — modern memory); shared `teleportParty` (hard cut, refactored out of I-19's `use_ladder`); `D_2CC3` solo-mode skipped; music deferred; phase can drift while idle (I-14d wall-clock, accepted). Verified live on real data: 7 surface gates at the exact endpoints, blue walk-in → dungeon (day-4 slot 6, level switched), red cast→walk-in → `D_171C` dest + consumed, sky strip + readout render. **Reviewed + 6 follow-up fixes landed** (sky-strip sizing; level-change cursor/reach wrap; inventory USE verb `U` + Orb held-vs-ground gate; dialog final-line readable; dialog auto-scroll; NPC name-reveal on TalkFlags bit 0 — all source-traced; the blue gate was dev-verified, not hand-played). See §"I-moongate scope" (+ its "Review fixes") + `research_moongate.md`. **Tests 527/527 pass** (75 new moongate + 452 prior; `tests/*.html` browser harnesses, no node). **Next: I-20** (remaining object-action handlers — spellbooks / instruments / etc.; demand-driven). Prior: I-19 (level change a–f, §"I-19 scope"), I-18 (party status UI a–k, §"I-18 scope"), I-17 (NPC AI behaviors, §"I-17 scope").
+**Status: I-egg (egg / creature-spawn system) COMPLETE (2026-06-14, a · b · d-visual · c · e · f).** Port of U6's EGG module (`seg_2E2D.c`, `OBJ_14F`): `hatchEgg` (gates / roll / embryo loop / alignment / AI-stamp / latch, minus the d-stats stat roll) + multi-tile bodies (dragon/hydra/serpent/vine/two-part as linked `Spawned` parts; winged gargoyle = 2×2 footprint-sprite) + the avatar-keyed trigger (`hatchAroundAvatar` = `EGG_hatchArea`, hatch on avatar entry/teleport — boot fires the throne ambush; camera-pan never hatches) + cull/re-arm (`cullAroundAvatar` = the `C_1184_19AA` stream-out behaviour: reap far spawns, delete LOCAL / re-arm non-LOCAL eggs) + gargoyle pacification (Amulet/party-gargoyle → `AI_GRAZE`) + Shamino's approach warning. All in `systems/egg.js` + the new `Spawned` component (cull key + occupancy; auto-persists, **no `SNAPSHOT_VERSION` bump**). **NO combat** — hostile AI modes stamped but idle until handlers land (§9.1 pt 5); **d-stats deferred** (stat roll + loot). Verified live on factory data (throne ambush hatch → 3 EVIL AI_ASSAULT gargoyles → reaped on leave; dragon egg → assembled 5-part body). **Suite 674/674** (527 prior + 147 new `tests/test_egg.html`). See §"I-egg scope" + `research_egg.md`. **Next: I-20** (remaining object-action handlers — spellbooks / instruments / etc.; demand-driven). Prior: I-moongate (blue + red gates + sky, §"I-moongate scope"), I-19 (level change, §"I-19 scope"), I-18 (party status UI, §"I-18 scope"), I-17 (NPC AI behaviors, §"I-17 scope").
 
 This banner is the **single canonical current-status line** — `CLAUDE.md` and
 `DOCUMENTATION_INDEX.md` point here instead of mirroring it (convention: §"Doc maintenance").
@@ -61,7 +61,7 @@ banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 | I-19 | **level change — `USE ladder` → multi-z dungeons.** Activate the already-decoded dungeon levels (`assets/map.js` decodes all 6; `MapLevel.dungeonTileIndex` ready; `Position.z` exists) + port `C_101C_089E` (z_incr direction + coordinate rescale + avatar reposition + reload/recompose). Single `SpatialIndex` + active-z filter; dungeon NPCs live; camera/bounds switch surface(1024-wrap)↔dungeon(256-wrap) per level. **Reframed 2026-06-12** (was "object-action handlers expansion" → re-homed to I-20). See §"I-19 scope" + `research_level_change.md`. | **done** (a–f, 2026-06-13) |
 | **I-moongate** | **blue + red moongate subsystem** — blue (`OBJ_055`) lunar-phase-routed, player-mutable `D_2C74` 8-endpoint network (hourly spawn `C_0A33_121A` + walk-in `GateTravel`; `USE moonstone` relocates an endpoint) · red (`OBJ_054`) Orb-of-the-Moons (`OBJ_057`) fixed-ROM single-use net · new-game `D_2C74` seeding from the `D_2C4A.c` constants · the player-facing **sky-view** (clock panel) + **gate-readout** (dev HUD). Pulled out of I-20 into its own named step (like `I-save/load`). See §"I-moongate scope" + `research_moongate.md`. | **done** (a–e + g/h, 2026-06-13; f out of scope) |
 | I-20 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / instruments / etc.; **moonstones → the dedicated I-moongate step**); demand-driven, each handler tied to its owning subsystem when that subsystem lands (was I-19 until 2026-06-12) | planned |
-| **I-egg** | **egg / creature-spawn system** (Path A, named 2026-06-14) — port `OBJ_14F` hatch (`seg_2E2D.c`): **a** data/decode · **b** hatch core (gates + embryo loop + alignment override + `SetHatched`/`SetInvisible`, spawns a placeholder/statless creature) · **d-visual** multi-tile bodies (place + link part-entities — dragon/hydra/serpent/vine + two-part cow/horse/giant-ant/etc.) · **c** avatar-keyed trigger (hatch on avatar entry into new territory, viewport-`nearRadius` proximity; `LOCAL` bypass) + force-hatch on the I-moongate `teleportParty` path · **e** cull + re-arm (avatar-keyed lifetime pass, §9.1; culls parts with the body) · **f** gargoyle pacification (Amulet/party-type → `AI_GRAZE`) + Shamino direction warning. **Spawn always stamps the embryo's AI mode (`NPCMode`/`NPCComMode`); unhandled modes idle, implemented I-16/I-17 worktypes apply automatically — NO combat** (`research_egg.md §9.1` pt 5). **Sub-step d is SPLIT:** **d-visual** (multi-tile bodies) is combat-independent and **IN I-egg** — a full-world objblk scan showed **234/943 eggs (~25%) hatch multi-tile creatures** (Dragon 55× / Giant Ant 69× / Alligator 39× / Hydra / Cow / Horse / Vine / Serpent), so deferring it would stub a quarter of all hatches; **d-stats** (`EGG_generate`+`D_3522` stat roll + loot) stays **combat-gated**. **Cadence: save-point commit per sub-step → squash `impl I-egg`. Fresh-chat start: `research_egg.md §10`** (build shape) + `§9`/`§9.1` (integration map + decided spawn/cull model). | planned (Path A) |
+| **I-egg** | **egg / creature-spawn system** (Path A, named 2026-06-14) — port `OBJ_14F` hatch (`seg_2E2D.c`): **a** data/decode · **b** hatch core (gates + embryo loop + alignment override + `SetHatched`/`SetInvisible`, spawns a placeholder/statless creature) · **d-visual** multi-tile bodies (place + link part-entities — dragon/hydra/serpent/vine + two-part cow/horse/giant-ant/etc.) · **c** avatar-keyed trigger (hatch on avatar entry into new territory, viewport-`nearRadius` proximity; `LOCAL` bypass) + force-hatch on the I-moongate `teleportParty` path · **e** cull + re-arm (avatar-keyed lifetime pass, §9.1; culls parts with the body) · **f** gargoyle pacification (Amulet/party-type → `AI_GRAZE`) + Shamino direction warning. **Spawn always stamps the embryo's AI mode (`NPCMode`/`NPCComMode`); unhandled modes idle, implemented I-16/I-17 worktypes apply automatically — NO combat** (`research_egg.md §9.1` pt 5). **Sub-step d is SPLIT:** **d-visual** (multi-tile bodies) is combat-independent and **IN I-egg** — a full-world objblk scan showed **234/943 eggs (~25%) hatch multi-tile creatures** (Dragon 55× / Giant Ant 69× / Alligator 39× / Hydra / Cow / Horse / Vine / Serpent), so deferring it would stub a quarter of all hatches; **d-stats** (`EGG_generate`+`D_3522` stat roll + loot) stays **combat-gated**. See §"I-egg scope" + `research_egg.md`. **d-stats + combat deferred.** | **done** (a · b · d-visual · c · e · f, 2026-06-14) |
 
 **Why I-2 is the world-data system.** Loading the real world from `OBJBLK*`/
 `objlist` into ECS entities is the clone's core purpose — the reason for choosing
@@ -3699,3 +3699,94 @@ predate moongate but were caught here, so fixed here rather than deferred). Each
 
 **Suite after the review: 527/527** (75 moongate; +4 inventory-USE held-bury + Orb-ground-gate;
 +2 the 2026-06-14 derived-gate skip, item 7). Cross-PC commit chain in [[reference_cross_pc_sync_state]].
+
+## I-egg scope — egg / creature-spawn system — COMPLETE 2026-06-14 (a · b · d-visual · c · e · f)
+
+Port of U6's EGG module (`seg_2E2D.c`, `OBJ_14F`). Built **a → b → d-visual → c → e → f**,
+one save-point commit per sub-step (squashed to `impl I-egg`). All in `systems/egg.js` +
+the `Spawned` component; the only shared-code edits are the `Spawned` registration
+(`main.js` + `components.js`), the passability occupancy/self-exclusion, and the
+`teleportParty` hatch/cull hooks. Research + decided model: `research_egg.md` (§1 data, §3/§4
+mechanics, §9.1 spawn/cull, §10 build shape). **Suite 674/674** (527 prior unchanged + 147 new
+`tests/test_egg.html`).
+
+**As built, per sub-step:**
+
+- **a — data + decode** (`0e43715`). `decodeEgg`/`decodeEmbryo` (Qual/Quan → time gate /
+  alignment override / hatch chance · count / AI mode / mutant) + the world read path
+  (`readEgg`/`findEggs`/`isEgg`) over I-6 containment. Validated live against the factory throne
+  egg `(307,350)` = `0x20` un-hatched, `Quan100/Qual2`, embryo `OBJ_16B Quan3/Qual8` (§7/§8).
+- **b — hatch core** (`53b2ddd`). `hatchEgg` = `EGG_hatches` (`seg_2E2D.c:203-365`) minus the
+  stat roll + multi-tile bodies: Armageddon/day-night gates (early-return, no latch), re-hatch
+  gate, hatch roll, embryo loop (firstborn-on-cell + ±3 `scatterCell` = `COMBAT_TryTeleport`
+  analog), `Qual%10` alignment override, embryo-`Qual` AI-mode stamp, **unconditional**
+  `SetHatched`+`SetInvisible`. `spawnCreature` = a placeholder (no stats — d-stats deferred)
+  tagged `Spawned` + `MoveSpeed(REF_DEX)`+`Destination` so any AI mode ticks without a retrofit.
+  New `Spawned` component (cull key + occupancy; auto-persists, **no `SNAPSHOT_VERSION` bump** —
+  MoonGates/loadedDungeons precedent). Live: factory throne egg → 3 EVIL AI_ASSAULT gargoyles.
+- **d-visual — multi-tile bodies** (`8aa5c01`). `buildMultiTileBody` assembles linked part-
+  entities for ~25% of hatches (full-world scan: 234/943 eggs): dragon `OBJ_19B` (body + head/
+  tail/2 wings), hydra `OBJ_176` (body + 8 heads), silver serpent `OBJ_19D` (curl), tangle vine
+  `OBJ_16D` (+4 tentacles), two-part `≥OBJ_1AA` (body f6 + east part). **Winged gargoyle
+  `OBJ_16A` = a single 2×2 footprint-sprite (frame 0x13, no parts)** — confirmed by a tile-flag
+  probe (only 0x16A f0x13 is dW+dH; all other part frames single-cell, so source's multi-object
+  == multi-entity). Parts: `Spawned{body,ox,oy}`, block + cull-with-head; a follow pass tracks a
+  moving head; `canStandAt` excludes a head's own parts (`body===actorId`) so a grazing cow
+  doesn't self-block. **Bug caught live**: firstborn is once-per-EGG not per-embryo
+  (`seg_2E2D.c:247`) — the dragon+drake egg had stacked both on the egg cell. Live: dragon egg →
+  5-part body renders as one creature.
+- **c — avatar-keyed trigger** (`e48a6a8`). `hatchAroundAvatar` = `EGG_hatchArea` keyed on the
+  AVATAR not the camera (§9.1 pt 1): scans eggs within `scanRadius` and hatches those past
+  `EGG_hatchArea`'s gate (`:381` — force OR off-screen `>nearRadius` OR LOCAL). Wired at boot
+  (the start area → throne ambush auto-fires), every avatar move (live pos, after
+  `checkGateEntry`), and `teleportParty`'s tail with `forceHatch` (the source `:315` PartyEnter;
+  ladder + both moongate nets land there). Live: camera-pan loads region 34 but the dragon egg
+  stays `0x0` (panning never hatches).
+- **e — cull + re-arm** (`e109650`). `cullAroundAvatar` = the avatar-keyed stand-in for the
+  stream-out `C_1184_19AA`: reap `Spawned` creatures beyond `cullRadius` (outer ring of the
+  two-radius hysteresis), and for far eggs delete LOCAL (one-shot) / clear HATCHED on non-LOCAL
+  (`ClrHatched` = wilderness respawn). Parts cull with their head; orphans reaped; permanent
+  NPCs/party never touched. Both avatar passes early-return when `Spawned` is unregistered (keeps
+  `teleportParty` safe in minimal test worlds). Live: the boot throne ambush is fully reaped once
+  the avatar leaves; hatch→leave→return re-hatches a fresh pack.
+- **f — pacification + warning** (`7fe15aa`). `shouldPacifyGargoyles` = the real scan
+  (`seg_2E2D.c:231-239` — gargoyle-in-party OR Amulet of Submission `OBJ_04C`, chain-walked
+  through bags) → gargoyle embryos hatch `AI_GRAZE`. Shamino's approach warning
+  (`seg_2E2D.c:351-360`): `hatchEgg` returns `atkplr` (`Is_ATKPLR` = alignment & EVIL-bit on a
+  non-LOCAL egg); `hatchAroundAvatar` fires a once-per-session direction call-out when Shamino
+  (slot 3, within 6) is near, gated by the 3/4 roll.
+
+**Kept deviations (so a later session doesn't "correct" them):**
+- **d-stats deferred** (combat): no `EGG_generate` `mkRandom` stat roll / `D_3522` tables /
+  `C_2E2D_00BE` loot. `spawnCreature` is a placeholder; class-default alignment falls back to
+  NEUTRAL when the egg gives no `Qual%10` override (which slightly under-fires Shamino's warning
+  for `Qual%10==0` eggs). **No combat** — hostile AI modes (AI_ASSAULT etc.) are stamped but
+  idle until handlers land (§9.1 pt 5); implemented I-16/I-17 worktypes (GRAZE/WANDER/…) apply
+  automatically.
+- **Avatar-keyed, not region-stream** (§9.1): the clone keeps regions resident, so hatch/cull
+  key on avatar distance (`nearRadius`/`scanRadius`/`cullRadius` from the live `Viewport`), not
+  source's `±20` active-window stream in/out. Camera pan never hatches.
+- **`Spawned` tag** replaces source's 256/3072 slot table + 32-slot monster pool; multi-tile
+  PARTS are `Spawned` map objects (status 0, source's `ClrLocal`), culled with the head via
+  `Spawned.body`. Single `MoveSpeed`/`Destination` on every spawn (lean future-proofing).
+- **Boot auto-hatch**: loading the game fires the throne-room ambush (the avatar's start area =
+  "entry into new territory"). Faithful to source's area-load hatch; the 3 gargoyles stand idle
+  (no combat).
+- **Shamino warning text is clone-authored** — the source format string (`D_356A_0128`) is
+  packed message data not decoded here; once-gate is a module flag (resets on page boot, which
+  is also when save-load restores, so no explicit reset hook).
+
+**Review finding (2026-06-14, Zane play-test) — the force-field moonstone shrines are an I-20
+follow-up, NOT a combat gap.** Walking a gargoyle-guarded moonstone shrine (e.g. `(503,359)`:
+Shrine `0x189` + Moonstone `0x049` frame 1 + Force Field `0x033` co-located, with a non-LOCAL
+gargoyle egg at `(503,361)`) shows the gargoyles **respawning every return** — which is *correct*
+I-egg behaviour (non-LOCAL re-arm). The moonstone is freed NOT by combat but by the **rune+mantra
+puzzle** `C_27A1_4B98` (`seg_27a1.c:2295`, dispatched from `USE` on the 8 virtue runes
+`OBJ_0F2..0F9` at `:3125`): USE the matching virtue Rune adjacent to the stone, type the mantra
+(`D_1D0F[virtue]`); if a moonstone in the 3×3 has **frame == the rune's virtue index**, it
+`DeleteObj`s the Force Field (`OBJ_033`) **and** calls `C_27A1_4B0B` to destroy the gargoyle egg
+(the ONLY `OBJ_033` removal in all of source — combat never touches it). For `(503,359)`: frame 1
+= Compassion → Rune of Compassion `OBJ_0F3` + mantra "Mu". **Missing piece = the rune USE handler
+(I-20)** + a mantra text-input prompt (the one genuinely new UI bit); the egg-destroy half
+(`C_27A1_4B0B`) is now trivial via `findEggs`+`deleteMapObject`. So I-egg is complete + faithful;
+the shrine scene just isn't *completable* until that I-20 handler lands.

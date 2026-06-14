@@ -81,3 +81,19 @@ export const PartyMember = defineComponent('PartyMember', { slotIndex: Uint8Arra
 // and the SpatialIndex skip them — they exist only as graph nodes off their holder.
 export const Container = defineComponent('Container');
 export const ContainedIn = defineComponent('ContainedIn', { holder: Float64Array, equipped: Uint8Array });
+
+// Spawned (I-egg b): tag for egg-hatched temporary creatures (and their multi-tile parts).
+// The clone's stand-in for source's temporary-monster pool (object slots 0xe0-0xff, always
+// LOCAL — research_egg.md §5): the clone has no fixed table, so a tag marks "this creature
+// was hatched, not authored." Two readers: the cull pass (I-egg e) reaps tagged creatures
+// that drift past the cull radius (the C_1184_19AA stream-out behaviour, §9.1), and
+// passability blocks them (a spawned monster occupies its cell like an Actor does — but it's
+// NOT an objlist Actor, so it carries no npcId and never lands in ActorIndex). Persisted by
+// the generic snapshot (gracefully absent in pre-egg saves → no SNAPSHOT_VERSION bump, same
+// as MoonGates / loadedDungeons). `body` links a multi-tile part to its head entity's save-id
+// `body` (a handle ref → snapshot-remapped) links a multi-tile PART to its head entity; 0 =
+// "I am a standalone creature / the head". `ox`/`oy` (set on parts in d-visual) are the part's
+// fixed offset from the head — the part-follow pass keeps part.pos = head.pos + (ox,oy) so a
+// moving multi-tile creature (e.g. a grazing cow) drags its parts; the head excludes its own
+// parts from canStandAt via `body === actorId`, so it never self-blocks.
+export const Spawned = defineComponent('Spawned', { body: Float64Array, ox: Int8Array, oy: Int8Array });

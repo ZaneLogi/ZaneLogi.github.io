@@ -28,6 +28,35 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-14 — I-egg IMPLEMENTED (a · b · d-visual · c · e · f) — eggs hatch end-to-end
+
+- **Built** the whole egg/creature-spawn subsystem in one session (Zane: "continue all sub steps
+  in one strike"), 6 save-point commits in build order **a → b → d-visual → c → e → f**, then
+  squashed. All logic in `systems/egg.js` + a new `Spawned` component; shared-code edits limited to
+  `Spawned` registration, the passability occupancy/self-exclusion, and the `teleportParty`
+  hatch/cull hooks. Per-sub-step record + kept deviations: `progress.md §"I-egg scope"`.
+- **Re-derived from source first** (CLAUDE.md discipline): `EGG_hatches` (`seg_2E2D.c:203-365`),
+  `EGG_generate` (`:120-194`, the multi-tile builders `:154-189`), `EGG_hatchArea` (`:367-385`),
+  the stream-out `C_1184_19AA`, `DirIncrX/Y` (`seg_0903.c`), `Is_ATKPLR`/`SHAMINO_COMMENT`
+  (`u6.h:122/283`). Every cited region read directly; `research_egg.md` matched.
+- **Found / decided at impl-read (the d-visual flavor question, resolved from evidence):** a live
+  **tile-flag probe** settled footprint-sprite vs linked-parts — **only the winged gargoyle
+  `OBJ_16A` f0x13 is a 2×2 (dW+dH) tile** (one entity, no parts, matching source's bare
+  `SetFrame`); **every other** multi-tile part frame (dragon/hydra/serpent/vine/two-part) is
+  single-cell, so source's multi-object model ports 1:1 to multi-ENTITY linked parts. Real-data
+  scan also gave the multi-tile embryo AI modes — **only 4 world-wide grazers** (cow/horse
+  `AI_GRAZE`), the rest idle combat modes; the moving case needs the part-follow + `canStandAt`
+  self-exclusion (`body===actorId`), built here.
+- **Bug caught live** (the value of per-sub-step browser verification): firstborn placement is
+  **once-per-EGG**, not per-embryo (`seg_2E2D.c:247`) — the dragon+drake egg stacked both firstborns
+  on the egg cell until fixed.
+- **Verified**: 147 new unit tests + **full suite 674/674** (`tests/*.html`, no node). Live on the
+  factory save — **boot auto-fires the throne ambush** (LOCAL egg `0x20→0x62` → 3 EVIL AI_ASSAULT
+  gargoyles); walking away **culls** them + deletes the one-shot egg; a **dragon egg** assembles a
+  5-part body that renders as one creature; **camera-pan loads region 34 but never hatches** (the
+  §9.1 avatar-keyed guarantee). NO combat (hostiles idle); **d-stats deferred**.
+- **Next**: I-20 (remaining object-action handlers), or whatever Zane picks.
+
 ## 2026-06-14 — egg-spawn clone design decided (research_egg.md §9.1)
 
 - **Decided** (discussion with Zane) how the egg/spawn system maps onto the clone's god-view +

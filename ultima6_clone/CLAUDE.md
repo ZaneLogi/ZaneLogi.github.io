@@ -51,7 +51,8 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 (see that file's §"Doc maintenance"); this section is NOT a status mirror — see the banner
 for where we are now. The NPC-movement arc I-14→I-17 is **complete** (speed model → drunk-walk
 → arrival/direction → AI behaviors), the status UI (I-18) and the **level-change subsystem (I-19 —
-`USE ladder` → multi-z dungeons)** have landed; object-action handler expansion is now I-20 (demand-driven).
+`USE ladder` → multi-z dungeons)**, the **moongate subsystem (I-moongate)** and the **egg/creature-spawn
+system (I-egg)** have landed; object-action handler expansion is now I-20 (demand-driven).
 What stays
 here is the durable, slowly-changing reference — the code layout, the dev console helpers,
 and the per-step **kept deviations** (so a later session doesn't "correct" them). The ECS
@@ -71,7 +72,10 @@ standalone effect VM + `opcodes.js` + `conversation_system.js` host) + **stat_fo
 `buildEquipment` / `resolveReadySlot` — the C_155D equip-slot machinery) + **level_change**
 (I-19: `setActiveLevel` + `teleportParty` — switch level / hard-cut party move) + **use_ladder** (I-19d: `C_101C_089E`
 port — `USE OBJ_131` changes level) + **moon_phase_system** + **moongate_runtime** (I-moongate:
-blue spawn/entry/travel `C_0A33_121A`/`C_1E0F_184D`/`C_101C_0A3A`, bury `C_27A1_3425`, red Orb `C_27A1_5789`), …),
+blue spawn/entry/travel `C_0A33_121A`/`C_1E0F_184D`/`C_101C_0A3A`, bury `C_27A1_3425`, red Orb `C_27A1_5789`) +
+**egg** (I-egg: the whole `seg_2E2D.c` EGG subsystem — `hatchEgg`/`spawnCreature`/`buildMultiTileBody`/
+`hatchAroundAvatar`/`cullAroundAvatar`/`shouldPacifyGargoyles`; the new **Spawned** component is the
+hatched-creature tag = cull key + occupancy), …),
 `assets/` also has **portrait.js** + **converse.js** (lazy lib_32 decoders);
 `resources/` also has **Commands** (dispatch registries) + **MessageLog**;
 `components/`, `view/` (WebGL renderer + dev HUD/inspector + **message_channel** +
@@ -160,6 +164,19 @@ NPCs by mis-mapping their low coords to an unloaded NW surface region). (5) **`l
 persisted** in the snapshot (not derived from entity z) so save/load neither re-loads a visited level
 nor resurrects deletions; `|| []` keeps pre-I-19 saves loadable (no version bump). Full record:
 `progress.md §"I-19 scope"` + `research_level_change.md`.
+**I-egg kept deviations (egg/creature spawn):** (1) **avatar-keyed, not region-stream** — the
+no-region-unload clone hatches/culls on AVATAR distance (`hatchAroundAvatar`/`cullAroundAvatar`,
+`nearRadius`/`scanRadius`/`cullRadius` from the live `Viewport`), not source's `±20` stream in/out;
+**camera pan never hatches** (only avatar moves/teleport/boot do — §9.1 pt 1). (2) **`Spawned` tag**
+replaces source's slot table + 32-slot monster pool; multi-tile PARTS are `Spawned` map objects linked
+via `Spawned.body` (cull-with-head + the head's `canStandAt` self-exclusion so a moving creature doesn't
+self-block); winged gargoyle `OBJ_16A` is a single 2×2 footprint-sprite (no parts). Auto-persists, **no
+`SNAPSHOT_VERSION` bump** (MoonGates/loadedDungeons precedent). (3) **NO combat + d-stats deferred** —
+hostile AI modes (`AI_ASSAULT` etc.) are stamped but idle until handlers land (§9.1 pt 5); spawns are
+stat-less placeholders (no `EGG_generate` roll / `D_3522` / loot), and a `Qual%10==0` egg's alignment
+falls back to NEUTRAL (so it slightly under-fires Shamino's warning). (4) **Boot auto-hatch** fires the
+throne ambush (the start area = entry into new territory). Full record: `progress.md §"I-egg scope"` +
+`research_egg.md`.
 
 The three phases (see local memory `feedback_project_phases`):
 

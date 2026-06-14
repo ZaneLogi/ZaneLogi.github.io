@@ -11,6 +11,7 @@ import { MapLevel } from '../resources/map_level.js';
 import { loadDungeonLevel } from '../world_loader.js';
 import { Position, PartyMember } from '../components/components.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
+import { hatchAroundAvatar, cullAroundAvatar } from './egg.js';
 
 // Set the active level. Returns the previous level (so callers can detect a no-op).
 // Entering a dungeon (z != 0) fire-and-forget loads that level's objects (I-19c) —
@@ -58,4 +59,12 @@ export function teleportParty(world, nx, ny, nz, { avatarRef, recenter, moveFoll
   if (moveFollowers) moveFollowers(avatarRef.handle, 1);   // tighten into formation around the avatar
   if (recenter) recenter(nx, ny);                          // camera follows to the destination
   spatial.dirty = true;                                    // force a render rebuild
+
+  // I-egg (c): a teleport / PartyEnter force-hatches the WHOLE destination area (source's
+  // seg_101C.c:315 ForceHatching=1; the ladder + both moongate networks all land here), so
+  // arriving by gate/ladder populates the new area's eggs regardless of proximity.
+  hatchAroundAvatar(world, nx, ny, nz, { forceHatch: true });
+  // I-egg (e): and reap whatever we left at the SOURCE — every spawn from the old area is now
+  // beyond the cull ring from the destination, so it (and its re-armable/one-shot egg) is culled.
+  cullAroundAvatar(world, nx, ny, nz);
 }

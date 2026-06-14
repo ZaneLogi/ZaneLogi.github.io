@@ -458,3 +458,11 @@ discipline.
   scatter feel matters.
 - **Rest-encounter path (`seg_3200.c`).** Agent-found (`HasNightEncounter` `:128`, rest
   loop `:405`); re-derive from source if/when rest is ported.
+- **Egg destruction via the rune+mantra moonstone puzzle (`C_27A1_4B0B`, I-20).** Some gargoyle
+  eggs guard a force-field moonstone shrine (e.g. `(503,359)`). The egg is destroyed — not by
+  combat — when the player solves the shrine: USE the matching virtue Rune (`OBJ_0F2..0F9`) +
+  speak the mantra (`C_27A1_4B98`, `seg_27a1.c:2295`), which `DeleteObj`s the Force Field
+  (`OBJ_033`) and calls `C_27A1_4B0B` to delete the egg's embryos + the egg (the `±20` scan for
+  an `OBJ_14F` holding an `OBJ_16A/16B`). Until then the non-LOCAL egg re-arms on every return
+  (faithful respawn). The rune USE handler is an **I-20** item; the egg-destroy half is trivial
+  given this doc's read path (`findEggs` + `deleteMapObject`). Found in the I-egg play-test review.

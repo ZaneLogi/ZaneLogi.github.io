@@ -29,7 +29,7 @@ import { makeTileAnimationSystem } from './systems/tile_animation_system.js';
 import { makePaletteCycleSystem } from './systems/palette_cycle_system.js';
 import { makeWorldRenderSystem } from './systems/world_render_system.js';
 import { makeWorldClockSystem } from './systems/world_clock_system.js';
-import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember, AIMode, Destination, Alignment, MoveSpeed } from './components/components.js';
+import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember, AIMode, Destination, Alignment, MoveSpeed, Spawned } from './components/components.js';
 import { Party } from './resources/party.js';
 import { Paths } from './resources/paths.js';
 import { Schedules } from './resources/schedules.js';
@@ -37,6 +37,7 @@ import { ActorIndex } from './resources/actor_index.js';
 import { installNpcScheduleSystem } from './systems/npc_schedule_system.js';
 import { installMoonPhaseSystem } from './systems/moon_phase_system.js';
 import { installNpcTickSystem } from './systems/npc_tick_system.js';
+import { installEggPartFollowSystem, hatchAroundAvatar, cullAroundAvatar } from './systems/egg.js';
 import { installAvatarMovement } from './systems/avatar_move_system.js';
 import { installMoveFollowers, settleParty } from './systems/move_followers.js';
 import { loadActors, ensureRegionsInView, makeStreamingSystem, inventoryOf } from './world_loader.js';
@@ -248,7 +249,8 @@ async function load() {
        .registerComponent(PartyMember)
        .registerComponent(AIMode).registerComponent(Destination)    // I-9: NPC pathfinding state
        .registerComponent(Alignment)                                // I-11a: NPCStatus alignment (carried from objlist)
-       .registerComponent(MoveSpeed);                               // I-14: DEXTE-paced accumulator state
+       .registerComponent(MoveSpeed)                                // I-14: DEXTE-paced accumulator state
+       .registerComponent(Spawned);                                 // I-egg: egg-hatched temporary creatures (cull key + occupancy)
   world.setResource(new Party());                 // I-8b: singleton party state (activeIndex, mode)
   world.setResource(new Paths());                 // I-9c: per-NPC pathfinding state (handle -> {dirs, counter, ...})
   world.setResource(new MessageLog());            // I-10a: gameplay message channel (CON_printf analog)
@@ -440,6 +442,12 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   log(`Loaded ${objCount} world objects + ${itemCount} carried + ${containedCount} container-held in the initial view.`, 'ok');
   verifyInventory(world, objlist);
 
+  // I-egg (c): hatch the avatar's STARTING area on boot — the avatar's initial placement is its
+  // "entry into new territory" (source hatches on area-load, seg_101C.c:191). This fires the
+  // opening throne-room gargoyle ambush (the LOCAL egg at (307,350), research_egg.md §7) and any
+  // off-screen eggs in the start region. Camera pans afterward never hatch — only avatar moves do.
+  if (avatarIdx !== -1) hatchAroundAvatar(world, posStore.x[avatarIdx], posStore.y[avatarIdx], posStore.z[avatarIdx], { message });
+
   // I-8a: avatar movement. installAvatarMovement wires the keydown handler
   // (8-dir; arrows = cardinals, numpad = diagonals) and returns the per-turn move
   // system. Registered BEFORE the clock so the avatar steps, then time advances
@@ -457,6 +465,14 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
         onMove: (x, y) => {
           centerOn(x, y); moveFollowers(avatarRef.handle, 0);
           checkGateEntry(world, moonCtx);               // I-moongate (c): step onto a moongate -> travel
+          // I-egg (c): hatch eggs around the avatar's CURRENT cell (checkGateEntry may have just
+          // teleported it; a teleport already force-hatched the dest, so this live-pos scan is then
+          // a harmless idempotent no-op). Off-screen/LOCAL eggs in the avatar's area hatch + walk in.
+          const ai = world.resolve(avatarRef.handle);
+          if (ai !== -1) {
+            hatchAroundAvatar(world, posStore.x[ai], posStore.y[ai], posStore.z[ai], { message });   // I-egg (c/f): hatch + Shamino's approach warning
+            cullAroundAvatar(world, posStore.x[ai], posStore.y[ai], posStore.z[ai]);   // I-egg (e): reap spawns left behind + re-arm/delete their eggs
+          }
         },
         onIdle: () => settleParty(world),               // I-8e: party plants its feet when idle
         isBlocked: () => !uiStack.isEmpty(),
@@ -475,6 +491,7 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   const npcTick = installNpcTickSystem(world, { avatarRef });
   world.addSimSystem(npcTick.system);
   window.__U6.npcTickStats = npcTick.stats;
+  world.addSimSystem(installEggPartFollowSystem(world));           // I-egg d-visual: multi-tile parts track their head (after the NPC tick that moved it)
   world.addSimSystem(makeWorldClockSystem());                      // per turn: clock.advance(1)
   world.addRenderSystem(makeTileAnimationSystem());                // advance animdata -> reg.animDirty
   world.addRenderSystem(makePaletteCycleSystem(renderer));         // rotate water/lava palette (shimmer)

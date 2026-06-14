@@ -23,7 +23,7 @@
 import { TileRegistry } from '../resources/tile_registry.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
 import { MapLevel } from '../resources/map_level.js';
-import { Position, Renderable, Actor, PartyMember, ObjType } from '../components/components.js';
+import { Position, Renderable, Actor, PartyMember, ObjType, Spawned } from '../components/components.js';
 import { forEachOccupiedCell } from './tile_footprint.js';
 
 // Door object range + the two pass-through object types (obj.h). A door's
@@ -48,6 +48,8 @@ export function canStandAt(world, x, y, { actorId, asPartyMember = false, leader
   const pos = world.store(Position);
   const rend = world.store(Renderable);
   const ot = asHumanoidNpc ? world.store(ObjType) : null;   // only needed for the door-passthrough check
+  const hasSpawned = world.isRegistered(Spawned);           // I-egg: hatched creatures occupy their cell (test worlds may not register it)
+  const sp = hasSpawned ? world.store(Spawned) : null;      // body link — a moving head excludes its own multi-tile parts
 
   // 1. Base terrain. Walkers can't enter an impassable terrain tile unless an
   //    object on that cell wins via Breakthrough (seg_1E0F.c:88,
@@ -97,6 +99,17 @@ export function canStandAt(world, x, y, { actorId, asPartyMember = false, leader
         // exception list is still dropped — not in scope until SIT/EAT/PLAY land.
         if (world.has(handle, Actor)) {
           if (asPartyMember && handle !== leaderHandle && world.has(handle, PartyMember)) continue;
+          return false;
+        }
+
+        // Egg-hatched creatures (I-egg) block like NPCs — they're actors in source (object
+        // index < 0x100), just not objlist slots in the clone, so they carry Spawned, not
+        // Actor. No party pass-through (a spawn is never a party member). Decided before the
+        // tile-flag checks, same as the Actor branch (some creature sprites are terrain-flagged).
+        // A multi-tile creature's own PARTS (Spawned.body === the moving head's handle) don't
+        // block it — else a cow couldn't step toward its own trailing half (d-visual self-block).
+        if (hasSpawned && world.has(handle, Spawned)) {
+          if (actorId !== undefined && sp.body[id] === actorId) continue;
           return false;
         }
 
