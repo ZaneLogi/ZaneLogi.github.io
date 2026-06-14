@@ -90,7 +90,15 @@ export function createDialogUI(world, target, uiStack, { reg, objlist, portraits
   let closed = false;
   let onEnd = () => {};        // host registers its end handler
 
-  function scroll() { text.scrollTop = text.scrollHeight; }
+  // Stick to the newest line. Re-assert on the next frame as well: in the flex column the
+  // text box's height can finalize a layout pass AFTER content is appended (especially the
+  // lines that first push it past the 80vh cap), so a single synchronous scrollTop set can
+  // land short and leave the latest line below the fold. The rAF pass catches that, so the
+  // player never has to scroll down themselves.
+  function scroll() {
+    text.scrollTop = text.scrollHeight;
+    requestAnimationFrame(() => { text.scrollTop = text.scrollHeight; });
+  }
 
   // Append a say line, rendering @word as a highlight (the rest verbatim — markup
   // <>/\& is passed through for now; research_i13_conversation_vm.md §Variables).
@@ -231,6 +239,7 @@ export function createDialogUI(world, target, uiStack, { reg, objlist, portraits
 
   return {
     name,
+    setName: (s) => { nameEl.textContent = s; },   // host reveals the real name once "known" (TalkFlags bit 0)
     isClosed: () => closed,
     say: appendSay,
     meta: appendMeta,

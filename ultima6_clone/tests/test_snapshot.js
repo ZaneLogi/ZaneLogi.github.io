@@ -107,9 +107,11 @@ const A = buildWorld();
   A.add(key, Amount, { quantity: 1, quality: 3 });
   A.add(key, ContainedIn, { holder: chest, equipped: 0 });
 
-  // A sword equipped on the avatar (ContainedIn -> avatar, equipped:1).
+  // A sword equipped on the avatar (ContainedIn -> avatar, equipped:1). Uses OBJ_02B (the
+  // real "Sword") deliberately: 0x55 is OBJ_055 (blue moongate), which serialize now skips as
+  // derived runtime state — an arbitrary 0x55 here used to collide with that filter.
   const sword = A.create();
-  A.add(sword, ObjType, { objNumber: 0x55, frame: 0 });
+  A.add(sword, ObjType, { objNumber: 0x2b, frame: 0 });
   A.add(sword, Status, { bits: 0x00 });
   A.add(sword, Amount, { quantity: 1, quality: 0 });
   A.add(sword, ContainedIn, { holder: avatar, equipped: 1 });
@@ -220,6 +222,30 @@ check('cell-chain: 2 entities in cell (104,100)', cellB && cellB.length === 2);
   check('objlist: global karma restored (42)', objB.globals.karma === 42);
   check('objlist: party roster restored', objB.party.length === 1 && objB.party[0] === 0 && objB.partySize === 1);
   check('objlist: omitted when not provided to serialize', !('objlist' in snapA));
+}
+
+// ── blue moongates (OBJ_055) are derived runtime state -> NEVER serialized ──
+// spawnBlueGates rebuilds them from the persisted D_2C74 + moon phase on load, so a
+// serialized gate would be both restored AND reconstructed (a duplicate). serialize must
+// drop OBJ_055 entities while leaving everything else intact. (Mirror of the objblk-load
+// skip in world_loader.spawnObjblkRecords.) research_moongate.md §4.
+{
+  const W = buildWorld();
+  const sp = W.getResource(SpatialIndex);
+  const rock = W.create();
+  W.add(rock, Position, { x: 200, y: 200, z: 0 });
+  W.add(rock, ObjType, { objNumber: 0x05, frame: 0 });
+  W.add(rock, Status, { bits: 0x00 });
+  sp.insert(200, 200, rock);
+  const gate = W.create();
+  W.add(gate, Position, { x: 201, y: 200, z: 0 });
+  W.add(gate, ObjType, { objNumber: 0x055, frame: 1 });   // a live blue gate
+  W.add(gate, Status, { bits: 0x00 });
+  sp.insert(201, 200, gate);
+  const s = serializeWorld(W);
+  const gateRows = s.entities.filter((e) => e.comps.ObjType && e.comps.ObjType.objNumber === 0x055);
+  check('blue gate (OBJ_055) excluded from snapshot (derived from D_2C74)', gateRows.length === 0);
+  check('blue gate exclusion leaves other on-map entities intact', s.entities.length === 1);
 }
 
 // ── render ──

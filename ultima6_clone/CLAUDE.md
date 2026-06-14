@@ -58,7 +58,8 @@ and the per-step **kept deviations** (so a later session doesn't "correct" them)
 runtime-ground spec is
 `docs/architecture_ecs.md`, implemented in `ecs/world.js` since I-1. Code layout:
 `ecs/` (runtime core), `assets/` (format decoders), `resources/` (TileRegistry,
-MapLevel, Camera, Viewport, Party, Paths, Schedules, **WorldSpeed** (I-14d), …),
+MapLevel, Camera, Viewport, Party, Paths, Schedules, **WorldSpeed** (I-14d),
+**MoonGates** (I-moongate: `D_2C74` blue endpoints + moon phases), …),
 `systems/` (render, camera, world-data, schedule, passability, avatar move,
 move-followers, humanoid-anim, pathfinding, npc_path, npc_tick, ai_modes, **move_economy**
 (I-14: DEXTE-paced accumulator — `rate`/`stepCostAt`/`PLAYER_STEP_MS`) + **drunk_walk**
@@ -68,14 +69,16 @@ use_handlers, use_drawbridge** (I-10), **conversation/** (I-13: `conversation_vm
 standalone effect VM + `opcodes.js` + `conversation_system.js` host) + **stat_formulas**
 (I-18: `maxHP`/`maxMagic`, objlist-canonical) + **equip_slots** (I-18g: `equipSlotForTile` /
 `buildEquipment` / `resolveReadySlot` — the C_155D equip-slot machinery) + **level_change**
-(I-19: `setActiveLevel` — switch the active map level) + **use_ladder** (I-19d: `C_101C_089E`
-port — `USE OBJ_131` changes level), …),
+(I-19: `setActiveLevel` + `teleportParty` — switch level / hard-cut party move) + **use_ladder** (I-19d: `C_101C_089E`
+port — `USE OBJ_131` changes level) + **moon_phase_system** + **moongate_runtime** (I-moongate:
+blue spawn/entry/travel `C_0A33_121A`/`C_1E0F_184D`/`C_101C_0A3A`, bury `C_27A1_3425`, red Orb `C_27A1_5789`), …),
 `assets/` also has **portrait.js** + **converse.js** (lazy lib_32 decoders);
 `resources/` also has **Commands** (dispatch registries) + **MessageLog**;
 `components/`, `view/` (WebGL renderer + dev HUD/inspector + **message_channel** +
 **dev_npc_inspect** + **dialog_window** (I-13 live conversation I/O) + **party_status**
 (I-18: `P` roster / ZSTATS / GIVE recipient-picker) + **inventory_picker** (I-10j inventory
-window + the I-18 `E` equip/`M` move pickers) + **equip_list** (I-18h equipped-slot list)), `world_loader.js`
+window + the I-18 `E` equip/`M` move pickers) + **equip_list** (I-18h equipped-slot list) +
+**moongate_hud** (I-moongate: composited sky strip + gate/phase readout)), `world_loader.js`
 (world-object load + runtime add/delete/find primitives), `u6db.js` (BYO-data store),
 `index.html`/`main.js` (app shell), `tests/`.
 

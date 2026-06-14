@@ -5,7 +5,7 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: I-19 (level change — `USE ladder` → multi-z dungeons) COMPLETE (2026-06-13, a–f).** Activated the already-decoded dungeon levels + ported `C_101C_089E`: the active level follows the avatar's `Position.z` (terrain / camera clamp+wrap / move-wrap, 1024↔256); a single `SpatialIndex` + active-z filter hides off-level entities (render / passability / cell-pick); a dungeon's objblk loads whole-level on entry (`loadDungeonLevel`, resident); `USE` a ladder (`OBJ_131`) changes level — z_incr + the ÷4/×4+quality coordinate rescale + party teleport + camera follow, **hard cut** (no PartyEnter/Exit); dungeon NPCs go live on their level (tick/schedule gate to the active level); and a save made in a dungeon restores there (`loadedDungeons` persisted, `|| []` keeps old saves — **no snapshot bump, stays v2**). Verified live on real data incl. an EXACT surface↔dungeon round-trip (the up-ladder's quality bits reconstruct the entrance cell). Decisions: single index + active-z filter (per-level index = named upgrade); live dungeon NPCs; hard-cut transition. See §"I-19 scope" + `research_level_change.md`. **Tests 446/446 pass** (run via the `tests/*.html` browser harnesses — no node needed; caught + fixed a `MapLevel`-stub null-safety regression mid-review). **Next: I-20** (object-action handlers expansion — demand-driven). Prior: I-18 (party status UI a–k, §"I-18 scope"), I-17 (NPC AI behaviors, §"I-17 scope"), I-16 (arrival + direction, §"I-16 scope").
+**Status: I-moongate (blue + red moongate subsystem) COMPLETE (2026-06-13, a–e + g/h; f out of scope).** Two unrelated networks sharing the moon idiom — **blue** (`OBJ_055`): the `D_2C74` 8-endpoint, lunar-phase-routed, *player-mutable* network (seeded from the `D_2C4A.c` constants; hourly spawn-reconcile `C_0A33_121A`; walk-in `GateTravel` `C_101C_0A3A` with the `|7-phase|` tiebreak + the 00:00 Shrine-of-Spirituality override; `USE moonstone` `C_27A1_3425` relocates an endpoint + GET clears it); **red** (`OBJ_054`): the Orb's (`OBJ_057`) *fixed-ROM* (`D_171C/174E/1780`), *single-use* network (cast `C_27A1_5789` via a 5×5 directional pad → `Qual`; consumed by `PartyTeleport` `C_101C_0828` at the source tile). Plus the player-facing UI: a faithful composited **sky strip** (`C_2FC1_19C5` — sun/two-moon-glyphs/mountain or cave, arc-placed via `D_2BFA`, eclipse-aware) on the clock panel, and a gate/phase **dev readout**. Moon phases recompute hourly (`seg_0A33.c:907-910`) off the existing `WorldClock`; `D_2C74` persists via `MoonGates` SAVED_RESOURCES (graceful absence, **no snapshot bump**). Kept deviations: dropped source's `AreaX` spawn bound (spawn-reconcile at *all* active-level slots — modern memory); shared `teleportParty` (hard cut, refactored out of I-19's `use_ladder`); `D_2CC3` solo-mode skipped; music deferred; phase can drift while idle (I-14d wall-clock, accepted). Verified live on real data: 7 surface gates at the exact endpoints, blue walk-in → dungeon (day-4 slot 6, level switched), red cast→walk-in → `D_171C` dest + consumed, sky strip + readout render. **Reviewed + 6 follow-up fixes landed** (sky-strip sizing; level-change cursor/reach wrap; inventory USE verb `U` + Orb held-vs-ground gate; dialog final-line readable; dialog auto-scroll; NPC name-reveal on TalkFlags bit 0 — all source-traced; the blue gate was dev-verified, not hand-played). See §"I-moongate scope" (+ its "Review fixes") + `research_moongate.md`. **Tests 527/527 pass** (75 new moongate + 452 prior; `tests/*.html` browser harnesses, no node). **Next: I-20** (remaining object-action handlers — spellbooks / instruments / etc.; demand-driven). Prior: I-19 (level change a–f, §"I-19 scope"), I-18 (party status UI a–k, §"I-18 scope"), I-17 (NPC AI behaviors, §"I-17 scope").
 
 This banner is the **single canonical current-status line** — `CLAUDE.md` and
 `DOCUMENTATION_INDEX.md` point here instead of mirroring it (convention: §"Doc maintenance").
@@ -59,7 +59,8 @@ banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 | I-17 | **NPC AI behaviors** — the moving worktypes as active per-turn behaviors: `WANDER`/`GRAZE` (`C_1E0F_37DB`), `LOITER`/`FARM` (`C_1E0F_33C4`), `GUARD` pacing, via the probability×accumulator contract; + **I-17d** displaced settle-in-place NPCs stand aside on a shove & return to post + re-pose when the slot clears. `RINGBELL` split to its own later step; thief/law + combat deferred by design. See §"I-17 scope". | **done** (a–d) |
 | I-18 | **party status UI — on-demand, NOT a fixed panel.** `P` → roster (icon/name/HP) → member digit → ZSTATS (portrait + STR/DEX/INT + Magic/Health cur/MAX + Lvl/Exp) → `Tab` ⇄ inventory, all on the UIStack; stats read straight from the **objlist** (NO `Stats` component — Option B; `MaxHP`/`MaxMagic` ported to `stat_formulas.js`). GIVE → in-stack recipient-picker (bare-map give + direct digit-inventory paths retired). Layout: fixed status panel removed → map full-width, clock → persistent strip, dev HUD → floating show/hide. Avatar portrait via `D_2CCB` (factory data → `z[6]`/D_2CCB 7 male-face default). **g/h/i** = equipped-equipment view (de-scoped paperdoll): equip-slot list beside the carried list + weight gauge + `E` equip/unequip (source gates, bagged-equip re-parents out) + **k** `M` "move to…" picker (move items in/out of bags, both directions). | **done** (a–k, 2026-06-12) |
 | I-19 | **level change — `USE ladder` → multi-z dungeons.** Activate the already-decoded dungeon levels (`assets/map.js` decodes all 6; `MapLevel.dungeonTileIndex` ready; `Position.z` exists) + port `C_101C_089E` (z_incr direction + coordinate rescale + avatar reposition + reload/recompose). Single `SpatialIndex` + active-z filter; dungeon NPCs live; camera/bounds switch surface(1024-wrap)↔dungeon(256-wrap) per level. **Reframed 2026-06-12** (was "object-action handlers expansion" → re-homed to I-20). See §"I-19 scope" + `research_level_change.md`. | **done** (a–f, 2026-06-13) |
-| I-20 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / moonstones / instruments / etc.); demand-driven, each handler tied to its owning subsystem when that subsystem lands (was I-19 until 2026-06-12) | planned |
+| **I-moongate** | **blue + red moongate subsystem** — blue (`OBJ_055`) lunar-phase-routed, player-mutable `D_2C74` 8-endpoint network (hourly spawn `C_0A33_121A` + walk-in `GateTravel`; `USE moonstone` relocates an endpoint) · red (`OBJ_054`) Orb-of-the-Moons (`OBJ_057`) fixed-ROM single-use net · new-game `D_2C74` seeding from the `D_2C4A.c` constants · the player-facing **sky-view** (clock panel) + **gate-readout** (dev HUD). Pulled out of I-20 into its own named step (like `I-save/load`). See §"I-moongate scope" + `research_moongate.md`. | **done** (a–e + g/h, 2026-06-13; f out of scope) |
+| I-20 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / instruments / etc.; **moonstones → the dedicated I-moongate step**); demand-driven, each handler tied to its owning subsystem when that subsystem lands (was I-19 until 2026-06-12) | planned |
 
 **Why I-2 is the world-data system.** Loading the real world from `OBJBLK*`/
 `objlist` into ECS entities is the clone's core purpose — the reason for choosing
@@ -3492,3 +3493,208 @@ there).
 moongate/gate-travel; combat; solo-mode gate; the PartyEnter/Exit transition animation (hard cut chosen);
 the momentary follower-stack-then-spread on a level change (cosmetic — `MoveFollowers` re-forms them).
 See `research_level_change.md §6`.
+
+## I-moongate scope — blue + red moongate subsystem — DONE (2026-06-13, a–e + g/h; f out of scope)
+
+**Read `research_moongate.md` alongside this** — it has the full mechanism decode, the
+real-save verification, the clone-reuse map, and the §7 sky-scene / §9 UI design. This
+section is the sub-step ledger; the `research_moongate.md §N` pointers below resolve there.
+Named **I-moongate** (no serial number, Zane's call — like `I-save/load`); **pulled out of
+I-20** because it's a whole subsystem, not a single `USE` handler.
+
+**What it is.** Two unrelated gate networks sharing the moon idiom — **blue** (`OBJ_055`):
+the `D_2C74` 8-endpoint, lunar-phase-routed, *player-mutable* network (auto-spawned hourly;
+walk-in → teleport to the phase-selected moonstone position; `USE moonstone` relocates an
+endpoint). **red** (`OBJ_054`): the Orb of the Moons' (`OBJ_057`) *fixed-ROM* (`D_171C`),
+*single-use* network. Plus a player-facing UI layer (sky view + gate readout) that makes the
+blue network legible. The Vortex-Cube endgame (`OBJ_03E`) is a separate device — out of scope.
+
+**Hard prerequisite already exists:** the clone's `WorldClock` (`resources/world_clock.js`)
+carries `Time_H`/`Date_D` + an `onHour(cb)` hook — exactly what the moon phases derive from
+(§3). **Verified vs Zane's real saves (§8.1):** a factory `objlist` ships `D_2C74` **empty**;
+char-creation seeds it with the `D_2C4A.c` constants — so the clone's new-game-init must seed
+`D_2C74` itself.
+
+**Locked decisions (research + the 2026-06-13 chat):**
+1. **Seed `D_2C74` from the compiled `D_2C4A.c` constants** at new-game-init (the `y` values —
+   NOT the placed-stone positions at `y+1`; verified vs a created save, §8.1).
+2. **Sky view → the clock-panel element (`textEl`)**, on its own row *under* the clock line;
+   **gate readout → the dev-HUD stats element (`npcStatsEl`)** — both already separate DOM
+   nodes in `view/dev_hud.js`. Dev HUD stays player-visible (clone ≠ 1:1 of the original). §9.
+3. **Sky view = faithful in-game tiles** via `view/ui_icons.js tileIcon` (CPU pixels → palette
+   → `<canvas>`), composited into the §7 scene — NOT Unicode glyphs.
+4. **Skip the `D_2CC3` solo-mode gate** (no solo mode) + **hard-cut teleport** (no
+   PartyEnter/Exit) — same kept-deviations as I-19.
+
+**Sub-steps (a–h, dependency order). Each a save-point commit; squash at the end.
+Browser-verify on real data per sub-step (the suite is node-less `tests/*.html`).**
+
+- **a — Data + moon-phase resource.** Extract verbatim ROM: `D_2C74[8][3]` defaults
+  (`D_2C4A.c:30-38`), the `D_036A[28][2]` calendar (`seg_0A33.c:684-713`), the
+  `D_171C/174E/1780` red-dest tables (`seg_1E0F.c:12-34`). Add a moon-phase resource for
+  `D_2CC6-9`. **Seed `D_2C74` from the constants** in new-game-init (alongside
+  `applyNewGameDefaults`, `assets/objlist.js`) + persist it in the snapshot (like I-19's
+  `loadedDungeons`). Object/tile IDs in §1. *No dep.*
+- **b — Phase clock.** An `onHour` hook recomputing both moons: `D_2CC6 = D_036A[Date_D-1][0]`,
+  `D_2CC7 = (D_2CC6*3 + 18 - Time_H) % 24`; same for `D_2CC8/D_2CC9` (+20). §3 (verified day-4/
+  hr-8 → 6/4/6/6). *Dep (a).* Verify: resource values match §3's formula across clock times.
+- **c — Blue-gate runtime (the meaty step).** Port `C_0A33_121A` (`seg_0A33.c:621`): on the
+  hour-hook + on level/area load, for each of the 8 `D_2C74` slots on the active level + in the
+  loaded area, spawn a blue gate (`OBJ_055` via `world_loader.js addMapObject`) when a moon is
+  up (`D_2CC7<15 ∥ D_2CC9<15`), else delete. Gate-entry: port the `C_1E0F_184D` **blue** branch
+  (`seg_1E0F.c:726`) into the post-move path — on the gate's **anchor cell**,
+  `|7-D_2CC7|-|7-D_2CC9|` picks Trammel vs Felucca → `GateTravel` (`C_101C_0A3A`,
+  `seg_101C.c:368`) teleports the party to `D_2C74[slot]` (reuse the I-19 `use_ladder` teleport
+  pattern + `setActiveLevel` for the z=1 slot 6); incl. the **midnight-shrine override**
+  (`00:00-00:09` → fixed `0x018,0x01d,1`). §4/§5. *Dep (b).* Verify: gates appear at the seeded
+  positions; walking in lands at the phase-correct destination.
+- **d — Bury / relocate (`USE moonstone`).** Port `C_27A1_3425` (`seg_27a1.c:1563`) as the
+  `OBJ_049` USE handler in `systems/use_handlers.js` (same path as `use_ladder`/`use_drawbridge`):
+  buryable tile (`TIL_001..007`/`TIL_010..06F`) → write `D_2C74[frame]=(x,y,z)` + move stone +
+  avatar, else "Cannot be buried here!"; + GET clears the slot (`seg_27a1.c:887-891`). §6.
+  *Dep (a); meaningful once (c) exists.* Verify: bury a stone → its blue gate relocates there.
+- **e — Red gate (Orb of the Moons).** Port `C_27A1_5789` (`seg_27a1.c:2642`) as the `OBJ_057`
+  USE handler: gated on `TalkFlags[5]` bit 5 (per Zane taught by **Lord British** — confirm via
+  LB's script if needed, §10), prompt a 5×5 cell, spawn `OBJ_054` with `Qual` = the cell offset.
+  Red-gate travel: the `C_1E0F_184D` **red** branch (`seg_1E0F.c:753`) → `PartyTeleport(D_171C
+  [Qual-1], …)`; **single-use** (`PartyTeleport`/`C_101C_0828` deletes the source `OBJ_054`,
+  §5.4). §2.2/§5.2/§6. *Dep (a); otherwise self-contained.*
+- **f — (separate) Vortex-Cube endgame.** OUT OF SCOPE here — only when the endgame lands
+  (`C_27A1_5FAC`, `seg_27a1.c:2882`). Listed for completeness.
+- **g — Gate + phase readout → dev HUD.** A diagnostic line in `view/dev_hud.js`'s `npcStatsEl`
+  block (beside `hours fired`): the two moons' phases + "today's gates → …" (the active
+  `D_2C74` dests for Trammel/Felucca; **coords by default** — named locations optional, would
+  need a name source). Text only. *Dep (b).*
+- **h — Sky view → clock panel.** A composited sky strip on its own row **beneath** the clock
+  line (`textEl`), via `tileIcon` composited into one mini-canvas, branching on `MapLevel.level`:
+  **0/5 →** sky base (`TIL_19B`) + sun (`TIL_169/16A/16B` by hour) + the two moon glyphs
+  (`reg.tileForObject(OBJ_049, D_2CC6/D_2CC8)`) + mountain (`TIL_160+`), arc-placed via `D_2BFA`;
+  **1–4 →** cave backdrop (`TIL_174/175`), no sun/moons. Faithful tiles + faithful arc. Split by
+  dep: **h1** (sun + backdrops + cave) needs only `Time_H`/level — **no dep on (b)**, can land
+  first; **h2** (the two moon glyphs) needs (b). Honor **eclipse** (`TIL_16B` + moons hidden,
+  `Date_D==1 && Date_M%3==0`). §7 (full scene) + §9 (h).
+
+**Impl-notes (decided — don't re-litigate):** (1) (h) honors eclipse per §7; (2) **no `D_2C55`
+tint** — faithful: the strip conveys time by sun presence/position, `D_2C55` drives *map*
+lighting, not the strip; (3) (g) coords by default, named gates optional.
+
+**Open (carry forward, §10):** the `TalkFlags[5]` Orb-enable event (Lord British per Zane —
+confirm via the conversation script when (e) is built). `D_0658` (FindLoc anchor-tile index)
+and the red dead-slots are already resolved in `research_moongate.md`.
+
+**Shape:** the real subsystem is **(b)+(c)** (the blue runtime); (d) bury is a ladder-class
+handler that rides on it; (e) red is self-contained (one handler + one fixed table); (g)/(h)
+are the player-facing UI (gated only on (b); h1 not even on that). Nothing blocks on combat or
+the endgame. Suggested order: **a → b → c → d → (h1 anytime) → h2/g → e**.
+
+### As built (2026-06-13)
+
+Landed a→e + g/h in one pass (Zane's cadence choice), squashed. **f (Vortex-Cube endgame)
+remains out of scope.** Files:
+
+- `assets/moon_tables.js` — verbatim ROM: `D_2C74` defaults (`D_2C4A.c`), `D_036A` calendar,
+  `D_171C/174E/1780` red dests, `D_2BFA` arc, the obj/tile ids, the shrine override coord.
+- `resources/moon_gates.js` — `MoonGates` resource: `D_2C74` (seeded from constants, persisted)
+  + the moon SLOT/PHASE quad + `recomputePhases` (`seg_0A33.c:907-910`) + `isSlotActive`/`anyMoonUp`.
+- `systems/moon_phase_system.js` (b) — `onHour` recompute + an initial sync (covers restore).
+- `systems/moongate_runtime.js` (c/d/e) — `spawnBlueGates` (`C_0A33_121A`, reconcile), `checkGateEntry`
+  (`C_1E0F_184D` blue+red), `gateTravel` (`C_101C_0A3A`), `partyTeleport` (`C_101C_0828`, red single-use),
+  `useMoonstone`/`clearMoonstoneSlot` (`C_27A1_3425` bury + GET-clear), `castDi`/`castRedGate`/`useOrb`
+  (`C_27A1_5789`), `installBlueGateSpawn` (hourly hook + level-change sync system).
+- `systems/level_change.js` — extracted `teleportParty` (the I-19 hard-cut party move), now shared by
+  `use_ladder.js` (refactored to call it) and moongate travel.
+- `view/moongate_hud.js` (g/h) — `computeSkyScene` (pure, tested) + `installMoongateHud` (composited sky
+  `<canvas>` via `tileIcon`, redrawn only on a scene-key change; the dev readout line).
+- Wiring: `use_handlers.js` registers `OBJ_049`/`OBJ_057`; `command_dispatch.js` adds the GET-clear + the
+  Orb 5×5 cast cursor (`armOrbCast`/`confirm`); `snapshot.js` adds `MoonGates.D_2C74` to SAVED_RESOURCES;
+  `index.html` adds `#sky-view` + `#moon-readout`; `main.js` creates the resource + installs (b)/(c)/(g/h)
+  + dev hooks (`__U6.moonGates`/`enableOrb`/`checkGateEntry`/`castRedGate`).
+
+**Kept deviations** (so a later session doesn't "correct" them):
+1. **Dropped source's `AreaX`/`AREA_W` spawn bound** (a DOS memory-streaming artifact). `spawnBlueGates`
+   RECONCILES (delete strays + add missing) at **every active-level slot**, not just the ~40×40 window.
+   Consequence: a relocated/cleared endpoint can't leave a stale gate (source's incremental form can), and
+   an UNBURIED (all-zero) slot is **skipped** so dropping the bound doesn't spawn a junk gate at (0,0).
+   Reproduces source's "immediate on area-load" (it spawns at `C_101C_0306:193` too) without coupling to
+   region streaming. Re-run on the hour-hook + a per-turn **level-change watch** + after bury/GET.
+2. **No `SNAPSHOT_VERSION` bump.** `MoonGates.D_2C74` is a SAVED_RESOURCES field that's **gracefully absent**
+   in a pre-moongate save (restore's `!data` guard leaves the freshly-seeded canonical network) — same call
+   as I-19's `loadedDungeons`. The moon PHASES are derived (recomputed on load), not saved.
+3. **Map-based bury.** The clone's USE is cell-based, so `USE moonstone` fires on an adjacent GROUND stone
+   (source also USEs from inventory — the inventory-USE front-end is deferred). Bury relocates the stone to
+   the avatar's feet (source's `MoveObj` to `Party[Active]`).
+4. **Shared `teleportParty` / `partyTeleport`.** `teleportParty` (level_change.js) = the I-19 hard-cut move,
+   now shared by the ladder + gate travel. `partyTeleport` wraps it to also consume a source-tile red gate
+   (`C_101C_0828`) — used by gate travel + the midnight override, NOT the ladder (`C_101C_089E` doesn't).
+5. **Phase drift while idle** (accepted, Zane 2026-06-13): the wall-clock clock (I-14d) re-rolls the moons
+   even while the player stands still; source only moves them on player action.
+6. **`D_2CC3` solo-mode gate skipped** (no solo mode, as I-19); **music (`MUS_*`) deferred** (no audio).
+
+**Orb gate (`TalkFlags[5]` bit 5):** kept faithful — set by Lord British's conversation (the clone's I-13
+VM ports the `setFlag` opcode → `objlist.actors[5].talkFlags`, `conversation_system.js`). `__U6.enableOrb()`
+sets it for testing without the LB talk. (The §10 open item — "confirm via LB script" — is resolved at the
+*mechanism* level: the VM supports it; whether Zane's `converse.a` LB script emits `setFlag(5,5)` is data and
+confirmable in a playthrough.)
+
+**Verification:** 71 new unit tests (`tests/test_moongate.html`, browser/node-less) — phase math (all 28×24
+day/hours incl. the negative-phase C-modulo case), spawn-reconcile (relocate/clear/idempotent/dungeon),
+entry tiebreak + midnight override, bury/GET-clear, red `castDi` + travel + single-use, the sky scene
+(sun/cave/eclipse/moon-hide), and D_2C74 persistence (incl. graceful old-save absence). Full suite **521/521**.
+Live on real data: 7 surface gates at the exact endpoints; blue walk-in (day 4) → `(23,22,z1)` with the
+active level switched to the dungeon; red cast 2-east (di 15) → walk-in → `D_171C[14]=(227,131,0)` + gate
+consumed; sky strip + readout render correctly.
+
+### Review fixes (2026-06-13)
+
+After the implementation landed, Zane reviewed it live (red moongate + the UI confirmed by hand; blue
+moongate left to in-play discovery — its walk-in→dungeon path was dev-verified, not manually played). The
+review surfaced **6 issues, all fixed in this step** (per the working rule "we found it, we fix it" — they
+predate moongate but were caught here, so fixed here rather than deferred). Each is its own commit on top of
+`impl I-moongate`:
+
+1. **Sky-strip sizing** (`423c6ce`) — the strip was too tall (28px native ×2 = 56px). Cropped to the visible
+   band + the outdoor-only top gap, rendered 1× (144×16). The cave keeps its natural top margin (its tiles
+   are top-cropped imagery; the outdoor crop is sun/moon-arc-specific — applied per scene in the blitter).
+2. **Cursor/reach stale across a level change** (`1e2517e`) — USE a ladder down, then USE again without
+   moving the mouse, hit "Out of range!": the dev-probe cached the hovered cell at mouse-move with a fixed
+   1024 wrap, so after a teleport it was still a surface coordinate. Now derived on demand from the live
+   camera + `MapLevel.tilesWide`; `__U6.probe` exposed. Also switched `command_dispatch`'s 1024 hardcodes
+   (`withinReach`/`canPushTo`/`resolveMove`) to the active level — seam-only defensive (closed dungeons keep
+   the 256-seam unreachable; the NPC-movement `0x3ff` is intentionally left for the same reason).
+3. **Inventory USE verb `U` + Orb held-vs-ground gate** (`ba9ad12`) — a held Orb couldn't be USEd (the map
+   `use` only targets a cell). Added `cmd.useItem(handle)` routing held items to the same `useHandlers`
+   registry + a `U` verb in the inventory window. Ported the source gate that was missing: the Orb works
+   only when HELD — on the ground it's "Not usable" (`seg_27a1.c:3109`, `GetCoordUse==LOCXYZ`/`D_0DDC[11]`).
+   `useMoonstone` now drops a held stone at the avatar's feet (bury-from-inventory).
+4. **Dialog closed before the final line was readable** (`bc7a46d`) — a script ending right after a `say`
+   with no trailing `WAIT` (e.g. Geoffrey's "speak to Lord British first" + `LEAVE`) flashed its last line +
+   closed on the same click. `drive()` now pauses once before closing when the last effect was an
+   unacknowledged say (source holds the final line until the player dismisses the conversation).
+5. **Dialog didn't auto-scroll to the latest line** (`d654053`) — a long line that wraps + first pushes the
+   flex text box past the 80vh cap finalized its height a layout pass after the line appended, so the
+   synchronous `scrollTop = scrollHeight` landed short. Re-assert in `requestAnimationFrame`.
+6. **NPC name not revealed once "known"** (`ae73adf`) — the dialog header showed the generic look string
+   ("musician") for the whole talk. Source shows generic until `TalkFlags` bit 0 is set — only by the
+   script's `SET self 0` (`seg_1703.c:868` OP_SET; read at `seg_16E1.c:76`; **no engine auto-set** — verified
+   by decoding LB / Nystul / Kenneth) — then the real name (the script's `$N` / party `Names[]`). The host
+   recomputes the header each effect; `ui.setName()` added. Verified "musician"→"Kenneth" (#11) via the real
+   VM flow. (The mage at LB's left, #6/Nystul, is a quest-intro NPC with no name keyword → stays "mage" in
+   source too; LB's name block has no SET — his look string is already "Lord British".)
+
+**Follow-up (2026-06-14) — item 7**, surfaced while documenting the Orb destination table
+(`research_moongate.md §2.3`) + the blue-gate player-facing model (`§11`):
+
+7. **Blue gates were treated as authored/saved data, not derived state** (its own commit,
+   below this review in history) — `spawnBlueGates` reconstructs every blue gate from
+   `D_2C74` + moon phase, yet the objblk loader and the snapshot still *also* loaded/saved
+   `OBJ_055` entities. A *played* save's objblk gate (or a restored snapshot gate) at a
+   still-active endpoint would sit beside the reconstructed one, and the reconcile **can't
+   dedupe two gates on one cell** → permanent duplicate. Fix: skip `OBJ_055` on objblk-load
+   (`world_loader.spawnObjblkRecords`) + in serialize (`snapshot.serializeWorld`); red gates
+   (`OBJ_054`) untouched (genuine objects). **No `SNAPSHOT_VERSION` bump** — the persisted
+   state set is unchanged, so old saves' serialized gates restore-then-reconcile and new
+   saves' absent gates rebuild from `D_2C74` even on old code (bumping would needlessly
+   reject v2 saves). `research_moongate.md §4.1`; +2 snapshot regression tests.
+
+**Suite after the review: 527/527** (75 moongate; +4 inventory-USE held-bury + Orb-ground-gate;
++2 the 2026-06-14 derived-gate skip, item 7). Cross-PC commit chain in [[reference_cross_pc_sync_state]].

@@ -28,6 +28,54 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-13 — I-moongate review: 6 follow-up fixes (UI + conversation + level-change)
+
+- **Reviewed** I-moongate live with Zane (red moongate + UI confirmed by hand; blue gate left to
+  in-play discovery — its walk-in→dungeon was dev-verified earlier). 6 issues surfaced, **all fixed
+  in this step** (rule "we found it, we fix it" — [[feedback_found_it_fix_it]]; they predate moongate
+  but were caught here). Each its own commit on `impl I-moongate`:
+  1. sky-strip too tall → cropped + 1× (`423c6ce`); cave keeps a top margin (outdoor-only top crop).
+  2. cursor/reach went stale across a level change → "Out of range!" on a 2nd USE; derive the probe
+     cell from the live camera + `MapLevel.tilesWide`; level-aware `command_dispatch` wraps (`1e2517e`).
+  3. inventory USE verb `U` (`cmd.useItem` → useHandlers) so the held Orb is usable + the Orb
+     held-vs-ground gate I'd missed (`GetCoordUse==LOCXYZ`→"Not usable", `seg_27a1.c:3109`) (`ba9ad12`).
+  4. dialog closed before a script's final line (say-then-`LEAVE`, no `WAIT`) was readable → pause
+     before close (`bc7a46d`).
+  5. dialog didn't auto-scroll to the newest line when it wrapped past the cap → rAF re-assert (`d654053`).
+  6. NPC real name not revealed once known → header shows the generic look string until `TalkFlags`
+     bit 0 (set only by the script's `SET self 0`), then the real `$N`, live (`ae73adf`).
+- **Source dives**: confirmed the name-known flag = `TalkFlags` bit 0, set ONLY by `OP_SET`
+  (`seg_1703.c:868`), read at `seg_16E1.c:76` (generic `GetObjectString` vs real `C_1703_0116`) — no
+  engine auto-set. Decoded LB / Nystul / Kenneth scripts: LB's name block has no SET (already known);
+  Nystul (#6, the mage at LB's left) is a quest-intro NPC with no name keyword (stays "mage" in source
+  too); Kenneth (#11) sets bit 0 in his greeting → "musician"→"Kenneth" verified live.
+- **Suite 525/525.** **Next**: I-20.
+
+## 2026-06-13 — I-moongate implemented (blue + red gates + sky view), a–e + g/h
+
+- **Built**: the whole moongate subsystem in one pass (Zane's cadence). Blue network
+  (`OBJ_055`): `MoonGates` resource (`D_2C74` seeded from the `D_2C4A.c` constants, persisted)
+  + hourly phase recompute (`seg_0A33.c:907-910`) + `spawnBlueGates` reconcile (`C_0A33_121A`)
+  + walk-in `checkGateEntry`/`gateTravel` (`C_1E0F_184D`/`C_101C_0A3A`, incl. the |7-phase|
+  tiebreak + 00:00 shrine override) + `useMoonstone` bury (`C_27A1_3425`) + GET-clear. Red
+  network (`OBJ_054`): `useOrb` + 5×5 cast (`C_27A1_5789`) + fixed-ROM travel + single-use
+  delete (`C_101C_0828`). UI: composited sky strip (`C_2FC1_19C5`) on the clock panel +
+  gate/phase dev readout. Extracted I-19's party-teleport into a shared `teleportParty`.
+- **Re-derived from source first** (CLAUDE.md discipline): every routine read directly in
+  u6-decompiled before porting — `D_2C4A.c` (D_2C74), `seg_0A33.c` (calendar/phase/spawn),
+  `seg_1E0F.c` (entry + red tables), `seg_101C.c` (GateTravel/PartyTeleport/ladder),
+  `seg_27a1.c` (bury/orb/dispatch), `seg_2FC1.c` (sky). research_moongate.md matched.
+- **Found / confirmed**: source spawns gates **immediately on area-recache** (`C_101C_0306:193`),
+  not only hourly → the clone's "reconcile at all active-level slots" reproduces that without
+  region-stream coupling. The Orb's `TalkFlags[5]` gate is set by a **conversation `setFlag`
+  opcode** (`seg_1703.c:868`), which the clone's I-13 VM already ports — so the Orb is
+  enable-able in-game via Lord British (dev hook `__U6.enableOrb()` for testing).
+- **Verified**: 71 new unit tests + full suite **521/521** (node-less `tests/*.html`); live on
+  real data — 7 surface gates, blue walk-in → dungeon level switch, red cast→walk-in →
+  `D_171C` dest + consumed, sky strip + readout render. Kept deviations + file map in
+  `progress.md §"I-moongate scope" → As built`.
+- **Next**: I-20 (remaining object-action handlers).
+
 ## 2026-06-13 — moongate system research (research-only, no code)
 
 - **Read**: the whole moonstone/moongate path in u6-decompiled — `C_27A1_3425`

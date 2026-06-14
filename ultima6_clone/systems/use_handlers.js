@@ -11,6 +11,7 @@ import { ObjType, Amount, Position } from '../components/components.js';
 import { setObjectFrame, addMapObject, deleteMapObject, findObjectsByTypeQuality, objAtCell, actorAtCell } from '../world_loader.js';
 import { registerCrank } from './use_drawbridge.js';
 import { useLadder } from './use_ladder.js';
+import { useMoonstone, useOrb } from './moongate_runtime.js';
 
 // Doors (obj.h:620-627): Oaken / Windowed / Cedar / Steel — all four route to one
 // handler (source's USE switch sends OBJ_129..12C to C_27A1_2A44, seg_27a1.c:3069).
@@ -110,6 +111,8 @@ export function registerUseHandlers(world) {
   commands.registerUse([0x0AE], useSwitch);   // I-10d: switch -> electric field (same mechanism)
   registerCrank(world);                        // I-10e: crank -> drawbridge (own module, geometry-heavy)
   commands.registerUse([0x131], useLadder);   // I-19d: ladder -> change level (C_101C_089E, own module)
+  commands.registerUse([0x049], useMoonstone); // I-moongate d: bury moonstone -> relocate a blue endpoint (C_27A1_3425)
+  commands.registerUse([0x057], useOrb);       // I-moongate e: Orb of the Moons -> cast a red gate (C_27A1_5789)
   // Later lantern · food · … register here as one-liners, each citing
   // its C_27A1_* counterpart.
 }

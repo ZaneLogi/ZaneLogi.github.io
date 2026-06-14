@@ -28,7 +28,7 @@ import { makeEquipList } from './equip_list.js';
 // multi-verb). Esc backs out one level (substrate auto-pop). DROP (step 3) + give (step 4)
 // supply `onVerb`; digit-open (step 2) supplies `onDigit`.
 export function openInventoryWindow(world, holder, uiStack, opts) {
-  const { reg, objlist, onVerb, onDigit, titleName, _baseDepth, tabBack, onGive, holderStr, onEquip, onMove, cursorHandle } = opts;
+  const { reg, objlist, onVerb, onDigit, titleName, _baseDepth, tabBack, onGive, holderStr, onEquip, onMove, onUse, cursorHandle } = opts;
   const baseDepth = _baseDepth ?? uiStack.depth();
   const nameOf = (item) => {
     const look = reg.tiles?.getTileLook?.(reg.tileForObject(item.objNumber, item.frame), item.quantity);
@@ -128,7 +128,7 @@ export function openInventoryWindow(world, holder, uiStack, opts) {
   const hint = document.createElement('div');
   hint.className = 'ui-hint';
   hint.textContent = items.length
-    ? '↑↓ · Enter open · E equip · M move · D drop · G give · 1-N · Esc'
+    ? '↑↓ · Enter open · U use · E equip · M move · D drop · G give · 1-N · Esc'
     : '1-N switch member · Esc close';
   el.appendChild(hint);
 
@@ -156,6 +156,15 @@ export function openInventoryWindow(world, holder, uiStack, opts) {
     }
     // I-18k: `M` opens the "move to…" picker for the highlighted item (relocate in/out of a container).
     if (item && onMove && /^m$/i.test(k)) { e.preventDefault(); onMove(item, baseDepth); return; }
+    // Inventory USE: `U` uses the highlighted item. Like `D`/`E`, unwind the modal chain to
+    // baseDepth and hand off to onUse — the handler may arm a map follow-up (the Orb's
+    // "Where:" cast cursor), which needs the modal closed; onUse detonates to the bare map.
+    if (item && onUse && /^u$/i.test(k)) {
+      e.preventDefault();
+      while (uiStack.depth() > baseDepth) uiStack.pop();
+      onUse(item);
+      return;
+    }
     if (item && /^[dg]$/i.test(k)) {
       e.preventDefault();
       // I-18e: `G` opens an in-stack recipient-picker (onGive) WITHOUT closing the window chain — the

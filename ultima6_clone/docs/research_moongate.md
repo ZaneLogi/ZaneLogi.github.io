@@ -75,6 +75,84 @@ zeros are **unreachable padding**, not a live hazard.
 **Blue points at a moonstone position; red points at a ROM coordinate.** That one
 sentence is the whole difference.
 
+### 2.3 The Orb's directional pad — full `USE Orb` → destination table
+
+The whole point Zane asked to pin down: **where does `USE Orb of the Moons` send you?**
+Mechanically the Orb is a *directional teleporter*. `USE Orb` (`C_27A1_5789`) prompts
+`"Where:"` and you pick a cell in the **5×5 box around the avatar**; a red gate spawns on
+that cell with `Qual = di`; stepping in teleports to `D_171C/174E/1780[di-1]`.
+
+**Key property — the destination depends ONLY on the cast *direction*, never on where
+you are.** `di` is computed from the **relative offset** `(dx,dy)` of the picked cell
+(`di = (dy+2)*5 + (dx+3)`, `C_27A1_5789:2665`), and the lookup is a fixed ROM table indexed
+by `Qual` with **no `MapX`/`MapY` term** (`seg_1E0F.c:756`). So "cast NW-by-2" lands you at
+the same coordinate whether you're in Britain or a dungeon. The avatar's / Orb's absolute
+position is irrelevant; only the joystick-direction of the pick matters. (This is why a
+"place the Orb sits → place you land" mapping is a single fixed table, not one-per-region.)
+
+**The pad** (avatar `⊕` at center; each cell = the destination it sends you to, decimal
+`x,y` + `z` only when ≠0; `B`n = identical to default **blue** endpoint slot `n`; `·` =
+dead "stay-put" cell):
+
+```
+          dx -2          dx -1          dx 0           dx +1          dx +2
+ dy -2  899,499        935,262 (B0)   435,395        503,358 (B1)   147,883
+ dy -1  919,934 (B7)   68,45  z5      307,352 (LB)   188,45  z5     159,942 (B2)
+ dy  0  739,699        ·  (stay)      ⊕  (stay)      ·  (stay)      227,131
+ dy +1  23,22  z1 (B6) 128,86  z5     108,221 z5     923,876        295,38  (B3)
+ dy +2  75,507         327,822 (B5)   387,787        831,166 (B4)   667,67
+```
+
+**Full index table** (`Qual = di`; destination row = `di-1`; hex is the source bytes,
+decimal is what the clone reports):
+
+| `Qual` | cast cell `(dx,dy)` | dest `(x,y,z)` hex | dest `(x,y,z)` dec | note |
+|---:|:---:|---|---|---|
+| 1  | (−2,−2) | `383,1F3,0` | 899,499,0  | |
+| 2  | (−1,−2) | `3A7,106,0` | 935,262,0  | = blue slot 0 |
+| 3  | ( 0,−2) | `1B3,18B,0` | 435,395,0  | |
+| 4  | (+1,−2) | `1F7,166,0` | 503,358,0  | = blue slot 1 |
+| 5  | (+2,−2) | `093,373,0` | 147,883,0  | |
+| 6  | (−2,−1) | `397,3A6,0` | 919,934,0  | = blue slot 7 |
+| 7  | (−1,−1) | `044,02D,5` | 68,45,**5** | gargoyle realm |
+| 8  | ( 0,−1) | `133,160,0` | 307,352,0  | Lord British's castle (the new-game start) |
+| 9  | (+1,−1) | `0BC,02D,5` | 188,45,**5** | gargoyle realm |
+| 10 | (+2,−1) | `09F,3AE,0` | 159,942,0  | = blue slot 2 |
+| 11 | (−2, 0) | `2E3,2BB,0` | 739,699,0  | |
+| 0  | (−1,0)/(0,0)/(+1,0) | `0,0,0` | — | **dead** — stay put (own cell + 2 H-neighbors) |
+| 15 | (+2, 0) | `0E3,083,0` | 227,131,0  | |
+| 16 | (−2,+1) | `017,016,1` | 23,22,**1** | = blue slot 6 (a dungeon level) |
+| 17 | (−1,+1) | `080,056,5` | 128,86,**5** | gargoyle realm |
+| 18 | ( 0,+1) | `06C,0DD,5` | 108,221,**5** | gargoyle realm |
+| 19 | (+1,+1) | `39B,36C,0` | 923,876,0  | |
+| 20 | (+2,+1) | `127,026,0` | 295,38,0   | = blue slot 3 |
+| 21 | (−2,+2) | `04B,1FB,0` | 75,507,0   | |
+| 22 | (−1,+2) | `147,336,0` | 327,822,0  | = blue slot 5 |
+| 23 | ( 0,+2) | `183,313,0` | 387,787,0  | |
+| 24 | (+1,+2) | `33F,0A6,0` | 831,166,0  | = blue slot 4 |
+| 25 | (+2,+2) | `29B,043,0` | 667,67,0   | |
+
+`Qual` 12/13/14 never occur: the formula would assign them to the dead-center cells, but
+`C_27A1_5789:2662` rewrites those to `Qual = 0` first, so table rows 11/12/13 (`0,0,0`) are
+**unreachable padding** — the source's three "stay-put" cells take the `Qual 0` path
+(`seg_1E0F.c:765`, teleport to `MapX,MapY,MapZ`), not a table read.
+
+**The pad bundles the whole blue network.** All **8 default blue-gate endpoints**
+(`D_2C74`, §2.1) appear verbatim as red destinations — `Qual` 2/4/10/20/24/22/16/6 = blue
+slots 0–7. So the Orb reaches every canonical moongate town **plus 14 extra fixed spots**:
+**4 in the z=5 gargoyle realm** (`Qual` 7/9/17/18), **1 dungeon** (`Qual` 16, same z=1 cell
+as blue slot 6), **Lord British's castle** (`Qual` 8), and 9 open-surface coordinates.
+Caveat: the 8 matches are against the blue endpoints' *factory defaults* — burying a
+moonstone moves a **blue** endpoint, but the **red** table is fixed ROM and never follows.
+
+**Live-verified** (read-only, against Zane's loaded played save, avatar at LB's castle):
+(1) the clone's `D_171C/174E/1780` are **byte-identical** to source; (2) real `castRedGate`
+casts in all 22 reachable directions stamped exactly the `Qual` this table predicts (the 3
+non-reachable cells in the throne room were terrain refusals, not formula mismatches);
+(3) end-to-end — `enableOrb` → cast NW-by-2 (`Qual 1`) → step in → **landed at (899,499,0)**
+= row `di-1=0`, the value above. Position-independence holds: the cast was from `(307,352)`
+and the destination ignored it.
+
 ---
 
 ## 3. The moon-phase clock
@@ -134,6 +212,36 @@ almost always; the phase mainly chooses *where you land*, not *whether a gate ex
 Called from the hourly block (`seg_0A33.c:912`) **and** on area-load
 (`seg_101C.c:193`, after `EGG_hatchArea`). The `z == MapZ` test maps directly to the
 clone's I-19 **active-z filter**.
+
+### 4.1 Clone: blue gates are *derived* state (not loaded, not persisted)
+
+The clone keeps regions resident and dropped source's `AreaX`/40×40 spawn bound
+(`systems/moongate_runtime.js spawnBlueGates`): it **reconciles** the gates on the active
+level — delete strays, add missing — at *every* active endpoint, gated only on
+`anyMoonUp()` + the buried-slot test + the active-z filter, **independent of region load**.
+Reconcile runs on the first sim tick, the hour hook, and every active-level change (not on
+region demand-load — it needn't, since the whole level's gates already exist). Two
+consequences:
+
+- **Open/close is global, hourly, and region-independent.** All blue gates on a level
+  appear together when ≥1 moon is up and vanish together when both set — the same
+  `D_2CC7<15 || D_2CC9<15` condition source uses, but evaluated for every active endpoint at
+  once rather than only the ones near the player.
+- **A blue gate is pure derived runtime state** — a function of `D_2C74` + the moon phase,
+  rebuilt on every load. It is therefore **never authored data and never saved game state.**
+  Two skips enforce that, because the reconcile *can't dedupe two gates on one cell* — a
+  loaded/restored gate beside the reconstructed one at an active endpoint would persist as a
+  permanent duplicate:
+  1. **objblk load** (`world_loader.spawnObjblkRecords`) skips `OBJ_055` — a *played* save's
+     objblk can carry a gate that was up at save time.
+  2. **snapshot serialize** (`systems/persistence/snapshot.serializeWorld`) omits `OBJ_055` —
+     `D_2C74` (the real state) persists; the gate is rebuilt on restore.
+
+  **No `SNAPSHOT_VERSION` bump:** the persisted state *set* is unchanged, so both directions
+  stay compatible — an old save's serialized gates restore-then-reconcile cleanly, and a new
+  save's absent gates are rebuilt from `D_2C74` even by old code; bumping would needlessly
+  reject existing v2 saves. **Red gates (`OBJ_054`) are NOT derived** — they're genuine
+  single-use objects, so they *are* loaded from objblk and *are* serialized.
 
 ---
 
@@ -389,3 +497,50 @@ resolved into §5 and §2.2 respectively.)
   anyway (no solo mode), so it needs no further trace.
 (The "started-game `D_2C74`" question — pre-active vs empty, constants vs stones — is now
 **resolved** in §8.1: a real created save has all 8 slots = the compiled constants.)
+
+---
+
+## 11. Player-facing model — reading the blue network in play
+
+A synthesis of how the §2–§7 mechanics present to a *player* (the "how it plays / how you
+read it" layer the mechanism sections imply but don't state outright).
+
+**It's time-gated fast travel.** Blue gates are the overworld fast-travel system — but you
+don't choose a destination; the moons choose it. That turns travel into a *timing* problem
+layered on a convenience.
+
+**Every blue gate leads to the same place at a given moment.** Gate entry (§5.1) computes
+the destination purely from the moons' phase (the winning moon's slot → `D_2C74[slot]`); it
+never reads *which* gate you entered. So the 8 endpoints are not 8 fixed routes — they are 8
+**entrances to this moment's destination.** Step into any of them and you arrive wherever
+the moons currently point; that endpoint has its own gate, so you hop onward from there.
+
+**Where / how many.** 8 endpoints, one per lunar phase (§2.1): **7 on the surface + 1 at
+z=1** (slot 6, a dungeon — so all 8 are never visible at once). A **moonstone** object is
+placed at each (§8.1) one tile *south* of the gate cell, so the gate forms ~1 tile north of
+the visible stone — you find a gate by finding its stone.
+
+**Reading the sky to predict where you'll land** (§7). Each moon encodes two numbers in two
+channels — the trap is to conflate them:
+
+- its **height / position** in the strip encodes its *phase* → tells you *which moon is
+  active* (the one nearest the top-center, phase ≈ 7, wins) and *whether a gate exists at
+  all* (a moon visible in the sky ⇒ gates are open; an empty sky ⇒ no gate anywhere).
+- its **glyph shape** (new / crescent / quarter / gibbous / full…) encodes its *slot* →
+  tells you *which* of the 8 endpoints it routes to.
+
+So the read is: **the moon nearest the top-center is the active one; its glyph names the
+destination.** A "full-looking" glyph sitting low is *not* active — height decides, glyph
+labels. With a learned glyph→place map the destination is fully predictable. It breaks only
+on **eclipse days** (moons not drawn, §7), an **exact phase tie** (a `Time_M`-based
+tiebreak you can't see in the sky), and **00:00–00:09** (every gate force-routes to the
+Shrine of Spirituality, §5.1 — predictable from the clock, not the moons).
+
+**You can rewire it.** `USE` a moonstone to bury it elsewhere and that phase's endpoint
+moves (overwrites `D_2C74[slot]`, §6); `GET` it and that endpoint goes dark. Persistent,
+buryable-terrain only. This edits the **blue** network *only* — the red Orb's table is fixed
+ROM and never follows a bury (§2.3).
+
+**Arrival wakes the area.** A moongate trip is a teleport, and the teleport path
+force-hatches the destination's eggs (`research_egg.md §2`, `ForceHatching=1`), so monsters
+can be waiting where you land — the direct coupling between fast-travel and the spawn system.

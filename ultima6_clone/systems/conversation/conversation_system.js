@@ -203,10 +203,30 @@ export function makeConversationHost(world, deps) {
   async function drive(vm, ui, session) {
     const gen = vm.run();
     let r = gen.next();
+    let lastWasSay = false;                  // true when the last effect was a say the player hasn't acknowledged
+    // Name reveal (seg_16E1.c:76): the header shows the GENERIC look string (ui.name, e.g.
+    // "mage") until the NPC's name is "known" — TalkFlags bit 0, set by the name keyword's
+    // `SET self 0` (ported as a setFlag effect). Then it shows the real name: a party
+    // member's objlist Names[] entry, or the script's $N (vm.npcName) for everyone else
+    // (source's C_1703_0116). Recompute after each effect so the switch lands the instant
+    // the SET fires mid-conversation.
+    const npcSlot = session ? session.npcSlot : -1;
+    const genericName = ui.name;
+    const updateName = () => {
+      if (npcSlot < 0) return;
+      const known = inParty(npcSlot) || (((A(npcSlot).talkFlags) || 0) & 1) === 1;
+      const real = inParty(npcSlot) ? A(npcSlot).name : vm.npcName;
+      ui.setName(known && real && real !== '(undefined)' ? real : genericName);
+    };
+    updateName();                            // already-known (or party) NPCs show the real name from the start
     while (!r.done && !ui.isClosed()) {
       const eff = r.value;
       let answer;
       if (session && (eff.type === 'pause' || eff.type.startsWith('get') || eff.type === 'ask')) session.waitingOn = eff.type;
+      // Track unacknowledged text: a say sets it; a pause / any input clears it (the player
+      // has now seen + advanced past the text). Drives the end-of-conversation pause below.
+      if (eff.type === 'say') lastWasSay = true;
+      else if (eff.type === 'pause' || eff.type === 'ask' || eff.type.startsWith('get')) lastWasSay = false;
       switch (eff.type) {
         case 'say': ui.say(eff.text); if (session) { session.log.push(eff.text); if (session.log.length > 100) session.log.shift(); } break;
         case 'pause': await ui.pause(); break;
@@ -225,7 +245,14 @@ export function makeConversationHost(world, deps) {
       if (session) session.waitingOn = null;
       if (ui.isClosed()) break;              // window closed (Esc) mid-effect → end
       r = gen.next(answer);
+      updateName();                          // the name keyword's SET may have just made it known
     }
+    // A script can end (LEAVE → done) right after a say with no trailing WAIT — e.g. an
+    // NPC's deferral line ("Thou hadst best speak to Lord British before aught else."). LEAVE
+    // has no implicit wait, and source holds the final line until the player dismisses the
+    // conversation; without this the window would close before that line is readable. So if
+    // a say is still unacknowledged, pause once (press-a-key) before closing.
+    if (lastWasSay && !ui.isClosed()) await ui.pause();
     if (!ui.isClosed()) ui.close();          // VM ended → close the dialog
     if (active === session) { active = null; if (typeof window !== 'undefined' && window.__U6) window.__U6.conversation = null; }
   }

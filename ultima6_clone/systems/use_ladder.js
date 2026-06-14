@@ -29,9 +29,8 @@
 // handler reads it from the USE dispatch ctx (command_dispatch threads avatarRef,
 // recenter, moveFollowers into every USE handler call).
 
-import { setActiveLevel } from './level_change.js';
-import { Position, ObjType, Amount, PartyMember } from '../components/components.js';
-import { SpatialIndex } from '../resources/spatial_index.js';
+import { teleportParty } from './level_change.js';
+import { Position, ObjType, Amount } from '../components/components.js';
 
 export function useLadder({ world, target, message, avatarRef, recenter, moveFollowers }) {
   const pos = world.store(Position);
@@ -64,29 +63,9 @@ export function useLadder({ world, target, message, avatarRef, recenter, moveFol
   }
   // dungeon ↔ dungeon: nx/ny stay on the ladder cell (no rescale).
 
-  setActiveLevel(world, nz);                               // switch level + fire the dungeon-object load (I-19c)
-
-  const spatial = world.getResource(SpatialIndex);
-
-  // Move the avatar to the destination.
-  spatial.remove(pos.x[ai], pos.y[ai], avatarRef.handle);
-  pos.x[ai] = nx; pos.y[ai] = ny; pos.z[ai] = nz;
-  spatial.insertAtHead(nx, ny, avatarRef.handle);
-
-  // Move the rest of the party onto the avatar's cell on the new level (hard cut);
-  // MoveFollowers then spreads them into formation. Stack-then-spread reuses the
-  // party pass-through (canStandAt) — followers walk through each other.
-  for (const id of world.query(PartyMember)) {
-    const h = world.handleOf(id);
-    if (h === avatarRef.handle) continue;
-    spatial.remove(pos.x[id], pos.y[id], h);
-    pos.x[id] = nx; pos.y[id] = ny; pos.z[id] = nz;
-    spatial.insertAtHead(nx, ny, h);
-  }
-  if (moveFollowers) moveFollowers(avatarRef.handle, 1);   // tighten into formation around the avatar
-
-  if (recenter) recenter(nx, ny);                          // camera follows to the destination
-  spatial.dirty = true;                                    // force a render rebuild
+  // The hard-cut party teleport + level switch + camera follow (shared with moongate
+  // travel; systems/level_change.js teleportParty).
+  teleportParty(world, nx, ny, nz, { avatarRef, recenter, moveFollowers });
 
   message(zIncr < 0 ? 'You climb up.' : 'You climb down.');
 }

@@ -48,9 +48,25 @@ export function installDevProbe(world, { canvas, ts, probeEl, cellEl, objlist, s
   // `action`.
   const actionName = new Map(Object.entries(AiAction).map(([k, v]) => [v, k]));
 
-  // Last cell described — cached for I-7c's `I` hotkey to inspect without
-  // re-running describeCell. null when the pointer is outside the canvas.
-  let lastCell = null;
+  // The cursor's last position WITHIN the canvas (screen px), or null when the pointer is
+  // outside it. The world cell under it is DERIVED ON DEMAND (cellFromScreen) from the
+  // current camera + active level — NOT cached — so after a level change / teleport (camera
+  // recenters, surface↔dungeon scale flips) getLastCell reflects the cell the cursor now
+  // points at, not a stale pre-teleport coordinate. (Bug it fixes: USE a ladder down, then
+  // USE again without moving the mouse → "Out of range!", because the cached cell was still
+  // a surface coordinate far from the dungeon avatar; the active-level wrap was also pinned
+  // to 1024 so dungeon cells past the 256 seam came out wrong.)
+  let lastScreen = null;
+
+  // Screen px (within the canvas) -> world cell on the ACTIVE level. Wraps to the active
+  // level's width (MapLevel.tilesWide: 1024 surface / 256 dungeon).
+  function cellFromScreen(sx, sy) {
+    const cam = world.getResource(Camera);
+    const W = world.getResource(MapLevel).tilesWide;
+    const tx = (Math.floor((cam.worldX + sx) / ts) % W + W) % W;
+    const ty = (Math.floor((cam.worldY + sy) / ts) % W + W) % W;
+    return { x: tx, y: ty };
+  }
 
   function describeCell(x, y) {
     const reg = world.getResource(TileRegistry);
@@ -135,11 +151,9 @@ export function installDevProbe(world, { canvas, ts, probeEl, cellEl, objlist, s
     const rect = canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
     if (sx < 0 || sy < 0 || sx >= rect.width || sy >= rect.height) return;
-    const W = 1024;
-    const tx = (Math.floor((cam.worldX + sx) / ts) % W + W) % W;
-    const ty = (Math.floor((cam.worldY + sy) / ts) % W + W) % W;
+    lastScreen = { sx, sy };
+    const { x: tx, y: ty } = cellFromScreen(sx, sy);
     const d = describeCell(tx, ty);
-    lastCell = { x: tx, y: ty };
     // Cell/stand line, then the objs line (variable length → its own line so a
     // crowded cell wraps within the fixed-width HUD), then the NPC line(s) — always
     // present ("NPC: none" when the cell has none) so the probe is a consistent
@@ -166,11 +180,13 @@ export function installDevProbe(world, { canvas, ts, probeEl, cellEl, objlist, s
     probeEl.textContent = 'hover the map…';
     probeEl.classList.remove('pass', 'blocked');
     cellEl.style.display = 'none';
-    lastCell = null;
+    lastScreen = null;
   });
 
   return {
     isDragging: () => dragging,
-    getLastCell: () => lastCell,
+    // Derived from the current camera + active level each call, so it stays correct after a
+    // teleport / level change even if the mouse hasn't moved (see lastScreen note above).
+    getLastCell: () => (lastScreen ? cellFromScreen(lastScreen.sx, lastScreen.sy) : null),
   };
 }

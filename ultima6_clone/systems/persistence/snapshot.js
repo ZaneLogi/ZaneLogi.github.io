@@ -19,10 +19,12 @@
 // resurrect it (research_save_load.md §"Object deletion"; rests on no-region-unload).
 
 import * as Components from '../../components/components.js';
+import { OBJ_BLUE_GATE } from '../../assets/moon_tables.js';
 import { SpatialIndex } from '../../resources/spatial_index.js';
 import { ActorIndex } from '../../resources/actor_index.js';
 import { WorldClock } from '../../resources/world_clock.js';
 import { Party } from '../../resources/party.js';
+import { MoonGates } from '../../resources/moon_gates.js';
 
 // Save-format version. restoreWorld REJECTS any snapshot whose version != this, so a stale
 // save fails cleanly instead of silently mis-restoring. Bump on EVERY persisted-schema change:
@@ -47,9 +49,16 @@ export const SNAPSHOT_VERSION = 2;
 // Viewport — rebuilt on load). WorldSpeed + Camera are deliberately NOT here: the boot
 // owns them (dev_hud re-applies the speed slider; startRender recenters the camera on the
 // avatar), so persisting them would be dead weight that's overwritten on the next load.
+// MoonGates.D_2C74 is the only persisted moongate state — burying relocates a blue
+// endpoint, so the 8x3 array must survive a reload (the moon PHASES are derived,
+// recomputed from the clock on load, so they're not saved). Like I-19's loadedDungeons,
+// this is GRACEFULLY ABSENT in a pre-moongate save: serialize skips it if the resource
+// is missing, restore's `!data` guard leaves the freshly-seeded canonical network in
+// place — so no SNAPSHOT_VERSION bump is needed (an old save just re-seeds the defaults).
 const SAVED_RESOURCES = [
   { cls: WorldClock, fields: ['Time_H', 'Time_M', 'Date_D', 'Date_M', 'Date_Y', 'D_2C55'] },
   { cls: Party,      fields: ['activeIndex', 'mode'] },
+  { cls: MoonGates,  fields: ['D_2C74'] },
 ];
 
 // Every registered component descriptor, in catalog (declaration) order. A def is the
@@ -77,16 +86,25 @@ export function serializeWorld(world, opts = {}) {
   const defs = registeredComponentDefs(world);
   const spatial = world.getResource(SpatialIndex);
 
+  // Blue moongates (OBJ_055) are derived runtime state: spawnBlueGates rebuilds them from
+  // the persisted D_2C74 + moon phase on load, so they're omitted from the dump (else a saved
+  // gate would be both restored AND reconstructed). NO SNAPSHOT_VERSION bump: the persisted
+  // state SET is unchanged (D_2C74 still carries the network), an old save's serialized gates
+  // still restore + reconcile cleanly, and a new save's absent gates are rebuilt from D_2C74
+  // even by old code. research_moongate.md §4.
+  const objStore = world.store(Components.ObjType);
+  const isBlueGate = (i) => world.has(world.handleOf(i), Components.ObjType) && objStore.objNumber[i] === OBJ_BLUE_GATE;
+
   const indices = [];
   const seen = new Set();
   if (spatial) {
     for (const arr of spatial.cells.values())
       for (const h of arr) {
         const i = world.resolve(h);
-        if (i !== -1 && !seen.has(i)) { seen.add(i); indices.push(i); }
+        if (i !== -1 && !seen.has(i) && !isBlueGate(i)) { seen.add(i); indices.push(i); }
       }
   }
-  for (const i of world.query()) if (!seen.has(i)) { seen.add(i); indices.push(i); }
+  for (const i of world.query()) if (!seen.has(i) && !isBlueGate(i)) { seen.add(i); indices.push(i); }
 
   const indexToSaveId = new Map();
   indices.forEach((i, saveId) => indexToSaveId.set(i, saveId));

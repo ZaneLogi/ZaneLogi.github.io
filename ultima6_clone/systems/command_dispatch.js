@@ -28,9 +28,9 @@ import { equipSlotForTile, buildEquipment, resolveReadySlot } from './equip_slot
 import { canStandAt } from './passability.js';
 import { DIR_DX, DIR_DY, dirFromKeyEvent } from './avatar_move_system.js';
 import { AI_SLEEP } from './ai_modes.js';
+import { clearMoonstoneSlot, castRedGate } from './moongate_runtime.js';
 
 const CLOSE_ENOUGH = 1;                 // Chebyshev reach for adjacency verbs (USE etc.)
-const WORLD = 1024;                     // tile-torus width (matches the render/probe wrap)
 const ALIGN_EVIL = 0x20, ALIGN_CHAOTIC = 0x60;   // NPCStatus alignment bits (u6.h:116/118)
 
 // Verb-first key bindings. Extended as verbs land (U=use, L=look, G=get, M=move, …).
@@ -61,13 +61,14 @@ function withArticle(name) {
 // from the per-cell scan. Deferred vs source: the IsTileSu "table-surface accept"
 // (C_27A1_1330) is treated as no surface — you can't push an object onto a tabletop yet.
 function canPushTo(world, handle, ox, oy, dir) {
-  const dx = (ox + DIR_DX[dir]) & 0x3ff, dy = (oy + DIR_DY[dir]) & 0x3ff;
+  const mask = world.getResource(MapLevel).wrapMask;                   // active level wrap (0x3ff surface / 0xff dungeon)
+  const dx = (ox + DIR_DX[dir]) & mask, dy = (oy + DIR_DY[dir]) & mask;
   if (!canStandAt(world, dx, dy, { actorId: handle })) return false;   // destination blocked
   if (!(dir & 1)) return true;                                         // cardinal: open destination is enough
   const aDir = (dir + 7) & 7, bDir = (dir + 1) & 7;                    // diagonal: the two flanking cardinals
-  const ax = (ox + DIR_DX[aDir]) & 0x3ff, ay = (oy + DIR_DY[aDir]) & 0x3ff;
+  const ax = (ox + DIR_DX[aDir]) & mask, ay = (oy + DIR_DY[aDir]) & mask;
   if (canStandAt(world, ax, ay, { actorId: handle })) return true;
-  const bx = (ox + DIR_DX[bDir]) & 0x3ff, by = (oy + DIR_DY[bDir]) & 0x3ff;
+  const bx = (ox + DIR_DX[bDir]) & mask, by = (oy + DIR_DY[bDir]) & mask;
   return canStandAt(world, bx, by, { actorId: handle });
 }
 
@@ -116,9 +117,14 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
   // disarm when it didn't — keeping the object pending for the push-direction key.
   function confirm(cell) {
     if (!cell) { message('What?', 'miss'); disarm(); return; }
+    // I-moongate e: the Orb's 5x5 "Where:" cast pick — castRedGate validates range +
+    // placement and spawns the OBJ_054 (it's not a verb-table handler).
+    if (pendingVerb === 'cast') { castRedGate(world, cell.x, cell.y, { avatarRef, message }); disarm(); return; }
     dispatch({ verb: pendingVerb, target: { x: cell.x, y: cell.y }, item: pendingDropItem });
     if (!awaitingDir) disarm();
   }
+  // I-moongate e: USE-Orb arms this cast cursor (threaded into the Orb USE handler).
+  function armOrbCast() { pendingVerb = 'cast'; showCue('Where'); }
   // DROP's two-stage target: the inventory picker (main.js) calls this with the chosen
   // carried item, which arms the map cursor for the location pick. Mirrors source's `D`
   // → switch panel to inventory + SelectMode/SelectRange (seg_0A33.c:1088), then the
@@ -184,12 +190,16 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
     const i = avatarRef.handle !== undefined ? world.resolve(avatarRef.handle) : -1;
     return i === -1 ? null : { x: posStore.x[i], y: posStore.y[i] };
   }
-  // wrap-aware Chebyshev on the tile torus.
+  // wrap-aware Chebyshev on the ACTIVE level's tile torus (1024 surface / 256 dungeon).
+  // Reading the live width matters at the dungeon seam: a fixed 1024 would mis-measure
+  // adjacency for a target wrapped across the 256 boundary (same class as the dev-probe
+  // cursor-cell fix).
   function withinReach(target, reach = CLOSE_ENOUGH) {
     const a = avatarPos();
     if (!a) return false;
-    const dx = Math.min((a.x - target.x + WORLD) % WORLD, (target.x - a.x + WORLD) % WORLD);
-    const dy = Math.min((a.y - target.y + WORLD) % WORLD, (target.y - a.y + WORLD) % WORLD);
+    const W = mapLevel.tilesWide;
+    const dx = Math.min((a.x - target.x + W) % W, (target.x - a.x + W) % W);
+    const dy = Math.min((a.y - target.y + W) % W, (target.y - a.y + W) % W);
     return Math.max(dx, dy) <= reach;
   }
 
@@ -218,7 +228,8 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
     const ox = posStore.x[oi], oy = posStore.y[oi];
     const name = displayName(world, handle, { reg, objlist });
     if (!canPushTo(world, handle, ox, oy, dir)) { message("You can't move it there."); return; }
-    moveMapObject(world, handle, (ox + DIR_DX[dir]) & 0x3ff, (oy + DIR_DY[dir]) & 0x3ff);
+    const mask = mapLevel.wrapMask;   // active level wrap (0x3ff surface / 0xff dungeon)
+    moveMapObject(world, handle, (ox + DIR_DX[dir]) & mask, (oy + DIR_DY[dir]) & mask);
     message(`You move ${withArticle(name)}.`);
   }
 
@@ -237,7 +248,7 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
     // Most USE handlers need only {world, target, message}; the ladder (I-19d) also reads
     // avatarRef/recenter/moveFollowers to teleport the party + follow the camera. Threaded
     // into every USE call; the other handlers ignore the extras.
-    if (fn) { fn({ world, target: { ...target, entity: pick }, message, avatarRef, recenter, moveFollowers }); return; }
+    if (fn) { fn({ world, target: { ...target, entity: pick }, message, avatarRef, recenter, moveFollowers, armOrbCast, objlist }); return; }
     const name = displayName(world, pick, { reg, objlist });
     message(`Nothing happens. (${name})`);
     console.warn(`USE: no handler for obj #${objNum} (${name})`);
@@ -285,7 +296,11 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
     const holder = avatarRef.handle;
     if (holder === undefined) return;
     const name = displayName(world, pick, { reg, objlist });
+    const frame = objStore.frame[world.resolve(pick)];               // read before the move (entity survives, but read here for clarity)
     moveToInventory(world, pick, holder);
+    // I-moongate d: picking up a moonstone (OBJ_049) clears its blue endpoint
+    // (seg_27a1.c:887-891) so that gate stops spawning.
+    if (objNum === 0x049) clearMoonstoneSlot(world, frame);
     message(`You get ${withArticle(name)}.`);
   });
 
@@ -429,8 +444,22 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
     confirm(probe.getLastCell());
   });
 
+  // Inventory USE (I-moongate review): the map `use` verb targets a cell via pickAtCell;
+  // this is its inventory analog — USE a HELD item by handle, routing to the SAME
+  // useHandlers registry. One-step at the dispatch (source's USE dispatch is one-step,
+  // C_27A1_6179); a handler that needs a target issues its OWN follow-up — e.g. the Orb
+  // arms the "Where:" cast cursor via armOrbCast (the caller closes the inventory modal
+  // first, so that map cursor is live). Bound from the inventory window's `U` verb.
+  function useItem(handle) {
+    const i = handle != null ? world.resolve(handle) : -1;
+    if (i === -1) { message('Nothing happens.', 'miss'); return; }
+    const fn = commands.useHandlers.get(objStore.objNumber[i]);
+    if (fn) { fn({ world, target: { entity: handle }, message, avatarRef, recenter, moveFollowers, armOrbCast, objlist }); return; }
+    message(`Nothing happens. (${displayName(world, handle, { reg, objlist })})`);
+  }
+
   return {
-    dispatch, armDrop, giveItem, equipToggle,
+    dispatch, armDrop, giveItem, equipToggle, useItem,
     isPending: () => pendingVerb !== null,
   };
 }

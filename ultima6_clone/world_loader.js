@@ -25,6 +25,7 @@ import { Schedules } from './resources/schedules.js';
 import { ActorIndex } from './resources/actor_index.js';
 import { Position, Renderable, ObjType, Status, Amount, Actor, Schedule, Container, ContainedIn, PartyMember, AIMode, Destination, Alignment, MoveSpeed } from './components/components.js';
 import { AI_COMMAND, AI_FOLLOW, AI_SCHEDULE } from './systems/ai_modes.js';
+import { OBJ_BLUE_GATE } from './assets/moon_tables.js';
 
 const LOCXYZ = CoordUse.LOCXYZ;
 
@@ -131,6 +132,12 @@ function spawnObjblkRecords(world, records, label, levelZ) {
   for (let i = 0; i < records.length; i++) {
     const rec = records[i];
     if (rec.coordUse === LOCXYZ) {
+      // Blue moongates (OBJ_055) are derived runtime state — spawnBlueGates reconstructs
+      // them from D_2C74 + moon phase, so they're never authored map data. Skip any a
+      // played-save's objblk carries: the spawn-reconcile can't dedupe two gates on one
+      // cell, so a loaded gate beside the reconstructed one would persist as a duplicate.
+      // Red gates (OBJ_054) ARE genuine single-use objects — keep them. research_moongate.md §4.
+      if (rec.objNumber === OBJ_BLUE_GATE) continue;
       handleByInFileIdx[i] = spawnFromRecord(world, reg, spatial, rec, false, levelZ);
       objects++;
     } else if (rec.coordUse === CoordUse.INVEN || rec.coordUse === CoordUse.EQUIP) {

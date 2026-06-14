@@ -22,6 +22,7 @@ import { Camera } from './resources/camera.js';
 import { Viewport } from './resources/viewport.js';
 import { WorldClock } from './resources/world_clock.js';
 import { WorldSpeed } from './resources/world_speed.js';
+import { MoonGates } from './resources/moon_gates.js';
 import { makeRenderSystem } from './systems/render_system.js';
 import { makeCameraSystem } from './systems/camera_system.js';
 import { makeTileAnimationSystem } from './systems/tile_animation_system.js';
@@ -34,6 +35,7 @@ import { Paths } from './resources/paths.js';
 import { Schedules } from './resources/schedules.js';
 import { ActorIndex } from './resources/actor_index.js';
 import { installNpcScheduleSystem } from './systems/npc_schedule_system.js';
+import { installMoonPhaseSystem } from './systems/moon_phase_system.js';
 import { installNpcTickSystem } from './systems/npc_tick_system.js';
 import { installAvatarMovement } from './systems/avatar_move_system.js';
 import { installMoveFollowers, settleParty } from './systems/move_followers.js';
@@ -52,6 +54,8 @@ import { makePickAtCell } from './systems/cell_pick.js';
 import { installCommandDispatch } from './systems/command_dispatch.js';
 import { registerUseHandlers } from './systems/use_handlers.js';
 import { setActiveLevel } from './systems/level_change.js';
+import { installBlueGateSpawn, checkGateEntry, castRedGate } from './systems/moongate_runtime.js';
+import { installMoongateHud } from './view/moongate_hud.js';
 import { serializeWorld, restoreWorld } from './systems/persistence/snapshot.js';
 
 // Gating set for terrain + flags (I-1b) + world objects (I-2) + NPC schedules (I-5) +
@@ -235,6 +239,7 @@ async function load() {
     Date_D: objlist.globals.dateDay, Date_M: objlist.globals.dateMonth, Date_Y: objlist.globals.dateYear,
   }));
   world.setResource(new WorldSpeed(1));           // I-14d: master pace scalar (NPC rate + clock); slider-driven
+  world.setResource(new MoonGates());             // I-moongate: blue-network endpoints (D_2C74, seeded from constants) + moon phases
   world.registerComponent(Position).registerComponent(Renderable)
        .registerComponent(ObjType).registerComponent(Status)
        .registerComponent(Amount).registerComponent(Actor)
@@ -268,6 +273,10 @@ async function load() {
   // their resolved slot position. Returned stats object is mutated each tick.
   const npcScheduleStats = installNpcScheduleSystem(world);
   window.__U6.npcScheduleStats = npcScheduleStats;
+
+  // I-moongate (b): moon-phase clock. Registers the WorldClock.onHour recompute +
+  // does an initial sync (so a restored game's phases are valid before the next hour).
+  installMoonPhaseSystem(world);
 
   // I-12c: conversation portraits — raw bytes (OPTIONAL set) decoded lazily by the
   // dialog window through u6pal (research_portraits.md). Absent files -> blank box.
@@ -439,15 +448,26 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   // toward their formation slots behind it (MoveFollowers). onMove composes the
   // camera recenter + the follow step.
   const moveFollowers = installMoveFollowers(world);
+  // I-moongate (c): the gate-entry context (avatar/camera/follow + message channel) the
+  // post-move check + GateTravel need — the same shape the USE dispatch threads.
+  const moonCtx = { avatarRef, recenter: centerOn, moveFollowers, message };
   const avatarMoveSystem = avatarIdx !== -1
     ? installAvatarMovement(world, {
         avatarRef,
-        onMove: (x, y) => { centerOn(x, y); moveFollowers(avatarRef.handle, 0); },
+        onMove: (x, y) => {
+          centerOn(x, y); moveFollowers(avatarRef.handle, 0);
+          checkGateEntry(world, moonCtx);               // I-moongate (c): step onto a moongate -> travel
+        },
         onIdle: () => settleParty(world),               // I-8e: party plants its feet when idle
         isBlocked: () => !uiStack.isEmpty(),
       })
     : null;
   if (avatarMoveSystem) world.addSimSystem(avatarMoveSystem);     // consume the pending step
+  // I-moongate (c): blue-gate spawn — registers the hourly reconcile + a per-turn
+  // level-change watch that re-spawns on entering/leaving a dungeon (slot 6 is z=1).
+  // Registered after installMoonPhaseSystem (load()) so its onHour runs after the phase
+  // recompute; the returned sim system's first tick reconciles the initial gate set.
+  world.addSimSystem(installBlueGateSpawn(world));
   // I-9d: NPC pathfinding tick. Each turn, AI_FINDPATH NPCs build a path in their own
   // 40x40 window and walk it (AI_ONPATH); far/unreachable slots snap. Sim-list system
   // so it inherits the turn-driver gating (breathe<->pause). Runs after the avatar
@@ -476,6 +496,20 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
     npcScheduleStats,
     npcTickStats: npcTick.stats,
   });
+
+  // I-moongate (h/g): the composited sky strip (clock panel) + the gate/phase readout
+  // (dev panel). Both ride on the moon-phase clock (b).
+  installMoongateHud(world, {
+    skyEl:     document.getElementById('sky-view'),
+    readoutEl: document.getElementById('moon-readout'),
+    reg,
+  });
+  window.__U6.moonGates = world.getResource(MoonGates);   // dev: live D_2C74 + phases
+  window.__U6.checkGateEntry = () => checkGateEntry(world, moonCtx);   // dev: run the post-move gate-entry check at the avatar's cell
+  window.__U6.castRedGate = (tx, ty) => castRedGate(world, tx, ty, moonCtx);   // dev: cast a red gate at (tx,ty) (skips the Orb USE/5x5-pick UI)
+  // dev: enable the Orb of the Moons without the Lord British conversation (sets
+  // TalkFlags[5] bit 5, the in-game gate the LB setFlag opcode would set). I-moongate e.
+  window.__U6.enableOrb = () => { objlist.actors[5].talkFlags = (objlist.actors[5].talkFlags || 0) | (1 << 5); return 'Orb enabled (TalkFlags[5] bit 5 set)'; };
 
   // I-18a: dev-panel toggle (strip "dev" button + backtick key). Plain show/hide — the panel
   // is NOT a UIStack modal (it must keep updating while the world ticks + never grab keys).
@@ -527,6 +561,7 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
     recenter: centerOn, moveFollowers,          // I-19d: the ladder handler teleports the party + follows the camera
   });
   window.__U6.cmd = cmd;            // dev: live dispatch({verb, target}) + isPending()
+  window.__U6.probe = probe;        // dev: isDragging() + getLastCell() (level-aware cursor cell)
   window.__U6.pickAtCell = pickAtCell;
   window.__U6.openInventoryWindow = (holder, onVerb) =>     // dev: open the I-10j verb-aware window
     openInventoryWindow(world, holder ?? avatarRef.handle, uiStack, { reg, objlist, onVerb: onVerb ?? ((v, i) => console.log('[inv]', v, i.handle)) });
@@ -603,6 +638,10 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
           if (verb !== 'drop') return;
           while (uiStack.depth() > 0) uiStack.pop();            // detonate the chain back to the map
           cmd.armDrop(item.handle);
+        },
+        onUse: (item) => {                            // inventory USE: detonate to the bare map (the handler
+          while (uiStack.depth() > 0) uiStack.pop();  // may arm a map follow-up — the Orb's "Where:" cast cursor)
+          cmd.useItem(item.handle);
         },
         onGive: (item) => {
           openRecipientPicker(uiStack, {
