@@ -28,6 +28,26 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-15 — I-13 fix: conversation ends after the look-line for PREFIX+MAIN scripts
+
+- **Symptom** (Zane, live in the preview): talking to **Nicodemus** (58) opened the dialog, showed
+  "You see a wizened old man with a ready smile," then **closed on the next click** — no greeting,
+  no topics.
+- **Root cause** (`systems/conversation/conversation_vm.js` `run()`): the per-talk body is marked by
+  `OP_MAIN` (0xf2), but **33/200 scripts** precede it with `OP_PREFIX` (0xf3) — the bytes run
+  `f3 f2` back-to-back (Nicodemus, **Ephemerides 35, Xiao 36, Dale 70, Zoltan 133**, …). The
+  skip-to-body loop broke on the FIRST marker (PREFIX) and left MAIN in the stream; the ask loop then
+  read MAIN (≥0xf0) as a structural terminator → `done` right after the look-line. The 165 lone-`MAIN`
+  NPCs worked, so I-13's tests never tripped it (`u6converse.txt`'s "f2 or f3" was really "f2,
+  optionally prefixed by f3").
+- **Fix**: `run()` now consumes the WHOLE consecutive PREFIX/MAIN marker run, landing the pc on the
+  greeting (or ASKTOP) — never on a leftover marker. Backward-compatible with the lone-`MAIN` shape.
+- **Verified**: VM unit pump on 58 now emits look → pause → "Good …, Avatar. For what purpose hast
+  thou come?" → ask; Lord British (5, lone MAIN) unchanged. Live UI: Nicodemus talks end-to-end
+  (greeting + name/job + keyword chips). Suite `test_conversation_vm` **27 → 30** (+3 regression
+  tests for both PREFIX+MAIN header shapes, with/without a leading WAIT).
+- **Next**: resume the NPC-script quest trace.
+
 ## 2026-06-15 — Z-order fix: object-vs-object cross-anchor ordering (broken lens under altar)
 
 - **Trigger**: Zane reported the **broken lens** (`OBJ_18B`/395, (124,194,z5)) "not displayed

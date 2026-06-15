@@ -218,6 +218,33 @@ function tableScript(indexFactor) {
   check('indexed table: RND index honored (gamma at rng-high)', says(eR).includes('gamma'), says(eR));
 }
 
+// ============== PREFIX + MAIN double marker (regression) ====================
+// 33/200 shipped scripts (Nicodemus 58, Ephemerides 35, Dale 70, Zoltan 133, …) mark
+// the per-talk body with OP_PREFIX (0xf3) immediately followed by OP_MAIN (0xf2). The
+// skip-to-body must consume BOTH markers; if it stops at PREFIX and leaves MAIN in the
+// stream, the ask loop reads MAIN (>=0xf0) as a terminator and the conversation ends
+// right after the look-line — the "click → dialog closes, no talk" bug. Both header
+// shapes (with / without a WAIT pause before the markers) lock the fix in.
+{
+  // Nicodemus shape: DESC <look> WAIT PREFIX MAIN <greeting> ASKTOP
+  const vmW = new ConversationVM(asm([
+    OP.ID, 58, 'Nick', OP.DESC, 'an old man.', OP.WAIT, OP.PREFIX, OP.MAIN, 'Greetings!',
+    { label: 'ASK' }, OP.ASKTOP, OP.KEY, 'bye', OP.RES, 'Bye.', OP.LEAVE, OP.ENDRES,
+  ]));
+  const eW = drive(vmW, { inputs: ['bye'] });
+  check('PREFIX+MAIN (with WAIT): greeting emitted past the markers', says(eW).includes('Greetings!'), says(eW));
+  check('PREFIX+MAIN (with WAIT): reaches the ask, no premature end', eW.some(e => e.type === 'ask'), eW.map(e => e.type).join(','));
+
+  // Zoltan shape: DESC <look> PREFIX MAIN <greeting> ASKTOP (no WAIT)
+  const vmN = new ConversationVM(asm([
+    OP.ID, 59, 'Z', OP.DESC, 'a gypsy.', OP.PREFIX, OP.MAIN, 'Huzzah!', OP.ASKTOP,
+    OP.KEY, 'bye', OP.RES, 'Bye.', OP.LEAVE, OP.ENDRES,
+  ]));
+  const eN = drive(vmN, { inputs: ['bye'] });
+  check('PREFIX+MAIN (no WAIT): greeting emitted + reaches ask',
+    says(eN).includes('Huzzah!') && eN.some(e => e.type === 'ask'), says(eN));
+}
+
 // ---- summary ----
 console.log(`\n${pass}/${pass + fail} passed${fail ? ` — ${fail} FAILED` : ''}`);
 window.__TEST_RESULT = { pass, fail, results };

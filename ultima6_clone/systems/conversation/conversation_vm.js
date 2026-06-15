@@ -98,9 +98,20 @@ export class ConversationVM {
     yield* this.statement();
 
     // --- MAIN: skip to body, then the optional greeting (seg_1703.c:1101-1109).
-    //     OP_PREFIX (0xf3) is an alternative body marker some NPCs use (u6converse.txt
-    //     "f2 or f3"); accept either as the start of the main body. ---
-    while (this.pc < this.end) { const c = this._u8(); if (c === OP.MAIN || c === OP.PREFIX) break; }
+    //     The per-talk body is marked by OP_MAIN (0xf2). 33/200 scripts (e.g. Nicodemus,
+    //     Ephemerides, Dale, Zoltan) precede it with OP_PREFIX (0xf3) — the bytes run
+    //     `f3 f2` back-to-back (u6converse.txt's "f2 or f3" was really "f2, optionally
+    //     prefixed by f3"). Consume the WHOLE marker run so pc lands on the greeting (or
+    //     ASKTOP), NEVER on a leftover marker: a stray OP_MAIN left in the stream is >= 0xf0,
+    //     so the ask loop below would read it as a terminator and end the conversation right
+    //     after the look-line (the "click → dialog closes, no talk" bug). ---
+    while (this.pc < this.end) {
+      const c = this._u8();
+      if (c === OP.MAIN || c === OP.PREFIX) {
+        while (this.pc < this.end && (d[this.pc] === OP.MAIN || d[this.pc] === OP.PREFIX)) this.pc++;
+        break;
+      }
+    }
     if (d[this.pc] !== OP.ASKTOP) {
       yield* this.statement();                 // the NPC's opening line
     }
