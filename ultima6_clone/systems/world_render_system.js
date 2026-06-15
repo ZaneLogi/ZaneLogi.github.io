@@ -19,23 +19,37 @@
 //   - fgExt tiles insert at TAIL. First-inserted = chain head = drawn first (bottom).
 //     So newer entity = on top (opposite of normal/fgHot).
 //
-// We mirror source's per-cell ordering with a TYPE-BASED Z-PRIORITY rather than the
-// chain: Actor entities get priority 1 (drawn last within their zone = on top), all
-// else gets 0. This decouples Z-order from entity index — which would otherwise be
-// fragile once world.create() starts reusing freed slots in the object-interaction
-// phase (a recycled low index could put a new object above NPCs).
-//
-// WITHIN-ZONE TIE-BREAK (e.g. candle on a table — both `normal` zone, both
-// non-Actor): we iterate `spatial.at` in REVERSE so older entries (chain head,
-// per loadRegion's file-order push + insertAtHead at runtime) emit LATER, get
-// drawn LATER, and end up on TOP. This mirrors source's ShowObject
-// (seg_1184.c:1676-1699): for non-foreground tiles it inserts NEW at the HEAD
-// of Obj_11x11[y][x], and the render walks that list forward (first-in-list
-// drawn first = bottom). So source's effect is "first-inserted (= older) ends
-// up at the tail of the render list = drawn last = on top." Our reverse-iter
-// reproduces that without modeling Obj_11x11 explicitly. fgExt's "newer at
-// tail = top" rule (source's ShowObject fg-branch) inverts this — multi-fgExt-
-// per-cell is rare in u6 data; revisit if it ever surfaces.
+// We mirror source's per-cell ordering with a TYPE-BASED Z-PRIORITY plus an
+// ANCHOR-POSITION tie-break, rather than rebuilding source's chain:
+//   1. Z-PRIORITY — Actor entities get priority 1 (drawn last within their zone =
+//      on top), all else 0. This decouples Z-order from entity index — fragile
+//      once world.create() reuses freed slots — and keeps NPCs above furniture/
+//      floor (Lord British on his throne, even though the throne's 2×2 extension
+//      reaches into his cell). Source analog: SearchArea visits the actor and the
+//      object, both head-insert, but the actor-on-top intent is what matters here.
+//   2. ANCHOR (Y,X) ORDER — for equal priority, sort by the contributing object's
+//      anchor position so the LOWER (Y, then X) anchor draws LAST = on top. Source
+//      visits objects in (Y,X) order (the position-sorted Link[] chain, C_1184_02FA
+//      / SearchArea seg_1184.c:139/369) and head-inserts each normal tile
+//      (seg_1184.c:1698-1699); the blit walks head→tail (head = bottom,
+//      C_0A33_09CE seg_0A33.c:363-369). So the FIRST-visited (lower Y,X) object
+//      ends at the chain tail = drawn last = ON TOP. This reproduces source when a
+//      2×2 EXTENSION reaches into a cell that also holds an anchored object — e.g.
+//      a broken lens at (124,194) under an altar anchored at (125,195): the lens's
+//      lower Y wins and draws on top, as in source. It generalizes the Actor case
+//      above to the object-vs-object case.
+//   3. SAME-ANCHOR TIE — JS sort is stable, so two contributions from the SAME
+//      anchor cell (same Y,X) keep their emit order. We iterate `spatial.at` in
+//      REVERSE so older entries (chain head — loadRegion file-order push +
+//      insertAtHead at runtime) emit LATER, get drawn LATER, end up on TOP — the
+//      candle-on-table / door-in-doorway case. Source's head-insert effect is
+//      "first-inserted (= older) ends at the render tail = on top"; the reverse-
+//      iter reproduces it without modeling Obj_11x11 explicitly.
+// CAVEAT — the (Y,X) order is the source-faithful direction for the head-insert
+// zones (normal, fgHot). For bg (terrain overwrite, last-write-wins) and fgExt
+// (source's fg-branch TAIL-insert = newer on top) the source direction inverts,
+// but MULTIPLE same-zone bg/fgExt contributions in ONE cell are rare in u6 data
+// (single-per-cell is direction-independent); revisit if it ever surfaces.
 //
 // The cell-scan is gather-then-sort: visit each cell, scan the 4 anchor candidates
 // whose footprint COULD cover it (own anchor + 3 neighbors that may extend in),
@@ -112,17 +126,26 @@ export function makeWorldRenderSystem(renderer) {
               });
               if (landed === -1) continue;
               const zPri = world.has(handle, Actor) ? 1 : 0;
-              contributions.push({ tile: landed, zPri, isExt: (dx > 0 || dy > 0) });
+              // ay/ax = the contributing object's ANCHOR cell (col+dx, row+dy) — the
+              // key source orders objects by (Y then X). Un-wrapped (matches isExt +
+              // screen pos), so a 2×2 straddling the seam stays internally consistent.
+              contributions.push({ tile: landed, zPri, isExt: (dx > 0 || dy > 0), ay: row + dy, ax: col + dx });
             }
           }
         }
         if (contributions.length === 0) continue;
 
-        // Sort ascending by z-priority: 0 (objects) first → emitted first → drawn
-        // first within the zone = bottom; 1 (Actors) last → emitted last → drawn
-        // last = on top. JS sort is stable, so multi-Actor or multi-object ties
-        // preserve scan order — deterministic across frames at a given world state.
-        contributions.sort((a, b) => a.zPri - b.zPri);
+        // Sort to bottom→top emit order:
+        //   primary  — z-priority ascending: objects (0) before Actors (1), so an
+        //              Actor draws last within its zone = on top (LB on his throne).
+        //   secondary — among equal priority, source's object-visit (Y,X) order:
+        //              the LOWER (ay, then ax) anchor was visited FIRST and head-
+        //              inserts to the chain tail = drawn last, so it must sort LAST
+        //              here → compare with b - a (descending). Fixes a 2×2 extension
+        //              (altar) covering a lower-Y anchored object (broken lens).
+        //   stable    — same priority AND same anchor keeps reverse-scan order
+        //              (candle-on-table), since JS sort is stable.
+        contributions.sort((a, b) => (a.zPri - b.zPri) || (b.ay - a.ay) || (b.ax - a.ax));
 
         const c = col - tileX, r = row - tileY;
         if (c < -1 || c > cols || r < -1 || r > rows) continue;

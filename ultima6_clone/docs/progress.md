@@ -269,15 +269,20 @@ faithful render together (Zane's call).
   (spatial-walk + 4-zone cross-cell order: **background → normal → FG-hotspot →
   FG-extension**) replaces I-1d's 2-zone `EntityRenderSystem`. Within-zone
   order: for each visible cell, gather all contributions (own anchor + the 3
-  neighbor anchors whose 2×2 footprint can reach in), then sort ascending by a
-  **type-based z-priority** (`Actor=1`, else=0; JS stable sort keeps ties in
-  scan order) before emitting to the zone lists — `Actor` entities end up
-  drawn last within zone = on top of furniture/floor objects. This rule
-  replaces an earlier "reverse load order" iteration that broke for
-  double-tile extensions reaching IN from a neighbor (the LB-throne bug
-  surfaced post-I-5). See `research_map_render.md §"Painter's algorithm"` for
-  the full source-vs-clone comparison + the deferred fgExt-source-faithful
-  rule. Two render channels extracted as systems:
+  neighbor anchors whose 2×2 footprint can reach in), then sort by a
+  **type-based z-priority** (`Actor=1`, else=0) then the contributing object's
+  **anchor `(Y,X)` descending** (JS stable sort keeps same-`(zPri,Y,X)` ties in
+  reverse-scan order) before emitting to the zone lists — `Actor` entities end up
+  drawn last within zone = on top of furniture/floor objects, and among equal-
+  priority objects the **lower-`(Y,X)` anchor draws on top** (source's object-visit
+  order: the position-sorted `Link[]` chain + HEAD-insert + head→tail blit). The
+  z-priority replaced an earlier "reverse load order" iteration that broke for
+  double-tile extensions reaching IN from a neighbor (the LB-throne bug surfaced
+  post-I-5); the **anchor-`(Y,X)` key (added 2026-06-15)** extends that fix to the
+  object-vs-object case — a broken lens at (124,194,z5) was hidden under an altar's
+  2×2 extension (same bug class, but no `Actor` to break the tie). See
+  `research_map_render.md §"Painter's algorithm"` for the full source-vs-clone
+  comparison + the deferred fgExt/bg-direction caveat. Two render channels extracted as systems:
   `TileAnimationSystem` (animdata frame-remap → `reg.animDirty`) and
   `PaletteCycleSystem` (the 0xE0–0xFC palette-register shimmer, ported from the legacy
   `colorCycling`). Painter's algorithm decoded from `ShowObject` (seg_1184.c:1651) and

@@ -28,6 +28,32 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-15 — Z-order fix: object-vs-object cross-anchor ordering (broken lens under altar)
+
+- **Trigger**: Zane reported the **broken lens** (`OBJ_18B`/395, (124,194,z5)) "not displayed
+  correctly." Live-traced it: the lens tile `0x6d2` decodes fine (a violet/cracked lens); it was
+  **occluded** by an **altar** (obj 328, frame-3 tile `0x4b7`, a 2×2) anchored at (125,195) whose
+  NW quadrant lands on the lens cell. Removing the altar live revealed the lens.
+- **Read** (to settle "is the occlusion faithful?"): `ShowObjects`/`ShowObject` (seg_1184.c:1723/
+  1651), the double-tile emit `C_1184_35EA` (:1702), `SearchArea`/`NextArea` (:369/:345) and the
+  **position-sorted `Link[]` chain** `C_1184_02FA` (:139, Y-then-X break tests :162-166/:194-201),
+  HEAD-insert (:1698-1699), and the blit `C_0A33_09CE` (seg_0A33.c:363-369, head=bottom).
+- **Found**: source visits objects in **(Y,X)** order and head-inserts non-FG tiles, so the
+  **lower-(Y,X) object draws on top**. Lens (Y=194) < altar (Y=195) ⇒ **source draws the lens ON
+  TOP** — the clone's occlusion was a **z-order bug**. Cause: `world_render_system.js` gathered
+  per-cell contributions in a fixed own-anchor-then-neighbor scan order, ignoring the objects'
+  relative (Y,X); the existing `zPri` (Actor-on-top) fix only covers NPC-vs-object, not
+  object-vs-object.
+- **Fixed**: added an **anchor-`(Y,X)` descending secondary sort key** after `zPri` in
+  `world_render_system.js` (each contribution now carries `ay/ax`). Reproduces source for the
+  reaching-in case; `zPri` primary preserves LB-on-throne, stable sort preserves the same-anchor
+  reverse-iter (candle/table). Verified live: lens now over altar; LB still over throne;
+  potions/candle still over tables; no console errors.
+- **Docs**: `research_map_render.md §"Painter's algorithm"` rewritten (3-key within-tier order +
+  the broken-lens repro + fgExt/bg-direction caveat); `progress.md` I-2c scope updated.
+- **Next**: optional commit (awaiting Zane's go-ahead). The bg/fgExt multi-same-cell tail-insert
+  direction remains the documented deferral.
+
 ## 2026-06-14 — I-egg IMPLEMENTED (a · b · d-visual · c · e · f) — eggs hatch end-to-end
 
 - **Built** the whole egg/creature-spawn subsystem in one session (Zane: "continue all sub steps

@@ -705,52 +705,78 @@ two terrain layers):
 cells never share pixels — Z-order only matters *within* a cell, and the four zones
 give exactly `ShowObject`'s cross-zone order.
 
-**Within a zone, two rules combine to decide the view.** When multiple objects share a
+**Within a zone, three keys combine to decide the view.** When multiple objects share a
 cell *and* a zone (e.g. an NPC standing on a carpet — both "normal"; a candle on a
-table — both "normal"), no flag separates them. `WorldRenderSystem` **gathers per-cell
-contributions** then sorts before emit, using a type-priority for the NPC-vs-object
-case and reverse iteration for the object-vs-object case:
+table — both "normal"; a broken lens under an altar's 2×2 extension — both "normal"),
+no flag separates them. `WorldRenderSystem` **gathers per-cell contributions** then
+sorts before emit, using a **type-priority** (NPC over object, same cell), the
+contributing object's **anchor `(Y,X)` order** (a double-tile extension reaching in
+draws under an object anchored AT the cell — source's position-sorted visit order),
+and **reverse iteration** as the same-anchor tie-break:
 
 1. For each visible cell `(col, row)`, scan the 4 anchor candidates whose 2×2 footprint
    could cover it — `(col, row)`, `(col+1, row)`, `(col, row+1)`, `(col+1, row+1)`.
 2. For each anchor's entity array, iterate **in REVERSE** (`for k = ents.length-1; k >=
-   0; k--`). This is the within-zone tie-break for same-priority objects (see
+   0; k--`). This is the same-anchor tie-break for same-priority objects (see
    "Within-tier order" below).
 3. For each entity, ask `forEachOccupiedCell` whether it contributes a tile *at this
-   exact cell* (catching extensions from neighbors). Collect `{tile, zPri, isExt}` per
-   contribution.
+   exact cell* (catching extensions from neighbors). Collect `{tile, zPri, isExt, ay,
+   ax}` per contribution, where `(ay, ax) = (row+dy, col+dx)` is the contributing
+   object's anchor cell.
 4. Compute `zPri`: **`Actor` entities = 1, everything else = 0**.
-5. **Stable** sort ascending by `zPri`, then emit to the zone lists. Actors end up
-   last within zone = drawn last = on top of floor objects.
+5. **Stable** sort by **`(zPri` ascending, then anchor `(Y,X)` descending`)`**, then
+   emit to the zone lists. Actors end up last within zone = drawn last = on top of
+   floor objects; among equal-priority objects the one with the **lower `(Y,X)`** anchor
+   sorts last = on top (source's visit order — see "Within-tier order"). The stable
+   sort leaves same-`(zPri,Y,X)` ties in their reverse-iteration order.
 
 ### Within-tier order — same-zone same-priority objects
 
-For two non-Actor objects in the same zone (e.g. candle + table at (300, 378)), `zPri`
-ties at 0. The stable sort preserves the reverse-iteration order from the gather, so
-the **older entity in `spatial.at` emits LAST, gets drawn LAST, ends up on TOP**. This
-matches source's `ShowObject` (seg_1184.c:1676-1699) for non-foreground tiles: it
-inserts NEW at the HEAD of `Obj_11x11[y][x]`, and the render walks that list forward
-(first-in-list drawn first = bottom). So source's effect is "first-inserted (= older)
-ends up at the tail of the render list = drawn last = on top." Our reverse-iter
-reproduces that without modeling `Obj_11x11` explicitly.
+When two objects share a cell and a zone with equal `zPri`, source orders them by
+**object position**: `ShowObjects` (seg_1184.c:1723) walks the **position-sorted
+`Link[]` chain** — `C_1184_02FA` (seg_1184.c:139) keeps it ordered by increasing **Y,
+then X** (the break tests at `:162-166`/`:194-201`) — and inserts each non-FG tile at
+the chain **HEAD** (seg_1184.c:1698-1699); the blit walks head→tail (head = bottom,
+`C_0A33_09CE` seg_0A33.c:363-369). So the **lowest-`(Y,X)` object is visited first →
+ends at the chain tail → drawn last → on top.** Two sub-cases:
 
-Combined with `spatial.at`'s ordering convention ([`research_world_data.md`](research_world_data.md)
-§"Clone correspondence — SpatialIndex API"): `spatial.at[0]` is always the chain head
-— initial-load uses `insert(push)` so file-order is preserved (first-loaded at idx 0),
-runtime uses `insertAtHead(unshift)` so the newest arrival is at idx 0. Either way,
-reverse-iter visits the OLDEST entries last, emitting them last, drawing them on top.
+**Cross-anchor (different `(Y,X)`) — a 2×2 extension reaching into the cell.** A
+double-tile object's extension cells are always to the **W / N / NW of its anchor** (the
+anchor is the SE corner, see `tile_footprint.js`), so a reaching-in object always has a
+**higher `(Y,X)`** than an object anchored AT the cell — and so draws UNDER it. The
+clone reproduces this with the **anchor-`(Y,X)` descending secondary sort key** (step 5
+above): lower `(Y,X)` sorts last = on top.
+*Canonical repro:* the **broken lens** at (124,194,z5) under an **altar** anchored at
+(125,195) — the altar's 2×2 NW quadrant (frame-3 tile `0x4b7`, both Double flags) lands
+on the lens cell, but the lens's lower Y wins and draws on top, matching source. (Before
+the `(Y,X)` key, the fixed gather scan emitted the own-cell anchor first = bottom, so
+the reaching-in altar wrongly *covered* the lens — the object-vs-object analog of the
+LB-throne bug in "NPC-vs-object" below, which `zPri` alone couldn't fix because neither
+object is an Actor.)
 
-This produces the source-faithful visual for two known stacks:
+**Same-anchor (same `(Y,X)`) — two objects in the same cell** (candle on a table).
+Position can't separate them; source tiebreaks by chain-insertion order. The clone
+gathers each anchor's `spatial.at` array **in REVERSE** so the older entry (chain head)
+emits last = drawn last = on top, and the stable sort preserves that order (the `(Y,X)`
+key ties). This matches source's HEAD-insert "first-inserted (= older) ends at the tail
+= on top." Combined with `spatial.at`'s ordering convention
+([`research_world_data.md`](research_world_data.md) §"Clone correspondence — SpatialIndex
+API"): `spatial.at[0]` is always the chain head — initial-load uses `insert(push)` so
+file-order is preserved, runtime uses `insertAtHead(unshift)` so the newest arrival is
+at idx 0. Either way, reverse-iter visits the OLDEST entries last, drawing them on top.
 
-| Cell | spatial.at[0..] | Visual top | Picked by inspector |
+This produces the source-faithful visual for the known stacks:
+
+| Cell | objects | Visual top | Picked by inspector |
 |---|---|---|---|
-| (300, 378) candle + table | `[candle, table]` | candle | candle |
-| (293, 376) door + doorway | `[door, doorway]` | door | door |
+| (300, 378) candle + table | same anchor `[candle, table]` | candle | candle |
+| (293, 376) door + doorway | same anchor `[door, doorway]` | door | door |
+| (124, 194, z5) broken lens + altar | cross-anchor (altar anchored (125,195)) | broken lens | broken lens |
 
-The inspector and renderer read the same chain-rule from opposite ends — inspector
-walks forward through `spatial.at` (first = chain head = source's `FindLoc` pick);
-renderer walks reverse (oldest emits last = drawn last = on top). Both arrive at the
-same chain entry being the "player-visible" thing. See
+For the same-anchor cases, the inspector and renderer read the same chain-rule from
+opposite ends — inspector walks forward through `spatial.at` (first = chain head =
+source's `FindLoc` pick); renderer walks reverse (oldest emits last = drawn last = on
+top). Both arrive at the same chain entry being the "player-visible" thing. See
 [`research_object_interaction.md`](research_object_interaction.md)
 §"Cell-pick (`C_2337_08F1`)" for the pick side.
 
@@ -795,7 +821,9 @@ naive "iterate the cell's entities reverse" loop only saw LB's own cell, so the
 neighbor's extension reaching back IN got emitted while processing the neighbor's
 anchor cell — *after* LB — and within the same zone drew on top. Gather-then-sort
 collects both the anchor-at-cell AND extension-into-cell contributions uniformly per
-cell so the `zPri` sort decides correctly.
+cell so the `zPri` sort decides correctly. (The **object-vs-object** version of this
+same reaching-in bug — two non-Actors, so `zPri` ties — is decided instead by the
+anchor-`(Y,X)` key; see "Within-tier order" and the broken-lens/altar repro.)
 
 (Naming: throne is `isDoubleWidth` in the port = `IsTileDoubleH` in source. Our port
 uses shape-naming (`isDoubleWidth` = 2-wide, `isDoubleHeight` = 2-tall); source uses
@@ -815,12 +843,15 @@ call; we encode it via per-cell sort.
 ### Known limitation, deferred — multi-fgExt source-faithful ordering
 
 Source's `ShowObject` foreground-branch inserts fgExt tiles at the chain TAIL (the
-`while(*si) si = D_E5E0 + *si;` walk-to-end), so a newer-inserted fgExt covers an
-older one in the same cell — the *opposite* of normal/fgHot's HEAD insertion. Our
-reverse-iter + stable sort gives all object fgExts the normal/fgHot rule (older on
-top); multi-fgExt-per-cell (two adjacent foreground multi-tile objects whose
-extensions share a cell) would render with the wrong within-zone order. Rare in u6
-data; revisit if observed.
+`while(*si) si = D_E5E0 + *si;` walk-to-end), so a newer-inserted (higher-`(Y,X)`) fgExt
+covers an older one in the same cell — the *opposite* of normal/fgHot's HEAD insertion.
+The clone applies ONE direction to every zone (the anchor-`(Y,X)` key + reverse-iter =
+lower-`(Y,X)`/older on top), which is source-faithful for the head-insert zones
+(normal, fgHot) but inverted for fgExt; so multi-fgExt-per-cell (two adjacent foreground
+multi-tile objects whose extensions share a cell) would render with the wrong
+within-zone order. (`bg` has the same inverted-direction caveat — source's `IsTileBa`
+terrain-overwrite is last-write-wins = higher-`(Y,X)` on top.) Single-fgExt/bg-per-cell
+is direction-independent, and multiples are rare in u6 data; revisit if observed.
 
 ### Two worked cases (verified on real data, region `objblkhg` = the Lycaeum)
 
