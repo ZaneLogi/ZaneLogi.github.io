@@ -231,8 +231,9 @@ function countGatesAtZ(world, z) {
   spatial.remove(50, 50, avatarRef.handle);
   pos.x[world.resolve(avatarRef.handle)] = 0x3A7; pos.y[world.resolve(avatarRef.handle)] = 0x106;
   spatial.insertAtHead(0x3A7, 0x106, avatarRef.handle);
-  checkGateEntry(world, { avatarRef });
+  const traveled = checkGateEntry(world, { avatarRef });
   const ai = world.resolve(avatarRef.handle);
+  check('blue-entry: checkGateEntry returns true when it travels (gates the I-19g dungeon-entry check)', traveled === true);
   check('blue-entry: Trammel (phase 7) wins -> party at D_2C74[3] (0x127,0x026)',
     pos.x[ai] === 0x127 && pos.y[ai] === 0x026);
 }

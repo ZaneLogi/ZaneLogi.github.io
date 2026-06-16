@@ -57,6 +57,7 @@ import { Books } from './resources/books.js';
 import { registerUseHandlers } from './systems/use_handlers.js';
 import { setActiveLevel } from './systems/level_change.js';
 import { installBlueGateSpawn, checkGateEntry, castRedGate } from './systems/moongate_runtime.js';
+import { checkDungeonEntry } from './systems/use_ladder.js';   // I-19g: walk onto a dungeon/cave hole -> descend
 import { installMoongateHud } from './view/moongate_hud.js';
 import { serializeWorld, restoreWorld } from './systems/persistence/snapshot.js';
 
@@ -470,7 +471,10 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
         avatarRef,
         onMove: (x, y) => {
           centerOn(x, y); moveFollowers(avatarRef.handle, 0);
-          checkGateEntry(world, moonCtx);               // I-moongate (c): step onto a moongate -> travel
+          // C_1E0F_184D post-move tile check: a moongate travels (I-moongate c); else a
+          // dungeon/cave hole descends (I-19g). Source dispatches one special object per
+          // tile (breaks), so `||` skips the hole check when a gate already fired.
+          checkGateEntry(world, moonCtx) || checkDungeonEntry(world, moonCtx);
           // I-egg (c): hatch eggs around the avatar's CURRENT cell (checkGateEntry may have just
           // teleported it; a teleport already force-hatched the dest, so this live-pos scan is then
           // a harmless idempotent no-op). Off-screen/LOCAL eggs in the avatar's area hatch + walk in.
@@ -529,6 +533,7 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   });
   window.__U6.moonGates = world.getResource(MoonGates);   // dev: live D_2C74 + phases
   window.__U6.checkGateEntry = () => checkGateEntry(world, moonCtx);   // dev: run the post-move gate-entry check at the avatar's cell
+  window.__U6.checkDungeonEntry = () => checkDungeonEntry(world, moonCtx);   // dev (I-19g): run the post-move dungeon/cave-entry check at the avatar's cell
   window.__U6.castRedGate = (tx, ty) => castRedGate(world, tx, ty, moonCtx);   // dev: cast a red gate at (tx,ty) (skips the Orb USE/5x5-pick UI)
   // dev: enable the Orb of the Moons without the Lord British conversation (sets
   // TalkFlags[5] bit 5, the in-game gate the LB setFlag opcode would set). I-moongate e.

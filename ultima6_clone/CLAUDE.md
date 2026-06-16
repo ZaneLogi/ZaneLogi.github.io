@@ -72,8 +72,9 @@ use_handlers, use_drawbridge** (I-10), **conversation/** (I-13: `conversation_vm
 standalone effect VM + `opcodes.js` + `conversation_system.js` host) + **stat_formulas**
 (I-18: `maxHP`/`maxMagic`, objlist-canonical) + **equip_slots** (I-18g: `equipSlotForTile` /
 `buildEquipment` / `resolveReadySlot` — the C_155D equip-slot machinery) + **level_change**
-(I-19: `setActiveLevel` + `teleportParty` — switch level / hard-cut party move) + **use_ladder** (I-19d: `C_101C_089E`
-port — `USE OBJ_131` changes level) + **moon_phase_system** + **moongate_runtime** (I-moongate:
+(I-19: `setActiveLevel` + `teleportParty` — switch level / hard-cut party move) + **use_ladder** (I-19d/I-19g:
+the `C_101C_089E` level-change core `enterLevelChange` — `USE OBJ_131` ladder + walk-onto a dungeon/cave hole
+`OBJ_146`/`OBJ_134` via `checkDungeonEntry`, the `C_1E0F_184D` branch) + **moon_phase_system** + **moongate_runtime** (I-moongate:
 blue spawn/entry/travel `C_0A33_121A`/`C_1E0F_184D`/`C_101C_0A3A`, bury `C_27A1_3425`, red Orb `C_27A1_5789`) +
 **egg** (I-egg: the whole `seg_2E2D.c` EGG subsystem — `hatchEgg`/`spawnCreature`/`buildMultiTileBody`/
 `hatchAroundAvatar`/`cullAroundAvatar`/`shouldPacifyGargoyles`; the new **Spawned** component is the
@@ -167,6 +168,13 @@ NPCs by mis-mapping their low coords to an unloaded NW surface region). (5) **`l
 persisted** in the snapshot (not derived from entity z) so save/load neither re-loads a visited level
 nor resurrects deletions; `|| []` keeps pre-I-19 saves loadable (no version bump). Full record:
 `progress.md §"I-19 scope"` + `research_level_change.md`.
+**I-19g kept deviation (dungeon/cave entry):** the dungeon/cave entrance holes (`OBJ_146`/`OBJ_134`)
+are **walk-onto only** — there is deliberately **no USE handler** for them, because source's USE switch
+(`seg_27a1.c:3085-3108`) has no `OBJ_146`/`OBJ_134` case. Don't "add" a USE-on-hole handler (it was
+scoped, then rejected as unfaithful). The walk-in is `checkDungeonEntry` (the `C_1E0F_184D` dungeon/cave
+branch, `systems/use_ladder.js`) → the shared `enterLevelChange` (`C_101C_089E`), gated in `main.js` by
+`checkGateEntry`'s "traveled" return so a tile dispatches as a gate OR a hole (source's single-dispatch).
+`progress.md §"I-19g scope"` + `research_level_change.md §7`.
 **I-egg kept deviations (egg/creature spawn):** (1) **avatar-keyed, not region-stream** — the
 no-region-unload clone hatches/culls on AVATAR distance (`hatchAroundAvatar`/`cullAroundAvatar`,
 `nearRadius`/`scanRadius`/`cullRadius` from the live `Viewport`), not source's `±20` stream in/out;

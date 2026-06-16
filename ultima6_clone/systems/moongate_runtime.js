@@ -95,7 +95,9 @@ export function gateTravel(world, slot, ctx) {
 // proximity to 7 and travel (incl. the 00:00-00:09 Shrine-of-Spirituality override).
 // On a red gate, teleport to its fixed-ROM destination (Qual-indexed). The gate entity
 // sits only at its anchor cell, so the D_0658==0 "anchor tile only" guard is satisfied
-// for free.
+// for free. Returns true if the avatar entered a gate — source's C_1E0F_184D dispatches
+// ONE special object per tile (it breaks), so the caller runs the dungeon/cave check
+// (use_ladder.checkDungeonEntry) only when this returns falsy.
 export function checkGateEntry(world, ctx) {
   const { avatarRef } = ctx;
   const ai = avatarRef?.handle !== undefined ? world.resolve(avatarRef.handle) : -1;
@@ -119,7 +121,7 @@ export function checkGateEntry(world, ctx) {
         const [sx, sy, sz] = SHRINE_OF_SPIRITUALITY;
         partyTeleport(world, sx, sy, sz, ctx);
         ctx.message?.('You are drawn into the moongate...');
-        return;
+        return true;
       }
       // Which moon is "fuller" (phase nearest 7)? Ties broken by Time_M vs phase order.
       const t = moons.trammelPhase, f = moons.feluccaPhase;
@@ -130,7 +132,7 @@ export function checkGateEntry(world, ctx) {
       else slot = moons.feluccaSlot;                                     // Felucca wins
       ctx.message?.('You enter the moongate.');
       gateTravel(world, slot, ctx);
-      return;
+      return true;
     }
 
     if (type === OBJ_RED_GATE) {                 // seg_1E0F.c:753-766
@@ -138,7 +140,7 @@ export function checkGateEntry(world, ctx) {
       ctx.message?.('You step into the red moongate.');
       if (di) partyTeleport(world, D_171C[di - 1], D_174E[di - 1], D_1780[di - 1], ctx);
       else partyTeleport(world, pos.x[ai], pos.y[ai], pos.z[ai], ctx);   // Qual 0 = dead gate: stay (still consumed)
-      return;
+      return true;
     }
   }
 }

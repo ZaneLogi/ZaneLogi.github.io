@@ -28,6 +28,30 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-16 — I-19g: dungeon/cave entry by walking onto a hole
+
+- **Read**: `seg_1E0F.c` — `C_1E0F_184D()` (`:712`, the post-move tile check; called at the tail of the
+  advance `C_1E0F_1B0E`, `:934`): scans the party's new cell, dispatches on the FIRST special object and
+  breaks — moongate `OBJ_055` / red `OBJ_054` / **dungeon-cave `OBJ_146`||`OBJ_134` → `C_101C_089E`**
+  (`:769-785`); the `D_17E2[]` dungeon-name table (`:686`, quality→name). `seg_101C.c:326` `C_101C_089E`
+  (the shared level-change engine, already ported as `useLadder`). `seg_27a1.c:3085-3108` the USE switch.
+- **Found**: cave entry is **automatic on walk-onto** (no verb) — a hole and a ladder run the *same*
+  routine, differing only in trigger (ladder = USE, hole = the post-move scan). **USE on a hole is a no-op
+  in source** — the USE switch has `case OBJ_131` but no `OBJ_146`/`OBJ_134` case (so I dropped the
+  USE-on-hole I'd initially scoped — Zane caught the redundancy). The clone already had BOTH halves: I-19's
+  engine + I-moongate's post-move hook (`checkGateEntry`); the only gap was the dungeon/cave *branch* of the
+  scan. The legacy `../ultima6/` port DID implement it (`map_viewer.js:852-909`, right-click ladder/cave →
+  traverse), but as view-navigation, not a party walk-in.
+- **Docs**: `research_level_change.md` — new §7 (the walk-in trigger; source/legacy/clone) + §1.1 now lists
+  `OBJ_146` + §6 un-defers the holes. `progress.md` §"I-19g scope" + banner + ledger. `CLAUDE.md`
+  code-layout (`use_ladder` broadened) + an I-19g kept-deviation (no USE-on-hole — don't re-add).
+- **Built**: extracted the `C_101C_089E` core out of `useLadder` into `enterLevelChange` (shared);
+  `checkDungeonEntry` (the `C_1E0F_184D` dungeon branch); `checkGateEntry` now returns "traveled" so
+  `main.js onMove` dispatches `checkGateEntry(...) || checkDungeonEntry(...)` (single-dispatch). New
+  `tests/test_dungeon_entry` 11/11; +1 in `test_moongate` (76/76); full suite green. **Live-verified**:
+  walked the party **north onto Destard's mouth → descended to dungeon level 1 at (68,161)**, "(underground)".
+- **Next**: I-20 (remaining object-action handlers, demand-driven) — or Zane's pick.
+
 ## 2026-06-16 — I-book: book / sign reading (`BOOK.DAT`), completing the LOOK verb
 
 - **Read**: `seg_27a1.c` LOOK handler — `C_27A1_06D7` ("CanRead?") + the two readable-type tables

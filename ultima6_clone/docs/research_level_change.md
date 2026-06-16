@@ -17,10 +17,12 @@ plumbing + the ladder handler.
 
 ### 1.1 Object types (vertical movement)
 
-`obj.h`: Ladder `OBJ_131` (0x131, #305), Hole `OBJ_134` (0x134, #308), Steps
-`OBJ_110`/`OBJ_114` (#272/#276), Trellis `OBJ_132`, Volcano `OBJ_133`. I-19's
-headline verb is **the ladder** (`OBJ_131`) — it handles both directions via its
-frame/quality. Hole/Steps are demand-driven adds (a location that needs them).
+`obj.h`: Ladder `OBJ_131` (0x131, #305); the dungeon/cave **entrance holes**
+`OBJ_146` (0x146, #326 — most dungeons + the named caves) and `OBJ_134` (0x134,
+#308 — the Ant Mound mouth); Steps `OBJ_110`/`OBJ_114` (#272/#276), Trellis
+`OBJ_132`, Volcano `OBJ_133`. I-19's headline verb is **the ladder** (`OBJ_131`) —
+it handles both directions via its frame/quality. The entrance holes are
+**walk-onto** triggers (no verb), added in **I-19g** (§7); Steps are demand-driven adds.
 
 ### 1.2 USE dispatch → the level-change routine
 
@@ -158,8 +160,9 @@ ladder cell).
 
 ## 6. Deferred / out of scope for I-19
 
-- **Hole (`OBJ_134`) / Steps (`OBJ_110`/`114`)** — add as one-line registrations when a
-  target location needs them; ladder (`OBJ_131`) is the headline.
+- **Steps (`OBJ_110`/`114`)** — add as one-line registrations when a target location
+  needs them. *(The dungeon/cave entrance holes `OBJ_146`/`OBJ_134` are no longer
+  deferred — done in **I-19g**, §7.)*
 - **Moongate / gate travel** (`PartyTeleport`, `seg_101C.c:368-376` `GateTravel`) —
   absolute-coordinate teleport (no scaling), its own later step.
 - **Combat / dangerous dungeons** — deferred by design across the clone.
@@ -170,3 +173,102 @@ ladder cell).
   from the old level (free via the active-z filter) and re-gathers on the new level (via `MoveFollowers`);
   only the *animation* is dropped. Add the faithful `PartyEnter`/`PartyExit` later only if the cut feels
   too abrupt in play.
+
+---
+
+## 7. Dungeon/cave entry by walking onto a hole (I-19g)
+
+I-19 shipped the level-change **engine** (`C_101C_089E`) + the **ladder USE** trigger,
+but deferred the dungeon/cave **entrances** (§6). I-19g adds the faithful trigger:
+**walking onto an entrance hole descends** — the way U6 actually enters a dungeon (a
+ladder is `USE`d; a hole is not).
+
+### 7.1 Source — the post-move tile check `C_1E0F_184D`
+
+After the avatar's step, the advance routine `C_1E0F_1B0E` (`seg_1E0F.c:811`) calls
+`C_1E0F_184D()` (`seg_1E0F.c:934`). That handler (`seg_1E0F.c:712`) scans the objects on
+the party's **new** cell and dispatches on the **first** special object, then breaks:
+- `OBJ_055` blue moongate / `OBJ_054` red moongate → gate travel (ported in I-moongate
+  as `checkGateEntry`).
+- **`OBJ_146 || OBJ_134` → `C_101C_089E(objNum)`** (`seg_1E0F.c:769-785`) — the **same
+  level-change routine the ladder USE calls**. No verb, no prompt.
+
+The specific dungeon is the entrance object's **quality**: `D_17E2[quality-1]`
+(`seg_1E0F.c:686`) names it (Deceit=1, Despise=2, Destard=3, … Hythloth=7, the gargoyle
+shrines 9-11, the caves 13-20). The quality only drives Shamino's "you see the dungeon X"
+line (`SHAMINO_COMMENT`-gated); the entry itself ignores it (the engine reads only the
+entrance's position/frame, plus — on the way *up* — the quality sub-cell bits, §5).
+
+**USE on a hole is a no-op in source** — its USE switch (`seg_27a1.c:3085-3108`) has a
+`case OBJ_131` (ladder) but **no `OBJ_146`/`OBJ_134` case**. So the clone deliberately
+does **not** register a USE handler for holes; they are walk-onto only.
+
+### 7.2 Legacy `../ultima6/` port
+
+The legacy viewer does implement hole/ladder traversal (`map_viewer.js:852-909`,
+right-click a `LADDER`/`CAVE` object → the same `z_incr` + coordinate scaling), but as a
+**view-navigation** affordance (it moves the view origin; there is no party, and the
+trigger is a right-click, not a walk-onto). It corroborates the coordinate math, not the
+trigger.
+
+### 7.3 Clone implementation
+
+Both halves already existed — I-19's engine and I-moongate's post-move hook — so I-19g is
+small:
+- **`enterLevelChange(world, entity, ctx)`** (`systems/use_ladder.js`) — the shared
+  `C_101C_089E` core, **extracted** out of `useLadder` (which now wraps it). Generic over
+  the entrance object: direction (`z_incr`) + the 1024↔256 rescale (§5) + `teleportParty`.
+  The up-direction test is gated to `OBJ_131` frame 1 (matching source's
+  `ObjShapeType == TypeFrame(OBJ_131,1)`), so a frame-1 *hole* is never mistaken for an
+  up-ladder (moot at the surface anyway, where `MapZ==0` short-circuits the test to "down").
+- **`checkDungeonEntry(world, ctx)`** (`systems/use_ladder.js`) — the `C_1E0F_184D`
+  dungeon/cave branch: scan the avatar's cell for an `OBJ_146`/`OBJ_134`, descend via
+  `enterLevelChange`. Returns whether it entered.
+- **Wiring** (`main.js` `onMove`): `checkGateEntry(...) || checkDungeonEntry(...)`.
+  `checkGateEntry` now **returns `true` when it travels**, so the `||` reproduces source's
+  single-dispatch-and-break (a tile is a moongate **or** a hole, never both → the hole
+  check is skipped when a gate already fired).
+
+No new components, no snapshot change. Tests: `tests/test_dungeon_entry.{html,js}`
+(walk onto `OBJ_146`/`OBJ_134` → descend with the /4 compression; the up `*4` expand +
+quality sub-cell; dungeon↔dungeon no-rescale) + one assertion in `test_moongate.js`
+locking `checkGateEntry`'s new return contract.
+
+### 7.4 The entrance catalog — `D_17E2` names + the surface mouths
+
+Each entrance object carries its dungeon **index** in `quality`; `D_17E2[quality-1]`
+(`seg_1E0F.c:686`) maps it to a name. `C_1E0F_184D`'s Shamino-gated "you see…" line
+prefixes the name by range: quality **< 8** → "dungeon ", quality **9–11** → "shrine of "
+(the gargoyle-realm shrines), else bare. A global scan of the 64 surface OBJBLK
+superchunks for `OBJ_146`/`OBJ_134` at `LOCXYZ` finds every surface mouth — **15 objects /
+14 named locations** (the Ant Mound has two); 6 quality values have **no** surface mouth
+(reached from *within* another level, not a walkable hole).
+
+| Qual | `D_17E2` name | Entrance obj | Surface mouth (this data) |
+|---|---|---|---|
+| 1 | Deceit | `OBJ_146` | (964, 306) |
+| 2 | Despise | `OBJ_146` | (365, 265) |
+| 3 | **Destard** | `OBJ_146` | (284, 657) |
+| 4 | Wrong | `OBJ_146` | (500, 81) |
+| 5 | Covetous | `OBJ_146` | (627, 113) |
+| 6 | Shame | `OBJ_146` | (234, 409) |
+| 7 | Hythloth | `OBJ_146` | (948, 930) |
+| 8 | GSA | — | *(no surface mouth)* |
+| 9 | Control *(shrine)* | — | *(gargoyle realm)* |
+| 10 | Passion *(shrine)* | — | *(gargoyle realm)* |
+| 11 | Diligence *(shrine)* | — | *(gargoyle realm)* |
+| 12 | Tomb of Kings | — | *(no surface mouth)* |
+| 13 | Ant Mound | `OBJ_134` | (867, 187) **and** (835, 195) |
+| 14 | Swamp Cave | `OBJ_146` | (611, 363) |
+| 15 | Spider Cave | `OBJ_146` | (92, 250) |
+| 16 | Cyclops Cave | `OBJ_146` | (185, 436) |
+| 17 | Heftimus Cave | `OBJ_146` | (132, 857) |
+| 18 | Heroes' Hole | `OBJ_146` | (348, 809) |
+| 19 | Pirate Cave | — | *(no surface mouth)* |
+| 20 | Buccaneer's Cave | `OBJ_146` | (564, 594) |
+
+So `OBJ_146` is the generic dungeon/cave mouth (19 of the 20 entrances); `OBJ_134` is the
+Ant Mound's distinct sprite. Coordinates are from a scan of the dropped game data (same
+provenance the quest log records — no game data is committed); the player-facing version
+lives in `quest_log.md §"Dungeon & cave entrances"`. The down-transform on each takes the
+surface mouth to its dungeon-level-1 cell via §5 (e.g. Destard (284,657)→(68,161,z1)).

@@ -5,7 +5,7 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: I-book (book / sign reading) COMPLETE (2026-06-16).** `LOOK` at a readable object now opens its `BOOK.DAT` text in a scrollable reader modal — completing the LOOK verb deferred at I-10f (which only printed "Thou dost see…"). Port of `seg_27a1.c`'s read path: `C_27A1_06D7` CanRead (two fixed readable-type tables — `D_1CDA` books, `D_1CE4` signs) → `C_27A1_078F` (reads `BOOK.DAT` keyed by the object's **quality**). New `resources/books.js` (the u16 offset-table reader; no compression) + `view/book_window.js` (the modal + U6-markup renderer: `<>` gargoyle/runic in a distinct style, `@` highlight, `*` paragraph break, `&`·`\` markers stripped, `\n` via pre-wrap) + the LOOK-handler readable gate in `command_dispatch.js` (books need adjacency, signs read at range, quality>0 required). `book.dat` wired as **OPTIONAL** BYO-data (absent → LOOK book-read no-ops). Verified live on real data (the Woodroffe self-portrait sign at the castle; the Book of Circles gargoyle+translation, scrollable) + **`tests/test_books.html` 19/19**. See §"I-book scope". **Next: I-20** (remaining object-action handlers — spellbooks / instruments / etc.; demand-driven). Prior: I-egg (§"I-egg scope"), I-moongate (§"I-moongate scope"), I-19 (§"I-19 scope"), I-18 (§"I-18 scope").
+**Status: I-19g (dungeon/cave entry) COMPLETE (2026-06-16).** Walking onto a dungeon/cave entrance hole (`OBJ_146`/`OBJ_134`) now **descends** — the faithful walk-onto trigger I-19 deferred (§6 of `research_level_change.md`). Ports the `C_1E0F_184D` dungeon/cave branch (`seg_1E0F.c:769-785`) as `checkDungeonEntry`, feeding the shared `C_101C_089E` engine **extracted** from `useLadder` into `enterLevelChange` (z-direction + the 1024↔256 coordinate rescale). Wired into `main.js onMove` as `checkGateEntry(...) || checkDungeonEntry(...)`: `checkGateEntry` now returns "traveled", so a tile is a moongate **or** a hole — source's single-dispatch-and-break. **No USE-on-hole** — source's USE switch has no `OBJ_146`/`OBJ_134` case (holes are walk-onto only); the clone matches. No new components / no snapshot change. **`tests/test_dungeon_entry.html` 11/11** + the full suite green (incl. `test_moongate` +1). See §"I-19g scope" + `research_level_change.md §7`. **Next: I-20** (remaining object-action handlers — spellbooks / instruments / etc.; demand-driven). Prior: I-book (§"I-book scope"), I-egg (§"I-egg scope"), I-moongate (§"I-moongate scope"), I-19 (§"I-19 scope").
 
 This banner is the **single canonical current-status line** — `CLAUDE.md` and
 `DOCUMENTATION_INDEX.md` point here instead of mirroring it (convention: §"Doc maintenance").
@@ -59,6 +59,7 @@ banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 | I-17 | **NPC AI behaviors** — the moving worktypes as active per-turn behaviors: `WANDER`/`GRAZE` (`C_1E0F_37DB`), `LOITER`/`FARM` (`C_1E0F_33C4`), `GUARD` pacing, via the probability×accumulator contract; + **I-17d** displaced settle-in-place NPCs stand aside on a shove & return to post + re-pose when the slot clears. `RINGBELL` split to its own later step; thief/law + combat deferred by design. See §"I-17 scope". | **done** (a–d) |
 | I-18 | **party status UI — on-demand, NOT a fixed panel.** `P` → roster (icon/name/HP) → member digit → ZSTATS (portrait + STR/DEX/INT + Magic/Health cur/MAX + Lvl/Exp) → `Tab` ⇄ inventory, all on the UIStack; stats read straight from the **objlist** (NO `Stats` component — Option B; `MaxHP`/`MaxMagic` ported to `stat_formulas.js`). GIVE → in-stack recipient-picker (bare-map give + direct digit-inventory paths retired). Layout: fixed status panel removed → map full-width, clock → persistent strip, dev HUD → floating show/hide. Avatar portrait via `D_2CCB` (factory data → `z[6]`/D_2CCB 7 male-face default). **g/h/i** = equipped-equipment view (de-scoped paperdoll): equip-slot list beside the carried list + weight gauge + `E` equip/unequip (source gates, bagged-equip re-parents out) + **k** `M` "move to…" picker (move items in/out of bags, both directions). | **done** (a–k, 2026-06-12) |
 | I-19 | **level change — `USE ladder` → multi-z dungeons.** Activate the already-decoded dungeon levels (`assets/map.js` decodes all 6; `MapLevel.dungeonTileIndex` ready; `Position.z` exists) + port `C_101C_089E` (z_incr direction + coordinate rescale + avatar reposition + reload/recompose). Single `SpatialIndex` + active-z filter; dungeon NPCs live; camera/bounds switch surface(1024-wrap)↔dungeon(256-wrap) per level. **Reframed 2026-06-12** (was "object-action handlers expansion" → re-homed to I-20). See §"I-19 scope" + `research_level_change.md`. | **done** (a–f, 2026-06-13) |
+| **I-19g** | **dungeon/cave entry by walking onto a hole** — the faithful auto-trigger I-19 deferred (§6): stepping onto an entrance hole (`OBJ_146`/`OBJ_134`) descends, via the `C_1E0F_184D` dungeon/cave branch (`checkDungeonEntry`) → the shared `C_101C_089E` engine (extracted from `useLadder` into `enterLevelChange`). `checkGateEntry` now returns "traveled" so `main.js` runs the hole check single-dispatch (a tile is a gate **or** a hole). **No USE-on-hole** (source has none). `tests/test_dungeon_entry` 11/11. See §"I-19g scope" + `research_level_change.md §7`. | **done** (2026-06-16) |
 | **I-moongate** | **blue + red moongate subsystem** — blue (`OBJ_055`) lunar-phase-routed, player-mutable `D_2C74` 8-endpoint network (hourly spawn `C_0A33_121A` + walk-in `GateTravel`; `USE moonstone` relocates an endpoint) · red (`OBJ_054`) Orb-of-the-Moons (`OBJ_057`) fixed-ROM single-use net · new-game `D_2C74` seeding from the `D_2C4A.c` constants · the player-facing **sky-view** (clock panel) + **gate-readout** (dev HUD). Pulled out of I-20 into its own named step (like `I-save/load`). See §"I-moongate scope" + `research_moongate.md`. | **done** (a–e + g/h, 2026-06-13; f out of scope) |
 | I-20 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / instruments / etc.; **moonstones → the dedicated I-moongate step**); demand-driven, each handler tied to its owning subsystem when that subsystem lands (was I-19 until 2026-06-12) | planned |
 | **I-book** | **book / sign reading** — completes the LOOK verb (I-10f stopped at "Thou dost see…"). `LOOK` at a readable object (`C_27A1_06D7` CanRead → `C_27A1_078F`) opens its `BOOK.DAT` text in a scrollable reader modal. `resources/books.js` (u16 offset-table reader, keyed by quality; no compression) + `view/book_window.js` (modal + U6-markup renderer: `<>` gargoyle / `@` highlight / `*` paragraph / `&`·`\` stripped) + the LOOK-handler readable-type tables (`D_1CDA` books adjacency-gated / `D_1CE4` signs any-range, quality>0). `book.dat` = OPTIONAL BYO-data. `tests/test_books.html` 19/19. See §"I-book scope". | **done** (2026-06-16) |
@@ -3496,10 +3497,56 @@ ticked, doors never blocked) — 61 `test_pathfinding` failures. Fixed to `mapLe
 the wrap mask from that (separate `fix I-19` commit; game behavior unchanged — `level` is always defined
 there).
 
-**Deferred:** Hole (`OBJ_134`) / Steps (`OBJ_110`/`114`) — one-line adds when a location needs them;
-moongate/gate-travel; combat; solo-mode gate; the PartyEnter/Exit transition animation (hard cut chosen);
-the momentary follower-stack-then-spread on a level change (cosmetic — `MoveFollowers` re-forms them).
+**Deferred:** Steps (`OBJ_110`/`114`) — one-line adds when a location needs them; moongate/gate-travel
+(landed as I-moongate); combat; solo-mode gate; the PartyEnter/Exit transition animation (hard cut chosen);
+the momentary follower-stack-then-spread on a level change (cosmetic — `MoveFollowers` re-forms them). The
+dungeon/cave entrance **holes** (`OBJ_146`/`OBJ_134`) are **no longer deferred** — done in **I-19g** below.
 See `research_level_change.md §6`.
+
+## I-19g scope — dungeon/cave entry by walking onto a hole — COMPLETE 2026-06-16
+
+The faithful entry trigger I-19 §6 deferred. U6 enters a dungeon/cave by **walking onto** its entrance hole
+(no verb): the advance routine `C_1E0F_1B0E` (`seg_1E0F.c:811`) calls `C_1E0F_184D()` at its tail (`:934`),
+which scans the party's new cell and, on an `OBJ_146`/`OBJ_134` hole, calls the **same** level-change routine
+the ladder USE uses — `C_101C_089E(objNum)` (`seg_1E0F.c:769-785`). Full source/legacy/clone analysis:
+`research_level_change.md §7`.
+
+**As built (one cohesive change, 5 files):**
+- **`systems/use_ladder.js`** — extracted the `C_101C_089E` core out of `useLadder` into an exported
+  **`enterLevelChange(world, entity, ctx)`** (z-direction + the 1024↔256 rescale + `teleportParty`; returns the
+  direction). `useLadder` is now a thin wrapper (USE `OBJ_131`). Added **`checkDungeonEntry(world, ctx)`** — the
+  `C_1E0F_184D` dungeon/cave branch (scan the avatar's cell for `OBJ_146`/`OBJ_134` → `enterLevelChange`;
+  returns whether it entered).
+- **`systems/moongate_runtime.js`** — `checkGateEntry` now **returns `true`** on each travel branch (was a bare
+  `return`), so the caller can gate the hole check.
+- **`main.js` `onMove`** — `checkGateEntry(world, moonCtx) || checkDungeonEntry(world, moonCtx)`. The `||` is
+  source's single-dispatch-and-break: a tile is a moongate **or** a hole, never both.
+- **`systems/use_handlers.js`** — registry unchanged (no USE-on-hole; see the deviation).
+
+**Deviation considered + rejected — USE-on-hole.** Initially scoped a `USE OBJ_146/OBJ_134` handler "for
+convenience," then dropped it: source's USE switch (`seg_27a1.c:3085-3108`) has **no** hole case (holes are
+walk-onto only), so adding one would be an unfaithful extension with no upside. The clone matches source — holes
+have no USE handler.
+
+**Faithfulness improvement folded in:** the shared core's up-direction test is gated to `OBJ_131 && frame==1`
+(matching source's `ObjShapeType == TypeFrame(OBJ_131,1)`), where the old `useLadder` used a bare `frame==1`.
+Equivalent while it only ran for ladders; correct now that holes share the core (a frame-1 *hole* is never an
+up-ladder — and is moot at the surface, where `MapZ==0` short-circuits the test to "down").
+
+**Tests:** new `tests/test_dungeon_entry.{html,js}` — 11 checks: walk onto `OBJ_146` → descend to z1 with the
+/4 compression (Destard (284,657)→(68,161)); `OBJ_134` (cave) also triggers; a non-entrance object doesn't;
+`enterLevelChange` up (dungeon→surface ×4 expand + quality sub-cell, (68,161,q3)→(284,641,z0)); dungeon↔dungeon
+no-rescale. Plus one assertion in `test_moongate.js` locking `checkGateEntry`'s new return contract (76/76). Full
+suite green.
+
+**Live-verified on real data:** teleported next to Destard's mouth, pressed **north** → the party walked
+onto the `OBJ_146` hole and **descended to Destard dungeon level 1 at (68,161)** (the /4 compression of
+(284,657)); active level → 1, dev panel reads "(underground)", message "You enter." Drove the real keydown
+→ `onMove` → `checkDungeonEntry` path, not the dev hook. Also added the dev hook `__U6.checkDungeonEntry()`
+(parallels `__U6.checkGateEntry`).
+
+**No new components, no `SNAPSHOT_VERSION` bump.** Reuses I-19's engine + I-moongate's post-move-hook pattern —
+this is the symmetric other half of I-19's level-change subsystem.
 
 ## I-moongate scope — blue + red moongate subsystem — DONE (2026-06-13, a–e + g/h; f out of scope)
 
