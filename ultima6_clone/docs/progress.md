@@ -5,7 +5,7 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: I-egg (egg / creature-spawn system) COMPLETE (2026-06-14, a · b · d-visual · c · e · f).** Port of U6's EGG module (`seg_2E2D.c`, `OBJ_14F`): `hatchEgg` (gates / roll / embryo loop / alignment / AI-stamp / latch, minus the d-stats stat roll) + multi-tile bodies (dragon/hydra/serpent/vine/two-part as linked `Spawned` parts; winged gargoyle = 2×2 footprint-sprite) + the avatar-keyed trigger (`hatchAroundAvatar` = `EGG_hatchArea`, hatch on avatar entry/teleport — boot fires the throne ambush; camera-pan never hatches) + cull/re-arm (`cullAroundAvatar` = the `C_1184_19AA` stream-out behaviour: reap far spawns, delete LOCAL / re-arm non-LOCAL eggs) + gargoyle pacification (Amulet/party-gargoyle → `AI_GRAZE`) + Shamino's approach warning. All in `systems/egg.js` + the new `Spawned` component (cull key + occupancy; auto-persists, **no `SNAPSHOT_VERSION` bump**). **NO combat** — hostile AI modes stamped but idle until handlers land (§9.1 pt 5); **d-stats deferred** (stat roll + loot). Verified live on factory data (throne ambush hatch → 3 EVIL AI_ASSAULT gargoyles → reaped on leave; dragon egg → assembled 5-part body). **Suite 674/674** (527 prior + 147 new `tests/test_egg.html`). See §"I-egg scope" + `research_egg.md`. **Next: I-20** (remaining object-action handlers — spellbooks / instruments / etc.; demand-driven). Prior: I-moongate (blue + red gates + sky, §"I-moongate scope"), I-19 (level change, §"I-19 scope"), I-18 (party status UI, §"I-18 scope"), I-17 (NPC AI behaviors, §"I-17 scope").
+**Status: I-book (book / sign reading) COMPLETE (2026-06-16).** `LOOK` at a readable object now opens its `BOOK.DAT` text in a scrollable reader modal — completing the LOOK verb deferred at I-10f (which only printed "Thou dost see…"). Port of `seg_27a1.c`'s read path: `C_27A1_06D7` CanRead (two fixed readable-type tables — `D_1CDA` books, `D_1CE4` signs) → `C_27A1_078F` (reads `BOOK.DAT` keyed by the object's **quality**). New `resources/books.js` (the u16 offset-table reader; no compression) + `view/book_window.js` (the modal + U6-markup renderer: `<>` gargoyle/runic in a distinct style, `@` highlight, `*` paragraph break, `&`·`\` markers stripped, `\n` via pre-wrap) + the LOOK-handler readable gate in `command_dispatch.js` (books need adjacency, signs read at range, quality>0 required). `book.dat` wired as **OPTIONAL** BYO-data (absent → LOOK book-read no-ops). Verified live on real data (the Woodroffe self-portrait sign at the castle; the Book of Circles gargoyle+translation, scrollable) + **`tests/test_books.html` 19/19**. See §"I-book scope". **Next: I-20** (remaining object-action handlers — spellbooks / instruments / etc.; demand-driven). Prior: I-egg (§"I-egg scope"), I-moongate (§"I-moongate scope"), I-19 (§"I-19 scope"), I-18 (§"I-18 scope").
 
 This banner is the **single canonical current-status line** — `CLAUDE.md` and
 `DOCUMENTATION_INDEX.md` point here instead of mirroring it (convention: §"Doc maintenance").
@@ -61,6 +61,7 @@ banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 | I-19 | **level change — `USE ladder` → multi-z dungeons.** Activate the already-decoded dungeon levels (`assets/map.js` decodes all 6; `MapLevel.dungeonTileIndex` ready; `Position.z` exists) + port `C_101C_089E` (z_incr direction + coordinate rescale + avatar reposition + reload/recompose). Single `SpatialIndex` + active-z filter; dungeon NPCs live; camera/bounds switch surface(1024-wrap)↔dungeon(256-wrap) per level. **Reframed 2026-06-12** (was "object-action handlers expansion" → re-homed to I-20). See §"I-19 scope" + `research_level_change.md`. | **done** (a–f, 2026-06-13) |
 | **I-moongate** | **blue + red moongate subsystem** — blue (`OBJ_055`) lunar-phase-routed, player-mutable `D_2C74` 8-endpoint network (hourly spawn `C_0A33_121A` + walk-in `GateTravel`; `USE moonstone` relocates an endpoint) · red (`OBJ_054`) Orb-of-the-Moons (`OBJ_057`) fixed-ROM single-use net · new-game `D_2C74` seeding from the `D_2C4A.c` constants · the player-facing **sky-view** (clock panel) + **gate-readout** (dev HUD). Pulled out of I-20 into its own named step (like `I-save/load`). See §"I-moongate scope" + `research_moongate.md`. | **done** (a–e + g/h, 2026-06-13; f out of scope) |
 | I-20 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / instruments / etc.; **moonstones → the dedicated I-moongate step**); demand-driven, each handler tied to its owning subsystem when that subsystem lands (was I-19 until 2026-06-12) | planned |
+| **I-book** | **book / sign reading** — completes the LOOK verb (I-10f stopped at "Thou dost see…"). `LOOK` at a readable object (`C_27A1_06D7` CanRead → `C_27A1_078F`) opens its `BOOK.DAT` text in a scrollable reader modal. `resources/books.js` (u16 offset-table reader, keyed by quality; no compression) + `view/book_window.js` (modal + U6-markup renderer: `<>` gargoyle / `@` highlight / `*` paragraph / `&`·`\` stripped) + the LOOK-handler readable-type tables (`D_1CDA` books adjacency-gated / `D_1CE4` signs any-range, quality>0). `book.dat` = OPTIONAL BYO-data. `tests/test_books.html` 19/19. See §"I-book scope". | **done** (2026-06-16) |
 | **I-egg** | **egg / creature-spawn system** (Path A, named 2026-06-14) — port `OBJ_14F` hatch (`seg_2E2D.c`): **a** data/decode · **b** hatch core (gates + embryo loop + alignment override + `SetHatched`/`SetInvisible`, spawns a placeholder/statless creature) · **d-visual** multi-tile bodies (place + link part-entities — dragon/hydra/serpent/vine + two-part cow/horse/giant-ant/etc.) · **c** avatar-keyed trigger (hatch on avatar entry into new territory, viewport-`nearRadius` proximity; `LOCAL` bypass) + force-hatch on the I-moongate `teleportParty` path · **e** cull + re-arm (avatar-keyed lifetime pass, §9.1; culls parts with the body) · **f** gargoyle pacification (Amulet/party-type → `AI_GRAZE`) + Shamino direction warning. **Spawn always stamps the embryo's AI mode (`NPCMode`/`NPCComMode`); unhandled modes idle, implemented I-16/I-17 worktypes apply automatically — NO combat** (`research_egg.md §9.1` pt 5). **Sub-step d is SPLIT:** **d-visual** (multi-tile bodies) is combat-independent and **IN I-egg** — a full-world objblk scan showed **234/943 eggs (~25%) hatch multi-tile creatures** (Dragon 55× / Giant Ant 69× / Alligator 39× / Hydra / Cow / Horse / Vine / Serpent), so deferring it would stub a quarter of all hatches; **d-stats** (`EGG_generate`+`D_3522` stat roll + loot) stays **combat-gated**. See §"I-egg scope" + `research_egg.md`. **d-stats + combat deferred.** | **done** (a · b · d-visual · c · e · f, 2026-06-14) |
 
 **Why I-2 is the world-data system.** Loading the real world from `OBJBLK*`/
@@ -3795,3 +3796,76 @@ puzzle** `C_27A1_4B98` (`seg_27a1.c:2295`, dispatched from `USE` on the 8 virtue
 (I-20)** + a mantra text-input prompt (the one genuinely new UI bit); the egg-destroy half
 (`C_27A1_4B0B`) is now trivial via `findEggs`+`deleteMapObject`. So I-egg is complete + faithful;
 the shrine scene just isn't *completable* until that I-20 handler lands.
+
+## I-book scope — book / sign reading (`BOOK.DAT`) — COMPLETE 2026-06-16
+
+Completes the **LOOK** verb. I-10f deliberately shipped LOOK as a pure "Thou dost see …" scroll line
+and **deferred** the one structured branch source's LOOK has: reading a book or sign. This step ports
+that branch.
+
+**Source mechanism (`seg_27a1.c`).** Inside the LOOK command handler, `C_27A1_06D7` ("CanRead?") tests
+the object's type against two fixed 5-entry tables; if readable **and** the object has a **non-zero
+quality**, `C_27A1_078F` reads `BOOK.DAT` and prints the text:
+- `di = GetQual(obj)` — the object's **quality is the book index**.
+- `OSI_read(file, (di-1)<<1, 2, &off)` — a **u16 little-endian offset table** (entry per book).
+- `OSI_read(file, off, 0x2800, buf)` — the **NUL-terminated text** at that offset. **No compression**
+  (unlike `converse.*`/`portrait.*` lib_32 LZW).
+
+**Readable-type tables (ported verbatim):**
+- **`D_1CDA` books** (`C_27A1_066D`, readable only when **adjacent** — source also allows carried books,
+  deferred): `151` book · `61` Book of Circles · `152` scroll · `270` balloon plans · `59` Codex.
+- **`D_1CE4` signs** (`C_27A1_06A2`, readable at **any range**): `332` sign · `333` gargoyle sign ·
+  `143` picture · `254` cross · `255` tombstone.
+
+**Files:**
+- **`resources/books.js`** — `Books` (the offset-table reader). `count = firstOffset>>1`;
+  `get(quality)` slices from `offsets[q-1]` to the NUL; `has(q)`. OPTIONAL data: `new Books(undefined)`
+  / `<2` bytes → `count 0`, every `get` → null (the LOOK book-read no-ops).
+- **`view/book_window.js`** — `openBookWindow(uiStack, title, rawText)`: a `.book-window` UIStack modal
+  (flex column, inner-scroll like `.dialog-window`; Esc/↑↓/PgUp-PgDn). Renders the U6 inline markup
+  carried in `BOOK.DAT`: `<…>` gargoyle/runic → a distinct `.book-runic` style (no rune font in the
+  clone, so the transliteration stays readable); `@word` → `.book-hl` highlight; `*` → paragraph break;
+  `&` (section marker) + `\` (plural marker) → **stripped**; `\n` → native line break (`white-space:
+  pre-wrap`). CSS lives in `index.html` beside the `.dialog-*` rules.
+- **`systems/command_dispatch.js`** — the `READABLE_BOOKS`/`READABLE_SIGNS` Sets + the LOOK-handler
+  extension: after the "Thou dost see …" line, `readable = isSign || (isBook && withinReach)` and
+  `quality>0` → `openBookWindow(uiStack, name, books.get(quality))`. Reads `quality` from the `Amount`
+  store; `books` is a new dispatch dep.
+- **`main.js`** — `const books = new Books(fileMap.get('book.dat'))`, threaded through `startRender`
+  into `installCommandDispatch`; `book.dat` added to the **OPTIONAL** file set (loaded raw, never gates
+  readiness); exposed as `__U6.books` for dev.
+
+**Data:** `book.dat` is **OPTIONAL** BYO-data — gitignored / user-dropped, never committed (the legal
+pattern). Absent → LOOK still names the object, just no modal.
+
+**Bug fixed during the work (worth recording):** the deps object referenced `books` inside
+`startRender`, but `const books` lived in `load()` — `books` wasn't threaded through `startRender`'s
+parameter list, so `installCommandDispatch` boot-threw `ReferenceError: books is not defined`, halting
+the load before the render loop (blank map, no `cmd`). Surfaced only because the throw was an
+un-awaited-rejection (no console error); found by wrapping the call in a temporary try/catch. Fix =
+add `books` to the `startRender` call + destructure. (`scripts`/`portraits` worked because they were
+already threaded — the lesson: a new load()-scope value used by `startRender` must be passed through.)
+
+**Verification:**
+- `tests/test_books.html` — **19/19** (synthetic `BOOK.DAT` only; no game data): offset-table parse,
+  `get`/`has` bounds (quality 0 / out-of-range → null), NUL-termination, newline survival, markup left
+  intact for the renderer, and the absent/truncated-file inert paths.
+- Live (real `book.dat`): LOOK at the **picture** by the throne (obj 143, quality 99) → modal "This is a
+  very fancy portrait of you … signed 'Woodroffe'" (the artist self-portrait easter egg); the **Book of
+  Circles** (quality 111) renders the gargoyle title/body in the runic style + the English `(Translation)`
+  with `*` paragraph breaks, scrollable. No console errors.
+
+**Kept deviations / deferrals (so a later session doesn't "correct" them):**
+- **Display is a modal, not a console dump.** Source `CON_printf`s the text into the scroll; the clone
+  uses a dismissable scroll modal (the modern-UX anchor). Behaviour (what's readable, keyed by quality)
+  is faithful; presentation is modernized.
+- **Books require adjacency; signs read at any range** — follows source (`C_27A1_066D` proximity gate
+  vs `C_27A1_06A2` none). LOOK can target anything in view, so a distant sign is readable — minor, matches
+  source's "signs always".
+- **Carried books not read via LOOK** — source allows reading a non-LOCXYZ (carried) book; the clone's
+  LOOK targets map cells, so reading from inventory is out of scope here.
+- **Single-object read** — source's sign branch loops every readable at the LOCXYZ cell; the clone reads
+  the one picked object (sufficient for the placed signs/books seen). 
+- **Markup is best-effort, not a rune font** — gargoyle `<…>` is styled, not transliterated to runes;
+  `&`/`\` control markers are dropped rather than interpreted (no count context for `\` plurals in static
+  book text). Faithful to the *text*, modernized in *render*.

@@ -53,6 +53,7 @@ import { installMessageChannel } from './view/message_channel.js';
 import { Commands } from './resources/commands.js';
 import { makePickAtCell } from './systems/cell_pick.js';
 import { installCommandDispatch } from './systems/command_dispatch.js';
+import { Books } from './resources/books.js';
 import { registerUseHandlers } from './systems/use_handlers.js';
 import { setActiveLevel } from './systems/level_change.js';
 import { installBlueGateSpawn, checkGateEntry, castRedGate } from './systems/moongate_runtime.js';
@@ -71,8 +72,11 @@ const REQUIRED = ['maptiles.vga', 'objtiles.vga', 'tileindx.vga', 'masktype.vga'
 // (decision 2026-06-07, Zane — supersedes I-12's "portraits are OPTIONAL/never block Britain").
 // OPTIONAL files are stored + loaded raw but do NOT gate readiness. portrait.z holds the
 // Avatar's own portrait (char-creation choice in the save); the talk target is never the
-// Avatar, so it stays deferred/optional (research_portraits.md).
-const OPTIONAL = ['portrait.z'];
+// Avatar, so it stays deferred/optional (research_portraits.md). book.dat holds the in-game
+// book/sign text read by LOOK (seg_27a1.c C_27A1_078F: an offset table keyed by the object's
+// quality → raw NUL-terminated text); OPTIONAL so it never gates Britain — the LOOK book-read
+// simply no-ops when it's absent.
+const OPTIONAL = ['portrait.z', 'book.dat'];
 
 // OBJBLK region files (64 surface objblk[col][row] + 5 dungeon objblk[level]i).
 // Demand-loaded per region from U6DB, so they gate by presence-count, not the
@@ -290,8 +294,10 @@ async function load() {
   // I-13d: conversation scripts — raw converse.a/.b bytes, decoded lazily per-NPC
   // by the conversation VM on talk (assets/converse.js).
   const scripts = new ConversationScripts({ a: fileMap.get('converse.a'), b: fileMap.get('converse.b') });
+  // I-book: BOOK.DAT book/sign text (OPTIONAL — null when not dropped; LOOK-read no-ops then).
+  const books = new Books(fileMap.get('book.dat'));
 
-  await startRender(world, { npcScheduleStats, objlist, schedules, uiStack, portraits, scripts, restored: !!snapshot, artifactStamp: stamp });
+  await startRender(world, { npcScheduleStats, objlist, schedules, uiStack, portraits, scripts, books, restored: !!snapshot, artifactStamp: stamp });
 }
 
 // I-6 verification: dump party inventories (I-6a) + a sampling of object
@@ -343,7 +349,7 @@ function verifyInventory(world, objlist) {
 // I-1c/I-2b: terrain + world objects on screen. Build the GPU atlas + palette, place
 // the camera at Britain's default origin, demand-load the OBJBLK regions in view, then
 // register CameraSystem + RenderSystem(s) and drive a continuous rAF loop. Drag to pan.
-async function startRender(world, { npcScheduleStats, objlist, schedules, uiStack, portraits, scripts, restored, artifactStamp } = {}) {
+async function startRender(world, { npcScheduleStats, objlist, schedules, uiStack, portraits, scripts, books, restored, artifactStamp } = {}) {
   const canvas = document.getElementById('screen');   // shown via the #app shell reveal in load()
 
   // I-10a: gameplay message channel. Render-flush installer (mirrors installDevHud);
@@ -574,9 +580,10 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
   cmd = installCommandDispatch(world, {
     pickAtCell, probe, canvas,
     cellEl: document.getElementById('probe-cell'),
-    avatarRef, reg, objlist, message, uiStack, portraits, scripts,
+    avatarRef, reg, objlist, message, uiStack, portraits, scripts, books,
     recenter: centerOn, moveFollowers,          // I-19d: the ladder handler teleports the party + follows the camera
   });
+  window.__U6.books = books;        // dev: Books.get(quality) → raw BOOK.DAT text
   window.__U6.cmd = cmd;            // dev: live dispatch({verb, target}) + isPending()
   window.__U6.probe = probe;        // dev: isDragging() + getLastCell() (level-aware cursor cell)
   window.__U6.pickAtCell = pickAtCell;

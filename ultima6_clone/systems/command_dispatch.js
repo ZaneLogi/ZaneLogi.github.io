@@ -19,8 +19,9 @@
 // real USE effects (door, crank, …) and the other verbs land in I-10c+.
 
 import { Commands } from '../resources/commands.js';
-import { Position, ObjType, ContainedIn, Actor, PartyMember, AIMode, Alignment } from '../components/components.js';
+import { Position, ObjType, ContainedIn, Actor, PartyMember, AIMode, Alignment, Amount } from '../components/components.js';
 import { displayName } from '../view/inspector.js';
+import { openBookWindow } from '../view/book_window.js';
 import { makeConversationHost } from './conversation/conversation_system.js';
 import { MapLevel } from '../resources/map_level.js';
 import { moveToInventory, dropToMap, moveMapObject, inventoryOf, setEquipped, readyItem } from '../world_loader.js';
@@ -32,6 +33,13 @@ import { clearMoonstoneSlot, castRedGate } from './moongate_runtime.js';
 
 const CLOSE_ENOUGH = 1;                 // Chebyshev reach for adjacency verbs (USE etc.)
 const ALIGN_EVIL = 0x20, ALIGN_CHAOTIC = 0x60;   // NPCStatus alignment bits (u6.h:116/118)
+
+// I-book — LOOK-readable object types (seg_27a1.c). D_1CDA = books: readable only when
+// ADJACENT (the clone LOOKs at map objects; source also allows carried books, deferred).
+// D_1CE4 = signs/plaques: readable at any range. Both still require a non-zero quality
+// (the BOOK.DAT index) before C_27A1_078F prints anything.
+const READABLE_BOOKS = new Set([151, 61, 152, 270, 59]);    // book · Book of Circles · scroll · balloon plans · Codex
+const READABLE_SIGNS = new Set([332, 333, 143, 254, 255]);  // sign · gargoyle sign · picture · cross · tombstone
 
 // Verb-first key bindings. Extended as verbs land (U=use, L=look, G=get, M=move, …).
 const VERB_KEYS = { u: 'use', l: 'look', g: 'get', m: 'move', t: 'talk' };
@@ -72,13 +80,14 @@ function canPushTo(world, handle, ox, oy, dir) {
   return canStandAt(world, bx, by, { actorId: handle });
 }
 
-export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellEl, avatarRef, reg, objlist, message, uiStack, portraits, scripts, recenter, moveFollowers }) {
+export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellEl, avatarRef, reg, objlist, message, uiStack, portraits, scripts, books, recenter, moveFollowers }) {
   const commands = world.getResource(Commands);
   const posStore = world.store(Position);
   const objStore = world.store(ObjType);
   const mapLevel = world.getResource(MapLevel);
   const aiStore = world.store(AIMode);          // I-11c: asleep gate (AIMode.AI_SLEEP)
   const alignStore = world.store(Alignment);    // I-11c: evil/chaotic gate (Alignment, carried from NPCStatus)
+  const amtStore = world.store(Amount);         // I-book: object quality = the BOOK.DAT index
 
   // --- targeting cue (decision #3): a verb label pinned to the #probe-cell
   //     highlight + a recolor, instead of source's textual "Use-" prompt echo. ---
@@ -275,6 +284,17 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
     }
     const name = displayName(world, pick, { reg, objlist });
     message(`Thou dost see ${withArticle(name)}.`);
+    // Book/sign reading (C_27A1_06D7 CanRead → C_27A1_078F): a readable type with a
+    // non-zero quality opens its BOOK.DAT text. Books need adjacency; signs read at range.
+    // No quality / no book.dat → no read (the "Thou dost see" line stands).
+    const lid = world.resolve(pick);
+    const qual = amtStore.quality[lid] | 0;
+    const objNum = objStore.objNumber[lid];
+    const readable = READABLE_SIGNS.has(objNum) || (READABLE_BOOKS.has(objNum) && withinReach(target));
+    if (readable && qual > 0) {
+      const txt = books && books.get(qual);
+      if (txt) openBookWindow(uiStack, name, txt);
+    }
   });
 
   // --- GET verb-handler (C_27A1_18F5): pick up an adjacent ground object into the

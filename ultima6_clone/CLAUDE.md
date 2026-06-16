@@ -52,7 +52,8 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 for where we are now. The NPC-movement arc I-14→I-17 is **complete** (speed model → drunk-walk
 → arrival/direction → AI behaviors), the status UI (I-18) and the **level-change subsystem (I-19 —
 `USE ladder` → multi-z dungeons)**, the **moongate subsystem (I-moongate)** and the **egg/creature-spawn
-system (I-egg)** have landed; object-action handler expansion is now I-20 (demand-driven).
+system (I-egg)** have landed, and **I-book** (book/sign reading — `LOOK` → `BOOK.DAT` reader modal)
+completes the LOOK verb; object-action handler expansion is now I-20 (demand-driven).
 What stays
 here is the durable, slowly-changing reference — the code layout, the dev console helpers,
 and the per-step **kept deviations** (so a later session doesn't "correct" them). The ECS
@@ -60,7 +61,8 @@ runtime-ground spec is
 `docs/architecture_ecs.md`, implemented in `ecs/world.js` since I-1. Code layout:
 `ecs/` (runtime core), `assets/` (format decoders), `resources/` (TileRegistry,
 MapLevel, Camera, Viewport, Party, Paths, Schedules, **WorldSpeed** (I-14d),
-**MoonGates** (I-moongate: `D_2C74` blue endpoints + moon phases), …),
+**MoonGates** (I-moongate: `D_2C74` blue endpoints + moon phases), **Books** (I-book:
+`BOOK.DAT` u16-offset-table reader, keyed by object quality), …),
 `systems/` (render, camera, world-data, schedule, passability, avatar move,
 move-followers, humanoid-anim, pathfinding, npc_path, npc_tick, ai_modes, **move_economy**
 (I-14: DEXTE-paced accumulator — `rate`/`stepCostAt`/`PLAYER_STEP_MS`) + **drunk_walk**
@@ -82,7 +84,8 @@ hatched-creature tag = cull key + occupancy), …),
 **dev_npc_inspect** + **dialog_window** (I-13 live conversation I/O) + **party_status**
 (I-18: `P` roster / ZSTATS / GIVE recipient-picker) + **inventory_picker** (I-10j inventory
 window + the I-18 `E` equip/`M` move pickers) + **equip_list** (I-18h equipped-slot list) +
-**moongate_hud** (I-moongate: composited sky strip + gate/phase readout)), `world_loader.js`
+**moongate_hud** (I-moongate: composited sky strip + gate/phase readout) + **book_window**
+(I-book: the LOOK book/sign reader modal + U6-markup renderer)), `world_loader.js`
 (world-object load + runtime add/delete/find primitives), `u6db.js` (BYO-data store),
 `index.html`/`main.js` (app shell), `tests/`.
 

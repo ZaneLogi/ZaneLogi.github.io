@@ -28,6 +28,29 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-16 — I-book: book / sign reading (`BOOK.DAT`), completing the LOOK verb
+
+- **Read**: `seg_27a1.c` LOOK handler — `C_27A1_06D7` ("CanRead?") + the two readable-type tables
+  `D_1CDA` (books: `OBJ_097`/`03D`/`098`/`10E`/`03B`) + `D_1CE4` (signs: `OBJ_14C`/`14D`/`08F`/`0FE`/`0FF`),
+  and `C_27A1_078F` (the reader: opens `BOOK.DAT`, `di = GetQual`, u16 offset table at `(di-1)<<1`, then
+  the NUL-terminated text). `obj.h` for the numbers.
+- **Found**: book content is keyed by the object's **quality** into a plain (uncompressed) `BOOK.DAT` =
+  a u16 offset table + NUL-terminated text. **`OBJ_10E` (270) = the balloon plans IS a readable book**
+  (in `D_1CDA`) — confirmed live ("balloon plans"). Reading is **LOOK-only**; the only book-like USE is
+  the spellbook (`OBJ_039`) which opens the spellbook UI, not a text read. The user's real `BOOK.DAT`:
+  128 entries, 25132 bytes; markup is in-band ASCII (`<>` gargoyle, `@` highlight, `*` paragraph, `&`/`\`
+  control markers) — no binary control bytes. Entry 1 = "The perpetual motion machine."; the Book of
+  Circles (quality 111) = gargoyle block + `(Translation)`.
+- **Docs**: `progress.md` banner → I-book; new ledger row + §"I-book scope"; this entry.
+- **Found (impl)**: a scope bug — `books` (declared in `load()`) was used in the deps object inside
+  `startRender` without being threaded through its params → boot `ReferenceError: books is not defined`,
+  silent (un-awaited rejection), blank map. Fix: pass `books` into `startRender`. Lesson noted in the scope.
+- **Built**: `resources/books.js` (offset-table reader), `view/book_window.js` (modal + markup renderer),
+  the LOOK-handler readable gate in `command_dispatch.js`, `book.dat` as OPTIONAL BYO-data, `tests/test_books.html`
+  (19/19). Verified live: the Woodroffe portrait sign + the Book of Circles.
+- **Open**: carried-book reading, the multi-object sign loop, and a true rune font are deferred (minor).
+- **Next**: I-20 (remaining object-action handlers — spellbooks / instruments / etc.; demand-driven).
+
 ## 2026-06-15 — I-13 fix: conversation ends after the look-line for PREFIX+MAIN scripts
 
 - **Symptom** (Zane, live in the preview): talking to **Nicodemus** (58) opened the dialog, showed
