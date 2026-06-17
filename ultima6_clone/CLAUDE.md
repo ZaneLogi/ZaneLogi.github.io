@@ -52,8 +52,10 @@ alongside the drag-only dropzone is a nice-to-have for the rebuild.)
 for where we are now. The NPC-movement arc I-14→I-17 is **complete** (speed model → drunk-walk
 → arrival/direction → AI behaviors), the status UI (I-18) and the **level-change subsystem (I-19 —
 `USE ladder` → multi-z dungeons)**, the **moongate subsystem (I-moongate)** and the **egg/creature-spawn
-system (I-egg)** have landed, and **I-book** (book/sign reading — `LOOK` → `BOOK.DAT` reader modal)
-completes the LOOK verb; object-action handler expansion is now I-20 (demand-driven).
+system (I-egg)** have landed, **I-book** (book/sign reading — `LOOK` → `BOOK.DAT` reader modal)
+completes the LOOK verb, **I-container** (USE chest/barrel/crate → spill + insert) and **I-spellbook**
+(`c` → a minimal cast feature: 7 non-combat spells wired to existing subsystems, the rest fizzle) have
+landed; object-action handler expansion is now I-20 (demand-driven).
 What stays
 here is the durable, slowly-changing reference — the code layout, the dev console helpers,
 and the per-step **kept deviations** (so a later session doesn't "correct" them). The ECS
@@ -62,7 +64,8 @@ runtime-ground spec is
 `ecs/` (runtime core), `assets/` (format decoders), `resources/` (TileRegistry,
 MapLevel, Camera, Viewport, Party, Paths, Schedules, **WorldSpeed** (I-14d),
 **MoonGates** (I-moongate: `D_2C74` blue endpoints + moon phases), **Books** (I-book:
-`BOOK.DAT` u16-offset-table reader, keyed by object quality), …),
+`BOOK.DAT` u16-offset-table reader, keyed by object quality), **Spells** (I-spellbook: the
+verbatim `seg_1944.c` `SpellName`/`Reagents_needed`/`ReagType` tables + accessors), …),
 `systems/` (render, camera, world-data, schedule, passability, avatar move,
 move-followers, humanoid-anim, pathfinding, npc_path, npc_tick, ai_modes, **move_economy**
 (I-14: DEXTE-paced accumulator — `rate`/`stepCostAt`/`PLAYER_STEP_MS`) + **drunk_walk**
@@ -78,7 +81,9 @@ the `C_101C_089E` level-change core `enterLevelChange` — `USE OBJ_131` ladder 
 blue spawn/entry/travel `C_0A33_121A`/`C_1E0F_184D`/`C_101C_0A3A`, bury `C_27A1_3425`, red Orb `C_27A1_5789`) +
 **egg** (I-egg: the whole `seg_2E2D.c` EGG subsystem — `hatchEgg`/`spawnCreature`/`buildMultiTileBody`/
 `hatchAroundAvatar`/`cullAroundAvatar`/`shouldPacifyGargoyles`; the new **Spawned** component is the
-hatched-creature tag = cull key + occupancy), …),
+hatched-creature tag = cull key + occupancy) + **use_container** (I-container: USE chest/barrel/crate →
+spill `C_27A1_09A1` / lock+trap / insert `C_27A1_00A9`) + **cast_spell** (I-spellbook: the spell registry
++ the Locate/Mass-Awaken/Create-Food/Heal/Telekinesis/Unlock-Magic/Gate-Travel effects), …),
 `assets/` also has **portrait.js** + **converse.js** (lazy lib_32 decoders);
 `resources/` also has **Commands** (dispatch registries) + **MessageLog**;
 `components/`, `view/` (WebGL renderer + dev HUD/inspector + **message_channel** +
@@ -86,7 +91,8 @@ hatched-creature tag = cull key + occupancy), …),
 (I-18: `P` roster / ZSTATS / GIVE recipient-picker) + **inventory_picker** (I-10j inventory
 window + the I-18 `E` equip/`M` move pickers) + **equip_list** (I-18h equipped-slot list) +
 **moongate_hud** (I-moongate: composited sky strip + gate/phase readout) + **book_window**
-(I-book: the LOOK book/sign reader modal + U6-markup renderer)), `world_loader.js`
+(I-book: the LOOK book/sign reader modal + U6-markup renderer) + **spellbook_window** (I-spellbook:
+the `c` cast modal — spells by circle + reagent tint)), `world_loader.js`
 (world-object load + runtime add/delete/find primitives), `u6db.js` (BYO-data store),
 `index.html`/`main.js` (app shell), `tests/`.
 

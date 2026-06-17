@@ -47,7 +47,10 @@ import { installNpcInspect } from './view/dev_npc_inspect.js';
 import { UIStack } from './view/ui_stack.js';
 import { openInspector } from './view/inspector.js';
 import { openInventoryWindow, openMovePicker } from './view/inventory_picker.js';
-import { openPartyRoster, openZStats, openRecipientPicker } from './view/party_status.js';
+import { openPartyRoster, openZStats, openRecipientPicker, makePartyMemberList } from './view/party_status.js';
+import { openSpellbook } from './view/spellbook_window.js';
+import { reagentMaskFromCarried } from './resources/spells.js';
+import { castSpell as dispatchCast } from './systems/cast_spell.js';
 import { MessageLog } from './resources/message_log.js';
 import { installMessageChannel } from './view/message_channel.js';
 import { Commands } from './resources/commands.js';
@@ -627,6 +630,74 @@ async function startRender(world, { npcScheduleStats, objlist, schedules, uiStac
     const pick = pickAtCell(cell.x, cell.y);
     if (pick !== null) openInspector(world, pick, uiStack, { reg, objlist });
     e.preventDefault();
+  });
+
+  // I-spellbook: `c` opens the spellbook modal (same gate as `I`). The reagent tint reads the
+  // party's carried reagents (informational only — no reagent gate). Sub-step a: EVERY spell
+  // fizzles; the cast registry (no-target + targeted effects) replaces `castSpell` in b/c.
+  function carriedReagentMask() {
+    const objNums = new Set();
+    const walk = (holder) => {
+      for (const it of inventoryOf(world, holder)) {
+        objNums.add(it.objNumber);
+        if (world.has(it.handle, Container)) walk(it.handle);   // recurse into carried bags
+      }
+    };
+    for (const id of world.query(PartyMember)) walk(world.handleOf(id));
+    return reagentMaskFromCarried(objNums);
+  }
+  // Heal's party-member target (research_spellbook.md §3.4): a roster picker over the whole
+  // party (the clone heals party-only, not source's at-range creature cursor). Calls onPick(slot).
+  function pickHealTarget(onPick) {
+    const el = document.createElement('div');
+    el.className = 'ui-modal';
+    const head = document.createElement('div');
+    head.className = 'ui-name';
+    head.textContent = 'Heal whom?';
+    el.appendChild(head);
+    const lc = makePartyMemberList({ reg, objlist, showHp: true, onSelect: (slot) => { uiStack.pop(); onPick(slot); } });
+    el.appendChild(lc.el);
+    const hint = document.createElement('div');
+    hint.className = 'ui-hint';
+    hint.textContent = '↑↓ select · Enter · Esc cancel';
+    el.appendChild(hint);
+    uiStack.push({ el, onKey: (e) => lc.onKey(e) });
+  }
+  // Gate Travel's phase pick (research_spellbook.md §3.3): source's "To phase " 1–8 prompt.
+  // A digit-capture modal; on 1–8 → onPhase(n), Esc cancels (UIStack default pop).
+  function promptPhase(onPhase) {
+    const el = document.createElement('div');
+    el.className = 'ui-modal';
+    const head = document.createElement('div');
+    head.className = 'ui-name';
+    head.textContent = 'Gate Travel';
+    el.appendChild(head);
+    const body = document.createElement('div');
+    body.className = 'ui-meta';
+    body.textContent = 'To which moon phase? (1–8)';
+    el.appendChild(body);
+    const hint = document.createElement('div');
+    hint.className = 'ui-hint';
+    hint.textContent = '1-8 · Esc cancel';
+    el.appendChild(hint);
+    uiStack.push({ el, onKey: (e) => { if (/^[1-8]$/.test(e.key)) { e.preventDefault(); uiStack.pop(); onPhase(parseInt(e.key, 10)); } } });
+  }
+  // I-spellbook cast dispatch: no-target casts run immediately; Heal opens the roster picker;
+  // Telekinesis/Unlock Magic arm the map cursor (cmd.armSpell); Gate Travel takes a phase digit.
+  const castCtx = {
+    message, avatarRef, tileSize: ts, objlist, pickHealTarget,
+    recenter: centerOn, moveFollowers,                       // teleportParty (Gate Travel)
+    armSpellCursor: (spellNum) => cmd.armSpell(spellNum),
+    promptPhase,
+  };
+  function castSpell(spellNum) { dispatchCast(world, spellNum, castCtx); }
+  document.addEventListener('keydown', (e) => {
+    if (!uiStack.isEmpty()) return;
+    if (probe.isDragging()) return;
+    if (cmd.isPending()) return;
+    if (e.key.toLowerCase() !== 'c') return;
+    e.preventDefault();
+    openSpellbook(uiStack, { haveMask: carriedReagentMask(), onCast: castSpell });
   });
 
   // I-18c/d/e — `P` opens the on-demand party roster (icon + name + HP). Selecting a member opens its

@@ -279,6 +279,21 @@ export function moveToInventory(world, itemHandle, holderHandle) {
   return true;
 }
 
+// Create a fresh item directly in a holder's pack — source's GiveObj (insert a NEW obj as
+// INVEN). The off-map analog of addMapObject: same component set minus Position, attached as
+// a ContainedIn child. Stack-merge into an existing same-type stack is deferred (a new stack
+// per call, as for GET). Used by Create Food (I-spellbook). Returns the new item handle.
+export function giveToInventory(world, holderHandle, { objNumber, frame = 0, quality = 0, quantity = 1, status = 0 }) {
+  const reg = world.getResource(TileRegistry);
+  const e = world.create();
+  world.add(e, ObjType, { objNumber, frame, origObjNumber: objNumber });
+  world.add(e, Status, { bits: status });
+  world.add(e, Amount, { quantity, quality });
+  world.add(e, Renderable, { tileId: reg.tileForObject(objNumber, frame) });
+  attachToHolder(world, e, holderHandle, false);
+  return e;
+}
+
 // Toggle an inventory item between worn (EQUIP) and carried (INVEN) — source's InsertObj
 // EQUIP/INVEN coord-use flip (C_155D ready/unready). The item stays in the holder's inventory;
 // only ContainedIn.equipped changes (the I-18h split key + the snapshot persists it). No-op if

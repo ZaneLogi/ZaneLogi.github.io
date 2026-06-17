@@ -24,7 +24,8 @@ import { displayName } from '../view/inspector.js';
 import { openBookWindow } from '../view/book_window.js';
 import { makeConversationHost } from './conversation/conversation_system.js';
 import { MapLevel } from '../resources/map_level.js';
-import { moveToInventory, dropToMap, moveMapObject, inventoryOf, setEquipped, readyItem } from '../world_loader.js';
+import { moveToInventory, dropToMap, moveMapObject, inventoryOf, setEquipped, readyItem, setObjectFrame } from '../world_loader.js';
+import { Telekinesis as SPELL_TELEKINESIS, Unlock_Magic as SPELL_UNLOCK_MAGIC } from '../resources/spells.js';
 import { equipSlotForTile, buildEquipment, resolveReadySlot } from './equip_slots.js';
 import { canStandAt } from './passability.js';
 import { DIR_DX, DIR_DY, dirFromKeyEvent } from './avatar_move_system.js';
@@ -106,6 +107,8 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
   let pendingDropItem = null;            // the carried item awaiting a DROP location
   let pendingMoveObj = null;             // the ground object awaiting a MOVE push direction (stage 2)
   let awaitingDir = false;               // MOVE stage 2: the next key is a push direction, not a cell
+  let pendingSpell = null;               // I-spellbook c: the targeted spell number while pendingVerb==='spell'
+  let spellPush = false;                 // I-spellbook c: the awaiting-dir push is a Telekinesis push (plain MoveObj, no container insert)
   // The #probe-cell targeting cue (armed recolor + a verb label): the cell/direction verbs
   // (arm/disarm) recolor the probe rectangle + show a verb label while you point at a cell.
   function showCue(text) {
@@ -126,6 +129,8 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
     pendingDropItem = null;
     pendingMoveObj = null;
     awaitingDir = false;
+    pendingSpell = null;
+    spellPush = false;
     hideCue();
   }
   // Confirm the armed cell (Enter or left-click): run the verb at the highlighted cell.
@@ -136,6 +141,9 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
     // I-moongate e: the Orb's 5x5 "Where:" cast pick — castRedGate validates range +
     // placement and spawns the OBJ_054 (it's not a verb-table handler).
     if (pendingVerb === 'cast') { castRedGate(world, cell.x, cell.y, { avatarRef, message }); disarm(); return; }
+    // I-spellbook c: a targeted cast (Telekinesis / Unlock Magic) resolves at the picked cell.
+    // Telekinesis-push transitions to awaitingDir (a second key) rather than completing here.
+    if (pendingVerb === 'spell') { runSpellTarget(pendingSpell, cell); if (!awaitingDir) disarm(); return; }
     dispatch({ verb: pendingVerb, target: { x: cell.x, y: cell.y }, item: pendingDropItem });
     if (!awaitingDir) disarm();
   }
@@ -238,25 +246,72 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
   // a blocked direction prints the refusal and the caller disarms (source returns at
   // :1016), so the player re-presses M to retry. SubMov(5) is deferred (move-point economy
   // is still project-wide deferred, as for GET/DROP).
-  function resolveMove(handle, dir) {
+  function resolveMove(handle, dir, { plain = false } = {}) {
     if (handle == null || world.resolve(handle) === -1) { message('What?', 'miss'); return; }   // stale pick
     const oi = world.resolve(handle);
     const ox = posStore.x[oi], oy = posStore.y[oi];
     const name = displayName(world, handle, { reg, objlist });
     const mask = mapLevel.wrapMask;   // active level wrap (0x3ff surface / 0xff dungeon)
     const dx = (ox + DIR_DX[dir]) & mask, dy = (oy + DIR_DY[dir]) & mask;
-    // Push onto an OPEN container → it goes inside (C_27A1_1E8B:1011-1013, FindLoc +
+    // MOVE pushes onto an OPEN container → it goes inside (C_27A1_1E8B:1011-1013, FindLoc +
     // C_27A1_00A9 + InsertObj CONTAINED). Checked before canPushTo: a container tile is
-    // impassable (you can't push ONTO it normally), but it accepts the item.
-    const container = containerAtCell(world, dx, dy, handle);
-    if (container !== null) {
-      moveToInventory(world, handle, container);
-      message(`You put ${withArticle(name)} in ${withArticle(displayName(world, container, { reg, objlist }))}.`);
-      return;
+    // impassable (you can't push ONTO it normally), but it accepts the item. A `plain` push
+    // (Telekinesis) SKIPS this — source's Telekinesis is a bare MoveObj with no InsertObj
+    // (research_spellbook.md §3.1), so it never drops the object into a container.
+    if (!plain) {
+      const container = containerAtCell(world, dx, dy, handle);
+      if (container !== null) {
+        moveToInventory(world, handle, container);
+        message(`You put ${withArticle(name)} in ${withArticle(displayName(world, container, { reg, objlist }))}.`);
+        return;
+      }
     }
     if (!canPushTo(world, handle, ox, oy, dir)) { message("You can't move it there."); return; }
     moveMapObject(world, handle, dx, dy);
     message(`You move ${withArticle(name)}.`);
+  }
+
+  // --- I-spellbook c: targeted-cast cursor (Telekinesis / Unlock Magic) -------------------
+  // The spellbook's Enter on a targeted spell closes the book then arms this cursor (via the
+  // cast ctx's armSpellCursor → armSpell). Pick a cell like USE/MOVE, then runSpellTarget
+  // applies the spell's effect. Source skips Telekinesis's missile/LOS (it always succeeds)
+  // and is range-exempt for Unlock Magic — the clone reuses the existing cell cursor for both.
+  const SPELL_DOORS = [0x129, 0x12A, 0x12B, 0x12C];   // the four doors (Unlock-Magic targets); CHEST = 0x062
+  function armSpell(spellNum) {
+    pendingVerb = 'spell';
+    pendingSpell = spellNum;
+    showCue('Cast');
+  }
+  function runSpellTarget(spellNum, cell) {
+    const pick = pickAtCell(cell.x, cell.y, { forUse: true });   // objects only (skip NPC / decoration)
+    if (pick === null) { message('Nothing happens.'); return; }
+    const oi = world.resolve(pick);
+    const objNum = objStore.objNumber[oi];
+    if (spellNum === SPELL_TELEKINESIS) {                 // C_1944_2DA7: lever / crank / range-push
+      const fn = commands.useHandlers.get(objNum);
+      if ((objNum === 0x10C || objNum === 0x120) && fn) {  // lever (OBJ_10C) / crank (OBJ_120) → trigger from afar (the payoff)
+        fn({ world, target: { x: cell.x, y: cell.y, entity: pick }, message, avatarRef, recenter, moveFollowers, objlist, name: nameOf });
+        return;
+      }
+      const w = reg.weightOf(objNum);                      // else push one tile (plain MoveObj, no container insert)
+      if (w === 0 || w === 255 || objNum === 0x19B || !world.has(pick, Position)) { message('Nothing happens.'); return; }
+      pendingMoveObj = pick; awaitingDir = true; spellPush = true;
+      label.textContent = 'Move…';
+      message('Move it which way? (arrow / numpad keys)');
+      return;                                              // stay armed for the direction key (confirm won't disarm)
+    }
+    if (spellNum === SPELL_UNLOCK_MAGIC) {                 // C_1944_1DF4 SPELL_17: clear a MAGIC lock only
+      const frame = objStore.frame[oi];
+      if (SPELL_DOORS.includes(objNum) && (frame & 0xc) === 0xc) {   // magic-locked door → closed-unlocked (state 1)
+        setObjectFrame(world, pick, (frame & 3) | 4); message('The magical lock dissolves.');
+      } else if (objNum === 0x062 && frame === 3) {                  // magic-locked chest → closed (frame 1)
+        setObjectFrame(world, pick, 1); message('The magical lock dissolves.');
+      } else {
+        message('Nothing happens.');                                 // not magically locked → fizzle (SpellResult 2)
+      }
+      return;
+    }
+    message('Nothing happens.');
   }
 
   // --- USE verb-handler: the shared wrap around the object-type table ---
@@ -462,7 +517,7 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
       const dir = dirFromKeyEvent(e);
       if (dir !== -1) {
         e.preventDefault(); e.stopPropagation();
-        resolveMove(pendingMoveObj, dir);
+        resolveMove(pendingMoveObj, dir, { plain: spellPush });   // spellPush = Telekinesis (plain MoveObj, no container)
         disarm();
       } else if (e.key === 'Escape') {
         e.preventDefault();
@@ -505,7 +560,7 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
   }
 
   return {
-    dispatch, armDrop, giveItem, equipToggle, useItem,
+    dispatch, armDrop, giveItem, equipToggle, useItem, armSpell,
     isPending: () => pendingVerb !== null,
   };
 }

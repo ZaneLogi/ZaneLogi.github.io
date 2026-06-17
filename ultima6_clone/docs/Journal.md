@@ -28,6 +28,31 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-17 — impl I-spellbook (minimal `c` cast: data + book UI + 7 wired spells)
+
+- **Read**: `seg_1944.c` (the spell module) + `spells.h` — `SpellName[]` (`:143`, 16 slots/circle),
+  `Reagents_needed[]` (`:255`), `Reagents_name[]`/`ReagType[]` (`:242`/`:253`), the cast dispatch switch
+  (`:2400-2499`), and the 7 implemented handlers: Telekinesis `C_1944_2DA7` (`:1771` — lever/crank/push),
+  Gate Travel `C_1944_305A` (`:1842`), Unlock Magic `C_1944_1DF4` SPELL_17 case (`:1400` — magic-lock only,
+  range-exempt), Locate `C_1944_42AC` (`:2345` — sextant from `MapX/MapY`), Mass Awaken `C_1944_256A`
+  (`:1562`), Create Food `C_1944_2B9A` (`:1712` — `GiveObj OBJ_081 ×rand(1,10)`), Heal `C_1944_114D`
+  (rand 1-30, clamp `MaxHP`). All claims verified against source before coding (the review pass).
+- **Surprised**: the reagent *display* order is descending bit value (SA…MR), not bit-index — that's
+  why the help text reads "GS GA MR" for Create Food. Mass Awaken is actually a **targeted** area spell
+  in source (missile → Explosion AOE); the clone deliberately makes it a no-target avatar-area spell.
+  Telekinesis's push reuses the SAME "Direction-" prompt as the MOVE verb — so the clone routes it
+  through MOVE's stage-2 (`awaitingDir`) machinery rather than re-implementing a push.
+- **Documented**: `progress.md §"I-spellbook scope"` (as-built notes + the kept deviations); the plan
+  body kept as "built as described." `research_spellbook.md` needed no correction — it was accurate.
+- **Built** (3 save-point commits → squash): `resources/spells.js` (verbatim tables), `view/
+  spellbook_window.js` (the `c` modal), `systems/cast_spell.js` (registry + effects); `command_dispatch`
+  gained a `pendingVerb='spell'` cursor + `runSpellTarget` (Telekinesis/Unlock at a cell) + a `plain`
+  `resolveMove`; `world_loader.giveToInventory` (GiveObj analog). `test_spellbook` 34/34; full suite green.
+- **Next**: Zane's review (live-cast the 7 on real data — esp. a far lever via Telekinesis, a magic-locked
+  object via Unlock Magic, gate travel to a buried phase). Then **I-20** (remaining object-action handlers).
+
+---
+
 ## 2026-06-17 — impl I-container (USE-on-container: spill / lock / trap / insert)
 
 - **Read**: `C_27A1_2BBC` (use-chest, `seg_27a1.c:1327`), `C_27A1_09A1` (the "Searching here, you find …"

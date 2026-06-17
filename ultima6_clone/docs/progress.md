@@ -5,7 +5,7 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: I-container (USE-on-container) COMPLETE (2026-06-17).** USE a chest/barrel/crate opens it and **spills its contents onto the ground tile** (source-faithful `C_27A1_09A1`, "Searching here, you find …"; the existing `GET` retrieves them), and **MOVE/DROP** an item onto an *open* container puts it inside (`C_27A1_00A9` + `InsertObj CONTAINED`). The chest frame model is faithful (1=closed/0=open/2=key-locked/3=magic-locked, toggle); a matching party key (quality-matched per `C_27A1_2D8E`, recursive incl. bags) or a lockpick on a quality-0 lock opens cleanly, else a keyless / magically-locked chest **force-opens** (the door lock-bypass spirit); a trap (a contained `OBJ_151`/`SPELL_16`) prints "You spring a trap!" + consumes the marker but deals **no damage** (combat deferred). New `systems/use_container.js` (`useContainer` / `spillContents` / `hasUnlockKey` / `springTrapIfAny` / `canInsertInto` / `containerAtCell`), registered in `use_handlers`; `command_dispatch` threads a `name` closure into the USE ctx + wires the MOVE-push / DROP insert. No new components / no snapshot change. **`tests/test_container.html` 31/31** + in-game verified (spill / force-open / trap / insert). See §"I-container scope". **Next: I-spellbook** (`c` → minimal cast — planned, sub-steps in §"I-spellbook plan"); then **I-20** (remaining object-action handlers — instruments / etc.; demand-driven). Prior: I-19g (§"I-19g scope"), I-book (§"I-book scope"), I-egg (§"I-egg scope"), I-moongate (§"I-moongate scope").
+**Status: I-spellbook (minimal `c` cast) COMPLETE (2026-06-17).** Press `c` → a spellbook modal listing all 80 named U6 spells by circle (reagents tinted by what the party carries); `Enter` casts. 7 non-combat spells hook already-ported subsystems — **Locate** (sextant from the viewport origin, `C_1944_42AC`), **Mass Awaken** (clear `AI_SLEEP` in an avatar-centred area), **Create Food** (`GiveObj OBJ_081 ×rand(1,10)`), **Heal** (roster picker → rand(1,30) HP, clamp `maxHP`), **Telekinesis** (a far lever `OBJ_10C` / crank `OBJ_120` via the USE registry, else a one-tile plain push), **Unlock Magic** (clear a magic-locked door/chest frame), **Gate Travel** (phase 1–8 → the I-moongate `D_2C74` endpoint) — every other named spell **fizzles**. NO spellbook-item / reagent gate / mana / INT-circle / combat (deliberate, `research_spellbook.md §1`). New `resources/spells.js` (verbatim `seg_1944.c` tables), `view/spellbook_window.js` (the `c` modal), `systems/cast_spell.js` (registry + effects); `command_dispatch` gains a `pendingVerb='spell'` cursor (`armSpell`/`runSpellTarget`) + `resolveMove` a `plain` flag; `world_loader.giveToInventory` = the GiveObj analog. No new components / no snapshot change. **`tests/test_spellbook.html` 34/34** + full suite green (18 harnesses) + live-verified (`c` opens the book on real U6 data). See §"I-spellbook scope". **Next: I-20** (remaining object-action handlers — instruments / etc.; demand-driven). Prior: I-container (§"I-container scope"), I-19g (§"I-19g scope"), I-book (§"I-book scope"), I-egg (§"I-egg scope"), I-moongate (§"I-moongate scope").
 
 This banner is the **single canonical current-status line** — `CLAUDE.md` and
 `DOCUMENTATION_INDEX.md` point here instead of mirroring it (convention: §"Doc maintenance").
@@ -65,7 +65,7 @@ banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 | **I-book** | **book / sign reading** — completes the LOOK verb (I-10f stopped at "Thou dost see…"). `LOOK` at a readable object (`C_27A1_06D7` CanRead → `C_27A1_078F`) opens its `BOOK.DAT` text in a scrollable reader modal. `resources/books.js` (u16 offset-table reader, keyed by quality; no compression) + `view/book_window.js` (modal + U6-markup renderer: `<>` gargoyle / `@` highlight / `*` paragraph / `&`·`\` stripped) + the LOOK-handler readable-type tables (`D_1CDA` books adjacency-gated / `D_1CE4` signs any-range, quality>0). `book.dat` = OPTIONAL BYO-data. `tests/test_books.html` 19/19. See §"I-book scope". | **done** (2026-06-16) |
 | **I-egg** | **egg / creature-spawn system** (Path A, named 2026-06-14) — port `OBJ_14F` hatch (`seg_2E2D.c`): **a** data/decode · **b** hatch core (gates + embryo loop + alignment override + `SetHatched`/`SetInvisible`, spawns a placeholder/statless creature) · **d-visual** multi-tile bodies (place + link part-entities — dragon/hydra/serpent/vine + two-part cow/horse/giant-ant/etc.) · **c** avatar-keyed trigger (hatch on avatar entry into new territory, viewport-`nearRadius` proximity; `LOCAL` bypass) + force-hatch on the I-moongate `teleportParty` path · **e** cull + re-arm (avatar-keyed lifetime pass, §9.1; culls parts with the body) · **f** gargoyle pacification (Amulet/party-type → `AI_GRAZE`) + Shamino direction warning. **Spawn always stamps the embryo's AI mode (`NPCMode`/`NPCComMode`); unhandled modes idle, implemented I-16/I-17 worktypes apply automatically — NO combat** (`research_egg.md §9.1` pt 5). **Sub-step d is SPLIT:** **d-visual** (multi-tile bodies) is combat-independent and **IN I-egg** — a full-world objblk scan showed **234/943 eggs (~25%) hatch multi-tile creatures** (Dragon 55× / Giant Ant 69× / Alligator 39× / Hydra / Cow / Horse / Vine / Serpent), so deferring it would stub a quarter of all hatches; **d-stats** (`EGG_generate`+`D_3522` stat roll + loot) stays **combat-gated**. See §"I-egg scope" + `research_egg.md`. **d-stats + combat deferred.** | **done** (a · b · d-visual · c · e · f, 2026-06-14) |
 | **I-container** | **USE-on-container** — a USE handler that opens a chest/barrel/crate on the map (`C_27A1_2BBC` + the shared `C_27A1_09A1`) and **spills its contents onto the ground tile** (source-faithful — reuses `dropToMap` + the `GET` verb, *not* a window); chest lock = a matching party key (`OBJ_040`, quality-matched per `C_27A1_2D8E`) opens cleanly, else force-open bypass (door-spirit); trap = message + consume, damage deferred to combat; filters `OBJ_150`/`OBJ_151` pseudo-items. Set = `{062 chest, 0BA barrel, 0C0 crate}`. **Sub-step d** adds the inverse — MOVE/DROP an item onto an open container to put it inside (`C_27A1_00A9` + `InsertObj CONTAINED`, the `moveToInventory` analog; full insert set incl. backpack/bag/basket/vortex-cube). Self-contained; **not** a Telekinesis dependency. `test_container` 31/31. See §"I-container scope". | **done** (a–d, 2026-06-17) |
-| **I-spellbook** | **minimal cast feature** — `c` → spellbook modal (all named U6 spells + reagents); `Enter` casts. Only 7 non-combat spells that hook already-ported subsystems are implemented (Telekinesis / Locate / Gate Travel / Heal / Mass Awaken / Create Food / Unlock Magic); the rest fizzle. No spellbook-item / reagent-gate / mana / combat. See §"I-spellbook plan" + `research_spellbook.md`. | **planned** (a–c) |
+| **I-spellbook** | **minimal cast feature** — `c` → spellbook modal (all named U6 spells + reagents); `Enter` casts. Only 7 non-combat spells that hook already-ported subsystems are implemented (Telekinesis / Locate / Gate Travel / Heal / Mass Awaken / Create Food / Unlock Magic); the rest fizzle. No spellbook-item / reagent-gate / mana / combat. See §"I-spellbook scope" + `research_spellbook.md`. | **done** (a–c, 2026-06-17) |
 
 **Why I-2 is the world-data system.** Loading the real world from `OBJBLK*`/
 `objlist` into ECS entities is the clone's core purpose — the reason for choosing
@@ -4043,7 +4043,40 @@ abandoned window route.)
   USE-on-bag handler** — it was considered and rejected as unfaithful (parallel to I-19g's "no
   USE-on-hole").
 
-## I-spellbook plan — minimal `c` cast (PLANNED, not yet built)
+## I-spellbook scope — minimal `c` cast (DONE 2026-06-17)
+
+**As-built notes** (deviations from the literal plan below):
+- **Modules:** `resources/spells.js` (the verbatim `SpellName` / `Reagents_needed` / `Reagents_name`
+  / `ReagType` tables + pure accessors), `view/spellbook_window.js` (the `c` modal — a **bespoke**
+  grouped list, NOT `makeListCursor`, because of the per-circle headers; reuses the `.ui-*` classes),
+  `systems/cast_spell.js` (the spell registry + the no-cursor + Gate-Travel effects).
+- **Telekinesis + Unlock Magic live in `command_dispatch`, not `cast_spell`:** they resolve at a picked
+  cell, and Telekinesis's push reuses MOVE's stage-2 (`awaitingDir`) machinery which is command-dispatch-
+  internal. So the cast effect just CLOSES the book + arms the cell cursor (`ctx.armSpellCursor` →
+  `cmd.armSpell`, `pendingVerb='spell'`), and `command_dispatch.runSpellTarget` does the per-cell effect
+  (lever/crank trigger via the `useHandlers` registry · plain one-tile push · magic-lock frame flip).
+  `resolveMove` gained a `plain` flag so the Telekinesis push is a bare `moveMapObject` with **no**
+  container-insert (source's Telekinesis `MoveObj` has none).
+- **Locate origin:** the camera's top-left tile (`floor(cam.worldX / ts)`) is the clone's `MapX/MapY`.
+  After a manual drag-pan it reads where you're *looking* (source can't drag-pan → always avatar-centred);
+  ≤1 sextant-unit difference (research §3.2). Output uses `°` for source's `{` degree glyph.
+- **Mass Awaken:** a NO-target avatar-centred area, **radius 5** (a clone constant — source missiles a
+  cell + an Explosion AOE); clears `AI_SLEEP` → `AI_SCHEDULE` on the active level only.
+- **Create Food:** a new food stack per cast (no `GiveObj` stack-merge — deferred, as for GET). Added
+  `world_loader.giveToInventory` (the off-map `addMapObject` analog) as the GiveObj primitive.
+- **`c` key** is wired in `main.js` (gated like `I`: no modal / not dragging / no verb pending); the
+  reagent tint scans the party's carried reagents (recursing bags) — informational, no gate.
+- **Verification:** `tests/test_spellbook.html` **34/34** (ROM data + cast registry + the no-cursor
+  effects + the targeted/digit delegation); the **full suite is green** (18 harnesses, ~773 checks, no
+  regression from the `command_dispatch` / `world_loader` changes); live — `c` opens the book on real U6
+  data (80 spells, 7 starred, reagent tint, Esc closes). The per-cell targeted effects (lever/crank
+  trigger · push · magic-lock flip · gate travel) are exercised **live** (they need the running game +
+  a far lever / a magic-locked object / a buried endpoint) — left for Zane's review so a factory save
+  stays untouched.
+
+The rest of this section is the plan as built (sub-steps a–c landed as described below).
+
+## I-spellbook plan — minimal `c` cast
 
 A deliberately *limited* cast feature: `c` opens a spellbook modal listing **all** named U6 spells (8
 circles, reagents shown); `Enter` casts. Only **7 non-combat spells** that hook already-ported subsystems
