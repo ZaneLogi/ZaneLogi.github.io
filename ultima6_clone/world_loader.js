@@ -336,17 +336,23 @@ export function moveMapObject(world, handle, x, y, z) {
 // All on-map objects of a given type, optionally filtered by quality (source's
 // SearchArea + type/quality test, e.g. C_27A1_433D / C_27A1_4479). Returns handles.
 //
-// `near` re-imposes source's area bound. SearchArea/NextArea (seg_1184.c:369/345)
-// walk the resident Link[] chain and keep each LOCXYZ object whose (x,y) is in a
-// bbox AND z == MapZ. The quality-linked controls pass SearchArea(0,0,0x3ff,0x3ff)
-// = "no coordinate filter" — but U6's resident set is only ~the 40x40 active area
-// (DOS streaming evicts the rest; research_world_data.md §"Area-bounded object
-// search"). The clone never unloads regions, so an unfiltered scan would see
-// same-quality objects across every visited castle/level — matches source can't
-// make. Pass `near = {x, y, z}` (the control's cell) to restrict to a ±20 box
-// (~the 40x40 active area) on the control's level — the z test is NextArea's
-// `z == MapZ`, a no-op while single-level (overworld) but load-bearing once
-// dungeons co-reside under no-unload. Omit `near` for a genuine global scan.
+// `near` imposes source's LEVEL bound — and only that. The quality-linked controls
+// (lever/switch) call SearchArea(0,0,0x3ff,0x3ff) + NextArea (seg_1184.c:369/345):
+// walk the resident Link[] chain and keep each LOCXYZ object on `z == MapZ`. The bbox
+// is the WHOLE MAP, so source applies NO distance restriction — a lever toggles EVERY
+// same-quality marker on its level, however far away (a portcullis and its lever can sit
+// at opposite ends of a dungeon). Pass `near = {x, y, z}` (the control's cell) to apply
+// that `z == near.z` filter; only `z` is read (x/y kept for call-site symmetry). Omit
+// `near` for a cross-level global scan.
+//
+// Deviation note: source's resident set is only the loaded area (DOS streaming evicts the
+// rest), so a lever never sees same-quality objects in an UN-loaded dungeon/castle. The
+// clone never unloads, so every same-quality marker on a z-level co-resides. U6 authors
+// each level's objblk with distinct control qualities, so a lever still hits exactly its
+// own gate(s); only if two dungeons on one z-level ever reused a quality would a lever
+// toggle the other's (off-screen) gate — tighten to a per-dungeon bbox if that surfaces.
+// (Earlier the clone clamped this to a ±20 box around the lever, which wrongly stranded
+// any gate >20 tiles from its lever — non-faithful; removed.)
 export function findObjectsByTypeQuality(world, objNumber, quality, near = null) {
   const objs = world.store(ObjType), amts = world.store(Amount);
   const pos = near ? world.store(Position) : null;
@@ -356,8 +362,7 @@ export function findObjectsByTypeQuality(world, objNumber, quality, near = null)
   for (const id of (near ? world.query(ObjType, Position) : world.query(ObjType))) {
     if (objs.objNumber[id] !== objNumber) continue;
     if (quality !== undefined && amts.quality[id] !== quality) continue;
-    if (near && (pos.z[id] !== near.z ||
-                 Math.abs(pos.x[id] - near.x) > 20 || Math.abs(pos.y[id] - near.y) > 20)) continue;
+    if (near && pos.z[id] !== near.z) continue;   // NextArea's z == MapZ; bbox is the whole map → no distance box
     out.push(world.handleOf(id));
   }
   return out;

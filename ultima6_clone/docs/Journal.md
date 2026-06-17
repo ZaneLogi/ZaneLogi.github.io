@@ -28,6 +28,27 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-17 — fix: lever couldn't reach a portcullis >20 tiles away (non-faithful search box)
+
+- **Found**: a lever (`OBJ_10C`) USE reported "Nothing happens" and left its portcullis (`OBJ_136`)
+  shut whenever the lever and its quality-linked doorway marker (`OBJ_12D`) sat more than 20 tiles
+  apart. Root cause was a clone-only **±20 box** in `findObjectsByTypeQuality` (`world_loader.js`).
+  Re-read source: `C_27A1_4479` (use-lever, `seg_27a1.c:2092`) calls `SearchArea(0,0,0x3ff,0x3ff)` —
+  the WHOLE MAP — and `NextArea` (`seg_1184.c:345`) keeps every LOCXYZ object on `z == MapZ`. There is
+  **no distance restriction**; a lever toggles every same-quality marker on its level, however far. The
+  clone's ±20 box was a heuristic guarding against its no-unload model (all of a z-level's objblk
+  co-resides), but it wrongly stranded legit far pairs.
+- **Code**: `findObjectsByTypeQuality` now applies only the `z == near.z` filter for `near` (dropped the
+  `Math.abs(dx/dy) > 20` clamp). Deviation note kept in-file: distinct per-objblk control qualities make a
+  cross-dungeon false toggle unobserved; tighten to a per-dungeon bbox only if it ever surfaces.
+- **Verified live** (dungeon Wrong z1): lever q53 (153,21) ↔ marker/portcullis q53 (123,6), **30 tiles
+  apart** — the fixed search returns the far marker (was `[]`), USE → "You hear a noise.", and the (123,6)
+  portcullis went present/impassable → gone/passable. No test encodes the box (none broke).
+- **Related (not engine bugs)**: U6 opens an UN-reachable lever with the **Telekinesis** spell
+  (`seg_1944.c` `C_1944_2DA7` → `if(type==OBJ_10C) C_27A1_4479`), i.e. the same handler at range — but the
+  clone has no spell-casting system (no CAST verb; spells unported), so that path doesn't exist yet.
+- **Next**: back to the `quest-trace` NPC-decode stream.
+
 ## 2026-06-17 — fix: dungeon eggs never hatched on a fresh descent (async load vs sync force-hatch)
 
 - **Found**: walking into a dungeon left its whole level un-populated — eggs sat at status `0` and the
