@@ -55,7 +55,8 @@ for where we are now. The NPC-movement arc I-14→I-17 is **complete** (speed mo
 system (I-egg)** have landed, **I-book** (book/sign reading — `LOOK` → `BOOK.DAT` reader modal)
 completes the LOOK verb, **I-container** (USE chest/barrel/crate → spill + insert) and **I-spellbook**
 (`c` → a minimal cast feature: 7 non-combat spells wired to existing subsystems, the rest fizzle) have
-landed; object-action handler expansion is now I-20 (demand-driven).
+landed; further object-action handler expansion is demand-driven (no dedicated step — each
+handler lands with its owning subsystem, or as a one-off when a concrete need is scoped).
 What stays
 here is the durable, slowly-changing reference — the code layout, the dev console helpers,
 and the per-step **kept deviations** (so a later session doesn't "correct" them). The ECS
