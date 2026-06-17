@@ -89,6 +89,12 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
   const alignStore = world.store(Alignment);    // I-11c: evil/chaotic gate (Alignment, carried from NPCStatus)
   const amtStore = world.store(Amount);         // I-book: object quality = the BOOK.DAT index
 
+  // Article-prefixed display name ("a sword" / "an apple" / "Iolo") for handler messages —
+  // the same naming GET/DROP/give use. Threaded into the USE ctx so a handler (e.g. the
+  // I-container spill's "Searching here, you find …") can name objects without importing
+  // reg/displayName itself (and without a use_container -> command_dispatch import cycle).
+  const nameOf = (h) => withArticle(displayName(world, h, { reg, objlist }));
+
   // --- targeting cue (decision #3): a verb label pinned to the #probe-cell
   //     highlight + a recolor, instead of source's textual "Use-" prompt echo. ---
   const label = document.createElement('span');
@@ -257,7 +263,7 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
     // Most USE handlers need only {world, target, message}; the ladder (I-19d) also reads
     // avatarRef/recenter/moveFollowers to teleport the party + follow the camera. Threaded
     // into every USE call; the other handlers ignore the extras.
-    if (fn) { fn({ world, target: { ...target, entity: pick }, message, avatarRef, recenter, moveFollowers, armOrbCast, objlist }); return; }
+    if (fn) { fn({ world, target: { ...target, entity: pick }, message, avatarRef, recenter, moveFollowers, armOrbCast, objlist, name: nameOf }); return; }
     const name = displayName(world, pick, { reg, objlist });
     message(`Nothing happens. (${name})`);
     console.warn(`USE: no handler for obj #${objNum} (${name})`);
@@ -474,7 +480,7 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
     const i = handle != null ? world.resolve(handle) : -1;
     if (i === -1) { message('Nothing happens.', 'miss'); return; }
     const fn = commands.useHandlers.get(objStore.objNumber[i]);
-    if (fn) { fn({ world, target: { entity: handle }, message, avatarRef, recenter, moveFollowers, armOrbCast, objlist }); return; }
+    if (fn) { fn({ world, target: { entity: handle }, message, avatarRef, recenter, moveFollowers, armOrbCast, objlist, name: nameOf }); return; }
     message(`Nothing happens. (${displayName(world, handle, { reg, objlist })})`);
   }
 
