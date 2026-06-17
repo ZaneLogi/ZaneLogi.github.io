@@ -5,7 +5,7 @@ convention: numbered `I-N` steps, each with a "scope" subsection carrying the
 per-sub-step notes that don't fit a commit body). Research-side truth lives in
 `research_*.md`; the architecture the steps build to is `architecture_ecs.md`.
 
-**Status: I-19g (dungeon/cave entry) COMPLETE (2026-06-16).** Walking onto a dungeon/cave entrance hole (`OBJ_146`/`OBJ_134`) now **descends** — the faithful walk-onto trigger I-19 deferred (§6 of `research_level_change.md`). Ports the `C_1E0F_184D` dungeon/cave branch (`seg_1E0F.c:769-785`) as `checkDungeonEntry`, feeding the shared `C_101C_089E` engine **extracted** from `useLadder` into `enterLevelChange` (z-direction + the 1024↔256 coordinate rescale). Wired into `main.js onMove` as `checkGateEntry(...) || checkDungeonEntry(...)`: `checkGateEntry` now returns "traveled", so a tile is a moongate **or** a hole — source's single-dispatch-and-break. **No USE-on-hole** — source's USE switch has no `OBJ_146`/`OBJ_134` case (holes are walk-onto only); the clone matches. No new components / no snapshot change. **`tests/test_dungeon_entry.html` 11/11** + the full suite green (incl. `test_moongate` +1). See §"I-19g scope" + `research_level_change.md §7`. **Next: I-20** (remaining object-action handlers — spellbooks / instruments / etc.; demand-driven). Prior: I-book (§"I-book scope"), I-egg (§"I-egg scope"), I-moongate (§"I-moongate scope"), I-19 (§"I-19 scope").
+**Status: I-19g (dungeon/cave entry) COMPLETE (2026-06-16).** Walking onto a dungeon/cave entrance hole (`OBJ_146`/`OBJ_134`) now **descends** — the faithful walk-onto trigger I-19 deferred (§6 of `research_level_change.md`). Ports the `C_1E0F_184D` dungeon/cave branch (`seg_1E0F.c:769-785`) as `checkDungeonEntry`, feeding the shared `C_101C_089E` engine **extracted** from `useLadder` into `enterLevelChange` (z-direction + the 1024↔256 coordinate rescale). Wired into `main.js onMove` as `checkGateEntry(...) || checkDungeonEntry(...)`: `checkGateEntry` now returns "traveled", so a tile is a moongate **or** a hole — source's single-dispatch-and-break. **No USE-on-hole** — source's USE switch has no `OBJ_146`/`OBJ_134` case (holes are walk-onto only); the clone matches. No new components / no snapshot change. **`tests/test_dungeon_entry.html` 11/11** + the full suite green (incl. `test_moongate` +1). See §"I-19g scope" + `research_level_change.md §7`. **Next: I-container** (USE-on-container — planned, sub-steps in §"I-container plan") then **I-spellbook** (`c` → minimal cast — planned, sub-steps in §"I-spellbook plan"); then **I-20** (remaining object-action handlers — instruments / etc.; demand-driven). Prior: I-book (§"I-book scope"), I-egg (§"I-egg scope"), I-moongate (§"I-moongate scope"), I-19 (§"I-19 scope").
 
 This banner is the **single canonical current-status line** — `CLAUDE.md` and
 `DOCUMENTATION_INDEX.md` point here instead of mirroring it (convention: §"Doc maintenance").
@@ -64,6 +64,8 @@ banner ballooned and `DOCUMENTATION_INDEX` stale at I-10), the convention is:
 | I-20 | object-action handlers expansion — fills in the rest of `seg_27a1.c`'s dispatch table (spellbooks / instruments / etc.; **moonstones → the dedicated I-moongate step**); demand-driven, each handler tied to its owning subsystem when that subsystem lands (was I-19 until 2026-06-12) | planned |
 | **I-book** | **book / sign reading** — completes the LOOK verb (I-10f stopped at "Thou dost see…"). `LOOK` at a readable object (`C_27A1_06D7` CanRead → `C_27A1_078F`) opens its `BOOK.DAT` text in a scrollable reader modal. `resources/books.js` (u16 offset-table reader, keyed by quality; no compression) + `view/book_window.js` (modal + U6-markup renderer: `<>` gargoyle / `@` highlight / `*` paragraph / `&`·`\` stripped) + the LOOK-handler readable-type tables (`D_1CDA` books adjacency-gated / `D_1CE4` signs any-range, quality>0). `book.dat` = OPTIONAL BYO-data. `tests/test_books.html` 19/19. See §"I-book scope". | **done** (2026-06-16) |
 | **I-egg** | **egg / creature-spawn system** (Path A, named 2026-06-14) — port `OBJ_14F` hatch (`seg_2E2D.c`): **a** data/decode · **b** hatch core (gates + embryo loop + alignment override + `SetHatched`/`SetInvisible`, spawns a placeholder/statless creature) · **d-visual** multi-tile bodies (place + link part-entities — dragon/hydra/serpent/vine + two-part cow/horse/giant-ant/etc.) · **c** avatar-keyed trigger (hatch on avatar entry into new territory, viewport-`nearRadius` proximity; `LOCAL` bypass) + force-hatch on the I-moongate `teleportParty` path · **e** cull + re-arm (avatar-keyed lifetime pass, §9.1; culls parts with the body) · **f** gargoyle pacification (Amulet/party-type → `AI_GRAZE`) + Shamino direction warning. **Spawn always stamps the embryo's AI mode (`NPCMode`/`NPCComMode`); unhandled modes idle, implemented I-16/I-17 worktypes apply automatically — NO combat** (`research_egg.md §9.1` pt 5). **Sub-step d is SPLIT:** **d-visual** (multi-tile bodies) is combat-independent and **IN I-egg** — a full-world objblk scan showed **234/943 eggs (~25%) hatch multi-tile creatures** (Dragon 55× / Giant Ant 69× / Alligator 39× / Hydra / Cow / Horse / Vine / Serpent), so deferring it would stub a quarter of all hatches; **d-stats** (`EGG_generate`+`D_3522` stat roll + loot) stays **combat-gated**. See §"I-egg scope" + `research_egg.md`. **d-stats + combat deferred.** | **done** (a · b · d-visual · c · e · f, 2026-06-14) |
+| **I-container** | **USE-on-container** — a USE handler that opens a chest/barrel/crate on the map (`C_27A1_2BBC` + the shared `C_27A1_09A1`) and **spills its contents onto the ground tile** (source-faithful — reuses `dropToMap` + the `GET` verb, *not* a window); chest lock = a matching party key (`OBJ_040`, quality-matched per `C_27A1_2D8E`) opens cleanly, else force-open bypass (door-spirit); trap = message + consume, damage deferred to combat; filters `OBJ_150`/`OBJ_151` pseudo-items. Set = `{062 chest, 0BA barrel, 0C0 crate}`. **Sub-step d** adds the inverse — MOVE/DROP an item onto an open container to put it inside (`C_27A1_00A9` + `InsertObj CONTAINED`, the `moveToInventory` analog; full insert set incl. backpack/bag/basket/vortex-cube). Self-contained; **not** a Telekinesis dependency. See §"I-container plan". | **planned** (a–d) |
+| **I-spellbook** | **minimal cast feature** — `c` → spellbook modal (all named U6 spells + reagents); `Enter` casts. Only 7 non-combat spells that hook already-ported subsystems are implemented (Telekinesis / Locate / Gate Travel / Heal / Mass Awaken / Create Food / Unlock Magic); the rest fizzle. No spellbook-item / reagent-gate / mana / combat. See §"I-spellbook plan" + `research_spellbook.md`. | **planned** (a–c) |
 
 **Why I-2 is the world-data system.** Loading the real world from `OBJBLK*`/
 `objlist` into ECS entities is the clone's core purpose — the reason for choosing
@@ -3916,3 +3918,146 @@ already threaded — the lesson: a new load()-scope value used by `startRender` 
 - **Markup is best-effort, not a rune font** — gargoyle `<…>` is styled, not transliterated to runes;
   `&`/`\` control markers are dropped rather than interpreted (no count context for `\` plurals in static
   book text). Faithful to the *text*, modernized in *render*.
+
+## I-container plan — USE-on-container (PLANNED, not yet built)
+
+A self-contained step covering the full container interaction: **USE** a chest/barrel/crate to open it and
+**spill its contents onto the ground tile** (source-faithful — Zane 2026-06-17, after the window-vs-spill
+fork — where the existing `GET` verb retrieves them), and **MOVE/DROP** an item onto an *open* container to
+put it inside (sub-step d). The loop: open (spills out) → put items in → close (sealed). **Independent of
+I-spellbook** — Telekinesis routes to the drawbridge crank (`OBJ_120` → `useCrank`), *not* a chest, so this
+is standalone. Source: the chest handler `C_27A1_2BBC` ("use chest", `seg_27a1.c:1327`) + the shared
+search/spill `C_27A1_09A1` ("Searching here, you find …", `seg_27a1.c:402`) + the USE switch
+(`seg_27a1.c:3030-3075`); the insert half is `C_27A1_00A9` + `InsertObj(…, CONTAINED)` shared by MOVE
+(`C_27A1_1E8B`) and DROP (`C_27A1_14DA`).
+
+**The openable set** (the "pin the full set" item, resolved from the USE switch — `CONTAINER_TYPES`):
+- `OBJ_062` (98, Chest) → `C_27A1_2BBC` → `C_27A1_09A1`. **Lockable + trappable.**
+- `OBJ_0BA` (186, Barrel) and `OBJ_0C0` (192, Crate) → `C_27A1_09A1` directly (`seg_27a1.c:3030`). No
+  lock, no trap — just search/spill.
+- *Not* containers: `OBJ_129–12C` are the four **doors** (`C_27A1_2A44`, already `useDoor`); an earlier
+  draft mis-listed them here.
+
+**Chest frame model** (`C_27A1_2BBC` — corrected from an earlier draft's inversion): frame **1 = closed**,
+**0 = open**, **2 = key-locked**, **3 = magically locked**. Plain USE *toggles* closed(1)↔open(0); the
+spill + trap fire on the closed→open (1→0) transition. (The "`0→1` closed→open" and "`di>=8 && di<0xc`
+locked range" framings were wrong — the latter is the *door* handler `C_27A1_2A44`'s range, not the
+chest's.) Barrel/crate carry no lock state — USE always spills.
+
+**What already exists (reused, not rebuilt):** `dropToMap(world, item, x, y, z)` (`world_loader.js:309`)
+strips `ContainedIn`, adds `Position`, and spatial-indexes — the exact re-parent the DROP verb uses, so
+**spill = `dropToMap` each child onto the container's cell.** `inventoryOf(world, container)`
+(`world_loader.js:398`) enumerates the contained children; the `get` verb already retrieves ground items
+(`moveToInventory`); `setObjectFrame` flips the frame; the snapshot persists the spilled items for free
+(they're ordinary map objects now). So the gap is just the USE→open wiring + the spill loop + the message
++ the chest frame/lock/trap logic. (**No `uiStack`/`reg` ctx threading** — that was only for the
+abandoned window route.)
+
+**Sub-steps** (each ≈ one save-point commit; browser-verify; squash → `impl I-container`):
+- **a — handler + frame toggle.** `CONTAINER_TYPES = {0x062, 0x0BA, 0x0C0}`; register `useContainer` in
+  `systems/use_handlers.js`. Chest: toggle frame 1↔0 (`C_27A1_2BBC`) — on open→close print "You close the
+  chest.", on closed→open fall through to the spill (step b). Barrel/crate: always spill. *Verify:* USE a
+  chest → frame flips + message.
+- **b — spill the contents (`C_27A1_09A1` port).** On open, `dropToMap` each child of
+  `inventoryOf(container)` onto the container's cell, **skipping `OBJ_150` ("Charge") / `OBJ_151`
+  ("Effect")** (lock/trap pseudo-items, not loot — source's `seg_27a1.c:440` filter). Print **"Searching
+  here, you find a *X*, a *Y* and a *Z*."** (the source comma/" and " join), or **"…you find nothing."**
+  when empty (`seg_27a1.c:464`). (Source's `MoveObj(avatar,…)` re-assert per item is a render quirk —
+  skipped.) *Verify:* a chest's contents drop to the floor; `GET` picks them up.
+- **c — lock + trap.** Locked chest (frame 2/3): first **scan the party for the matching key** — source's
+  `C_27A1_2D8E` rule (`seg_27a1.c:1410-1427`): a key `OBJ_040` whose quality matches the chest's *nonzero*
+  lock quality, or a lockpick `OBJ_03F` on a quality-0 lock. Party scan = recurse over each
+  `world.query(PartyMember)`'s inventory, drilling into `Container`-tagged bags (the `inventoryOf` +
+  `Container`-gate recursion already in `inventory_picker.js:117`), so a key inside a pack still counts. **Key found →
+  unlock + open + spill cleanly** (no "force" message — e.g. "You unlock the chest."). **No key →
+  force-open bypass:** "You force the chest open." + spill — the **same TEMPORARY LOCK BYPASS as `useDoor`**
+  (`use_handlers.js:28`); a magically-locked chest (frame 3) always lands here (a key can't open it in
+  source, and there is no magic-unlock yet). The lockpick break-chance (`C_27A1_2D34` dex test) is the one
+  faithful detail deferred — the auto-scan never breaks the pick. Trapped chest (a contained `OBJ_151` of
+  quality `SPELL_16` = `0x16`): on the open transition print **"You spring a trap!"** and consume the
+  marker (`DeleteObj`, `C_27A1_28A3:1274`), but **do not apply the damage** (`C_27A1_28A3`'s
+  Acid/Poison/Bomb/Gas need the combat subsystem — deferred, consistent with I-egg's "NO combat"). The
+  trap is orthogonal to the lock — it springs on *any* open (key or force). *Verify* with a chest you hold
+  the key for (opens clean), a locked chest with no key (force-open), and a trapped chest.
+- **d — insert into a container (MOVE-push + DROP).** The other half of the interaction: putting items
+  *into* a container. Port `C_27A1_00A9` ([seg_27a1.c:51](../u6_decompiled/SRC/seg_27a1.c)) as
+  `canInsertInto(container, item)` — container objNumber ∈ the `D_1C00` set (`C_27A1_0082`) **minus** the
+  two non-droppable ones: **Backpack `063` / Bag `0BC` / Basket `0BF`** (always accept) + **Chest `062` /
+  Barrel `0BA` / Crate `0C0`** (accept only when OPEN, frame 0) + **Vortex Cube `03E`**; AND the item
+  isn't itself a chest/barrel/crate (no nesting those); AND item weight < 255. Spellbook `039` + Dead Body
+  `153` are containers (lootable) but **not** drop-targets (source excludes them). Wire into both verbs,
+  each replacing its ground-placement call with the insert when the destination holds an accepting
+  container:
+    - **MOVE-push** (`C_27A1_1E8B:1011`): in `resolveMove`, if the push-destination cell holds an
+      accepting container → `moveToInventory(world, movedObj, container)` instead of `moveMapObject`.
+    - **DROP** (`C_27A1_14DA:778`): if the drop cell holds an accepting container →
+      `moveToInventory(world, item, container)` instead of `dropToMap`. (Target a container cell even when
+      it's not `canStandAt` — source gates on the container test, not standability.)
+  `moveToInventory` (strip `Position`+spatial → `attachToHolder` as INVEN child, `world_loader.js:270`) IS
+  the `InsertObj(…, CONTAINED)` analog. Message: "You put the *X* in the *Y*." *Verify:* open a chest →
+  MOVE/DROP an item onto it → it's inside (re-open spills it back out); a *closed* chest refuses (item
+  pushes to the cell / drops on the ground). Deferred (faithful): the throw-and-break-if-fragile branch
+  (`C_27A1_012C` breakables × missile distance), the stackable give-into-container quantity merge
+  (`GiveObj`/`TakeObj`, the `bp_04` arms), and `SetOkToGet` anti-theft (moot until karma).
+
+**Kept deviations:**
+- **Locked chests: a matching key in party inventory opens them cleanly; only a *keyless* chest
+  force-opens** (message-but-don't-enforce, mirroring the door's temporary lock-bypass). The handler
+  auto-scans the party for the key (the faithful `C_27A1_2D8E` quality match) rather than requiring the
+  player to USE-key-on-chest; the full USE-item-on-target front-end + the lockpick break-chance stay
+  deferred. Magically-locked chests always force-open (no magic-unlock yet).
+- **Traps detected + messaged + consumed, but damage not applied** — no combat subsystem yet; revisit
+  when combat lands.
+- **Frame model is faithful** (chest closed-1/open-0/locked-2/magic-3, toggle); barrel/crate are
+  search-only with no lock state.
+- **Display = spill-to-ground, not an inventory window** — this IS the source behavior (`C_27A1_09A1`),
+  *not* a deviation; recorded here because the clone's container data model (Container/ContainedIn +
+  `openInventoryWindow` drilling) could have supported a window, and the window route was explicitly
+  rejected for source-faithfulness.
+
+## I-spellbook plan — minimal `c` cast (PLANNED, not yet built)
+
+A deliberately *limited* cast feature: `c` opens a spellbook modal listing **all** named U6 spells (8
+circles, reagents shown); `Enter` casts. Only **7 non-combat spells** that hook already-ported subsystems
+do anything — Telekinesis · Locate · Gate Travel · Heal · Mass Awaken · Create Food · Unlock Magic — the
+rest **fizzle**. NOT a magic system, NOT combat. Full source grounding + per-spell decode + kept
+deviations live in `research_spellbook.md` (verified against `seg_1944.c`, 2026-06-17); this is the
+sub-step cut. **No** spellbook-item / reagent gate / mana / INT-circle gate.
+
+**What already exists (reused, not rebuilt):** the **UIStack + list-widget** substrate (inventory/dialog
+windows); `command_dispatch`'s **cell-cursor** (`pendingVerb`, armed for targeted verbs) + the digit-input
+shape (dialog window); **I-moongate** `D_2C74` + `teleportParty`/`GateTravel` (Gate Travel);
+**`useLever`/`useCrank`** (Telekinesis lever/crank branches); **`moveMapObject`/`canPushTo`** (Telekinesis
+push); the door/chest **lock frame** model (Unlock Magic); `AI_SLEEP` (Mass Awaken); objlist HP +
+`stat_formulas.maxHP` + the `party_status` roster picker (Heal); `MessageLog`. So most of I-spellbook is
+data + UI + wiring, not new engines.
+
+**Sub-steps** (each ≈ one save-point commit; browser-verify; squash → `impl I-spellbook`):
+- **a — data resource + the book UI (all fizzle).** `resources/spells.js`: extract `SpellName`,
+  `Reagents_needed`, `Reagents_name`, `ReagType` **verbatim** (`seg_1944.c:143/255/242/253`; 16 slots/
+  circle = 10 named + 6 empty; `MK_CIRCLE(n)=n/0x10+1`). The `c` modal (`view/spellbook_window.js`): a
+  scrollable list grouped by circle header, each row = spell name + reagent abbrevs, **★** the implemented
+  7; footer = full reagent names + a one-line desc + key hints; each reagent **tinted by whether the party
+  carries it** (`ReagType`→obj#→party scan, informational only — no gate). ↑↓/Enter/Esc via the list
+  widget. Every spell **fizzles** ("Nothing happens.") this step. *Verify:* `c` opens, lists all 8
+  circles, reagent tints track carried reagents.
+- **b — cast registry + the no-cursor casts** (Locate · Mass Awaken · Create Food · Heal). A spell
+  registry keyed by spell number (mirrors `useHandlers`), dispatched on Enter. **Locate** → sextant
+  readout from the **viewport origin** (NOT raw avatar pos — `research §3.2`) → `MessageLog`. **Mass
+  Awaken** → clear `AI_SLEEP` on NPCs in the avatar's area window. **Create Food** → add food to inventory.
+  **Heal** → `party_status` roster picker → restore HP, clamp to `maxHP` (party-only = a targeting
+  deviation, `research §3.4`). *Verify:* each fires; the rest still fizzle.
+- **c — the cursor + digit casts** (Telekinesis · Unlock Magic · Gate Travel). Close the book, arm the
+  cell-cursor with `pendingVerb='spell'`. **Telekinesis** (`research §3.1`): pick an object at range →
+  lever `OBJ_10C`→`useLever`, crank `OBJ_120`→`useCrank`, else **push one tile** in a chosen direction via
+  `moveMapObject` (NOT the MOVE-insert path — keep source's plain relocate; skip the missile/LOS).
+  **Unlock Magic** (`research §3.7`): pick a door/chest at range → if magic-locked (door `frame&0xc==0xc`
+  / chest frame 3) flip to closed-unlocked, else fizzle. **Gate Travel**: a 1–8 phase digit prompt → if
+  `D_2C74[phase-1]` is set, `teleportParty` there, else fizzle. *Verify:* a far/blocked lever opens
+  (the Telekinesis payoff); a magic-locked chest/door unlocks; gate-travel to a set phase lands.
+
+**Kept deviations** (full list `research_spellbook.md §7`): no spellbook-item / reagent gate / mana /
+INT-circle gate / combat; Telekinesis skips missile+LOS and routes its push to a plain relocate (no
+container-insert); "Awaken" = **Mass Awaken** (no single-target Awaken in source); Heal targets party-only
+(source targets any creature at range); Unlock Magic clears the magic-lock faithfully but is partly
+redundant under the door/chest force-open bypasses until those revert; reagent tint is informational only.
