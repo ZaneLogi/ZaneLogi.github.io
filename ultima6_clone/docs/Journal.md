@@ -28,6 +28,23 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-17 — impl I-container (USE-on-container: spill / lock / trap / insert)
+
+- **Read**: `C_27A1_2BBC` (use-chest, `seg_27a1.c:1327`), `C_27A1_09A1` (the "Searching here, you find …"
+  search/spill, `:402`), the USE switch (`:3030-3075`), `C_27A1_00A9` (insert-acceptance, `:51`) +
+  `C_27A1_0082` / `D_1C00` (the container-type set), `C_27A1_2D8E` (key/lockpick, `:1389`), `C_27A1_28A3`
+  (trap spring). Mostly decoded in the prior planning pass; re-confirmed against source at impl.
+- **Found**: the dropped U6 data in the live preview region carries 6 chests / 3 barrels / 7 crates and
+  135 contained items — including a **key-locked + trapped** chest at (293,351) and a **magic-locked**
+  chest at (273,324), which let every path be verified in-game on real data. The avatar/party start
+  empty-handed, so the keyless force-open path exercised naturally; the key-unlock path is covered by the
+  test harness. Two dev-helper quirks to remember: `__U6.findByObj` returns `{frame,quality,x,y}`
+  descriptors (not entity handles), and `__U6.inventoryOf` is world-curried.
+- **Docs**: `progress.md` §"I-container plan" → §"I-container scope" (as-built notes: dedicated
+  `systems/use_container.js`, the `name`-closure threaded into the USE ctx, the verification record);
+  banner → I-container COMPLETE; ledger row → done. New `tests/test_container.{html,js}` (28/28).
+- **Next**: I-spellbook (`c` → minimal cast; sub-steps in `progress.md` §"I-spellbook plan").
+
 ## 2026-06-17 — fix: lever couldn't reach a portcullis >20 tiles away (non-faithful search box)
 
 - **Found**: a lever (`OBJ_10C`) USE reported "Nothing happens" and left its portcullis (`OBJ_136`)
