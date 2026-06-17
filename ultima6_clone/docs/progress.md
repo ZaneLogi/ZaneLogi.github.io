@@ -4030,6 +4030,13 @@ abandoned window route.)
   *not* a deviation; recorded here because the clone's container data model (Container/ContainedIn +
   `openInventoryWindow` drilling) could have supported a window, and the window route was explicitly
   rejected for source-faithfulness.
+- **Bag / backpack / basket are intentionally NOT USE-openable** (confirmed faithful, Zane 2026-06-17).
+  Source has no USE case for `OBJ_063`/`OBJ_0BC`/`OBJ_0BF` — they appear only in the `D_1C00`
+  container-type table (`seg_27a1.c:36-37`), never in the USE switch; U6 opens these portable containers
+  via the container/inventory window, not a USE-spill. In the clone they open via the inventory-window
+  drill-in (I-18: GET the bag → Enter to drill in). They DO accept inserts (sub-step d). **Don't add a
+  USE-on-bag handler** — it was considered and rejected as unfaithful (parallel to I-19g's "no
+  USE-on-hole").
 
 ## I-spellbook plan — minimal `c` cast (PLANNED, not yet built)
 
