@@ -9,11 +9,21 @@
 
 import { ObjType, Position, Amount, Container, PartyMember } from '../components/components.js';
 import { setObjectFrame, inventoryOf, dropToMap } from '../world_loader.js';
+import { SpatialIndex } from '../resources/spatial_index.js';
 
 // The USE-openable container types (the C_27A1_2BBC / C_27A1_09A1 set from the USE
 // switch, seg_27a1.c:3030-3075): Chest (lockable + trappable) · Barrel · Crate.
 export const CHEST = 0x062, BARREL = 0x0BA, CRATE = 0x0C0;
 export const CONTAINER_TYPES = [CHEST, BARREL, CRATE];
+
+// Insert-accepting container types — source's C_27A1_00A9 / D_1C00 set MINUS the two it
+// excludes as drop-targets (Spellbook 0x039 + Dead Body 0x153, which are lootable but you
+// can't put items INTO them). Backpack/Bag/Basket always accept; the search-containers
+// (chest/barrel/crate) accept only when OPEN (frame 0); the Vortex Cube accepts.
+const BACKPACK = 0x063, BAG = 0x0BC, BASKET = 0x0BF, VORTEX_CUBE = 0x03E;
+const INSERT_CONTAINERS = new Set([BACKPACK, BAG, BASKET, CHEST, BARREL, CRATE, VORTEX_CUBE]);
+const OPEN_GATED = new Set([CHEST, BARREL, CRATE]);     // must be OPEN (frame 0) to accept
+const SEARCH_CONTAINERS = new Set([CHEST, BARREL, CRATE]); // can't be NESTED into another container
 
 // Chest frame model (C_27A1_2BBC): 1 = closed, 0 = open, 2 = key-locked, 3 = magically
 // locked. Plain USE *toggles* closed(1)↔open(0); the spill (+ trap) fires on the
@@ -120,4 +130,30 @@ export function useContainer({ world, target, message, name }) {
   } else {                                          // barrel / crate: search, no frame toggle
     spillContents(world, target.entity, message, name);
   }
+}
+
+// --- sub-step d: the inverse — put an item INTO a container -----------------------------
+// Port of C_27A1_00A9 (seg_27a1.c:51): can `itemHandle` be inserted into the container
+// `containerHandle`? True iff the container is an insert-accepting type, an OPEN_GATED
+// container (chest/barrel/crate) is actually open, and the item isn't itself a
+// chest/barrel/crate (no nesting those). Weight (source's bp_0e < 0xff) is the mover's
+// gate — the MOVE/DROP handlers already refuse fixed/255-weight objects upstream.
+export function canInsertInto(world, containerHandle, itemHandle) {
+  const ci = world.resolve(containerHandle), ii = world.resolve(itemHandle);
+  if (ci === -1 || ii === -1 || ci === ii) return false;
+  const objs = world.store(ObjType);
+  const cType = objs.objNumber[ci];
+  if (!INSERT_CONTAINERS.has(cType)) return false;
+  if (OPEN_GATED.has(cType) && objs.frame[ci] !== OPEN) return false;
+  if (SEARCH_CONTAINERS.has(objs.objNumber[ii])) return false;
+  return true;
+}
+
+// The first accepting container at (x,y) for `itemHandle`, or null — source's FindLoc +
+// C_27A1_00A9 test at the push/drop destination cell. Used by MOVE-push + DROP.
+export function containerAtCell(world, x, y, itemHandle) {
+  const ents = world.getResource(SpatialIndex).at(x, y);
+  if (!ents) return null;
+  for (const h of ents) if (canInsertInto(world, h, itemHandle)) return h;
+  return null;
 }

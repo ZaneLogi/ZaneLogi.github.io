@@ -30,6 +30,7 @@ import { canStandAt } from './passability.js';
 import { DIR_DX, DIR_DY, dirFromKeyEvent } from './avatar_move_system.js';
 import { AI_SLEEP } from './ai_modes.js';
 import { clearMoonstoneSlot, castRedGate } from './moongate_runtime.js';
+import { containerAtCell } from './use_container.js';
 
 const CLOSE_ENOUGH = 1;                 // Chebyshev reach for adjacency verbs (USE etc.)
 const ALIGN_EVIL = 0x20, ALIGN_CHAOTIC = 0x60;   // NPCStatus alignment bits (u6.h:116/118)
@@ -242,9 +243,19 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
     const oi = world.resolve(handle);
     const ox = posStore.x[oi], oy = posStore.y[oi];
     const name = displayName(world, handle, { reg, objlist });
-    if (!canPushTo(world, handle, ox, oy, dir)) { message("You can't move it there."); return; }
     const mask = mapLevel.wrapMask;   // active level wrap (0x3ff surface / 0xff dungeon)
-    moveMapObject(world, handle, (ox + DIR_DX[dir]) & mask, (oy + DIR_DY[dir]) & mask);
+    const dx = (ox + DIR_DX[dir]) & mask, dy = (oy + DIR_DY[dir]) & mask;
+    // Push onto an OPEN container → it goes inside (C_27A1_1E8B:1011-1013, FindLoc +
+    // C_27A1_00A9 + InsertObj CONTAINED). Checked before canPushTo: a container tile is
+    // impassable (you can't push ONTO it normally), but it accepts the item.
+    const container = containerAtCell(world, dx, dy, handle);
+    if (container !== null) {
+      moveToInventory(world, handle, container);
+      message(`You put ${withArticle(name)} in ${withArticle(displayName(world, container, { reg, objlist }))}.`);
+      return;
+    }
+    if (!canPushTo(world, handle, ox, oy, dir)) { message("You can't move it there."); return; }
+    moveMapObject(world, handle, dx, dy);
     message(`You move ${withArticle(name)}.`);
   }
 
@@ -337,10 +348,19 @@ export function installCommandDispatch(world, { pickAtCell, probe, canvas, cellE
   //     animation, break-if-fragile-and-far, the quantity prompt, drop-into-container.
   commands.register('drop', ({ world, target, message, item }) => {
     if (item == null || world.resolve(item) === -1) { message('What?', 'miss'); return; }   // stale pick
+    const name = displayName(world, item, { reg, objlist });
+    // Drop onto an OPEN container → it goes inside (C_27A1_14DA:778, the same C_27A1_00A9 +
+    // InsertObj as MOVE). Checked before canStandAt: a container tile is impassable but a
+    // valid drop target.
+    const container = containerAtCell(world, target.x, target.y, item);
+    if (container !== null) {
+      moveToInventory(world, item, container);
+      message(`You put ${withArticle(name)} in ${withArticle(displayName(world, container, { reg, objlist }))}.`);
+      return;
+    }
     if (!canStandAt(world, target.x, target.y)) { message("You can't drop it there."); return; }
     const ai = world.resolve(avatarRef.handle);
     const z = ai === -1 ? 0 : posStore.z[ai];
-    const name = displayName(world, item, { reg, objlist });
     dropToMap(world, item, target.x, target.y, z);
     message(`You drop ${withArticle(name)}.`);
   });
