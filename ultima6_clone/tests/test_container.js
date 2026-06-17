@@ -199,6 +199,23 @@ function onCell(world, item, x, y) {
   check('insert: containerAtCell ignores a closed chest', containerAtCell(world, 51, 51, item) === null);
 }
 
+// ── guard: a CARRIED (contained, no Position) container refuses — no spill at (0,0) ──
+// The map USE path only ever picks on-map objects, but the inventory `U` verb routes a
+// carried item to useContainer unfiltered (command_dispatch.useItem). Source gates this
+// (GetCoordUse == LOCXYZ, seg_27a1.c:3071); without the guard spillContents reads a
+// missing Position and scatters the loot onto a stale (0,0) cell.
+{
+  const world = buildWorld();
+  const m = placeMember(world, {});
+  const carried = addContained(world, m, { obj: CHEST });           // ContainedIn, no Position
+  world.store(ObjType).frame[world.resolve(carried)] = 1;           // closed → would spill if not guarded
+  const loot = addContained(world, carried, { obj: 0xA0 });
+  const msgs = use(world, carried);
+  check('guard: carried container → "Nothing happens."', msgs.includes('Nothing happens.'));
+  check('guard: carried container does not spill (loot stays inside)', !world.has(loot, Position) && inventoryOf(world, carried).length === 1);
+  check('guard: carried chest frame unchanged (no open/close)', world.store(ObjType).frame[world.resolve(carried)] === 1);
+}
+
 // ── report ──
 const summary = `${pass} passed, ${fail} failed`;
 console.log(`\n=== I-container: ${summary} ===`);

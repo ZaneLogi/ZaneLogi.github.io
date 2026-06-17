@@ -106,6 +106,13 @@ export function useContainer({ world, target, message, name }) {
   const objs = world.store(ObjType);
   const i = world.resolve(target.entity);
   if (i === -1) return;
+  // On-map gate (source's GetCoordUse == LOCXYZ — the USE switch refuses a carried chest:
+  // `case OBJ_062: if(GetCoordUse(Selection.obj) != LOCXYZ) ... else C_27A1_2BBC`,
+  // seg_27a1.c:3071; barrel/crate are only reachable via that same map-targeted switch).
+  // The map USE path always picks an on-map object, but the inventory `U` verb (useItem)
+  // routes a carried item here unfiltered — a CONTAINED container has no Position, so
+  // spillContents would read a stale (0,0) cell and scatter loot there. Refuse it.
+  if (!world.has(target.entity, Position)) { message('Nothing happens.'); return; }
   const objNum = objs.objNumber[i];
   if (objNum === CHEST) {
     const frame = objs.frame[i];
