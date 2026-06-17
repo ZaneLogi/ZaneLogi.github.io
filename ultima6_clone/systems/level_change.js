@@ -13,15 +13,15 @@ import { Position, PartyMember } from '../components/components.js';
 import { SpatialIndex } from '../resources/spatial_index.js';
 import { hatchAroundAvatar, cullAroundAvatar } from './egg.js';
 
-// Set the active level. Returns the previous level (so callers can detect a no-op).
-// Entering a dungeon (z != 0) fire-and-forget loads that level's objects (I-19c) —
-// load-once + resident; the surface streamer handles level 0.
+// Set the active level. Entering a dungeon (z != 0) kicks off that level's object load
+// (I-19c — load-once + resident; the surface streamer handles level 0). The load is ASYNC,
+// so we RETURN its Promise (a dungeon) or null (surface / no load), letting a caller defer
+// work until the objects actually land — e.g. teleportParty's force-hatch, which must run
+// AFTER the eggs exist or it no-ops on an empty level. (No caller uses the old `prev` return.)
 export function setActiveLevel(world, z) {
   const map = world.getResource(MapLevel);
-  const prev = map.level;
   map.level = z;
-  if (z !== 0) loadDungeonLevel(world, z);
-  return prev;
+  return z !== 0 ? loadDungeonLevel(world, z) : null;
 }
 
 // Teleport the whole party to (nx, ny, nz) — the shared "hard cut" relocate behind
@@ -40,7 +40,7 @@ export function teleportParty(world, nx, ny, nz, { avatarRef, recenter, moveFoll
   if (ai === -1) return;
   const pos = world.store(Position);
 
-  setActiveLevel(world, nz);                               // switch level + fire the dungeon-object load (I-19c)
+  const loaded = setActiveLevel(world, nz);                // switch level + fire the dungeon-object load (I-19c); Promise for a dungeon, null for surface
   const spatial = world.getResource(SpatialIndex);
 
   // Move the avatar.
@@ -60,11 +60,16 @@ export function teleportParty(world, nx, ny, nz, { avatarRef, recenter, moveFoll
   if (recenter) recenter(nx, ny);                          // camera follows to the destination
   spatial.dirty = true;                                    // force a render rebuild
 
-  // I-egg (c): a teleport / PartyEnter force-hatches the WHOLE destination area (source's
-  // seg_101C.c:315 ForceHatching=1; the ladder + both moongate networks all land here), so
-  // arriving by gate/ladder populates the new area's eggs regardless of proximity.
-  hatchAroundAvatar(world, nx, ny, nz, { forceHatch: true });
-  // I-egg (e): and reap whatever we left at the SOURCE — every spawn from the old area is now
-  // beyond the cull ring from the destination, so it (and its re-armable/one-shot egg) is culled.
-  cullAroundAvatar(world, nx, ny, nz);
+  // I-egg (c/e): force-hatch the WHOLE destination area (source's seg_101C.c:315 ForceHatching=1;
+  // the ladder + both moongate networks all land here) + cull the source's spawns. The dungeon
+  // object load is ASYNC (setActiveLevel → loadDungeonLevel, un-awaited), so for a dungeon we DEFER
+  // this until the objects land — otherwise the force-hatch runs before the eggs exist and the
+  // whole freshly-entered level descends UN-hatched (the bug: dungeon eggs never spawn on a fresh
+  // descent — they sit at status 0, then the off-screen gate keeps suppressing them while you
+  // explore nearby). Surface / already-loaded (loaded === null / resolved) runs next-tick or sync.
+  const populate = () => {
+    hatchAroundAvatar(world, nx, ny, nz, { forceHatch: true });
+    cullAroundAvatar(world, nx, ny, nz);
+  };
+  if (loaded) loaded.then(populate); else populate();
 }

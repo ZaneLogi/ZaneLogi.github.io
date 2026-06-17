@@ -28,6 +28,27 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-17 — fix: dungeon eggs never hatched on a fresh descent (async load vs sync force-hatch)
+
+- **Found**: walking into a dungeon left its whole level un-populated — eggs sat at status `0` and the
+  off-screen hatch gate (`hatchAroundAvatar`: a non-LOCAL egg hatches only when `dist > nearRadius`, so
+  monsters appear off-screen and walk in) then suppressed them forever while exploring nearby. Root cause is
+  an **ordering bug** between I-19c and I-egg: `setActiveLevel` fires `loadDungeonLevel(z)` **async and
+  un-awaited** ("fire-and-forget", `world_loader.js`), but `teleportParty` then force-hatched
+  **synchronously** — *before* the objblk decode landed, so the descent force-hatch (source's
+  `seg_101C.c:315` `ForceHatching=1`) scanned an empty level. Diagnosed live in dungeon Wrong z1: egg
+  (123,43) qual 4 / quan 50 (50% hatch, 1× CHAOTIC `obj 0x179`) was `0x0`; a manual `hatchAroundAvatar`
+  force-hatch flipped it `0x0→0x42` and reported `hatched: 5` (five stuck eggs fired at once).
+- **Docs/code**: `systems/level_change.js` — `setActiveLevel` now **returns the load Promise** (dungeon) or
+  `null` (surface); no caller used the old `prev` return. `teleportParty` **defers the force-hatch + cull
+  onto that Promise** (`loaded.then(populate)`; surface runs synchronously), so the area populates the
+  instant its objects land. Verified: a fresh descent now auto-hatches (egg (123,43) `0x0→0x42`, 39 spawns
+  across the level, every egg latched); `test_dungeon_entry` 11/11, `test_egg` 147/147, `test_moongate` 76/76.
+- **Open**: spawns are still combat-free idle placeholders (I-egg d-stats deferred). The off-screen
+  `nearRadius` gate means a non-LOCAL egg the avatar lands *on top of* still won't pop in-view without the
+  force-hatch — that's the intended "walk-in from the edge" behavior, unchanged.
+- **Next**: back to the `quest-trace` NPC-decode stream.
+
 ## 2026-06-16 — I-19g: dungeon/cave entry by walking onto a hole
 
 - **Read**: `seg_1E0F.c` — `C_1E0F_184D()` (`:712`, the post-move tile check; called at the tail of the
