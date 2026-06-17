@@ -117,6 +117,31 @@ const ctx = (avatarRef) => ({ avatarRef, recenter: () => {}, moveFollowers: () =
   check('ladder-down: dungeon↔dungeon keeps the ladder cell (no rescale)', pos.x[ai] === 120 && pos.y[ai] === 90);
 }
 
+// ── REGRESSION (cross-level alias): a dungeon avatar must NOT trigger on a SURFACE hole
+//    sharing its (x,y). The single no-unload SpatialIndex co-resides every level at one
+//    (x,y) bucket; source scans FindLoc(MapX,MapY,MapZ) — level-filtered. Without the z
+//    guard a dungeon avatar over Spider Cave's (92,250) warped off-level. ──
+{
+  const world = buildWorld();
+  const avatarRef = placeAvatar(world, 92, 250, 1);                              // inside a dungeon (z1)
+  placeObj(world, { obj: 0x146, frame: 5, x: 92, y: 250, z: 0, quality: 15 });   // a SURFACE cave at the same (x,y)
+  const entered = checkDungeonEntry(world, ctx(avatarRef));
+  const pos = world.store(Position), ai = world.resolve(avatarRef.handle);
+  check('cross-level: a surface hole under a dungeon avatar does NOT trigger', entered === false);
+  check('cross-level: party stays on its dungeon level (no warp)', pos.x[ai] === 92 && pos.y[ai] === 250 && pos.z[ai] === 1);
+}
+
+// ── a SAME-level in-dungeon hole still triggers (the z guard doesn't break legit holes) ──
+{
+  const world = buildWorld();
+  world.getResource(SpatialIndex).loadedDungeons.add(3);
+  const avatarRef = placeAvatar(world, 92, 250, 2);
+  placeObj(world, { obj: 0x146, frame: 0, x: 92, y: 250, z: 2, quality: 4 });    // a hole on the avatar's OWN level
+  const entered = checkDungeonEntry(world, ctx(avatarRef));
+  const pos = world.store(Position), ai = world.resolve(avatarRef.handle);
+  check('same-level: an in-dungeon hole still triggers, descends z2→z3', entered === true && pos.z[ai] === 3);
+}
+
 // ── report ──
 const summary = `${pass} passed, ${fail} failed`;
 console.log(`\n=== I-19g dungeon-entry: ${summary} ===`);

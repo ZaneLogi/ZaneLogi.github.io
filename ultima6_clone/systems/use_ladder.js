@@ -62,6 +62,12 @@ export function enterLevelChange(world, entity, { avatarRef, recenter, moveFollo
   }
   // dungeon ↔ dungeon: nx/ny stay on the entrance cell (no rescale — both 256-wide).
 
+  // Clamp to the destination level's torus (source's FindLoc `x &= 0xff` for dungeons,
+  // seg_1184.c). Defensive: a legit ladder/hole cell is already in range, so this is a no-op
+  // for faithful inputs — it just guarantees the party can never land off-map.
+  const destMask = nz ? 0xff : 0x3ff;
+  nx &= destMask; ny &= destMask;
+
   // The hard-cut party teleport + level switch + camera follow (shared with moongate
   // travel; systems/level_change.js teleportParty).
   teleportParty(world, nx, ny, nz, { avatarRef, recenter, moveFollowers });
@@ -94,6 +100,10 @@ export function checkDungeonEntry(world, ctx) {
     if (h === avatarRef.handle) continue;      // Party[Active] == objNum → skip the avatar
     const i = world.resolve(h);
     if (i === -1) continue;
+    if (pos.z[i] !== pos.z[ai]) continue;      // source scans FindLoc(MapX,MapY,MapZ) — level-filtered (seg_1184.c).
+                                               // The clone's single no-unload SpatialIndex co-resides every level
+                                               // at one (x,y) bucket, so without this a dungeon avatar matches a
+                                               // SURFACE hole/gate sharing its (x,y) and warps off-level.
     if (DUNGEON_ENTRANCES.includes(objs.objNumber[i])) {
       ctx.message?.('You enter.');
       enterLevelChange(world, i, ctx);

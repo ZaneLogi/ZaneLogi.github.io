@@ -113,6 +113,10 @@ export function checkGateEntry(world, ctx) {
     if (h === avatarRef.handle) continue;      // Party[Active] == objNum -> skip the avatar itself
     const i = world.resolve(h);
     if (i === -1) continue;
+    if (pos.z[i] !== pos.z[ai]) continue;      // source scans FindLoc(MapX,MapY,MapZ) — level-filtered (seg_1184.c).
+                                               // The shared no-unload SpatialIndex co-resides every level at one
+                                               // (x,y) bucket; without this a dungeon avatar matches a SURFACE gate
+                                               // sharing its (x,y) and is warped to the overworld.
     const type = objs.objNumber[i];
 
     if (type === OBJ_BLUE_GATE) {

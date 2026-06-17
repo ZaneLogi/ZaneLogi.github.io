@@ -28,6 +28,28 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-17 — fix: walking in a dungeon warped you off-level (cross-level hole/gate alias)
+
+- **Symptom** (Zane, in Dungeon Wrong): moving around suddenly popped the party out to the surface "from a hole."
+- **Root cause**: `checkDungeonEntry` (I-19g) + `checkGateEntry` (I-moongate) scan `SpatialIndex.at(x,y)`
+  and act on the match **without filtering by level**. The clone's single no-unload `SpatialIndex` is keyed
+  by `(x,y)` only (`y*1024+x`), so every level co-resides in one bucket; dungeon coords `[0,255]` overlap low
+  surface coords, so a dungeon avatar matches a **surface** hole/gate sharing its `(x,y)`. A matched surface
+  cave (`OBJ_146`) drops you a level; a matched surface **moongate/red gate** teleports you to the overworld
+  (Zane's "to surface" symptom — both gate + hole live in the *same* source scan loop, `seg_1E0F.c:769-785`).
+- **Source check**: source scans `FindLoc(MapX, MapY, **MapZ**)` (`seg_1184.c:281`) — level-filtered (and
+  `x &= 0xff; y &= 0xff` for dungeons). The clone's `SpatialIndex.at(x,y)` is the 2D regression; the other
+  systems (render/passability/cell-pick/npc-tick) already had the `Position.z == MapLevel.level` filter — the
+  two post-move entry scans missed it.
+- **Reproduced live** then **fixed**: standing in Wrong (z1) on `(92,250)` — which aliases the surface Spider
+  Cave — `checkDungeonEntry()` fired "You enter." → z2 before; after the fix it returns false, party stays z1.
+- **Fix**: a `pos.z[i] !== pos.z[ai]` guard in both scans (= `FindLoc`'s `MapZ`); plus a defensive
+  `nx &= mask; ny &= mask` in `enterLevelChange`'s dungeon↔dungeon branch (source's `x &= 0xff`). +3 checks
+  `test_dungeon_entry` (14) / +2 `test_moongate` (78); full suite 18 harnesses green.
+- **Next**: back to Zane's pick (decode on `quest-trace`, or whatever's next on the trunk).
+
+---
+
 ## 2026-06-17 — impl I-spellbook (minimal `c` cast: data + book UI + 7 wired spells)
 
 - **Read**: `seg_1944.c` (the spell module) + `spells.h` — `SpellName[]` (`:143`, 16 slots/circle),

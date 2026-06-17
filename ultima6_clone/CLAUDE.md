@@ -164,7 +164,11 @@ whose slot is walled off WAITS in `AI_SCHEDULE` rather than popping onto it. So 
 on-screen NPC teleports (reschedule reclaim + unreachable-fallback) follow source in view
 (re-path / wait) and only teleport once the NPC is off-screen.
 **I-19 kept deviations (level change):** (1) **single `SpatialIndex` + active-z filter**, NOT a
-per-level index — render/passability/cell-pick/npc-tick all skip `Position.z != MapLevel.level`.
+per-level index — render/passability/cell-pick/npc-tick **and the post-move entry scans
+(`checkDungeonEntry`/`checkGateEntry`)** all skip `Position.z != MapLevel.level`. **EVERY cell scan
+that acts on a match MUST carry this filter** — the index is keyed by `(x,y)` only and never unloads,
+so all levels co-reside in one bucket; without the z-check a dungeon avatar matches a surface hole/gate
+sharing its `(x,y)` and warps off-level (the 2026-06-17 fix; source scans `FindLoc(MapX,MapY,MapZ)`).
 The per-level index is the *named upgrade* if the z-checks ever sprawl; don't pre-build it.
 (2) **Hard cut** — no `PartyEnter`/`PartyExit` choreography; the party teleports (active-z filter
 hides them on the old level, `MoveFollowers` re-forms them). Don't "add the missing animation"

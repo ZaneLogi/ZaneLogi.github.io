@@ -444,6 +444,24 @@ import { D_171C, D_174E } from '../assets/moon_tables.js';
 }
 
 // ── report ───────────────────────────────────────────────────────────────
+// ── REGRESSION (cross-level alias): a dungeon avatar must NOT trigger on a SURFACE blue gate
+//    sharing its (x,y) — the z-blind shared-index bug (source scans FindLoc(MapX,MapY,MapZ)).
+//    Without the z guard this warped the party to the overworld from inside a dungeon. ──
+{
+  const { world, avatarRef } = buildRuntimeWorld();
+  const mg = world.getResource(MoonGates);
+  mg.trammelPhase = 4; mg.feluccaPhase = 6;                                          // both moons up (gates "live")
+  addMapObject(world, { objNumber: OBJ_BLUE_GATE, frame: 1, x: 23, y: 22, z: 0 });   // a SURFACE gate
+  const pos = world.store(Position), spatial = world.getResource(SpatialIndex), ai = world.resolve(avatarRef.handle);
+  spatial.remove(50, 50, avatarRef.handle);
+  pos.x[ai] = 23; pos.y[ai] = 22; pos.z[ai] = 1;                                      // dungeon avatar on the gate's (x,y)
+  spatial.insertAtHead(23, 22, avatarRef.handle);
+  world.getResource(MapLevel).level = 1;
+  const traveled = checkGateEntry(world, { avatarRef, recenter: () => {}, moveFollowers: () => {}, message: () => {} });
+  check('cross-level gate: a surface blue gate under a dungeon avatar does NOT travel', !traveled);
+  check('cross-level gate: party stays on its dungeon level (no warp to surface)', pos.x[ai] === 23 && pos.y[ai] === 22 && pos.z[ai] === 1);
+}
+
 const summary = `${pass} passed, ${fail} failed`;
 console.log(`\n=== I-moongate: ${summary} ===`);
 if (typeof document !== 'undefined') {
