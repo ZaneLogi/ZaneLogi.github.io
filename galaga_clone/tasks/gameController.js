@@ -209,13 +209,17 @@ function stgInitEnv(state) {
 // (apply config) vs steady-state (let dev-panel toggles persist).
 let _lastState = null;
 
-// Z80 plyr_respawn_rdy (game_ctrl.s:872) sets _b_atk_wv_enbl = 1 AFTER
-// the "STAGE X" text clears and the player ship is ready. We mirror that
-// delay with a frame countdown so the launcher doesn't fire instantly on
-// the first stageStart frame. Gives gameplay-friendly settle time and
-// matches the Z80's two-phase enable.
-let _atkWvEnableDelay = 0;
-const ATK_WV_ENABLE_DELAY_FRAMES = 60;   // ~1 sec at 60 Hz, mirrors Z80 stage-init delay
+// The Z80's pre-launch delay is c_tdelay_3 (game_ctrl.s:868 → gg1-2.s:963):
+// game_tmrs[3] = 3, busy-wait until 0, ticked at 2 Hz (½-s); the splash +
+// c_player_respawn add nothing on a fresh stage (c_player_respawn's only wait,
+// "while(bugs_flying)", passes instantly with no bugs). We port the MECHANISM
+// (gameTimers[3] ticked to 0 arms atkWvEnbl; then Z80 plyr_respawn_rdy sets
+// _b_atk_wv_enbl, game_ctrl.s:876), but the COUNT is tuned by EXPERIMENT: 5,
+// NOT the ROM literal 3. With 5 the first wave snaps as the oscillation crosses
+// back through ~0 (formation at its undrifted base) — the "centered" look that
+// matches the original; the literal 3 snaps it at oscillateX ~+11 (drifted
+// right) in our port, because our fly-in / launcher timing isn't quite frame-
+// identical to the ROM's and the snap phase is sensitive to the whole chain.
 
 export function update(state) {
     // On state transition, apply the per-state task config + any per-state
@@ -225,7 +229,7 @@ export function update(state) {
 
         if (state.gameState === 'stageStart') {
             stgInitEnv(state);
-            _atkWvEnableDelay = ATK_WV_ENABLE_DELAY_FRAMES;
+            state.gameTimers[3] = 5;   // c_tdelay_3 mechanism; count=5 tuned by experiment (ROM literal=3) — see above
         }
 
         _lastState = state.gameState;
@@ -244,16 +248,12 @@ export function update(state) {
             break;
 
         case 'stageStart':
-            // Z80 plyr_respawn_rdy hand-off: after a settle delay, flip
-            // atkWvEnbl=true so the launcher actually starts. Before this,
-            // the launcher task is "enabled" via state.tasks but its first
-            // line gates on atkWvEnbl (mirrors Z80 f_2916 line 1672-1675).
-            if (!state.atkWvEnbl) {
-                if (_atkWvEnableDelay > 0) {
-                    _atkWvEnableDelay -= 1;
-                } else {
-                    state.atkWvEnbl = true;
-                }
+            // c_tdelay_3 done (gameTimers[3] ticked to 0) → arm the launcher.
+            // Before this, launchAttackWave is "enabled" via state.tasks but
+            // gates on atkWvEnbl (mirrors Z80 f_2916 line 1672-1675); the
+            // formation just oscillates from center during the wait.
+            if (!state.atkWvEnbl && state.gameTimers[3] === 0) {
+                state.atkWvEnbl = true;
             }
 
             // Wait for fly-in to complete (signalled by launchAttackWave
