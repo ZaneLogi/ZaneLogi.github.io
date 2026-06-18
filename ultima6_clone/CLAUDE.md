@@ -117,6 +117,38 @@ straight from the browser **DevTools console** (F12 → Console) on the running 
 reachable via preview-eval. A **boot-time `console.info` hint** listing the helpers is
 **deferred** — add on request (Zane will say when); keep the console quiet until then.
 
+**Project dev-skills (`ultima6_clone/skills/`).** Committed, branch-scoped procedures Claude
+follows when Zane invokes them as `/<name>` — NOT harness-registered slash commands (repo-root
+`.claude/` is git-ignored, so a real skill there wouldn't sync cross-PC; committing under the
+project folder does). On `/<name>`, **read `skills/<name>/SKILL.md` and follow it.** Current:
+- **`teleport_to`** — `/teleport_to <x> <y> [z]`: move the whole party to a tile via the real
+  `teleportParty` core (followers + camera + egg-hatch, like the Orb/moongates), for dev
+  world-exploration. (`setLevel` only moves the avatar+camera — don't use it for party moves.)
+- **`decode_npc`** — `/decode_npc <npcId | name>`: disassemble an NPC's `converse.a/.b` script
+  (desync-proof byte-walker via preview-eval) and write a full `research_npc_scripts.md` catalog
+  entry + same-pass `quest_log.md` update. Embeds the disassembler + format/opcode guide so a
+  fresh chat needn't re-derive the VM. A "check" always yields a full entry; one NPC at a time.
+- **`locate`** — `/locate <name>` (NPC home/live tile), `/locate obj <N>` (every instance of an
+  object in the loaded region), or `/locate near <x> <y>` (NPC roster around a tile). Reports tile +
+  direction from the avatar; pairs with `/teleport_to` (go) + `/decode_npc` (read). The "where is X?"
+  step of quest-chasing.
+- **`orb_route`** — `/orb_route <x> <y> [z]`: closest Orb-of-the-Moons landing to a destination —
+  ranks the fixed-ROM red-gate table (`research_moongate.md §2.3`) by distance and reports the cast
+  to use + how far the landing is from the goal (+ ship caveat for island targets). Pure lookup.
+- **`decode_egg`** — `/decode_egg <x> <y> [z]`: decode + diagnose an EGG (`OBJ_14F`) — why it does
+  or doesn't spawn. Reads the live egg via the engine's own `readEgg` (desync-proof), reports its
+  spawn template (time gate / alignment / hatch-% / embryos) + runs the hatch-gate checklist
+  (off-screen `>nearRadius` suppression · LOCAL ambush · `quan%` roll · async dungeon-load), with an
+  optional deterministic force-hatch to prove it. **Engine-debug — a diagnosis to Zane, never a
+  quest_log/research_npc_scripts/Journal write.**
+- **`sim`** — `/sim <action…>`: drive the running game like a player through its REAL input surface —
+  reload, step (8-dir, incl. walking into a dungeon/cave), change levels by ladder, the verb set
+  (LOOK/USE/GET/MOVE/DROP via `window.__U6.cmd.dispatch({verb,target})`), and a full **TALK**
+  conversation (open at the NPC cell → advance pauses → say keywords via the `.dialog-field` → read
+  `.dialog-text`). Embeds the exact input targets (move keys on `window`; dialog/modal keys + Esc on
+  `document`; `__U6.uiStack.clear()` to force-close) so they're never re-derived. Pairs with
+  `teleport_to`/`locate`/`decode_npc`. Player-drive (mutates the live sim); nothing committed.
+
 **Key I-9 kept deviations from source** (so the next-session you doesn't
 "correct" them): per-NPC window (not player-centered); edge-seek accepts any
 toward-goal edge (not source's single dominant axis); teleport-to-previous-target
