@@ -96,6 +96,14 @@ function buildEnemies() {
                 // §5b.
                 homeOscX: 0,
                 homeOscY: 0,
+
+                // ── FC dive-Y target (case_0B4E, bee dive) ─────────────
+                // When armed (a canvas-Y set by the FC token), the motion
+                // step force-expires the current segment once the bug dives
+                // to this depth — "dive until Y, then turn for home." null =
+                // not armed. Mirror of Z80 0x06(ix)+bit 5 of 0x13(ix); the
+                // port keeps it separate from the homing target (homeX/Y).
+                fcDiveTargetY: null,
             });
         }
     }

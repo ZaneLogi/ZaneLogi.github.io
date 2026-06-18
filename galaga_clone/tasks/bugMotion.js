@@ -68,6 +68,14 @@ function byteSigned(b) {
     return b > 127 ? b - 256 : b;
 }
 
+// Z80 internal-Y high byte → canvas Y. Local copy of paths.js rawYToCanvasY
+// (CLAUDE.md "Coordinate system") kept here to preserve this module's
+// no-paths.js-import boundary (see note above). Used by the FC dive-Y
+// trigger to convert FC's raw screen-Y arg into our canvas space.
+function rawYToCanvasY(rawY) {
+    return ((~(rawY + 0x4F)) & 0xFF) * 2 + 1 - 40;
+}
+
 // (vx/vy nibbles in segment byte 0 are UNSIGNED magnitudes 0-15. The
 // Z80 segment-load at gg1-5.s:1996-2011 stores them via `and 0x0F` —
 // no sign extension. Direction comes from the angle, not from a sign
@@ -77,19 +85,22 @@ function byteSigned(b) {
 // past so we don't mis-read the args as segment data. Defaults to 0
 // (the token byte alone) for unlisted opcodes.
 //
-// FD and FA are handled by dedicated cases above (Phase E INT-7) — the
-// entries here are documentation only; the generic skip-path never sees
-// those opcodes. Same for FB / FF / F6 (handled via dedicated cases).
+// Most attack/fly-in tokens now have dedicated cases above; the generic
+// skip-path (this map) only still stubs the fly-in CALL tokens F7/F0.
+// Entries below are documentation — for [H] tokens the dedicated case
+// advances the pointer itself. Some annotations predate the handlers and
+// were corrected when each was ported (e.g. F8 is 0-arg, F3 is an 8-byte
+// LUT). [H] = has a dedicated handler.
 //
-//   0xFD JUMP            · 2-byte address  (case_0B46, gg1-5.s:1885)  [HANDLED]
-//   0xFC RTN_FMTN/DIVE   · 1-byte origin Y (case_0B4E, gg1-5.s:1896)
-//   0xFA LOOP_TOP        · 2-byte alt addr (case_0BD1, gg1-5.s:1984)  [HANDLED]
-//   0xF8 BEAM_ON         · 1-byte Y value  (case_0B87, gg1-5.s:1935)
-//   0xF7 ATTACK_TURN     · 2-byte sub addr (case_0B98, gg1-5.s:1947)
-//   0xF6 FREE_FLIGHT     · 1-byte velocity (case_0BA8, gg1-5.s:1963)  [HANDLED]
-//   0xF3 BREAK_TARGETED  · 2-byte sub addr (case_0A01, gg1-5.s:1661)
-//   0xF0 ATTACK_WAVE     · 2-byte sub addr (case_0955, gg1-5.s:1529)
-//   0xEF BOMB_MODE       · 2-byte alt addr (case_094E, gg1-5.s:1523)
+//   0xFD JUMP            · 2-byte address  (case_0B46, gg1-5.s:1885)  [H]
+//   0xFC RTN_FMTN/DIVE   · 1-byte Y ref    (case_0B4E, gg1-5.s:1896)  [H]  ← bee dive-to-Y
+//   0xFA LOOP_TOP        · 2-byte alt addr (case_0BD1, gg1-5.s:1984)  [H]
+//   0xF8 (Y→top)         · 0-byte          (case_0B87, gg1-5.s:1929)  [H]
+//   0xF7 ATTACK_TURN     · 2-byte sub addr (case_0B98, gg1-5.s:1947)       ← fly-in CALL, skipped
+//   0xF6 FREE_FLIGHT     · 1-byte heading  (case_0BA8, gg1-5.s:1963)  [H]
+//   0xF3 BREAK_TARGETED  · 8-byte LUT      (case_0A01, gg1-5.s:1661)  [H]
+//   0xF0 ATTACK_WAVE     · 2-byte sub addr (case_0955, gg1-5.s:1529)       ← fly-in CALL, skipped
+//   0xEF BOMB_MODE       · 2-byte alt addr (case_094E, gg1-5.s:1523)  [H]
 //
 // Step 8 phase 8a additions: FC, F8, F6, F3, EF — these only appear in
 // attack-context paths (db_flv_atk_yllw / _red); fly-in paths don't use
@@ -350,6 +361,25 @@ function loadSegment(e, state) {
                 continue;
             }
 
+            // ── 0xFC RTN_FMTN/DIVE (case_0B4E, gg1-5.s:1896) ────────────
+            // Bee dive: "dive until you reach screen-Y <arg>, THEN advance"
+            // — arms a position-triggered segment exit. Z80 sets 0x06(ix)
+            // (a screen-Y reference) from the 1-byte arg and bit 5 of
+            // 0x13(ix) (the "bee/boss dive" flag); every frame after, the
+            // motion step (l_0C2D, gg1-5.s:2056) force-expires the current
+            // segment once the bug's Y reaches that reference, then clears
+            // the flag. We store the reference in canvas space (a dedicated
+            // e.fcDiveTargetY — the port keeps the homing target on
+            // e.homeX/Y, so no field reuse) and do the trigger in update().
+            // The flag PERSISTS across segments until the Y is reached
+            // (source clears bit 5 only at l_0C3E) — so a later F6/segment
+            // is also subject to it. Keeps vx/vy/rotRate (skip_load).
+            if (b0 === 0xFC) {
+                e.fcDiveTargetY = rawYToCanvasY(e.pathBase[e.pathOffset + 1]);
+                e.pathOffset += 2;                   // token + 1 arg
+                continue;
+            }
+
             // ── 0xEF BOMB_MODE / continuous-bombing (case_094E, gg1-5.s:1523) ──
             // Stage-gated branch. Reads the per-stage difficulty byte
             // newStageParms[9]:
@@ -442,6 +472,7 @@ export function launchEnemy(state, objectId, pathInfo) {
     e.pathBase   = pathInfo.bytes;
     e.pathOffset = 0;
     e.segTimer   = 0;             // 0 → load first segment on tick 0
+    e.fcDiveTargetY = null;       // no FC dive-Y armed at launch
     return e;
 }
 
@@ -485,6 +516,7 @@ export function launchEnemyAttack(state, objectId, attackBytes) {
     e.pathBase   = attackBytes;
     e.pathOffset = 0;
     e.segTimer   = 0;             // 0 → load first segment on tick 0
+    e.fcDiveTargetY = null;       // no FC dive-Y armed at launch
 
     // Z80 c_1083 (gg1-2.s:206-216): negateRotation is RECOMPUTED per
     // attack launch from objectId bit 1 — left pair members get false,
@@ -564,6 +596,17 @@ export function update(state) {
         const A = (state.frameCount & 1) ? e.vx : e.vy;
         e.x += A * Math.cos(angleRad);
         e.y -= A * Math.sin(angleRad);
+
+        // FC dive-Y trigger (case_0B4E + l_0C2D, gg1-5.s:2056-2068): while a
+        // dive-Y reference is armed (set by the FC token), force the current
+        // segment to expire once the bug dives down to that depth, then
+        // disarm. This is the bee's "dive until you reach Y, then turn for
+        // home." Z80 sets 0x0D=1 (expire next step) + clears bit 5 of 0x13.
+        // The bee dives DOWN = e.y increasing, so "reached" is e.y >= target.
+        if (e.state === 'flying' && e.fcDiveTargetY != null && e.y >= e.fcDiveTargetY) {
+            e.segTimer      = 1;       // expire next frame (Z80: 0x0D = 1)
+            e.fcDiveTargetY = null;    // disarm (Z80: res 5,0x13)
+        }
 
         // Homing arrival check (Z80 case_0AA0's home-detect at
         // gg1-5.s:2030-2053 — bit 6 of 0x13(ix) is set during FB,

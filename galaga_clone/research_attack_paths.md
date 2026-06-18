@@ -347,7 +347,7 @@ counting. For attack paths specifically:
 | 0xF9 (case_0B5F) | gg1-5.s:1907 | ✅ **PORTED (2026-06-18).** Sets the bug's **X to its home-column** coordinate (`0x03(ix) = ds_hpos_spcoords[col]/2 → rawXToCanvasX = e.homeX`), so it re-enters above its slot. 0-arg; skips the cocktail flip-screen branch + cont_bmb dive-sound (unmodelled). With F8, the moth re-appears at `(homeX, top)` then FA→FB homes it down — the faithful "dive off bottom → re-enter top → fly down to formation" loop. |
 | 0xFA LOOP_TOP | case_0BD1 (gg1-5.s:1984) | ✅ Phase E INT-7 — gated on state.contBmbFlag. Jumps to FB tail when cont_bmb=false (most of stage 1), falls through when cont_bmb=true (late stage 1, ≤5 enemies). |
 | 0xFB TURN_HOME | case_0AA0 | ✅ INT-7 — homing tracks the live oscillating slot (per-frame offset re-sync, the `case_2422` mirror); bug lands on the drifting formation with no jump. **See §5b.** |
-| 0xFC RTN_FMTN/DIVE | case_0B4E (gg1-5.s:1896) | ⚠ skip (1 arg). Sets dive-origin Y for boss — needs check |
+| 0xFC RTN_FMTN/DIVE | case_0B4E (gg1-5.s:1896) | ✅ **PORTED (2026-06-19).** Bee "dive-to-Y": arms a screen-Y reference (`e.fcDiveTargetY = rawYToCanvasY(arg)`); a per-frame check in `update()` (port of `l_0C2D`, gg1-5.s:2056) force-expires the current segment once the bee dives to that depth, then disarms. Source uses `0x06(ix)` + bit 5 of `0x13(ix)`; the port keeps a dedicated field (homing target stays on `homeX/Y`). Reached every bee dive (`p_flv_0358`), but on normal stage 1 the bee only reaches ~y173 vs the ~221 target → arms without firing (segment expires naturally); fires on deeper/continuous passes. |
 | 0xFD JUMP | case_0B46 (gg1-5.s:1885) | ✅ Phase E INT-7 — unconditional jump via path.z80Base address translation. Used by attack-yellow inner loop (offset 42 → 3) and attack-red inner loop (offsets 43 → 3, 96 → 35). |
 | 0xEF BOMB_MODE | case_094E (gg1-5.s:1523) | ✅ **PORTED (2026-06-18).** Stage-gated branch on `newStageParms[9]`: nonzero → JUMP to the embedded address (`p_flv_03d7`, a harder pass — moth keeps diving/bombing) via `z80Base`; zero → skip the 2-byte address (re-loop / home). **Data note:** `[9]` is 0 until **stage 12** (rank 3), not stage 8 — the source "on/after stage 8" comment conflates it with the `F0` token's gate (`[8]`, which does turn on at stage 8). EF is only *reached* when `FA` falls through (contBmbFlag true). Dormant on stage 1 (gate=0 → skip), so this changes nothing in normal stage-1 play. |
 
@@ -593,7 +593,7 @@ px. See §5b for the full mechanism + measurements.
 - ✅ EF BOMB_MODE ported — stage-gated jump to the harder continuous-bombing pass; dormant on stage 1 (2026-06-18, §7)
 - ✅ F6 FREE_FLIGHT fully ported — heading redirect (arg×4, mirrored) + per-stage bomb-enable bitmask, not just bomb-arming (2026-06-18, §7)
 - ✅ **Every token the MOTH (red) path uses is now fully implemented** (data, F3, F6, F8, F9, FA, FB, FD, EF, FF) — see §11
-- ⚠ FC token (bee dive-start, sets return-home Y) still a no-op skip — BEE-path only, not yet needed
+- ✅ **Every token the BEE (yellow) path uses is now fully implemented too** (data, FC, FA, F8, F9, EF, F6, FD, FB, FF) — FC ported 2026-06-19, see §12. No attack-path token stub remains for moth OR bee.
 - ❌ Missing dispatcher guards (Phase D)
 - ❌ Boss capture squad is missing (Phase F / step 10)
 - ⏳ Sound, bonus-bee deferred
@@ -663,3 +663,114 @@ Gates 1–2 shape **one dive** (direction + aim); gates 3–4 decide **what
 happens after** the dive (home / re-loop / escalate). In normal stage-1 play
 only gate 3 is ever exercised (and it's almost always `false` → home), which
 is why a lone surviving moth is the only one that visibly re-loops.
+
+## 12. Bee (yellow) dive — token map + decision gates
+
+The bee's break-formation dive. Source: `db_flv_atk_yllw` (gg1-5.s:285). All
+tokens ported as of 2026-06-19. **vs the moth (§11):** the bee has **`FC`**
+(a dive-to-Y trigger) and has **no `F3`** (targeting is moth-only) — otherwise
+the same vocabulary.
+
+### 12.1 Tokens the bee uses
+
+| Token | Role | Appears in |
+|-------|------|------------|
+| data `0x12`/`0x23` | 3-byte motion segment | throughout |
+| **`FC`** | **dive-to-Y** — arm a screen-Y; force-expire the current segment once the bee dives to it (then turn for home). *Bee-only.* | `p_flv_0358`, `p_flv_037c` |
+| `FA` | LOOP_TOP — gated jump | `p_flv_0358`, `p_flv_037c` |
+| `FB` | TURN_HOME → home into slot | `p_flv_039e` |
+| `FD` | unconditional JUMP (loop wiring) | `p_flv_036c`, `p_flv_037c` |
+| `F6` | "free flight" — heading (`arg×4`) + arm bombs | `p_flv_036c`, `p_flv_037c` |
+| `F8` / `F9` | Y→top / X→home column | `p_flv_036c` |
+| `EF` | BOMB_MODE — stage-gated jump | `p_flv_036c` |
+| `FF` | terminate | `p_flv_039e` tail |
+
+No `F3` (no player-targeting), no `F7`/`F0` (those are fly-in CALL tokens).
+
+### 12.2 The gates that steer the bee
+
+1. **`negateRotation`** (`objectId & 0x02`) — mirrors every segment's `rotRate`
+   → pair members sweep opposite arcs. (Same as the moth; no F3 to also mirror.)
+2. **`FC` dive-Y** (per-dive, from the token's arg) — gates the **turn-for-home
+   point**: the descent segment ends when the bee reaches screen-Y `0x2e`
+   (canvas ~221) **or** the segment's frame-count runs out, whichever first.
+   On stage 1 the bee only reaches ~y173, so the frame-count wins and FC is a
+   no-op in practice; it bites on deeper dives.
+3. **`contBmbFlag`** (`aliveOnScreen < newStageParms[7]` + fire active) — the
+   **`FA`** gate: false → `p_flv_039e` → `FB` home; true → fall through to the
+   loop (`F8`/`F9`/`EF`/`F6`/`FD`).
+4. **`newStageParms[9]`** (per-stage, first nonzero at stage 12) — the **`EF`**
+   gate: 0 → skip (re-loop); nonzero → continuous-bombing pass.
+
+### 12.3 Decision flow
+
+```
+LAUNCH  (angle = 0x100 = 90°/down ; negateRotation = objectId & 0x02)
+  │  descend → FC arms dive-Y (0x2e) → turn segment (rotRate −6)
+  │            └─ ends at Y=0x2e OR on duration (whichever first)
+  │  (no F3 — the bee does NOT aim at the player)
+  │
+  FA ── contBmbFlag? ───────────────────────────────────────────────┐
+        │ false → p_flv_039e → FB TURN_HOME → HOME INTO SLOT          │ (returns)
+        │ true  → p_flv_036c: F8/F9 (→top/home-col) · EF · F6 · FD    │ (loop / escalate)
+        EF ── newStageParms[9]? ── 0 → re-loop · !=0 → harder pass    │
+```
+
+The bee's dive is **simpler than the moth's** in one key way: it has no
+player-targeting (`F3`), so its descent is a fixed scripted arc rather than a
+heading bent toward the ship. The `FC` dive-to-Y is the bee's distinctive
+mechanic — a position-gated turn-for-home instead of the moth's `F8`/`F9`
+top-wrap. (On stage 1, with shallow dives + `contBmb` rarely true, the bee just
+descends its scripted arc and homes — gates 2–4 stay dormant, same as the moth.)
+
+## 13. Attack-path script structure (sub-path composition)
+
+Each enemy TYPE owns exactly **one** top-level attack-path table, built from
+several **sub-paths** laid out inline and wired together by the jump tokens
+(`FA` LOOP_TOP, `FD` JUMP, `EF` BOMB_MODE) and fall-through. In the port each
+table is a single `Uint8Array`; sub-paths are reached by translating the
+embedded Z80 addresses via `pathBase.z80Base`. (Verified by tokenizing each
+table — the byte-walk ends exactly at the table length, so the sub-path
+boundaries are consistent.)
+
+| Type | Top-level table | Port array | Sub-paths |
+|------|-----------------|------------|-----------|
+| **Moth (red)** | `db_flv_atk_red` (gg1-5.s:311) | `ATTACK_PATH_RED` | **4** |
+| **Bee (yellow)** | `db_flv_atk_yllw` (gg1-5.s:285) | `ATTACK_PATH_YELLOW` | **6** |
+
+### 13.1 Moth (red) — 4 sub-paths
+
+| Sub-path | Role |
+|---|---|
+| `db_flv_atk_red` (header) → `p_flv_03ac` | entry |
+| `p_flv_03ac` | main dive — descent + `F3` targeting + counter-turns + `F8`/`F9` top-wrap + `FA` + `EF` |
+| `p_flv_03cc` | re-loop body — `F6` re-arm + `FD` → back to `p_flv_03ac` (when `EF` skips, stages ≤11) |
+| `p_flv_03d7` | harder continuous pass — `F6` + 2nd `F3` + `F8`/`F9` + `FD` (the `EF` target, stage 12+) |
+| `p_flv_040c` | home tail — `FB` TURN_HOME → terminate (the `FA` jump target) |
+
+### 13.2 Bee (yellow) — 6 sub-paths
+
+| Sub-path | Role |
+|---|---|
+| `db_flv_atk_yllw` (header) → `p_flv_0352` | entry / initial descent |
+| `p_flv_0358` | descent + `FC` dive-Y + `FA` — the turn-for-home decision point |
+| `p_flv_0363` | loop-branch descent (entered when `FA` falls through, contBmb) |
+| `p_flv_036c` | loop body — `F8`/`F9`/`EF`/`F6`/`FD` (the continuous re-dive) |
+| `p_flv_037c` | harder/`EF`-target pass |
+| `p_flv_039e` | home tail — `FB` TURN_HOME → terminate |
+
+Same shape, the moth's just more compact (its `F3` targeting + top-wrap fold
+into the single main pass `p_flv_03ac`; the bee spreads descent/turn/loop over
+two extra sub-paths).
+
+### 13.3 Notes
+
+- **Fly-in is NOT type-specific.** A bug enters formation on whatever entrance
+  path the WAVE data assigns (the `db_flv_001d`-style tables, shared across all
+  types). The only type-owned path is the one attack table above. (Boss has no
+  own attack table yet — it reuses `ATTACK_PATH_YELLOW` as the step-10 stand-in.)
+- **Some sub-paths are shared (ROM code-reuse), not extra scripts.** The home
+  tail `p_flv_040c` has 4 `.dw` refs (2 from red's `FA` sites + 2 fly-in paths);
+  the bee's `p_flv_0358`/`0363`/`039e` are also jumped into by the
+  challenging-stage paths (`db_0473`/`04AB`/`04EA`). Counted once, as part of
+  their owning attack table.
