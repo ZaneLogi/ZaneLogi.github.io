@@ -172,14 +172,26 @@ function loadSegment(e, state) {
                 //   cos(θ) ∝ (homeX − e.x)
                 //   sin(θ) ∝ -(homeY − e.y)   ← canvas-Y inversion
                 // → θ = atan2(-(homeY − e.y), homeX − e.x)
-                const dx = e.homeX - e.x;
-                const dy = e.homeY - e.y;
+                // Aim at the LIVE (oscillating) slot, not the static home.
+                // In the Z80 the home TARGET stays the static origin
+                // (0x06/0x07), but each frame `case_2422` (gg1-3.s:826-848)
+                // re-syncs the bug's offset to the formation's current
+                // ds_hpos_loc_offs and the motion adds it (gg1-5.s:2297/2326),
+                // so the bug arrives at the drifting slot. We model that by
+                // targeting homeX+offset here and tracking the offset delta
+                // each frame in the homing block below (see research_attack_
+                // paths.md §5b).
+                const fo = state.formation;
+                const ox = fo.oscillateX + (fo.pulseOffsets[e.colIdx] ?? 0);
+                const oy =                  (fo.pulseOffsets[10 + e.rowIdx] ?? 0);
+                const dx = (e.homeX + ox) - e.x;
+                const dy = (e.homeY + oy) - e.y;
                 if (Math.abs(dx) <= HOME_THRESHOLD &&
                     Math.abs(dy) <= HOME_THRESHOLD) {
-                    // Already at home — degenerate case; snap immediately.
+                    // Already at the slot — degenerate case; snap immediately.
                     e.state = 'formation';
-                    e.x = e.homeX;
-                    e.y = e.homeY;
+                    e.x = e.homeX + ox;
+                    e.y = e.homeY + oy;
                     e.vx = e.vy = e.rotRate = 0;
                     e.pathBase = null;
                     return;
@@ -190,6 +202,8 @@ function loadSegment(e, state) {
                 e.rotRate  = 0;          // fixed direction during homing
                 e.pathBase = null;       // no more segments
                 e.state    = 'homing';
+                e.homeOscX = ox;         // track the slot's per-frame drift
+                e.homeOscY = oy;         //   (case_2422 re-sync) in update()
                 // Keep current vx/vy from last segment so motion continues
                 // (mirrors Z80 — 0x0A/0x0B are not modified by case_0AA0).
                 return;
@@ -444,13 +458,28 @@ export function update(state) {
         // gg1-5.s:2030-2053 — bit 6 of 0x13(ix) is set during FB,
         // l_0C05_flite_pth_cont compares (b01,b03) to home (b06,b07)
         // each frame and snaps when within ±1).
-        if (e.state === 'homing' &&
-            Math.abs(e.x - e.homeX) <= HOME_THRESHOLD &&
-            Math.abs(e.y - e.homeY) <= HOME_THRESHOLD) {
-            e.state = 'formation';
-            e.x = e.homeX;
-            e.y = e.homeY;
-            e.vx = e.vy = 0;
+        // Homing tracks the LIVE oscillating slot (Z80 case_2422,
+        // gg1-3.s:826-848: each frame re-syncs the per-bug offset to the
+        // formation's current ds_hpos_loc_offs, and the motion adds it,
+        // gg1-5.s:2297/2326). We mirror that by carrying the slot's drift
+        // delta onto e.x/e.y each frame, so the bug glides onto the moving
+        // formation and snaps onto it with no jump (research_attack_paths.md
+        // §5b). Snap when within HOME_THRESHOLD of the live slot.
+        if (e.state === 'homing') {
+            const fo = state.formation;
+            const ox = fo.oscillateX + (fo.pulseOffsets[e.colIdx] ?? 0);
+            const oy =                  (fo.pulseOffsets[10 + e.rowIdx] ?? 0);
+            e.x += ox - e.homeOscX;      // follow the slot's drift since last frame
+            e.y += oy - e.homeOscY;
+            e.homeOscX = ox;
+            e.homeOscY = oy;
+            if (Math.abs(e.x - (e.homeX + ox)) <= HOME_THRESHOLD &&
+                Math.abs(e.y - (e.homeY + oy)) <= HOME_THRESHOLD) {
+                e.state = 'formation';
+                e.x = e.homeX + ox;
+                e.y = e.homeY + oy;
+                e.vx = e.vy = 0;
+            }
         }
     }
 }

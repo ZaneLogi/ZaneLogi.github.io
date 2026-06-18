@@ -233,6 +233,83 @@ our behavior is visually correct even if mechanically the Z80 might
 do something slightly different (e.g. snap to home first then read
 sprite_posn).
 
+## 5b. Homing return to formation — formation-offset tracking (FB / case_0AA0)
+
+The symmetric companion to §5. §5 makes a dive **start** leave from the
+visible (offset-included) position; this is the homing **return**
+arriving at the visible (offset-included) position. `FB`/`case_0AA0` is
+the shared "go home" handler for **both** the fly-in (a bug reaching its
+slot for the first time) and a dive-return.
+
+**Status: ✅ FIXED (INT-7). Homing now tracks the live oscillating slot
+(the `case_2422` mirror): at FB the bug aims at `homeX+offset` and seeds
+`homeOscX/Y`; each homing frame it adds the formation's drift delta to its
+position and snaps against the live slot — so it glides onto the moving
+formation with no jump. Without the tracking it homed to the *static* slot
+and popped sideways by the current `oscillateX` at snap.**
+
+### What the source does (verified)
+
+A bug at `FB`/`TURN_HOME` (`case_0AA0`, gg1-5.s:1768) enters disposition
+**9** (diving/homing):
+
+1. `case_0AA0` sets the home **target** `0x06/0x07(ix)` to the slot's
+   **static origin** (gg1-5.s:1840-1841), stores the slot's **current**
+   drift offset in `0x11/0x12(ix)` (:1793-1794), and pre-shifts the
+   bug's position by that offset (:1807-1828).
+2. **Every frame**, `case_2422` (gg1-3.s:826-848 — the disposition-9
+   handler) re-reads the slot's **current** offset from the live
+   `ds_hpos_loc_offs` and re-writes it into the bug's `0x11/0x12`
+   (:832-847). The offset is re-synced to the oscillation each frame,
+   not frozen at FB.
+3. The motion update adds `0x11/0x12` to the bug's position
+   ("heading home (add x-offset)", gg1-5.s:2297 / 2326).
+4. Home-detect (`l_0C05`, gg1-5.s:2037-2053) compares the bug to the
+   *static* origin `0x06/0x07`; because the position carries the live
+   offset, "reached the origin" means "reached the **live slot** on
+   screen." Snap (`l_0E08_imhome`, gg1-5.s:2474) fires with the bug
+   already on the moving formation → **no jump.**
+
+Net: a homing bug **tracks the oscillating formation every frame** and
+glides onto it wherever it has drifted.
+
+### What our clone does (`bugMotion.js`, INT-7)
+
+At `FB`, `bugMotion` aims at the **live** slot (`homeX + oscillateX +
+pulse`) and seeds `e.homeOscX/Y` from the slot's offset. Each homing frame
+it adds the offset **delta** (`ox − homeOscX`) to `e.x/e.y` — the
+`case_2422` re-sync — and snaps when within `HOME_THRESHOLD` of the live
+slot. So `e.x` carries the drift and the bug lands on the moving slot.
+`objectStates` is unchanged: `'homing'` still renders at `e.x`, which now
+tracks the formation. `state.js` adds the `homeOscX/homeOscY` fields.
+
+### Measured (stage 1, no shooting; headless replay of the clone's own tasks)
+
+| event | frame | `oscillateX` |
+|---|---|---|
+| `stageStart` | 2 | 0 |
+| launcher enables (`atkWvEnbl`) | 62 | +15 |
+| first wave snaps (obj 88/90/92/94/40/42/44/46) | 176–188 | **+18 … +21** |
+| later wave snaps (obj 48…) | 396–406 | **−30 … −27** |
+
+**Before** the tracking, each snap's horizontal jump equalled the
+`oscillateX` at that frame (≈ +20 px first wave, growing later) — the
+visible "doesn't match the original" artifact. **After** (same replay,
+measuring last-homing → first-formation render): the horizontal jump is
+**≤ 2.7 px** (within the 2 px snap threshold), and the formed block sits
+correctly in its slots. The formation is still at +20 px drift when the
+first wave arrives, but the bug now lands on it seamlessly.
+
+### Implementation (INT-7 — done)
+
+`bugMotion.js` gives flying/homing bugs a per-frame offset carried **on the
+position** (mirror `case_2422`): each frame set a per-bug `(offX, offY)`
+from the slot's current `oscillateX` (+ pulse) and add it to the position
+used for homing motion **and** the home-distance check, so the bug arrives
+at the live slot and the snap is seamless. The home *target* can stay static
+(matches Z80 `0x06/0x07`); only the live offset on the *position* is
+missing.
+
 ## 6. F6 spawn-arming workaround
 
 **Status: ✅ removed in Phase E INT-7.** With FD JUMP and FA LOOP_TOP
@@ -269,7 +346,7 @@ counting. For attack paths specifically:
 | 0xF8 BEAM_ON | case_0B87 (gg1-5.s:1935) | ⚠ TOKEN_ARG_BYTES says 1 arg but Z80 case_0B87 reads 0 args (just `inc hl`); off-by-one mostly harmless on stage 1 since F9 is also 0-arg behavioral. **Bug to fix in Phase F.** |
 | 0xF9 (case_0B5F) | gg1-5.s:1907 | ⚠ skip (0 args). Loop-back from below screen — visual effect missed |
 | 0xFA LOOP_TOP | case_0BD1 (gg1-5.s:1984) | ✅ Phase E INT-7 — gated on state.contBmbFlag. Jumps to FB tail when cont_bmb=false (most of stage 1), falls through when cont_bmb=true (late stage 1, ≤5 enemies). |
-| 0xFB TURN_HOME | case_0AA0 | ✅ properly handled (INT-7 homing state) |
+| 0xFB TURN_HOME | case_0AA0 | ✅ INT-7 — homing tracks the live oscillating slot (per-frame offset re-sync, the `case_2422` mirror); bug lands on the drifting formation with no jump. **See §5b.** |
 | 0xFC RTN_FMTN/DIVE | case_0B4E (gg1-5.s:1896) | ⚠ skip (1 arg). Sets dive-origin Y for boss — needs check |
 | 0xFD JUMP | case_0B46 (gg1-5.s:1885) | ✅ Phase E INT-7 — unconditional jump via path.z80Base address translation. Used by attack-yellow inner loop (offset 42 → 3) and attack-red inner loop (offsets 43 → 3, 96 → 35). |
 | 0xEF BOMB_MODE | case_094E (gg1-5.s:1523) | ✅ correct skip (stage 8+ gated) |
@@ -312,6 +389,12 @@ on stage 1 normal mode (FA short-circuits to FB) and on cont_bmb mode
    frame mod 16) so cadence matches Z80; initial timers no longer
    need Phase B's × 16 scaling — they're now stored in 16-frame ticks
    directly (boss=22, red=2, yellow=2).
+
+★ **Fly-in / dive homing snap-jump — ✅ fixed INT-7.** The homing return
+  now tracks the oscillating formation (the `case_2422` mirror), so a bug
+  lands on the drifting slot instead of popping by `oscillateX` (was
+  ≈ +20 px first wave) when it joins. Verified: jump → ≤ 2.7 px. Full
+  mechanism + measurements in §5b.
 
 ### 🟡 Medium impact (structural / contextual)
 
@@ -468,6 +551,14 @@ max-bombers pressure.
   conditional jump is what gives early-stage attackers a way out via
   the FB tail.
 
+**Homing formation-offset tracking — ✅ done INT-7 (fixed the visible
+fly-in/dive snap-jump).** Flying/homing bugs now carry a per-frame offset
+on the position (mirror `case_2422`, gg1-3.s:826-848): at FB they aim at
+the live slot + seed `homeOscX/Y`, and each frame add the offset delta to
+the position used for homing motion **and** the home-distance check, so the
+bug arrives at the live slot and snaps seamlessly. Verified: jump → ≤ 2.7
+px. See §5b for the full mechanism + measurements.
+
 **Phase F: Step-10 territory (deferred)**
 - Boss capture squad
 - Bonus-bee
@@ -479,7 +570,7 @@ max-bombers pressure.
 - ✅ Bytecode arrays are correct (no transcription errors)
 - ✅ Token argument-byte counts are correct (except F8 — see §7 Phase F note)
 - ✅ Per-type slot-scan logic is structurally correct
-- ✅ FB TURN_HOME homing is correct (INT-7)
+- ✅ FB TURN_HOME homing tracks the live oscillating formation (INT-7 — the `case_0AA0` + `case_2422` offset mechanism is ported; bug lands on the drifting slot, no snap-jump). See §5b.
 - ✅ FD JUMP + FA LOOP_TOP correct (Phase E INT-7)
 - ✅ MAX_BOMBERS sourced from per-stage data (Phase A INT-7)
 - ✅ F6 bomb-arming fires at proper path offset (Phase E INT-7)

@@ -87,6 +87,15 @@ function buildEnemies() {
                 // partners. NOT YET READ (bugMotion rewrite is the next
                 // phase); set here so the data plumbing is correct.
                 negateRotation: false,
+
+                // ── Homing offset-tracking (the case_2422 mirror, INT-7) ──
+                // While 'homing', e.x/e.y carry the formation's live offset
+                // so the bug tracks the oscillating slot instead of snapping
+                // to the static home then popping by oscillateX. Seeded at
+                // FB, drift-followed each frame. See research_attack_paths.md
+                // §5b.
+                homeOscX: 0,
+                homeOscY: 0,
             });
         }
     }
