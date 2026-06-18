@@ -28,6 +28,15 @@ the process record; the research docs are the product.
 
 ---
 
+## 2026-06-18 — project wound down (educational goal met) + branch cleanup
+
+- **Decision** (Zane): stop active implementation. *Wander the world and talk to NPCs* is achieved; the leftover is gameplay-completeness, not new mechanism understanding.
+- **Audited** MOVE (`C_27A1_1E8B`) and LOOK (`C_27A1_0C67` + search `C_27A1_09A1`) source-vs-clone, branch by branch → new `research_verb_coverage.md`. One real defect (the `TypeWeight==255` push over-gate vs source's `==0`-only gate); everything else is deferred-by-design.
+- **Docs**: folded the temp `HANDOFF_secret_door` findings into `research_verb_coverage.md §3`; compacted the `quest-trace` NPC-decode docs + dev-skills (17 commits → 3) onto the trunk; flipped the `progress.md` banner to closed.
+- **Next**: none — project closed. Resumable from `research_verb_coverage.md §4` if ever wanted.
+
+---
+
 ## 2026-06-17 — fix: walking in a dungeon warped you off-level (cross-level hole/gate alias)
 
 - **Symptom** (Zane, in Dungeon Wrong): moving around suddenly popped the party out to the surface "from a hole."
