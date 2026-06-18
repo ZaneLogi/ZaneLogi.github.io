@@ -192,6 +192,15 @@ function stgInitEnv(state) {
 
     state.waveLauncherFlyInDone = false;
 
+    // Reset the formation drift/breathe lifecycle for the new stage: start
+    // oscillating from center, clear the stop-request, reset the pulse.
+    // (STATE_TASKS['stageStart'] re-enables oscillate + disables pulse.)
+    state.formation.oscillateX   = 0;
+    state.formation.oscillateDir = 1;
+    state.formation.nestlrInh    = false;
+    state.formation.pulseCounter = 0;
+    state.formation.pulseOffsets.fill(0);
+
     // Reset phase-2 (continuous attack) timers via the launcher's helper.
     resetWaveState(state);
 }

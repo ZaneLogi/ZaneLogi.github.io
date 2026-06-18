@@ -311,6 +311,10 @@ export const state = {
         // f_2A90 — L/R oscillation
         oscillateX:   0,   // current pixel offset applied to all enemy X
         oscillateDir: 1,   // +1 = drifting right, -1 = drifting left
+        // Z80 _b_nestlr_inh: set when the formation completes (last bug
+        // home). Oscillate then coasts to center and hands off to the
+        // breathing pulse f_1DE6 (gg1-3.s:1998-2031). See formationOscillate.js.
+        nestlrInh:    false,
 
         // f_1DE6 — expand/contract pulse
         // pulseOffsets[0-9]  = per-column X offsets (cols 0-9)

@@ -475,7 +475,7 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
     <div class="lbl">bugs in flight OR f_2916 active<br><span style="color:#444">(fly-in phase AND during dive attacks)</span></div>
     <div class="val">f_1DE6</div>
     <div class="lbl">expand/contract "breathing" · 15 Hz (% 4)<br><span style="color:#444">bitmap table d_1E64 selects which cols/rows move · direction flips at ±0x1F count</span></div>
-    <div class="lbl">steady-state only — enabled by f_2A90 when formation completes and returns to centre<br><span style="color:#444">(disabled during dive attacks)</span></div>
+    <div class="lbl">steady-state only — enabled by f_2A90 when formation completes and returns to centre<br><span style="color:#444">(runs through the dive phase — the formation breathes while bugs dive; only disabled at next stage init)</span></div>
   </div>
 
   <div>

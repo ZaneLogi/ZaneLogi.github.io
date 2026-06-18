@@ -137,13 +137,17 @@ function runFlyInWave(state) {
 
     const b = state.waveStream[state.waveStreamCursor];
 
-    // ── 0x7F: end-of-stage marker (gg1-3.s:1664-1665) ────────────────
+    // ── 0x7F: end-of-stage marker (gg1-3.s:1664-1665 → l_2A29) ───────
     if (b === 0x7F) {
-        // Z80 jumps to l_2A29_attack_waves_complete which disables f_2916
-        // and enables f_1A80 (bonus-bee) + f_1B65 (bomber attack), then
-        // sets _b_nestlr_inh = 1. We just signal completion; gameController
-        // transitions to 'playing' which enables our phase-2 attack mode.
-        state.waveLauncherFlyInDone = true;
+        // l_2A29 (gg1-3.s:1897-1911) WAITS here for the last wave's bugs to
+        // land before completing: "if (bugs_flying_nbr > 0) return". Only
+        // when bugsFlying==0 (formation fully formed) does it disable f_2916,
+        // enable f_1B65 (dives) + f_1A80, and set _b_nestlr_inh. We mirror
+        // that — hold at the marker until the formation is complete, so dives
+        // don't start mid-fly-in and the oscillate→breathe handoff can fire.
+        if (state.bugsFlying > 0) return;
+        state.waveLauncherFlyInDone = true;   // → gameController enters 'playing' (dives)
+        state.formation.nestlrInh   = true;   // → oscillate coasts to center, hands off to f_1DE6
         return;
     }
 
