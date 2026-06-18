@@ -340,16 +340,16 @@ counting. For attack paths specifically:
 
 | Token | Z80 case | Status in our port |
 |-------|----------|---------------------|
-| 0xF3 BREAK_TARGETED | case_0A01 (gg1-5.s:1661) | ❌ TOKEN_ARG_BYTES says 2 args but Z80 advances HL by 9 (`ld a,#9; rst 0x10` at gg1-5.s:1717) — token + 8-byte LUT. Currently mis-skips, causing RED path to misread LUT bytes 12-17 as 2 spinning segments. Fix: TOKEN_ARG_BYTES.F3 = 8. **Critical for RED path correctness — Phase F.** Real handler (player-deltaX → LUT lookup → sub-path) is also Phase F. |
-| 0xF6 FREE_FLIGHT | case_0BA8 (gg1-5.s:1963) | ✅ now arms bombs at the proper path offset (Phase E removes the spawn-time workaround) |
+| 0xF3 BREAK_TARGETED | case_0A01 (gg1-5.s:1661) | ✅ **PORTED (2026-06-18).** Player-targeted turn-hold: reads player X, computes `(playerX−mothX)/4` (signed, mirrored by negateRotation), biases +0x18, clamps [0,0x2F], `/6` → bucket 0-7, and writes `LUT[bucket]` into the segment **duration** (0x0D), then continues the current heading. **Doc correction:** earlier rows here said F3 does a "LUT lookup → *sub-path*". It does NOT select a sub-path — it picks a turn-HOLD DURATION (`0x0D(ix)`) and `jp l_0BFF_flite_pth_skip_load` (gg1-5.s:1715) keeps the prior segment's vx/vy/rotRate. The longer hold of the preceding `0x12,0xFA,..` (rotRate −6) turn = bigger hook toward the player. See `bugMotion.js` loadSegment `0xF3` block. |
+| 0xF6 FREE_FLIGHT | case_0BA8 (gg1-5.s:1963) | ✅ **FULLY PORTED (2026-06-18).** All 3 effects: (1) sets heading `0x04/0x05 = (arg, mirrored by negateRotation) << 2` (arg×4); (2) bomb counter `0x0E = 0x1E`; (3) bomb-enable bitmask `0x0F = b_92C0[8]` (= `state.bombDropFlags`, was hardcoded `0xFF`). Earlier the heading-redirect was skipped — now done. |
 | 0xF7 ATTACK_TURN | case_0B98 (gg1-5.s:1947) | ✅ correct skip (transient-only behavior; not used for non-transient bombers) |
-| 0xF8 BEAM_ON | case_0B87 (gg1-5.s:1935) | ⚠ TOKEN_ARG_BYTES says 1 arg but Z80 case_0B87 reads 0 args (just `inc hl`); off-by-one mostly harmless on stage 1 since F9 is also 0-arg behavioral. **Bug to fix in Phase F.** |
-| 0xF9 (case_0B5F) | gg1-5.s:1907 | ⚠ skip (0 args). Loop-back from below screen — visual effect missed |
+| 0xF8 | case_0B87 (gg1-5.s:1929) | ✅ **PORTED (2026-06-18).** In the attack/home context this is NOT "BEAM_ON" — it repositions the bug's **Y to the top** ("flew through the bottom of the screen to the top"): Z80 sets `0x01(ix) = 0x0138>>1 = 0x9C`; `rawYToCanvasY(0x9C) = 1` (top edge). **0-arg** token (the old TOKEN_ARG_BYTES.F8=1 was wrong, §7c). Pairs with F9 + the FB tail. See `bugMotion.js` `0xF8` block. |
+| 0xF9 (case_0B5F) | gg1-5.s:1907 | ✅ **PORTED (2026-06-18).** Sets the bug's **X to its home-column** coordinate (`0x03(ix) = ds_hpos_spcoords[col]/2 → rawXToCanvasX = e.homeX`), so it re-enters above its slot. 0-arg; skips the cocktail flip-screen branch + cont_bmb dive-sound (unmodelled). With F8, the moth re-appears at `(homeX, top)` then FA→FB homes it down — the faithful "dive off bottom → re-enter top → fly down to formation" loop. |
 | 0xFA LOOP_TOP | case_0BD1 (gg1-5.s:1984) | ✅ Phase E INT-7 — gated on state.contBmbFlag. Jumps to FB tail when cont_bmb=false (most of stage 1), falls through when cont_bmb=true (late stage 1, ≤5 enemies). |
 | 0xFB TURN_HOME | case_0AA0 | ✅ INT-7 — homing tracks the live oscillating slot (per-frame offset re-sync, the `case_2422` mirror); bug lands on the drifting formation with no jump. **See §5b.** |
 | 0xFC RTN_FMTN/DIVE | case_0B4E (gg1-5.s:1896) | ⚠ skip (1 arg). Sets dive-origin Y for boss — needs check |
 | 0xFD JUMP | case_0B46 (gg1-5.s:1885) | ✅ Phase E INT-7 — unconditional jump via path.z80Base address translation. Used by attack-yellow inner loop (offset 42 → 3) and attack-red inner loop (offsets 43 → 3, 96 → 35). |
-| 0xEF BOMB_MODE | case_094E (gg1-5.s:1523) | ✅ correct skip (stage 8+ gated) |
+| 0xEF BOMB_MODE | case_094E (gg1-5.s:1523) | ✅ **PORTED (2026-06-18).** Stage-gated branch on `newStageParms[9]`: nonzero → JUMP to the embedded address (`p_flv_03d7`, a harder pass — moth keeps diving/bombing) via `z80Base`; zero → skip the 2-byte address (re-loop / home). **Data note:** `[9]` is 0 until **stage 12** (rank 3), not stage 8 — the source "on/after stage 8" comment conflates it with the `F0` token's gate (`[8]`, which does turn on at stage 8). EF is only *reached* when `FA` falls through (contBmbFlag true). Dormant on stage 1 (gate=0 → skip), so this changes nothing in normal stage-1 play. |
 
 **Phase E INT-7 status:** FD JUMP + FA LOOP_TOP both implemented as a
 pair (one without the other gives wrong behavior — see §3.3 and §9
@@ -428,11 +428,16 @@ on stage 1 normal mode (FA short-circuits to FB) and on cont_bmb mode
 
 ### 🟡 Medium impact (newly discovered in Phase E review)
 
-7a. **F3 BREAK_TARGETED arg count wrong (2, should be 8).** ✅ Fixed
-    INT-7 (TOKEN_ARG_BYTES.F3 = 8). Verified against Z80 case_0A01
-    (gg1-5.s:1717): `ld a,#9; rst 0x10` advances HL by 9. RED path no
-    longer mis-spins at offset 9. Real handler (player-deltaX → LUT
-    lookup → sub-path) is still Phase F.
+7a. **F3 BREAK_TARGETED — ✅ fully ported (2026-06-18).** First fixed the
+    arg count INT-7 (skip 8 LUT bytes), then ported the real handler
+    `case_0A01` (gg1-5.s:1661-1715): player-X → bucket → `LUT[bucket]`
+    becomes the turn-hold **duration**, current heading preserved.
+    Verified by deterministic replay through `bugMotion.update()`: the
+    duration sweep is monotonic in player X and mirror-symmetric under
+    negateRotation, and a full-dive replay shows the moth's trajectory
+    diverges ~70 px between player-far-left and player-far-right (was 0 —
+    F3 used to be a no-op skip). Earlier "→ sub-path" framing was wrong
+    (see §7 row).
 
 7b. **negateRotation leaking from fly-in into attack.** ✅ Fixed INT-7.
     Z80 c_1083 (gg1-2.s:206-216) recomputes `0x13(ix) bit 7` on every
@@ -562,13 +567,14 @@ px. See §5b for the full mechanism + measurements.
 **Phase F: Step-10 territory (deferred)**
 - Boss capture squad
 - Bonus-bee
-- F3 BREAK_TARGETED LUT
+- ~~F3 BREAK_TARGETED LUT~~ ✅ done 2026-06-18 (player-targeted turn-hold; see §7/§7a)
 - Sound
 
 ## 10. What we can claim about the current implementation
 
 - ✅ Bytecode arrays are correct (no transcription errors)
-- ✅ Token argument-byte counts are correct (except F8 — see §7 Phase F note)
+- ✅ Token argument-byte counts are correct (F8 corrected 1→0, 2026-06-18, §7)
+- ✅ Attack-dive INITIAL ANGLE = 0x100 (90°), per Z80 j_108A (gg1-2.s:243). Was hardcoded 0 (a placeholder) → moths veered left / one pair member flew up; 0x100 makes the pair dive down + split symmetrically. (2026-06-18; see launchEnemyAttack.)
 - ✅ Per-type slot-scan logic is structurally correct
 - ✅ FB TURN_HOME homing tracks the live oscillating formation (INT-7 — the `case_0AA0` + `case_2422` offset mechanism is ported; bug lands on the drifting slot, no snap-jump). See §5b.
 - ✅ FD JUMP + FA LOOP_TOP correct (Phase E INT-7)
@@ -582,7 +588,78 @@ px. See §5b for the full mechanism + measurements.
 - ✅ MAX_BOMBERS ramp-up after 30 sec elapsed (Phase C)
 - ✅ Cont_bmb branch (memset reloads to 2) (Phase C)
 - ✅ Dispatcher entry guards (playerFire gate) (Phase D)
-- ⚠ F3/FC/F8 token semantics are partial
+- ✅ F3 BREAK_TARGETED ported — RED dives now hook toward the player (2026-06-18)
+- ✅ F8 (Y→top) + F9 (X→home column) ported — dive wraps off the bottom, re-enters at the top, homes into the slot (2026-06-18, §7)
+- ✅ EF BOMB_MODE ported — stage-gated jump to the harder continuous-bombing pass; dormant on stage 1 (2026-06-18, §7)
+- ✅ F6 FREE_FLIGHT fully ported — heading redirect (arg×4, mirrored) + per-stage bomb-enable bitmask, not just bomb-arming (2026-06-18, §7)
+- ✅ **Every token the MOTH (red) path uses is now fully implemented** (data, F3, F6, F8, F9, FA, FB, FD, EF, FF) — see §11
+- ⚠ FC token (bee dive-start, sets return-home Y) still a no-op skip — BEE-path only, not yet needed
 - ❌ Missing dispatcher guards (Phase D)
 - ❌ Boss capture squad is missing (Phase F / step 10)
 - ⏳ Sound, bonus-bee deferred
+
+## 11. Moth (red) dive — token map + decision gates
+
+Quick reference for the moth's break-formation dive: which path tokens it
+uses, and the gates that decide which branch it takes. Source:
+`db_flv_atk_red` (gg1-5.s:311). All ported as of 2026-06-18 (stage-1 path);
+the moth does NOT use `F7` (fly-in CALL) or `FC` (bee dive-start).
+
+### 11.1 Tokens the moth uses
+
+| Token | Role | Appears in |
+|-------|------|------------|
+| data `0x12`/`0x23` | 3-byte motion segment `[vx/vy nibbles, signed rotRate, duration]` — the actual flight | throughout |
+| `F3` | **player-targeted turn-hold** — read ship X, pick a turn-HOLD duration from an 8-byte LUT (moth-only) | `p_flv_03ac`, `p_flv_03d7` |
+| `F6` | "free flight" run — set heading (`arg×4`, mirrored) + arm bombs (`bombCounter`=30, `bombEnable`=per-stage bitmask) | `p_flv_03cc`, `p_flv_03d7` |
+| `F8` | reposition **Y → top edge** (`0x01(ix)=0x9C` → canvas Y 1) | `p_flv_03ac`, `p_flv_03d7` |
+| `F9` | reposition **X → home column** (`0x03(ix)` → `e.homeX`) | `p_flv_03ac`, `p_flv_03d7` |
+| `FA` | LOOP_TOP — **gated jump** (see gate 3) | `p_flv_03ac`, `p_flv_03d7` |
+| `FB` | TURN_HOME → enter `homing` (track live slot, land in formation) | `p_flv_040c` |
+| `FD` | unconditional JUMP (via `z80Base`) — wires the attack loop | `p_flv_03cc`, `p_flv_03d7` |
+| `EF` | BOMB_MODE — **stage-gated jump** (see gate 4) | `p_flv_03ac` |
+| `FF` | terminate (defensive; FB takes over first) | `p_flv_040c` tail |
+
+### 11.2 The four gates that steer the moth
+
+1. **`negateRotation`** — per-enemy, set at launch from `objectId & 0x02`
+   (`c_1083`, gg1-2.s:206). Negates every segment's `rotRate` **and** the
+   `F3` player-delta. Net: the two members of a launch pair sweep **mirrored**
+   arcs (one hooks left, one right).
+2. **Player X** (live, `ds_sprite_posn+0x62`) — read by **`F3`** to pick the
+   turn-hold bucket (0–7). Decides **how far / which way** the dive curves to
+   aim at the ship. (§7/§7a.)
+3. **`contBmbFlag`** (live) — `aliveOnScreen < newStageParms[7]` AND the
+   fire-button task active (`gg1-5.s:489`). The **`FA`** gate:
+   - **false** (most of a stage, many enemies) → `FA` jumps to `p_flv_040c`
+     → `FB` → **moth homes back to formation**.
+   - **true** (few enemies left, the endgame) → `FA` falls through → reach `EF`.
+4. **`newStageParms[9]`** (per-stage, fixed at stage init via `c_2C00`) — the
+   **`EF`** gate. **First nonzero at STAGE 12** (rank 3), *not* stage 8:
+   - **== 0** (stages ≤ 11) → `EF` skips → `p_flv_03cc` → `F6` + `FD` →
+     **re-loop the SAME dive** (`p_flv_03ac`).
+   - **!= 0** (stage ≥ 12) → `EF` jumps to `p_flv_03d7` → a **harder pass**
+     (2nd `F3` targeting dive + `F8`/`F9` + `FD` loop) → **continuous bombing**.
+
+### 11.3 Decision flow
+
+```
+LAUNCH  (angle = 0x100 = 90°/down ; negateRotation = objectId & 0x02)
+  │  descend → begin turn (data segments; rotRate sign per negateRotation)
+  │  F3  → read player X → turn-hold duration → CURVE TOWARD THE SHIP
+  │  counter-turn segments
+  │  F8 (Y→top) , F9 (X→home column)
+  │
+  FA ── contBmbFlag? ───────────────────────────────────────────────┐
+        │ false → jump p_flv_040c → FB TURN_HOME → HOME INTO SLOT     │ (returns)
+        │ true  → fall through ↓                                      │
+        EF ── newStageParms[9]? ──────────────────────────────────────┤
+              │ ==0 (stage ≤11) → skip → p_flv_03cc → F6+FD → loop dive│ (re-dive)
+              │ !=0 (stage ≥12) → jump p_flv_03d7 → harder F3 pass     │ (continuous bombing)
+              │                    → F8/F9 → FD → loop                 │
+```
+
+Gates 1–2 shape **one dive** (direction + aim); gates 3–4 decide **what
+happens after** the dive (home / re-loop / escalate). In normal stage-1 play
+only gate 3 is ever exercised (and it's almost always `false` → home), which
+is why a lone surviving moth is the only one that visibly re-loops.

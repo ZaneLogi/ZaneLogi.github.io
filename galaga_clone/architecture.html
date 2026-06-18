@@ -846,7 +846,7 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
   <div style="display:flex;flex-direction:column;gap:10px">
 
   <div style="padding:8px 12px;background:#0a1018;border-left:2px solid #7af;border-radius:2px">
-    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:4px">0xF6 FREE_FLIGHT &nbsp;·&nbsp; case_0BA8 (gg1-5.s:1963)</div>
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:4px">0xF6 FREE_FLIGHT &nbsp;·&nbsp; case_0BA8 (gg1-5.s:1963) &nbsp;<span style="color:#5d9">✅ ported 2026-06-18 (heading + per-stage bomb-enable)</span></div>
     <div style="color:#888;font-size:11px;line-height:1.7">
       <b>Arg bytes:</b> 1 (rotational-velocity / direction value, sign-checked at bit 7).<br>
       <b>State writes:</b> <span style="color:#7af">0x04(ix), 0x05(ix)</span> ← 2-byte velocity (left-shifted ×2, conditionally negated); <span style="color:#7af">0x0E(ix)</span> ← <code>0x1E</code> (bomb-drop counter); <span style="color:#7af">0x0F(ix)</span> ← global bomb-enable flag from <span style="color:#7af">b_92C0+0x08</span>.<br>
@@ -855,21 +855,21 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
   </div>
 
   <div style="padding:8px 12px;background:#0a1018;border-left:2px solid #7af;border-radius:2px">
-    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:4px">0xEF BOMB_MODE &nbsp;·&nbsp; case_094E (gg1-5.s:1523)</div>
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:4px">0xEF BOMB_MODE &nbsp;·&nbsp; case_094E (gg1-5.s:1523) &nbsp;<span style="color:#5d9">✅ ported 2026-06-18</span></div>
     <div style="color:#888;font-size:11px;line-height:1.7">
-      <b>Arg bytes:</b> 2 (LE pointer to alt-attack table — only consumed on stage ≥ 8).<br>
-      <b>State writes:</b> if <span style="color:#7af">ds_new_stage_parms+0x09 ≥ 8</span> → <span style="color:#7af">0x08(ix), 0x09(ix)</span> ← new path pointer from arg; otherwise no state change, just advance past arg.<br>
-      <b>Behaviour:</b> Stage-gated — activates continuous-bombing mode by switching the enemy's path pointer to an alternate, more aggressive table. <b>No-op on stages 1–7</b>, which is why early Galaga feels gentler than later stages.
+      <b>Arg bytes:</b> 2 (LE pointer to the harder "continuous-bombing" pass — <code>p_flv_03d7</code> in the red path).<br>
+      <b>Gate:</b> reads <span style="color:#7af">ds_new_stage_parms[0x09]</span>. If <b>nonzero</b> → JUMP the path pointer to the embedded address (translated via <code>z80Base</code>, same as FD); if <b>zero</b> → skip the 2-byte address and continue. <i style="color:#fc6">Corrected: the gate is "[9] != 0", NOT "≥ 8". And [9] first turns on at STAGE 12 (rank 3) — the old "on/after stage 8" wording conflated it with the F0 token's gate (index 8).</i><br>
+      <b>Behaviour:</b> Stage-gated continuous-bombing: at the gated stages the moth re-enters and keeps diving/bombing instead of homing. <b>No-op on stages 1–11</b> (gate=0 → skip), so it doesn't affect normal early play.
     </div>
   </div>
 
   <div style="padding:8px 12px;background:#0a1018;border-left:2px solid #7af;border-radius:2px">
-    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:4px">0xF3 BREAK_TARGETED &nbsp;·&nbsp; case_0A01 (gg1-5.s:1661)</div>
+    <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:4px">0xF3 BREAK_TARGETED &nbsp;·&nbsp; case_0A01 (gg1-5.s:1661) &nbsp;<span style="color:#5d9">✅ ported 2026-06-18</span></div>
     <div style="color:#888;font-size:11px;line-height:1.7">
-      <b>Arg bytes:</b> 2 (LE pointer to follow-up path). Handler then does target-acquisition math with ~7 more bytes of internal computation (not from path stream).<br>
-      <b>State writes:</b> <span style="color:#7af">0x0D(ix)</span> ← rotation index (computed from delta-X to ship via div-by-6 lookup, clamped at screen edges); <span style="color:#7af">0x08(ix), 0x09(ix)</span> ← new path pointer from arg.<br>
-      <b>Reads:</b> ship X at <span style="color:#7af">ds_sprite_posn+0x62</span>; flip-screen flag at <span style="color:#7af">b_9215</span>; orientation bit 7 of <span style="color:#7af">0x13(ix)</span>.<br>
-      <b>Behaviour:</b> Red moth acquires lock on ship — computes the angle needed to dive at the player's current X, sets rotation, then jumps to a "now diving at player" follow-up path.
+      <b>Arg bytes:</b> 8 — an inline LUT of turn-HOLD durations (NOT a pointer). <i style="color:#fc6">Corrected: earlier this said "2-byte pointer to a follow-up path + acquire angle + jump there." Reading case_0A01 shows none of that is true — there is no sub-path jump and no angle is set.</i><br>
+      <b>State writes:</b> <span style="color:#7af">0x0D(ix)</span> ← segment DURATION = <code>LUT[bucket]</code>, where <code>bucket</code> = <code>clamp((playerX−mothX)/4 + 0x18, 0, 0x2F) / 6</code> → 0-7 (negated for the mirrored pair member). Path pointer just advances past the token + 8 LUT bytes; vx/vy/rotRate are left untouched (<span style="color:#7af">jp l_0BFF_flite_pth_skip_load</span>, gg1-5.s:1715).<br>
+      <b>Reads:</b> ship X at <span style="color:#7af">ds_sprite_posn+0x62</span> (clamped 0x1E–0xD1); flip-screen flag at <span style="color:#7af">b_9215</span> (not modelled in port); orientation bit 7 of <span style="color:#7af">0x13(ix)</span> = negateRotation.<br>
+      <b>Behaviour:</b> Red moth doesn't change WHERE it points — it varies HOW LONG it holds the turn the preceding <code>0x12,0xFA,..</code> (rotRate −6) segment started. Player far to one side → long hold → big hook that way; aligned → short hold. The variable turn-hold is what bends the dive toward the player. Verified: trajectory diverges ~70 px between player-far-left vs far-right (was a no-op skip before).
     </div>
   </div>
 
@@ -886,18 +886,16 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
   <div style="margin-top:14px">
     <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Flow-control tokens (also in attack tables, simpler)</div>
     <div style="color:#888;font-size:11px;line-height:1.7">
-      &nbsp;• <span style="color:#7af">0xF8 BEAM_ON</span> (case_0B87, gg1-5.s:1935) — <b>1-byte arg</b>; sets <span style="color:#7af">0x01(ix) = 0x9C</span> (screen-bottom Y). Used by both attack and step 9 tractor beam.<br>
-      &nbsp;• <span style="color:#7af">0xF9 LOOP_HOME</span> (case_0B5F, gg1-5.s:1907) — <b>0-byte arg</b>; sets <span style="color:#7af">0x03(ix)</span> from formation home column; conditionally fires dive-attack SFX.<br>
+      &nbsp;• <span style="color:#7af">0xF8</span> (case_0B87, gg1-5.s:1929) — <b>0-byte arg</b> <span style="color:#5d9">✅ ported</span>; sets <span style="color:#7af">0x01(ix) = 0x9C</span> → <code>rawYToCanvasY(0x9C)=1</code>, the <b>TOP</b> edge ("flew through the bottom to the top"). <i style="color:#fc6">Corrected from "1-byte arg / screen-bottom Y" — it's 0-arg and the TOP, not the bottom.</i><br>
+      &nbsp;• <span style="color:#7af">0xF9 LOOP_HOME</span> (case_0B5F, gg1-5.s:1907) — <b>0-byte arg</b> <span style="color:#5d9">✅ ported</span>; sets <span style="color:#7af">0x03(ix)</span> = home-column X (→ <code>e.homeX</code>). With F8, the moth re-enters at (homeX, top) then FB homes it down. (We skip the conditional dive SFX — no sound system.)<br>
       &nbsp;• <span style="color:#7af">0xFA LOOP_TOP</span> (case_0BD1, gg1-5.s:1984) — <b>2-byte arg</b> (alt-pattern pointer; handler conditionally loads it but the path bytes always reserve 2 bytes for the address). <i>Corrected from "0-byte / conditional" — caught when phase 8c attack-path test mis-read the .dw address as a segment opcode and flew the enemy off-screen.</i><br>
       &nbsp;• <span style="color:#7af">0xFC RTN_FMTN / DIVE_START</span> (case_0B4E, gg1-5.s:1896) — <b>1-byte arg</b> (origin Y); sets <span style="color:#7af">0x06(ix)</span>, zeroes <span style="color:#7af">0x07(ix)</span>, sets dive-flag bit 5 in <span style="color:#7af">0x13(ix)</span>.<br>
       &nbsp;• <span style="color:#7af">0xFD JUMP</span> (case_0B46, gg1-5.s:1885) — <b>2-byte arg</b> (LE pointer); already in step 7 interpreter.
     </div>
   </div>
 
-  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:14px;padding:6px 10px;background:#1a1408;border-left:2px solid #c93;border-radius:2px">
-    <b style="color:#fc6">Important fix needed for existing TOKEN_ARG_BYTES (bugMotion.js):</b> our current map has only FD/F7/F0 = 2 bytes; everything else defaults to 0. Step 8 needs these added (otherwise their args get mis-read as segment opcodes):
-    <br>&nbsp;&nbsp;0xF8 BEAM_ON: <b>1</b> · 0xFC RTN_FMTN: <b>1</b> · 0xF6 FREE_FLIGHT: <b>1</b> · 0xF3 BREAK_TARGETED: <b>2</b> · 0xEF BOMB_MODE: <b>2</b>
-    <br>The 0-arg tokens (F9 LOOP_HOME, FA LOOP_TOP) need behaviour wiring but no arg-byte change. Not visible today because fly-in paths don't use these — bug latent until step 8.
+  <div style="color:#888;font-size:11px;line-height:1.7;margin-top:14px;padding:6px 10px;background:#0a1a0e;border-left:2px solid #5d9;border-radius:2px">
+    <b style="color:#5d9">TOKEN_ARG_BYTES — resolved.</b> Step-8 added FC=1 · F6=1 · F3=<b>8</b> (not 2 — F3 carries an 8-byte LUT) · EF=2. <b>F8 is 0-arg</b> (the earlier "F8=1" was wrong) and is now handled explicitly. <b>Every token the MOTH (red) path uses is fully ported as of 2026-06-18</b> — data, F3, F6 (incl. heading-redirect + per-stage bomb-enable), F8, F9, FA, FB, FD, EF, FF. The only remaining attack-token stub is <span style="color:#7af">FC</span> (bee dive-start), used by the <b>bee</b> path only.
   </div>
 
   <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px;padding:6px 10px;background:#0a1a0e;border-left:2px solid #5d9;border-radius:2px">

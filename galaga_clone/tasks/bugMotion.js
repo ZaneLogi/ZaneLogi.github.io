@@ -209,20 +209,28 @@ function loadSegment(e, state) {
                 return;
             }
 
-            // Behavioural token for attack-dive bombing.
-            //   0xF6 FREE_FLIGHT · case_0BA8 — arms the bomb-drop counter
-            //                       and per-enemy enable bits. Z80 also
-            //                       sets a 2-byte angle from the arg byte;
-            //                       step 8 phase 8d/e simplifies that to
-            //                       just bomb-state initialisation —
-            //                       motion redirect is polish for later.
-            //                       The 1-byte arg (rot/velocity hint) is
-            //                       consumed but ignored. bombUpdate.js
-            //                       reads bombCounter / bombEnable.
+            // ── 0xF6 FREE_FLIGHT (case_0BA8, gg1-5.s:1963) ──────────────
+            // The lone-moth "free flight" bombing run. Does THREE things:
+            //   (1) SET HEADING from the 1-byte arg: angle 0x04/0x05 =
+            //       (arg, mirrored by negateRotation) << 2  (= arg×4, our
+            //       10-bit space). The moth's args 0xC0/0xB0/0xAB → 768
+            //       (straight down)/704/684 — a mostly-downward run.
+            //   (2) bomb-drop COUNTER 0x0E = 0x1E (30 frames to first drop).
+            //   (3) bomb-drop ENABLE bitmask 0x0F = b_92C0[8] (the per-stage
+            //       pattern, our state.bombDropFlags). bombUpdate consumes it
+            //       bit-by-bit (willFire = bit0; then >>=1).
+            // Previously this set bombCounter only + hardcoded enable=0xFF and
+            // skipped the heading (a stub). Reached only in the late-stage /
+            // continuous branches (p_flv_03cc / p_flv_03d7), never the normal
+            // stage-1 dive. Keeps vx/vy/rotRate (continues this segment-set);
+            // the next data segment's rotRate then turns from this heading.
             if (b0 === 0xF6) {
-                e.bombCounter = 0x1E;     // 30 frames to first drop attempt
-                e.bombEnable  = 0xFF;     // all 8 enable bits set (aggressive)
-                e.pathOffset += 2;        // skip token + 1 arg
+                let a = e.pathBase[e.pathOffset + 1];          // arg byte
+                if (e.negateRotation) { a = (a + 0x80) & 0xFF; a = (-a) & 0xFF; }
+                e.angle       = (a << 2) & 0x3FF;              // 0x04/0x05: heading = arg×4
+                e.bombCounter = 0x1E;                          // 0x0E: 30 frames to first drop
+                e.bombEnable  = state.bombDropFlags;           // 0x0F: per-stage drop bitmask (b_92C0[8])
+                e.pathOffset += 2;                             // token + 1 arg
                 continue;
             }
 
@@ -268,6 +276,102 @@ function loadSegment(e, state) {
                     const target = (hi << 8) | lo;
                     const base   = e.pathBase.z80Base ?? 0;
                     e.pathOffset = target - base;
+                }
+                continue;
+            }
+
+            // ── 0xF3 BREAK_TARGETED (case_0A01, gg1-5.s:1661) ───────────
+            // The red-moth targeting waypoint. Mid-dive, the moth reads the
+            // player ship's X and picks one of 8 turn-HOLD durations from the
+            // 8-byte LUT that follows the token. It does NOT change heading —
+            // it sets only the segment duration (0x0D), then continues the
+            // turn the PREVIOUS segment started (the `0x12,0xFA,..` rotRate=−6
+            // in db_flv_atk_red). Longer hold → bigger hook → the dive bends
+            // toward where the player is standing. (Second F3 in p_flv_03d7
+            // is a deeper targeting waypoint with its own LUT.)
+            //
+            // Z80 math (gg1-5.s:1669-1705), ported faithfully:
+            //   px  = clamp(playerSpriteX, 0x1E, 0xD1)     ; targeting window
+            //   a   = (px>>1) − mothRawX                   ; mothRawX = 0x03(ix)
+            //   a   = a >> 1                                ; (playerX−mothX)/4,
+            //                                                 signed (rra-after-sub)
+            //   if negateRotation: a = −a                  ; mirrored pair member
+            //   a  += 0x18 ; clamp [0,0x2F] ; idx = a/6     ; bucket 0..7 (c_0EAA /6)
+            //   segTimer = LUT[idx]                         ; 0x0D duration
+            //
+            // The +16 sprite↔canvas offsets cancel in (player.x − e.x), so the
+            // delta is clean in canvas space; only the player clamp needs
+            // sprite coords. mothRawX = (e.x+16)/2 because the bug-render path
+            // is half-scale (sprite_X = rawX×2 — CLAUDE.md "Coordinate
+            // system"). We skip the cocktail flip-screen branch (b_9215, not
+            // modelled). Pointer advances token(1)+LUT(8)=9 and we RETURN
+            // without reloading vx/vy/rotRate so the moth keeps turning
+            // (Z80 jp l_0BFF_flite_pth_skip_load, gg1-5.s:1715).
+            if (b0 === 0xF3) {
+                const px = Math.max(0x1E, Math.min(0xD1,
+                                    Math.round(state.player.x) + 16));
+                let a = (px >> 1) - Math.floor((e.x + 16) / 2);
+                a = a >> 1;                          // signed /2 → /4 total
+                if (e.negateRotation) a = -a;
+                a += 0x18;                           // bias into index range
+                a = a < 0 ? 0 : (a > 0x2F ? 0x2F : a);   // clamp [0,0x2F]
+                const idx = Math.floor(a / 6);       // c_0EAA /6 → 0..7
+                e.segTimer    = e.pathBase[e.pathOffset + 1 + idx];  // LUT[idx]
+                e.pathOffset += 9;                   // skip token + 8-byte LUT
+                return;                              // keep vx/vy/rotRate (hold turn)
+            }
+
+            // ── 0xF8 (case_0B87, gg1-5.s:1929) ──────────────────────────
+            // "flew through the bottom of the screen to the TOP, heading
+            // for home." Repositions the bug's Y to the top edge:
+            // Z80 sets 0x01(ix) = 0x0138>>1 = 0x9C (internal-Y high byte).
+            // rawYToCanvasY(0x9C) = ((~(0x9C+0x4F))&0xFF)*2+1−40 = 1, the
+            // top of the playfield. 0-arg token (case_0B87 just inc's hl —
+            // the prior TOKEN_ARG_BYTES.F8=1 was wrong, research §7c). Keeps
+            // current vx/vy/rotRate; pairs with F9 + the FB tail.
+            if (b0 === 0xF8) {
+                e.y = 1;                 // rawYToCanvasY(0x9C)
+                e.pathOffset += 1;
+                continue;
+            }
+
+            // ── 0xF9 (case_0B5F, gg1-5.s:1907) ──────────────────────────
+            // Sets the bug's X to its home-COLUMN coordinate so it re-enters
+            // aligned above its formation slot: Z80 sets 0x03(ix) =
+            // ds_hpos_spcoords[col]/2 → rawXToCanvasX → the static column X =
+            // e.homeX. (We skip the cocktail flip-screen branch and the
+            // cont_bmb dive-sound, neither modelled.) 0-arg token; keeps
+            // current vx/vy/rotRate. With F8 above, the moth re-appears at
+            // (homeX, top); the following FA→FB then homes it down to its
+            // live oscillating slot.
+            if (b0 === 0xF9) {
+                e.x = e.homeX;
+                e.pathOffset += 1;
+                continue;
+            }
+
+            // ── 0xEF BOMB_MODE / continuous-bombing (case_094E, gg1-5.s:1523) ──
+            // Stage-gated branch. Reads the per-stage difficulty byte
+            // newStageParms[9]:
+            //   == 0  → skip the embedded 2-byte address, continue past EF
+            //           (the stages where [9]==0; moth re-loops or homes).
+            //   != 0  → JUMP the path pointer to the embedded address — a
+            //           harder attack pass (p_flv_03d7 in the red path) where
+            //           the moth keeps diving + bombing instead of going home.
+            // Address is a Z80 absolute, translated to a JS offset via
+            // pathBase.z80Base (same mechanism as FD JUMP / FA LOOP_TOP).
+            // NOTE: [9] first becomes nonzero at STAGE 12 (rank 3), not stage
+            // 8 — the source's "on/after stage 8" comment predates the data
+            // (index 8 = the F0 token gates at stage 8; EF reads index 9).
+            if (b0 === 0xEF) {
+                if (state.newStageParms[9] !== 0) {
+                    const lo     = e.pathBase[e.pathOffset + 1];
+                    const hi     = e.pathBase[e.pathOffset + 2];
+                    const target = (hi << 8) | lo;
+                    const base   = e.pathBase.z80Base ?? 0;
+                    e.pathOffset = target - base;
+                } else {
+                    e.pathOffset += 3;   // skip token + 2-byte address
                 }
                 continue;
             }
@@ -369,7 +473,14 @@ export function launchEnemyAttack(state, objectId, attackBytes) {
     e.y          = e.homeY +                (f.pulseOffsets[10 + e.rowIdx] ?? 0);
     e.vx         = 0;
     e.vy         = 0;
-    e.angle      = 0;
+    // Initial dive heading. Z80 j_108A (gg1-2.s:243-244) sets the angle
+    // field 0x04/0x05(ix) = 0x0100 ("90 degrees" per the source comment)
+    // for every attack launch. Was hardcoded 0 here (a placeholder) —
+    // which seeds "pointing right", so the header's +24 rotation swept the
+    // moth hard LEFT (and the mirrored pair member UP). 0x100 makes the
+    // pair dive DOWN and split symmetrically left/right. Same 10-bit angle
+    // space as the fly-in seed (paths.js startAngle = rotHi<<8).
+    e.angle      = 0x100;
     e.rotRate    = 0;
     e.pathBase   = attackBytes;
     e.pathOffset = 0;
