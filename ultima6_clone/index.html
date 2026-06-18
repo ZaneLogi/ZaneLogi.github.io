@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ultima VI — engine reimplementation (bring your own data)</title>
+<style>
+  html, body { height: 100%; }
+  /* Full-height flex column: the header + checklist take their natural height, #app fills
+     the rest of the viewport. overflow:hidden so the page itself never scrolls/pans —
+     the map is render-to-fit and inner panels (messages/log) scroll on their own. */
+  body { font: 14px/1.6 monospace; background: #14110c; color: #d8cdb4; margin: 0; padding: 12px;
+         box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
+  h1 { font-size: 16px; color: #e8c060; margin: 0 0 4px; }
+  .sub { color: #8a7f66; margin: 0 0 16px; }
+
+  /* ---- pre-load gate: checklist doubles as the dropzone (unchanged) ---- */
+  #dropzone {
+    border: 2px dashed #6b5d3a; border-radius: 8px; padding: 16px; text-align: center;
+    color: #b8a878; background: #1c180f; margin: 4px 0 10px;
+  }
+  #dropzone .dz-headline { color: #d8cdb4; }
+  #dropzone .dz-sub { color: #8a7f66; font-size: 12px; margin-top: 4px; }
+  #checklist { background: #0e0b07; border: 1px solid #2a2316; padding: 8px 12px; border-radius: 6px; }
+  /* The whole panel is a drop target (even collapsed) — highlight it while dragging. */
+  #checklist.drag { border-color: #e8c060; background: #1a1610; }
+  #checklist > summary { cursor: pointer; user-select: none; list-style: none; }
+  #checklist > summary::before { content: '▸ '; color: #6b5d3a; }
+  #checklist[open] > summary::before { content: '▾ '; }
+  #checklist[open] > summary { margin-bottom: 8px; }
+  #checklist-body { margin: 0; white-space: pre; color: #d8cdb4; font: 14px monospace; }
+
+  /* ---- game shell — render-to-fit CSS grid ----
+     Three named regions: the map (canvas), the message channel below it, and a right
+     panel spanning both rows. Hidden until load() reveals it. The grid FILLS the
+     viewport: the map column/row flex (minmax(0,1fr)) so the canvas fills the space
+     left by the fixed-width panel + message band, and main.js sizes the canvas drawing
+     buffer to match (render-to-fit). No fixed px frame -> nothing to pan to. */
+  #app {
+    display: none;                 /* load() sets this to 'grid' */
+    flex: 1 1 auto;                /* fill the viewport height left under the header */
+    min-height: 0;                 /* allow the grid to shrink below its content size */
+    grid-template-columns: minmax(0, 1fr);   /* I-18a: single column — dev panel floats, status is on-demand */
+    grid-template-rows: minmax(0, 1fr) minmax(56px, 100px);   /* I-18a: shorter message band */
+    grid-template-areas:
+      "map"
+      "msg";
+    gap: 8px;
+    margin-top: 8px;
+  }
+  #map-region     { grid-area: map; min-width: 0; min-height: 0; }
+  #message-region { grid-area: msg; min-height: 0; }
+
+  /* Canvas fills its grid cell; main.js sets the drawing buffer = this CSS size (dpr=1).
+     border-box so the 1px border doesn't push the element past the cell. */
+  #screen { display: block; width: 100%; height: 100%; box-sizing: border-box;
+            border: 1px solid #2a2316; image-rendering: pixelated; touch-action: none; }
+
+  /* Single-column fluid grid (I-18a): the map fills the window width, the message band
+     sits below it. (A dedicated mobile/stacked reflow is deferred; this is a desktop dev tool.) */
+
+  /* message channel — the gameplay scroll (CON_printf analog). Bottom strip. */
+  #messages {
+    height: 100%; box-sizing: border-box; overflow-y: auto;
+    background: #0e0b07; border: 1px solid #2a2316; border-radius: 6px;
+    padding: 8px 12px; font: 13px/1.5 monospace; color: #d8cdb4;
+  }
+  #messages .msg { white-space: pre-wrap; }
+  #messages .msg.miss { color: #c66; }    /* refusals: "Out of range!", "What?" */
+  #messages .msg.ok   { color: #6c6; }
+  #messages .msg.warn { color: #e8c060; }
+
+  /* shared panel chrome (used by the floating dev block) */
+  .panel { background: #0e0b07; border: 1px solid #2a2316; border-radius: 6px; padding: 10px 12px; }
+  .panel-label { color: #8a7f66; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+
+  /* I-18a: persistent clock strip — the always-visible date/time/sun readout (schedule
+     testing needs it without expanding the dev panel). installDevHud reveals it (sets
+     display:block) and toggles .paused on it; #clock-text lives inside it. */
+  #clock-strip { display: none; background: #0e0b07; border: 1px solid #2a2316; border-radius: 6px;
+                 padding: 4px 12px; margin: 4px 0 0; color: #e8c060; font: 13px monospace; }
+  #clock-strip.paused #clock-text { color: #c66; }
+  #clock-strip #dev-toggle { float: right; background: #1c180f; color: #e8c060;
+    border: 1px solid #6b5d3a; border-radius: 3px; font: 12px monospace; padding: 1px 8px; cursor: pointer; }
+  #clock-strip #dev-toggle:hover { background: #241d10; }
+
+  /* I-18a: the dev block is now a FLOATING, toggleable overlay (was the right-column
+     panel). NOT a UIStack modal — it must coexist with a live, ticking world (watch NPC
+     stats update) and never capture keys, so it's a plain show/hide div. z-index below
+     #ui-root (100) so player modals stack above it. Revealed by load() so boot-log is visible. */
+  #dev-block { position: fixed; bottom: 12px; right: 12px; width: 320px; max-height: 78vh;
+               overflow-y: auto; z-index: 90; padding: 8px 12px; }
+  #dev-block[hidden] { display: none; }
+
+  /* dev HUD content. installDevHud / installDevProbe are unchanged; only the elements'
+     home moved (clock readout → the strip above; controls/stats/probe → the dev block).
+     The pause tint lives on #clock-strip (see above). */
+  #clock-text { white-space: normal; }
+  /* I-moongate (h): the composited sky strip sits on its own row under the clock line.
+     Native 144x28, scaled 2x crisp (pixelated). The dark sky-blue backing shows through
+     the colour-keyed tile gaps so the strip reads as a sky band. */
+  #sky-view { display: block; margin-top: 4px; width: 144px; height: 16px;
+              image-rendering: pixelated; background: #101820; border: 1px solid #2a2316; border-radius: 3px; }
+  #clock-controls { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
+  #npc-stats  { white-space: pre; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2316; color: #b8a878; font-size: 12px; line-height: 1.45; }
+  #moon-readout { white-space: normal; overflow-wrap: anywhere; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2316; color: #9ab0c8; font-size: 12px; line-height: 1.45; }
+  #probe-text { white-space: normal; overflow-wrap: anywhere; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2316; color: #b8a878; font-size: 12px; line-height: 1.45; }
+  #probe-text.blocked { color: #c66; }
+  #probe-text.pass { color: #6c6; }
+  #dev-block button {
+    background: #1c180f; color: #e8c060;
+    border: 1px solid #6b5d3a; border-radius: 3px;
+    font: 12px monospace; padding: 2px 6px; cursor: pointer;
+  }
+  #dev-block button:hover { background: #241d10; }
+
+  /* boot/dev log — folded into the dev block (was a full-width box under the canvas) */
+  #log { white-space: pre-wrap; margin-top: 8px; padding-top: 6px; border-top: 1px solid #2a2316;
+         color: #8a7f66; font-size: 11px; max-height: 120px; overflow-y: auto; }
+
+  /* probe cell highlight: a fixed map overlay (a cursor, not a panel). Doubles as
+     the I-10 targeting cue. Positioned from the canvas bounding rect by dev_probe. */
+  #probe-cell {
+    position: fixed; width: 16px; height: 16px;
+    border: 2px solid #e8c060; box-sizing: border-box;
+    outline: 1px solid #000;    /* dark halo so the yellow stands out on any tile */
+    pointer-events: none; display: none;
+  }
+  /* I-10b targeting cue: when a verb is armed, recolor the probe box + show a verb
+     label pinned above it (decision #3 — visual cue, no textual prompt echo). */
+  #probe-cell.armed { border-color: #6cf; }
+  .probe-verb-label {
+    display: none; position: absolute; bottom: 100%; left: -2px; margin-bottom: 2px;
+    padding: 1px 5px; white-space: nowrap; border-radius: 3px;
+    background: #6cf; color: #06121a; font: bold 11px monospace;
+  }
+  /* I-7b UI substrate: root container holds the modal stack. Modals stack
+     visually too (z-index by DOM order); UIStack appends in push order. */
+  #ui-root {
+    position: fixed; inset: 0;
+    pointer-events: none;        /* root passes clicks; modals re-enable on themselves */
+    z-index: 100;
+  }
+  .ui-modal {
+    pointer-events: auto;
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: #1c180f; color: #d8cdb4;
+    border: 1px solid #6b5d3a; border-radius: 6px;
+    padding: 12px 16px; min-width: 320px; max-width: 560px;
+    max-height: 80vh; overflow-y: auto;
+    font: 13px monospace;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+  }
+  /* Stacked modals nudge so the top-most is the clear focus. Plain CSS sibling
+     selector: every .ui-modal after another shifts down+right a little. */
+  .ui-modal + .ui-modal { transform: translate(calc(-50% + 16px), calc(-50% + 16px)); }
+  .ui-modal + .ui-modal + .ui-modal { transform: translate(calc(-50% + 32px), calc(-50% + 32px)); }
+  .ui-header { color: #e8c060; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #2a2316; display: flex; align-items: center; gap: 8px; }
+  .ui-header .ui-icon { flex: 0 0 32px; }
+  .ui-meta { color: #8a7f66; font-size: 12px; margin: 2px 0; }
+  /* The list scrolls WITHIN itself (capped), so a long inventory keeps the modal's header +
+     hint/operation line pinned and visible instead of pushing them past the modal's 80vh scroll.
+     makeListCursor's scrollIntoView keeps the cursor row in view inside this scroller. */
+  .ui-list { margin-top: 8px; max-height: 56vh; overflow-y: auto; }
+  .ui-row { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 3px; }
+  .ui-row.ui-cursor { background: #3a2f15; color: #e8c060; }
+  .ui-row .ui-icon { flex: 0 0 32px; }
+  .ui-row .ui-name { flex: 1 1 auto; }
+  .ui-row .ui-tags { color: #8a7f66; font-size: 11px; }
+  .ui-icon { image-rendering: pixelated; width: 32px; height: 32px; vertical-align: middle; }
+  .ui-hint { color: #8a7f66; font-size: 11px; margin-top: 8px; padding-top: 6px; border-top: 1px solid #2a2316; }
+  /* I-18h: two-column inventory — the equipped-slot list (de-scoped paperdoll) beside the carried list. */
+  /* The member view (inv-window) is forced wider than the default modal so the two columns breathe. */
+  .ui-modal.inv-window { width: min(720px, 92vw); max-width: min(720px, 92vw); }
+  .inv-body { display: flex; gap: 16px; align-items: flex-start; }
+  .inv-carried { flex: 1 1 auto; min-width: 0; }
+  .equip-list { flex: 0 0 auto; min-width: 208px; }
+  .equip-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; min-height: 20px; }
+  .equip-label { color: #8a7f66; flex: 0 0 104px; }
+  .equip-item { flex: 1 1 auto; min-width: 0; }
+  .equip-none { color: #5c5444; font-style: italic; }
+  .equip-row .ui-icon { width: 16px; height: 16px; flex: 0 0 16px; }
+  .equip-weight { color: #8a7f66; font-size: 11px; margin-top: 8px; padding-top: 6px; border-top: 1px solid #2a2316; }
+  .ok { color: #6c6; } .miss { color: #c66; } .warn { color: #e8c060; }
+  /* I-12 dialog window: fixed centred, readable width (it's text, not the map —
+     a fixed column reads better than scaling with the viewport). Four regions:
+     portrait+name / scrolling text / keyword chips / "you say:" input. */
+  /* Flex column + overflow:hidden so the MODAL never scrolls (overriding .ui-modal's
+     overflow-y:auto); only .dialog-text scrolls. max-height:80vh comes from .ui-modal. */
+  .dialog-window { width: 460px; min-width: 460px; max-width: 460px;
+    display: flex; flex-direction: column; overflow: hidden; }
+  .dialog-top, .dialog-keywords, .dialog-input, .dialog-cue, .dialog-window .ui-hint {
+    flex: 0 0 auto; }            /* fixed regions keep their size; the text box absorbs growth */
+  .dialog-top { display: flex; gap: 12px; align-items: flex-start;
+    margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid #2a2316; }
+  .dialog-portrait { flex: 0 0 auto; width: 112px; height: 128px;
+    background: #100d08; border: 1px solid #3a3120; image-rendering: pixelated; }
+  .dialog-id { flex: 1 1 auto; }
+  .dialog-name { color: #e8c060; font-size: 16px; }
+  .dialog-text { flex: 1 1 auto; min-height: 110px; overflow-y: auto;
+    padding: 2px 0; line-height: 1.5; white-space: pre-wrap; }
+  .dialog-keywords { display: flex; flex-wrap: wrap; gap: 6px;
+    margin: 8px 0; padding-top: 6px; border-top: 1px solid #2a2316; }
+  .dialog-chip { padding: 2px 9px; border: 1px solid #4a4029; border-radius: 11px;
+    background: #2a2316; color: #8a7f66; font-size: 12px; }   /* muted = inert at I-12 */
+  .dialog-input { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .dialog-prompt { color: #8a7f66; flex: 0 0 auto; }
+  .dialog-field { flex: 1 1 auto; background: #100d08; color: #d8cdb4;
+    border: 1px solid #3a3120; border-radius: 3px; padding: 3px 6px; font: 13px monospace; }
+  .dialog-field:disabled { color: #6a6049; }
+  /* I-13: @highlighted words = askable keywords (click to say); live chips clickable. */
+  .dialog-hl { color: #e8a33d; cursor: pointer; }
+  .dialog-hl:hover { text-decoration: underline; color: #f0c060; }
+  .dialog-chip-live { cursor: pointer; color: #cdbf9c; }
+  .dialog-chip-live:hover { background: #3a2f15; color: #e8c060; border-color: #6b5d3a; }
+  /* I-book: the book/sign reader modal. Flex column with an inner scroll (like
+     .dialog-window) so the title + hint stay pinned while only the text scrolls. */
+  .book-window { width: 460px; min-width: 460px; max-width: 460px;
+    display: flex; flex-direction: column; overflow: hidden; }
+  .book-window .ui-header, .book-window .ui-hint { flex: 0 0 auto; }
+  .book-text { flex: 1 1 auto; min-height: 120px; max-height: 60vh; overflow-y: auto;
+    padding: 4px 2px; line-height: 1.55; white-space: pre-wrap; }
+  .book-runic { color: #9a86c0; font-style: italic; }   /* gargoyle script (no rune font → distinct hue) */
+  .book-hl { color: #e8a33d; }
+  /* continue / input cue — blinks so "click or press a key" is unmissable. */
+  .dialog-cue { color: #e8c060; font-size: 12px; margin: 6px 0 2px; cursor: pointer;
+    animation: dialogcue 1.1s steps(2, start) infinite; }
+  @keyframes dialogcue { 50% { opacity: 0.35; } }
+  /* the player's own echoed input — cool tone vs the NPC's warm sepia, so the
+     transcript reads as a two-way talk. */
+  .dialog-you { color: #86b4d6; margin: 3px 0; }
+</style>
+</head>
+<body>
+<h1>Ultima VI — engine reimplementation</h1>
+
+<!-- pre-load gate + persistent re-drop affordance (bring-your-own-data) -->
+<details id="checklist" open>
+  <summary id="checklist-summary">scanning…</summary>
+  <div id="dropzone">
+    <div class="dz-headline">Drop your Ultima VI data files here</div>
+    <div class="dz-sub">Bring your own data — files stay in your browser (IndexedDB) and are never uploaded.</div>
+  </div>
+  <pre id="checklist-body"></pre>
+</details>
+
+<!-- I-18a: persistent clock strip (date/time/sun) — always visible above the shell.
+     installDevHud reveals it + writes #clock-text + toggles .paused on it. -->
+<div id="clock-strip">
+  <button id="dev-toggle" title="toggle dev panel (`)">dev</button>
+  <span id="clock-text"></span>
+  <!-- I-moongate (h): composited sky strip (sun/moons/mountain or cave), drawn by
+       view/moongate_hud.js. Native 144x28; scaled up crisp via image-rendering. -->
+  <canvas id="sky-view" width="144" height="16"></canvas>
+</div>
+
+<!-- the game shell; revealed by load() once data is ready -->
+<div id="app">
+  <div id="map-region">
+    <canvas id="screen" width="1024" height="640"></canvas>
+  </div>
+  <div id="message-region">
+    <div id="messages"></div>
+  </div>
+</div>
+
+<!-- I-18a: floating, toggleable dev panel (NOT a modal — coexists with a live world).
+     Hidden until load() reveals it; toggle via the strip "dev" button or the backtick key. -->
+<div id="dev-block" class="panel" hidden>
+  <div class="panel-label">dev</div>
+  <div id="clock-controls">
+    <button data-act="pause">⏸ pause</button>
+    <button data-act="m60">−1h</button>
+    <button data-act="m10">−10m</button>
+    <button data-act="p10">+10m</button>
+    <button data-act="p60">+1h</button>
+  </div>
+  <div id="speed-controls" style="margin-top:4px; display:flex; align-items:center; gap:6px;">
+    <span style="font-size:12px;">world</span>
+    <input id="world-speed" type="range" min="0" max="100" value="53" style="flex:1; min-width:90px;">
+    <span id="world-speed-label" style="font-size:12px; min-width:56px; text-align:right;">×1.0</span>
+  </div>
+  <div id="npc-stats">schedule: no hour ticked yet</div>
+  <div id="moon-readout">moons · —</div>
+  <div id="probe-text">hover the map…</div>
+  <div id="save-controls" style="margin-top:6px; display:flex; gap:6px; align-items:center;">
+    <button data-act="export">⤓ export save</button>
+    <button data-act="import">⤒ load save</button>
+    <input id="save-file" type="file" accept=".json,application/json" style="display:none;">
+  </div>
+  <div id="log"></div>
+</div>
+
+<!-- fixed overlays: targeting/probe cursor on the map + the modal stack layer -->
+<div id="probe-cell"></div>
+<div id="ui-root"></div>
+
+<script type="module" src="./main.js"></script>
+</body>
+</html>

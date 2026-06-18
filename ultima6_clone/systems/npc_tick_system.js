@@ -1,0 +1,296 @@
+// NPC tick system (I-9d) — the per-turn heartbeat that walks scheduled NPCs to their
+// slots. A SIM-list system (so it inherits the turn-driver's breathe<->pause gating,
+// same as the avatar + clock systems). The ECS analog of source's C_1E0F_4E0A NPC
+// tick, minus the move-point priority interleave (deferred): each turn we scan the
+// AIMode entities and, for the active cohort, build paths for AI_FINDPATH NPCs and
+// step the AI_ONPATH ones.
+//
+// Per-NPC 40x40 pathfinding window (Zane 2026-06-01) — findPath is centered on the
+// NPC itself, not the player (source's player-centered grid would teleport on-screen
+// NPCs given our wide canvas). A schedule slot inside the window is walked directly;
+// a slot OUTSIDE it is reached by findPath's edge-seek (I-9e) — walk to the window
+// edge nearest the goal, then re-plan from there, so the NPC walks across the map
+// incrementally.
+//
+// I-9h walk-near / teleport-far gate (source's C_1E0F_464A order): each turn, an
+// AI_FINDPATH NPC first tries the off-area teleport (tryTeleportToSlot) — which fires
+// only when the NPC is far enough from the VIEW CENTER (camera) that the player can't
+// see it (the clone drag-pans, so visibility tracks the camera, not the avatar). Far
+// NPCs teleport straight to their post (no path build); near NPCs fall through to the
+// pathfinder and walk visibly. The teleport is capped per turn (source's D_17A5 = 3).
+// A genuinely UNREACHABLE in-window slot (terrain/objects wall the NPC off) falls back
+// to a forced teleport (allowVisible — ignores the distance guard), matching the I-5
+// snap behavior; if even the slot cell is blocked, the NPC waits till the next hour.
+//
+// I-14b DEXTE-paced accumulator — the per-actor speed model (a modern rewrite of source's
+// MovePts/DEXTE round economy, NOT a round-driver port; see systems/move_economy.js +
+// progress.md §"I-14 scope"). Each tick integrates real elapsed time into every mobile
+// NPC's MoveSpeed.credit at its rate(dexterity); PLANNING (findpath / teleport / re-find)
+// is free, but an actual tile STEP is gated on the credit reaching the tile's stepCost
+// and spends it. Faster (higher-DEXTE) NPCs cross the threshold more often, and the
+// per-actor credit phases stagger the steps naturally — no global round-robin. The tick is
+// a sim system (so it inherits the turn-driver pause), but its credit integrates wall-clock
+// elapsed, clamped, so the cadence is right regardless of how often the turn fires; on
+// worlds without MoveSpeed (the unit-test worlds) the accumulator is OFF and NPCs step
+// every tick (the old flat rate), keeping the I-9 pathfinding tests valid.
+
+import { AIMode, Position, Destination, MoveSpeed, Schedule, ObjType, Renderable } from '../components/components.js';
+import { SpatialIndex } from '../resources/spatial_index.js';
+import { TileRegistry } from '../resources/tile_registry.js';
+import { Paths } from '../resources/paths.js';
+import { Camera } from '../resources/camera.js';
+import { Viewport } from '../resources/viewport.js';
+import { MapLevel } from '../resources/map_level.js';
+import { WorldSpeed } from '../resources/world_speed.js';
+import { WorldClock } from '../resources/world_clock.js';
+import { Schedules } from '../resources/schedules.js';
+import { findPath } from './pathfinding.js';
+import { doOnPath, atDestination, tryTeleportToSlot, chebyshev, TELEPORT_NEAR_RADIUS, actorHandleAt, reconcilePoseBody } from './npc_path.js';
+import { rate, stepCostAt, MAX_ELAPSED_MS } from './move_economy.js';
+import { dispatchWorktype, randInt } from './npc_behaviors.js';
+import * as AI from './ai_modes.js';
+
+// Off-area teleports per turn (source's D_17A5 cap). A CPU throttle in source; here it's
+// near-free and invisible (the distance guard means teleports only fire off-screen), so
+// it's kept source-faithful but flagged as a drop-candidate for the post-I-9 deviation
+// audit (the world is coherent either way — the cap only spreads the settle across turns).
+const TELEPORT_CAP = 3;
+
+// Install the system. Pass `avatarRef` ({ handle }) so the teleport gate can measure
+// player distance; without it the gate is disabled (every NPC pathfinds — preserves the
+// pre-I-9h behavior + keeps the unit tests that don't model an avatar walking). Returns
+// { system, stats }: add `system` to the sim list, read `stats` (mutated each turn) from
+// the dev HUD.
+export function installNpcTickSystem(world, { avatarRef, now = () => performance.now(), rand = randInt } = {}) {
+  const stats = { active: 0, finding: 0, walking: 0, teleported: 0, snapped: 0, blocked: 0, arrived: 0 };
+
+  // I-14b accumulator state. `ms` is null on test worlds that don't register MoveSpeed →
+  // the accumulator is disabled (flat rate). `now` is injectable so the accumulator tests
+  // can advance time deterministically; in the app it's performance.now() (the tick is a
+  // sim system, called on each turn — its credit integrates real elapsed time, clamped).
+  const ms = world.isRegistered(MoveSpeed) ? world.store(MoveSpeed) : null;
+  let lastBeatAt = now();
+
+  function system() {
+    const am = world.store(AIMode);
+    const pos = world.store(Position);
+    const dest = world.store(Destination);
+    // Null-safe (like the MoveSpeed/Schedule grabs): a minimal unit-test tick world may not
+    // register ObjType/Renderable/TileRegistry — then the pose reconciliation below is skipped.
+    const ot = world.isRegistered(ObjType) ? world.store(ObjType) : null;
+    const rd = world.isRegistered(Renderable) ? world.store(Renderable) : null;
+    const reg = world.getResource(TileRegistry);
+    const spatial = world.getResource(SpatialIndex);
+    const paths = world.getResource(Paths);
+    let active = 0, finding = 0, walking = 0, teleported = 0, snapped = 0, blocked = 0, arrived = 0;
+
+    // I-19e: only the ACTIVE level's NPCs tick — a surface NPC must not pathfind on dungeon
+    // terrain (tileAt/passability are active-level-bound) while the avatar is below, and a
+    // dungeon's NPCs come alive when the avatar is on their level. levelMask wraps the view
+    // center to the active level (1024 overworld / 256 dungeon). Null-safe for the unit-test
+    // tick worlds: `?? 0` covers BOTH no MapLevel AND the test's `Object.create(MapLevel.prototype)`
+    // stub (which bypasses the constructor → `.level` is undefined) → overworld defaults.
+    const mapLevel = world.getResource(MapLevel);
+    const activeLevel = mapLevel?.level ?? 0;
+    const levelMask = activeLevel === 0 ? 0x3ff : 0xff;
+    // "Active area" predicate: the overworld is region-streamed (freeze NPCs in unloaded
+    // regions), but a dungeon loads whole-level on entry — so on a dungeon level the area is
+    // simply "this level is loaded" (true once entered), NOT the surface region grid (whose
+    // ids would mis-map the dungeon's low coords to an unloaded NW region and freeze it).
+    const inActiveArea = (x, y) => activeLevel === 0 ? spatial.hasRegionAt(x, y) : spatial.loadedDungeons.has(activeLevel);
+
+    // I-14b: real time since the last tick, fed into each NPC's movement credit below.
+    // Clamped so a backgrounded tab or a resumed modal (sim suspended → tick skipped)
+    // doesn't bank into a multi-tile jump. worldSpeed is the I-14d master scalar — 1 here
+    // until the slider resource lands.
+    const t = now();
+    let elapsed = t - lastBeatAt; lastBeatAt = t;
+    if (elapsed < 0) elapsed = 0; else if (elapsed > MAX_ELAPSED_MS) elapsed = MAX_ELAPSED_MS;
+    const wsRes = world.getResource(WorldSpeed);   // I-14d master scalar (1 if unset, e.g. tests)
+    const worldSpeed = wsRes ? wsRes.value : 1;
+
+    // View center for the I-9h visibility gate, resolved once per turn. The gate suppresses
+    // teleport for anything the player CAN SEE — and what's visible is the VIEWPORT (centered
+    // on the CAMERA), not the avatar. They coincide while the camera follows the avatar, but
+    // the clone's drag-to-pan (a modern-UX feature the source lacks) can move the view off the
+    // avatar, so the gate must track the camera to stay correct while panned. Falls back to the
+    // avatar position when there's no camera/viewport (the unit tests). Undefined -> gate off.
+    let viewX, viewY;
+    const cam = world.getResource(Camera);
+    const vp = world.getResource(Viewport);
+    if (cam && vp) {
+      // camera world-pixel origin -> top-left tile; + half the visible extent = center tile
+      // (16 = tile size px, matches renderer.tileSize). Wrapped onto the toroidal 1024 axis.
+      viewX = (Math.floor(cam.worldX / 16) + (vp.cols >> 1)) & levelMask;
+      viewY = (Math.floor(cam.worldY / 16) + (vp.rows >> 1)) & levelMask;
+    } else if (avatarRef && avatarRef.handle !== undefined) {
+      const ai = world.resolve(avatarRef.handle);
+      if (ai !== -1) { viewX = pos.x[ai]; viewY = pos.y[ai]; }
+    }
+    const gateOn = viewX !== undefined;
+    // Same nearRadius tryTeleportToSlot uses, hoisted so the unreachable-fallback below can
+    // run the identical visibility test (NPC/slot within nearRadius of the view center).
+    const nearRadius = vp ? vp.nearRadius : TELEPORT_NEAR_RADIUS;
+
+    // AI_SCHEDULE continuous-settle inputs (source seg_1E0F.c:2198). Null-safe: the unit-test
+    // tick worlds register no clock/schedules/Schedule, so the settle in the loop stays off there.
+    const clock = world.getResource(WorldClock);
+    const schedules = world.getResource(Schedules);
+    const sched = world.isRegistered(Schedule) ? world.store(Schedule) : null;
+    const settleSchedule = !!(clock && schedules && sched);
+    const nowHour = clock ? clock.Time_H : 0;
+    const nowDow = clock ? Schedules.dayOfWeek(clock.Date_D) : 0;
+
+    for (const i of world.query(AIMode)) {
+      const mode = am.mode[i];
+      if (pos.z[i] !== activeLevel) continue;   // I-19e: skip NPCs not on the active level
+
+      // Un-pose a stale body sprite every tick (seg_0A33.c:837-840): an NPC that left a pose
+      // worktype (SLEEP/PLAY) via a path the per-branch restores miss — AI_SCHEDULE-settle or
+      // alreadyAtTarget — would otherwise walk to its new slot still wearing the bed/instrument
+      // (the "LB asleep at the throne" bug) until arrival. Restores it to the real body here.
+      if (ot && rd && reg) reconcilePoseBody(i, mode, ot, rd, reg);
+
+      // AI_SCHEDULE continuous-settle (source seg_1E0F.c:2198 — __AtDestination runs for every
+      // AI_SCHEDULE NPC each active tick, reading its current slot from the save-persisted
+      // SchedIndex). The clone re-derives the current slot with resolveActiveSlot, because the
+      // hourly arm only fires on exact-hour rollovers — without this an NPC loaded or streamed
+      // in mid-period shows its raw pose/position until the next hour (e.g. Lord British loads
+      // STANDING instead of sitting on his throne). On its slot -> atDestination applies the
+      // worktype pose/facing; off it -> AI_FINDPATH walks there.
+      if (mode === AI.AI_SCHEDULE) {
+        const handle = world.handleOf(i);
+        if (settleSchedule && world.has(handle, Schedule) && inActiveArea(pos.x[i], pos.y[i])) {
+          const slot = schedules.resolveActiveSlot(sched.npcId[i], nowHour, nowDow);
+          if (slot) {
+            dest.x[i] = slot.x; dest.y[i] = slot.y; dest.z[i] = slot.z; dest.action[i] = slot.action;
+            if (pos.x[i] === slot.x && pos.y[i] === slot.y && pos.z[i] === slot.z) atDestination(world, handle);
+            else am.mode[i] = AI.AI_FINDPATH;
+          }
+        }
+        continue;
+      }
+
+      // Two tiers tick below: the pathfinding tier (0x81..0x86 — walk to a slot) and, since
+      // I-17, the active MOVING worktypes (WANDER/GRAZE/LOITER/FARM/GUARD pacing). Party
+      // (COMMAND/FOLLOW), MOTIONLESS, and the idle/pose worktypes (STAND/SLEEP/SIT/EAT/PLAY)
+      // are skipped — party moves via the avatar/MoveFollowers, the rest sit until their
+      // schedule re-fires. (AI_SCHEDULE is handled+continued above.)
+      const pathTier = mode >= AI.AI_FINDPATH && mode <= AI.AI_86;
+      const worktypeActive = AI.isActiveWorktype(mode);   // I-17 moving worktypes
+      // I-17d: a settle-in-place NPC needs the tick only when DISPLACED — shoved off its slot by
+      // a passing NPC's step-aside (which left it standing, mode AI_STAND, off its post). On its
+      // slot it's idle (skipped). Then it returns to post once the slot cell clears.
+      const displaced = AI.isSettleInPlace(mode) &&
+        (pos.x[i] !== dest.x[i] || pos.y[i] !== dest.y[i] || pos.z[i] !== dest.z[i]);
+      if (!pathTier && !worktypeActive && !displaced) continue;
+
+      // Active-area gate: NPCs whose region isn't loaded are frozen (same predicate as
+      // the schedule system). Keeps the expensive path builds bounded to the explored
+      // cohort near the player. Level-aware (I-19e): surface region grid vs whole-dungeon.
+      if (!inActiveArea(pos.x[i], pos.y[i])) continue;
+      active++;
+
+      const handle = world.handleOf(i);
+
+      // I-17d return-to-post: a displaced settle-in-place NPC (it stood aside for a passing NPC)
+      // walks back to its post once the slot cell is CLEAR. Gating on slot-clear (not immediate)
+      // waits the passer out — breaking the push↔return loop — and the walk-back re-poses on
+      // arrival (atDestination applies Destination.action, e.g. sits back down). While the slot
+      // is still occupied it keeps standing aside (waits). Clone-only: source's settled NPCs
+      // never move, so this serves the clone's step-aside.
+      if (displaced) {
+        if (actorHandleAt(world, dest.x[i], dest.y[i], handle) === null) am.mode[i] = AI.AI_FINDPATH;
+        continue;
+      }
+
+      // I-14b/c: this cell's step cost (SubTerrainMov — terrain-weighted) is both the
+      // accumulator's per-step price and the credit cap. Fill this actor's movement credit
+      // (DEXTE-paced) for every mobile NPC each tick; PLANNING below (findpath / teleport /
+      // re-find) is free, only an actual STEP spends it. Capping at the cell's cost means an
+      // NPC banks at most one step (no multi-tile burst) yet can still afford costly terrain.
+      const cost = stepCostAt(world, pos.x[i], pos.y[i], pos.z[i]);
+      if (ms) {
+        ms.credit[i] += rate(ms.dexterity[i], worldSpeed) * elapsed;
+        if (ms.credit[i] > cost) ms.credit[i] = cost;
+      }
+
+      // I-17: active worktype behaviors (npc_behaviors.js — WANDER/GRAZE now; LOITER/FARM +
+      // GUARD pacing in I-17b/c). The credit gate IS the accumulator beat; on a beat the
+      // handler rolls source's per-turn die and steps or idles. We spend stepCost on EVERY
+      // outcome — step, blocked, OR idle — so a high-DEXTE NPC that keeps rolling idle can't
+      // bank beats into a burst (mirrors source's idle SubMov(5)). The probability×accumulator
+      // contract: progress.md §"I-17 scope".
+      if (worktypeActive) {
+        if (ms && ms.credit[i] < cost) continue;            // not a beat yet → wait
+        const r = dispatchWorktype(world, handle, mode, dest, i, rand);
+        if (ms) ms.credit[i] -= cost;                       // spend on step AND idle
+        if (r === 'step') walking++;
+        else if (r === 'blocked') blocked++;
+        continue;
+      }
+
+      if (mode === AI.AI_86) {
+        // Stuck (blocked 3x) — re-find next turn (source's path service promotes
+        // AI_86 -> AI_FINDPATH). Path was already abandoned by doOnPath.
+        am.mode[i] = AI.AI_FINDPATH;
+        continue;
+      }
+
+      if (mode === AI.AI_FINDPATH) {
+        finding++;
+        const tx = dest.x[i], ty = dest.y[i];   // tz is read inside tryTeleportToSlot
+        // I-9h: off-area teleport first (source's C_1E0F_464A order). Fires only when the
+        // NPC is far from the view center (off-screen) and under the per-turn cap;
+        // tryTeleportToSlot settles the worktype itself. Near NPCs are suppressed by its
+        // distance guard and fall through to the pathfinder below.
+        if (gateOn && teleported < TELEPORT_CAP &&
+            tryTeleportToSlot(world, handle, viewX, viewY)) { teleported++; continue; }
+        // Window centered on the NPC -> a per-NPC 40x40 work area. findPath walks an
+        // in-window goal directly, or edge-seeks toward an off-window goal (then the
+        // NPC re-plans at the edge). null = the goal is unreachable from here.
+        const path = findPath(world, pos.x[i], pos.y[i], tx, ty, pos.x[i], pos.y[i]);
+        if (path === null) {
+          // Walled off from the goal in-window. OFF-SCREEN -> forced teleport onto the slot
+          // (allowVisible — place it where its schedule says, like source's off-area teleport).
+          // IN VIEW -> do NOT pop: wait in AI_SCHEDULE (the settle re-derives the slot next tick;
+          // once the NPC scrolls off-screen the off-area teleport above takes over, or the next
+          // hour gives it a new, maybe-reachable slot). "Visible" = the same test the teleport
+          // guard uses: NPC's cell OR the slot within nearRadius of the view center. gateOff
+          // (no view info / unit tests) -> off-screen -> teleport (preserves the I-9 snap test).
+          // If even the slot cell is blocked, the forced teleport returns false -> also waits.
+          const visible = gateOn &&
+            (chebyshev(pos.x[i], pos.y[i], viewX, viewY) <= nearRadius ||
+             chebyshev(tx, ty, viewX, viewY) <= nearRadius);
+          if (!visible && tryTeleportToSlot(world, handle, viewX, viewY, true)) snapped++;
+          else am.mode[i] = AI.AI_SCHEDULE;
+        } else if (path.length === 0) {
+          atDestination(world, handle); arrived++;   // already on the slot -> set the worktype
+        } else {
+          // Walks to the goal (in-window) OR to the window edge (edge-seek); on reaching
+          // the path's end short of the goal, doOnPath sets AI_FINDPATH to re-plan.
+          paths.set(handle, path, tx, ty);
+          am.mode[i] = AI.AI_ONPATH; walking++;
+        }
+      } else {
+        // AI_ONPATH / AI_84 / AI_85 — take (or retry) a step, gated by movement credit
+        // (I-14b/c). A step (or a blocked retry — source spends the move-point attempt either
+        // way) costs `cost` (this cell's terrain-weighted SubTerrainMov). Not enough credit
+        // yet -> the NPC waits this tick. Arrival ('end') is free (no step taken).
+        if (ms && ms.credit[i] < cost) continue;
+        const r = doOnPath(world, handle);
+        // 'step'/'blocked'/'aside' all consume the move attempt; 'end'/'idle' don't. ('aside'
+        // = the step-aside clone path: the blocker was nudged and this NPC re-plans next tick.)
+        if (ms && (r === 'step' || r === 'blocked' || r === 'aside')) ms.credit[i] -= cost;
+        if (r === 'step') walking++;
+        else if (r === 'blocked' || r === 'aside') blocked++;
+        else if (r === 'end') arrived++;
+      }
+    }
+
+    stats.active = active; stats.finding = finding; stats.walking = walking;
+    stats.teleported = teleported; stats.snapped = snapped; stats.blocked = blocked; stats.arrived = arrived;
+  }
+
+  return { system, stats };
+}
