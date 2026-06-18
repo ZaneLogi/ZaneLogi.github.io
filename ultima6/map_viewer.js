@@ -307,30 +307,37 @@ function updateObjects() {
     const ox = (obj.x >= xstart) ? obj.x - xstart : obj.x + mapTiles - xstart;
     const oy = (obj.y >= ystart) ? obj.y - ystart : obj.y + mapTiles - ystart;
 
-    // draw the tile if it matches the top tile condition
-    if (tileFlag.isTopTile() !== topTile)
-      return;
+    // Per-tile layer routing. Each tile (hotspot + each DoubleH/V
+    // extension) is checked against its OWN isTopTile() flag — not the
+    // base's. Mirrors u6-decompiled's ShowObject behavior, which
+    // checks IsTileFor per-call to decide chain-position. The earlier
+    // implementation only checked the base, so e.g. a pillar with a
+    // non-top BASE and a top HEAD ended up entirely in Layer 1,
+    // letting Layer 3 objects (like Steps, OBJ_114) cover the head.
+    // Falls back to base tileFlag if extension info is null.
+    const drawTileForLayer = (tileIndex, tx, ty) => {
+      const info = ObjManager.tileFlags[tileIndex] || tileFlag;
+      if (info.isTopTile() !== topTile) return;
+      drawTile(tileIndex, tx, ty);
+    };
 
-    drawTile(baseTileIndex, ox, oy);
+    drawTileForLayer(baseTileIndex, ox, oy);
 
     let next = 1;
 
     // Double-width
     if (tileFlag?.isDoubleWidth()) {
-      const tileIndex = baseTileIndex - next++;
-      drawTile(tileIndex, ox-1, oy);
+      drawTileForLayer(baseTileIndex - next++, ox-1, oy);
     }
 
     // Double-height
     if (tileFlag?.isDoubleHeight()) {
-      const tileIndex = baseTileIndex - next++;
-      drawTile(tileIndex, ox, oy-1);
+      drawTileForLayer(baseTileIndex - next++, ox, oy-1);
     }
 
     // Double-width + double-height
     if (tileFlag?.isDoubleWidth() && tileFlag?.isDoubleHeight()) {
-      const tileIndex = baseTileIndex - next++;
-      drawTile(tileIndex, ox-1, oy-1);
+      drawTileForLayer(baseTileIndex - next++, ox-1, oy-1);
     }
   }
 
