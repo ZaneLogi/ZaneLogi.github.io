@@ -456,6 +456,14 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
     <div class="box purple">f_2222: tractor beam drawn<br><span style="color:#555;font-size:10px">6-wide · 24-row · 15 Hz animation</span></div>
     <div class="down">↓</div>
     <div class="box purple">f_20F2: pull ship ±1 px/frame</div>
+    <div style="margin-top:6px;color:#b66;font-size:10px;border:1px solid #411;padding:5px 7px;border-radius:3px;line-height:1.45">
+      ✗ <b>boss shot while on beam duty</b> (any time before capture completes):<br>
+      cue = boss disposition <span style="color:#888">b_8800[cobj] ≠ 0x09</span>, polled every frame.<br>
+      • dive, no beam yet → <span style="color:#888">f_21CB → l_221A</span>: dive task off, mission aborts<br>
+      • beam up / mid-pull → <span style="color:#888">f_2222 → l_2327</span>: beam <b>retracts</b> strip-by-strip,
+        pull gate cleared, <b>player control restored</b> (task 0x14)<br>
+      kill handler <span style="color:#888">l_07DF</span> clears cflag at once → no capture, selection re-opens.
+    </div>
     <div class="down">↓</div>
     <div class="box red">ship captured → spins · wings close</div>
     <div class="down">↓  <span style="color:#555;font-size:10px">boss killed during beam?</span></div>

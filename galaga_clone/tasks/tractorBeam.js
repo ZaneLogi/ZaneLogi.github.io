@@ -38,6 +38,30 @@ export function update(state) {
     const beam = state.beam;
     if (!beam) { state.tasks.tractorBeam = false; return; }
 
+    // ── Boss shot while the beam is up (Z80 l_2257 → l_2327, gg1-3.s:497-506,
+    //    639-649) ───────────────────────────────────────────────────────────
+    // f_2222 reads the capture boss's disposition b_8800[cobj] EVERY frame; if it
+    // isn't 0x09 ("in a diving attack") the boss was shot, and — unless the beam
+    // is already retracting (Z80 bit 7 of captr_status+1 ⇔ beam.mode 'shrink') —
+    // it switches the beam to retract (l_2327): set the retract flag, restart the
+    // per-strip timer at 1, clear the pull gate (stop f_20F2), and RE-ENABLE the
+    // player control stick (task 0x14) so a ship caught mid-pull isn't frozen.
+    // The cone is anchored at beam.x, so it withdraws on its own with no boss.
+    // A kill sets boss.alive=false (enemyStatus leaves boss.state) — so test
+    // alive. Runs BEFORE the pull-gate gate below so a mid-pull kill is caught.
+    if (beam.mode !== 'shrink') {
+        const cb = state.enemies.find(e => e.objectId === state.captureBossId);
+        if (!cb || !cb.alive || (cb.state !== 'flying' && cb.state !== 'homing')) {
+            beam.mode  = 'shrink';                  // Z80 captr_status+1 |= 0x80 (retract)
+            beam.timer = 1;                         // Z80 captr_status+2 = 1 (retract next frame)
+            state.capture.pullGate     = 0;         // Z80 captr_status+3 = 0 (stop the pull)
+            state.player.controlLocked = false;     // Z80 task_actv[0x14] = 1 (control restored)
+            state.player.captureFrame  = null;      // stop the pull tumble (if any)
+            state.tasks.pullShip       = false;     // f_20F2 off (it would also see pullGate=0)
+            return;
+        }
+    }
+
     // While the pull (f_20F2) runs, f_2222 keeps the beam drawn but does NOT
     // advance it — it holds at full extent until connect (gg1-3.s:583-630).
     if (state.capture.pullGate) return;
@@ -148,7 +172,10 @@ function endBeamNoCapture(state) {
     state.beam = null;
     state.tasks.tractorBeam = false;
     const boss = state.enemies.find(e => e.objectId === state.captureBossId);
-    if (boss) {
+    // Only resume a LIVE boss's retreat path. When the beam ended because the
+    // boss was SHOT (the l_2327 retract), the boss is dead (alive=false) — leave
+    // its motion alone; the kill/explosion path is cleaning it up.
+    if (boss && boss.alive) {
         boss.captureHalted = false;   // un-freeze → path resumes (retreat)
         boss.captureDiving = false;
         // Force the halted stall segment (00 FC FF, dur 0xFF) to expire NOW so

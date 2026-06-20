@@ -24,15 +24,18 @@ export function update(state) {
     // No active mission → make sure we're off (Z80 l_221A clears cflag too).
     if (!state.captureActive || state.captureBossId == null) {
         state.tasks.captorDive = false;
+        state.captureBossId = null;   // tidy: drop the locator if the kill (l_07DF) cleared cflag mid-dive
         return;
     }
 
     const boss = state.enemies.find(e => e.objectId === state.captureBossId);
 
-    // Z80 l_221A: if the boss is no longer in its diving state (e.g. shot, or
-    // it finished and went home), abort the mission and re-enable capture
-    // selection.
-    if (!boss || (boss.state !== 'flying' && boss.state !== 'homing')) {
+    // Z80 l_221A (gg1-3.s:392-399,441-445): f_21CB reads the capture boss's
+    // disposition b_8800[cobj] each frame; if it isn't 0x09 ("in a diving
+    // attack") the boss is gone — shot, or finished and went home — so abort the
+    // mission and re-enable capture selection. A kill sets boss.alive=false but
+    // LEAVES boss.state ('flying'); the state test alone misses it, so test alive.
+    if (!boss || !boss.alive || (boss.state !== 'flying' && boss.state !== 'homing')) {
         state.tasks.captorDive = false;
         state.captureActive = false;
         state.captureBossId = null;

@@ -19,9 +19,12 @@ export function update(state) {
     const p    = state.player;
     const boss = state.enemies.find(e => e.objectId === state.captureBossId);
 
-    // Boss gone mid-pull (e.g. shot — 4d rescue territory): abort the pull so
-    // the player isn't left frozen.
-    if (!boss || (boss.state !== 'flying' && boss.state !== 'homing')) {
+    // Boss gone mid-pull (shot): abort the pull so the ship isn't left frozen.
+    // Normally tractorBeam (f_2222, dispatched just before this task) catches the
+    // kill first and clears pullGate → the gate at the top of update returns
+    // before reaching here. This is the defensive backstop. A kill sets
+    // boss.alive=false but leaves boss.state, so the state test alone misses it.
+    if (!boss || !boss.alive || (boss.state !== 'flying' && boss.state !== 'homing')) {
         abortPull(state);
         return;
     }

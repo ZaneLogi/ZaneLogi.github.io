@@ -25,6 +25,18 @@ export function update(state) {
 
         e.alive = false;
 
+        // Z80 l_07DF (gg1-5.s:1206-1214): the instant the capture boss on beam
+        // duty is queued for elimination, the collision handler clears cflag
+        // (capture no longer active → selection re-opens) and invalidates cobj.
+        // Mirror the cflag clear here; captorDive/tractorBeam poll boss.alive and
+        // tear down the dive/beam themselves (and null captureBossId when done).
+        // Gate on captureBossId so this is ONLY the beam-duty boss — a boss
+        // holding an already-captured slave is the (mutually exclusive) rescue
+        // case below, where captureBossId was already nulled on slave-settle.
+        if (e.type === 'boss' && e.objectId === state.captureBossId) {
+            state.captureActive = false;   // Z80: cflag = 0
+        }
+
         // 4d-c rescue (Z80 gg1-5.s:1339): a dying boss that holds the captured
         // ship FREES it — the slave spins, lands, and docks beside the player
         // (→ 2-ship). fighterCaptured drives the motion. (Shooting the slave
