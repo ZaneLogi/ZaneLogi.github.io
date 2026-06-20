@@ -12,7 +12,31 @@
 export function update(state) {
     for (const e of state.enemies) {
         if (!e.hitFlag) continue;
-        e.alive   = false;
         e.hitFlag = false;
+
+        // 2-hit bosses (Z80 l_08CA, gg1-5.s:1189): the first hit on a green
+        // boss (palette 0) turns it blue (palette 1) and it SURVIVES; only the
+        // second hit kills. Other enemies die on the first hit. (4d-c hooks the
+        // capture rescue onto the killing blue-boss hit.)
+        if (e.type === 'boss' && (e.hits | 0) === 0) {
+            e.hits = 1;          // → blue; render swaps the sprite (objectStates)
+            continue;
+        }
+
+        e.alive = false;
+
+        // 4d-c rescue (Z80 gg1-5.s:1339): a dying boss that holds the captured
+        // ship FREES it — the slave spins, lands, and docks beside the player
+        // (→ 2-ship). fighterCaptured drives the motion. (Shooting the slave
+        // ITSELF, not the boss, loses it — handled in bulletUpdate, G19.)
+        const slave = state.capturedSlave;
+        if (e.type === 'boss' && slave && slave.bossId === e.objectId &&
+            !String(slave.state).startsWith('rescue')) {
+            slave.state                = 'rescue-spin';
+            slave.rescueTimer          = 0;
+            state.player.controlLocked = true;   // lock control during the rescue
+            state.captureActive        = false;
+            state.captureBossId        = null;
+        }
     }
 }

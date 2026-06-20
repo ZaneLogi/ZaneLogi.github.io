@@ -404,7 +404,7 @@ documented as workarounds:
 | Disable formationPulse, bomberAttack, bonusBee | `state.tasks.* = false` via STATE_TASKS | partial; bomber-attack currently always-on in our code |
 | Zero per-stage counters | reset `state.atkWvEnbl=false`, `attkwvCtr=0`, `bugsFlying=0`, `waveStreamCursor=0`, `attackTimers.*=initial` | gathered into `resetStageState(state)` helper |
 | Enable enemyStatus, launchAttackWave, formationOscillate | `state.tasks.* = true` via STATE_TASKS | already done |
-| `c_2C00` (difficulty params) | `state.newStageParms = loadStageParms(state.stage, state.rank)` | **deferred** — not needed for stage 1 (all zeroes anyway); needed for stage 2+ bombing tuning |
+| `c_2C00` (difficulty params) | `state.newStageParms = loadStageParms(state.stage, state.rank)` | **implemented** — `paths.js loadStageParms` (unpacks `bmbr_stg_cfg_dat`), called by `gameController.js`. NOT all-zeroes for stage 1: rank 3 gives `[4]=[5]=2` (max bombers), `[6]=12` (tractor-beam frames/phase), `[7]=6` (cont-bomb threshold). Feeds `bomberConfig`, `bombUpdate`, the attack-reload lookups, and `tractorBeam`. |
 | Set bomber-boss sprite codes | n/a (sprite-code workaround) | — |
 | `plyr_respawn_rdy` sets `_b_atk_wv_enbl=1` | `gameController` sets `state.atkWvEnbl = true` after stage init settles | **add a 'stageReady' state OR sub-step within stageStart** |
 

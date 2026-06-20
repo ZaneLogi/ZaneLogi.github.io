@@ -181,11 +181,11 @@
 <h2>Branch: galaga_clone &nbsp;·&nbsp; Ref: <a href="architecture.html">architecture.html</a> &nbsp;·&nbsp; Z80: C:\Z_Temp\hackbar_galaga\rom0\</h2>
 
 <div class="summary">
-  <div class="summary-item"><span class="done-count">9</span> done</div>
+  <div class="summary-item"><span class="done-count">10</span> done</div>
   <div class="summary-item"><span class="active-count">0</span> in progress</div>
-  <div class="summary-item"><span class="todo-count">3</span> todo</div>
-  <div class="progress-bar"><div class="progress-fill" style="width: 75%"></div></div>
-  <div class="summary-item" style="color:#333">9 / 12 steps &nbsp;<span style="color:#555">(plan resequenced — integration moved before boss capture)</span></div>
+  <div class="summary-item"><span class="todo-count">2</span> todo</div>
+  <div class="progress-bar"><div class="progress-fill" style="width: 83%"></div></div>
+  <div class="summary-item" style="color:#333">10 / 12 steps &nbsp;<span style="color:#555">(plan resequenced — integration moved before boss capture)</span></div>
 </div>
 
 
@@ -485,23 +485,29 @@
 
 
 <!-- ── Step 10 ── -->
-<div class="step todo">
+<div class="step done">
   <div class="step-gutter">
     <div class="step-num">10</div>
     <div class="step-line"></div>
   </div>
   <div class="step-body">
-    <div class="step-title">Boss capture mechanic <span class="badge todo">todo</span></div>
-    <div class="step-desc">Boss fires tractor beam (6-wide, 24-row, 15 Hz animation) → pulls player ship upward (±1 px/frame). Captured ship joins formation as a slave. If boss killed during beam, rescued ship lands and enables 2-ship mode. Also wires the F4 BOSS_DIVE / F2 SPAWN_BEE / FE BREAK_ATTACK tokens that step 8 research deferred here. Convoy / capture squad orchestration (boss + 2 wingmen, partly documented in step 8 research item [3]) gets fleshed out.</div>
+    <div class="step-title">Boss capture mechanic <span class="badge done">done</span></div>
+    <div class="step-desc">Boss fires the tractor beam → pulls + spins the ship up; the captured ship is carried home and joins the formation as a red slave ("FIGHTER CAPTURED"); it dives WITH its boss; shoot that boss (now 2-hit, green→blue) to rescue → spin/land/dock → 2-ship mode (dual fire + double hitbox). General respawn added (no life-loss). Full research + every-branch trace in <a href="research_boss_capture.md">research_boss_capture.md</a>; built as 6 verified save-point sub-steps (4c-i, 4c-ii, 4d-a..d).</div>
     <div class="files">
-      <span class="file modified">tasks/tractorBeam.js</span>
-      <span class="file modified">tasks/pullShip.js</span>
-      <span class="file modified">tasks/captorDive.js</span>
-      <span class="file modified">tasks/launchAttackWave.js (capture-squad bundling)</span>
-      <span class="file modified">tasks/bugMotion.js (F4 / F2 / FE token behaviour)</span>
+      <span class="file modified">tasks/tractorBeam.js (l_233D ship-in-beam)</span>
+      <span class="file modified">tasks/pullShip.js (f_20F2 pull+spin)</span>
+      <span class="file new">tasks/fighterCaptured.js (f_19B2 slave + text)</span>
+      <span class="file modified">tasks/enemyStatus.js (2-hit boss + rescue trigger)</span>
+      <span class="file modified">tasks/objectStates.js (blue boss)</span>
+      <span class="file modified">tasks/playerMove/Fire.js (2-ship)</span>
+      <span class="file modified">tasks/bombUpdate.js (2-ship hitbox)</span>
+      <span class="file modified">tasks/gameController.js (respawn)</span>
+      <span class="file modified">state.js · paths.js · gfx/resource.js</span>
     </div>
     <div class="notes">
-      <div class="note"><span class="note-tag note">note</span><span class="note-text">Z80 ref: <code>f_2222</code> (tractor beam draw) · <code>f_20F2</code> (pull ship) · <code>f_2000</code> (rescued ship landing — also referenced as gate flag in f_1B65) · <code>case_0A53 F4 BOSS_DIVE</code> · <code>case_097B F2 SPAWN_BEE</code> · <code>case_0B16 FE BREAK_ATTACK</code> · <code>d_1D2C_wingmen</code> (gg1-2_fx.s:1333) wingman pool. Step 8 research item [5] (deferred) becomes the seed for this step's research.</span></div>
+      <div class="note"><span class="note-tag verify">verify</span><span class="note-text">Live capture→carry-home→respawn observed in normal play; each sub-step browser-verified (deterministic task-stepping). 2-hit bosses, dual fire, lose-one-revert all confirmed. See research_boss_capture.md §9.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">As-built deviations (§9): slave is a dedicated <code>state.capturedSlave</code> object (not a 48-roster enemy); glued to its boss (never fires — matches normal-stage escort behavior); captr_status split across <code>state.beam</code> + <code>state.capture</code>; rescue stages simplified.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Deferred: G21 standalone-rogue + status-4 forced rogue · G20 slave-body→player (no enemy-body collision yet) · sound · real life-loss/game-over. Z80 ref: f_2222 · f_20F2 · f_19B2 · f_2000 · l_233D · l_1CE3 · case_0A53 (F4).</span></div>
     </div>
   </div>
 </div>

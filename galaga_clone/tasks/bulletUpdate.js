@@ -60,6 +60,24 @@ export function update(state) {
                 break;
             }
         }
+
+        // 4d-c (G19): bullet vs the captured slave. Shooting your OWN captured
+        // ship (not the boss holding it) destroys it — lost forever. Skipped
+        // while it's mid-rescue (already freed). The boss sits 16 px BELOW the
+        // slave during a dive, so an upward shot reaches the boss first (→
+        // rescue) unless you aim squarely at the slave.
+        if (b.alive) {
+            const s = state.capturedSlave;
+            if (s && s.alive && !String(s.state).startsWith('rescue') &&
+                Math.abs(s.x - b.x) < COLL_DX && Math.abs(s.y - b.y) <= COLL_DY) {
+                b.alive                       = false;
+                state.capturedSlave           = null;
+                state.capture.fighterCaptured = 0;
+                state.captureActive           = false;
+                state.captureBossId           = null;
+                state.tasks.fighterCaptured   = false;
+            }
+        }
     }
 }
 

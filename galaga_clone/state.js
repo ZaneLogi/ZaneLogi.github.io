@@ -32,6 +32,7 @@ function buildEnemies() {
                 type:     row.type,
                 alive:    true,
                 hitFlag:  false,            // set by bulletUpdate, read by enemyStatus (f_1DB3)
+                hits:     0,                // boss 2-hit counter: 0 = green, 1 = blue (4d-a)
                 homeX:    _COL_X[ci],
                 homeY:    row.y,
                 colIdx:   ci,
@@ -104,6 +105,17 @@ function buildEnemies() {
                 // not armed. Mirror of Z80 0x06(ix)+bit 5 of 0x13(ix); the
                 // port keeps it separate from the homing target (homeX/Y).
                 fcDiveTargetY: null,
+
+                // ── Capture-boss state (sub-step 4) ────────────────────
+                // captureDiving  — armed by the F4 token; this boss is on a
+                //   capture run aiming at the player.
+                // captureHalted  — set by captorDive (f_21CB) when it reaches
+                //   beam position; frozen (bugMotion skips its motion) until
+                //   the beam ends, then it resumes its path to retreat.
+                // captureTargetX — the beam/aim X (player X clamped to a lane).
+                captureDiving:  false,
+                captureHalted:  false,
+                captureTargetX: null,
             });
         }
     }
@@ -222,6 +234,65 @@ export const state = {
     attackReloads:         { boss: 2, red: 2, yellow: 2 },
     bombDropFlags:         0,
 
+    // bmbr_boss_pool (gg1-2_fx.s:874) — up to 4 queued boss/escort launches,
+    // populated by the boss launcher (tryLaunchBoss) and drained one-per-frame
+    // by runAttackMode (drainBossPool), so a boss sortie peels off staggered
+    // over consecutive frames. Each slot: { objectId, negate, path, entryOffset }
+    // or null (null = Z80 0xFF empty sentinel). Reset by resetWaveState.
+    bossPool:              [null, null, null, null],
+
+    // ── Capture mission state (sub-step 4) ─────────────────────────────────
+    // captureToggle  — _b_bmbr_boss_wingm (gg1-2_fx.s:1017): ++ each boss
+    //   launch; capture is attempted only when it lands EVEN (every other
+    //   launch), and only when no capture is already active.
+    // captureActive  — _b_bmbr_boss_cflag (gg1-2_fx.s:1013): a capture mission
+    //   is in progress (boss diving or beaming). Blocks starting another and
+    //   forces escort-mode on subsequent boss launches until cleared.
+    // captureBossId  — _b_bmbr_boss_cobj: objectId of the diving capture boss.
+    // beam — tractor-beam render/anim state (4b), null when no beam:
+    //   { x, phase, timer }. Set by captorDive (f_21CB) when the boss halts
+    //   in position; advanced + drawn by tractorBeam (f_2222).
+    captureToggle:         0,
+    captureActive:         false,
+    captureBossId:         null,
+    beam:                  null,
+
+    // ── Capture machine state (sub-step 4c/4d) ─────────────────────────────
+    // Mirrors ds5_928A_captr_status's +3/+4 bytes + the rescue-stage reuse of
+    // +1. The beam-render bytes (+0 beamX, +1 phase, +2 timer) live in
+    // state.beam above; captureActive/captureBossId mirror the ds_plyr_actv
+    // capture fields. (See research_boss_capture.md §2.)
+    //   pullGate        ⇔ captr_status+3 — pull/spin active (f_20F2 / f_2000)
+    //   fighterCaptured ⇔ captr_status+4 — 1 once the boss connects with the
+    //                     ship (arms the slave + "FIGHTER CAPTURED", 4c-ii)
+    //   rescueStage     ⇔ captr_status+1 reuse during f_2000 (0..3), 4d-c
+    capture: { pullGate: 0, fighterCaptured: 0, rescueStage: 0 },
+
+    // ── Captured-ship slave (sub-step 4c-ii) ───────────────────────────────
+    // The player's captured ship, living as a dedicated object (not one of the
+    // fixed 48 state.enemies — that array has no free slot 0/2/4/6 and its
+    // objectIds collide with the boss-attack scans, so a separate object avoids
+    // accidental auto-launch). null = none. Managed by the fighterCaptured task
+    // (f_19B2): glued to its boss during carry-home, then settled above it in
+    // the formation as a red ship (sprite code 7). bossId links it to its boss
+    // (for the 4d rescue). Shape when set:
+    //   { bossId, x, y, colIdx, rowIdx, state:'carryhome'|'formation', alive }
+    capturedSlave: null,
+
+    // TEMP dev aid: restrict runAttackMode to a subset of attack types so one
+    // behavior can be judged in isolation. null = all three enabled (NORMAL
+    // PLAY — moth, bee, AND boss; nothing disabled). Toggle live, e.g.
+    //   window.state.debugAttackTypes = ['boss']    // boss sorties only
+    //   window.state.debugAttackTypes = ['yellow']  // bees only
+    //   window.state.debugAttackTypes = null        // everything
+    // Remove (or leave null) before squash.
+    debugAttackTypes:      null,
+
+    // TEMP dev aid: when true, force EVERY boss launch to be a capture mission
+    // (db_0454). false = the Z80's normal every-other toggle (capture + escort).
+    // Currently false = NORMAL behavior. See tryLaunchBoss (launchAttackWave.js).
+    debugForceCapture:     false,
+
     // ── Game timers ────────────────────────────────────────────────────────
     // Mirrors ds4_game_tmrs — 4 countdown bytes decremented at 2 Hz by the
     // internal tickGameTimers() in main.js (equivalent of f_1DD2).
@@ -254,6 +325,7 @@ export const state = {
         captorDive:          false,  // f_21CB     — enabled when boss initiates capture
         tractorBeam:         false,  // f_2222     — enabled when boss reaches player Y
         pullShip:            false,  // f_20F2     — enabled when beam locks on ship
+        fighterCaptured:     false,  // f_19B2     — enabled when the ship is captured (slave + text)
     },
 
     // ── Starfield control ──────────────────────────────────────────────────
@@ -281,6 +353,22 @@ export const state = {
                        // 7-px gap above lives icons at canvas Y 272-288. ✓
         dxFlag: 0,     // toggles each held frame: first=1 px, then 1/2 px alternating
         alive:  true,
+
+        // ── Capture / respawn (sub-step 4c) ────────────────────────────────
+        // controlLocked — true during the tractor-beam pull: input ignored
+        //   (ship still renders, moved + spun by pullShip / f_20F2).
+        // captureFrame  — when non-null, the ship's spin sprite frame (0..6)
+        //   during the pull (c_2188_ship_spin); null = normal upright [6].
+        // respawnTimer  — frames until a fresh ship reappears after the ship is
+        //   lost (captured or bomb-killed). Decremented + respawned by
+        //   gameController (general respawn, no life-loss). 0 = not respawning.
+        controlLocked: false,
+        captureFrame:  null,
+        respawnTimer:  0,
+
+        // twoShip (Z80 _b_2ship, ds_plyr_actv) — dual-fighter mode after a
+        // rescue: two ships side by side, double fire + hitbox (4d-c/4d-d).
+        twoShip: false,
     },
 
     // ── Player bullets ────────────────────────────────────────────────────

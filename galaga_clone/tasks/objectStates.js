@@ -84,7 +84,9 @@ export function render(state) {
 
         // 16×16 sprite centered on (x, y). For flying/homing, apply
         // flip transforms via canvas scale around the sprite center.
-        const img = sprites[e.type][frame];
+        // 2-hit boss: render blue (palette 1) once it has taken its first hit (4d-a).
+        const grp = (e.type === 'boss' && e.hits) ? sprites.bossBlue : sprites[e.type];
+        const img = grp[frame];
         if (flipX || flipY) {
             ctx.save();
             ctx.translate(x, y);

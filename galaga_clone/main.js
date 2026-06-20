@@ -29,6 +29,7 @@ import * as bulletUpdate       from './tasks/bulletUpdate.js';
 import * as captorDive         from './tasks/captorDive.js';
 import * as tractorBeam        from './tasks/tractorBeam.js';
 import * as pullShip           from './tasks/pullShip.js';
+import * as fighterCaptured    from './tasks/fighterCaptured.js';
 
 // ── Task dispatch table ────────────────────────────────────────────────────
 // Ordered to match the Z80 task table (d_cpu0_task_table). bulletUpdate has
@@ -59,6 +60,7 @@ const TASK_TABLE = [
     { flag: 'captorDive',         module: captorDive,         ref: 'f_21CB'    },
     { flag: 'tractorBeam',        module: tractorBeam,        ref: 'f_2222'    },
     { flag: 'pullShip',           module: pullShip,           ref: 'f_20F2'    },
+    { flag: 'fighterCaptured',    module: fighterCaptured,    ref: 'f_19B2'    },
 ];
 
 // ── Canvas setup ───────────────────────────────────────────────────────────

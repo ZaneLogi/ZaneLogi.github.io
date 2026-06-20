@@ -93,14 +93,24 @@ export function update(state) {
         // actual 224×288 hardware screen).
         if (b.y > 288) { b.alive = false; continue; }
 
-        // AABB collision vs player ship.
-        if (player.alive &&
-            Math.abs(b.x - player.x) < COLL_DX &&
+        // AABB collision vs player ship. Skip while the ship is being pulled by
+        // a tractor beam (mid-capture, not dodging). In 2-ship mode a bomb that
+        // hits EITHER fighter costs one ship (revert to single) instead of a
+        // full loss (4d-d).
+        if (player.alive && !player.controlLocked &&
             Math.abs(b.y - player.y) < COLL_DY) {
-            b.alive = false;
-            // Phase 8e: just mark player dead. Full death sequence
-            // (explosion sprite, lives, respawn) is later steps.
-            player.alive = false;
+            const hitRight = Math.abs(b.x - player.x) < COLL_DX;
+            const hitLeft  = player.twoShip && Math.abs(b.x - (player.x - 16)) < COLL_DX;
+            if (hitRight || hitLeft) {
+                b.alive = false;
+                if (player.twoShip) {
+                    player.twoShip = false;   // lose one fighter → back to single
+                } else {
+                    // Ship lost → general respawn (gameController, 4c). No
+                    // life-loss yet (deferred). Was a permanent freeze before 4c.
+                    player.alive = false;
+                }
+            }
         }
     }
 }

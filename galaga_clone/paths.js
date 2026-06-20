@@ -255,6 +255,76 @@ export const ATTACK_PATH_RED = new Uint8Array([
     0xFB, 0x12, 0x00, 0xFF, 0xFF,
 ]);
 
+// ── Boss-path REGION (gg1-5.s:335-369) — db_flv_0411 + db_0454 ─────────
+// One array covering the contiguous ROM 0x40C–0x46A: the shared home tail
+// (p_flv_040c), the BOSS+ESCORT sortie (db_flv_0411), the rogue-fighter path
+// (db_fltv_rogefgter, kept verbatim so addresses align), and the CAPTURE-boss
+// path (db_0454). They're laid out together because they share sub-paths —
+// db_0454's FA jumps back to p_flv_040c (0x40C) and its FD to p_flv_0425
+// (0x425), both inside this region — so one z80Base=0x40C resolves every jump
+// with no cross-array machinery.
+//
+// Two entry points (via the entryOffset passed to launchEnemyAttack):
+//   - BOSS / ESCORT sortie → db_flv_0411 at offset 5  (z80 0x411)
+//   - CAPTURE boss        → db_0454     at offset 72 (z80 0x454)
+//
+// db_flv_0411 (escort sortie) is set as IY in j_1CA0 (gg1-2_fx.s:1159) and
+// copied into every boss/escort pool slot; escorts mirror via the negate flag.
+export const ATTACK_PATH_BOSS = new Uint8Array([
+    // p_flv_040C (offset 0, z80 0x40C) — shared home tail (FA target)
+    0xFB, 0x12, 0x00, 0xFF, 0xFF,
+    // db_flv_0411 (offset 5, z80 0x411) — ESCORT-SORTIE ENTRY: header / 1st seg
+    0x12, 0x18, 0x14,
+    // p_flv_0414 (offset 8, z80 0x414) — the dive arc
+    0x12, 0x03, 0x2A, 0x12, 0x10, 0x40, 0x12, 0x01, 0x20, 0x12, 0xFE, 0x71,
+    // p_flv_0420 (offset 20, z80 0x420) — F9 X→home col, F1 Y→home row, FA→home
+    0xF9, 0xF1, 0xFA, 0x0C, 0x04,
+    // p_flv_0425 (offset 25, z80 0x425) — EF gate, then re-loop body
+    0xEF, 0x30, 0x04, 0xF6, 0xAB, 0x12, 0x02, 0x20, 0xFD, 0x14, 0x04,
+    // p_flv_0430 (offset 36, z80 0x430) — harder/continuous pass (EF target)
+    0xF6, 0xB0,
+    0x23, 0x04, 0x1A, 0x23, 0x03, 0x1D, 0x23, 0x1A, 0x25, 0x23, 0x03, 0x10, 0x23, 0xFD, 0x48, 0xFD, 0x20, 0x04,
+    // db_fltv_rogefgter (offset 56, z80 0x444) — rogue-fighter path, verbatim
+    // (not entered yet; present to keep db_0454 at the right offset)
+    0x12, 0x18, 0x14, 0x12, 0x03, 0x2A, 0x12, 0x10, 0x40, 0x12, 0x01, 0x20, 0x12, 0xFE, 0x78, 0xFF,
+    // db_0454 (offset 72, z80 0x454) — CAPTURE-boss ENTRY
+    //   data, F4 (aim at player X + arm capture monitor), data,
+    //   FC dive-to-Y 0x48 (≈y169), data, data, F8/F9, FA→home, FD→p_flv_0425
+    0x12, 0x18, 0x14, 0xF4, 0x12, 0x00, 0x04, 0xFC, 0x48, 0x00, 0xFC, 0xFF,
+    0x23, 0x00, 0x30, 0xF8, 0xF9, 0xFA, 0x0C, 0x04, 0xFD, 0x25, 0x04,
+]);
+// Capture boss enters at db_0454 (z80 0x454) = offset 72. Passed explicitly to
+// launchEnemyAttack (the array's default .entryOffset=5 is the escort entry).
+export const CAPTURE_ENTRY_OFFSET = 72;
+
+// ── db_flv_cboss (gg1-5.s:367) — capture boss carry-home path ──────────────
+// Loaded into the BOSS's motion slot by f_2222 l_2305 once the ship connects, so
+// the boss flies home CARRYING the captured ship. `12 18 14` descend → `FB`
+// TURN_HOME (bugMotion homes it to its formation slot) → `12 00` + `FF` END
+// tail. No F6 (the carry-home never fires). f_19B2 (fighterCaptured) glues the
+// captured slave to the boss while it flies this path.
+export const BOSS_CARRYHOME_PATH = Uint8Array.from(
+    [0x12, 0x18, 0x14, 0xFB, 0x12, 0x00, 0xFF, 0xFF]);
+
+// ── d_23A1 — tractor-beam cone tile arrangement (gg1-3.s:726) ──────────
+// 10 entries × 6 char codes. f_2222 draws entry e as the beam grows to phase
+// e+1; each entry is one 6-tile strip spanning the beam's WIDTH, and successive
+// entries extend it DOWNWARD (narrow at the boss → wide at the ship). 0x24 =
+// blank; the cone edges live in the 50 unique tiles 0x4E-0x7F. (The other
+// f_2222 loop's 0x18-0x1A are text tiles, not the beam.)
+export const BEAM_CONE = [
+    [0x24, 0x4E, 0x4F, 0x50, 0x51, 0x24],
+    [0x24, 0x52, 0x53, 0x54, 0x55, 0x24],
+    [0x24, 0x56, 0x57, 0x58, 0x59, 0x24],
+    [0x24, 0x5A, 0x5B, 0x5C, 0x5D, 0x24],
+    [0x24, 0x5E, 0x5F, 0x60, 0x61, 0x24],
+    [0x62, 0x63, 0x64, 0x65, 0x66, 0x67],
+    [0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D],
+    [0x6E, 0x6F, 0x70, 0x71, 0x72, 0x73],
+    [0x74, 0x75, 0x76, 0x77, 0x78, 0x79],
+    [0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F],
+];
+
 // Z80 ROM base addresses for FD JUMP / FA LOOP_TOP address translation.
 // .dw addresses inside these arrays are absolute Z80 addresses; the path
 // interpreter computes JS offset = z80_addr − z80Base.
@@ -265,11 +335,19 @@ export const ATTACK_PATH_RED = new Uint8Array([
 //   99 has .dw value 0x0C,0x04 = 0x40C → base = 0x40C − 99 = 0x3A9).
 ATTACK_PATH_YELLOW.z80Base = 0x34F;
 ATTACK_PATH_RED.z80Base    = 0x3A9;
+// Boss: db_flv_0411 prepended with p_flv_040c (0x40C). base = 0x40C so the
+// FA→0x40C jump lands at offset 0 and db_flv_0411 (0x411) at offset 5.
+ATTACK_PATH_BOSS.z80Base     = 0x40C;
+// Fresh boss/escort launches enter at db_flv_0411 (0x411), NOT the prepended
+// home tail at offset 0. Read by launchEnemyAttack (moth/bee arrays have no
+// entryOffset → default 0 = their header).
+ATTACK_PATH_BOSS.entryOffset = 5;
 
 // Convenience accessor for type-driven launches.
 export function getAttackPath(type) {
     if (type === 'yellow') return ATTACK_PATH_YELLOW;
     if (type === 'red')    return ATTACK_PATH_RED;
+    if (type === 'boss')   return ATTACK_PATH_BOSS;
     return null;
 }
 

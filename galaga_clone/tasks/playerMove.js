@@ -16,7 +16,7 @@ const X_MAX = 209;  // sprite 0xE1 = 225 → canvas 209 (c_1F92, gg1-2_fx.s:2118
 
 export function update(state) {
     const p = state.player;
-    if (!p.alive) return;
+    if (!p.alive || p.controlLocked) return;   // controlLocked: ship pulled by f_20F2
 
     const { left, right } = state.input;
 
@@ -29,11 +29,13 @@ export function update(state) {
     p.dxFlag ^= 1;
     const dx = p.dxFlag ? 1 : 2;
 
-    // Pre-move check (mirrors Z80 cp/ret before add/sub).
+    // Pre-move check (mirrors Z80 cp/ret before add/sub). In 2-ship mode the
+    // LEFT fighter sits 16 px left of p.x, so the left limit shifts in by 16.
+    const xMin = p.twoShip ? X_MIN + 16 : X_MIN;
     if (right) {
         if (p.x < X_MAX) p.x += dx;
     } else {
-        if (p.x >= X_MIN) p.x -= dx;
+        if (p.x >= xMin) p.x -= dx;
     }
 }
 
@@ -43,7 +45,14 @@ export function render(state) {
     const p = state.player;
     if (!p.alive) return;
 
-    // Sprite code 6 = wings-open upright pose (c_133A, gg1-2.s:1044).
+    // Sprite code 6 = wings-open upright pose (c_133A, gg1-2.s:1044). During a
+    // tractor-beam pull, captureFrame holds the spin frame (0..6, c_2188).
     // 16×16 sprite centered on (p.x, p.y).
-    state.ctx.drawImage(sprites.ship[6], p.x - 8, p.y - 8);
+    const frame = (p.captureFrame != null) ? p.captureFrame : 6;
+    state.ctx.drawImage(sprites.ship[frame], p.x - 8, p.y - 8);
+
+    // 2-ship mode (4d-d): the rescued fighter rides 16 px to the left.
+    if (p.twoShip && p.captureFrame == null) {
+        state.ctx.drawImage(sprites.ship[6], (p.x - 16) - 8, p.y - 8);
+    }
 }

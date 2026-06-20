@@ -61,6 +61,7 @@ const STATE_TASKS = {
         captorDive:          false,
         tractorBeam:         false,
         pullShip:            false,
+        fighterCaptured:     false,
     },
     'stageStart': {
         // Fly-in phase. Formation-side tasks active so enemies can fly in
@@ -91,6 +92,7 @@ const STATE_TASKS = {
         captorDive:          false,
         tractorBeam:         false,
         pullShip:            false,
+        fighterCaptured:     false,
     },
     'playing': {
         starfield:           true,
@@ -108,6 +110,7 @@ const STATE_TASKS = {
         captorDive:          false,   // step 9+
         tractorBeam:         false,   // step 9+
         pullShip:            false,   // step 9+
+        fighterCaptured:     false,   // step 9+
     },
 
     // Defined in §5c JS port state diagram — wired in later INT phases:
@@ -176,6 +179,7 @@ function stgInitEnv(state) {
     for (const e of state.enemies) {
         e.state          = 'pending';
         e.alive          = true;
+        e.hits           = 0;       // boss 2-hit counter (4d-a)
         e.x              = 0;
         e.y              = 0;
         e.vx             = 0;
@@ -191,6 +195,15 @@ function stgInitEnv(state) {
     }
 
     state.waveLauncherFlyInDone = false;
+
+    // Clear any captured-ship slave + capture-machine state from a prior stage.
+    state.capturedSlave           = null;
+    state.capture.pullGate        = 0;
+    state.capture.fighterCaptured = 0;
+    state.capture.rescueStage     = 0;
+    state.player.controlLocked    = false;
+    state.player.captureFrame     = null;
+    state.player.twoShip          = false;
 
     // Reset the formation drift/breathe lifecycle for the new stage: start
     // oscillating from center, clear the stop-request, reset the pulse.
@@ -208,6 +221,31 @@ function stgInitEnv(state) {
 // Module-scope previous-state tracker so we can detect TRANSITIONS
 // (apply config) vs steady-state (let dev-panel toggles persist).
 let _lastState = null;
+
+// ── General respawn (G12, sub-step 4c) ─────────────────────────────────────
+// The clone had no respawn — a bomb hit (and now a capture) left the ship gone
+// forever. We add a no-life-loss respawn: once the ship is lost
+// (player.alive=false, set by bombUpdate or pullShip), a fresh ship reappears at
+// the spawn position after a short pause. Stands in for the Z80 c_player_respawn
+// flow (game_ctrl.s) without the lives/game-over machinery (deferred — see
+// research_boss_capture.md Decision 2). _playerWasAlive arms the timer once on
+// the death frame so the killers don't need the constant.
+const RESPAWN_DELAY = 72;   // frames (~1.2 s) — tuned by experiment
+let _playerWasAlive = true;
+
+function handleRespawn(state) {
+    const p = state.player;
+    if (p.alive) { _playerWasAlive = true; return; }
+    if (_playerWasAlive) {              // ship just lost this frame → arm the timer
+        _playerWasAlive = false;
+        p.respawnTimer  = RESPAWN_DELAY;
+        return;
+    }
+    if (p.respawnTimer > 0) { p.respawnTimer -= 1; return; }
+    // Respawn: fresh ship at the spawn position, controls released.
+    p.x = 106; p.y = 257; p.dxFlag = 0;
+    p.alive = true; p.controlLocked = false; p.captureFrame = null;
+}
 
 // The Z80's pre-launch delay is c_tdelay_3 (game_ctrl.s:868 → gg1-2.s:963):
 // game_tmrs[3] = 3, busy-wait until 0, ticked at 2 Hz (½-s); the splash +
@@ -233,6 +271,11 @@ export function update(state) {
         }
 
         _lastState = state.gameState;
+    }
+
+    // General respawn (G12): bring a lost ship back during gameplay.
+    if (state.gameState === 'playing' || state.gameState === 'stageStart') {
+        handleRespawn(state);
     }
 
     // Per-state per-tick logic.

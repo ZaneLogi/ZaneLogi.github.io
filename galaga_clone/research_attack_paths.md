@@ -126,7 +126,7 @@ function runAttackMode(state) {
 | Behavior | Z80 | Our port | Status |
 |----------|-----|----------|--------|
 | Guard: glbl_enemy_enbl + fire-button + no-destroyed-capture | yes | none | ❌ missing |
-| Boss+wing pool (capture squad queue) | check first, before per-type | none | ⏳ step 10 |
+| Boss+wing pool (capture squad queue) | check first, before per-type | `drainBossPool` + `queueCaptureBoss`/`queueBossSortie` | ✅ step 10 (4a–4d) — see §14 + research_boss_capture.md |
 | Frame mod 16 gate scope | wraps boss-pool wait + per-type DEC | wraps per-type DEC + dispatch attempt | ⚠ slightly off |
 | Per-type timer DEC frequency | every 16 frames (gated) | every 16 frames after Phase C (gate-first dispatch) | ✅ Phase C INT-7 |
 | `b_92C0` array indexing | `[0]=boss, [1]=red, [2]=yellow` (verified via f_1B65 djnz loop + d_1BD1 case-table at gg1-2_fx.s:923-970) | `state.attackTimers.{boss,red,yellow}` named slots | ✅ matches semantically |
@@ -173,7 +173,7 @@ Z80:
 Our `tryLaunchAttack(state, 'yellow')`:
 - Range `e.objectId 0x08..0x2E` ✅
 - Filter `e.state === 'formation' && e.alive` ✅ (functional equivalent of STAND_BY check)
-- **No bonus-bee skip** ⚠ — we don't have a bonus-bee object yet, so this is currently moot, but will matter when step 10 adds it
+- **No bonus-bee skip** ⚠ — still no bonus-bee object; it was a step-10 nice-to-have that the 4c/4d capture work did **not** include, so it remains deferred and the skip stays moot for now
 - Returns first match (first-found = first available in formation order) ✅
 
 ### 4.2 Red (gg1-2_fx.s:1004-1008) — ✅ verified
@@ -186,7 +186,18 @@ Our `tryLaunchAttack(state, 'red')`:
 - Range `e.objectId 0x40..0x5E` ✅
 - Same filter logic ✅
 
-### 4.3 Boss (gg1-2_fx.s:1011+) — ❌ wrong / oversimplified
+### 4.3 Boss (gg1-2_fx.s:1011+) — ✅ implemented in step 10 (was: oversimplified)
+
+> **✅ UPDATE (step 10, 4a–4d).** The boss launcher below is no longer
+> oversimplified. The clone now has the **capture-squad select** (`captureToggle`/
+> `captureActive`, one capture at a time), **escort sorties** (boss + 1–2 wingmen
+> via `BOSS_ESCORTS`), the **boss-pool stagger** (`drainBossPool`), and a real
+> **boss-path** (`ATTACK_PATH_BOSS`, not the YELLOW stand-in). The boss roster is
+> `BOSS_ID_MIN..BOSS_ID_MAX = 0x30..0x36` (the 4 bosses of the boss row), which
+> **resolves the open `BOSS_IDS` question below** — the earlier
+> `[0x00,0x02,0x04,0x06,…]` guess was wrong; bosses are the `0x30–0x36` row only.
+> Full mechanism: **§14** + [research_boss_capture.md](research_boss_capture.md).
+> The step-8-era analysis below is kept for history.
 
 Z80 boss launcher is **complex**. It implements the capture-squad
 logic:
@@ -398,19 +409,20 @@ on stage 1 normal mode (FA short-circuits to FB) and on cont_bmb mode
 
 ### 🟡 Medium impact (structural / contextual)
 
-4. **Missing guards.** Z80 requires `task_actv[0x15]` (fire button
-   active) and `!task_actv[0x1D]` (no destroyed-capture-boss). Our
-   port runs unconditionally. Could cause bombers to dive during
-   wrong game states.
+4. **Dispatcher guards — ⚠ mostly done (Phase D INT-7).** The `task_actv[0x15]`
+   (fire-button active) guard is ported (`if (!state.tasks.playerFire) return`).
+   `!task_actv[0x1D]` (no destroyed-capture-boss) and `glbl_enemy_enbl` have no
+   port equivalent yet — currently always-pass, harmless in the states we enter.
 
 5. **FD JUMP + FA LOOP_TOP — ✅ fixed in Phase E INT-7.** Dive paths
    now loop their inner attack section when cont_bmb is active, and
    take the short-dive-home path otherwise. F6 spawn-arming workaround
    removed.
 
-6. **Boss attack behavior oversimplified.** Currently solo boss with
-   yellow path; should be 3-bug capture squad. Step 10 territory but
-   worth flagging.
+6. **Boss attack behavior — ✅ done step 10 (4a–4d).** Was solo boss with the
+   yellow path; now the full 3-bug capture squad (capture dive + escort/paired
+   dive + 2-hit boss + rescue → 2-ship) on the real `ATTACK_PATH_BOSS`. See §14 +
+   research_boss_capture.md.
 
    **Side-effect discovered during Phase C testing (verified against
    MAME):** in Z80, the boss_pool capture-squad pattern (3 enemies in
@@ -423,8 +435,11 @@ on stage 1 normal mode (FA short-circuits to FB) and on cont_bmb mode
    a similar-looking effect (yellow pauses) for a different reason:
    our solo boss uses ATTACK_PATH_YELLOW with a fast 4-tick reload,
    eating one of the 2 max-bomber slots most of the time and
-   crowding out yellow. Two paths to the same visual symptom; both
-   resolve when Phase F lands proper boss_pool + wingmen + boss path.
+   crowding out yellow. Two paths to the same visual symptom.
+   **✅ Resolved in step 10:** the real `boss_pool` + wingmen +
+   `ATTACK_PATH_BOSS` landed, so the clone now reproduces the genuine
+   capture-squad pause (yellow/red wait while the pool drains) rather
+   than the look-alike artifact.
 
 ### 🟡 Medium impact (newly discovered in Phase E review)
 
@@ -531,8 +546,10 @@ max-bombers pressure.
 - Ported f_1B65 entry guards (gg1-2_fx.s:858-869):
   `if (!state.tasks.playerFire) return` at top of runAttackMode.
 - Z80's two-condition gate (`task_actv[0x15] != 0 AND task_actv[0x1D] == 0`)
-  simplifies to one check in our port: task_actv[0x1D] (destroyed-capture-
-  boss) doesn't exist yet (Phase F), so it's always 0 = always passes.
+  simplifies to one check in our port: the destroyed-capture-boss rescue
+  (`f_2000`) now exists (step 10, driven by `fighterCaptured`) but is **not wired
+  as a dispatcher guard**, so the second condition is still effectively always-pass.
+  Pausing attacks during a rescue animation is a minor follow-up.
 - Without this guard, dev-panel toggling playerFire off would still
   let attackers dive — which doesn't match Z80.
 - glbl_enemy_enbl (the outer wrapper condition) has no port equivalent
@@ -564,11 +581,12 @@ the position used for homing motion **and** the home-distance check, so the
 bug arrives at the live slot and snaps seamlessly. Verified: jump → ≤ 2.7
 px. See §5b for the full mechanism + measurements.
 
-**Phase F: Step-10 territory (deferred)**
-- Boss capture squad
-- Bonus-bee
+**Phase F: Step-10 territory**
+- ~~Boss capture squad~~ ✅ done step 10 (4a–4d) — capture dive + escort/paired
+  dive + 2-hit boss + rescue → 2-ship. See §14 + research_boss_capture.md.
+- Bonus-bee — ⏳ still deferred (not part of the 4c/4d capture work)
 - ~~F3 BREAK_TARGETED LUT~~ ✅ done 2026-06-18 (player-targeted turn-hold; see §7/§7a)
-- Sound
+- Sound — ⏳ deferred
 
 ## 10. What we can claim about the current implementation
 
@@ -594,8 +612,9 @@ px. See §5b for the full mechanism + measurements.
 - ✅ F6 FREE_FLIGHT fully ported — heading redirect (arg×4, mirrored) + per-stage bomb-enable bitmask, not just bomb-arming (2026-06-18, §7)
 - ✅ **Every token the MOTH (red) path uses is now fully implemented** (data, F3, F6, F8, F9, FA, FB, FD, EF, FF) — see §11
 - ✅ **Every token the BEE (yellow) path uses is now fully implemented too** (data, FC, FA, F8, F9, EF, F6, FD, FB, FF) — FC ported 2026-06-19, see §12. No attack-path token stub remains for moth OR bee.
-- ❌ Missing dispatcher guards (Phase D)
-- ❌ Boss capture squad is missing (Phase F / step 10)
+- ✅ **Every token the BOSS paths use is implemented too** (data, F4, FC, F8, F9, F1, FA, FB, FD, EF, F6, FF) — step 10 (4a–4d), see §14. `F4` (capture aim) + `F1` (Y→home row) are boss-distinctive.
+- ✅ Boss capture squad implemented (capture dive + escort/paired dive + 2-hit boss + rescue → 2-ship), step 10 — see §14 + research_boss_capture.md
+- ⚠ Dispatcher guard partial: `playerFire` gate ported (Phase D); `glbl_enemy_enbl` has no port equivalent yet
 - ⏳ Sound, bonus-bee deferred
 
 ## 11. Moth (red) dive — token map + decision gates
@@ -737,6 +756,7 @@ boundaries are consistent.)
 |------|-----------------|------------|-----------|
 | **Moth (red)** | `db_flv_atk_red` (gg1-5.s:311) | `ATTACK_PATH_RED` | **4** |
 | **Bee (yellow)** | `db_flv_atk_yllw` (gg1-5.s:285) | `ATTACK_PATH_YELLOW` | **6** |
+| **Boss** | boss-path region (gg1-5.s:335-369) | `ATTACK_PATH_BOSS` + `BOSS_CARRYHOME_PATH` | **4 paths** — see §14.1 |
 
 ### 13.1 Moth (red) — 4 sub-paths
 
@@ -767,10 +787,104 @@ two extra sub-paths).
 
 - **Fly-in is NOT type-specific.** A bug enters formation on whatever entrance
   path the WAVE data assigns (the `db_flv_001d`-style tables, shared across all
-  types). The only type-owned path is the one attack table above. (Boss has no
-  own attack table yet — it reuses `ATTACK_PATH_YELLOW` as the step-10 stand-in.)
+  types). The only type-owned path is the one attack table above. (The boss owns
+  the **boss-path region** `ATTACK_PATH_BOSS` + the carry-home `BOSS_CARRYHOME_PATH`
+  — see §14; step 10 replaced the earlier "boss reuses `ATTACK_PATH_YELLOW`"
+  stand-in.)
 - **Some sub-paths are shared (ROM code-reuse), not extra scripts.** The home
   tail `p_flv_040c` has 4 `.dw` refs (2 from red's `FA` sites + 2 fly-in paths);
   the bee's `p_flv_0358`/`0363`/`039e` are also jumped into by the
   challenging-stage paths (`db_0473`/`04AB`/`04EA`). Counted once, as part of
   their owning attack table.
+
+## 14. Boss sortie + capture dive — token map + decision gates
+
+The boss is the odd one out: it does **not** run `ATTACK_PATH_RED`/`YELLOW`. It
+owns the **boss-path region** (`ATTACK_PATH_BOSS`, paths.js:273 — the contiguous
+ROM `0x40C–0x46A`: shared home tail `p_flv_040c` + escort sortie `db_flv_0411` +
+rogue `db_fltv_rogefgter` + capture dive `db_0454`) plus the separate **carry-home**
+array (`BOSS_CARRYHOME_PATH` / `db_flv_cboss`). It launches in **two flavors** and
+flies **two more** paths across the capture lifecycle. Source: gg1-5.s:335-369
+(paths) + gg1-2_fx.s:1011-1043 (`case_bmbr_boss` select). Built in **step 10**
+(sub-steps 4a–4d).
+
+> **The capture *mechanic* — tractor beam, ship-in-beam, pull/spin, 2-hit boss,
+> rescue → 2-ship — is its own document: [`research_boss_capture.md`](research_boss_capture.md).**
+> This section covers only the boss's **path/token movement** and hands off at the
+> beam.
+
+### 14.1 The four boss paths
+
+| Path | Role | Entry |
+|---|---|---|
+| `db_0454` **capture dive** | solo tractor-beam mission — dive, aim at the ship, halt, open beam | `ATTACK_PATH_BOSS` offset 72 (`CAPTURE_ENTRY_OFFSET`) |
+| `db_flv_0411` **escort sortie** | boss + 1–2 wingmen; once it owns a slave, the **paired rescue dive** brings the captured ship down | `ATTACK_PATH_BOSS` offset 5 (`.entryOffset`) |
+| `db_flv_cboss` **carry-home** | flies the captured ship home (loaded into the boss's slot by `f_2222 l_2305` on connect) | `BOSS_CARRYHOME_PATH` |
+| `db_fltv_rogefgter` **rogue** | standalone fallback (no boss/escort available) — ⏳ **deferred, never entered** (G21) | `ATTACK_PATH_BOSS` offset 56 (verbatim, for address alignment) |
+
+### 14.2 Tokens the boss uses
+
+| Token | Role | Appears in |
+|-------|------|------------|
+| data `0x12`/`0x23`/`0x00` | 3-byte motion segment. The `00 FC FF` segment (vx=0) is the **halt cue** — see gate 3 | all |
+| **`F4`** | **capture aim** (boss-only) — read player X, clamp to a lane, point down-and-at the ship, arm the capture-dive monitor (`captorDive`/`f_21CB`). `case_0A53`, gg1-5.s:1724 | `db_0454` |
+| `FC` | dive-to-Y (arg `0x48` ≈ y169) — shared with the bee | `db_0454` |
+| `F8` | reposition **Y → top edge** | `db_0454` |
+| `F9` | reposition **X → home column** | `db_0454`, `db_flv_0411` |
+| **`F1`** | reposition **Y → home row** (above the top) — the boss-sortie counterpart of the moth's `F8`. `case_0968`, gg1-5.s:1551 | `db_flv_0411` |
+| `FA` | LOOP_TOP — gated jump (gate 4) | `db_0454`, `db_flv_0411` |
+| `FB` | TURN_HOME → enter `homing`, land in formation | `p_flv_040c` (tail), `db_flv_cboss` |
+| `FD` | unconditional JUMP (loop wiring, via `z80Base`) | `db_0454`, `db_flv_0411` |
+| `EF` | BOMB_MODE — stage-gated jump (gate 4) | `db_flv_0411` |
+| `F6` | "free flight" — heading + **arm bombs** | `db_flv_0411` **only** (escort/paired); `db_0454` + `db_flv_cboss` have **no `F6`** → those paths never fire |
+| `FF` | terminate | `db_flv_cboss`, rogue, shared tail |
+
+### 14.3 The gates that steer the boss
+
+1. **Capture-squad select** (`case_bmbr_boss`, gg1-2_fx.s:1011) — every **other**
+   boss launch is a capture mission (`captureToggle` ⇔ `_b_bmbr_boss_wingm`),
+   gated by `captureActive` ⇔ `_b_bmbr_boss_cflag` (**one capture at a time** —
+   the flag stays set the whole time a ship is held; see
+   [research_boss_capture.md](research_boss_capture.md) §9 review fix). A capture
+   turn queues the first standby boss **solo** on `db_0454`. Otherwise → an
+   **escort sortie** on `db_flv_0411` with 1–2 wingmen; a boss that already owns a
+   slave can't open a fresh beam, so it dives as an escort **bringing the slave**
+   (the rescue chance). `launchAttackWave.js:359-401`.
+2. **`F4` capture aim** (boss-only) — reads the **live** player X, clamps it to a
+   capture lane (canvas [25,185]), points the heading down-and-at the ship, and
+   arms `captorDive` (`f_21CB`). This is what makes the capture boss **position
+   over the ship**, unlike the escort's fixed arc. `bugMotion.js` `0xF4`.
+3. **The `00 FC FF` stall = the halt cue** — a vx=0 data segment; `captorDive`
+   (`f_21CB`) detects vx=0, spins the boss to face DOWN, and **opens the tractor
+   beam** (`f_2222`). **→ from here it is [research_boss_capture.md](research_boss_capture.md)**
+   (beam grow/grab/shrink → ship-in-beam → pull/spin → connect → carry-home →
+   rescue → 2-ship).
+4. **`contBmbFlag`/`FA`** and **`newStageParms[9]`/`EF`** — the **same** gates as
+   the moth/bee (§11/§12): on the escort/loop sub-paths `FA` picks home-vs-loop and
+   `EF` picks re-loop-vs-continuous. Dormant on stage 1.
+
+### 14.4 Decision flow
+
+```
+case_bmbr_boss select ── capture turn? ───────────────────────────────────────┐
+  │ YES → db_0454 CAPTURE DIVE                                                  │
+  │        descend → F4 aim at ship → FC dive-to-Y → 00 FC FF STALL            │
+  │        └─ f_21CB halt cue → spin down → OPEN BEAM (f_2222)                 │
+  │           └──► research_boss_capture.md: ship-in-beam → pull → CONNECT     │
+  │                 → db_flv_cboss CARRY-HOME (FB → slot, no F6)               │
+  │                 → f_19B2 settle slave above boss (red, standby)            │
+  │ NO  → db_flv_0411 ESCORT SORTIE (boss + 1–2 wingmen)                       │
+  │        dive arc → F9/F1 (X→col / Y→top) → FA ── contBmb? ── home / loop    │
+  │        F6 arms bombs (escort/paired only)                                   │
+  │        └─ a boss that owns a slave dives here, bringing it = RESCUE CHANCE │
+  │           └──► shoot the blue, holding boss → f_2000 → 2-ship             │
+  └──────────────────────────────────────────────────────────────────────────┘
+  (db_fltv_rogefgter standalone-rogue path — ⏳ deferred, never entered)
+```
+
+Gates 1–2 decide **which dive** (capture vs escort) and **where the capture dive
+aims**; the beam/pull/rescue machine downstream of the halt cue is
+`research_boss_capture.md`'s domain. On a normal stage the escort sortie's `FA`
+homes the squad before `F6`, so boss + wingmen + paired slave all dive **without
+bombing** — matching the Z80 (firing only in the continuous-bomb endgame; in the
+clone the *glued* slave never fires at all, D3).

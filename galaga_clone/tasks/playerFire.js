@@ -12,14 +12,19 @@
 // gg1-2_fx.s:1909–1912 copies sprite_posn[0x62-3] → rocket_posn[0x64-7].
 
 export function update(state) {
-    if (!state.player.alive)   return;
+    const p = state.player;
+    if (!p.alive)              return;
+    if (p.controlLocked)       return;   // ship being pulled by the beam (f_20F2)
     if (!state.input.fireEdge) return;
 
-    // Find first free slot (mirrors slot 0 then slot 1 scan).
-    const slot = state.bullets.find(b => !b.alive);
-    if (!slot) return;  // both slots in use
-
-    slot.x     = state.player.x;
-    slot.y     = state.player.y;
-    slot.alive = true;
+    // 2-ship mode (4d-d): fire from BOTH fighters (Z80 _b_2ship) — one rocket
+    // each, using whatever bullet slots are free (max 2). Single ship: one shot.
+    const xs = p.twoShip ? [p.x, p.x - 16] : [p.x];
+    for (const x of xs) {
+        const slot = state.bullets.find(b => !b.alive);
+        if (!slot) break;   // both slots in use
+        slot.x     = x;
+        slot.y     = p.y;
+        slot.alive = true;
+    }
 }

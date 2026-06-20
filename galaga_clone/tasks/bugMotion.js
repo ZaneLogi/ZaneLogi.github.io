@@ -361,6 +361,53 @@ function loadSegment(e, state) {
                 continue;
             }
 
+            // ── 0xF1 (case_0968, gg1-5.s:1551) ──────────────────────────
+            // "diving attacks stop and bugs go home" — the vertical companion
+            // to F9, the BOSS sortie path's equivalent of the moth's F8. After
+            // the dive arc takes the boss off the BOTTOM, F9 (X→home col) + F1
+            // re-enter it from the TOP, then FA→FB homes it straight down.
+            //
+            // Z80 sets 0x01(ix) (a RAW Y) = home-row origin rawY + 0x20, then
+            // the sprite chip converts it. rawYToCanvasY has slope −2 (bigger
+            // rawY = HIGHER on screen — it's inverted), so +0x20 raw = −64
+            // canvas px → ABOVE the top edge. (Boss: home rawY ~0x8A → slot
+            // y≈37; +0x20 → rawYToCanvasY(0xAA) ≈ −27.) My first port used
+            // homeY + 0x20 (DOWN to the moth row) — wrong sign; the inverted
+            // raw→canvas mapping makes it go UP. Exact value is non-critical
+            // (FB re-homes to the live slot); −0x40 matches the source within
+            // 1px without an 8-bit wrap for any formation row. 0-arg token.
+            if (b0 === 0xF1) {
+                e.y = e.homeY - 0x40;
+                e.pathOffset += 1;
+                continue;
+            }
+
+            // ── 0xF4 (case_0A53, gg1-5.s:1724) — CAPTURE-boss aim ───────
+            // The capture boss reads the PLAYER's X, clamps it to a capture
+            // lane, points its heading down-and-at that spot, and arms the
+            // capture-dive monitor — this is what makes it position itself over
+            // the ship (unlike the escort's fixed arc). Z80 also enables task
+            // 0x19 (f_21CB) + records the motion slot; our captorDive task
+            // finds the boss via state.captureBossId, so we just flag it here.
+            // 0-arg token. Capture path only (db_0454).
+            if (b0 === 0xF4) {
+                // Lane clamp: Z80 [0x29,0x C9] sprite X → canvas [25,185].
+                const targetX = Math.max(25, Math.min(185, state.player.x | 0));
+                e.captureTargetX = targetX;     // beam center (4b) + aim point
+                e.captureDiving  = true;        // arm captorDive (f_21CB)
+                state.tasks.captorDive = true;  // Z80 case_0A53:1760 — task 0x19 on
+                // Aim down-and-toward the target. c_0E5B aims at (targetX,
+                // dive-depth 0x48 → y≈169). NOTE the motion is e.y -= A·sin(θ),
+                // so DOWN (e.y increasing) is θ≈768, not 256 — the velocity
+                // vector is (cosθ, −sinθ), hence atan2(−dy, dx) (dy>0 = below).
+                const dx  = targetX - e.x;
+                const dy  = Math.max(8, rawYToCanvasY(0x48) - e.y);
+                const ang = Math.atan2(-dy, dx) / (2 * Math.PI) * 1024;
+                e.angle   = ((ang % 1024) + 1024) % 1024;
+                e.pathOffset += 1;
+                continue;
+            }
+
             // ── 0xFC RTN_FMTN/DIVE (case_0B4E, gg1-5.s:1896) ────────────
             // Bee dive: "dive until you reach screen-Y <arg>, THEN advance"
             // — arms a position-triggered segment exit. Z80 sets 0x06(ix)
@@ -373,11 +420,24 @@ function loadSegment(e, state) {
             // e.homeX/Y, so no field reuse) and do the trigger in update().
             // The flag PERSISTS across segments until the Y is reached
             // (source clears bit 5 only at l_0C3E) — so a later F6/segment
-            // is also subject to it. Keeps vx/vy/rotRate (skip_load).
+            // is also subject to it.
+            //
+            // skip_load (Z80 `jp l_0BFF_flite_pth_skip_load`, gg1-5.s:1903):
+            // case_0B4E does NOT load a new segment — it advances the pointer
+            // PAST the token/arg but KEEPS the current segment's vx/vy/rotRate,
+            // so the bug keeps diving at its present velocity until the Y-trigger
+            // (per-tick step below) force-expires the segment and the NEXT
+            // segment is finally loaded. The Z80 leaves 0x0D==0; the following
+            // `dec 0x0D` wraps 0→0xFF (gg1-5.s:1461), giving ~255 frames of
+            // dive. We mirror that with a large segTimer and RETURN — crucially
+            // NOT `continue`, which would read the next segment immediately and
+            // (for the capture boss, whose next segment is the 00 FC FF stall)
+            // zero the velocity before the dive ever happens.
             if (b0 === 0xFC) {
                 e.fcDiveTargetY = rawYToCanvasY(e.pathBase[e.pathOffset + 1]);
-                e.pathOffset += 2;                   // token + 1 arg
-                continue;
+                e.pathOffset += 2;                   // token + 1 arg → next seg
+                e.segTimer     = 0xFF;               // keep current velocity
+                return;                              // do NOT load next segment
             }
 
             // ── 0xEF BOMB_MODE / continuous-bombing (case_094E, gg1-5.s:1523) ──
@@ -490,7 +550,7 @@ export function launchEnemy(state, objectId, pathInfo) {
 //
 // Returns the enemy on success, or null if not found, not in 'formation'
 // state, or attackBytes missing.
-export function launchEnemyAttack(state, objectId, attackBytes) {
+export function launchEnemyAttack(state, objectId, attackBytes, negateOverride, entryOffset) {
     if (!attackBytes) return null;
 
     const e = state.enemies.find(en => en.objectId === objectId);
@@ -514,9 +574,15 @@ export function launchEnemyAttack(state, objectId, attackBytes) {
     e.angle      = 0x100;
     e.rotRate    = 0;
     e.pathBase   = attackBytes;
-    e.pathOffset = 0;
+    // Entry into the path. Most arrays start at their header (offset 0). The
+    // boss-path region has two entries: the escort sortie at .entryOffset (=5)
+    // and the capture boss at CAPTURE_ENTRY_OFFSET (=72), passed explicitly.
+    e.pathOffset = entryOffset ?? attackBytes.entryOffset ?? 0;
     e.segTimer   = 0;             // 0 → load first segment on tick 0
     e.fcDiveTargetY = null;       // no FC dive-Y armed at launch
+    e.captureDiving = false;      // F4 arms this for a capture boss
+    e.captureHalted = false;      // captorDive sets it at the beam position
+    e.captureTargetX = null;
 
     // Z80 c_1083 (gg1-2.s:206-216): negateRotation is RECOMPUTED per
     // attack launch from objectId bit 1 — left pair members get false,
@@ -526,7 +592,16 @@ export function launchEnemyAttack(state, objectId, attackBytes) {
     // execute the attack path mirrored, sending them in the wrong
     // direction (e.g. red butterflies flying UP and off the top edge
     // instead of diving down).
-    e.negateRotation = (objectId & 0x02) !== 0;
+    //
+    // negateOverride: boss ESCORTS don't use their own bit 1 — the whole
+    // sortie (boss + wingmen) inherits the BOSS's rotation flag so the group
+    // sweeps together, not mirrored against each other (Z80 j_1CAE stashes
+    // the boss's flag in Cy' and c_1D03/l_1D16 OR's it into every escort's
+    // pool-slot index bit 7, gg1-2_fx.s:1177-1185 / 1305-1307). Solo boss
+    // and moth/bee dives pass undefined → use the object's own bit 1.
+    e.negateRotation = (negateOverride !== undefined)
+        ? negateOverride
+        : (objectId & 0x02) !== 0;
 
     // Phase E INT-7: F6 spawn-arming workaround removed. Bombs are now
     // armed by the F6 FREE_FLIGHT token at offset 34 (yellow) when it
@@ -568,6 +643,12 @@ export function update(state) {
         // Both 'flying' (executing path bytecode) and 'homing' (post-FB
         // guided approach to formation slot) get per-tick motion updates.
         if (e.state !== 'flying' && e.state !== 'homing') continue;
+
+        // Capture boss halted in beam position (set by captorDive / f_21CB):
+        // freeze in place while the tractor beam runs. pathBase/pathOffset/
+        // segTimer are kept intact, so clearing the flag (beam end) resumes the
+        // path exactly where it paused → F8/F9/FA retreat home.
+        if (e.captureHalted) continue;
 
         // Steps 1-3 are 'flying'-only. 'homing' has no segments to load
         // and a fixed angle (set once when FB fired).
