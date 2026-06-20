@@ -398,7 +398,7 @@ documented as workarounds:
 |--------|-----------|-------|
 | `c_sctrl_sprite_ram_clr` (game start) | reset `state.enemies[*].state = 'pending'`, `hitFlag = false`, motion fields | needed for stage cycling |
 | `c_2896` (sprite codes/colors) | **workaround:** sprites hardcoded in `gfx/resource.js`; no per-stage refresh needed | see CLAUDE.md |
-| `c_25A2` (build wave table) | `state.waveStream = buildWaveStream(state.stage)` | use new builder from §12 |
+| `c_25A2` (build wave table) | `state.waveStream = buildWaveStream(state.stage, state.rank)` | **per-stage AND per-rank caravans (INT-5, §14.3)** — full `d_combat_stg_dat` + idx ported |
 | `c_12C3` (formation home positions) | **workaround:** positions hardcoded in `state.js` `_ROWS` / `_COL_X` | see CLAUDE.md |
 | Clear `obj_collsn_notif[]` | `state.enemies.forEach(e => e.hitFlag = false)` | per-stage hit-flag reset |
 | Disable formationPulse, bomberAttack, bonusBee | `state.tasks.* = false` via STATE_TASKS | partial; bomber-attack currently always-on in our code |
@@ -412,8 +412,8 @@ documented as workarounds:
 
 | Z80 var | Phase |
 |---------|-------|
-| `_b_stgctr` increment | INT-5 (stage cycling) |
-| `_b_not_chllg_stg` | INT-5+ (challenge-stage handling) |
+| `_b_stgctr` increment | ✅ done INT-5 (stage cycling, §14) |
+| `_b_not_chllg_stg` | deferred (challenge-stage handling — §14.4) |
 | `_b_nships` (lives) | INT-6 (HUD) |
 | `_w_shot_ct`, `_w_hit_ct` | INT-6 (HUD) |
 | Bonus-bee, capture-boss vars | step 10 (boss capture) |
@@ -433,3 +433,82 @@ documented as workarounds:
    gate per byte and the `game_tmrs[0]` gate per wave.
 4. **bugMotion.js** — separate phase: motion model rewrite per
    research_path_data.md; add negateRotation handling.
+
+## 14. Stage advancement (INT-5 — as built 2026-06-20)
+
+The stage/rank → parameter machinery (§12, §13.3) was correct but **never
+exercised**: `state.stage` was frozen at 1 (no stage-clear). INT-5 wires the
+clear → advance loop so the difficulty curve and per-stage caravans actually run.
+
+### 14.1 The loop
+
+| Z80 | clone | site |
+|---|---|---|
+| `gctl_supv_stage` clear gate (`num_bugs==0 && !f_2916`, game_ctrl.s:1306) | `gameController` 'playing': `activeEnemyCount(state)===0 && !capturedSlave && !captureActive` → `gameState='stageClear'` | gameController.js |
+| `stg_init_splash` `_b_stgctr++` (task_man.s:192) | in the 'playing' clear-detection: `state.stage = (stage+1)&0xFF` (NOT the 'stageClear' entry — see note) | gameController.js |
+| `stg_init_splash` "STAGE n" + `game_tmrs[2]=3` busy-wait (~1.5 s) | new 'stageClear' state: `STAGE_SPLASH_FRAMES=90` countdown; `gameController.render` draws centered "STAGE n" (charCanvas + c_string_out formula) | gameController.js |
+| `stg_init_env` (re-init) | timeout → 'stageStart' → existing `stgInitEnv` re-runs for the new stage (re-arms 48 enemies + new caravan) | gameController.js |
+
+**Game start also uses the splash.** A new game routes `attract` → `'stageClear'`
+(not straight to `'stageStart'`), so it opens with the **"STAGE 1"** splash —
+faithful to `stg_init_splash` running at game start. The stage *increment* lives in
+the clear-detection (above), so entering `'stageClear'` from `'attract'` shows
+"STAGE 1" with no bump (state.stage is already 1), while a real clear shows the next
+number. The `'stageClear'` enter-block only arms the 90-frame timer.
+
+`activeEnemyCount` counts `alive && state !== 'dead' && state !== 'pending'`.
+**'pending' is excluded** because the roster has **48 slots but only 40 ever fly
+in** (the wave stream covers 40 object IDs — the other 8, IDs 0x00/02/04/06 and
+0x38/3a/3c/3e, are never launched and stay 'pending' forever; counting them would
+peg the total at 8 and the stage could never clear). 'playing' is entered only
+after fly-in completes, so any 'pending' enemy is one of those phantoms (never a
+still-to-arrive one), and the Z80 `!f_2916` half is implicit. *(Caught in the first
+playtest 2026-06-21: the original count included 'pending' → clear never fired.)*
+
+### 14.2 twoShip persists across the boundary
+
+The Z80 never clears `_b_2ship` on a stage change (only at game/demo init, on a
+kill, or never — the 3 write-sites; see [[project_galaga_dual_capture_decision]]).
+So the dual fighter carries into the next stage. `stgInitEnv` now resets `twoShip`
+only on a NEW GAME (`stage === 1`), not every stage. (Was unconditional → it
+stripped the dual fighter on every advance.)
+
+### 14.3 Per-stage AND per-rank fly-in caravans
+
+`buildWaveStream(stage, rank)` now ports the real `c_25A2` lookup
+(gg1-3.s:1170-1235): stage wrap (`while >0x17 sub 4`), then
+`off = d_combat_stg_dat_idx[rank*17 + (stage − stage/4 − 1)]` → an 18-byte caravan
+row in `d_combat_stg_dat` (2-byte header + 5 wave triplets + 0xFF). Both tables are
+ported verbatim to `paths.js` (13 rows × 18; 4 ranks × 17), the `+0x80` constants
+left as JS expressions (1:1 with the `.db` lines). The triplet decode
+(member-1/member-2 path byte → `resolveWaveByte`) is unchanged. **Stage 1 is a
+byte-exact regression** (pairs `[[0,0xC0],[1,1],[0x41,0x41],[0x40,0x40],[0,0]]`, 86 B).
+
+> **Indexing subtlety:** the fly-in indexes `d_combat_stg_dat_idx` by `rank*17`
+> **directly** (gg1-3.s:1197) — NOT through the `bmbr_stg_cfg_lut` rotation
+> `[1,2,3,0]` the difficulty table uses. So the clone's rank 3 reads idx ROW 3 for
+> fly-in but sub-table 0 for difficulty. Don't conflate them.
+
+### 14.4 Challenge stages — deferred (combat fallback)
+
+Stages 3/7/11/… (`(stage+1)%4==0`) are challenge bonus rounds in the source
+(separate `d_challg_stg_dat`, no-attack fly-through, hit-bonus tally). Deferred per
+decision. They fall through the combat path: `buildWaveStream` gives them a combat
+caravan, and their `bmbr_stg_cfg_dat` row carries **max_bombers = 0**, so the
+enemies fly in + settle but never attack — a safe, clearable "sit-and-shoot" stage,
+not the real fly-through. No softlock. **To add later:** the challenge data tables +
+the no-attack fly-through launcher branch + the hit counter + the
+"CHALLENGING STAGE / NUMBER OF HITS / PERFECT!" screens.
+
+### 14.5 Still deferred
+- **Level-token badges** (the stage-count flags) — HUD / step 11.
+- **Real life-loss / game-over** (respawn is unconditional).
+
+### 14.6 Verification (deterministic stepping + render sample)
+- `buildWaveStream(1,3)` == the old stage-1 stream (86 B, exact); `(2,3)` and
+  `(3,3)` give distinct correct caravans (rows 1 and 4).
+- Stepping `gameController.update` with the formation cleared: step 0 → 'stageClear';
+  step 1 → stage 2; step 91 → 'stageStart' (90-frame pause); `twoShip` stays true;
+  48 enemies re-armed to 'pending'; stage-2 waveStream rebuilt (86 B).
+- `gameController.render` lights 156 px in the "STAGE n" band when 'stageClear', 0 px
+  when 'playing' (gated). Visual confirmed: "STAGE 2" centered, ship visible.

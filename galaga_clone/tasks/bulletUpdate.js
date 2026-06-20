@@ -8,14 +8,20 @@
 // 1-frame lag.
 //
 //   dY = 6 px/frame upward          (gg1-5.s:927–970, max value)
-//   despawn at canvas Y < 40        (gg1-5.s:996–1000)
+//   despawn at canvas Y < 0         (gg1-5.s:996–1000)
 //   AABB: |dY| ≤ 3, |dX| < 6        (gg1-5.s:1094–1119, 1-ship mode)
 //
 // On hit: enemy.hitFlag = true; CPU0's f_1DB3 (enemyStatus) reads it on
 // its own tick and transitions the enemy to dead (gg1-2_fx.s:1500–1519).
 
 const BULLET_DY   = 6;
-const Y_OFFSCREEN = 40;
+// Despawn threshold. Z80 disables the rocket at SPRITE_Y < 40 (gg1-5.s:996-997);
+// canvas_Y = sprite_Y − 40, so that is canvas_Y < 0 — the bullet travels the
+// whole playfield to the top edge. (Was 40: the Z80's sprite-Y threshold used
+// directly as a canvas threshold dropped the −40, so bullets vanished at Y=40 —
+// just below the boss row at Y=36 and the top row at Y=20, making both
+// effectively unhittable in formation. Caught playtesting 2026-06-21.)
+const Y_OFFSCREEN = 0;
 const COLL_DX     = 6;
 const COLL_DY     = 3;
 
@@ -40,7 +46,12 @@ export function update(state) {
         // in step 8 phase 8f). Now bullets correctly hit enemies wherever
         // they actually are on screen.
         for (const e of state.enemies) {
-            if (!e.alive || e.hitFlag) continue;
+            // Skip 'pending' (not yet flown in): the else-branch below would test
+            // its FORMATION SLOT, making the empty slot hittable — so the player
+            // could kill a bug by shooting the spot it will land in (very visible
+            // on a fresh stage's fly-in). Only on-screen enemies (formation /
+            // flying / homing) are valid targets. 'dead' is covered by !e.alive.
+            if (!e.alive || e.hitFlag || e.state === 'pending') continue;
 
             let ex, ey;
             if (e.state === 'flying' || e.state === 'homing') {

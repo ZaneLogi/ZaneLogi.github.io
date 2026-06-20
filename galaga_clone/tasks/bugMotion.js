@@ -603,14 +603,16 @@ export function launchEnemyAttack(state, objectId, attackBytes, negateOverride, 
         ? negateOverride
         : (objectId & 0x02) !== 0;
 
-    // Phase E INT-7: F6 spawn-arming workaround removed. Bombs are now
-    // armed by the F6 FREE_FLIGHT token at offset 34 (yellow) when it
-    // actually fires inside the FD JUMP loop. In normal mode (most of
-    // stage 1), FA at offset 17 jumps to the FB tail before reaching F6
-    // — so attackers don't drop bombs unless cont_bmb has kicked in
-    // (≤5 enemies left). Matches Z80 stage 1 behavior.
-    e.bombCounter = 0;
-    e.bombEnable  = 0;
+    // Z80 j_108A (gg1-2.s:314-323): EVERY attack launch arms the bomb counter
+    // (0x0E = 0x1E) AND the enable bitmask (0x0F = b_92C0[8] = bombDropFlags, set
+    // whenever enemies are enabled — i.e. all through a stage). So every diving
+    // enemy can bomb, not just continuous-bombing-loop ones — F6 merely RE-arms it
+    // for the loop. (This previously set 0/0 on the belief that the Z80 only bombs
+    // in the cont-bmb endgame — WRONG: j_108A arms at launch, so normal dives bomb.
+    // Caught playtesting 2026-06-21: no bombs even at rank D. The drop is still
+    // gated downstream by the enable bitmask + Y≥152 + fire-button, case_0DF5.)
+    e.bombCounter = 0x1E;
+    e.bombEnable  = state.bombDropFlags;
 
     return e;
 }

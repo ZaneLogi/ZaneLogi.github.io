@@ -142,11 +142,24 @@ export const state = {
     //             INT-2a: builder returns the same 3-pair wave for any stage.
     //             INT-2b: real per-stage variation from d_combat_stg_dat.
     // rank  = difficulty rank (Z80 b_mchn_cfg_rank, 0-3 from DIP switches).
-    //         Default 3 = rank A (easiest, the typical Galaga DIP default).
-    //         Per bmbr_stg_cfg_lut: rank 3 → sub-table 0, rank 0 → 1, etc.
+    //         Raw value → displayed letter (str_3A68 "B/C/D/A"): 0=B, 1=C, 2=D, 3=A.
+    //         Difficulty by the data curve: A ≈ B (easy) < C < D (hardest) — D
+    //         reaches maxBmb=4 + the fastest ramp by stage 8, and bumps to 3
+    //         simultaneous bombers after 30 s even on stage 1 (A stays at 2). Each
+    //         rank also flies DIFFERENT fly-in caravans from stage 4+ (the idx is
+    //         rank-direct, gg1-3.s:1197). Difficulty PARAMS use the rotated
+    //         sub-table (bmbr_stg_cfg_lut: rank 3→sub-table 0, 0→1, 1→2, 2→3).
+    //         Default 3 = rank A. (Was briefly set to 2 = rank D to exercise the
+    //         harder bug behavior; reverted back to A.)
     //         TODO: connect to a DIP-switch UI (step 11+).
     stage:     1,
     rank:      3,
+
+    // Stage-clear splash timer (frames). Set when a stage is cleared; the
+    // 'stageClear' state renders "STAGE n" while it counts down, then advances
+    // to 'stageStart'. Mirrors the Z80 stg_init_splash pause (game_tmrs[2]=3 at
+    // 2 Hz ≈ 1.5 s; task_man.s:227-242). INT-5.
+    stageClearTimer: 0,
 
     // ── Per-stage difficulty params (Z80 ds_new_stage_parms) ──────────────
     // 11-element Uint8Array populated by gameController.stgInitEnv via

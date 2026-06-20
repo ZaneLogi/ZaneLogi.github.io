@@ -321,28 +321,62 @@ at the live slot and the snap is seamless. The home *target* can stay static
 (matches Z80 `0x06/0x07`); only the live offset on the *position* is
 missing.
 
-## 6. F6 spawn-arming workaround
+## 6. Bomb arming — ⚠ CORRECTED 2026-06-21 (the "no normal-dive bombing" claim was WRONG)
 
-**Status: ✅ removed in Phase E INT-7.** With FD JUMP and FA LOOP_TOP
-implemented (§7), F6 now fires at its proper offset inside the inner
-attack loop. In normal-mode stage 1 (most of the round), FA at offset
-17 jumps directly to the FB tail before reaching F6, so attackers don't
-drop bombs at all — matching Z80 behavior. In late stage 1 (≤5 enemies
-left, cont_bmb active), FA falls through, the path continues to F6
-(offset 34, arms bombs), then FD JUMP loops the inner section so F6
-re-fires every loop iteration.
+**This section previously claimed attackers don't bomb on a normal dive — only
+in the cont_bmb endgame loop via `F6`. That is WRONG, and it made the clone never
+drop bombs in normal play.** The real arming is at **attack LAUNCH**, not `F6`:
 
-Previously (pre-Phase E):
-```js
-// Phase 8e simplification: ... bombs at spawn ...
-e.bombCounter = 0x1E;
-e.bombEnable  = 0xFF;
-```
-Now:
-```js
-e.bombCounter = 0;
-e.bombEnable  = 0;
-```
+- **`j_108A` (gg1-2.s:314-323) arms EVERY diving enemy at launch:** `0x0E = 0x1E`
+  (the bomb countdown) and `0x0F = b_92C0[8]` (= `bombDropFlags`, the per-stage
+  enable bitmask) whenever enemies are enabled (i.e. all through a stage). So
+  **every dive can bomb.** `F6` (`case_0BA8`) only **re-arms** the same fields
+  inside the continuous-bombing loop — it is NOT the only arming.
+- **The bomb counter `0x0E` free-runs:** `case_0DF5` (gg1-5.s:2345) does
+  `dec 0x0E` **every frame** for every diving enemy and, when it hits 0, shifts
+  the enable mask (`srl 0x0F`) and drops if the shifted bit was 1 AND the bomber
+  is low enough AND fire is active. (Reload from `b_92E2[0]` = the stage-header
+  byte = `0x14` on stage 1.)
+
+**The three fixes (2026-06-21), caught playtesting "no bombs even at rank D":**
+1. **Restore launch-arming** (`bugMotion.launchEnemyAttack`): `bombCounter = 0x1E`,
+   `bombEnable = state.bombDropFlags` — matching `j_108A`. (The Phase-E code set
+   `0/0` on the wrong belief above; ironically the *older* `0x1E/0xFF` was closer,
+   just with too many enable bits.)
+2. **Drop Y-gate conversion** (`bombUpdate`): Z80 drops at **sprite_Y ≥ 152**
+   (`case_0DF5` `cp #152>>1` on `0x01(ix)` = sprite_Y>>1); `canvas = sprite − 40`,
+   so the gate is **canvas Y ≥ 112**. Was `152` used as a canvas value (the −40
+   dropped — same bug class as the bullet despawn), making bombers need to dive
+   40px deeper than they ever do.
+3. **Hold-set-bit DEVIATION** (`bombUpdate`) — **see §6.1**.
+
+So: normal dives now drop their 1-2 bombs (stage-1 `bombDropFlags` is `0x03`/`0x01`
+= 1-2 bits, **verified faithful** against `d_0909` + `c_08BE`), and the endgame
+loop bombs continuously.
+
+### 6.1 ⚑ FIDELITY FLAG — attack-dive descent vs the bomb timing (DEVIATION, open)
+
+Even after fixes 1+2, **no bomb dropped**: the Z80 consumes an enable bit on
+*every* counter tick **regardless of height** (`srl 0x0F` before the Y-check),
+which only works if the bomber is already low (sprite_Y ≥ 152) by the first
+couple of checks (launch counter `0x1E` = 30 frames, then `0x14` = 20). The
+clone's attack-dive descent is a touch **slower / curvier** — on stage 1 the
+bomber is still above canvas Y=112 on the frame-29/49 checks (measured: bee
+≈ y87/y96, moth ≈ y59/y68, crossing y112 only around frame ~85) — so the tiny
+1-2-bit mask depletes before it gets low and nothing drops.
+
+**Current deviation (`bombUpdate`):** a *set* enable bit is **held** until the
+bomber is actually low enough (`y ≥ 112`), so each set bit yields a bomb instead
+of being wasted high. Clear bits are consumed immediately (as the Z80 does). Net:
+each diving enemy drops ≈ its mask's set-bit count per dive.
+
+**Why this is a flag, not a clean port:** the *real* faithful behavior is the
+Z80's unconditional shift — which implies the **attack-dive descent should be
+faster/steeper** so the bomber is low by the early checks. The descent timing was
+verified for the *fly-in*, not the *attack dive*. **Open item:** compare the
+attack-dive descent profile against MAME (the data-segment velocity + the initial
+`12 18 1e`/`12 18 1d` turn that keeps the bomber high early); if the descent is
+made faithful, revert the §6.1 deviation and let the mask shift unconditionally.
 
 ## 7. Token handlers (attack context)
 
@@ -352,7 +386,7 @@ counting. For attack paths specifically:
 | Token | Z80 case | Status in our port |
 |-------|----------|---------------------|
 | 0xF3 BREAK_TARGETED | case_0A01 (gg1-5.s:1661) | ✅ **PORTED (2026-06-18).** Player-targeted turn-hold: reads player X, computes `(playerX−mothX)/4` (signed, mirrored by negateRotation), biases +0x18, clamps [0,0x2F], `/6` → bucket 0-7, and writes `LUT[bucket]` into the segment **duration** (0x0D), then continues the current heading. **Doc correction:** earlier rows here said F3 does a "LUT lookup → *sub-path*". It does NOT select a sub-path — it picks a turn-HOLD DURATION (`0x0D(ix)`) and `jp l_0BFF_flite_pth_skip_load` (gg1-5.s:1715) keeps the prior segment's vx/vy/rotRate. The longer hold of the preceding `0x12,0xFA,..` (rotRate −6) turn = bigger hook toward the player. See `bugMotion.js` loadSegment `0xF3` block. |
-| 0xF6 FREE_FLIGHT | case_0BA8 (gg1-5.s:1963) | ✅ **FULLY PORTED (2026-06-18).** All 3 effects: (1) sets heading `0x04/0x05 = (arg, mirrored by negateRotation) << 2` (arg×4); (2) bomb counter `0x0E = 0x1E`; (3) bomb-enable bitmask `0x0F = b_92C0[8]` (= `state.bombDropFlags`, was hardcoded `0xFF`). Earlier the heading-redirect was skipped — now done. |
+| 0xF6 FREE_FLIGHT | case_0BA8 (gg1-5.s:1963) | ✅ **FULLY PORTED (2026-06-18).** All 3 effects: (1) sets heading `0x04/0x05 = (arg, mirrored by negateRotation) << 2` (arg×4); (2) bomb counter `0x0E = 0x1E`; (3) bomb-enable bitmask `0x0F = b_92C0[8]` (= `state.bombDropFlags`). **NOTE (2026-06-21):** F6 is NOT the primary bomb arming — `j_108A` (gg1-2.s:314-323) arms **every** dive at launch with the same `0x0E`/`0x0F`; F6 only **re-arms** inside the cont_bmb loop. The earlier "no normal-dive bombing" reading was wrong — see §6. |
 | 0xF7 ATTACK_TURN | case_0B98 (gg1-5.s:1947) | ✅ correct skip (transient-only behavior; not used for non-transient bombers) |
 | 0xF8 | case_0B87 (gg1-5.s:1929) | ✅ **PORTED (2026-06-18).** In the attack/home context this is NOT "BEAM_ON" — it repositions the bug's **Y to the top** ("flew through the bottom of the screen to the top"): Z80 sets `0x01(ix) = 0x0138>>1 = 0x9C`; `rawYToCanvasY(0x9C) = 1` (top edge). **0-arg** token (the old TOKEN_ARG_BYTES.F8=1 was wrong, §7c). Pairs with F9 + the FB tail. See `bugMotion.js` `0xF8` block. |
 | 0xF9 (case_0B5F) | gg1-5.s:1907 | ✅ **PORTED (2026-06-18).** Sets the bug's **X to its home-column** coordinate (`0x03(ix) = ds_hpos_spcoords[col]/2 → rawXToCanvasX = e.homeX`), so it re-enters above its slot. 0-arg; skips the cocktail flip-screen branch + cont_bmb dive-sound (unmodelled). With F8, the moth re-appears at `(homeX, top)` then FA→FB homes it down — the faithful "dive off bottom → re-enter top → fly down to formation" loop. |
@@ -566,8 +600,10 @@ max-bombers pressure.
   from `aliveOnScreen < newStageParms[7]` and `tasks.playerFire`.
 - Refactored loadSegment to take `state` so token handlers can read
   state-dependent flags.
-- F6 spawn-arming workaround removed. Bombs now arm at the path's F6
-  offset, which fires only when cont_bmb is active (late stage 1).
+- F6 spawn-arming workaround removed. ⚠ **This was a regression — corrected
+  2026-06-21:** bombs are armed at attack LAUNCH (`j_108A`), not only at F6, so
+  removing the launch-arming made the clone never bomb in normal play. Restored.
+  See §6.
 - IMPORTANT: FD and FA had to be implemented together. FD alone would
   loop attack paths forever on stage 1 (no FB inside the loop); FA's
   conditional jump is what gives early-stage attackers a way out via
@@ -597,7 +633,7 @@ px. See §5b for the full mechanism + measurements.
 - ✅ FB TURN_HOME homing tracks the live oscillating formation (INT-7 — the `case_0AA0` + `case_2422` offset mechanism is ported; bug lands on the drifting slot, no snap-jump). See §5b.
 - ✅ FD JUMP + FA LOOP_TOP correct (Phase E INT-7)
 - ✅ MAX_BOMBERS sourced from per-stage data (Phase A INT-7)
-- ✅ F6 bomb-arming fires at proper path offset (Phase E INT-7)
+- ✅ Bombs armed at attack LAUNCH (`j_108A`) + re-armed by F6 in the cont_bmb loop; drop Y-gate fixed to canvas ≥ 112; normal dives now bomb (2026-06-21, §6). ⚑ attack-dive-descent deviation flagged (§6.1)
 - ✅ Initial-timer values match Z80 c_2C00 constants (Phase B)
 - ✅ Dispatcher iteration order matches Z80 b_92C0 traversal (Phase B)
 - ✅ Reload values dynamic via f_0857 lookup chain (Phase C)
@@ -884,7 +920,9 @@ case_bmbr_boss select ── capture turn? ────────────�
 
 Gates 1–2 decide **which dive** (capture vs escort) and **where the capture dive
 aims**; the beam/pull/rescue machine downstream of the halt cue is
-`research_boss_capture.md`'s domain. On a normal stage the escort sortie's `FA`
-homes the squad before `F6`, so boss + wingmen + paired slave all dive **without
-bombing** — matching the Z80 (firing only in the continuous-bomb endgame; in the
-clone the *glued* slave never fires at all, D3).
+`research_boss_capture.md`'s domain. **Bombing (corrected 2026-06-21, §6):** boss +
+wingmen are armed at attack launch (`j_108A`) like any diving enemy, so they CAN
+bomb on a normal escort sortie — `FA` homing before `F6` only skips the cont_bmb
+*re*-arm, not the launch arm. (The earlier "dive without bombing — matching the
+Z80" note here was the same wrong reading.) The clone's **glued slave** still never
+fires — it isn't a path-runner so it never arms (deviation D3).

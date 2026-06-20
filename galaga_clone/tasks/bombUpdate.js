@@ -17,8 +17,13 @@
 
 // ── Drop-logic constants ──────────────────────────────────────────────
 const DROP_RELOAD       = 0x14;   // Z80 b_92E2[0] reload value (~20 frames)
-const DROP_Y_THRESHOLD  = 152;    // Z80 cp #152>>1 — only drop when below
-                                  // mid-screen (canvas Y matches Z80 Y here)
+// Only drop when the bomber is low enough on screen. Z80 case_0DF5 (gg1-5.s:2351-2352)
+// compares 0x01(ix) (= SPRITE_Y >> 1) against 152>>1 — i.e. sprite_Y >= 152. Since
+// canvas_Y = sprite_Y − 40, that is canvas_Y >= 112. (Was 152 with a comment that
+// wrongly assumed canvas==sprite here — the −40 was dropped, same bug class as the
+// bullet despawn. 152 canvas is 40px too deep; stage-1 dives only reach ~y173, so
+// the drop window was too narrow and bombs almost never fired.)
+const DROP_Y_THRESHOLD  = 112;
 
 // ── Movement / collision constants ────────────────────────────────────
 // Y velocity alternates 2 / 3 px/frame by frame parity (Z80 line 1740).
@@ -53,14 +58,28 @@ export function update(state) {
 
         e.bombCounter -= 1;
         if (e.bombCounter > 0) continue;        // not yet at zero
+        e.bombCounter = DROP_RELOAD;             // reload the per-drop countdown
 
-        // Counter hit zero — shift enable bits, may drop, reload.
-        const willFire   = (e.bombEnable & 1) !== 0;
-        e.bombEnable     = e.bombEnable >>> 1;   // shift right; eventually depletes
-        e.bombCounter    = DROP_RELOAD;
-
-        // Y-position gate (matches Z80: only drop when below Y=152).
-        if (!willFire || e.y < DROP_Y_THRESHOLD) continue;
+        // Decide whether this tick drops a bomb, consuming the enable bitmask.
+        //
+        // Z80 case_0DF5 (gg1-5.s:2348-2353) does `srl 0x0F` (shift the enable
+        // bits) EVERY time the counter hits zero, regardless of height — so a SET
+        // bit is wasted if the bomber is still high. That relies on the bomber
+        // being low (sprite_Y >= 152) by the first couple of checks. Our attack-
+        // dive descent is a touch slower/curvier, so on stage 1 the bomber is
+        // still above the drop line (canvas Y < 112) on those early checks and the
+        // tiny per-stage mask (1-2 bits) depletes before it gets low → no bomb
+        // ever drops. **DEVIATION:** hold a SET bit until the bomber is actually
+        // low enough, so each set bit yields a bomb instead of being wasted high.
+        // (Consume clear bits immediately, as the Z80 does.) Pending a deeper
+        // attack-dive-descent vs MAME fidelity pass — see research_attack_paths.md.
+        if (e.bombEnable === 0) continue;        // no drops left this dive
+        if ((e.bombEnable & 1) === 0) {          // clear bit → consume, no drop
+            e.bombEnable >>>= 1;
+            continue;
+        }
+        if (e.y < DROP_Y_THRESHOLD) continue;    // set bit but too high — keep it for a later check
+        e.bombEnable >>>= 1;                     // consume the set bit on the actual drop
 
         // Allocate first free bomb slot.
         const slot = state.bombs.find(b => !b.alive);

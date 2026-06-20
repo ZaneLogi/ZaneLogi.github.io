@@ -40,6 +40,7 @@
 
 import { buildWaveStream, loadStageParms } from '../paths.js';
 import { resetWaveState }                  from './launchAttackWave.js';
+import { charCanvas }                      from '../gfx/resource.js';
 
 // Per-state task-enable configurations.
 // Applied ONLY on state transition — so dev-panel toggles within a state
@@ -113,12 +114,56 @@ const STATE_TASKS = {
         fighterCaptured:     false,   // step 9+
     },
 
+    // 'stageClear' (INT-5): the brief between-stages pause. The formation is
+    // cleared (no enemies) and the player is frozen while the "STAGE n" splash
+    // shows; only the starfield keeps moving. The ship still RENDERS (render runs
+    // regardless of enable) so it stays visible. Mirrors the Z80 stg_init_splash
+    // window (task_man.s:227-242).
+    'stageClear': {
+        starfield:           true,
+        formationOscillate:  false,
+        formationPulse:      false,
+        objectStates:        false,
+        bugMotion:           false,
+        enemyStatus:         false,
+        bombUpdate:          false,
+        bomberConfig:        false,
+        launchAttackWave:    false,
+        playerMove:          false,
+        playerFire:          false,
+        bulletUpdate:        false,
+        captorDive:          false,
+        tractorBeam:         false,
+        pullShip:            false,
+        fighterCaptured:     false,
+    },
+
     // Defined in §5c JS port state diagram — wired in later INT phases:
-    //   'stageStart'  → INT-2  (stage data + builder)
-    //   'stageClear'  → INT-5  (clear detection + cycling)
     //   'playerDying' → INT-4  (lifecycle bug fixes + respawn)
     //   'gameOver'    → INT-4  (game-over flow)
 };
+
+// Stage-clear splash hold (frames). Z80 stg_init_splash sets game_tmrs[2]=3 and
+// busy-waits to 0 (task_man.s:227-242); at 2 Hz that's ~1.5 s = 90 frames @ 60 Hz.
+const STAGE_SPLASH_FRAMES = 90;
+
+// Count of enemies still "on screen" for stage-clear detection — the JS analog
+// of Z80 b_bugs_actv_nbr (gctl_supv_stage, game_ctrl.s:1311). Counts only enemies
+// in an ACTIVE on-screen state: alive, not 'dead', not 'pending'.
+//
+// 'pending' is EXCLUDED on purpose: the stage roster has 48 slots but only 40 ever
+// fly in (the wave stream covers 40 object IDs — the other 8, IDs 0x00/02/04/06 and
+// 0x38/3a/3c/3e, are never launched and sit in 'pending' forever). Counting those
+// would peg the total at 8 and the stage could never clear. 'playing' is entered
+// only after fly-in completes, so any 'pending' enemy here is one of those phantom
+// slots — never a still-to-arrive one.
+function activeEnemyCount(state) {
+    let n = 0;
+    for (const e of state.enemies) {
+        if (e.alive && e.state !== 'dead' && e.state !== 'pending') n += 1;
+    }
+    return n;
+}
 
 function applyStateTasks(state) {
     const cfg = STATE_TASKS[state.gameState];
@@ -138,8 +183,9 @@ function applyStateTasks(state) {
 //   - c_12C3 formation positions  → positions hardcoded in state.js _ROWS
 //   - bomber-boss sprite codes    → no boss-capture in stage 1
 function stgInitEnv(state) {
-    // Z80: c_25A2 → builds the runtime wave table at ds_8920.
-    state.waveStream       = buildWaveStream(state.stage);
+    // Z80: c_25A2 → builds the runtime wave table at ds_8920. Per-stage AND
+    // per-rank caravan now (was stage-1-only) — see paths.buildWaveStream.
+    state.waveStream       = buildWaveStream(state.stage, state.rank);
     state.waveStreamCursor = 0;
 
     // Z80: c_2C00 (new_stage.s:28-119) → load per-stage difficulty
@@ -196,14 +242,21 @@ function stgInitEnv(state) {
 
     state.waveLauncherFlyInDone = false;
 
-    // Clear any captured-ship slave + capture-machine state from a prior stage.
+    // Clear any captured-ship slave + capture-machine state from a prior stage
+    // (a new stage never starts mid-capture).
     state.capturedSlave           = null;
     state.capture.pullGate        = 0;
     state.capture.fighterCaptured = 0;
     state.capture.rescueStage     = 0;
     state.player.controlLocked    = false;
     state.player.captureFrame     = null;
-    state.player.twoShip          = false;
+
+    // twoShip is a NEW-GAME reset, NOT a per-stage one: the Z80 never clears
+    // _b_2ship on a stage change (only at game/demo init, on a kill, or never),
+    // so the dual fighter CARRIES OVER into the next stage. Reset it only when a
+    // fresh game begins (stage 1). (INT-5 — was unconditional, which stripped the
+    // dual fighter on every advance.)
+    if (state.stage === 1) state.player.twoShip = false;
 
     // Reset the formation drift/breathe lifecycle for the new stage: start
     // oscillating from center, clear the stop-request, reset the pulse.
@@ -268,6 +321,13 @@ export function update(state) {
         if (state.gameState === 'stageStart') {
             stgInitEnv(state);
             state.gameTimers[3] = 5;   // c_tdelay_3 mechanism; count=5 tuned by experiment (ROM literal=3) — see above
+        } else if (state.gameState === 'stageClear') {
+            // Arm the "STAGE n" splash pause. The stage number is already correct
+            // here: a new game enters from 'attract' with state.stage = 1; a stage
+            // clear bumped it in the 'playing' case (Z80 stg_init_splash _b_stgctr++).
+            // On timeout we hand off to 'stageStart' (re-runs stgInitEnv for
+            // state.stage → re-arms the formation + its fly-in).
+            state.stageClearTimer = STAGE_SPLASH_FRAMES;
         }
 
         _lastState = state.gameState;
@@ -281,12 +341,13 @@ export function update(state) {
     // Per-state per-tick logic.
     switch (state.gameState) {
         case 'attract':
-            // Wait for Space (rising edge) to start the game. Browser has
-            // no coin slot — we collapse Z80's READY state into the start
-            // trigger and go straight into stageStart (the splash + fly-in
-            // window).
+            // Wait for Space (rising edge) to start the game. Browser has no coin
+            // slot — we collapse Z80's READY state into the start trigger. Route
+            // through 'stageClear' so a new game opens with the "STAGE 1" splash
+            // (faithful: stg_init_splash shows "STAGE n" at game start too), then
+            // fly-in. state.stage is already 1 here → no increment on game start.
             if (state.input.fireEdge) {
-                state.gameState = 'stageStart';
+                state.gameState = 'stageClear';
             }
             break;
 
@@ -308,11 +369,54 @@ export function update(state) {
             break;
 
         case 'playing':
-            // INT-4 / INT-5 will add death + stage-clear transitions. For
-            // now just let attack mode run.
+            // Stage-clear detection (Z80 gctl_supv_stage, game_ctrl.s:1306-1317):
+            // the round is cleared once no enemies remain on screen. We reach
+            // 'playing' only after fly-in completes, so the wave launcher is
+            // already done (the Z80 `!f_2916` half is implicit). A capture in
+            // progress (or a captured slave still in play) means the boss is
+            // still alive, so activeEnemyCount covers it — but guard explicitly.
+            if (activeEnemyCount(state) === 0 &&
+                !state.capturedSlave && !state.captureActive) {
+                state.stage   = (state.stage + 1) & 0xFF;   // advance (Z80 stg_init_splash _b_stgctr++)
+                state.gameState = 'stageClear';
+            }
+            // INT-4 will add the death / game-over transition.
+            break;
+
+        case 'stageClear':
+            // Hold the "STAGE n" splash, then advance. stage++ already happened
+            // on entry; 'stageStart' re-runs stgInitEnv for the new stage.
+            if (state.stageClearTimer > 0) {
+                state.stageClearTimer -= 1;
+            } else {
+                state.gameState = 'stageStart';
+            }
             break;
 
         // Other states (declared in STATE_TASKS but not yet transitioned to)
         // get wired in later INT phases.
+    }
+}
+
+// ── "STAGE n" splash (Z80 stg_init_splash, task_man.s:204-211) ─────────────
+// ASCII → char tile code, the c_string_out formula (gg1-2.s:1208-1217):
+//   code = ascii − 0x30 ; −7 if ≥ 0x11 ; space → 0x24.
+// Digits '0'-'9' → 0x00-0x09, 'A'-'Z' → 0x0A-0x23. (Mirrors fighterCaptured.js's
+// charCode; kept local so the two text tasks stay independent.)
+function charCode(ch) {
+    if (ch === ' ') return 0x24;
+    let a = ch.charCodeAt(0) - 0x30;
+    if (a >= 0x11) a -= 7;
+    return a;
+}
+const SPLASH_PAL = 3;   // char palette (matches the FIGHTER CAPTURED text)
+
+export function render(state) {
+    if (state.gameState !== 'stageClear') return;
+    const codes = [...('STAGE ' + state.stage)].map(charCode);
+    const x0    = (224 - codes.length * 8) >> 1;   // centered
+    const ctx   = state.ctx;
+    for (let i = 0; i < codes.length; i++) {
+        ctx.drawImage(charCanvas(codes[i], SPLASH_PAL), x0 + i * 8, 128);
     }
 }

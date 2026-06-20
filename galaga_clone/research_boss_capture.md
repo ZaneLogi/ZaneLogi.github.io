@@ -219,25 +219,28 @@ join, no F6), **`db_flv_0411`** (paired dive with boss — the rescue dive), and
 #### 3.3.3 Does the slave fire? — it fires *exactly like an escort* (corrected)
 
 **The earlier "slave never fires" claim was mechanistically wrong.** On the
-paired dive the slave flies `db_flv_0411`, which **contains `F6`** (the bomb-arm
-token; gg1-5.s:348, 352). There is **no captured-ship firing exclusion** — the
-bomb-drop gate (gg1-5.s:2345-2349) checks only the per-object counter `0x0E` /
-enable mask `0x0F` (armed by `F6`) plus position, identical for any attacker. So
-the slave drops bombs under the **same conditions as the boss and wingmen on that
-sortie**.
+paired dive the slave flies `db_flv_0411`, an ordinary escort sortie. There is
+**no captured-ship firing exclusion** — the bomb-drop gate (`case_0DF5`,
+gg1-5.s:2345-2349) checks only the per-object counter `0x0E` / enable mask `0x0F`
+plus position, identical for any attacker. So the slave drops bombs under the
+**same conditions as the boss and wingmen on that sortie**.
 
-In *practice* that means **no firing on a normal stage**: the escort sortie's
-`FA` gate homes the whole group before reaching `F6`, so boss + wingmen + slave
-all dive without bombing (routine bombing comes from the *separate* yellow/red
-attack dives). Firing only happens in the continuous-bombing endgame (few enemies
-left), where the slave fires like any escort. `db_flv_cboss` and
-`db_fltv_rogefgter` have no `F6` → no fire on the carry-home or standalone-rogue
-paths either.
+> **⚠ CORRECTED 2026-06-21** (the bombing-arming misconception — full analysis in
+> `research_attack_paths.md` §6). This section previously claimed "no firing on a
+> normal stage — the escort sortie's `FA` homes the group before reaching `F6`".
+> That is WRONG: bombs are armed at attack **LAUNCH** by `j_108A` (gg1-2.s:314-323,
+> `0x0E=0x1E` / `0x0F=b_92C0[8]`), NOT by `F6`. `F6` only **re-arms** inside the
+> cont_bmb loop. So boss + wingmen on a normal escort sortie **do** bomb (every
+> diving enemy is armed at launch), and the carry-home `db_flv_cboss` /
+> standalone-rogue paths bomb too (the launch arm doesn't depend on the path
+> containing `F6`).
 
-**Clone consequence:** do **not** special-case the slave as a non-firer. Make it
-an escort on `db_flv_0411`; the clone's existing escort + bomb code
-(`bombUpdate.js` + `F6` arming — **fully implemented and correctly gated**, which
-is why stage 1 shows no enemy bombing) then yields correct firing for free.
+**Clone consequence:** the slave is the exception only because of the clone's
+**glued-slave deviation (D2/D3)** — it's positioned by `fighterCaptured`, not run
+as a `db_flv_0411` path-runner, so `launchEnemyAttack` (which does the j_108A-style
+launch arming) is never called for it → it never arms → never fires. That's a
+*clone* limitation, not a Z80 "no normal-stage bombing" rule. If the slave were
+made a real path-runner it would bomb like any escort.
 
 #### 3.3.4 "FIGHTER CAPTURED" text — render the real glyphs (Decision G11)
 
@@ -335,8 +338,18 @@ the clone yet* — 4d builds it.
   firing under the usual gates (§3.3.3). The paired slave flies **this** path
   (`l_1CE3`/`l_1D16`, §3.3.2).
 - **`db_fltv_rogefgter`** standalone-rogue path (gg1-5.s:356-357) —
-  `12 18 14 12 03 2a 12 10 40 12 01 20 12 fe 78 ff` (no F6 → no fire). Flown only
-  by the no-boss-available fallback (`l_1D25`, §3.3.2 / G21). **Not yet ported.**
+  `12 18 14 12 03 2a 12 10 40 12 01 20 12 fe 78 ff`. Flown only by the
+  no-boss-available fallback (`l_1D25`, §3.3.2 / G21). **Not yet ported.**
+
+> **⚠ Firing reasoning corrected 2026-06-21** (the "Contains F6 → fires" / "no F6
+> → no fire" notes above were wrong): bombs are armed at attack **LAUNCH** by
+> `j_108A` (`0x0E`/`0x0F`), **not** by `F6` in the path — see
+> `research_attack_paths.md` §6. So firing depends on **whether the path-runner is
+> launched** (`c_1079`/`j_108A`), not on `F6` presence: `db_flv_0411` (escort/rogue
+> launches) **do** arm and fire on normal dives; `F6` only re-arms in the cont_bmb
+> loop. The one genuine "no fresh fire" case is **`db_flv_cboss`** carry-home —
+> loaded into the boss's slot by `f_2222 l_2305`, **not** a `j_108A` launch, so it
+> keeps whatever arm state was left (no new launch arm).
 
 ---
 
@@ -370,7 +383,7 @@ re-read before/while implementing.**
 | G14 | `f_2000` rescue (spin→land→dock) | Not ported. | ❌ → 4d |
 | G15 | 2-ship mode (`_b_2ship`): dual fire, double-wide hitbox, two sprites, docking offsets | Nothing exists. The biggest single piece of 4d. | ❌ → 4d |
 | G16 | captured-ship object identity | **DECIDED: normal enemy object flagged `isCapturedSlave`** (reuse render/collision; the flag distinguishes shoot-slave=lose vs shoot-boss=rescue, and marks which enemy to convert on rescue). After rescue it's deleted and replaced by a 2nd *player* ship — no "captured friend" state. | ✅ → 4c-ii |
-| G17 | Slave firing | **NOT a special case — it's an escort (corrected §3.3.3).** On the paired dive the slave flies `db_flv_0411` (has `F6`; gg1-5.s:348/352); the bomb gate is identical for any attacker. Clone's `bombUpdate.js` + `F6` arming are **fully implemented + gated** (stage 1 shows no fire because `FA` homes before `F6`). Model slave as escort → correct firing for free. | ✅ no special work |
+| G17 | Slave firing | **NOT a special case — it's an escort (corrected §3.3.3).** On the paired dive the slave flies `db_flv_0411`; the bomb gate is identical for any attacker. **⚠ corrected 2026-06-21:** bombs arm at attack LAUNCH (`j_108A`), not `F6`, so normal dives DO bomb (the old "stage 1 shows no fire because FA homes before F6" was wrong — see `research_attack_paths.md` §6). The clone's slave is the exception only via the **glued-slave deviation (D3)** — never run as a path-runner, so never armed. | ✅ no special work |
 | G18 | Slave dives WITH its boss (squad pairing) | **The rescue dive — deliberate, via `l_1CE3`** (gg1-2_fx.s:1221-1248): boss activation queues the standby slave into `bmbr_boss_pool` with the boss's `IY = db_flv_0411`; the pool drains them as one squad (§3.3.2). **NOT emergent / not an independent rogue dive.** Required for the rescue to be reachable. | ❌ → 4d |
 | G19 | Shoot the slave itself → lost forever | Bullet→`isCapturedSlave` special-case: remove the slave permanently (vs. shoot-boss = rescue). | ❌ → 4d |
 | G20 | Slave body → player contact kills player | Needs enemy-body→player collision (may not exist yet); on hit → respawn (no life-loss, Decision 2). | ❌ → 4d (or whenever body-collision lands) |
@@ -394,9 +407,11 @@ re-read before/while implementing.**
 6. **G16 — captured slave = normal enemy object flagged `isCapturedSlave`**;
    rescue deletes it and spawns a 2nd player ship. No "captured friend". §3.3.
 7. **Slave fires *like an escort*, not "never" (G17, corrected).** On the paired
-   dive it flies the escort path `db_flv_0411` (has `F6`); no firing exclusion.
-   Model it as an escort — the clone's existing (fully-implemented, gated) bomb
-   code yields correct firing for free. §3.3.3.
+   dive it flies the escort path `db_flv_0411`; no firing exclusion — bombs are
+   armed at attack LAUNCH (`j_108A`) like any dive (⚠ NOT only via `F6` / the
+   cont-bmb endgame — corrected 2026-06-21, `research_attack_paths.md` §6). In the
+   clone the slave is glued (D3), not a path-runner, so it never arms → never
+   fires; that's the deviation, not Z80 behavior. §3.3.3.
 8. **The paired squad dive IS the rescue dive and is in scope (G18, corrected).**
    `l_1CE3` queues the standby slave into the boss pool so it dives *with* the
    boss on `db_flv_0411`; the rescue (shoot the **blue, flying** boss while the
@@ -490,7 +505,7 @@ load-bearing checks were done by stepping `update()` directly):
 |---|---|---|---|
 | D1 | G16: slave = a normal `state.enemies` entry | **Dedicated `state.capturedSlave` object** | The fixed 48-enemy roster has no free slot 0/2/4/6 and the objectIds collide with the boss-attack scans; a separate object avoids accidental auto-launch. G16 benefits kept via explicit checks (bulletUpdate slave hit, fighterCaptured glue). |
 | D2 | G18: slave flies the boss's path `db_flv_0411` | **Slave glued to the boss's position** each frame | Simpler + the slave isn't a `state.enemies` path-runner. Net effect (dives with boss) identical. |
-| D3 | G17: slave fires like an escort | **Glued slave never fires** | Falls out of D2. Matches normal-stage play (escort sortie homes before F6); deviates only in the cont-bmb endgame, where the Z80 slave on `db_flv_0411` could bomb. Documented in `fighterCaptured.js`. |
+| D3 | G17: slave fires like an escort | **Glued slave never fires** | Falls out of D2 (positioned by `fighterCaptured`, not a `db_flv_0411` path-runner → `launchEnemyAttack`'s j_108A-style arming never runs for it). **⚠ corrected 2026-06-21:** the Z80 slave/escort bombs on EVERY dive (armed at launch by `j_108A`), so this deviates on every paired dive — NOT only in the cont-bmb endgame as previously stated. (See `research_attack_paths.md` §6.) Documented in `fighterCaptured.js`. |
 | D4 | captr_status as one named struct (§2) | **Split: `state.beam` (+0/+1/+2 render) + `state.capture` (+3/+4 + rescueStage)** | The working 4a/4b beam already lived in `state.beam`; lower-risk than refactoring it. Both documented as mirroring captr_status. |
 | D5 | `f_2000` exact rescue stages | **Simplified spin(36f) → land → dock-left-of-player → twoShip** | Faithful-in-effect; the exact Z80 stage timings/`captr_status+1` reuse weren't reproduced byte-for-byte. |
 | D6 | 2-hit boss scoring (bonus 1600/800/400) | **Not wired** | No scoring/HUD in the clone yet (step 11). The 2-hit + blue-render combat is in. |
