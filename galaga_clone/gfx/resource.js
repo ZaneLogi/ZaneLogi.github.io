@@ -74,6 +74,8 @@ function group(start, count, palIdx) {
 }
 
 export const colorPalettes = _palettes;
+// Total decoded 16×16 sprite shapes (sprite1 + sprite2 sheets) — for the viewer.
+export const SPRITE_SHAPE_COUNT = _tiles.length;
 
 // ── Projectile + explosion sprites ─────────────────────────────────────
 // Namco sprite hardware treats tile-pixel value 0 as transparent regardless of
@@ -83,7 +85,7 @@ export const colorPalettes = _palettes;
 // value-0 transparent here.
 // flipV mirrors top↔bottom (Z80 sprite ctrl bit 0 = "flip about the X axis",
 // i.e. up/down). flipH mirrors left↔right (bit 1).
-function spriteTile(code, palIdx, flipV = false, flipH = false) {
+export function spriteTile(code, palIdx, flipV = false, flipH = false) {
     const tile = _tiles[code], pal = _palettes[palIdx];
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 16;

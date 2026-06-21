@@ -44,71 +44,108 @@
   <button class="sbtn active" data-scale="2">2x</button>
   <button class="sbtn" data-scale="4">4x</button>
   <button class="sbtn" data-scale="8">8x</button>
+  <span style="margin-left:20px">Sheet palette:</span>
+  <span id="pal-bar"></span>
 </div>
 
 <div id="viewer"></div>
 
 <script type="module">
-import { sprites, colorPalettes } from './resource.js';
+import { sprites, colorPalettes, spriteTile, SPRITE_SHAPE_COUNT } from './resource.js';
 
 let currentScale = 2;
+let sheetPal     = 3;   // palette for the full sheet (3 = bee/blue)
 const viewer = document.getElementById('viewer');
+
+// Named groups the clone uses, with their raw shape-code range + palette so a
+// frame can be cross-referenced (the diving bee is wasp = shapes 24-31, pal 3).
+const GROUPS = [
+  { name: 'ship',          start: 0,  count: 8, pal: 9, tiles: sprites.ship },
+  { name: 'boss (green)',  start: 8,  count: 8, pal: 0, tiles: sprites.boss },
+  { name: 'boss (blue)',   start: 8,  count: 8, pal: 1, tiles: sprites.bossBlue },
+  { name: 'butterfly/moth',start: 16, count: 8, pal: 2, tiles: sprites.butterfly },
+  { name: 'wasp/BEE',      start: 24, count: 8, pal: 3, tiles: sprites.wasp },
+];
+
+function drawTile(src, scale) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 16 * scale;
+  c.style.width = c.style.height = (16 * scale) + 'px';
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(src, 0, 0, 16 * scale, 16 * scale);
+  return c;
+}
+
+function tileWrap(src, scale, labelText, highlight) {
+  const wrap = document.createElement('div');
+  wrap.className = 'tile-wrap';
+  const c = drawTile(src, scale);
+  if (highlight) c.style.borderColor = '#c93';
+  const lbl = document.createElement('div');
+  lbl.className = 'tile-label';
+  lbl.textContent = labelText;
+  wrap.appendChild(c);
+  wrap.appendChild(lbl);
+  return wrap;
+}
 
 function buildViewer(scale) {
   viewer.innerHTML = '';
 
-  const groups = [
-    { name: 'ship',      tiles: sprites.ship },
-    { name: 'boss',      tiles: sprites.boss },
-    { name: 'butterfly', tiles: sprites.butterfly },
-    { name: 'wasp',      tiles: sprites.wasp },
-  ];
-
-  for (const { name, tiles } of groups) {
+  // ── Named groups (clone-used), labelled with shape codes ──────────────
+  for (const g of GROUPS) {
     const groupEl = document.createElement('div');
     groupEl.className = 'group';
-
     const label = document.createElement('div');
     label.className = 'group-label';
-    label.textContent = `${name} (${tiles.length} frames)`;
+    label.textContent = `${g.name} — shapes ${g.start}-${g.start + g.count - 1} (0x${g.start.toString(16)}-0x${(g.start+g.count-1).toString(16)}), palette ${g.pal}`;
     groupEl.appendChild(label);
-
     const row = document.createElement('div');
     row.className = 'row';
-
-    tiles.forEach((src, i) => {
-      const wrap = document.createElement('div');
-      wrap.className = 'tile-wrap';
-
-      const canvas = document.createElement('canvas');
-      canvas.width  = 16 * scale;
-      canvas.height = 16 * scale;
-      canvas.style.width  = (16 * scale) + 'px';
-      canvas.style.height = (16 * scale) + 'px';
-
-      const ctx = canvas.getContext('2d');
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(src, 0, 0, 16 * scale, 16 * scale);
-
-      const tileLabel = document.createElement('div');
-      tileLabel.className = 'tile-label';
-      tileLabel.textContent = i;
-
-      wrap.appendChild(canvas);
-      wrap.appendChild(tileLabel);
-      row.appendChild(wrap);
+    g.tiles.forEach((src, i) => {
+      row.appendChild(tileWrap(src, scale, `${g.start + i} / f${i}`, g.name === 'wasp/BEE'));
     });
-
     groupEl.appendChild(row);
     viewer.appendChild(groupEl);
   }
+
+  // ── Full sprite sheet: every shape, current sheet palette ─────────────
+  const sheetEl = document.createElement('div');
+  sheetEl.className = 'group';
+  const sheetLabel = document.createElement('div');
+  sheetLabel.className = 'group-label';
+  sheetLabel.textContent = `ALL ${SPRITE_SHAPE_COUNT} SHAPES — palette ${sheetPal} (bee range 24-31 boxed). Hex labels.`;
+  sheetEl.appendChild(sheetLabel);
+  let row;
+  for (let code = 0; code < SPRITE_SHAPE_COUNT; code++) {
+    if (code % 16 === 0) { row = document.createElement('div'); row.className = 'row'; sheetEl.appendChild(row); }
+    const inBee = code >= 24 && code <= 31;
+    row.appendChild(tileWrap(spriteTile(code, sheetPal), scale, '0x' + code.toString(16).padStart(2,'0'), inBee));
+  }
+  viewer.appendChild(sheetEl);
+}
+
+// ── Palette selector for the full sheet ───────────────────────────────
+const palBar = document.getElementById('pal-bar');
+for (let p = 0; p < colorPalettes.length; p++) {
+  const b = document.createElement('button');
+  b.className = 'sbtn' + (p === sheetPal ? ' active' : '');
+  b.textContent = p;
+  b.addEventListener('click', () => {
+    palBar.querySelectorAll('.sbtn').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    sheetPal = p;
+    buildViewer(currentScale);
+  });
+  palBar.appendChild(b);
 }
 
 buildViewer(currentScale);
 
-document.querySelectorAll('.sbtn').forEach(btn => {
+document.querySelectorAll('#scale-bar > .sbtn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.sbtn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#scale-bar > .sbtn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     currentScale = Number(btn.dataset.scale);
     buildViewer(currentScale);
