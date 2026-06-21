@@ -72,8 +72,9 @@ function byteSigned(b) {
 // (CLAUDE.md "Coordinate system") kept here to preserve this module's
 // no-paths.js-import boundary (see note above). Used by the FC dive-Y
 // trigger to convert FC's raw screen-Y arg into our canvas space.
+// −32 = galagino corner −40 + 8 (renderer draws centered) — see paths.js.
 function rawYToCanvasY(rawY) {
-    return ((~(rawY + 0x4F)) & 0xFF) * 2 + 1 - 40;
+    return ((~(rawY + 0x4F)) & 0xFF) * 2 + 1 - 32;
 }
 
 // (vx/vy nibbles in segment byte 0 are UNSIGNED magnitudes 0-15. The
@@ -336,12 +337,12 @@ function loadSegment(e, state) {
             // "flew through the bottom of the screen to the TOP, heading
             // for home." Repositions the bug's Y to the top edge:
             // Z80 sets 0x01(ix) = 0x0138>>1 = 0x9C (internal-Y high byte).
-            // rawYToCanvasY(0x9C) = ((~(0x9C+0x4F))&0xFF)*2+1−40 = 1, the
+            // rawYToCanvasY(0x9C) = ((~(0x9C+0x4F))&0xFF)*2+1−32 = 9, the
             // top of the playfield. 0-arg token (case_0B87 just inc's hl —
             // the prior TOKEN_ARG_BYTES.F8=1 was wrong, research §7c). Keeps
             // current vx/vy/rotRate; pairs with F9 + the FB tail.
             if (b0 === 0xF8) {
-                e.y = 1;                 // rawYToCanvasY(0x9C)
+                e.y = 9;                 // rawYToCanvasY(0x9C)
                 e.pathOffset += 1;
                 continue;
             }
@@ -371,7 +372,7 @@ function loadSegment(e, state) {
             // the sprite chip converts it. rawYToCanvasY has slope −2 (bigger
             // rawY = HIGHER on screen — it's inverted), so +0x20 raw = −64
             // canvas px → ABOVE the top edge. (Boss: home rawY ~0x8A → slot
-            // y≈37; +0x20 → rawYToCanvasY(0xAA) ≈ −27.) My first port used
+            // y≈45; +0x20 → rawYToCanvasY(0xAA) ≈ −19.) My first port used
             // homeY + 0x20 (DOWN to the moth row) — wrong sign; the inverted
             // raw→canvas mapping makes it go UP. Exact value is non-critical
             // (FB re-homes to the live slot); −0x40 matches the source within
@@ -391,13 +392,14 @@ function loadSegment(e, state) {
             // finds the boss via state.captureBossId, so we just flag it here.
             // 0-arg token. Capture path only (db_0454).
             if (b0 === 0xF4) {
-                // Lane clamp: Z80 [0x29,0x C9] sprite X → canvas [25,185].
-                const targetX = Math.max(25, Math.min(185, state.player.x | 0));
+                // Lane clamp: Z80 [0x29,0xC9] sprite X → center canvas [32,192]
+                // (sprite_X − 9; see paths.js rawXToCanvasX).
+                const targetX = Math.max(32, Math.min(192, state.player.x | 0));
                 e.captureTargetX = targetX;     // beam center (4b) + aim point
                 e.captureDiving  = true;        // arm captorDive (f_21CB)
                 state.tasks.captorDive = true;  // Z80 case_0A53:1760 — task 0x19 on
                 // Aim down-and-toward the target. c_0E5B aims at (targetX,
-                // dive-depth 0x48 → y≈169). NOTE the motion is e.y -= A·sin(θ),
+                // dive-depth 0x48 → y≈177). NOTE the motion is e.y -= A·sin(θ),
                 // so DOWN (e.y increasing) is θ≈768, not 256 — the velocity
                 // vector is (cosθ, −sinθ), hence atan2(−dy, dx) (dy>0 = below).
                 const dx  = targetX - e.x;

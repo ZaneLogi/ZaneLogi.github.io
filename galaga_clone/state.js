@@ -9,18 +9,21 @@ import { getObjectIdForSlot } from './paths.js';
 //   Column canvas X after −16 offset: [33, 49, 65, 81, 97, 113, 129, 145, 161, 177].
 //
 // Y conversion (also harbaum/galagino — see paths.js rawYToCanvasY):
-// canvas_Y = sprite_Y_byte − 40 (formation has bit 8 = 0).
+// canvas_Y = sprite_Y_byte − 32 (corner −40 + 8 center; formation has bit 8 = 0).
 //   Row sprite_Y from c_12C3 conversion: ~(rawY+0x4F) & 0xFF, then ×2.
 //   Row sprite_Y values: 60, 76, 92, 104, 116, 128 (one per row 0-5).
-//   Row canvas_Y after −40 offset: 20, 36, 52, 64, 76, 88.
-const _COL_X = [33, 49, 65, 81, 97, 113, 129, 145, 161, 177];
+//   Row canvas_Y after −32 offset: 28, 44, 60, 72, 84, 96.
+// Column CENTER canvas X = sprite_X − 9 (galagino corner −16 + 8 center, −1 visual
+// nudge — see paths.js rawXToCanvasX; centers the formation on x=112). Sprite X
+// [0x31..0xC1] = [49..193].
+const _COL_X = [40, 56, 72, 88, 104, 120, 136, 152, 168, 184];
 const _ROWS = [
-    { y: 20, type: 'boss',      cols: [3,4,5,6]              },
-    { y: 36, type: 'boss',      cols: [3,4,5,6]              },
-    { y: 52, type: 'butterfly', cols: [0,1,2,3,4,5,6,7,8,9] },
-    { y: 64, type: 'butterfly', cols: [0,1,2,3,4,5,6,7,8,9] },
-    { y: 76, type: 'wasp',      cols: [0,1,2,3,4,5,6,7,8,9] },
-    { y: 88, type: 'wasp',      cols: [0,1,2,3,4,5,6,7,8,9] },
+    { y: 28, type: 'boss',      cols: [3,4,5,6]              },
+    { y: 44, type: 'boss',      cols: [3,4,5,6]              },
+    { y: 60, type: 'butterfly', cols: [0,1,2,3,4,5,6,7,8,9] },
+    { y: 72, type: 'butterfly', cols: [0,1,2,3,4,5,6,7,8,9] },
+    { y: 84, type: 'wasp',      cols: [0,1,2,3,4,5,6,7,8,9] },
+    { y: 96, type: 'wasp',      cols: [0,1,2,3,4,5,6,7,8,9] },
 ];
 
 function buildEnemies() {
@@ -340,6 +343,7 @@ export const state = {
         tractorBeam:         false,  // f_2222     — enabled when boss reaches player Y
         pullShip:            false,  // f_20F2     — enabled when beam locks on ship
         fighterCaptured:     false,  // f_19B2     — enabled when the ship is captured (slave + text)
+        hud:                 true,   // faked score/lives HUD landmarks (diagnostic, not a Z80 task)
     },
 
     // ── Starfield control ──────────────────────────────────────────────────
@@ -353,18 +357,19 @@ export const state = {
 
     // ── Player ship ────────────────────────────────────────────────────────
     // Mirrors ds_sprite_posn[$62] / ds_plyr_actv in the Z80 source.
-    // Spawn sprite X = 0x7A = 122 (c_133A, gg1-2.s:1058); canvas X = 122 − 16 = 106.
+    // Spawn sprite X = 0x7A = 122 (c_133A, gg1-2.s:1058); CENTER canvas X = 122 − 9 = 113.
     // dxFlag mirrors b_92A0[3]: toggles each held frame → alternates 1/2 px step.
     player: {
-        x:      106,   // canvas X = sprite_X 0x7A (=122) − 16 (hardware offset,
-                       // verified against harbaum/galagino).
-        y:      257,   // canvas Y derived from Z80 sprite_Y (gg1-2.s:1051-1062):
+        x:      113,   // CENTER canvas X = sprite_X 0x7A (=122) − 9 (galagino corner
+                       // −16 + 8 center, −1 visual nudge; see paths.js rawXToCanvasX).
+        y:      265,   // canvas Y derived from Z80 sprite_Y (gg1-2.s:1051-1062):
                        //   sprite_Y_byte = 0x29 = 41, sprite_ctrl bit 0 = 1
                        //   full sprite_Y = 256 + 41 = 297
-                       //   canvas_Y = 297 − 40 = 257 (per harbaum formula
-                       //   verified by ESP32 Galaga emulator gameplay)
-                       // Player center at 257 → sprite (16×16) spans 249-265,
-                       // 7-px gap above lives icons at canvas Y 272-288. ✓
+                       //   canvas_Y = 297 − 32 = 265 (galagino corner −40 + 8
+                       //   center, matching the renderer's drawImage(y−8))
+                       // Player center at 265 → sprite (16×16) spans 257-273,
+                       // base flush on the lives-icon row at canvas Y 272-288
+                       // (MAME-confirmed: ship touches it, not 7px above). ✓
         dxFlag: 0,     // toggles each held frame: first=1 px, then 1/2 px alternating
         alive:  true,
 

@@ -24,8 +24,12 @@ function charCode(ch) {
 }
 const TEXT_CODES = [...'FIGHTER CAPTURED'].map(charCode);
 const TEXT_PAL   = 3;                                    // char palette (verified visually)
-const TEXT_X     = (224 - TEXT_CODES.length * 8) >> 1;   // centered (= 48)
-const TEXT_Y     = 128;
+// Z80 string position _dea 17 6 (gg1-2.s:1319): tile = playfield row R=17, col
+// C=6. Tile→canvas (mrw.s:63-79): x = C*8 = 48, y = (R+2)*8 = 152. The centered
+// 16-char width happens to give x=48 too; Y was a hardcoded 128 — 3 rows too
+// high — corrected in the X+Y coordinate-system audit.
+const TEXT_X     = (224 - TEXT_CODES.length * 8) >> 1;   // = 48 (= source col 6)
+const TEXT_Y     = 152;
 
 // ── Rescue motion (Z80 f_2000, gg1-3.s:29-194) ────────────────────────────
 const RESCUE_SPIN_FRAMES = 36;   // spin duration before landing

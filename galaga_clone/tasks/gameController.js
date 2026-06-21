@@ -283,7 +283,10 @@ let _lastState = null;
 // flow (game_ctrl.s) without the lives/game-over machinery (deferred — see
 // research_boss_capture.md Decision 2). _playerWasAlive arms the timer once on
 // the death frame so the killers don't need the constant.
-const RESPAWN_DELAY = 72;   // frames (~1.2 s) — tuned by experiment
+// Respawn wait (frames). The Z80's c_player_respawn waits out the bug-nest
+// retreat (~126 frames ≈ 2.1 s via f_1D32) while "READY" shows; we don't model
+// the nest animation, but use a comparable hold so the "READY" text is readable.
+const RESPAWN_DELAY = 120;  // ~2 s
 let _playerWasAlive = true;
 
 function handleRespawn(state) {
@@ -296,7 +299,7 @@ function handleRespawn(state) {
     }
     if (p.respawnTimer > 0) { p.respawnTimer -= 1; return; }
     // Respawn: fresh ship at the spawn position, controls released.
-    p.x = 106; p.y = 257; p.dxFlag = 0;
+    p.x = 113; p.y = 265; p.dxFlag = 0;   // center canvas X (sprite 0x7A − 9), Y (297 − 32)
     p.alive = true; p.controlLocked = false; p.captureFrame = null;
 }
 
@@ -411,12 +414,38 @@ function charCode(ch) {
 }
 const SPLASH_PAL = 3;   // char palette (matches the FIGHTER CAPTURED text)
 
-export function render(state) {
-    if (state.gameState !== 'stageClear') return;
-    const codes = [...('STAGE ' + state.stage)].map(charCode);
-    const x0    = (224 - codes.length * 8) >> 1;   // centered
-    const ctx   = state.ctx;
+// Both splashes occupy the Z80's READY / STAGE slot — string position _dea 16 10
+// (gg1-2.s:1272 GAME OVER, 1278 READY, 1295 STAGE): tile 0x8270 = playfield row
+// R=16, col C=10. Tile→canvas (mrw.s:63-79 layout): x = C*8 = 80, y = (R+2)*8 =
+// 144 (the +2 skips the two top rows). Was a hardcoded CENTERED y=128 — 2 tile
+// rows too high and a column off — corrected in the X+Y coordinate-system audit.
+const SPLASH_X = 80;
+const SPLASH_Y = 144;
+
+function drawSplash(ctx, text) {
+    const codes = [...text].map(charCode);
     for (let i = 0; i < codes.length; i++) {
-        ctx.drawImage(charCanvas(codes[i], SPLASH_PAL), x0 + i * 8, 128);
+        ctx.drawImage(charCanvas(codes[i], SPLASH_PAL), SPLASH_X + i * 8, SPLASH_Y);
+    }
+}
+
+export function render(state) {
+    const ctx = state.ctx;
+
+    // "STAGE n" splash — new stage / game start (Z80 stg_init_splash). On a new
+    // stage the Z80 shows "STAGE n" in this same center slot and SKIPS "READY"
+    // (c_player_respawn's 0x8270 check, gg1-2.s:1013-1017) — so the stage-begin
+    // case needs no "READY"; this branch is it.
+    if (state.gameState === 'stageClear') {
+        drawSplash(ctx, 'STAGE ' + state.stage);
+        return;
+    }
+
+    // "READY" splash — Z80 c_player_respawn (gg1-2.s:1019): shown MID-STAGE during
+    // the respawn wait after the ship is destroyed, before the new ship is live.
+    // Our wait is player.respawnTimer counting down while the ship is gone.
+    const p = state.player;
+    if (state.gameState === 'playing' && !p.alive && p.respawnTimer > 0) {
+        drawSplash(ctx, 'READY');
     }
 }

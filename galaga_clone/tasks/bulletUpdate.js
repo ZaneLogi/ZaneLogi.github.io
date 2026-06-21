@@ -18,12 +18,12 @@ import { missile } from '../gfx/resource.js';
 
 const BULLET_DY   = 6;
 // Despawn threshold. Z80 disables the rocket at SPRITE_Y < 40 (gg1-5.s:996-997);
-// canvas_Y = sprite_Y − 40, so that is canvas_Y < 0 — the bullet travels the
-// whole playfield to the top edge. (Was 40: the Z80's sprite-Y threshold used
-// directly as a canvas threshold dropped the −40, so bullets vanished at Y=40 —
-// just below the boss row at Y=36 and the top row at Y=20, making both
+// canvas_Y = sprite_Y − 32 (corner→center), so that is canvas_Y < 8 — the bullet
+// travels the whole playfield to the top edge. (Was 40: the Z80's sprite-Y threshold
+// used directly as a canvas threshold dropped the offset, so bullets vanished at Y=40 —
+// just below the boss row at Y=44 and the top row at Y=28, making both
 // effectively unhittable in formation. Caught playtesting 2026-06-21.)
-const Y_OFFSCREEN = 0;
+const Y_OFFSCREEN = 8;
 const COLL_DX     = 6;
 const COLL_DY     = 3;
 

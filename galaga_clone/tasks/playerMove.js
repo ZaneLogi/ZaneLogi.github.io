@@ -1,18 +1,19 @@
 // f_1F85 — ship movement from joystick input (c_1F92, gg1-2_fx.s:2071)
 //
-// All X values are canvas coordinates (sprite_X − 16 hardware offset, per
-// harbaum/galagino's verified Galaga sprite-chip mapping).
-// Z80 sprite limits: left 0x12=18, right 0xE1=225  →  canvas: 2, 209.
+// All X values are canvas CENTER coordinates (sprite_X − 9: galagino corner
+// sprite_X − 16, + 8 sprite center, −1 visual nudge — see paths.js rawXToCanvasX).
+// Z80 sprite limits: left 0x12=18, right 0xE1=225  →  center canvas: 9, 216.
 // Movement uses a pre-move check (not a post-move clamp), matching the Z80:
-//   right: move only when canvas_X < 209; left: move only when canvas_X >= 2.
+//   right: move only when canvas_X < 216; left: move only when canvas_X >= 9.
 // Speed: dxFlag toggles each held frame → 1 px first frame, then alternates
 //   1 / 2 px, matching Z80 b_92A0[3] toggle logic.
 
 import { sprites } from '../gfx/resource.js';
 
-// Canvas-coordinate limits (Z80 sprite limits minus 16 px hardware offset).
-const X_MIN = 2;    // sprite 0x12 = 18  → canvas 2   (c_1F92, gg1-2_fx.s:2128)
-const X_MAX = 209;  // sprite 0xE1 = 225 → canvas 209 (c_1F92, gg1-2_fx.s:2118)
+// Canvas-coordinate center limits (Z80 sprite limits − 9; render seats the 16px
+// ship's left edge flush on the first column at the left limit).
+const X_MIN = 9;    // sprite 0x12 = 18  → center 9   (c_1F92, gg1-2_fx.s:2128)
+const X_MAX = 216;  // sprite 0xE1 = 225 → center 216 (c_1F92, gg1-2_fx.s:2118)
 
 export function update(state) {
     const p = state.player;

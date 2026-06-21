@@ -57,6 +57,12 @@ const TASK_GROUPS = [
             { flag: 'pullShip',           label: 'Pull Ship',          ref: 'f_20F2' },
         ]
     },
+    {
+        group: 'Debug',
+        tasks: [
+            { flag: 'hud',                label: 'HUD (faked)',        ref: 'visual check' },
+        ]
+    },
 ];
 
 // Flat list for lookups

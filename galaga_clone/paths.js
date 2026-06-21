@@ -810,31 +810,39 @@ function rawYToCanvasY(rawY) {
     // Galaga emulator that's community-validated by playing the actual
     // game — see harbaum/galagino galaga.h galaga_prepare_frame()):
     //
-    //     canvas_Y = sprite_Y_byte + 256 × bit_8 − 40
+    //     canvas_Y = sprite_Y_byte + 256 × bit_8 − 32   (corner −40 + 8 center)
     //
-    // The −40 is the Galaga sprite chip's hardware bottom-border
-    // offset. Both MAME's draw_sprites and harbaum's emulator
-    // include this constant; it accounts for the unused scanlines
-    // at the top of the unrotated hardware bitmap.
+    // The −40 is galagino's sprite-chip bottom-border offset, but it is the
+    // sprite's TOP-LEFT CORNER (its `spr.y > −16` visible-range check is a
+    // corner test). Our renderer draws sprites CENTERED (drawImage at y−8),
+    // so the CENTER = corner + 8 (half a 16px sprite) = sprite_Y − 32. (Was
+    // −40, which seated the corner value at the center → every sprite sat 8px
+    // too HIGH; the symmetric twin of the rawXToCanvasX corner→center fix,
+    // confirmed against a MAME snapshot where the resting ship touches the
+    // life-icon row instead of floating ~7px above it.)
     //
     // Worked example for variant 2 (rawY=0x23):
     //   inner    = ~(0x23 + 0x4F) & 0xFF = 0x8D
     //   sprite_Y = inner × 2 + 1 = 283  (= 256 + 27, bit 8 = 1)
-    //   canvas_Y = 283 − 40 = 243  →  bottom area, just above lives
+    //   canvas_Y = 283 − 32 = 251  →  bottom area, just above lives
     //                                 icons (which are at canvas Y
     //                                 272-288)
     //
-    // For variant 0 (rawY=0x9B): canvas_Y = 43 − 40 = 3 (very top edge).
-    // For player ship (sprite_Y full = 297): canvas_Y = 297 − 40 = 257.
-    return ((~(rawY + 0x4F)) & 0xFF) * 2 + 1 - 40;
+    // For variant 0 (rawY=0x9B): canvas_Y = 43 − 32 = 11 (very top edge).
+    // For player ship (sprite_Y full = 297): canvas_Y = 297 − 32 = 265.
+    return ((~(rawY + 0x4F)) & 0xFF) * 2 + 1 - 32;
 }
 
 function rawXToCanvasX(rawX) {
-    // Variant table X is the high byte of internal X. Sprite hardware
-    // doubles it (rla shift, gg1-5.s:2287-2288), then the canvas
-    // mapping subtracts 16 (Galaga's hardware left-border offset, per
-    // harbaum/galagino's verified formula `spr.x = sprite_X_byte − 16`).
-    return rawX * 2 - 16;
+    // Variant table X is the high byte of internal X. Sprite hardware doubles it
+    // (rla shift, gg1-5.s:2287-2288). harbaum/galagino's `spr.x = sprite_X − 16`
+    // is the sprite's TOP-LEFT corner (its visible-range check `spr.x > −16` is
+    // the corner test). Our renderer draws sprites CENTERED (drawImage at x−8),
+    // so the CENTER = corner + 8 (half a 16px sprite) = sprite_X − 8; a 1px visual
+    // nudge left (−9) seats the ship's left edge flush on the first screen column
+    // and centers the formation exactly on x=112 (Zane-tuned). (Was −16, which put
+    // the corner value at the center → everything sat 8px too far left.)
+    return rawX * 2 - 9;
 }
 
 // ── Wave-byte decoder (step 9 phase INT-2c) ───────────────────────────
