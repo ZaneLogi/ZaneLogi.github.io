@@ -24,6 +24,14 @@ export function update(state) {
         }
 
         e.alive = false;
+        // Transition disposition OUT of the in-flight state, mirroring the Z80
+        // (a killed bug's b_8800 disposition goes to exploding/inactive, never
+        // stays 9 = "flying/diving"). Without this, a bug shot MID-DIVE keeps
+        // state==='flying' with alive=false, so bugMotion keeps running its
+        // (cont_bmb-looping) path AND the launcher's bugsFlying recount counts
+        // it as a live diver — pinning the 2-bomber cap so no new bug can dive.
+        // (fighterCaptured.js already assumes a killed boss reaches 'dead'.)
+        e.state = 'dead';
 
         // Z80 l_07DF (gg1-5.s:1206-1214): the instant the capture boss on beam
         // duty is queued for elimination, the collision handler clears cflag
