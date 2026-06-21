@@ -10,11 +10,25 @@
 // Note:     flip_screen (cocktail cabinet direction reversal) is not applicable
 //           to an HTML5 game and is intentionally omitted.
 
-// ── Star palette ───────────────────────────────────────────────────────────
-// The original hardware produces stars in 6 colours. We approximate with two
-// sets: dim (slow layer) and bright (fast layer).
-const COLORS_SLOW = ['#336', '#448', '#446', '#558', '#667', '#778'];
-const COLORS_FAST = ['#88a', '#99b', '#aac', '#bbf', '#cce', '#fff'];
+// ── Star palette (faithful 2-2-2 RGB) ──────────────────────────────────────
+// The Galaga star circuit is pure hardware — the Z80 only writes scroll/freeze
+// bits to $A000-$A005 (task_man.s:358-382); it has NO colour control. Each star
+// is a 6-bit colour: 2 bits per gun (R,G,B), each gun mapped through the four
+// resistor-network levels {0x00,0x47,0x97,0xDE} (MAME PALETTE_INIT(galaga),
+// `map[4]`). That's 63 visible full-spectrum colours — red/green/blue/yellow/
+// cyan/magenta/white and every mix — not the old blue/purple/white tints.
+// See research_starfield.md. Brightness comes from the colour itself, so both
+// scroll layers draw from the same set (the 2-speed split is a parallax
+// approximation, separate from the palette).
+const STAR_LEVELS = [0x00, 0x47, 0x97, 0xDE];
+const STAR_COLORS = (() => {
+    const out = [];
+    for (const r of STAR_LEVELS)
+        for (const g of STAR_LEVELS)
+            for (const b of STAR_LEVELS)
+                if (r || g || b) out.push(`rgb(${r},${g},${b})`);
+    return out;   // 63 colours (the 64th, 0,0,0, is an invisible/black star)
+})();
 
 // ── Star counts matching the original dual-generator hardware ──────────────
 const COUNT_SLOW = 32;
@@ -48,8 +62,8 @@ function createLayer(count, colors) {
 
 export function init(state) {
     if (!ready) {
-        slowStars = createLayer(COUNT_SLOW, COLORS_SLOW);
-        fastStars = createLayer(COUNT_FAST, COLORS_FAST);
+        slowStars = createLayer(COUNT_SLOW, STAR_COLORS);
+        fastStars = createLayer(COUNT_FAST, STAR_COLORS);
         ready = true;
     }
     // Start scrolling immediately when task is enabled via dev panel.
@@ -63,13 +77,19 @@ export function update(state) {
 
     const speed = state.starCtrl.speed;
 
+    // Scroll REVERSES (stars go UP) during the tractor-beam pull. Z80: the
+    // star_ctrl[1] (99BA) flag flips f_1D76's scroll value to the reverse
+    // direction (gg1-2_fx.s:1423-1447, the `neg`); it's SET at l_236D
+    // (gg1-3.s:691) when f_20F2 starts pulling the ship, and CLEARED at
+    // capture-complete (l_2305) / boss-shot-mid-capture (l_2327). The clone's
+    // pullShip task is active for exactly that window. Wrap handles both edges.
+    const dir = state.tasks.pullShip ? -1 : 1;
+
     for (const s of slowStars) {
-        s.y += SPEED_SLOW * speed;
-        if (s.y >= 288) s.y -= 288;
+        s.y = (s.y + SPEED_SLOW * speed * dir + 288) % 288;
     }
     for (const s of fastStars) {
-        s.y += SPEED_FAST * speed;
-        if (s.y >= 288) s.y -= 288;
+        s.y = (s.y + SPEED_FAST * speed * dir + 288) % 288;
     }
 }
 

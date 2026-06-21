@@ -140,6 +140,38 @@ stages 9+. Transient routing in `l_2974_got_slot` (gg1-3.s:1748+) detects
 ID & 0x38 == 0x38 and dispatches to `l_29B3_setup_transients` which assigns
 sprite code/color manually based on bit 6 of the ID.
 
+### 6.1 What `l_29B3_setup_transients` does [verified, gg1-3.s:1806-1822]
+
+These are *"the additional 'transient' buggers that fly-in but don't join"* — bugs
+with no home slot that dive straight through the screen. The routine's own
+comment annotates it **"Stage 4 or higher"** (but the *data* only carries
+transients from stage 6 per the byte0 nibbles above — the "stage 4" comment is
+the disassembler's loose note; trust the data, verify before relying on a stage
+number).
+
+Setup per transient:
+- **Sprite:** by bit 6 of the object ID — `0x18` *yellowbee* (bit 6 clear) or
+  `0x10` *redmoth* (bit 6 set); or `0x08` *boss* when `_b_attkwv_ctr == 2`
+  (≥ stage 9). All entered with a 270° (downward) heading. These are the
+  **normal** creature codes — NOT the bonus-bee's `0x5x` set.
+- **No bombing:** `0x0F(ix) = 0` (transients never drop bombs), unlike homing
+  bugs which get the stage's bomb-enable flags.
+- Path/motion then set up the same way as homing bugs (`l_29D1`, gg1-3.s:1824+),
+  but with no return-to-formation — they fly the dive arc and leave.
+
+**Clone gap:** the JS wave builder (`buildWaveStream` / `launchAttackWave`) only
+emits the 8 homing bugs per wave; the byte0 low-nibble (transient count) is
+ignored, so **the clone spawns no transients** at stage 6+. Porting them = honor
+the low nibble in the builder + a transient branch in the launcher that uses the
+normal codes + the fly-through (no-home, no-bomb) path. The dive itself reuses
+`launchEnemyAttack`/`j_108A` (`research_attack_paths.md` §5).
+
+> **Not the bonus-bee.** The stage-4 special diver Zane saw (the flashing convoy
+> leader drawn with `0x58`) is a *separate* mechanism — the "clone-attack" /
+> bonus-bee, gated by `new_stage_parms[0x0A]`, documented in
+> `research_bonus_bee.md`. Transients (here) are plain fly-through bugs in the
+> wave data. Two different stage gaps; don't conflate.
+
 ## 7. Wave-launcher cadence [verified, gg1-3.s:1658-1745]
 
 `f_2916` runs once per frame. Each call processes AT MOST ONE byte of the

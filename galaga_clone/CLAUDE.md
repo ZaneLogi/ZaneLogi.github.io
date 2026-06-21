@@ -93,25 +93,34 @@ real Galaga) and match MAME's draw_sprites. See `paths.js`
 `rawXToCanvasX` / `rawYToCanvasY` for the implementation with full
 citations.
 
-**X conversion:**
+**Corner → center (the load-bearing subtlety).** galagino's formulas give the
+sprite's **top-left corner** (`spr.x = sprite_X − 16`, `spr.y = sprite_Y − 40`;
+its visible-range checks `spr.x / spr.y > −16` are corner tests). Our renderer
+draws sprites **centered** (`drawImage(img, x−8, y−8)`), so the canvas value we
+store is the **center = corner + 8** (half a 16px sprite). Feeding the raw corner
+value into a centered draw put every sprite 8px off (X too far left, Y too high) —
+the **"X+Y coordinate drift"** fix corrected both axes (Y direction MAME-confirmed:
+the resting ship's base sits flush on the lives row).
+
+**X conversion (center):**
 ```
-canvas_X = sprite_X − 16
+canvas_X = sprite_X − 9        (corner −16, +8 center, −1 visual nudge)
 ```
 
 For the variant table (db_2A6C), sprite_X = rawX × 2 (the sprite chip
 shifts the high byte left 1, gg1-5.s:2287-2288), so for variants:
 ```
-canvas_X = rawX × 2 − 16
+canvas_X = rawX × 2 − 9
 ```
 
 Worked examples:
-- Z80 ship spawn `0x7A = 122` → `state.player.x = 106`
-- Z80 ship limits `0x12 / 0xE1 = 18 / 225` → canvas `2 / 209`
-- Z80 formation column X `[0x31..0xC1] = [49..193]` → canvas `[33..177]`
+- Z80 ship spawn `0x7A = 122` → `state.player.x = 113`
+- Z80 ship limits `0x12 / 0xE1 = 18 / 225` → canvas `9 / 216`
+- Z80 formation column X `[0x31..0xC1] = [49..193]` → canvas `[40..184]`
 
-**Y conversion:**
+**Y conversion (center):**
 ```
-canvas_Y = sprite_Y_byte + 256 × bit_8 − 40
+canvas_Y = sprite_Y_byte + 256 × bit_8 − 32      (corner −40, +8 center)
 ```
 
 bit 8 lives in `ds_sprite_ctrl[n + 1] bit 0` (the Z80 author's
@@ -120,14 +129,15 @@ gg1-5.s:2305-2321 (`(~(rawY+0x4F)) & 0xFF) × 2 + 1`); for formation
 positions, via c_12C3 with no `+1`.
 
 Worked examples:
-- Player ship sprite_Y full = 297 → canvas Y = 257
-- Variant 0 (rawY=0x9B): sprite_Y = 43, bit_8 = 0 → canvas Y = 3
-- Variant 2 (rawY=0x23): sprite_Y full = 283 → canvas Y = 243
-- Formation row 0 (rawY=0x92): sprite_Y = 60 → canvas Y = 20
+- Player ship sprite_Y full = 297 → canvas Y = 265
+- Variant 0 (rawY=0x9B): sprite_Y = 43, bit_8 = 0 → canvas Y = 11
+- Variant 2 (rawY=0x23): sprite_Y full = 283 → canvas Y = 251
+- Formation row 0 (rawY=0x92): sprite_Y = 60 → canvas Y = 28
 
-When reading a Z80 X/Y value or porting a new feature: **apply the
-canvas conversion immediately** so the rest of the JS stays in canvas
-coordinates.
+Screen-edge gates (288 despawn) and tile-plane text/HUD positions are NOT sprite
+positions — they don't carry the −9/−32 offset. When reading a Z80 X/Y value or
+porting a new feature: **apply the center conversion immediately** so the rest of
+the JS stays in canvas coordinates. Full arc: `research_coordinate_system.md`.
 
 ## Fidelity patterns to preserve
 

@@ -244,6 +244,15 @@ our behavior is visually correct even if mechanically the Z80 might
 do something slightly different (e.g. snap to home first then read
 sprite_posn).
 
+**`c_1083` now read (gg1-2.s:206-259):** it's the *shared* diving-attacker
+setup — header *"diving movement of red alien, yellow alien, clone-attacker,
+and rogue fighter"* — that computes the negate-rotation flag from the object's
+left/right origin and falls into `j_108A`. So `launchEnemyAttack` is the right
+shared primitive. Two attack modes beyond the normal moth/bee/boss dives also
+route through it and are **unported**:
+- stage-4+ **bonus-bee / "clone-attack" convoy** → `research_bonus_bee.md`
+- stage-6+ **transient fly-through bugs** → `research_stage_init.md` §6.1
+
 ## 5b. Homing return to formation — formation-offset tracking (FB / case_0AA0)
 
 The symmetric companion to §5. §5 makes a dive **start** leave from the
@@ -377,6 +386,53 @@ verified for the *fly-in*, not the *attack dive*. **Open item:** compare the
 attack-dive descent profile against MAME (the data-segment velocity + the initial
 `12 18 1e`/`12 18 1d` turn that keeps the bomber high early); if the descent is
 made faithful, revert the §6.1 deviation and let the mask shift unconditionally.
+
+### 6.2 Bomb X-aim — the `c_0EAA` divide [verified, gg1-5.s:2402-2457; c_0EAA @ 2649; mover f_1EA4 @ gg1-2_fx.s:1737]
+
+The bomb's sideways velocity is a **real aimed shot, frozen at drop** — not the
+"kind of toward the player" the clone's comment claims. The drop path
+(`case_0DF5`, gg1-5.s:2402-2457) computes:
+
+1. `dX = fighter.x − bomber.x`  (sprite-X px; sign stashed)
+2. `dY = (298 >> 1) − (bomber.sprite_Y >> 1)`  (gg1-5.s:2414, `0x95 = 298>>1`) —
+   ≈ **(canvas Y gap to the player) / 2**. Note the asymmetry: **X is full-scale,
+   Y is halved.**
+3. `slope = (dX << 8) / dY`  (`c_0EAA` — unsigned 16/8 divide, gg1-5.s:2649 → 8.8
+   fixed point of dX/dY)
+4. `rate = slope × 5/16`  (the `srl;rr×2 → add hl,bc → srl;rr×2` chain, 2423-2434)
+5. clamp `rate ≤ 0x60` (96), re-apply sign, store in `b_92B0[bomb]` (remainder `=0`)
+6. `f_1EA4` advances the bomb `rate/32` px/frame (32-count→1px fixed point; the
+   `b_92B0` odd byte accumulates the sub-pixel remainder). Y advances 2/3 px by
+   frame parity (~2.5 avg).
+
+**Net, in canvas terms** (`dx = player.x − bomb.x`, `dy = player.y − bomb.y`):
+
+```
+vx = clamp(±3.0, 5.0 × dx/dy)   px/frame
+```
+
+The bomb's Y speed is ~2.5 px/frame, so a *perfect* intercept would be
+`vx = 2.5 × dx/dy`. The Z80's **5.0 is 2× the intercept** — the halved `dY`
+makes it deliberately **over-aim**, so the bomb curves toward and **crosses** the
+player's column partway down (the aggressive Galaga lead). The **±3 cap** stops
+it tracking a player far to the side; the dodge comes from it being **frozen at
+drop** (aimed where you *were*), not from a gentle gain.
+
+**Clone deviation (`bombUpdate.js`):** `VX_GAIN = 0.5`, `VX_CAP = 1.0` — gain
+**10× too low**, cap **3× too low**. Clone bombs fall nearly straight; faithful
+ones curve hard. The file's own note ("earlier draft used 2.5 … felt too smart")
+shows even that prior value was *half* the faithful 5.0; dropping to 0.5 is an
+un-sourced feel tweak.
+
+**Fix (independent of §6.1 / octagonal motion — the aim is computed from
+positions at drop, not from descent speed):** `VX_GAIN 0.5 → 5.0`,
+`VX_CAP 1.0 → 3.0`. The y-step (2/3 parity) and the float `vx` sub-pixel model
+already match the Z80. ⚑ Playtest the feel against MAME — 5.0 is aggressive by
+design, but verify it reads as "dodgeable aimed bomb," not "unfair," before
+locking it in.
+
+**Reload faithful:** `case_0DF5` reloads the drop counter `0x0E` from `b_92E2[0]`
+(stage-header byte, `0x14`=20 on stage 1); clone `DROP_RELOAD = 0x14` ✓.
 
 ## 7. Token handlers (attack context)
 

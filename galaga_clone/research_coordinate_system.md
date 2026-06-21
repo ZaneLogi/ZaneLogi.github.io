@@ -3,7 +3,9 @@
 **Status: resolved.** Y conversion fix landed via `rawYToCanvasY −40`,
 formation row shift, player Y derivation; X conversion fix landed via
 `rawXToCanvasX −16`, formation col shift, player X derivation, movement
-limits. Canvas extended from 256→288 to match actual hardware.
+limits. Canvas extended from 256→288 to match actual hardware. **Refined 2026-06-21: the
+`−16`/`−40` above are the galagino CORNER offsets; the renderer draws CENTERED, so
+the live formulas are `−9` (X) / `−32` (Y) = corner + 8 — see §5.3.**
 
 This doc captures the research arc that got us here: **why the issue
 existed, what made it hard, and how we resolved it without guessing**.
@@ -221,6 +223,31 @@ that adds the `+1`). Then the −40 offset applies in both cases.
 | `tasks/bombUpdate.js` | despawn threshold 256→288 |
 | `tasks/starfield.js` | star Y range 256→288 |
 | `CLAUDE.md` | coordinate-system section rewritten with both verified formulas |
+
+### 5.3 CORRECTION — corner → center (2026-06-21)
+
+§5.1's `−16` (X) and `−40` (Y) are galagino's **top-left CORNER** offsets (its
+visible checks `spr.x / spr.y > −16` are corner tests). But our renderer draws
+sprites **centered** (`drawImage(img, x−8, y−8)`), so the stored canvas value must
+be the **center = corner + 8** (half a 16px sprite). Feeding the corner value into
+a centered draw left every sprite **8px off** — X too far left, Y too high. The
+"X+Y coordinate drift" fix corrected both axes:
+
+```
+canvas_X = sprite_X − 9        (corner −16, +8 center, −1 visual nudge)
+canvas_Y = sprite_Y + 256×bit8 − 32   (corner −40, +8 center)
+```
+
+So the §5.2 values shift — **X +7**: `rawXToCanvasX −16 → −9`, `_COL_X`
+[33..177]→[40..184], `X_MIN/X_MAX` 2/209→9/216, `player.x` 106→113. **Y +8**:
+`rawYToCanvasY −40 → −32`, `_ROWS` [20..88]→[28..96], `player.y` 257→265, plus the
+sprite-Y-derived gates `DROP_Y_THRESHOLD` 112→120 and bullet `Y_OFFSCREEN` 0→8.
+Splash text moved to its source tile rows (READY/STAGE 80,144; FIGHTER CAPTURED
+48,152). Screen-edge gates (288) and tile-plane text/HUD do NOT carry the offset.
+
+**MAME-confirmed (Y direction):** the resting ship's base sits flush on the
+life-icon row, not ~7px above it (pixel-measured). Detail: progress.html step-9
+"X coordinate drift" / "Y coordinate drift" notes.
 
 ## 6. Sources used (with confidence levels)
 
