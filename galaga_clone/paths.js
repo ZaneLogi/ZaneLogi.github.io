@@ -937,9 +937,17 @@ export function buildWaveStream(stage, rank = 3) {
         const byte2   = D_COMBAT_STG_DAT[t + 2];    // member-2 path byte
         const idsBase = w * 8;
         stream.push(0x7E);                          // wave-start marker
-        for (let i = 0; i < 8; i += 2) {
-            stream.push(byte1, ATTK_WAV_IDS[idsBase + i]);     // lefty
-            stream.push(byte2, ATTK_WAV_IDS[idsBase + i + 1]); // righty
+        // Z80 c_25A2 (gg1-3.s:1357-1383) splits the 8 IDs into a lefty half
+        // (temp-buf slots 0-3) and a righty half (slots 8-11), then pairs
+        // lefty[i] with the CORRESPONDING righty[i] — NOT two consecutive IDs.
+        // So the stream interleaves [lefty, righty, lefty, righty]: wave 2 =
+        // boss,moth,boss,moth (each boss with its butterfly escort), not
+        // boss×4 then moth×4. ATTK_WAV_IDS stores the 8 as
+        // [L0,L1,L2,L3, R0,R1,R2,R3] (transient slots 4-7/12-15 dropped — none
+        // in stage 1), so the matching righty is idsBase + 4 + i.
+        for (let i = 0; i < 4; i++) {
+            stream.push(byte1, ATTK_WAV_IDS[idsBase + i]);     // lefty  (slots 0-3)
+            stream.push(byte2, ATTK_WAV_IDS[idsBase + 4 + i]); // righty (slots 4-7)
         }
     }
     stream.push(0x7F);                              // end-of-stage marker
