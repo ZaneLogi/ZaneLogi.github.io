@@ -35,21 +35,33 @@ const COLL_DX = 6;     // matches bullet-vs-enemy AABB scale
 const COLL_DY = 4;     // tighter Y — bombs are taller than wide
 
 // ── Aim tuning ────────────────────────────────────────────────────────
-// Bomb X velocity is computed at drop time from the slope toward the
-// player (frozen — NOT homing). The Z80 path is c_0EAA divide → 7 right-
-// shifts → ÷32 in the rate byte, which produces an effective vx roughly
-// (dx/dy) × 1.0 — i.e. bombs aim "kind of toward" the player but don't
-// precisely track. Player can dodge by moving after the drop.
+// Bomb X velocity is a REAL aimed shot, computed at drop time from the
+// slope toward the player and frozen (NOT homing). Verified against the
+// Z80 drop path — see research_attack_paths.md §6.2:
 //
-// VX_GAIN here approximates that Z80 effective rate. Earlier draft used
-// 2.5 (matching the bomb's actual Y velocity, giving precise targeting),
-// but that made bombs feel too smart vs. Galaga's actual dodgeable feel.
+//   case_0DF5 (gg1-5.s:2402-2457) computes
+//     dX    = fighter.x − bomber.x                 (X full-scale)
+//     dY    = (298>>1) − (bomber.sprite_Y >> 1)    (Y HALVED — gg1-5.s:2414)
+//     slope = (dX << 8) / dY                        (c_0EAA divide @2649)
+//     rate  = clamp(±0x60, slope × 5/16)            (shift chain @2423-2434)
+//   f_1EA4 (gg1-2_fx.s:1737) advances the bomb rate/32 px/frame, Y by 2/3
+//   px on frame parity (~2.5 avg).
 //
-// TUNING POINT: this is approximate — real Z80 fidelity needs another
-// research pass on the c_0EAA shift math, and "feel" depends on actual
-// stage-flow playtesting. Refine during integration phase.
-const VX_GAIN = 0.5;
-const VX_CAP  = 1.0;
+// In canvas terms (dx = player.x − bomb.x, dy = player.y − bomb.y):
+//
+//   vx = clamp(±3.0, 5.0 × dx/dy)   px/frame
+//
+// The bomb's Y speed is ~2.5 px/frame, so a *perfect* intercept would use
+// gain 2.5. The Z80's 5.0 is 2× that (the halved dY) — a deliberate
+// OVER-AIM: the bomb curves toward and crosses the player's column partway
+// down (the aggressive Galaga lead). The ±3 cap stops it tracking a player
+// far to the side; the dodge comes from the vector being frozen at drop
+// (aimed where you *were*), not from a gentle gain.
+//
+// (Was VX_GAIN=0.5 / VX_CAP=1.0 — an un-sourced feel tweak, 10×/3× too weak;
+// clone bombs fell nearly straight. Restored to the verified §6.2 values.)
+const VX_GAIN = 5.0;
+const VX_CAP  = 3.0;
 
 export function update(state) {
     if (!state.tasks.bombUpdate) return;   // dev-panel toggle (defensive)
@@ -88,9 +100,10 @@ export function update(state) {
         const slot = state.bombs.find(b => !b.alive);
         if (!slot) continue;
 
-        // Vector frozen at drop — Z80 normalises (player.x - bomber.x)
-        // by Y distance, then scales down. Approximate via slope × VX_GAIN
-        // (see the TUNING POINT note at the top of this file).
+        // Vector frozen at drop — aimed at the player's position now, then
+        // never updated. vx = clamp(±VX_CAP, VX_GAIN × dx/dy); the over-aim
+        // gain + dodge-by-moving feel is the verified §6.2 behavior (see the
+        // aim-tuning note at the top of this file).
         slot.x = e.x;
         slot.y = e.y;
         const dx = state.player.x - slot.x;

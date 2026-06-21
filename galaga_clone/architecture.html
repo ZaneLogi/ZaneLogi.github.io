@@ -1037,8 +1037,8 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
     <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px">Vector math (gg1-5.s:2402-2434) — frozen at drop</div>
     <div style="color:#888;font-size:11px;line-height:1.7">
       &nbsp;• <span style="color:#7af">dX = fighter.X - bomber.X</span> &nbsp;(fighter X at <span style="color:#7af">ds_sprite_posn + 0x62</span>)<br>
-      &nbsp;• <span style="color:#7af">dY = fighter.Y - bomber.Y</span> &nbsp;(constant ≈ 0x95 = 149, screen-flip aware)<br>
-      &nbsp;• Normalise via fixed-point divide <span style="color:#7af">c_0EAA</span> (HL / A) → scale down by 7 right-shifts → store at <span style="color:#7af">b_92B0[bomb_idx]</span><br>
+      &nbsp;• <span style="color:#7af">dY = (298&gt;&gt;1) - (bomber.Y&gt;&gt;1)</span> &nbsp;(0x95 = 149 is the <i>minuend</i>, not dY; <b>Y is halved vs X</b> → deliberate 2× over-aim)<br>
+      &nbsp;• Normalise via fixed-point divide <span style="color:#7af">c_0EAA</span> (<span style="color:#7af">dX&lt;&lt;8 / dY</span> = 8.8 fixed) → <span style="color:#7af">rate = slope × 5/16</span>, clamp ±0x60 → store at <span style="color:#7af">b_92B0[bomb_idx]</span><br>
       &nbsp;• <b>Y velocity is NOT computed from this</b> — Y is always the fixed 2/3 px/frame parity. Only X is targeted.<br>
       &nbsp;• <b>Frozen at drop</b> — no homing; bomb commits to its initial vector.
     </div>
@@ -1079,7 +1079,7 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
   </div>
 
   <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px;padding:6px 10px;background:#1a1408;border-left:2px solid #c93;border-radius:2px">
-    <b style="color:#fc6">Known gap (added phase 8e):</b> the precise angle math depends on the body of <span style="color:#7af">c_0EAA</span> (fixed-point divide subroutine) which the research didn't decode — we know it's called as <span style="color:#7af">HL / A</span> followed by 7 right-shifts, then ÷32 in the per-tick mover, but operand sign handling, overflow, and exact result format are unknown. Z80 also uses a <b>hardcoded dy ≈ 149</b> (gg1-5.s:2415) instead of actual player-Y distance, which makes the slope denominator constant and thus all angles shallower than a "true geometric" calculation. The current <code>VX_GAIN</code> / <code>VX_CAP</code> in bombUpdate.js are visual placeholders awaiting that research pass — bombs reach the player but feel more aggressive than Z80. Refine during integration phase or with a dedicated bomb-math research item.
+    <b style="color:#7c5">✅ RESOLVED (2026-06-21, research_attack_paths.md §6.2):</b> the <span style="color:#7af">c_0EAA</span> math is decoded — an unsigned <span style="color:#7af">(dX&lt;&lt;8)/dY</span> divide → <span style="color:#7af">× 5/16</span> → clamp ±0x60, advanced at rate/32 px/frame. The Z80 <b>halves dY</b> (0x95 = 298&gt;&gt;1 is the minuend, <i>not</i> a constant dy ≈ 149), which makes the bomb <b>over-aim 2×</b> the true intercept and cross the player's column — <i>more</i> aggressive, not "shallower" as this gap previously guessed. In canvas terms: <span style="color:#7af">vx = clamp(±3.0, 5.0 × dx/dy)</span>. <code>bombUpdate.js</code> now uses <code>VX_GAIN=5.0</code> / <code>VX_CAP=3.0</code> (was a placeholder 0.5/1.0); verified deterministically (synthetic drop through the real module) + live (28 stage-1 dive-drops). <b style="color:#7c5">Feel signed off (Zane played it, LGTM) — LOCKED at 5.0/3.0.</b>
   </div>
 
   <div style="color:#888;font-size:11px;line-height:1.7;margin-top:10px;padding:6px 10px;background:#1a1408;border-left:2px solid #c93;border-radius:2px">

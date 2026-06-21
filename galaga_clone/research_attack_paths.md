@@ -418,18 +418,34 @@ player's column partway down (the aggressive Galaga lead). The **±3 cap** stops
 it tracking a player far to the side; the dodge comes from it being **frozen at
 drop** (aimed where you *were*), not from a gentle gain.
 
-**Clone deviation (`bombUpdate.js`):** `VX_GAIN = 0.5`, `VX_CAP = 1.0` — gain
-**10× too low**, cap **3× too low**. Clone bombs fall nearly straight; faithful
-ones curve hard. The file's own note ("earlier draft used 2.5 … felt too smart")
-shows even that prior value was *half* the faithful 5.0; dropping to 0.5 is an
-un-sourced feel tweak.
+**✅ APPLIED 2026-06-21 (`bombUpdate.js`):** `VX_GAIN 0.5 → 5.0`, `VX_CAP 1.0
+→ 3.0`. The clamp expression `(dx/dy) × VX_GAIN`, clamped to ±`VX_CAP`, is now
+exactly the verified canvas formula `vx = clamp(±3.0, 5.0 × dx/dy)`. The y-step
+(2/3 parity) and the float `vx` sub-pixel model already matched the Z80, so the
+two constants were the whole fix. Independent of §6.1 / octagonal motion — the
+aim is computed from positions at drop, not from descent speed. The stale
+"approximate / TUNING POINT" comment block was replaced with the §6.2 derivation.
 
-**Fix (independent of §6.1 / octagonal motion — the aim is computed from
-positions at drop, not from descent speed):** `VX_GAIN 0.5 → 5.0`,
-`VX_CAP 1.0 → 3.0`. The y-step (2/3 parity) and the float `vx` sub-pixel model
-already match the Z80. ⚑ Playtest the feel against MAME — 5.0 is aggressive by
-design, but verify it reads as "dodgeable aimed bomb," not "unfair," before
-locking it in.
+*Prior deviation (for history):* `VX_GAIN = 0.5`, `VX_CAP = 1.0` — gain 10× too
+low, cap 3× too low; clone bombs fell nearly straight. The file's own note
+("earlier draft used 2.5 … felt too smart") shows even that prior value was
+*half* the faithful 5.0; dropping to 0.5 was an un-sourced feel tweak.
+
+**Verification (2026-06-21, preview port 8084):**
+- *Deterministic:* dynamically imported the shipped `bombUpdate.js` and drove a
+  synthetic drop through the real `update()` across 5 geometries — every result
+  matched `clamp(±3.0, 5.0 × dx/dy)` to 1e-6 (near-column dx=−7 → −0.41 gentle;
+  side/shallow → clamped to the ±3 cap). Proves the live constants.
+- *Live:* started stage 1 (`bombDropFlags = 3`, the verified-faithful 1-2-bit
+  mask); 28 real dive-drops sampled. Bombs dropped near the player's column
+  (x≈110-126 vs player x=113) got gentle vx ≈ 0.08-0.49; bombs dropped off to
+  the side (x=67, dx≈46) got vx ≈ 1.76 curving toward/across the player —
+  ~10× the magnitude the old gain=0.5 build produced. No console errors.
+
+✅ **Feel signed off (2026-06-21, Zane) — LOCKED.** Played live: reads fine, and
+source-faithful settles it. 5.0 is aggressive *by design* (the deliberate 2×
+over-aim); the dodge comes from the vector being frozen at drop (aimed where you
+*were*) — move after the drop. No further tuning planned; treat 5.0/3.0 as final.
 
 **Reload faithful:** `case_0DF5` reloads the drop counter `0x0E` from `b_92E2[0]`
 (stage-header byte, `0x14`=20 on stage 1); clone `DROP_RELOAD = 0x14` ✓.
