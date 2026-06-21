@@ -74,6 +74,71 @@ function group(start, count, palIdx) {
 }
 
 export const colorPalettes = _palettes;
+
+// ── Projectile + explosion sprites ─────────────────────────────────────
+// Namco sprite hardware treats tile-pixel value 0 as transparent regardless of
+// what the palette maps it to. The four ENEMY palettes happen to map index 0 to
+// the master transparent slot (15), so the generic tileToCanvas works for them —
+// but the projectile/explosion palettes (e.g. the bomb's 0x0B) do NOT, so force
+// value-0 transparent here.
+// flipV mirrors top↔bottom (Z80 sprite ctrl bit 0 = "flip about the X axis",
+// i.e. up/down). flipH mirrors left↔right (bit 1).
+function spriteTile(code, palIdx, flipV = false, flipH = false) {
+    const tile = _tiles[code], pal = _palettes[palIdx];
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 16;
+    const ctx = canvas.getContext('2d');
+    const img = ctx.createImageData(16, 16);
+    let o = 0;
+    for (let y = 0; y < 16; y++)
+        for (let x = 0; x < 16; x++) {
+            const v = tile[flipV ? 15 - y : y][flipH ? 15 - x : x];
+            const [r, g, b] = pal[v];
+            img.data.set([r, g, b, v === 0 ? 0 : 255], o);   // tile value 0 = transparent
+            o += 4;
+        }
+    ctx.putImageData(img, 0, 0);
+    return canvas;
+}
+
+// Player missile + enemy bomb are BOTH sprite tile 0x30; c_game_or_demo_init
+// (gg1-2.s:761-782) writes code 0x30 to both, color 0x09 to the 2 rocket slots
+// and color 0x0B to the 8 bomb slots. (Rocket also has rotated variants
+// 0x31/0x33 — straight-fire uses 0x30.)
+export const missile = spriteTile(0x30, 0x09);              // player shot (ctrl 0 — head up)
+export const bomb    = spriteTile(0x30, 0x0B, true);       // enemy bomb (ctrl 1 = flipX/up-down — head DOWN toward the player)
+// Bug explosion: tiles 0x41-0x44 at palette 0x0A (f_1DB3 gg1-2_fx.s:1517 sets the
+// dying sprite's color to 0x0A; case_24B2 gg1-3.s:945 advances code = count+1
+// over 0x41..0x44 then a score popup).
+// A 2×2 (32×32) doubled sprite = 4 consecutive tiles. The quadrant order is the
+// standard Namco gfx_offs {{0,1},{2,3}} ROTATED 90° CW — because the cabinet is
+// rotated and our sprite decode produces upright tiles (same reason decodeChar
+// rotates 90° CW). Confirmed visually against the explosion tiles:
+//   TL=base+2, TR=base+0, BL=base+3, BR=base+1.
+function doubledTile(base, palIdx) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 32;
+    const ctx = canvas.getContext('2d');
+    const quad = [[0, 0, 2], [16, 0, 0], [0, 16, 3], [16, 16, 1]];  // [dx, dy, tileOffset]
+    for (const [dx, dy, off] of quad) ctx.drawImage(spriteTile(base + off, palIdx), dx, dy);
+    return canvas;
+}
+
+// Bug explosion (case_24B2 gg1-3.s:945): frames 0x41-0x43 are single 16×16, then
+// the FINAL frame 0x44 expands to a 32×32 2×2 (dblh|dblw set at l_24DA, with a
+// −8,−8 recenter) — the big debris spread — before the score popup. Palette 0x0A.
+export const explosionBug = [
+    spriteTile(0x41, 0x0A),
+    spriteTile(0x42, 0x0A),
+    spriteTile(0x43, 0x0A),
+    doubledTile(0x44, 0x0A),
+];
+
+// Player-ship explosion (hitd_fghtr_hit gg1-5.s:744-754): base tile 0x20, palette
+// 0x0B, dblh|dblw → a 2×2 (32×32) sprite from the start. case_243C (gg1-3.s:850)
+// advances the code +4 every 4 frames over the 0x0F counter → 0x20/24/28/2C.
+export const explosionShip = [0x20, 0x24, 0x28, 0x2C].map(b => doubledTile(b, 0x0B));
+
 export const sprites = {
     ship:         group( 0, 8, 9),  // palette 9 — white ship
     shipCaptured: group( 0, 8, 7),  // palette 7 — red captured ship (Z80 color map 7)

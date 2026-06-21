@@ -14,6 +14,8 @@
 // On hit: enemy.hitFlag = true; CPU0's f_1DB3 (enemyStatus) reads it on
 // its own tick and transitions the enemy to dead (gg1-2_fx.s:1500–1519).
 
+import { missile } from '../gfx/resource.js';
+
 const BULLET_DY   = 6;
 // Despawn threshold. Z80 disables the rocket at SPRITE_Y < 40 (gg1-5.s:996-997);
 // canvas_Y = sprite_Y − 40, so that is canvas_Y < 0 — the bullet travels the
@@ -95,13 +97,12 @@ export function update(state) {
 export function render(state) {
     if (!state.tasks.bulletUpdate) return;
 
-    // Placeholder: 2 × 6 white rectangle. Galaga has a small rocket sprite
-    // at code 0x30 (gg1-2_fx.s:1941–1951); wire it up when the resource
-    // decoder exposes the missile / explosion sprite groups.
+    // Real rocket sprite (tile 0x30, palette 0x09 — gg1-2.s c_game_or_demo_init).
+    // The 16×16 tile is centered on the bullet position; the missile graphic is
+    // a small dart in the tile's center, the rest transparent.
     const ctx = state.ctx;
-    ctx.fillStyle = '#fff';
     for (const b of state.bullets) {
         if (!b.alive) continue;
-        ctx.fillRect(b.x - 1, b.y - 3, 2, 6);
+        ctx.drawImage(missile, (b.x | 0) - 8, (b.y | 0) - 8);
     }
 }

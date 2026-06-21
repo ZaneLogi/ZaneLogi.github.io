@@ -6,8 +6,12 @@
 // tick and transitions the enemy to disposition 4 (exploding), with a
 // ~5-frame counter (0x40 → 0x45) handled by f_23DD (gg1-3.s:949–954).
 //
-// For now: simply mark the enemy dead. Explosion sprite + countdown come
-// when the resource decoder exposes the explosion tile group (~step 8).
+// On the killing hit it spawns the bug death-burst (Z80 disposition 4 →
+// case_24B2, sprite codes 0x41-0x44 at palette 0x0A) via the explosions task,
+// then marks the enemy dead.
+
+import { spawnExplosion } from './explosions.js';
+import { explosionBug }   from '../gfx/resource.js';
 
 export function update(state) {
     for (const e of state.enemies) {
@@ -22,6 +26,16 @@ export function update(state) {
             e.hits = 1;          // → blue; render swaps the sprite (objectStates)
             continue;
         }
+
+        // Death-burst at the enemy's current screen position (Z80 disposition 4,
+        // case_24B2). Compute it from the LIVE state before flipping to 'dead' —
+        // flying/homing use the free position, formation the oscillating slot
+        // (same routing as objectStates/bulletUpdate).
+        const f = state.formation;
+        const inFlight = (e.state === 'flying' || e.state === 'homing');
+        const burstX = inFlight ? e.x : e.homeX + f.oscillateX + (f.pulseOffsets[e.colIdx] ?? 0);
+        const burstY = inFlight ? e.y : e.homeY +                (f.pulseOffsets[10 + e.rowIdx] ?? 0);
+        spawnExplosion(state, burstX, burstY, explosionBug, 4);
 
         e.alive = false;
         // Transition disposition OUT of the in-flight state, mirroring the Z80

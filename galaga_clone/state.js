@@ -329,6 +329,7 @@ export const state = {
         objectStates:        true,   // f_23DD     ★ always on
         enemyStatus:         true,   // f_1DB3     — on when stage is active
         bombUpdate:          true,   // f_1EA4     ★ always on
+        explosions:          true,   // death-burst animator (bug + ship) ★ always on
         bomberConfig:        false,  // f_0857     — recomputes reload values; on during 'playing'
         launchAttackWave:    true,   // f_2916     — on when stage is active
         playerMove:          true,   // f_1F85     — on during gameplay
@@ -398,6 +399,14 @@ export const state = {
     // implicit, not stored). Pre-allocated; alive=false means slot is free.
     // See architecture.html §5b "BOMB SUBSYSTEM" for f_1EA4 details.
     bombs: Array.from({ length: 8 }, () => ({ x: 0, y: 0, vx: 0, alive: false })),
+
+    // ── Explosions (death-burst animations) ───────────────────────────────
+    // Bug explosion (tiles 0x41-0x44, Z80 case_24B2) and the player-ship
+    // explosion (2×2 burst, case_243C). Each entry:
+    //   { alive, x, y, frames (HTMLCanvasElement[]), frame, timer, holdFrames, scale }
+    // Spawned on demand by spawnExplosion (tasks/explosions.js); the array grows
+    // by reusing dead slots, so it stays small.
+    explosions: [],
 
     // ── Raw input state (updated by main.js before each update tick) ───────
     // fireEdge is true on the rising edge of fire (mirrors hardware debounce

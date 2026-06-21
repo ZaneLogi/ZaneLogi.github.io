@@ -30,6 +30,7 @@ import * as captorDive         from './tasks/captorDive.js';
 import * as tractorBeam        from './tasks/tractorBeam.js';
 import * as pullShip           from './tasks/pullShip.js';
 import * as fighterCaptured    from './tasks/fighterCaptured.js';
+import * as explosions        from './tasks/explosions.js';
 
 // ── Task dispatch table ────────────────────────────────────────────────────
 // Ordered to match the Z80 task table (d_cpu0_task_table). bulletUpdate has
@@ -61,6 +62,8 @@ const TASK_TABLE = [
     { flag: 'tractorBeam',        module: tractorBeam,        ref: 'f_2222'    },
     { flag: 'pullShip',           module: pullShip,           ref: 'f_20F2'    },
     { flag: 'fighterCaptured',    module: fighterCaptured,    ref: 'f_19B2'    },
+    // Death-burst animator — rendered LAST so bursts sit on top of enemies/bombs.
+    { flag: 'explosions',         module: explosions,         ref: 'case_24B2' },
 ];
 
 // ── Canvas setup ───────────────────────────────────────────────────────────

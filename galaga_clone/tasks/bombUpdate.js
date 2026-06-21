@@ -15,6 +15,9 @@
 //   gg1-3.s:1090     — collision detection
 // See architecture.html §5b "BOMB SUBSYSTEM" for the full research block.
 
+import { bomb, explosionShip } from '../gfx/resource.js';
+import { spawnExplosion } from './explosions.js';
+
 // ── Drop-logic constants ──────────────────────────────────────────────
 const DROP_RELOAD       = 0x14;   // Z80 b_92E2[0] reload value (~20 frames)
 // Only drop when the bomber is low enough on screen. Z80 case_0DF5 (gg1-5.s:2351-2352)
@@ -122,11 +125,16 @@ export function update(state) {
             const hitLeft  = player.twoShip && Math.abs(b.x - (player.x - 16)) < COLL_DX;
             if (hitRight || hitLeft) {
                 b.alive = false;
+                // Player-ship explosion (Z80 hitd_fghtr_hit → disposition 8,
+                // case_243C): the 2×2 burst at the destroyed fighter's position.
                 if (player.twoShip) {
-                    player.twoShip = false;   // lose one fighter → back to single
+                    // left fighter destroyed → back to single
+                    spawnExplosion(state, player.x - 16, player.y, explosionShip, 4);
+                    player.twoShip = false;
                 } else {
                     // Ship lost → general respawn (gameController, 4c). No
                     // life-loss yet (deferred). Was a permanent freeze before 4c.
+                    spawnExplosion(state, player.x, player.y, explosionShip, 4);
                     player.alive = false;
                 }
             }
@@ -137,15 +145,11 @@ export function update(state) {
 export function render(state) {
     if (!state.tasks.bombUpdate) return;
 
-    // Placeholder bomb sprite — small white rect, similar to bullets but
-    // a bit taller. Galaga's actual bomb sprite is code 0x30 (same RAM
-    // index as player rockets, distinguished by object-status byte). When
-    // the resource decoder exposes the missile / bomb sprite group, swap
-    // this for the real sprite.
+    // Real bomb sprite (tile 0x30, palette 0x0B — gg1-2.s c_game_or_demo_init;
+    // same tile as the player rocket, different color). Centered on the bomb.
     const ctx = state.ctx;
-    ctx.fillStyle = '#ff8';   // pale-yellow tint to distinguish from bullets
     for (const b of state.bombs) {
         if (!b.alive) continue;
-        ctx.fillRect(b.x - 1, b.y - 2, 2, 4);
+        ctx.drawImage(bomb, (b.x | 0) - 8, (b.y | 0) - 8);
     }
 }
