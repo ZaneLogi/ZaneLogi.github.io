@@ -50,10 +50,17 @@
 //     velocity alternation, segment timer dec, etc. Don't simplify these.
 //
 // Other trade-offs vs Z80:
-//   - F7/F0 CALL (fly-in sub-path call/return) are still skipped. For
-//     STAGE 1 this is correct (those tokens are gated and skip in stage 1
-//     — see research_stage_init.md / research_path_data.md §2.2). For
-//     stages 4+ fly-in paths, F7/F0 sub-call support is still needed.
+//   - F0 (case_0955) is PORTED: a stage-8+ gated JUMP to a fly-in sub-path
+//     (pointer-replace, no return; see research_path_data.md §2.2). Below
+//     stage 8 the gate (newStageParms[8]) is off and it skips, byte-identical
+//     to the Z80 — so stages 1-7 are unaffected. See the 0xF0 handler +
+//     paths.js `.subPaths`.
+//   - F7 (case_0B98) is still skipped, and stays deferred: its gate
+//     (objId & 0x38)==0x38 selects "transient" caravan members the clone
+//     never launches, and its sub-paths use the unported FE token. Porting it
+//     means porting the whole transient-launch layer, not just a handler
+//     (research_attack_paths.md §8). The skip is correct meanwhile — the gate
+//     is never true in the clone, so the Z80 would skip too.
 //   - FD JUMP, FA LOOP_TOP — implemented for attack-dive paths in
 //     Phase E (research_attack_paths.md). FD is unconditional; FA gates
 //     on state.contBmbFlag (continuous-bombing mode). Translates the
@@ -87,7 +94,9 @@ function rawYToCanvasY(rawY) {
 // (the token byte alone) for unlisted opcodes.
 //
 // Most attack/fly-in tokens now have dedicated cases above; the generic
-// skip-path (this map) only still stubs the fly-in CALL tokens F7/F0.
+// skip-path (this map) only still stubs F7 — the deferred transient-only JUMP
+// (gate never true in the clone; sub-paths need the unported FE token; see
+// header). F0 now has a dedicated stage-8+ JUMP handler.
 // Entries below are documentation — for [H] tokens the dedicated case
 // advances the pointer itself. Some annotations predate the handlers and
 // were corrected when each was ported (e.g. F8 is 0-arg, F3 is an 8-byte
@@ -97,10 +106,10 @@ function rawYToCanvasY(rawY) {
 //   0xFC RTN_FMTN/DIVE   · 1-byte Y ref    (case_0B4E, gg1-5.s:1896)  [H]  ← bee dive-to-Y
 //   0xFA LOOP_TOP        · 2-byte alt addr (case_0BD1, gg1-5.s:1984)  [H]
 //   0xF8 (Y→top)         · 0-byte          (case_0B87, gg1-5.s:1929)  [H]
-//   0xF7 ATTACK_TURN     · 2-byte sub addr (case_0B98, gg1-5.s:1947)       ← fly-in CALL, skipped
+//   0xF7 ATTACK_TURN     · 2-byte sub addr (case_0B98, gg1-5.s:1947)       ← conditional JUMP, DEFERRED (transient-only; needs FE)
 //   0xF6 FREE_FLIGHT     · 1-byte heading  (case_0BA8, gg1-5.s:1963)  [H]
 //   0xF3 BREAK_TARGETED  · 8-byte LUT      (case_0A01, gg1-5.s:1661)  [H]
-//   0xF0 ATTACK_WAVE     · 2-byte sub addr (case_0955, gg1-5.s:1529)       ← fly-in CALL, skipped
+//   0xF0 ATTACK_WAVE     · 2-byte sub addr (case_0955, gg1-5.s:1529)  [H]  ← stage-8+ JUMP to sub-path, PORTED
 //   0xEF BOMB_MODE       · 2-byte alt addr (case_094E, gg1-5.s:1523)  [H]
 //
 // Step 8 phase 8a additions: FC, F8, F6, F3, EF — these only appear in
@@ -559,6 +568,45 @@ function loadSegment(e, state) {
                     e.pathOffset = target - base;
                 } else {
                     e.pathOffset += 3;   // skip token + 2-byte address
+                }
+                continue;
+            }
+
+            // ── 0xF0 ATTACK_WAVE (case_0955, gg1-5.s:1529) ──────────────
+            // The structural twin of EF above, gated on newStageParms[8]
+            // (the Z80's "on/after stage 8" byte; != 0 from stage 8):
+            //   == 0 (stages 1-7) → skip the 2-byte address, continue.
+            //                       Byte-identical to the Z80's l_0963 skip —
+            //                       this is what made the unported F0 faithful
+            //                       on every shipped stage all along.
+            //   != 0 (stage 8+)   → replace the path with the embedded sub-path
+            //                       (a different final approach segment before
+            //                       the same FB-home). case_0955 → l_0B8C:
+            //                       pointer-replace, no return.
+            // The sub-paths aren't in this array — ROM interleaves them with
+            // non-path data — so unlike FD/EF we can't use z80Base offset math.
+            // The path carries a `.subPaths` map (paths.js) keyed by Z80 address
+            // and we switch e.pathBase to the target. Like the clone's other
+            // l_0B8B-family tokens (F8/F9/F1) we apply the jump immediately
+            // rather than modelling the Z80's 1-frame defer (inc 0x0D → next
+            // frame) — invisible with the FB-home that follows.
+            //
+            // F7 (case_0B98), the sibling stage-4 token, stays a SKIP (default
+            // arg-skip below): its gate (objId & 0x38)==0x38 selects transient
+            // caravan members the clone never launches, and its sub-paths use
+            // the unported FE token. Porting it means porting the whole
+            // transient-launch layer, not a handler. research_attack_paths.md §8.
+            if (b0 === 0xF0) {
+                if (state.newStageParms[8] !== 0) {
+                    const lo     = e.pathBase[e.pathOffset + 1];
+                    const hi     = e.pathBase[e.pathOffset + 2];
+                    const target = (hi << 8) | lo;
+                    const sub    = e.pathBase.subPaths && e.pathBase.subPaths[target];
+                    if (!sub) { turnHome(e, state); return; }   // unknown target → home (defensive)
+                    e.pathBase   = sub;
+                    e.pathOffset = 0;
+                } else {
+                    e.pathOffset += 3;   // skip token + 2-byte address (stages 1-7)
                 }
                 continue;
             }

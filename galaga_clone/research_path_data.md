@@ -332,7 +332,7 @@ Status legend: ✓ implemented · ⏳ pending
 | ✓ | `e.x += vx × cos`, `e.y += -vy × sin` | `e.x += A × cos`, `e.y -= A × sin` where A alternates vx/vy | Use single A magnitude |
 | ✓ | Skip rotation negate for pair members | Negate rotRate when bit 7 of 0x13 set (= bit 6 of wave byte) | Add `negateRotation` field; apply in loadSegment |
 | ✓ | FB TURN_HOME: instant transition to 'formation' | Guided flight: aim at home, fly until within ±1 px, then snap | Added `'homing'` state with `Math.atan2`-based target-angle compute (mathematically equivalent to c_0E5B per file-header arithmetic policy) |
-| ⏳ | Sub-paths skipped (F7/F0 etc) | Not "skipped" — they're conditional JUMPS that REPLACE pointer | Implement as jumps (no call stack needed) |
+| ✓/⏳ | Sub-paths skipped (F7/F0 etc) | Not "skipped" — they're conditional JUMPS that REPLACE pointer | **F0 done** (2026-06-22, stage-8+ gate, pointer-replace via paths.js `.subPaths`). **F7 deferred** — gate fires only for transient members the clone never launches; needs the transient layer + FE token (research_attack_paths.md §8). |
 | ⏳ | Sprite frame from frameCount | Sprite frame from current angle (8 directions + flips) | Compute frame in objectStates.render |
 
 ## 11. Implementation order suggestion
@@ -346,7 +346,9 @@ Status legend: ✓ implemented · ⏳ pending
    byte after the rendering pipeline's ×2). INT-7.
 4. ⏳ **Sprite-frame from angle** — visual polish (enemies face the right
    way during curves).
-5. ⏳ **Token handlers** (FD, F0, F7, etc.) — for stages 4+ and attack
+5. **Token handlers** (FD, F0, F7, etc.) — for stages 4+ and attack
    dives. Stage 1 doesn't strictly need them (verified in earlier
    research); stage 1 paths use only END (FF) and TURN_HOME (FB) when
-   the F7/F0 conditions are not met.
+   the F7/F0 conditions are not met. Status: FD, F0, and the attack-dive
+   tokens are ✅ done; **F7 is deferred** (transient layer + FE — see
+   research_attack_paths.md §8).

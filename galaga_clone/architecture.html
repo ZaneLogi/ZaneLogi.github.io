@@ -546,7 +546,7 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
   <div style="color:#aaa;font-size:11px;font-weight:bold;margin-bottom:6px;letter-spacing:0.5px">WHERE THE CODE LIVES &nbsp;·&nbsp; quick map from this section's research findings to the JS implementation</div>
   <div style="color:#888;font-size:11px;line-height:1.7">
     &nbsp;• <span style="color:#7af">paths.js</span> — all 22 ported <span style="color:#7af">db_flv_XXXX</span> data blocks, the 24-entry <span style="color:#7af">PATH_INDEX</span> (db_2A3C), the 8-entry <span style="color:#7af">VARIANTS</span> table (db_2A6C), the 96-byte <span style="color:#7af">SPRT_FMTN_HPOS</span> + <code>getObjectIdForSlot()</code>, and <code>getPathByIndex()</code>.<br>
-    &nbsp;• <span style="color:#7af">tasks/bugMotion.js</span> — per-tick interpreter (CPU1 f_08D3 stand-in): segment loop, token dispatch (<code>0xFF</code> END / <code>0xFB</code> TURN_HOME / <code>0xFD/0xF7/0xF0</code> 2-byte arg skip), X/Y alternation. Exports <code>launchEnemy(state, objectId, pathIndex)</code> — the public API for "put this enemy into flight".<br>
+    &nbsp;• <span style="color:#7af">tasks/bugMotion.js</span> — per-tick interpreter (CPU1 f_08D3 stand-in): segment loop, token dispatch (14 of 17 handled — <code>0xFF</code> END / <code>0xFB</code> TURN_HOME / <code>0xFD</code> JUMP / <code>0xF0</code> stage-8 JUMP-to-sub-path / etc.; <code>0xF7</code> alone still arg-skipped — deferred, needs the transient layer + FE), X/Y alternation. Exports <code>launchEnemy(state, objectId, pathInfo)</code> — the public API for "put this enemy into flight".<br>
     &nbsp;• <span style="color:#7af">tasks/launchAttackWave.js</span> — wave runner (f_2916 stand-in). Currently walks a hardcoded <code>TEST_WAVE</code>; the integration pass (after step 8) replaces this with a stage-data-driven <code>state.waveTable</code>.<br>
     &nbsp;• <span style="color:#7af">tasks/objectStates.js</span> — render dispatch by enemy <code>state</code> ('formation' uses homeX/Y + offsets, 'flying' uses live x/y, 'dead' is skipped).<br>
     &nbsp;• <span style="color:#7af">state.js</span> — per-enemy schema includes <code>objectId</code>, <code>state</code>, motion fields (<code>x,y,vx,vy,angle,rotRate,pathBase,pathOffset,segTimer</code>), and the <code>bugMotion</code> task flag.<br>
@@ -835,7 +835,7 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
     <div style="color:#888;font-size:11px;line-height:1.7">
       &nbsp;• <span style="color:#7af">0xF3 BREAK_TARGETED</span> — red moth targeting burst (red ×2, yellow ×0)<br>
       &nbsp;• <span style="color:#7af">0xF6 FREE_FLIGHT</span> — continuous motion mode (red ×3, yellow ×1)<br>
-      &nbsp;• <span style="color:#7af">0xF7 ATTACK_TURN</span> — sub-path call (yellow ×1, red ×0)<br>
+      &nbsp;• <span style="color:#7af">0xF7 ATTACK_TURN</span> — sub-path jump, skipped (gate <code>(objId&amp;0x38)==0x38</code> false for formation bugs; deferred) (yellow ×1, red ×0)<br>
       &nbsp;• <span style="color:#7af">0xEF BOMB_MODE</span> — bomb-drop state change (each ×1)<br>
       &nbsp;• <span style="color:#7af">0xF8–0xFA, 0xFB, 0xFC–0xFD</span> — flow-control / segment-end opcodes throughout<br>
       &nbsp;• <span style="color:#7af">0xFF 0xFF</span> — paired block terminator

@@ -173,7 +173,7 @@ Z80:
 Our `tryLaunchAttack(state, 'yellow')`:
 - Range `e.objectId 0x08..0x2E` ✅
 - Filter `e.state === 'formation' && e.alive` ✅ (functional equivalent of STAND_BY check)
-- **No bonus-bee skip** ⚠ — still no bonus-bee object; it was a step-10 nice-to-have that the 4c/4d capture work did **not** include, so it remains deferred and the skip stays moot for now
+- **Bonus-bee skip** ⚠ — the bonus-bee is now implemented (BB-1..5, `research_bonus_bee.md`), so this yellow scan SHOULD skip the reserved bee `state.bonusBee.obj` (Z80 skips `_b_bbee_obj`) to avoid the attack dispatcher launching it as a normal diver mid-flash. Not yet added — follow-up in §8.9.
 - Returns first match (first-found = first available in formation order) ✅
 
 ### 4.2 Red (gg1-2_fx.s:1004-1008) — ✅ verified
@@ -459,7 +459,7 @@ counting. For attack paths specifically:
 |-------|----------|---------------------|
 | 0xF3 BREAK_TARGETED | case_0A01 (gg1-5.s:1661) | ✅ **PORTED (2026-06-18).** Player-targeted turn-hold: reads player X, computes `(playerX−mothX)/4` (signed, mirrored by negateRotation), biases +0x18, clamps [0,0x2F], `/6` → bucket 0-7, and writes `LUT[bucket]` into the segment **duration** (0x0D), then continues the current heading. **Doc correction:** earlier rows here said F3 does a "LUT lookup → *sub-path*". It does NOT select a sub-path — it picks a turn-HOLD DURATION (`0x0D(ix)`) and `jp l_0BFF_flite_pth_skip_load` (gg1-5.s:1715) keeps the prior segment's vx/vy/rotRate. The longer hold of the preceding `0x12,0xFA,..` (rotRate −6) turn = bigger hook toward the player. See `bugMotion.js` loadSegment `0xF3` block. |
 | 0xF6 FREE_FLIGHT | case_0BA8 (gg1-5.s:1963) | ✅ **FULLY PORTED (2026-06-18).** All 3 effects: (1) sets heading `0x04/0x05 = (arg, mirrored by negateRotation) << 2` (arg×4); (2) bomb counter `0x0E = 0x1E`; (3) bomb-enable bitmask `0x0F = b_92C0[8]` (= `state.bombDropFlags`). **NOTE (2026-06-21):** F6 is NOT the primary bomb arming — `j_108A` (gg1-2.s:314-323) arms **every** dive at launch with the same `0x0E`/`0x0F`; F6 only **re-arms** inside the cont_bmb loop. The earlier "no normal-dive bombing" reading was wrong — see §6. |
-| 0xF7 ATTACK_TURN | case_0B98 (gg1-5.s:1947) | ✅ correct skip (transient-only behavior; not used for non-transient bombers) |
+| 0xF7 ATTACK_TURN | case_0B98 (gg1-5.s:1947) | ⚠ skipped — fine for ATTACK paths (bombers don't use F7). F7 is a **conditional JUMP to a sub-path** (gate `(obj_id & 0x38)==0x38`; on the gate it `jp l_0B46` = the FD-JUMP handler → pointer-replace, no return) and is **DEFERRED**: its gate fires only for transient caravan members the clone never launches, so the skip is faithful. Not a standalone token — needs the transient-launch layer + the FE token (see §8). |
 | 0xF8 | case_0B87 (gg1-5.s:1929) | ✅ **PORTED (2026-06-18).** In the attack/home context this is NOT "BEAM_ON" — it repositions the bug's **Y to the top** ("flew through the bottom of the screen to the top"): Z80 sets `0x01(ix) = 0x0138>>1 = 0x9C`; `rawYToCanvasY(0x9C) = 1` (top edge). **0-arg** token (the old TOKEN_ARG_BYTES.F8=1 was wrong, §7c). Pairs with F9 + the FB tail. See `bugMotion.js` `0xF8` block. |
 | 0xF9 (case_0B5F) | gg1-5.s:1907 | ✅ **PORTED (2026-06-18).** Sets the bug's **X to its home-column** coordinate (`0x03(ix) = ds_hpos_spcoords[col]/2 → rawXToCanvasX = e.homeX`), so it re-enters above its slot. 0-arg; skips the cocktail flip-screen branch + cont_bmb dive-sound (unmodelled). With F8, the moth re-appears at `(homeX, top)` then FA→FB homes it down — the faithful "dive off bottom → re-enter top → fly down to formation" loop. |
 | 0xFA LOOP_TOP | case_0BD1 (gg1-5.s:1984) | ✅ Phase E INT-7 — gated on state.contBmbFlag. Jumps to FB tail when cont_bmb=false (most of stage 1), falls through when cont_bmb=true (late stage 1, ≤5 enemies). |
@@ -473,6 +473,44 @@ pair (one without the other gives wrong behavior — see §3.3 and §9
 Phase E notes). The path now executes its inner loop structure correctly
 on stage 1 normal mode (FA short-circuits to FB) and on cont_bmb mode
 (FD loops the attack pass with F6 firing each iteration).
+
+### 7.1 Complete token coverage — all 17 (0xEF-0xFF)
+
+Full dispatch = `d_0920_jp_tbl` (gg1-5.s:1494): the token is `cpl`'d, then ×2
+indexes the table. `bugMotion.loadSegment` explicitly handles **14 of 17** (F0
+added 2026-06-22); the other 3 (F5, F7, FE) fall through to the default
+`TOKEN_ARG_BYTES` arg-skip. (Verified against `bugMotion.js` + a byte-scan of
+every ported path array, 2026-06-22.)
+
+| Token | Z80 case | Role | Clone |
+|---|---|---|---|
+| FF | case_0E49 | END / make inactive | ✅ despawn (challenge bug / bonus-bee clone) or → formation (combat) |
+| FE | case_0B16 | player-targeted turn-hold ("level 3+", F3-like) | ⛔ **not ported, but NEVER REACHED** — no ported path uses the FE *token* (the `0x..,0xFE,..` bytes in path data are segment rotRates). It has a VARIABLE-length table arg, so it'd mis-parse under the 0-arg default → needs a real handler IF a future path uses it. |
+| FD | case_0B46 | JUMP | ✅ |
+| FC | case_0B4E | dive-to-Y | ✅ (2026-06-19) |
+| FB | case_0AA0 | TURN_HOME | ✅ |
+| FA | case_0BD1 | LOOP_TOP | ✅ |
+| F9 | case_0B5F | X→home column | ✅ |
+| F8 | case_0B87 | Y→top | ✅ |
+| F7 | case_0B98 | conditional **JUMP** to sub-path (pointer-replace, no return) | ⚠ **DEFERRED** — gate `(obj_id & 0x38)==0x38`; the 2-byte addr is skipped (`TOKEN_ARG_BYTES.F7=2`, byte-aligned). The gate selects **transient** caravan members (slots `$38/$3A/$3C/$3E`) which the clone never launches, so the skip is faithful everywhere it currently runs. F7 is **not a standalone token**: porting it means porting the whole transient-launch layer (`c_25A2` byte0 insertion + `_setup_transients`) AND its sub-paths, which use the unported **FE** token. See §8. |
+| F6 | case_0BA8 | FREE_FLIGHT | ✅ |
+| F5 | case_0942 | set disposition 3 + advance | ✅-effectively — genuinely 0-arg, so the default no-op skip is byte-correct; the dropped disposition is irrelevant to the clone. Reached by the bonus-bee convoy (`p_flv_0502`); verified harmless. |
+| F4 | case_0A53 | capture aim (boss) | ✅ (step 10) |
+| F3 | case_0A01 | BREAK_TARGETED | ✅ |
+| F2 | case_097B | SPAWN (bonus-bee clone) | ✅ (BB-5) |
+| F1 | case_0968 | Y→home row (boss) | ✅ (step 10) |
+| F0 | case_0955 | conditional **JUMP** to sub-path (pointer-replace, no return) | ✅ **PORTED (2026-06-22).** Gate `ds_new_stage_parms[0x08]` (0 until stage 8): off → skip the 2-byte addr (byte-exact to the Z80's `l_0963`, so stages 1-7 are unchanged); on → replace the path with the embedded sub-path (`l_0B8C`). The 6 F0-target sub-paths (`p_flv_005e/0097/00cc/0173/01a8/01e0`, each a segment + FB-home) were ported into a per-path `.subPaths` map (paths.js) because in ROM they sit in gaps interleaved with non-path data; the `0xF0` handler in `bugMotion.js` switches `e.pathBase`. Verified against the real stage data, not just a forced gate: `loadStageParms` opens the gate at stages 8/9/12/13/14/16 (rank A); every gate-on stage launches F0-bearing paths (stage 8 → idx 0,1 = `path_001D`/`path_0067`). Under real stage-8 params, enemies on those paths hit F0, jump to the right sub-path (0x5E/0x97), and FB-home to formation; gate-off stays on the main path. |
+| EF | case_094E | BOMB_MODE | ✅ |
+
+**Not implemented: F5, F7, FE.** **F0** is now ported (2026-06-22, above). The
+remaining real gap is **F7** — and it is bigger than a token: its gate fires only
+for **transient** caravan members, which need the whole transient-launch layer
+(`c_25A2` byte0 insertion + transient object IDs + `_setup_transients`), and its
+sub-paths use the unported **FE** token. Porting the F7 handler alone changes
+nothing (nothing triggers the gate). **F5** is benign (no-op is byte-correct), **FE**
+is unreached *today* (it becomes reachable only via F7's sub-paths). Every token
+actually exercised by the ported stages (1-3 + challenge + combat dives + bonus-bee)
+is implemented — and F0 is exercised from stage 8.
 
 ## 8. Summary — what's wrong, in priority order
 
@@ -578,8 +616,25 @@ on stage 1 normal mode (FA short-circuits to FB) and on cont_bmb mode
 
 ### 🟢 Low impact / known deferred
 
-8. FC/FE token handlers skipped — visual polish.
-9. Bonus-bee skip in yellow scan — moot until bonus-bee exists (step 10).
+8. **F7 fly-in sub-path JUMP — deferred (depends on the transient layer).**
+   F0 was ported 2026-06-22 (§7.1): a stage-8+ gated JUMP that fires for ordinary
+   formation bugs, so it was self-contained — port its 6 FB-home sub-paths + the
+   handler and it's done. **F7 is not** the same shape, even though the token logic
+   is identical (a conditional pointer-replace, no return). Its gate
+   `(obj_id & 0x38)==0x38` fires only for **transient** caravan members — the extra
+   fly-in bugs that first appear at **stage 4** (combat-stage-data byte0 low nibble;
+   `c_25A2` inserts them with `or #0x38`, `_setup_transients` at gg1-3.s:1777). The
+   clone never launches transients (its wave builder drops them and ignores byte0),
+   so nothing triggers F7's gate — the skip is faithful, and porting the F7 handler
+   alone would change nothing. A faithful F7 needs three pieces together: the
+   transient-launch layer, the F7 handler, and F7's sub-paths — which use the
+   **FE** token (`case_0B16`), also unported. That's a multi-subsystem feature past
+   the clone's tested scope, deferred as one unit. Aside from F7 (+ FE, reachable
+   only through it) and sound, every token the ported stages exercise is implemented.
+9. Bonus-bee ✅ implemented (BB-1..5, `research_bonus_bee.md`). ⚠ follow-up: the
+   attack-dispatcher yellow/moth scan (§4.1) should skip `state.bonusBee.obj` so the
+   reserved/flashing bee can't also be launched as a normal diver mid-flash (Z80
+   skips `_b_bbee_obj`) — verify / add.
 10. Sound effects — no sound system yet.
 11. Fly-in bombing (stage 2+) — ✅ PORTED (2026-06-22). Fly-in bugs bomb in later
     stages via a SEPARATE arming path (`b_92E2[1]` per-stage + sprite-code bit-7,
@@ -695,7 +750,7 @@ px. See §5b for the full mechanism + measurements.
 **Phase F: Step-10 territory**
 - ~~Boss capture squad~~ ✅ done step 10 (4a–4d) — capture dive + escort/paired
   dive + 2-hit boss + rescue → 2-ship. See §14 + research_boss_capture.md.
-- Bonus-bee — ⏳ still deferred (not part of the 4c/4d capture work)
+- Bonus-bee — ✅ implemented 2026-06-22 (BB-1..5: flashing diver + 3-bug X3 convoy; `research_bonus_bee.md`)
 - ~~F3 BREAK_TARGETED LUT~~ ✅ done 2026-06-18 (player-targeted turn-hold; see §7/§7a)
 - Sound — ⏳ deferred
 
@@ -726,7 +781,7 @@ px. See §5b for the full mechanism + measurements.
 - ✅ **Every token the BOSS paths use is implemented too** (data, F4, FC, F8, F9, F1, FA, FB, FD, EF, F6, FF) — step 10 (4a–4d), see §14. `F4` (capture aim) + `F1` (Y→home row) are boss-distinctive.
 - ✅ Boss capture squad implemented (capture dive + escort/paired dive + 2-hit boss + rescue → 2-ship), step 10 — see §14 + research_boss_capture.md
 - ⚠ Dispatcher guard partial: `playerFire` gate ported (Phase D); `glbl_enemy_enbl` has no port equivalent yet
-- ⏳ Sound, bonus-bee deferred
+- ✅ Bonus-bee implemented (BB-1..5, `research_bonus_bee.md`) · ⏳ Sound deferred
 - ✅ Fly-in bombing (stage 2+) — separate `b_92E2[1]` arming path, PORTED 2026-06-22 (see `research_stage_init.md` §6.2)
 
 ## 11. Moth (red) dive — token map + decision gates
@@ -734,7 +789,7 @@ px. See §5b for the full mechanism + measurements.
 Quick reference for the moth's break-formation dive: which path tokens it
 uses, and the gates that decide which branch it takes. Source:
 `db_flv_atk_red` (gg1-5.s:311). All ported as of 2026-06-18 (stage-1 path);
-the moth does NOT use `F7` (fly-in CALL) or `FC` (bee dive-start).
+the moth does NOT use `F7` (fly-in sub-path JUMP) or `FC` (bee dive-start).
 
 ### 11.1 Tokens the moth uses
 
@@ -816,7 +871,7 @@ the same vocabulary.
 | `EF` | BOMB_MODE — stage-gated jump | `p_flv_036c` |
 | `FF` | terminate | `p_flv_039e` tail |
 
-No `F3` (no player-targeting), no `F7`/`F0` (those are fly-in CALL tokens).
+No `F3` (no player-targeting), no `F7`/`F0` (those are fly-in sub-path JUMP tokens).
 
 ### 12.2 The gates that steer the bee
 
