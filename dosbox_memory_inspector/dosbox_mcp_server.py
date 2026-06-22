@@ -354,68 +354,153 @@ def write_dos(segment: int, offset: int, value: int, width: int = 2) -> str:
     return f"Wrote {n} bytes: DOS {segment:04X}:{offset:04X} <- {value}"
 
 
-def _verify_membase(handle: int, membase: int,
-                    known: Optional[tuple] = None) -> tuple[int, list]:
-    """Check several PC BIOS fingerprints for a candidate MemBase.
-    Returns (match_score, evidence_list).
-    `known` = (segment, offset, value, width) is an optional decisive check
-    against a known variable."""
-    score = 0
-    evidence = []
+# ----------------------------------------------------------------------------
+# MemBase auto-detection via the DOS BIOS Data Area (BDA)
+#
+# DOSBox does NOT map a ROM BIOS image at segment F000 -- the reset vector at
+# linear 0xFFFF0 and the BIOS date string are absent (read back as zero), so the
+# classic PC-BIOS fingerprints are useless here. What IS always present, even
+# with only the DOSBox shell loaded, is the BIOS Data Area at the fixed linear
+# address 0x400 (segment 0x40): the COM/LPT I/O-port table, the equipment word,
+# the conventional-memory size (DOSBox = 640 KB), and a live timer-tick counter.
+# We locate the BDA by that signature and derive MemBase = host(BDA) - 0x400.
+# MemBase is NOT necessarily the region start (observed +0x20 on real DOSBox), so
+# we scan for the signature rather than probing a few fixed offsets.
+# ----------------------------------------------------------------------------
+BDA_COM1    = 0x400   # word: COM1 I/O port   (DOSBox default 0x03F8)
+BDA_LPT1    = 0x408   # word: LPT1 I/O port   (DOSBox default 0x0378)
+BDA_EQUIP   = 0x410   # word: equipment list  (non-zero, not 0xFFFF)
+BDA_BASEMEM = 0x413   # word: conventional memory in KB (DOSBox = 640 = 0x280)
+BDA_TIMER   = 0x46C   # dword: timer-tick count, increments ~18.2 Hz
 
-    def at(linear, n):
-        try:
-            return _read(handle, membase + linear, n)
-        except OSError:
-            return None
+# Plausible I/O-port values across common DOSBox / PC configs.
+_COM_PORTS = {0x3F8, 0x2F8, 0x3E8, 0x2E8}
+_LPT_PORTS = {0x378, 0x278, 0x3BC}
 
-    # Fingerprint 1: reset vector @ 0xFFFF0 is a far jump, opcode = 0xEA
-    rv = at(0xFFFF0, 1)
-    if rv == b"\xEA":
-        score += 2
-        evidence.append("reset vector 0xFFFF0 = EA (far jmp)")
 
-    # Fingerprint 2: BIOS date string MM/DD/YY @ 0xFFFF5; positions 2 and 5 are '/'
-    date = at(0xFFFF5, 8)
-    if date and len(date) == 8 and date[2:3] == b"/" and date[5:6] == b"/":
-        if all(0x20 <= b < 0x7F for b in date):
-            score += 3
-            evidence.append(f"BIOS date string @0xFFFF5 = {date.decode(errors='replace')!r}")
+def _score_bda(buf: bytes, off: int) -> tuple[int, list]:
+    """Score a candidate MemBase sitting at byte offset `off` within `buf`, by
+    checking BDA invariants at their fixed linear addresses. Returns
+    (score, evidence), or (0, []) if this is not a BDA.
 
-    # Fingerprint 3: BDA (BIOS Data Area) @ 0x400; equipment word @ 0x410 is usually non-0/non-FFFF
-    eq = at(0x410, 2)
-    if eq is not None and eq not in (b"\x00\x00", b"\xFF\xFF"):
+    The conventional-memory word @40:13 is the decisive discriminator: DOSBox
+    invariably reports 640 KB (639 with an EBDA), a value that -- combined with
+    the COM1/LPT1 ports at their exact relative offsets -- is far too specific to
+    hit by chance. A loose range here produced false positives in DOSBox's own
+    host heap (e.g. a 511-KB word next to a stray 0x03F8), so it is mandatory."""
+    def word(linear):
+        p = off + linear
+        return int.from_bytes(buf[p:p + 2], "little") if 0 <= p and p + 2 <= len(buf) else None
+
+    def dword(linear):
+        p = off + linear
+        return int.from_bytes(buf[p:p + 4], "little") if 0 <= p and p + 4 <= len(buf) else None
+
+    basemem = word(BDA_BASEMEM)
+    if basemem not in (639, 640):        # mandatory: not a DOSBox BDA otherwise
+        return 0, []
+    com1, lpt1 = word(BDA_COM1), word(BDA_LPT1)
+    com1_ok, lpt1_ok = com1 in _COM_PORTS, lpt1 in _LPT_PORTS
+    if not (com1_ok or lpt1_ok):         # mandatory: the I/O-port table is the
+        return 0, []                     # real signature; 640 KB alone is not enough
+    score = 3
+    ev = [f"BDA base memory @40:13 = {basemem} KB"]
+    if com1_ok:
         score += 1
-        evidence.append(f"BDA equipment word @0x410 = {int.from_bytes(eq,'little'):#06x}")
+        ev.append(f"BDA COM1 @40:00 = {com1:#06x}")
+    if lpt1_ok:
+        score += 1
+        ev.append(f"BDA LPT1 @40:08 = {lpt1:#06x}")
+    equip = word(BDA_EQUIP)
+    if equip not in (None, 0x0000, 0xFFFF):
+        score += 1
+        ev.append(f"BDA equipment word @40:10 = {equip:#06x}")
+    tick = dword(BDA_TIMER)
+    if tick not in (None, 0, 0xFFFFFFFF):
+        score += 1
+        ev.append(f"BDA timer tick @40:6C = {tick}")
+    return score, ev
 
-    # Fingerprint 4: BDA base memory in KB @ 0x413; DOSBox commonly reports 640 (0x280)
-    kb = at(0x413, 2)
-    if kb is not None:
-        v = int.from_bytes(kb, "little")
-        if 256 <= v <= 640:
-            score += 1
-            evidence.append(f"BDA base memory @0x413 = {v} KB")
 
-    # Final check: matching a known variable value -> decisive evidence
+def _detect_membase_bda(handle: int, known: Optional[tuple] = None) -> tuple:
+    """Find MemBase by locating the DOS BIOS Data Area in every large region.
+    Anchors the search on two stable BDA bytes -- the COM1 port word (0x03F8) and
+    the 640-KB conventional-memory word -- validates the surrounding BDA with
+    _score_bda, and derives MemBase = host(BDA) - 0x400. A known variable
+    (seg, off, value, width), if given, is verified with a live read as a
+    decisive tie-breaker. Returns (membase, evidence_list, others) where `others`
+    is a short list of runner-up (score, hex_addr); (None, [], []) on failure."""
+    WINDOW = 0x200000  # 2 MB from each region start covers the BDA + low DS data
+    found = {}         # membase -> (score, evidence)
+    for base, size in _iter_regions(handle):
+        if size < 0x110000:        # DOSBox emulated RAM is at least ~1 MB
+            continue
+        try:
+            buf = _read(handle, base, min(size, WINDOW))
+        except OSError:
+            continue
+        for anchor, anchor_linear in ((b"\xf8\x03", BDA_COM1),     # COM1 = 0x03F8
+                                      (b"\x80\x02", BDA_BASEMEM)):  # basemem = 640
+            start = 0
+            while len(found) <= 64:
+                i = buf.find(anchor, start)
+                if i < 0:
+                    break
+                start = i + 1
+                off = i - anchor_linear
+                if off < 0:
+                    continue
+                cand = base + off
+                if cand in found:
+                    continue
+                score, ev = _score_bda(buf, off)
+                if score >= 5:        # mandatory base memory (3) + >=2 corroborators
+                    found[cand] = (score, ev)
+    if not found:
+        return None, [], []
+
+    ranked = sorted(((sc, mb, ev) for mb, (sc, ev) in found.items()), reverse=True)
+
+    # A known variable is decisive: prefer candidates whose live read matches.
     if known:
-        seg, off, val, w = known
-        cur = at((seg << 4) + off, w)
-        if cur is not None and int.from_bytes(cur, "little") == (val & ((1 << (8*w)) - 1)):
-            score += 5
-            evidence.append(f"known variable {seg:04X}:{off:04X} == {val} OK")
+        seg, koff, val, w = known
+        mask = (1 << (8 * w)) - 1
+        confirmed = []
+        for sc, mb, ev in ranked:
+            try:
+                cur = int.from_bytes(_read(handle, mb + (seg << 4) + koff, w), "little")
+            except OSError:
+                continue
+            if cur == (val & mask):
+                confirmed.append((sc + 5, mb,
+                                  ev + [f"known var {seg:04X}:{koff:04X} == {val}"]))
+        if confirmed:
+            ranked = sorted(confirmed, reverse=True)
+        # If nothing matched, fall through to the BDA-only ranking: the supplied
+        # value may be wrong or the program may not be in that state yet.
 
-    return score, evidence
+    best_score, best, best_ev = ranked[0]
+    others = [(s, hex(a)) for s, a, _ in ranked[1:4]]
+    return best, [f"(match score {best_score})"] + best_ev, others
 
 
 @mcp.tool()
 def find_membase_auto(known_segment: int = -1, known_offset: int = -1,
                       known_value: int = -1, known_width: int = 2) -> str:
-    """Auto-detect DOSBox's MemBase, skipping manual scan calibration.
-    How it works: DOSBox's emulated memory contains fixed PC BIOS features
-    (reset vector, BIOS date string, BDA); this checks those fingerprints on
-    every large-enough region and cross-validates. If you supply a known
-    variable (known_segment/offset/value/width), it is used as a decisive final
-    check for maximum accuracy. On success MemBase is set directly."""
+    """Auto-detect DOSBox's MemBase without a manual scan, using the DOS BIOS
+    Data Area (BDA) as the footprint.
+
+    DOSBox maps no ROM BIOS at segment F000 (no reset vector / date string), so
+    this does NOT use PC-BIOS fingerprints. Instead it locates the BDA at its
+    fixed linear address 0x400 -- the COM/LPT port table, equipment word, the
+    640-KB conventional-memory word and the live timer tick -- and derives
+    MemBase = host(BDA) - 0x400. Because it scans for the signature, it works
+    even when MemBase is not at the region start, and with only the DOSBox shell
+    loaded (no game needed).
+
+    Pass a known variable (known_segment/offset/value/width) for a decisive
+    cross-check; without it, detection rests on the BDA signature alone. On
+    success MemBase is set directly."""
     if not S.handle:
         return HINT_NO_PROC
 
@@ -423,43 +508,22 @@ def find_membase_auto(known_segment: int = -1, known_offset: int = -1,
     if known_segment >= 0 and known_offset >= 0 and known_value >= 0:
         known = (known_segment, known_offset, known_value, known_width)
 
-    # DOSBox emulated memory is >=1MB and contiguous; pre-filter large regions as bases
-    candidates = []
-    for base, size in _iter_regions(S.handle):
-        if size >= 0x110000:  # at least 1MB+64KB (includes HMA)
-            candidates.append((base, size))
+    best, evidence, others = _detect_membase_bda(S.handle, known)
+    if best is None:
+        return ("Auto-detect failed: no region exposed a recognizable DOS BIOS "
+                "Data Area (BDA) signature.\nFall back to the manual flow "
+                "(scan_value -> next_scan -> set_membase_from), or pin any value "
+                "you can see on screen and use set_membase_from.")
 
-    results = []
-    for base, size in candidates:
-        # MemBase may be exactly the region start, or offset by alignment; try a few
-        for off in (0, 0x1000, 0x10000):
-            if off + 0x100000 > size:
-                continue
-            cand = base + off
-            score, ev = _verify_membase(S.handle, cand, known)
-            min_need = 7 if known else 4
-            if score >= min_need:
-                results.append((score, cand, ev))
-
-    if not results:
-        return ("Auto-detect failed: no region matched the PC BIOS fingerprints.\n"
-                "Fall back to the manual flow (scan_value -> next_scan -> set_membase_from), "
-                "or supply a known variable value and retry to improve the hit rate.")
-
-    results.sort(reverse=True)
-    best_score, best, best_ev = results[0]
     S.membase = best
-    detail = "\n  - ".join(best_ev)
-    extra = ""
-    if len(results) > 1:
-        others = [(s, hex(a)) for s, a, _ in results[1:4]]
-        extra = f"\n(Other candidates: {others}; picked the highest score.)"
-    return (f"MemBase auto-set to 0x{best:x} (match score {best_score})\n"
+    detail = "\n  - ".join(evidence)
+    extra = f"\n(Other candidates: {others}; picked the highest score.)" if others else ""
+    return (f"MemBase auto-set to 0x{best:x}\n"
             f"Evidence:\n  - {detail}{extra}\n"
             f"You can now read variables directly with read_dos / read_linear."
             + ("" if known else
-               "\nTip: no known-variable check was provided; verify once with "
-               "read_dos against an address you are sure of."))
+               "\nTip: no known-variable check was provided; the BDA signature is "
+               "reliable, but you can verify once with read_dos against a value you know."))
 
 
 @mcp.tool()
@@ -470,13 +534,14 @@ def session_init(table_path: str = "",
     load an address table -- the usual boot sequence in a single call.
 
     Pass a known variable (known_segment/offset/value/width) so MemBase
-    calibration is verified decisively; without it, detection falls back to BIOS
-    fingerprints only and may be less certain. Pass table_path to also load a
-    saved variable table; omit it on first run when no table exists yet.
+    calibration is cross-checked decisively; without it, detection rests on the
+    DOS BIOS Data Area (BDA) signature alone (still reliable, and game-free).
+    Pass table_path to also load a saved variable table; omit it on first run
+    when no table exists yet.
 
-    Returns a step-by-step boot report. If a step fails (e.g. the target program
-    isn't loaded yet so fingerprints don't match), the report says where it
-    stopped and what to do next, and later steps are skipped."""
+    Returns a step-by-step boot report. If a step fails (e.g. DOSBox isn't
+    running, or no large region exposed a BDA), the report says where it stopped
+    and what to do next, and later steps are skipped."""
     lines = ["session_init:"]
 
     # Step 1: attach
@@ -495,15 +560,16 @@ def session_init(table_path: str = "",
     lines.append(f"  [2] find_membase_auto -> {'OK' if ok2 else 'FAILED'}")
     lines.append(f"      {r2.splitlines()[0]}")
     if not ok2:
-        lines.append("  Stopped: MemBase not calibrated. Common cause: the target "
-                     "program isn't loaded yet, or no known variable was given. "
-                     "Load the program, or retry with known_segment/offset/value, "
-                     "or use the manual scan flow.")
+        lines.append("  Stopped: MemBase not calibrated. The BDA signature wasn't "
+                     "found -- DOSBox may still be starting up, or has an unusual "
+                     "memory config. Retry once DOSBox is at its prompt, pass "
+                     "known_segment/offset/value for a cross-check, or use the "
+                     "manual scan flow.")
         return "\n".join(lines)
     had_known = (known_segment >= 0 and known_offset >= 0 and known_value >= 0)
     if not had_known:
-        lines.append("      (no known variable supplied; calibration is "
-                     "fingerprint-only -- verify once with read_dos if unsure.)")
+        lines.append("      (no known variable supplied; calibration rests on the "
+                     "BDA signature -- verify once with read_dos if unsure.)")
 
     # Step 3: optional table load
     if table_path:

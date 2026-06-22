@@ -60,8 +60,8 @@ start Claude Code elevated, otherwise opening the process is denied.
 
 The server itself has no dependency on DOSBox being open — it just registers its
 tools and waits. You can load it before or after launching DOSBox. It only
-touches the emulator when you call `find_dosbox()`, and by then the target
-program should be running so its values and the BIOS fingerprints are in memory.
+touches the emulator when you call `find_dosbox()`, and by then DOSBox should be
+at its prompt so its BDA (and any program values you want to read) are in memory.
 
 ## Calibrating MemBase
 
@@ -69,21 +69,33 @@ Everything depends on `MemBase`. There are two ways to get it.
 
 ### Fast path: auto-detect
 
-`find_membase_auto` exploits the fact that DOSBox emulates a PC, so its memory
-contains fixed PC BIOS fingerprints that pin `MemBase`:
+`find_membase_auto` locates DOSBox's **BIOS Data Area (BDA)** — a small fixed
+structure the emulator keeps at linear `0x400`, present even with only the DOS
+shell loaded — and derives `MemBase = host(BDA) - 0x400`.
 
-- reset vector @ `0xFFFF0` — first boot instruction, always a far jump (`EA`)
-- BIOS date string @ `0xFFFF5` — `MM/DD/YY` format
-- BIOS Data Area @ `0x400` — equipment word, base-memory size
+It deliberately does **not** rely on a ROM BIOS. DOSBox maps no BIOS image at
+segment `F000`, so the reset vector (`0xFFFF0`) and BIOS date string read back as
+zero — the classic PC-BIOS fingerprints are useless here. The BDA, however, is
+always populated. Detection scans each large (>=1MB) region for the BDA
+signature at its exact relative offsets:
 
-It checks these on every large (>=1MB) region, scores them, and picks the best.
-For a decisive lock, pass a variable you can confirm in the program right now:
+- conventional-memory size @ `40:13` — DOSBox invariably reports **640 KB**; this
+  is the decisive discriminator (a loose range here matches stray data in
+  DOSBox's own heap)
+- COM/LPT I/O-port table @ `40:00` / `40:08` — e.g. `0x03F8` / `0x0378`; at least
+  one valid port is required, as the port table is the real structural signature
+- equipment word @ `40:10` and a live timer tick @ `40:6C` — corroborating
+
+Because it scans for the signature rather than assuming `MemBase` is at a
+region's start, it finds the base even when it sits at an odd offset (real DOSBox
+places it a little above the allocation start). For an extra-decisive lock, pass
+a variable you can confirm in the program right now:
 
 ```
-# fingerprints only (quick, looser threshold)
+# BDA signature only — works with no game loaded
 find_membase_auto()
 
-# with a known-variable check (most reliable, recommended)
+# with a known-variable cross-check (most reliable)
 find_membase_auto(known_segment=0x1234, known_offset=0x10,
                   known_value=50, known_width=2)
 ```
@@ -104,9 +116,10 @@ session_init(table_path="C:\\tools\\dosbox_mcp\\vars.json",
              known_segment=0x1234, known_offset=0x10, known_value=50)
 ```
 
-Passing a known variable makes calibration decisive; without it, detection is
-fingerprint-only. The individual tools (`find_dosbox`, `find_membase_auto`,
-`table_load`) remain available for when you need finer control.
+Passing a known variable makes calibration decisive; without it, detection rests
+on the BDA signature alone (still reliable, and works with no game loaded). The
+individual tools (`find_dosbox`, `find_membase_auto`, `table_load`) remain
+available for when you need finer control.
 
 ### Manual path: scan and derive
 
@@ -197,7 +210,7 @@ Table tools: `table_add`, `table_remove`, `table_list`, `table_save`,
 | Tool | Purpose |
 |------|---------|
 | `find_dosbox()` | Locate and open the DOSBox process |
-| `find_membase_auto(...)` | Auto-detect MemBase via BIOS fingerprints |
+| `find_membase_auto(...)` | Auto-detect MemBase via the DOS BIOS Data Area (BDA) |
 | `session_init(table_path, known_*)` | One-shot: attach + calibrate + load table |
 | `set_membase_from(host_addr, seg, off)` | Derive MemBase from a known address |
 | `scan_value(value, width)` | Exact-value first scan (integer) |
