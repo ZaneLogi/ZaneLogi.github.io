@@ -30,7 +30,8 @@ without patching it.
 pip install "mcp[cli]"
 ```
 
-Put `dosbox_mcp_server.py` somewhere stable, e.g. `C:\tools\dosbox_mcp\`.
+Put `dosbox_mcp_server.py` **and `dosbox_mem.py`** (the shared library it
+imports) together in the same folder, e.g. `C:\tools\dosbox_mcp\`.
 
 ## Register with Claude Code
 

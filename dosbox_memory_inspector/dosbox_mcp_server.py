@@ -1,256 +1,143 @@
 #!/usr/bin/env python3
 """
-DOSBox Memory Inspector - MCP Server (Windows)
+DOSBox Memory Inspector - generic "dosbox-memory" MCP server (Windows).
 
-Inspects DOSBox's emulated memory like Cheat Engine, for reverse
-engineering 16-bit real-mode DOS programs.
+The INVESTIGATION WORKBENCH: Cheat-Engine-style discovery tools for reverse
+engineering 16-bit DOS programs under DOSBox -- value/typed/AOB/fuzzy scans, a
+struct dumper, and a persistent address table. Its output (discovered memory
+layouts) is what you bake into a per-game decoder server (dosbox-u6, ...).
 
-Key concept: DOSBox stores its emulated 8086 memory as one contiguous
-block in its own process, starting at MemBase. A DOS address is
-segment:offset, so:  host address = MemBase + (seg*16 + off)
-Calibrate MemBase once (via scan or find_membase_auto), then read any
-variable by its seg:off. See README for the full workflow.
+The routine plumbing (attach, calibrate via BDA scan, read/write, status,
+disconnect) comes from the shared `dosbox_mem` library -- registered here with
+register_base_tools, and reused unchanged by every game server. This file adds
+ONLY the discovery tools on top. See README for the full workflow.
 """
 
-import ctypes
-import ctypes.wintypes as wt
 import json
-import os
-import struct
-import sys
 from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("dosbox-memory-inspector")
+import dosbox_mem as dm
 
-# ----------------------------------------------------------------------------
-# Windows API bindings
-# ----------------------------------------------------------------------------
-PROCESS_QUERY_INFORMATION = 0x0400
-PROCESS_VM_READ           = 0x0010
-PROCESS_VM_WRITE          = 0x0020
-PROCESS_VM_OPERATION      = 0x0008
-ACCESS = (PROCESS_QUERY_INFORMATION | PROCESS_VM_READ
-          | PROCESS_VM_WRITE | PROCESS_VM_OPERATION)
-
-MEM_COMMIT  = 0x1000
-PAGE_READABLE = {0x02, 0x04, 0x08, 0x20, 0x40, 0x80}  # readable protection flags
-
-
-class MEMORY_BASIC_INFORMATION64(ctypes.Structure):
-    _fields_ = [
-        ("BaseAddress", ctypes.c_ulonglong),
-        ("AllocationBase", ctypes.c_ulonglong),
-        ("AllocationProtect", wt.DWORD),
-        ("__alignment1", wt.DWORD),
-        ("RegionSize", ctypes.c_ulonglong),
-        ("State", wt.DWORD),
-        ("Protect", wt.DWORD),
-        ("Type", wt.DWORD),
-        ("__alignment2", wt.DWORD),
-    ]
-
-
-def _k32():
-    return ctypes.WinDLL("kernel32", use_last_error=True)
+mcp = FastMCP("dosbox-memory")
 
 
 # ----------------------------------------------------------------------------
-# Global state (kept for the lifetime of a single session)
+# Session state: core (handle/MemBase) from dm.Session + workbench fields
+# (last scan set, fuzzy working set, address table). reset() also clears the
+# workbench state so re-attaching to a new DOSBox doesn't leak stale host addrs.
 # ----------------------------------------------------------------------------
-class State:
-    pid: Optional[int] = None
-    handle: Optional[int] = None
-    membase: Optional[int] = None          # DOSBox emulated-memory base (host addr)
-    last_scan: list[int] = []              # host addresses hit by the last scan
-    # Fuzzy-scan working set: parallel lists kept server-side, never returned whole.
-    fuzzy_addrs: list[int] = []            # candidate host addresses
-    fuzzy_prev: list[int] = []             # their values at the previous fuzzy step
-    fuzzy_width: int = 2                   # byte width used for the fuzzy session
-    # Address table: list of dicts {name, segment, offset, type, note}.
-    # Stores DOS seg:off (stable), NEVER host addresses (which change per run).
-    table: list = []
-    table_path: Optional[str] = None       # last file used, for convenience saves
+class WorkbenchState(dm.Session):
+    def __init__(self):
+        super().__init__()
+        self.last_scan: list[int] = []          # host addresses hit by last scan
+        self.fuzzy_addrs: list[int] = []        # fuzzy candidate host addresses
+        self.fuzzy_prev: list[int] = []         # their values at the previous step
+        self.fuzzy_width: int = 2
+        self.table: list = []                   # [{name, segment, offset, type, note}]
+        self.table_path: Optional[str] = None
 
-S = State()
+    def reset(self):
+        super().reset()
+        self.last_scan = []
+        self.fuzzy_addrs = []
+        self.fuzzy_prev = []
 
 
-# ----------------------------------------------------------------------------
-# Shared hint strings, so every tool points at the same consistent next step.
-# Each error/edge return should tell the AI what to do next, not just what failed.
-# ----------------------------------------------------------------------------
-HINT_NO_PROC   = "Not attached to DOSBox. Call find_dosbox() first."
-HINT_NO_MEMBASE = ("MemBase not set. Calibrate first: find_membase_auto(...) "
-                   "(ideally with a known variable), or scan_value -> next_scan "
-                   "-> set_membase_from.")
+S = WorkbenchState()
+
+# Register the shared base tools (find_dosbox / find_membase_auto /
+# set_membase_from / read_dos / read_linear / write_dos / status / disconnect)
+# on this server, operating on S. `base` lets us call them internally below.
+base = dm.register_base_tools(mcp, S)
+
+# Re-bind the shared primitives to the local names the workbench tool bodies use,
+# so those bodies stay identical to the standalone version.
+_read = dm.read
+_write = dm.write
+_iter_regions = dm.iter_regions
+_pack = dm.pack
+_encode = dm.encode
+_decode = dm.decode
+_type_width = dm.type_width
+TYPES = dm.TYPES
+HINT_NO_PROC = dm.HINT_NO_PROC
+HINT_NO_MEMBASE = dm.HINT_NO_MEMBASE
 HINT_EMPTY_TABLE = ("Address table is empty. Add entries with table_add(...) "
                     "or load a file with table_load(path).")
 
 
-# ----------------------------------------------------------------------------
-# Low level: open process, enumerate regions, read/write
-# ----------------------------------------------------------------------------
-def _open(pid: int) -> int:
-    k32 = _k32()
-    h = k32.OpenProcess(ACCESS, False, pid)
-    if not h:
-        raise OSError(f"OpenProcess failed (pid={pid}); run as Administrator."
-                      f" err={ctypes.get_last_error()}")
-    return h
-
-
-def _reset_session():
-    """Close any open process handle and clear all per-process state.
-    Called before attaching to a (possibly different) DOSBox so nothing from a
-    previous session leaks: an unclosed kernel handle, or a stale MemBase / scan
-    set that would be garbage for a new process. The persistent address table is
-    intentionally NOT cleared (it holds stable seg:off, reusable across runs)."""
-    if S.handle:
-        try:
-            _k32().CloseHandle(wt.HANDLE(S.handle))
-        except Exception:
-            pass
-    S.handle = None
-    S.pid = None
-    S.membase = None
-    S.last_scan = []
-    S.fuzzy_addrs = []
-    S.fuzzy_prev = []
-
-
-def _iter_regions(handle: int):
-    """Yield every committed, readable memory region in the target process."""
-    k32 = _k32()
-    VirtualQueryEx = k32.VirtualQueryEx
-    VirtualQueryEx.restype = ctypes.c_size_t
-    addr = 0
-    mbi = MEMORY_BASIC_INFORMATION64()
-    max_addr = 0x7FFFFFFFFFFF
-    while addr < max_addr:
-        ok = VirtualQueryEx(wt.HANDLE(handle), ctypes.c_void_p(addr),
-                            ctypes.byref(mbi), ctypes.sizeof(mbi))
-        if not ok:
-            break
-        if (mbi.State == MEM_COMMIT
-                and (mbi.Protect & 0xFF) in PAGE_READABLE
-                and mbi.RegionSize > 0):
-            yield mbi.BaseAddress, mbi.RegionSize
-        nxt = mbi.BaseAddress + mbi.RegionSize
-        if nxt <= addr:
-            break
-        addr = nxt
-
-
-def _read(handle: int, addr: int, size: int) -> bytes:
-    k32 = _k32()
-    buf = ctypes.create_string_buffer(size)
-    n = ctypes.c_size_t(0)
-    ok = k32.ReadProcessMemory(wt.HANDLE(handle), ctypes.c_void_p(addr),
-                               buf, size, ctypes.byref(n))
-    if not ok:
-        raise OSError(f"ReadProcessMemory failed @0x{addr:x} err={ctypes.get_last_error()}")
-    return buf.raw[:n.value]
-
-
-def _write(handle: int, addr: int, data: bytes) -> int:
-    k32 = _k32()
-    n = ctypes.c_size_t(0)
-    ok = k32.WriteProcessMemory(wt.HANDLE(handle), ctypes.c_void_p(addr),
-                                data, len(data), ctypes.byref(n))
-    if not ok:
-        raise OSError(f"WriteProcessMemory failed @0x{addr:x} err={ctypes.get_last_error()}")
-    return n.value
-
-
-# ----------------------------------------------------------------------------
-# Type system for typed scanning
-# ----------------------------------------------------------------------------
-# Each type maps to a struct format and a byte width.
-# Integer types cover signed/unsigned 1/2/4 bytes; plus float/double.
-TYPES = {
-    "u8":  ("<B", 1), "i8":  ("<b", 1),
-    "u16": ("<H", 2), "i16": ("<h", 2),
-    "u32": ("<I", 4), "i32": ("<i", 4),
-    "float": ("<f", 4), "double": ("<d", 8),
-}
-
-
-def _type_width(vtype: str) -> int:
-    if vtype == "string":
-        return 0  # variable; handled separately
-    return TYPES[vtype][1]
-
-
-def _encode(value, vtype: str) -> bytes:
-    """Encode a Python value into raw little-endian bytes for the given type."""
-    if vtype == "string":
-        return value.encode("latin-1") if isinstance(value, str) else bytes(value)
-    fmt, _ = TYPES[vtype]
-    if vtype in ("float", "double"):
-        return struct.pack(fmt, float(value))
-    return struct.pack(fmt, int(value))
-
-
-def _decode(raw: bytes, vtype: str):
-    """Decode raw bytes into a Python value for the given type."""
-    if vtype == "string":
-        return raw
-    fmt, w = TYPES[vtype]
-    return struct.unpack(fmt, raw[:w])[0]
-
-
-# Legacy helper kept for the original integer tools (width = 1/2/4).
-def _pack(value: int, width: int) -> bytes:
-    return {1: struct.pack("<B", value & 0xFF),
-            2: struct.pack("<H", value & 0xFFFF),
-            4: struct.pack("<I", value & 0xFFFFFFFF)}[width]
-
-
-# ----------------------------------------------------------------------------
-# MCP tools
-# ----------------------------------------------------------------------------
 @mcp.tool()
-def find_dosbox() -> str:
-    """Find a running DOSBox process and open it.
-    Returns the pid and executable name. This server must run as Administrator."""
-    k32 = _k32()
-    TH32CS_SNAPPROCESS = 0x2
+def session_init(table_path: str = "",
+                 known_segment: int = -1, known_offset: int = -1,
+                 known_value: int = -1, known_width: int = 2) -> str:
+    """One-shot startup: attach to DOSBox, auto-detect MemBase, and optionally
+    load an address table -- the usual boot sequence in a single call.
 
-    class PROCESSENTRY32(ctypes.Structure):
-        _fields_ = [("dwSize", wt.DWORD), ("cntUsage", wt.DWORD),
-                    ("th32ProcessID", wt.DWORD), ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
-                    ("th32ModuleID", wt.DWORD), ("cntThreads", wt.DWORD),
-                    ("th32ParentProcessID", wt.DWORD), ("pcPriClassBase", ctypes.c_long),
-                    ("dwFlags", wt.DWORD), ("szExeFile", ctypes.c_char * 260)]
+    Pass a known variable (known_segment/offset/value/width) so MemBase
+    calibration is cross-checked decisively; without it, detection rests on the
+    DOS BIOS Data Area (BDA) signature alone (still reliable, and game-free).
+    Pass table_path to also load a saved variable table; omit it on first run
+    when no table exists yet.
 
-    snap = k32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-    entry = PROCESSENTRY32()
-    entry.dwSize = ctypes.sizeof(PROCESSENTRY32)
-    found = []
-    if k32.Process32First(snap, ctypes.byref(entry)):
-        while True:
-            name = entry.szExeFile.decode(errors="ignore")
-            if "dosbox" in name.lower():
-                found.append((entry.th32ProcessID, name))
-            if not k32.Process32Next(snap, ctypes.byref(entry)):
-                break
-    k32.CloseHandle(snap)
+    Returns a step-by-step boot report. If a step fails (e.g. DOSBox isn't
+    running, or no large region exposed a BDA), the report says where it stopped
+    and what to do next, and later steps are skipped."""
+    lines = ["session_init:"]
 
-    if not found:
-        return "No DOSBox process found. Make sure DOSBox is running with the target program loaded."
-    pid, name = found[0]
-    # Close the previous handle and clear stale per-process state before
-    # attaching to this process, so nothing leaks or carries over.
-    _reset_session()
-    S.pid = pid
-    S.handle = _open(pid)
-    extra = ""
-    if len(found) > 1:
-        extra = f"\n(Multiple found: {found}; selected the first.)"
-    return f"Opened DOSBox: pid={pid} exe={name}{extra}\nNext: run scan_value on a known value."
+    # Step 1: attach
+    r1 = base.find_dosbox()
+    ok1 = r1.startswith("Opened DOSBox")
+    lines.append(f"  [1] find_dosbox      -> {'OK' if ok1 else 'FAILED'}")
+    lines.append(f"      {r1.splitlines()[0]}")
+    if not ok1:
+        lines.append("  Stopped: could not attach. Make sure DOSBox is running, "
+                     "then call session_init again.")
+        return "\n".join(lines)
+
+    # Step 2: calibrate MemBase
+    r2 = base.find_membase_auto(known_segment, known_offset, known_value, known_width)
+    ok2 = r2.startswith("MemBase auto-set")
+    lines.append(f"  [2] find_membase_auto -> {'OK' if ok2 else 'FAILED'}")
+    lines.append(f"      {r2.splitlines()[0]}")
+    if not ok2:
+        lines.append("  Stopped: MemBase not calibrated. The BDA signature wasn't "
+                     "found -- DOSBox may still be starting up, or has an unusual "
+                     "memory config. Retry once DOSBox is at its prompt, pass "
+                     "known_segment/offset/value for a cross-check, or use the "
+                     "manual scan flow.")
+        return "\n".join(lines)
+    had_known = (known_segment >= 0 and known_offset >= 0 and known_value >= 0)
+    if not had_known:
+        lines.append("      (no known variable supplied; calibration rests on the "
+                     "BDA signature -- verify once with read_dos if unsure.)")
+
+    # Step 3: optional table load
+    if table_path:
+        r3 = table_load(table_path)
+        ok3 = r3.startswith("Loaded")
+        lines.append(f"  [3] table_load        -> {'OK' if ok3 else 'FAILED'}")
+        lines.append(f"      {r3.splitlines()[0]}")
+        if not ok3:
+            lines.append("  Note: attached and calibrated fine, but the table "
+                         "didn't load. Fix the path or skip it; reads still work "
+                         "via read_dos.")
+            return "\n".join(lines)
+    else:
+        lines.append("  [3] table_load        -> skipped (no table_path)")
+
+    # Final status + next step
+    tail = ("table_read_all() to dump every known variable, or read_var(name)."
+            if (table_path and S.table) else
+            "read_dos(seg, off) now; add variables with table_add and table_save.")
+    lines.append(f"  Ready. {tail}")
+    return "\n".join(lines)
 
 
+# ----------------------------------------------------------------------------
+# Exact-value integer scanning
+# ----------------------------------------------------------------------------
 @mcp.tool()
 def scan_value(value: int, width: int = 2) -> str:
     """First scan: find every address in the DOSBox process whose value equals `value`.
@@ -305,304 +192,6 @@ def next_scan(value: int, width: int = 2) -> str:
                 f"\nNext: if you know its DOS seg:off, call "
                 f"set_membase_from({survivors[0]}, seg, off) to derive MemBase.")
     return f"Narrowed to {len(survivors)} addresses: {sample}{note}"
-
-
-@mcp.tool()
-def set_membase_from(host_addr: int, segment: int, offset: int) -> str:
-    """Derive DOSBox's MemBase from a known variable's host address plus its
-    DOS segment:offset (e.g. from your disassembly). Once set, use read_dos to
-    read any variable."""
-    linear = (segment << 4) + offset
-    S.membase = host_addr - linear
-    return (f"MemBase set to 0x{S.membase:x}\n"
-            f"(host 0x{host_addr:x} maps to DOS {segment:04X}:{offset:04X}, linear=0x{linear:x})\n"
-            f"You can now read variables with read_dos(seg, off, width), or load a "
-            f"table and use read_var(name) / table_read_all().")
-
-
-@mcp.tool()
-def read_dos(segment: int, offset: int, width: int = 2) -> str:
-    """Read a variable by DOS segment:offset (MemBase must be set)."""
-    if S.membase is None:
-        return HINT_NO_MEMBASE
-    linear = (segment << 4) + offset
-    host = S.membase + linear
-    try:
-        raw = _read(S.handle, host, width)
-    except OSError as ex:
-        return (f"Read failed at DOS {segment:04X}:{offset:04X} (host 0x{host:x}): {ex}\n"
-                f"Check the address is mapped and MemBase is calibrated (status()).")
-    val = int.from_bytes(raw, "little")
-    return (f"DOS {segment:04X}:{offset:04X} (host 0x{host:x}) = {val} "
-            f"(0x{val:x}) raw={raw.hex()}")
-
-
-@mcp.tool()
-def read_linear(linear: int, size: int = 16) -> str:
-    """Read a block of memory by 8086 linear address and show a hex dump
-    (MemBase must be set)."""
-    if S.membase is None:
-        return HINT_NO_MEMBASE
-    host = S.membase + linear
-    try:
-        raw = _read(S.handle, host, size)
-    except OSError as ex:
-        return (f"Read failed at linear 0x{linear:x} (host 0x{host:x}): {ex}\n"
-                f"Check the address is mapped and MemBase is calibrated (status()).")
-    return f"linear=0x{linear:x} (host 0x{host:x}):\n{raw.hex(' ')}"
-
-
-@mcp.tool()
-def write_dos(segment: int, offset: int, value: int, width: int = 2) -> str:
-    """Write a variable (change a value). Use with care; save the program state first."""
-    if S.membase is None:
-        return HINT_NO_MEMBASE
-    host = S.membase + (segment << 4) + offset
-    try:
-        n = _write(S.handle, host, _pack(value, width))
-    except OSError as ex:
-        return (f"Write failed at DOS {segment:04X}:{offset:04X} (host 0x{host:x}): {ex}\n"
-                f"Check the address is mapped and MemBase is calibrated (status()).")
-    return f"Wrote {n} bytes: DOS {segment:04X}:{offset:04X} <- {value}"
-
-
-# ----------------------------------------------------------------------------
-# MemBase auto-detection via the DOS BIOS Data Area (BDA)
-#
-# DOSBox does NOT map a ROM BIOS image at segment F000 -- the reset vector at
-# linear 0xFFFF0 and the BIOS date string are absent (read back as zero), so the
-# classic PC-BIOS fingerprints are useless here. What IS always present, even
-# with only the DOSBox shell loaded, is the BIOS Data Area at the fixed linear
-# address 0x400 (segment 0x40): the COM/LPT I/O-port table, the equipment word,
-# the conventional-memory size (DOSBox = 640 KB), and a live timer-tick counter.
-# We locate the BDA by that signature and derive MemBase = host(BDA) - 0x400.
-# MemBase is NOT necessarily the region start (observed +0x20 on real DOSBox), so
-# we scan for the signature rather than probing a few fixed offsets.
-# ----------------------------------------------------------------------------
-BDA_COM1    = 0x400   # word: COM1 I/O port   (DOSBox default 0x03F8)
-BDA_LPT1    = 0x408   # word: LPT1 I/O port   (DOSBox default 0x0378)
-BDA_EQUIP   = 0x410   # word: equipment list  (non-zero, not 0xFFFF)
-BDA_BASEMEM = 0x413   # word: conventional memory in KB (DOSBox = 640 = 0x280)
-BDA_TIMER   = 0x46C   # dword: timer-tick count, increments ~18.2 Hz
-
-# Plausible I/O-port values across common DOSBox / PC configs.
-_COM_PORTS = {0x3F8, 0x2F8, 0x3E8, 0x2E8}
-_LPT_PORTS = {0x378, 0x278, 0x3BC}
-
-
-def _score_bda(buf: bytes, off: int) -> tuple[int, list]:
-    """Score a candidate MemBase sitting at byte offset `off` within `buf`, by
-    checking BDA invariants at their fixed linear addresses. Returns
-    (score, evidence), or (0, []) if this is not a BDA.
-
-    The conventional-memory word @40:13 is the decisive discriminator: DOSBox
-    invariably reports 640 KB (639 with an EBDA), a value that -- combined with
-    the COM1/LPT1 ports at their exact relative offsets -- is far too specific to
-    hit by chance. A loose range here produced false positives in DOSBox's own
-    host heap (e.g. a 511-KB word next to a stray 0x03F8), so it is mandatory."""
-    def word(linear):
-        p = off + linear
-        return int.from_bytes(buf[p:p + 2], "little") if 0 <= p and p + 2 <= len(buf) else None
-
-    def dword(linear):
-        p = off + linear
-        return int.from_bytes(buf[p:p + 4], "little") if 0 <= p and p + 4 <= len(buf) else None
-
-    basemem = word(BDA_BASEMEM)
-    if basemem not in (639, 640):        # mandatory: not a DOSBox BDA otherwise
-        return 0, []
-    com1, lpt1 = word(BDA_COM1), word(BDA_LPT1)
-    com1_ok, lpt1_ok = com1 in _COM_PORTS, lpt1 in _LPT_PORTS
-    if not (com1_ok or lpt1_ok):         # mandatory: the I/O-port table is the
-        return 0, []                     # real signature; 640 KB alone is not enough
-    score = 3
-    ev = [f"BDA base memory @40:13 = {basemem} KB"]
-    if com1_ok:
-        score += 1
-        ev.append(f"BDA COM1 @40:00 = {com1:#06x}")
-    if lpt1_ok:
-        score += 1
-        ev.append(f"BDA LPT1 @40:08 = {lpt1:#06x}")
-    equip = word(BDA_EQUIP)
-    if equip not in (None, 0x0000, 0xFFFF):
-        score += 1
-        ev.append(f"BDA equipment word @40:10 = {equip:#06x}")
-    tick = dword(BDA_TIMER)
-    if tick not in (None, 0, 0xFFFFFFFF):
-        score += 1
-        ev.append(f"BDA timer tick @40:6C = {tick}")
-    return score, ev
-
-
-def _detect_membase_bda(handle: int, known: Optional[tuple] = None) -> tuple:
-    """Find MemBase by locating the DOS BIOS Data Area in every large region.
-    Anchors the search on two stable BDA bytes -- the COM1 port word (0x03F8) and
-    the 640-KB conventional-memory word -- validates the surrounding BDA with
-    _score_bda, and derives MemBase = host(BDA) - 0x400. A known variable
-    (seg, off, value, width), if given, is verified with a live read as a
-    decisive tie-breaker. Returns (membase, evidence_list, others) where `others`
-    is a short list of runner-up (score, hex_addr); (None, [], []) on failure."""
-    WINDOW = 0x200000  # 2 MB from each region start covers the BDA + low DS data
-    found = {}         # membase -> (score, evidence)
-    for base, size in _iter_regions(handle):
-        if size < 0x110000:        # DOSBox emulated RAM is at least ~1 MB
-            continue
-        try:
-            buf = _read(handle, base, min(size, WINDOW))
-        except OSError:
-            continue
-        for anchor, anchor_linear in ((b"\xf8\x03", BDA_COM1),     # COM1 = 0x03F8
-                                      (b"\x80\x02", BDA_BASEMEM)):  # basemem = 640
-            start = 0
-            while len(found) <= 64:
-                i = buf.find(anchor, start)
-                if i < 0:
-                    break
-                start = i + 1
-                off = i - anchor_linear
-                if off < 0:
-                    continue
-                cand = base + off
-                if cand in found:
-                    continue
-                score, ev = _score_bda(buf, off)
-                if score >= 5:        # mandatory base memory (3) + >=2 corroborators
-                    found[cand] = (score, ev)
-    if not found:
-        return None, [], []
-
-    ranked = sorted(((sc, mb, ev) for mb, (sc, ev) in found.items()), reverse=True)
-
-    # A known variable is decisive: prefer candidates whose live read matches.
-    if known:
-        seg, koff, val, w = known
-        mask = (1 << (8 * w)) - 1
-        confirmed = []
-        for sc, mb, ev in ranked:
-            try:
-                cur = int.from_bytes(_read(handle, mb + (seg << 4) + koff, w), "little")
-            except OSError:
-                continue
-            if cur == (val & mask):
-                confirmed.append((sc + 5, mb,
-                                  ev + [f"known var {seg:04X}:{koff:04X} == {val}"]))
-        if confirmed:
-            ranked = sorted(confirmed, reverse=True)
-        # If nothing matched, fall through to the BDA-only ranking: the supplied
-        # value may be wrong or the program may not be in that state yet.
-
-    best_score, best, best_ev = ranked[0]
-    others = [(s, hex(a)) for s, a, _ in ranked[1:4]]
-    return best, [f"(match score {best_score})"] + best_ev, others
-
-
-@mcp.tool()
-def find_membase_auto(known_segment: int = -1, known_offset: int = -1,
-                      known_value: int = -1, known_width: int = 2) -> str:
-    """Auto-detect DOSBox's MemBase without a manual scan, using the DOS BIOS
-    Data Area (BDA) as the footprint.
-
-    DOSBox maps no ROM BIOS at segment F000 (no reset vector / date string), so
-    this does NOT use PC-BIOS fingerprints. Instead it locates the BDA at its
-    fixed linear address 0x400 -- the COM/LPT port table, equipment word, the
-    640-KB conventional-memory word and the live timer tick -- and derives
-    MemBase = host(BDA) - 0x400. Because it scans for the signature, it works
-    even when MemBase is not at the region start, and with only the DOSBox shell
-    loaded (no game needed).
-
-    Pass a known variable (known_segment/offset/value/width) for a decisive
-    cross-check; without it, detection rests on the BDA signature alone. On
-    success MemBase is set directly."""
-    if not S.handle:
-        return HINT_NO_PROC
-
-    known = None
-    if known_segment >= 0 and known_offset >= 0 and known_value >= 0:
-        known = (known_segment, known_offset, known_value, known_width)
-
-    best, evidence, others = _detect_membase_bda(S.handle, known)
-    if best is None:
-        return ("Auto-detect failed: no region exposed a recognizable DOS BIOS "
-                "Data Area (BDA) signature.\nFall back to the manual flow "
-                "(scan_value -> next_scan -> set_membase_from), or pin any value "
-                "you can see on screen and use set_membase_from.")
-
-    S.membase = best
-    detail = "\n  - ".join(evidence)
-    extra = f"\n(Other candidates: {others}; picked the highest score.)" if others else ""
-    return (f"MemBase auto-set to 0x{best:x}\n"
-            f"Evidence:\n  - {detail}{extra}\n"
-            f"You can now read variables directly with read_dos / read_linear."
-            + ("" if known else
-               "\nTip: no known-variable check was provided; the BDA signature is "
-               "reliable, but you can verify once with read_dos against a value you know."))
-
-
-@mcp.tool()
-def session_init(table_path: str = "",
-                 known_segment: int = -1, known_offset: int = -1,
-                 known_value: int = -1, known_width: int = 2) -> str:
-    """One-shot startup: attach to DOSBox, auto-detect MemBase, and optionally
-    load an address table -- the usual boot sequence in a single call.
-
-    Pass a known variable (known_segment/offset/value/width) so MemBase
-    calibration is cross-checked decisively; without it, detection rests on the
-    DOS BIOS Data Area (BDA) signature alone (still reliable, and game-free).
-    Pass table_path to also load a saved variable table; omit it on first run
-    when no table exists yet.
-
-    Returns a step-by-step boot report. If a step fails (e.g. DOSBox isn't
-    running, or no large region exposed a BDA), the report says where it stopped
-    and what to do next, and later steps are skipped."""
-    lines = ["session_init:"]
-
-    # Step 1: attach
-    r1 = find_dosbox()
-    ok1 = r1.startswith("Opened DOSBox")
-    lines.append(f"  [1] find_dosbox      -> {'OK' if ok1 else 'FAILED'}")
-    lines.append(f"      {r1.splitlines()[0]}")
-    if not ok1:
-        lines.append("  Stopped: could not attach. Make sure DOSBox is running, "
-                     "then call session_init again.")
-        return "\n".join(lines)
-
-    # Step 2: calibrate MemBase
-    r2 = find_membase_auto(known_segment, known_offset, known_value, known_width)
-    ok2 = r2.startswith("MemBase auto-set")
-    lines.append(f"  [2] find_membase_auto -> {'OK' if ok2 else 'FAILED'}")
-    lines.append(f"      {r2.splitlines()[0]}")
-    if not ok2:
-        lines.append("  Stopped: MemBase not calibrated. The BDA signature wasn't "
-                     "found -- DOSBox may still be starting up, or has an unusual "
-                     "memory config. Retry once DOSBox is at its prompt, pass "
-                     "known_segment/offset/value for a cross-check, or use the "
-                     "manual scan flow.")
-        return "\n".join(lines)
-    had_known = (known_segment >= 0 and known_offset >= 0 and known_value >= 0)
-    if not had_known:
-        lines.append("      (no known variable supplied; calibration rests on the "
-                     "BDA signature -- verify once with read_dos if unsure.)")
-
-    # Step 3: optional table load
-    if table_path:
-        r3 = table_load(table_path)
-        ok3 = r3.startswith("Loaded")
-        lines.append(f"  [3] table_load        -> {'OK' if ok3 else 'FAILED'}")
-        lines.append(f"      {r3.splitlines()[0]}")
-        if not ok3:
-            lines.append("  Note: attached and calibrated fine, but the table "
-                         "didn't load. Fix the path or skip it; reads still work "
-                         "via read_dos.")
-            return "\n".join(lines)
-    else:
-        lines.append("  [3] table_load        -> skipped (no table_path)")
-
-    # Final status + next step
-    tail = ("table_read_all() to dump every known variable, or read_var(name)."
-            if (table_path and S.table) else
-            "read_dos(seg, off) now; add variables with table_add and table_save.")
-    lines.append(f"  Ready. {tail}")
-    return "\n".join(lines)
 
 
 # ----------------------------------------------------------------------------
@@ -707,8 +296,8 @@ def next_scan_typed(value: str, vtype: str = "u16") -> str:
 # (2) AOB (array-of-bytes) pattern scan with wildcards
 # ----------------------------------------------------------------------------
 def _parse_aob(pattern: str):
-    """Parse an AOB pattern like '8B 46 ?? 50 E8' into (regex_bytes, mask).
-    Tokens of '??' or '?' are wildcards. Returns a list of (byte_or_None)."""
+    """Parse an AOB pattern like '8B 46 ?? 50 E8' into a list of (byte_or_None).
+    Tokens of '??' or '?' are wildcards."""
     tokens = pattern.replace(",", " ").split()
     out = []
     for t in tokens:
@@ -1145,27 +734,6 @@ def write_var(name: str, value: str) -> str:
     except OSError as ex:
         return f"Write error for '{name}' @ {seg:04X}:{off:04X}: {ex}"
     return f"Wrote {name} <- {value}  ({written} bytes @ {seg:04X}:{off:04X} {t})"
-
-
-@mcp.tool()
-def disconnect() -> str:
-    """Detach from DOSBox: close the process handle and clear MemBase and scan
-    state. The saved address table is kept. Useful before reopening a different
-    DOSBox, or to release the handle when done."""
-    had = S.pid
-    _reset_session()
-    return (f"Disconnected from pid={had}; handle closed and scan/MemBase state cleared."
-            if had else "Nothing was connected.")
-
-
-@mcp.tool()
-def status() -> str:
-    """Show the current connection and calibration state."""
-    return (f"pid={S.pid} membase="
-            f"{'0x%x' % S.membase if S.membase else 'unset'} "
-            f"last_scan={len(S.last_scan)} addresses "
-            f"fuzzy={len(S.fuzzy_addrs)} candidates "
-            f"table={len(S.table)} entries")
 
 
 if __name__ == "__main__":
