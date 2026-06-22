@@ -159,6 +159,19 @@ function loadSegment(e, state) {
             //                     a 'homing' state — see the homing block in
             //                     update() below for the per-frame check.
             if (b0 === 0xFF) {
+                // Z80 case_0E49 (gg1-5.s:2517) makes the creature INACTIVE
+                // (b_8800[id]=0x80, sprite hidden) — GONE, not homed. Challenge
+                // (fly-through) bugs reach FF for real (their paths have no FB),
+                // so they despawn here — the bonus-stage exit. Combat bugs always
+                // FB-home before FF, so they never reach this; the 'formation'
+                // branch is a defensive fallback only.
+                if (isChallengeStage(state)) {
+                    e.state    = 'dead';
+                    e.alive    = false;
+                    e.pathBase = null;
+                    e.vx = e.vy = e.rotRate = 0;
+                    return;
+                }
                 e.state    = 'formation';
                 e.pathBase = null;
                 e.vx = e.vy = e.rotRate = 0;
@@ -642,6 +655,15 @@ const TWO_PI_OVER_1024 = (2 * Math.PI) / 1024;
 // canvas offsets — those are irrelevant to deltas.
 const HOME_THRESHOLD = 2;
 
+// Challenge (bonus) stages: bugs fly their patterns and EXIT off-screen — they
+// never home into formation (their paths end with FF, no FB). Z80
+// _b_not_chllg_stg == 0 on every 4th stage (3, 7, 11, …). During a challenge
+// stage there are no attack dives (max_bombers = 0), so EVERY flying bug is a
+// fly-through bug — the predicate alone disambiguates. research_stage_init.md §14.4.
+function isChallengeStage(state) {
+    return ((state.stage + 1) % 4) === 0;
+}
+
 export function update(state) {
     for (const e of state.enemies) {
         // Both 'flying' (executing path bytecode) and 'homing' (post-FB
@@ -681,6 +703,22 @@ export function update(state) {
         const A = (state.frameCount & 1) ? e.vx : e.vy;
         e.x += A * Math.cos(angleRad);
         e.y -= A * Math.sin(angleRad);
+
+        // Challenge fly-through: a bug that has cleared the playfield is GONE.
+        // The Z80 despawns it at its path's FF (case_0E49) after a long off-screen
+        // tail; we despawn as soon as it's clearly past an edge so the empty-screen
+        // wait between waves (the bugsFlying==0 inter-wave gate) stays short — a
+        // port responsiveness tweak with the same visible result. Challenge paths
+        // exit downward/sideways and stay on-screen mid-pattern, so the generous
+        // margins won't clip a bug mid-flight. Combat bugs home before leaving, so
+        // this never fires for them. research_stage_init.md §14.4.
+        if (e.state === 'flying' && isChallengeStage(state) &&
+            (e.y > 304 || e.x < -24 || e.x > 248)) {
+            e.state    = 'dead';
+            e.alive    = false;
+            e.pathBase = null;
+            continue;
+        }
 
         // FC dive-Y trigger (case_0B4E + l_0C2D, gg1-5.s:2056-2068): while a
         // dive-Y reference is armed (set by the FC token), force the current

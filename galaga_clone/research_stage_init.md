@@ -227,13 +227,13 @@ Wired faithfully across five files:
 - **`paths.js`** — `FLYIN_BOMB_CAPABLE` (a `Set` of objectIds) is built by replaying
   `c_2896` + `c_28E9` over `d_2908` (the 44-bit table), so the table stays the source
   of truth rather than a hand-listed set. `getFlyInBombFlags(stage, rank)` returns
-  `b_92E2[1]` from the SAME caravan row `buildWaveStream` selects (extracted a shared
-  `combatStgDatOffset` helper so they can't drift). **Challenge-stage gate:** it
-  returns 0 for challenge stages (`(stage+1)%4==0`) — those use the separate
-  `d_challg_stg_dat` (header byte 1 = 0x00 on every row, gg1-3.s:1478-1485, bonus
-  rounds don't bomb), but the clone falls through to a combat caravan (§14.4), so
-  without the gate the combat row's nonzero mask would wrongly arm fly-in bombing
-  on challenge stages.
+  `b_92E2[1]` from the SAME caravan row `buildWaveStream` selects — a shared
+  `stageCaravanRow` helper returns `{table, off}` so they can't drift. Challenge
+  stages return 0 NATURALLY because `stageCaravanRow` reads the real
+  `d_challg_stg_dat` (header byte 1 = 0x00 on every row, gg1-3.s:1478-1485 — bonus
+  rounds don't bomb); see §14.4. *(An earlier interim build special-cased this with
+  a `(stage+1)%4==0 → return 0` gate, when challenge stages still fell through to a
+  combat caravan; the challenge-table port superseded it.)*
 - **`state.js`** — each enemy carries `bombCapable` (= membership in the set, stamped at
   roster build); `state.flyInBombFlags` holds the per-stage mask.
 - **`gameController.stgInitEnv`** — sets `state.flyInBombFlags = getFlyInBombFlags(stage,
@@ -534,7 +534,7 @@ documented as workarounds:
 | Z80 var | Phase |
 |---------|-------|
 | `_b_stgctr` increment | ✅ done INT-5 (stage cycling, §14) |
-| `_b_not_chllg_stg` | deferred (challenge-stage handling — §14.4) |
+| `_b_not_chllg_stg` | ✅ done 2026-06-22 (challenge/bonus stages — §14.4) |
 | `_b_nships` (lives) | INT-6 (HUD) |
 | `_w_shot_ct`, `_w_hit_ct` | INT-6 (HUD) |
 | Bonus-bee, capture-boss vars | step 10 (boss capture) |
@@ -610,16 +610,52 @@ byte-exact regression** (pairs `[[0,0xC0],[1,1],[0x41,0x41],[0x40,0x40],[0,0]]`,
 > `[1,2,3,0]` the difficulty table uses. So the clone's rank 3 reads idx ROW 3 for
 > fly-in but sub-table 0 for difficulty. Don't conflate them.
 
-### 14.4 Challenge stages — deferred (combat fallback)
+### 14.4 Challenge (bonus) stages — IMPLEMENTED 2026-06-22
 
-Stages 3/7/11/… (`(stage+1)%4==0`) are challenge bonus rounds in the source
-(separate `d_challg_stg_dat`, no-attack fly-through, hit-bonus tally). Deferred per
-decision. They fall through the combat path: `buildWaveStream` gives them a combat
-caravan, and their `bmbr_stg_cfg_dat` row carries **max_bombers = 0**, so the
-enemies fly in + settle but never attack — a safe, clearable "sit-and-shoot" stage,
-not the real fly-through. No softlock. **To add later:** the challenge data tables +
-the no-attack fly-through launcher branch + the hit counter + the
-"CHALLENGING STAGE / NUMBER OF HITS / PERFECT!" screens.
+Stages 3/7/11/… (`(stage+1)%4==0`, Z80 `_b_not_chllg_stg==0`) are bonus rounds:
+40 bugs fly elaborate patterns and **fly through / exit off-screen** — they never
+join the formation, drop no bombs, and the stage ends when all 40 are gone (whether
+you shot them or they escaped). A free shooting gallery, no danger.
+
+**Z80 mechanism (verified):**
+- **Data:** a SEPARATE `d_challg_stg_dat` (8 rows × 18 B, same triplet layout as
+  combat) + `d_challg_stg_data_idx` (8 entries, NO rank dimension), selected when
+  `_b_not_chllg_stg==0` via `idx = (stgctr>>2)&7` (`c_25A2`, gg1-3.s:1216-1222).
+  Header byte 1 = 0 on every row → no fly-in bombs.
+- **Fly-through:** challenge path bytes index the HIGHER `db_2A3C` entries
+  (6..0x17), whose flight blocks end with **FF (no FB)** — the bug runs its path
+  and `FF`/`case_0E49` (gg1-5.s:2517) makes it INACTIVE (gone), never homing.
+- **Text:** `stg_init_splash` shows string idx 7 **"CHALLENGING STAGE"**
+  (`_dea 16 5` → canvas (40,144)) vs idx 6 "STAGE n" (task_man.s:201-217).
+- **No attacks** (no dives; header bomb mask 0). **End:** all bugs gone → next
+  stage. (The "NUMBER OF HITS / PERFECT!" tally + 10000-pt bonus is the results
+  screen — OUT OF SCOPE; the clone has no score system.)
+
+**As built (clone):**
+- `paths.js` — `D_CHALLG_STG_DAT` + `D_CHALLG_STG_DATA_IDX` ported verbatim; a
+  shared `stageCaravanRow(stage, rank)` returns `{table, off}`, picking the
+  challenge table on challenge stages. `buildWaveStream` + `getFlyInBombFlags` both
+  read it (so the fly-in bomb mask is 0 for challenge NATURALLY — the earlier
+  special-case gate in §6.2 is gone, replaced by reading the real header).
+- `gameController.render` — draws "CHALLENGING STAGE" (x=40) vs "STAGE n" (x=80) on
+  the 'stageClear' splash for challenge stages.
+- `bugMotion` — `isChallengeStage(state)`: on `FF` a challenge bug despawns
+  (`state='dead'`) instead of snapping to formation (combat is unchanged — it
+  always FB-homes before FF); plus an off-screen despawn (cleared the playfield →
+  dead) so the inter-wave `bugsFlying==0` gate stays responsive (a port tweak, same
+  visible result).
+- **Completion reuses the existing INT-5 path** — no new code: fly-through bugs →
+  'dead' → `bugsFlying==0` → `waveLauncherFlyInDone` → 'playing' →
+  `activeEnemyCount==0` → advance.
+
+**Verified** (preview, deterministic + manual loop replay): stage 3 builds from the
+challenge table (≠ combat stage 2, ≠ challenge stage 7); "CHALLENGING STAGE" = 17
+glyphs @ x=40; a challenge bug → dead on FF AND off-screen, a combat bug → formation
+(control); a full manual-tick replay of stage 3 advances start → fly-through → stage
+4 with **maxFormed=0** (bugs never form up) and clears WITHOUT the player firing.
+
+**Still deferred (scoring-dependent):** the "NUMBER OF HITS / PERFECT!" results
+screen + the 10000-pt bonus + the per-8-bug hit tally (`w_bug_flying_hit_cnt`).
 
 ### 14.5 Still deferred
 - **Level-token badges** (the stage-count flags) — HUD / step 11.

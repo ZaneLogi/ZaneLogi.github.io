@@ -472,6 +472,20 @@ Tasks set a value and busy-wait: <span style="color:#7af">while (gameTimers[2] &
 
 </div>
 
+<!-- ── Challenge (bonus) stage lifecycle ── -->
+<div style="margin-top:18px;border:1px solid #234;background:#0b1320;padding:10px 14px;border-radius:3px;line-height:1.55;font-size:11px;color:#9bd;max-width:980px">
+  <b style="color:#7af">4a · Challenge (bonus) stages — fly-through</b> <span style="color:#555">(every 4th stage: 3, 7, 11, 15, …; <code>(stage+1)%4==0</code>) — implemented 2026-06-22</span><br>
+  A fourth enemy lifecycle, distinct from fly-in / attack / capture: 40 bugs run the
+  <span style="color:#7af">d_challg_stg_dat</span> patterns (path indices 6–0x17, a SEPARATE table from combat)
+  and <b>fly through / exit off-screen</b> — they never home into formation and never bomb. Those paths
+  end with <span style="color:#7af">FF</span> (no <span style="color:#7af">FB</span>); <span style="color:#7af">case_0E49</span>
+  makes the bug inactive (gone). The stage ends when all 40 are gone — shot OR escaped — then advances.
+  <b style="color:#5d9">Clone:</b> <span style="color:#7af">stageCaravanRow</span> picks the challenge table;
+  <span style="color:#7af">bugMotion isChallengeStage</span> despawns on FF + off-screen (combat still homes);
+  <span style="color:#7af">gameController</span> draws the <b>"CHALLENGING STAGE"</b> splash; completion reuses the INT-5
+  clear path. Scoring (NUMBER OF HITS / PERFECT! / bonus) is out of scope. Spec: research_stage_init.md §14.4.
+</div>
+
 <!-- ── Formation movement detail ── -->
 <h4 style="color:#555;font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:24px;margin-bottom:10px;border-bottom:1px solid #1a1a1a;padding-bottom:4px">4b · Formation Movement — Two Separate Systems (verified from Z80 source)</h4>
 <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:flex-start">

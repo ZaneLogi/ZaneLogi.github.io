@@ -587,6 +587,32 @@ const D_COMBAT_STG_DAT_IDX = new Uint8Array([
     0x00,0x12,0x48,0x36,0x24,0x48,0x6C,0x00,0x7E,0xA2,0x90,0xB4,0xD8,0x00,0xB4,0xD8,0xC6,
 ]);
 
+// ── d_challg_stg_dat — bonus-stage fly-through caravans (gg1-3.s:1477) ─
+// 8 unique CHALLENGING-STAGE patterns. Same 18-byte row layout as the combat
+// table (2-byte header + 5 wave triplets + 0xFF), but the path bytes index the
+// HIGHER db_2A3C entries (6..0x17), whose flight blocks end with FF (no FB) — so
+// the bugs fly through and EXIT off-screen rather than homing into formation.
+// Header byte 1 = 0x00 on every row → no fly-in bombs (bonus rounds never shoot;
+// getFlyInBombFlags reads this directly). Transcribed VERBATIM from the .db lines.
+const D_CHALLG_STG_DAT = new Uint8Array([
+    0xFF,0x00, 0x00,0x06,0x46+0x80, 0x00,0x07,0x07+0x00, 0x00,0x47,0x47+0x00, 0x00,0x46,0x46+0x00, 0x00,0x06,0x06+0x00, 0xFF,
+    0xFF,0x00, 0x00,0x08,0x48+0x80, 0x00,0x09,0x49+0x80, 0x00,0x09,0x49+0x80, 0x00,0x48,0x48+0x00, 0x00,0x08,0x08+0x00, 0xFF,
+    0xFF,0x00, 0x00,0x0A,0x4A+0x00, 0x00,0x0B,0x4B+0x80, 0x00,0x0B,0x4B+0x80, 0x00,0x0A,0x4A+0x00, 0x00,0x16,0x56+0x00, 0xFF,
+    0xFF,0x00, 0x00,0x0C,0x4C+0x80, 0x00,0x0D,0x0D+0x00, 0x00,0x4D,0x4D+0x00, 0x00,0x0C,0x4C+0x80, 0x00,0x17,0x57+0x80, 0xFF,
+    0xFF,0x00, 0x00,0x0E,0x0E+0x00, 0x00,0x0F,0x0F+0x00, 0x00,0x4F,0x4F+0x00, 0x00,0x0E,0x0E+0x00, 0x00,0x4E,0x4E+0x00, 0xFF,
+    0xFF,0x00, 0x00,0x10,0x10+0x00, 0x00,0x11,0x51+0x80, 0x00,0x11,0x51+0x80, 0x00,0x50,0x50+0x00, 0x00,0x10,0x10+0x00, 0xFF,
+    0xFF,0x00, 0x00,0x12,0x12+0x00, 0x00,0x13,0x13+0x00, 0x00,0x53,0x53+0x00, 0x00,0x52,0x52+0x00, 0x00,0x12,0x12+0x00, 0xFF,
+    0xFF,0x00, 0x00,0x14,0x54+0x80, 0x00,0x15,0x15+0x00, 0x00,0x55,0x55+0x00, 0x00,0x14,0x54+0x80, 0x00,0x14,0x54+0x80, 0xFF,
+]);
+
+// ── d_challg_stg_data_idx — challenge row offsets (gg1-3.s:1444) ───────
+// 8 entries, each a byte offset (multiple of 18) into D_CHALLG_STG_DAT. NO rank
+// dimension (unlike combat). Selected by idx = (stgctr >> 2) & 7 (gg1-3.s:1216-
+// 1222) — so challenge stages 3,7,11,15,19,23,27,31 map to rows 0..7.
+const D_CHALLG_STG_DATA_IDX = new Uint8Array([
+    0x00, 0x12, 0x24, 0x36, 0x48, 0x5A, 0x6C, 0x7E,
+]);
+
 // ── bmbr_stg_cfg_dat — per-stage difficulty (new_stage.s:143-198) ─────
 // 4 sub-tables × 26 stages × 5 bytes per stage (10 packed nibbles).
 // Each row supplies the per-stage difficulty parameters that drive the
@@ -962,50 +988,50 @@ export function resolveWaveByte(byte) {
 // in the byte order, NOT a separate field.
 //
 // Stage 1 (5 waves × 4 pairs × 2 members + 6 markers) = 86 bytes.
-// ── Combat caravan row selection (shared) ─────────────────────────────
-// Z80 c_25A2 (gg1-3.s:1170-1235): pick the caravan row by (rank, stage). Stage
-// wrap: while > 0x17 keep subtracting 4 — endless games cycle the last 4 combat
-// configs (a DIFFERENT wrap than the difficulty table's 0x1B). Stage index
-// within the rank's 17-entry idx row = stage − stage/4 − 1 (gg1-3.s:1206-1211).
-// Challenge stages (deferred) fall through this combat path: they get a combat
-// caravan whose difficulty row has max_bombers = 0 → enemies settle but never
-// attack (see research notes). Returns the byte offset of the 18-byte row in
-// D_COMBAT_STG_DAT. Shared by buildWaveStream (the caravan) and getFlyInBombFlags
-// (the 2-byte header) so they always read the SAME row.
-function combatStgDatOffset(stage, rank = 3) {
+// ── Caravan row selection (shared, combat + challenge) ────────────────
+// Z80 c_25A2 (gg1-3.s:1170-1235): pick the 18-byte caravan row for the stage.
+//   - Challenge stages ((stage+1)%4==0, Z80 _b_not_chllg_stg==0): the SEPARATE
+//     d_challg_stg_dat, indexed by idx = (stgctr>>2)&7 — no rank dimension
+//     (gg1-3.s:1216-1222). Its rows fly-through (FF terminals) + header[1]=0.
+//   - Combat stages: d_combat_stg_dat[rank]. Stage wrap: while > 0x17 keep
+//     subtracting 4 (endless games cycle the last 4 combat configs — a DIFFERENT
+//     wrap than the difficulty table's 0x1B); index = stage − stage/4 − 1
+//     (gg1-3.s:1206-1211).
+// Returns { table, off } so buildWaveStream (the caravan) and getFlyInBombFlags
+// (the 2-byte header) always read the SAME row from the SAME table.
+function stageCaravanRow(stage, rank = 3) {
+    if (((stage + 1) % 4) === 0) {
+        return { table: D_CHALLG_STG_DAT, off: D_CHALLG_STG_DATA_IDX[(stage >> 2) & 0x07] };
+    }
     let s = stage;
     while (s > 0x17) s -= 4;
     let si = s - (s >> 2) - 1;
     if (si < 0)  si = 0;
     if (si > 16) si = 16;
-    return D_COMBAT_STG_DAT_IDX[(rank & 3) * 17 + si];
+    return { table: D_COMBAT_STG_DAT, off: D_COMBAT_STG_DAT_IDX[(rank & 3) * 17 + si] };
 }
 
 // b_92E2[1] for the stage — the fly-in bomb-drop ENABLE mask, the 2nd byte of
 // the caravan row header (gg1-3.s:1246), loaded into 0x0F(ix) per bug at
 // gg1-3.s:1800 (gated by the per-object bit-7, FLYIN_BOMB_CAPABLE). 0x00 on
-// stage 1 → no fly-in bombs; 0x01 from stage 2, 0x03 on the hardest rows. See
-// research_stage_init.md §6.2.
+// stage 1 → no fly-in bombs; 0x01 from stage 2, 0x03 on the hardest rows. Reads
+// the row's real table, so challenge stages return 0 naturally (d_challg header[1]
+// is always 0 — bonus rounds never bomb). See research_stage_init.md §6.2.
 export function getFlyInBombFlags(stage, rank = 3) {
-    // Challenge stages (every 4th: 3, 7, 11, …; Z80 _b_not_chllg_stg == 0) load
-    // the SEPARATE d_challg_stg_dat, whose header byte 1 is 0x00 on EVERY row
-    // (gg1-3.s:1478-1485) — bonus rounds never bomb. The clone defers challenge
-    // data and falls through to a combat caravan (research_stage_init.md §14.4),
-    // so without this gate the combat row's nonzero b_92E2[1] would wrongly arm
-    // fly-in bombing on challenge stages. Zero it to match d_challg_stg_dat.
-    if (((stage + 1) % 4) === 0) return 0;
-    return D_COMBAT_STG_DAT[combatStgDatOffset(stage, rank) + 1];
+    const { table, off } = stageCaravanRow(stage, rank);
+    return table[off + 1];
 }
 
 export function buildWaveStream(stage, rank = 3) {
-    const off = combatStgDatOffset(stage, rank);
+    const { table, off } = stageCaravanRow(stage, rank);
 
-    // Row layout: [0,1] header (unused), [2..16] 5 triplets, [17] 0xFF.
+    // Row layout: [0,1] header (unused here), [2..16] 5 triplets, [17] 0xFF.
+    // Same builder for combat + challenge — only the source table differs.
     const stream = [];
     for (let w = 0; w < 5; w++) {
         const t       = off + 2 + w * 3;
-        const byte1   = D_COMBAT_STG_DAT[t + 1];    // member-1 path byte
-        const byte2   = D_COMBAT_STG_DAT[t + 2];    // member-2 path byte
+        const byte1   = table[t + 1];    // member-1 path byte
+        const byte2   = table[t + 2];    // member-2 path byte
         const idsBase = w * 8;
         stream.push(0x7E);                          // wave-start marker
         // Z80 c_25A2 (gg1-3.s:1357-1383) splits the 8 IDs into a lefty half

@@ -433,11 +433,14 @@ const SPLASH_PAL = 3;   // char palette (matches the FIGHTER CAPTURED text)
 // rows too high and a column off — corrected in the X+Y coordinate-system audit.
 const SPLASH_X = 80;
 const SPLASH_Y = 144;
+// "CHALLENGING STAGE" sits further left — Z80 string idx 7 is _dea 16 5
+// (gg1-2.s:1310), col C=5 → x = 5*8 = 40 (same row y=144 as "STAGE n").
+const CHALLENGE_SPLASH_X = 40;
 
-function drawSplash(ctx, text) {
+function drawSplash(ctx, text, x = SPLASH_X) {
     const codes = [...text].map(charCode);
     for (let i = 0; i < codes.length; i++) {
-        ctx.drawImage(charCanvas(codes[i], SPLASH_PAL), SPLASH_X + i * 8, SPLASH_Y);
+        ctx.drawImage(charCanvas(codes[i], SPLASH_PAL), x + i * 8, SPLASH_Y);
     }
 }
 
@@ -449,7 +452,13 @@ export function render(state) {
     // (c_player_respawn's 0x8270 check, gg1-2.s:1013-1017) — so the stage-begin
     // case needs no "READY"; this branch is it.
     if (state.gameState === 'stageClear') {
-        drawSplash(ctx, 'STAGE ' + state.stage);
+        // Challenge (bonus) stages show "CHALLENGING STAGE" instead of "STAGE n"
+        // — Z80 stg_init_splash branches on _b_not_chllg_stg (task_man.s:201-217).
+        if (((state.stage + 1) % 4) === 0) {
+            drawSplash(ctx, 'CHALLENGING STAGE', CHALLENGE_SPLASH_X);
+        } else {
+            drawSplash(ctx, 'STAGE ' + state.stage);
+        }
         return;
     }
 
