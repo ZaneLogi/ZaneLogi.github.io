@@ -84,8 +84,21 @@ export function render(state) {
 
         // 16×16 sprite centered on (x, y). For flying/homing, apply
         // flip transforms via canvas scale around the sprite center.
-        // 2-hit boss: render blue (palette 1) once it has taken its first hit (4d-a).
-        const grp = (e.type === 'boss' && e.hits) ? sprites.bossBlue : sprites[e.type];
+        let grp;
+        if (e.bbeeColorIndex != null) {
+            // Launched bonus-bee → the 0x5x sprite (research_bonus_bee.md §4). Once it
+            // homes back to formation, revert to a normal bee (the 0x5x base has a blank
+            // frame 7, which the formation 6↔7 idle would hit; §4 frame-7 note).
+            if (e.state === 'formation') { e.bbeeColorIndex = null; grp = sprites[e.type]; }
+            else                          grp = sprites.bonusBee[e.bbeeColorIndex];
+        } else if (e.objectId === state.bonusBee.obj && state.bonusBee.flashOn && state.bonusBee.flashFrames) {
+            // Resting bee flashing before launch → the clrB-recolored normal shape
+            // (research_bonus_bee.md §3); alternated with sprites[type] by the manager.
+            grp = state.bonusBee.flashFrames;
+        } else {
+            // 2-hit boss: render blue (palette 1) once it has taken its first hit (4d-a).
+            grp = (e.type === 'boss' && e.hits) ? sprites.bossBlue : sprites[e.type];
+        }
         const img = grp[frame];
         if (flipX || flipY) {
             ctx.save();

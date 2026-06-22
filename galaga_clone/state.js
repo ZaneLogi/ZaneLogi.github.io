@@ -88,6 +88,18 @@ function buildEnemies() {
                 bombCounter: 0,
                 bombEnable:  0,
 
+                // Bonus-bee repaint (BB-3): when this enemy is launched as a
+                // bonus-bee, the color index (0/1/2) of its 0x5x sprite, so
+                // objectStates draws sprites.bonusBee[idx]. null = normal enemy.
+                // Cleared on home-back (research_bonus_bee.md §3/§4).
+                bbeeColorIndex: null,
+
+                // Bonus-bee CONVOY CLONE (BB-5): true for a clone split off a
+                // convoy leader via the 0xF2 token (objectIds 0x38-0x3E). Clones
+                // are transients — FF / off-screen despawns them (no home slot).
+                // research_bonus_bee.md §6.
+                bbeeClone: false,
+
                 // ── Pair-mirror flag (step 9 phase INT-2c, launcher rewrite) ──
                 // Mirror of Z80 0x13(ix) bit 7 — set by launchAttackWave
                 // when wave-byte bit 6 is set. Consumed by bugMotion when
@@ -268,6 +280,21 @@ export const state = {
     // over consecutive frames. Each slot: { objectId, negate, path, entryOffset }
     // or null (null = Z80 0xFF empty sentinel). Reset by resetWaveState.
     bossPool:              [null, null, null, null],
+
+    // ── Bonus-bee / "clone-attack" state (BB-2, port of _b_bbee_*) ──────────
+    // The stage-4+ flashing diver (research_bonus_bee.md). Managed by the new
+    // bonusBee task (f_1A80, BB-3): a resting bee is plucked, flashes, repaints to
+    // the 0x5x sprite, and dives as the leader of a 3-bug convoy.
+    //   obj  ⇔ _b_bbee_obj  — objectId of the chosen bee; null = none active
+    //   clrA ⇔ _b_bbee_clr_a — flash color A (the bee's original color)
+    //   clrB ⇔ _b_bbee_clr_b — flash color B / stage color index (4/5/6); the 0x5x
+    //          base + palette derive from this (color index = clrB − 4 → 0/1/2)
+    //   tmr  ⇔ _b_bbee_tmr — launch timer: 0 idle; armed at 0xC0, then counts UP,
+    //          wrapping 0xFF→0x00 to fire (~0x40 = 64 frames of flashing first)
+    // BB-3 render helpers (clone-only): colorIndex = clrB−4 (0/1/2 → sprites.bonusBee[idx]);
+    // flashFrames = the clrB-recolored normal shape; flashOn toggles it each ~16 frames.
+    bonusBee:              { obj: null, clrA: null, clrB: 0, tmr: 0,
+                             colorIndex: null, flashFrames: null, flashOn: false },
 
     // ── Capture mission state (sub-step 4) ─────────────────────────────────
     // captureToggle  — _b_bmbr_boss_wingm (gg1-2_fx.s:1017): ++ each boss

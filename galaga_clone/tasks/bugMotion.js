@@ -124,9 +124,65 @@ const TOKEN_ARG_BYTES = {
                 // by 9 (token + 8-byte LUT). Earlier value of 2 was wrong
                 // and caused RED path to misread offsets 12-19 as 2 fast-
                 // spinning fake segments at offset 9.
+    0xF2: 2,    // SPAWN (case_097B) — 2-byte sub-path address (handled explicitly below)
     0xF0: 2,
     0xEF: 2,
 };
+
+// case_0AA0 / FB TURN_HOME (gg1-5.s:1768-1846): redirect the bug toward its LIVE
+// formation slot and enter 'homing' (tracks the oscillating slot in update()).
+// Extracted into a helper so the FD/FA out-of-array fallback (the bonus-bee convoy
+// leaders' cross-region home-tails) can reuse it. See research_attack_paths.md §5b.
+function turnHome(e, state) {
+    const fo = state.formation;
+    const ox = fo.oscillateX + (fo.pulseOffsets[e.colIdx] ?? 0);
+    const oy =                  (fo.pulseOffsets[10 + e.rowIdx] ?? 0);
+    const dx = (e.homeX + ox) - e.x;
+    const dy = (e.homeY + oy) - e.y;
+    if (Math.abs(dx) <= HOME_THRESHOLD && Math.abs(dy) <= HOME_THRESHOLD) {
+        e.state = 'formation';                 // already at the slot — snap
+        e.x = e.homeX + ox; e.y = e.homeY + oy;
+        e.vx = e.vy = e.rotRate = 0;
+        e.pathBase = null;
+        return;
+    }
+    const angleRad = Math.atan2(-dy, dx);
+    const norm     = (angleRad + 2 * Math.PI) % (2 * Math.PI);
+    e.angle    = Math.round(norm / (2 * Math.PI) * 1024) & 0x3FF;
+    e.rotRate  = 0;
+    e.pathBase = null;
+    e.state    = 'homing';
+    e.homeOscX = ox;
+    e.homeOscY = oy;
+}
+
+// case_097B "split off bonus bee" (gg1-5.s:1564-1633): a convoy leader, on a 0xF2
+// token, spawns a CLONE into a 0x38-0x3E transient slot — copying its sprite/color
+// (bbeeColorIndex), position, and rotation flag — that runs the embedded sub-path
+// (subOffset, within the leader's own CONVOY_REGION array). Clones never bomb and
+// despawn on FF / off-screen (bbeeClone). research_bonus_bee.md §6.2.
+function spawnClone(leader, state, subOffset) {
+    for (let id = 0x38; id <= 0x3E; id += 2) {
+        const c = state.enemies.find(en => en.objectId === id);
+        if (!c || (c.state !== 'pending' && c.state !== 'dead')) continue;
+        c.state          = 'flying';
+        c.alive          = true;
+        c.x = leader.x;   c.y = leader.y;          // start where the leader is
+        c.vx = leader.vx; c.vy = leader.vy;
+        c.angle          = leader.angle;
+        c.rotRate        = 0;
+        c.negateRotation = leader.negateRotation;
+        c.bbeeColorIndex = leader.bbeeColorIndex;  // identical 0x5x sprite + color
+        c.bbeeClone      = true;                   // FF / off-screen → despawn
+        c.pathBase       = leader.pathBase;        // same CONVOY_REGION array
+        c.pathOffset     = subOffset;
+        c.segTimer       = 0;                       // load first segment next tick
+        c.fcDiveTargetY  = null;
+        c.bombCounter = 0; c.bombEnable = 0;        // clones don't bomb (no F6)
+        return;
+    }
+    // no free slot → no clone (Z80 l_09FA_bonusbee_creat_fail)
+}
 
 // Read next segment (or dispatch token) at e.pathOffset.
 // Updates vx, vy, rotRate, segTimer (or transitions e.state on token).
@@ -165,7 +221,9 @@ function loadSegment(e, state) {
                 // so they despawn here — the bonus-stage exit. Combat bugs always
                 // FB-home before FF, so they never reach this; the 'formation'
                 // branch is a defensive fallback only.
-                if (isChallengeStage(state)) {
+                if (isChallengeStage(state) || e.bbeeClone) {
+                    // Challenge fly-through bugs AND bonus-bee convoy clones are
+                    // transients with no home — FF makes them GONE, not homed.
                     e.state    = 'dead';
                     e.alive    = false;
                     e.pathBase = null;
@@ -270,7 +328,13 @@ function loadSegment(e, state) {
                 const hi     = e.pathBase[e.pathOffset + 2];
                 const target = (hi << 8) | lo;
                 const base   = e.pathBase.z80Base ?? 0;
-                e.pathOffset = target - base;
+                const off    = target - base;
+                // Out-of-array target = a bonus-bee convoy leader's cross-region
+                // home-tail (→ the bee descent in ATTACK_PATH_YELLOW) → TURN_HOME.
+                // Existing attack paths always jump within their own array, so this
+                // never fires for them. research_bonus_bee.md §6.
+                if (off < 0 || off >= e.pathBase.length) { turnHome(e, state); return; }
+                e.pathOffset = off;
                 continue;
             }
 
@@ -300,8 +364,26 @@ function loadSegment(e, state) {
                     const hi     = e.pathBase[e.pathOffset + 2];
                     const target = (hi << 8) | lo;
                     const base   = e.pathBase.z80Base ?? 0;
-                    e.pathOffset = target - base;
+                    const off    = target - base;
+                    // Out-of-array (convoy leader home-tail) → TURN_HOME. See FD.
+                    if (off < 0 || off >= e.pathBase.length) { turnHome(e, state); return; }
+                    e.pathOffset = off;
                 }
+                continue;
+            }
+
+            // ── 0xF2 SPAWN ("split off bonus bee", case_097B, gg1-5.s:1564) ──
+            // Only the bonus-bee convoy leaders use F2: each one splits off a CLONE
+            // that runs the embedded sub-path (an address WITHIN the same
+            // CONVOY_REGION array). The leader keeps flying past the token.
+            // research_bonus_bee.md §6.2.
+            if (b0 === 0xF2) {
+                const lo     = e.pathBase[e.pathOffset + 1];
+                const hi     = e.pathBase[e.pathOffset + 2];
+                const target = (hi << 8) | lo;
+                const base   = e.pathBase.z80Base ?? 0;
+                spawnClone(e, state, target - base);
+                e.pathOffset += 3;       // token + 2-byte address; continue the dive
                 continue;
             }
 
@@ -712,7 +794,7 @@ export function update(state) {
         // exit downward/sideways and stay on-screen mid-pattern, so the generous
         // margins won't clip a bug mid-flight. Combat bugs home before leaving, so
         // this never fires for them. research_stage_init.md §14.4.
-        if (e.state === 'flying' && isChallengeStage(state) &&
+        if (e.state === 'flying' && (isChallengeStage(state) || e.bbeeClone) &&
             (e.y > 304 || e.x < -24 || e.x > 248)) {
             e.state    = 'dead';
             e.alive    = false;

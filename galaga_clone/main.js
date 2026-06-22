@@ -23,6 +23,7 @@ import * as enemyStatus        from './tasks/enemyStatus.js';
 import * as bombUpdate         from './tasks/bombUpdate.js';
 import * as bomberConfig       from './tasks/bomberConfig.js';
 import * as launchAttackWave   from './tasks/launchAttackWave.js';
+import * as bonusBee           from './tasks/bonusBee.js';
 import * as playerMove         from './tasks/playerMove.js';
 import * as playerFire         from './tasks/playerFire.js';
 import * as bulletUpdate       from './tasks/bulletUpdate.js';
@@ -56,6 +57,7 @@ const TASK_TABLE = [
     { flag: 'bombUpdate',         module: bombUpdate,         ref: 'f_1EA4'    },
     { flag: 'bomberConfig',       module: bomberConfig,       ref: 'f_0857'    },
     { flag: 'launchAttackWave',   module: launchAttackWave,   ref: 'f_2916'    },
+    { flag: 'bonusBee',           module: bonusBee,           ref: 'f_1A80'    },
     { flag: 'playerMove',         module: playerMove,         ref: 'f_1F85'    },
     { flag: 'playerFire',         module: playerFire,         ref: 'f_1F04'    },
     { flag: 'bulletUpdate',       module: bulletUpdate,       ref: 'CPU1 rckt' },

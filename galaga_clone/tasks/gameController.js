@@ -56,6 +56,7 @@ const STATE_TASKS = {
         bombUpdate:          false,
         bomberConfig:        false,
         launchAttackWave:    false,
+        bonusBee:            false,
         playerMove:          false,   // player ship hidden
         playerFire:          false,
         bulletUpdate:        false,
@@ -91,6 +92,7 @@ const STATE_TASKS = {
         bombUpdate:          true,    // fly-in bombing (stage 2+): armed at launch, not F6 — §6.2
         bomberConfig:        false,   // attack reloads not needed during fly-in
         launchAttackWave:    true,    // runs runFlyInWave during stageStart
+        bonusBee:            false,   // bonus-bee is a 'playing' feature (after fly-in)
         playerMove:          true,    // INT-4 (UX deviation): ship visible + movable
         playerFire:          true,    // INT-4 (UX deviation): bullets can spawn
         bulletUpdate:        true,    // INT-4: bullets move + collide
@@ -109,6 +111,7 @@ const STATE_TASKS = {
         bombUpdate:          true,
         bomberConfig:        true,    // Phase C INT-7: f_0857 recomputes reload values per frame
         launchAttackWave:    true,
+        bonusBee:            true,    // f_1A80 — stage-4+ bonus-bee manager
         playerMove:          true,
         playerFire:          true,
         bulletUpdate:        true,
@@ -133,6 +136,7 @@ const STATE_TASKS = {
         bombUpdate:          false,
         bomberConfig:        false,
         launchAttackWave:    false,
+        bonusBee:            false,
         playerMove:          false,
         playerFire:          false,
         bulletUpdate:        false,
@@ -249,6 +253,8 @@ function stgInitEnv(state) {
         e.segTimer       = 0;
         e.bombCounter    = 0;
         e.bombEnable     = 0;
+        e.bbeeColorIndex = null;    // clear any bonus-bee repaint from a prior stage
+        e.bbeeClone      = false;   // clear any convoy-clone flag from a prior stage
         e.negateRotation = false;   // cleared until re-set by next launch
     }
 
@@ -262,6 +268,16 @@ function stgInitEnv(state) {
     state.capture.rescueStage     = 0;
     state.player.controlLocked    = false;
     state.player.captureFrame     = null;
+
+    // Bonus-bee: reset the per-stage manager state (Z80 stg_init_env zeroes
+    // _b_bbee_tmr/_b_bbee_obj, task_man.s:286-294). research_bonus_bee.md §7.
+    state.bonusBee.obj         = null;
+    state.bonusBee.clrA        = null;
+    state.bonusBee.clrB        = 0;
+    state.bonusBee.tmr         = 0;
+    state.bonusBee.colorIndex  = null;
+    state.bonusBee.flashFrames = null;
+    state.bonusBee.flashOn     = false;
 
     // twoShip is a NEW-GAME reset, NOT a per-stage one: the Z80 never clears
     // _b_2ship on a stage change (only at game/demo init, on a kill, or never),

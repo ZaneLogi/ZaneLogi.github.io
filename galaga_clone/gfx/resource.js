@@ -77,6 +77,17 @@ export const colorPalettes = _palettes;
 // Total decoded 16×16 sprite shapes (sprite1 + sprite2 sheets) — for the viewer.
 export const SPRITE_SHAPE_COUNT = _tiles.length;
 
+// Decode a normal creature's 8 frames in an ARBITRARY palette. Used by the
+// bonus-bee flash (research_bonus_bee.md §3): a resting bee alternates its palette
+// between clrA (its original color) and clrB (the stage color 4/5/6) — the SHAPE
+// stays the normal bee (its frame 7 has graphics, unlike the 0x5x bonus base), so
+// we recolor the normal shape rather than swap to the 0x5x sprite. Base shapes match
+// the `sprites` groups: boss 8, butterfly 16, wasp 24.
+const _CREATURE_BASE = { boss: 8, butterfly: 16, wasp: 24 };
+export function recolorCreature(type, palIdx) {
+    return group(_CREATURE_BASE[type], 8, palIdx);
+}
+
 // ── Projectile + explosion sprites ─────────────────────────────────────
 // Namco sprite hardware treats tile-pixel value 0 as transparent regardless of
 // what the palette maps it to. The four ENEMY palettes happen to map index 0 to
@@ -148,6 +159,16 @@ export const sprites = {
     bossBlue:     group( 8, 8, 1),  // palette 1 — blue boss (2-hit, 4d-a)
     butterfly:    group(16, 8, 2),  // palette 2 — moth
     wasp:         group(24, 8, 3),  // palette 3 — bee
+
+    // Bonus-bee ("clone-attack") — the stage-4+ flashing diver (research_bonus_bee.md §4).
+    // Three stage-group color variants: color index c (0/1/2) selects sprite base
+    // 0x50 / 0x58 / 0x60 and palette 4 / 5 / 6 (gg1-2_fx.s:813-817 base = c<<3 + 0x50;
+    // clr_b = c + 4, gg1-2_fx.s:725-732 cycles by stage). Index as
+    // sprites.bonusBee[c][frame] — frame comes from spriteFromAngle like any creature
+    // (the 0x5x base flows through determine_sprite_code unchanged, §4). The 4/5/6
+    // palette is the "lit"/stage color; the resting-phase flash alternates it with the
+    // bee's original palette — wired in the manager/render step (BB-4), not here.
+    bonusBee: [group(0x50, 8, 4), group(0x58, 8, 5), group(0x60, 8, 6)],
 };
 
 // ── Character tiles (8×8) — dat_character.js ───────────────────────────
