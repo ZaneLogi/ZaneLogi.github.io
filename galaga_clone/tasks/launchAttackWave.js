@@ -216,6 +216,14 @@ function runFlyInWave(state) {
         //                                         enemies, 0x44 for "sides")
         e.negateRotation = pathInfo.negateRotation;
         e.bombCounter    = pathInfo.bombCounterInit;
+
+        // 0x0F(ix) — fly-in bomb-drop ENABLE mask (gg1-3.s:1796-1803). The
+        // stage mask (state.flyInBombFlags = b_92E2[1]) is loaded ONLY for
+        // bomb-capable objects (per-object bit-7 from d_2908); the rest get 0.
+        // Stage 1's mask is 0 → no fly-in bombs there; stage 2+ → these bugs
+        // drop bombs on the way in. bombUpdate (case_0DF5) consumes it exactly
+        // like an attack dive's. research_stage_init.md §6.2.
+        e.bombEnable     = e.bombCapable ? state.flyInBombFlags : 0;
     }
 
     // Advance past path byte + object ID.

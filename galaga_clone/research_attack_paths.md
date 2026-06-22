@@ -581,6 +581,9 @@ on stage 1 normal mode (FA short-circuits to FB) and on cont_bmb mode
 8. FC/FE token handlers skipped — visual polish.
 9. Bonus-bee skip in yellow scan — moot until bonus-bee exists (step 10).
 10. Sound effects — no sound system yet.
+11. Fly-in bombing (stage 2+) — ✅ PORTED (2026-06-22). Fly-in bugs bomb in later
+    stages via a SEPARATE arming path (`b_92E2[1]` per-stage + sprite-code bit-7,
+    NOT the §6 attack-dive mask `b_92C0[8]`). Spec + as-built: `research_stage_init.md` §6.2.
 
 ## 9. Recommended fix sequence
 
@@ -724,6 +727,7 @@ px. See §5b for the full mechanism + measurements.
 - ✅ Boss capture squad implemented (capture dive + escort/paired dive + 2-hit boss + rescue → 2-ship), step 10 — see §14 + research_boss_capture.md
 - ⚠ Dispatcher guard partial: `playerFire` gate ported (Phase D); `glbl_enemy_enbl` has no port equivalent yet
 - ⏳ Sound, bonus-bee deferred
+- ✅ Fly-in bombing (stage 2+) — separate `b_92E2[1]` arming path, PORTED 2026-06-22 (see `research_stage_init.md` §6.2)
 
 ## 11. Moth (red) dive — token map + decision gates
 

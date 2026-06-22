@@ -25,8 +25,8 @@ Each row = one stage = 18 bytes:
 
 | Offset | Bytes | Meaning |
 |--------|-------|---------|
-| 0      | 1     | Stage parm 0 → `b_92E2[0]` (purpose currently unverified) |
-| 1      | 1     | Stage parm 1 → `b_92E2[1]` = bomb-drop enable bits, fed into `0x0F(ix)` per bug |
+| 0      | 1     | Stage parm 0 → `b_92E2[0]` = fly-in **bomb-drop counter reload** (`0x14`); reloaded into `0x0E(ix)` by `case_0DF5` (gg1-5.s:2460). See §6.2. |
+| 1      | 1     | Stage parm 1 → `b_92E2[1]` = fly-in bomb-drop **enable bits**, fed into `0x0F(ix)` per bug (gated by sprite-code bit 7). `0x00` in stage 1 → no fly-in bombs. See §6.2. |
 | 2-4    | 3     | Wave 1 triplet: `[byte0, byte1, byte2]` |
 | 5-7    | 3     | Wave 2 triplet |
 | 8-10   | 3     | Wave 3 triplet |
@@ -171,6 +171,92 @@ normal codes + the fly-through (no-home, no-bomb) path. The dive itself reuses
 > bonus-bee, gated by `new_stage_parms[0x0A]`, documented in
 > `research_bonus_bee.md`. Transients (here) are plain fly-through bugs in the
 > wave data. Two different stage gaps; don't conflate.
+
+## 6.2 Fly-in bombing — stage-gated + per-object [verified; PORTED 2026-06-22]
+
+Fly-in bugs (the ones that swarm in and join the formation) **drop bombs in
+later stages but not in stage 1** — a real Galaga behavior, and a *separate*
+arming path from the attack-dive bombing in `research_attack_paths.md` §6. Two
+independent gates stack:
+
+**Gate 1 — per-stage (`b_92E2[1]` = `_stg_dat[1]`).** The fly-in object setup
+loads the bomb-enable mask from the combat-data row header — **not** from
+`bmbr_stg_cfg_dat` / `b_92C0[8]` (that is the attack-dive source):
+
+```
+if (sprite_code & 0x80)  0x0F(ix) = b_92E2[1]    ; else 0x0F(ix) = 0
+```
+
+(gg1-3.s:1796-1803.) `b_92E2[1]` is the 2nd header byte of the stage's
+`d_combat_stg_dat` row, loaded once per stage at gg1-3.s:1246 (see §2):
+- **Stage 1 → row 0 → header `0x14, 0x00` → `b_92E2[1] = 0` → no fly-in bombs.**
+- **Stage 2+ → header byte `0x01`** (one enable bit), **rising to `0x03`** on the
+  hardest combat rows (rows 10-12). The exact stage→row mapping is the §14.3 idx
+  table; stage 1 is always row 0, every other combat row carries `0x01`/`0x03`,
+  so fly-in bombing turns on from stage 2.
+
+**Gate 2 — per-object (sprite-code bit 7).** Only flagged creatures are
+bomb-capable. `c_2896` / `stg_init_env` (gg1-3.s:1523) packs a bomb-drop bit into
+**bit 7** of each enemy's sprite-code byte (its header comment, gg1-3.s:1503),
+pulled from the fixed 44-bit table `d_2908` (gg1-3.s:1639) via `c_28E9`
+(gg1-3.s:1606) — one bit per creature, MSB-first, in roster order (20 bees
+`0x08-0x2E`, 8 boss/bonus-bee `0x30-0x3E`, 16 moths `0x40-0x5E`):
+
+```
+d_2908 = A5 5A A9 0F 0A 50    ; 44 bits used, one per creature
+```
+
+The bit is consumed at fly-in setup — the base code is re-stored bit-7-clear
+(gg1-3.s:1789) — so it arms exactly one fly-in pass.
+
+**Counter + drop (shared with attack dives).** The fly-in counter `0x0E` is set
+to `0x08` (top-entry bugs) or `0x44` (side-entry — wave-byte bit 0 set;
+gg1-3.s:1827-1834, cross-ref §3 row "bit 0"). Then the shared drop check
+`case_0DF5` (gg1-5.s:2345) runs every frame for any flying bug: `dec 0x0E`; at 0,
+`srl 0x0F` and drop **if** the shifted-out bit was 1 **and** the bug is low enough
+(sprite_Y ≥ 152 → canvas Y ≥ 112) **and** fire is active; then reload `0x0E` from
+`b_92E2[0]` (= `0x14`, §2). On stage 1 `0x0F = 0`, so the shift never yields a
+drop — hence no fly-in bombs, regardless of bit-7.
+
+(Transients differ — §6.1 forces `0x0F = 0` at gg1-3.s:1822, so fly-through bugs
+never bomb in any stage.)
+
+### As built (ported 2026-06-22)
+
+Wired faithfully across five files:
+- **`paths.js`** — `FLYIN_BOMB_CAPABLE` (a `Set` of objectIds) is built by replaying
+  `c_2896` + `c_28E9` over `d_2908` (the 44-bit table), so the table stays the source
+  of truth rather than a hand-listed set. `getFlyInBombFlags(stage, rank)` returns
+  `b_92E2[1]` from the SAME caravan row `buildWaveStream` selects (extracted a shared
+  `combatStgDatOffset` helper so they can't drift). **Challenge-stage gate:** it
+  returns 0 for challenge stages (`(stage+1)%4==0`) — those use the separate
+  `d_challg_stg_dat` (header byte 1 = 0x00 on every row, gg1-3.s:1478-1485, bonus
+  rounds don't bomb), but the clone falls through to a combat caravan (§14.4), so
+  without the gate the combat row's nonzero mask would wrongly arm fly-in bombing
+  on challenge stages.
+- **`state.js`** — each enemy carries `bombCapable` (= membership in the set, stamped at
+  roster build); `state.flyInBombFlags` holds the per-stage mask.
+- **`gameController.stgInitEnv`** — sets `state.flyInBombFlags = getFlyInBombFlags(stage,
+  rank)` each stage (the `b_92E2[1]` latch). (`b_92E2[0]` stays the `0x14` constant
+  `bombUpdate.DROP_RELOAD` — uniform across all rows.)
+- **`launchAttackWave.runFlyInWave`** — `e.bombCounter` was already armed (0x08/0x44 from
+  the wave-byte bit 0); added the missing `e.bombEnable = bombCapable ? flyInBombFlags : 0`
+  (the `0x0F(ix)` gate).
+- **`gameController` STATE_TASKS** — `bombUpdate` now runs during `stageStart` (the fly-in
+  phase). It was off under the same §6-corrected "no F6 → no bombs" misconception; the
+  drop check (`case_0DF5`) runs during fly-in in the Z80, so it must run here too.
+
+**Verified** (preview):
+- *Deterministic* — the decode yields the 20 expected objectIds (bees
+  0x08/0C/12/16/1A/1E/20/24/28/2C · bosses 0x30/36 · moths 0x40/42/44/46/50/54/5A/5E);
+  `getFlyInBombFlags` over stages 1-16 (rank 3): stage 1 = 0, stage 2 = 1, stage 16 = 3,
+  and challenge stages 3/7/11/15 = 0 (the gate).
+- *Live drive* (full fly-in) — **stage 1** (flag 0): 0 bombs / 0 armed over 677 frames;
+  **stage 2** (flag 1): ~20 drops, armed set = exactly those 20 ids, **no non-capable
+  enemy ever armed**, over 974 frames.
+- *Not separately live-driven* (covered by the above + logic): challenge stages (flag 0 ≡
+  the proven stage-1 path) and the `0x03` two-bomb mask (same consume-then-shift drop
+  logic as stage 2's `0x01`, just two bombs/enemy).
 
 ## 7. Wave-launcher cadence [verified, gg1-3.s:1658-1745]
 
@@ -394,7 +480,10 @@ packs 2 nibbles = 10 parameters):
 
 For stage 1, rank A (sub-table 0): all params 0 except max_bombers=1,
 captured_boss=0xC, continuous_bomb_threshold=6. Result: **stage 1 has no
-bombing during fly-in** and minimal active bombers later.
+attack-dive bombing** (param[0]=0 → `b_92C0[8]` empty) and minimal active
+bombers later. *(Fly-in bombing is gated separately by `b_92E2[1]` from
+`d_combat_stg_dat`, also 0 on stage 1 — see §6.2. Don't conflate the two
+bomb-enable sources: `b_92C0[8]` = attack dives, `b_92E2[1]` = fly-in.)*
 
 ## 13. JS state-layer mapping (Z80 → JS)
 

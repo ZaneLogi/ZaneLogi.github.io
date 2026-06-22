@@ -38,7 +38,7 @@
 //            with the Z80 frame_cnt&7 launch gate. Added stgInitEnv() per
 //            research_stage_init.md to mirror the Z80 stg_init_env beats.
 
-import { buildWaveStream, loadStageParms } from '../paths.js';
+import { buildWaveStream, loadStageParms, getFlyInBombFlags } from '../paths.js';
 import { resetWaveState }                  from './launchAttackWave.js';
 import { charCanvas }                      from '../gfx/resource.js';
 
@@ -76,15 +76,19 @@ const STATE_TASKS = {
         // Galaga ports and gives the player something to do during the ~3 sec
         // fly-in window. Documented in architecture.html §5c.
         //
-        // bombUpdate stays off because fly-in paths don't have F6 FREE_FLIGHT
-        // tokens — no bombs ever drop during stageStart anyway.
+        // bombUpdate is ON: fly-in bugs are armed to bomb at LAUNCH (the fly-in
+        // object setup loads the counter + enable mask, gg1-3.s:1796-1834), NOT
+        // via F6 — so in stage 2+ they drop bombs during the swarm-in. The drop
+        // check (case_0DF5) runs as part of the per-frame bug update in the Z80,
+        // i.e. during fly-in too. (The old "no F6 in fly-in paths → no bombs"
+        // reasoning was the §6-corrected misconception.) research_stage_init.md §6.2.
         starfield:           true,
         formationOscillate:  true,
         formationPulse:      false,
         objectStates:        true,
         bugMotion:           true,    // path interpreter for fly-in
         enemyStatus:         true,    // INT-4: hit registration so bullets can kill enemies
-        bombUpdate:          false,   // no bombs during fly-in (no F6 in fly-in paths)
+        bombUpdate:          true,    // fly-in bombing (stage 2+): armed at launch, not F6 — §6.2
         bomberConfig:        false,   // attack reloads not needed during fly-in
         launchAttackWave:    true,    // runs runFlyInWave during stageStart
         playerMove:          true,    // INT-4 (UX deviation): ship visible + movable
@@ -194,6 +198,14 @@ function stgInitEnv(state) {
     // future phases will use it for reload values, bomb-drop flags,
     // captured-boss flag, etc. (See research_attack_paths.md §9.)
     state.newStageParms = loadStageParms(state.stage, state.rank);
+
+    // Z80: c_25A2 also latches the caravan's 2-byte header into b_92E2[0..1]
+    // (gg1-3.s:1242-1246). [1] is the FLY-IN bomb-drop enable mask, loaded into
+    // each fly-in bug's 0x0F(ix) (gated by its bit-7 / bombCapable). 0 on stage 1
+    // → no fly-in bombs; 0x01 from stage 2. (b_92E2[0], the drop-counter reload,
+    // is a constant 0x14 across all rows — see bombUpdate DROP_RELOAD.)
+    // research_stage_init.md §6.2.
+    state.flyInBombFlags = getFlyInBombFlags(state.stage, state.rank);
 
     // Z80: zero per-stage counters (task_man.s:283-291).
     state.atkWvEnbl    = false;   // gates the launcher; flipped after settling

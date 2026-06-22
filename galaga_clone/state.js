@@ -1,7 +1,7 @@
 // Shared mutable game state — analogous to Galaga's shared RAM.
 // All tasks read and write from this object.
 
-import { getObjectIdForSlot } from './paths.js';
+import { getObjectIdForSlot, FLYIN_BOMB_CAPABLE } from './paths.js';
 
 // ── Formation home-position tables (db_fmtn_hpos_orig, gg1-2.s:949) ──────────
 // X conversion (verified against harbaum/galagino): canvas_X = sprite_X − 16.
@@ -31,6 +31,7 @@ function buildEnemies() {
     for (let ri = 0; ri < _ROWS.length; ri++) {
         const row = _ROWS[ri];
         for (const ci of row.cols) {
+            const objectId = getObjectIdForSlot(ri, ci);  // Z80 sprt_fmtn_hpos byte offset
             list.push({
                 type:     row.type,
                 alive:    true,
@@ -40,7 +41,11 @@ function buildEnemies() {
                 homeY:    row.y,
                 colIdx:   ci,
                 rowIdx:   ri,
-                objectId: getObjectIdForSlot(ri, ci),  // Z80 sprt_fmtn_hpos byte offset
+                objectId,                   // Z80 sprt_fmtn_hpos byte offset
+                // Bomb-capable during FLY-IN: per-object bit-7 from d_2908 via
+                // c_2896 (gg1-3.s). With the per-stage mask state.flyInBombFlags
+                // this gates fly-in bombing — research_stage_init.md §6.2.
+                bombCapable: FLYIN_BOMB_CAPABLE.has(objectId),
 
                 // ── Motion state (step 7+, 'pending' added INT-3a,
                 //                  'homing' added INT-7) ──────────────────
@@ -245,10 +250,17 @@ export const state = {
     //
     // bombDropFlags: bomb-drop enable bitmask, recomputed by f_0857 from
     //   newStageParms[0] + bug count via c_08BE. Read by bombUpdate.
-    //   Mirrors Z80 b_92C0[8].
+    //   Mirrors Z80 b_92C0[8]. NOTE: this is the ATTACK-DIVE mask only.
+    //
+    // flyInBombFlags: the SEPARATE bomb-drop enable mask for FLY-IN bugs,
+    //   sourced per-stage from b_92E2[1] (d_combat_stg_dat header byte 1) in
+    //   stgInitEnv. 0 on stage 1 → no fly-in bombs; 0x01 from stage 2. Gated
+    //   per-object by enemy.bombCapable. Read by launchAttackWave.runFlyInWave
+    //   when arming a fly-in bug. Mirrors Z80 b_92E2[1]. research_stage_init.md §6.2.
     attackTimers:          { boss: 0, red: 0, yellow: 0 },
     attackReloads:         { boss: 2, red: 2, yellow: 2 },
     bombDropFlags:         0,
+    flyInBombFlags:        0,
 
     // bmbr_boss_pool (gg1-2_fx.s:874) — up to 4 queued boss/escort launches,
     // populated by the boss launcher (tryLaunchBoss) and drained one-per-frame

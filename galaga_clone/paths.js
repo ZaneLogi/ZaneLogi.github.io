@@ -487,6 +487,46 @@ export function getObjectIdForSlot(rowIdx, colIdx) {
     return _SLOT_TO_ID.get(rowIdx * 10 + colIdx) ?? null;
 }
 
+// ── d_2908 — per-object "bomb-capable during fly-in" bits (gg1-3.s:1639) ──
+// c_2896/stg_init_env (gg1-3.s:1523) packs a bomb-drop flag into bit 7 of each
+// creature's sprite-code byte, pulled MSB-first from this fixed 44-bit table via
+// c_28E9 (gg1-3.s:1606). The fly-in object setup (gg1-3.s:1796-1803) then loads
+// the stage's bomb-enable mask (b_92E2[1]) into 0x0F(ix) ONLY for creatures whose
+// bit is set; the rest get 0 → never bomb on fly-in (in ANY stage).
+//
+// Walk order (gg1-3.s:1574-1588): 20 bees (objectIds 0x08-0x2E), 8 boss/bonus-bee
+// (0x30-0x3E), 16 moths (0x40-0x5E) — 44 bits. The moth class has no explicit
+// `call` — c_2896 FALLS THROUGH into c_28E9 (the `; call c_28E9` at gg1-3.s:1588
+// is commented out precisely because of the fall-through). See
+// research_stage_init.md §6.2.
+const D_2908 = [0xA5, 0x5A, 0xA9, 0x0F, 0x0A, 0x50];
+
+// Set of objectIds whose bit-7 is set → eligible to drop bombs during fly-in.
+// Built by replaying c_2896 + c_28E9 (bits MSB-first, one per creature in walk
+// order) rather than hand-listing the IDs, so the table stays the source of
+// truth. Result (verified): bees 0x08,0x0C,0x12,0x16,0x1A,0x1E,0x20,0x24,0x28,0x2C
+// · bosses 0x30,0x36 · moths 0x40,0x42,0x44,0x46,0x50,0x54,0x5A,0x5E.
+export const FLYIN_BOMB_CAPABLE = (() => {
+    const set = new Set();
+    let bitIndex = 0;
+    const nextBit = () => {
+        const bit = (D_2908[bitIndex >> 3] >> (7 - (bitIndex & 7))) & 1;
+        bitIndex += 1;
+        return bit;
+    };
+    // The three creature classes, in c_2896 walk order — each a contiguous run
+    // of even objectIds (gg1-3.s:1578/1582/1586).
+    const CLASSES = [{ first: 0x08, count: 20 },   // bees  (0x08-0x2E)
+                     { first: 0x30, count: 8  },   // boss + bonus-bee (0x30-0x3E)
+                     { first: 0x40, count: 16 }];  // moths (0x40-0x5E)
+    for (const cls of CLASSES) {
+        for (let i = 0; i < cls.count; i++) {
+            if (nextBit()) set.add(cls.first + i * 2);
+        }
+    }
+    return set;
+})();
+
 // ── db_attk_wav_IDs — formation IDs grouped by wave (gg1-3.s:1489) ────
 // 5 waves × 8 IDs = 40 enemies per stage. Each wave row supplies 4
 // consecutive ID PAIRS (slots 0/1, 2/3, 4/5, 6/7) — the pair members
@@ -922,20 +962,43 @@ export function resolveWaveByte(byte) {
 // in the byte order, NOT a separate field.
 //
 // Stage 1 (5 waves × 4 pairs × 2 members + 6 markers) = 86 bytes.
-export function buildWaveStream(stage, rank = 3) {
-    // Z80 c_25A2 (gg1-3.s:1170-1235): pick the caravan row by (rank, stage).
-    // Stage wrap: while > 0x17 keep subtracting 4 — endless games cycle the last
-    // 4 combat configs (a DIFFERENT wrap than the difficulty table's 0x1B).
+// ── Combat caravan row selection (shared) ─────────────────────────────
+// Z80 c_25A2 (gg1-3.s:1170-1235): pick the caravan row by (rank, stage). Stage
+// wrap: while > 0x17 keep subtracting 4 — endless games cycle the last 4 combat
+// configs (a DIFFERENT wrap than the difficulty table's 0x1B). Stage index
+// within the rank's 17-entry idx row = stage − stage/4 − 1 (gg1-3.s:1206-1211).
+// Challenge stages (deferred) fall through this combat path: they get a combat
+// caravan whose difficulty row has max_bombers = 0 → enemies settle but never
+// attack (see research notes). Returns the byte offset of the 18-byte row in
+// D_COMBAT_STG_DAT. Shared by buildWaveStream (the caravan) and getFlyInBombFlags
+// (the 2-byte header) so they always read the SAME row.
+function combatStgDatOffset(stage, rank = 3) {
     let s = stage;
     while (s > 0x17) s -= 4;
-    // Stage index within the rank's 17-entry idx row = stage − stage/4 − 1
-    // (gg1-3.s:1206-1211). Challenge stages (deferred) fall through this combat
-    // path: they get a combat caravan, and their difficulty row has
-    // max_bombers = 0 → the enemies settle but never attack (see research notes).
     let si = s - (s >> 2) - 1;
     if (si < 0)  si = 0;
     if (si > 16) si = 16;
-    const off = D_COMBAT_STG_DAT_IDX[(rank & 3) * 17 + si];
+    return D_COMBAT_STG_DAT_IDX[(rank & 3) * 17 + si];
+}
+
+// b_92E2[1] for the stage — the fly-in bomb-drop ENABLE mask, the 2nd byte of
+// the caravan row header (gg1-3.s:1246), loaded into 0x0F(ix) per bug at
+// gg1-3.s:1800 (gated by the per-object bit-7, FLYIN_BOMB_CAPABLE). 0x00 on
+// stage 1 → no fly-in bombs; 0x01 from stage 2, 0x03 on the hardest rows. See
+// research_stage_init.md §6.2.
+export function getFlyInBombFlags(stage, rank = 3) {
+    // Challenge stages (every 4th: 3, 7, 11, …; Z80 _b_not_chllg_stg == 0) load
+    // the SEPARATE d_challg_stg_dat, whose header byte 1 is 0x00 on EVERY row
+    // (gg1-3.s:1478-1485) — bonus rounds never bomb. The clone defers challenge
+    // data and falls through to a combat caravan (research_stage_init.md §14.4),
+    // so without this gate the combat row's nonzero b_92E2[1] would wrongly arm
+    // fly-in bombing on challenge stages. Zero it to match d_challg_stg_dat.
+    if (((stage + 1) % 4) === 0) return 0;
+    return D_COMBAT_STG_DAT[combatStgDatOffset(stage, rank) + 1];
+}
+
+export function buildWaveStream(stage, rank = 3) {
+    const off = combatStgDatOffset(stage, rank);
 
     // Row layout: [0,1] header (unused), [2..16] 5 triplets, [17] 0xFF.
     const stream = [];
