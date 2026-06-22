@@ -327,7 +327,11 @@ def read_dos(segment: int, offset: int, width: int = 2) -> str:
         return HINT_NO_MEMBASE
     linear = (segment << 4) + offset
     host = S.membase + linear
-    raw = _read(S.handle, host, width)
+    try:
+        raw = _read(S.handle, host, width)
+    except OSError as ex:
+        return (f"Read failed at DOS {segment:04X}:{offset:04X} (host 0x{host:x}): {ex}\n"
+                f"Check the address is mapped and MemBase is calibrated (status()).")
     val = int.from_bytes(raw, "little")
     return (f"DOS {segment:04X}:{offset:04X} (host 0x{host:x}) = {val} "
             f"(0x{val:x}) raw={raw.hex()}")
@@ -340,7 +344,11 @@ def read_linear(linear: int, size: int = 16) -> str:
     if S.membase is None:
         return HINT_NO_MEMBASE
     host = S.membase + linear
-    raw = _read(S.handle, host, size)
+    try:
+        raw = _read(S.handle, host, size)
+    except OSError as ex:
+        return (f"Read failed at linear 0x{linear:x} (host 0x{host:x}): {ex}\n"
+                f"Check the address is mapped and MemBase is calibrated (status()).")
     return f"linear=0x{linear:x} (host 0x{host:x}):\n{raw.hex(' ')}"
 
 
@@ -350,7 +358,11 @@ def write_dos(segment: int, offset: int, value: int, width: int = 2) -> str:
     if S.membase is None:
         return HINT_NO_MEMBASE
     host = S.membase + (segment << 4) + offset
-    n = _write(S.handle, host, _pack(value, width))
+    try:
+        n = _write(S.handle, host, _pack(value, width))
+    except OSError as ex:
+        return (f"Write failed at DOS {segment:04X}:{offset:04X} (host 0x{host:x}): {ex}\n"
+                f"Check the address is mapped and MemBase is calibrated (status()).")
     return f"Wrote {n} bytes: DOS {segment:04X}:{offset:04X} <- {value}"
 
 
@@ -873,7 +885,11 @@ def struct_dump(segment: int, offset: int, fields: str = "", size: int = 64) -> 
     base_lin = (segment << 4) + offset
     host = S.membase + base_lin
     if not fields.strip():
-        raw = _read(S.handle, host, size)
+        try:
+            raw = _read(S.handle, host, size)
+        except OSError as ex:
+            return (f"Read failed at {segment:04X}:{offset:04X} (host 0x{host:x}): {ex}\n"
+                    f"Check the address is mapped and MemBase is calibrated (status()).")
         return (f"struct @ {segment:04X}:{offset:04X} (host 0x{host:x}), {size} bytes:\n{raw.hex(' ')}\n"
                 f"Pass fields='name:type, ...' to parse this into labelled values.")
 
@@ -886,13 +902,23 @@ def struct_dump(segment: int, offset: int, fields: str = "", size: int = 64) -> 
         name, t = (s.strip() for s in spec.split(":", 1))
         if t.startswith("string"):
             n = int(t[6:]) if len(t) > 6 else 1
-            raw = _read(S.handle, host + cur, n)
+            try:
+                raw = _read(S.handle, host + cur, n)
+            except OSError as ex:
+                lines.append(f"  +{cur:#04x} {name:<12} string[{n}] = <read error: {ex}>")
+                cur += n
+                continue
             text = raw.split(b"\x00", 1)[0].decode("latin-1", "replace")
             lines.append(f"  +{cur:#04x} {name:<12} string[{n}] = {text!r} ({raw.hex()})")
             cur += n
         elif t in TYPES:
             w = _type_width(t)
-            raw = _read(S.handle, host + cur, w)
+            try:
+                raw = _read(S.handle, host + cur, w)
+            except OSError as ex:
+                lines.append(f"  +{cur:#04x} {name:<12} {t:<6} = <read error: {ex}>")
+                cur += w
+                continue
             val = _decode(raw, t)
             lines.append(f"  +{cur:#04x} {name:<12} {t:<6} = {val} ({raw.hex()})")
             cur += w
