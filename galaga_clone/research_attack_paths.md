@@ -477,22 +477,23 @@ on stage 1 normal mode (FA short-circuits to FB) and on cont_bmb mode
 ### 7.1 Complete token coverage — all 17 (0xEF-0xFF)
 
 Full dispatch = `d_0920_jp_tbl` (gg1-5.s:1494): the token is `cpl`'d, then ×2
-indexes the table. `bugMotion.loadSegment` explicitly handles **14 of 17** (F0
-added 2026-06-22); the other 3 (F5, F7, FE) fall through to the default
-`TOKEN_ARG_BYTES` arg-skip. (Verified against `bugMotion.js` + a byte-scan of
-every ported path array, 2026-06-22.)
+indexes the table. `bugMotion.loadSegment` explicitly handles **16 of 17** (F0,
+FE, F7 all added 2026-06-22 — the latter two with the transient feature,
+`research_transients.md`); the only one without a dedicated case is **F5**, whose
+0-arg default skip is byte-correct (§7.1 F5 row). (Verified against `bugMotion.js`
++ a byte-scan of every ported path array, 2026-06-22.)
 
 | Token | Z80 case | Role | Clone |
 |---|---|---|---|
 | FF | case_0E49 | END / make inactive | ✅ despawn (challenge bug / bonus-bee clone) or → formation (combat) |
-| FE | case_0B16 | player-targeted turn-hold ("level 3+", F3-like) | ⛔ **not ported, but NEVER REACHED** — no ported path uses the FE *token* (the `0x..,0xFE,..` bytes in path data are segment rotRates). It has a VARIABLE-length table arg, so it'd mis-parse under the 0-arg default → needs a real handler IF a future path uses it. |
+| FE | case_0B16 | player-region turn-hold ("level 3+", F3-twin) | ✅ **PORTED (2026-06-22, dormant)** — the F3-twin used by F7's transient sub-paths; sub-step 1 of the transient feature (`research_transients.md` §5.2). Picks a turn-HOLD duration from a **FIXED 8-byte LUT** (not "variable-length") indexed by the player's *screen region* (`(neg?shipX:0xF2−shipX)+0x0E`, `/0x1E`), keeps vx/vy (`jp l_0BFF`). `TOKEN_ARG_BYTES.FE=8`. **Still NEVER REACHED** until F7/transients land — verified by unit-driving a synthetic path (6 cases: center symmetric, L/R mirror, velocity held). |
 | FD | case_0B46 | JUMP | ✅ |
 | FC | case_0B4E | dive-to-Y | ✅ (2026-06-19) |
 | FB | case_0AA0 | TURN_HOME | ✅ |
 | FA | case_0BD1 | LOOP_TOP | ✅ |
 | F9 | case_0B5F | X→home column | ✅ |
 | F8 | case_0B87 | Y→top | ✅ |
-| F7 | case_0B98 | conditional **JUMP** to sub-path (pointer-replace, no return) | ⚠ **DEFERRED** — gate `(obj_id & 0x38)==0x38`; the 2-byte addr is skipped (`TOKEN_ARG_BYTES.F7=2`, byte-aligned). The gate selects **transient** caravan members (slots `$38/$3A/$3C/$3E`) which the clone never launches, so the skip is faithful everywhere it currently runs. F7 is **not a standalone token**: porting it means porting the whole transient-launch layer (`c_25A2` byte0 insertion + `_setup_transients`) AND its sub-paths, which use the unported **FE** token. See §8. |
+| F7 | case_0B98 | conditional **JUMP** to sub-path (pointer-replace, no return) | ✅ **PORTED (2026-06-22)** as the transient feature (`research_transients.md`). Gate `(obj_id & 0x38)==0x38` → true for transient caravan members (slots `$38/$3A/$3C/$3E`), which `buildWaveStream` now inserts from stage 4 (the `c_25A2` byte0 layer) and the launcher sets up (sprite + `e.transient` despawn). On the gate, jump into the F7 sub-path (FE pass → FF despawn); formation bugs skip it and home. Verified end-to-end at stage 4. |
 | F6 | case_0BA8 | FREE_FLIGHT | ✅ |
 | F5 | case_0942 | set disposition 3 + advance | ✅-effectively — genuinely 0-arg, so the default no-op skip is byte-correct; the dropped disposition is irrelevant to the clone. Reached by the bonus-bee convoy (`p_flv_0502`); verified harmless. |
 | F4 | case_0A53 | capture aim (boss) | ✅ (step 10) |
@@ -616,21 +617,20 @@ is implemented — and F0 is exercised from stage 8.
 
 ### 🟢 Low impact / known deferred
 
-8. **F7 fly-in sub-path JUMP — deferred (depends on the transient layer).**
-   F0 was ported 2026-06-22 (§7.1): a stage-8+ gated JUMP that fires for ordinary
-   formation bugs, so it was self-contained — port its 6 FB-home sub-paths + the
-   handler and it's done. **F7 is not** the same shape, even though the token logic
-   is identical (a conditional pointer-replace, no return). Its gate
-   `(obj_id & 0x38)==0x38` fires only for **transient** caravan members — the extra
-   fly-in bugs that first appear at **stage 4** (combat-stage-data byte0 low nibble;
-   `c_25A2` inserts them with `or #0x38`, `_setup_transients` at gg1-3.s:1777). The
-   clone never launches transients (its wave builder drops them and ignores byte0),
-   so nothing triggers F7's gate — the skip is faithful, and porting the F7 handler
-   alone would change nothing. A faithful F7 needs three pieces together: the
-   transient-launch layer, the F7 handler, and F7's sub-paths — which use the
-   **FE** token (`case_0B16`), also unported. That's a multi-subsystem feature past
-   the clone's tested scope, deferred as one unit. Aside from F7 (+ FE, reachable
-   only through it) and sound, every token the ported stages exercise is implemented.
+8. **F7 fly-in sub-path JUMP — ✅ IMPLEMENTED (2026-06-22) as the transient
+   feature.** F7's gate `(obj_id & 0x38)==0x38` fires only for **transient**
+   caravan members — extra fly-in bugs that swoop once + leave, first at **stage
+   4**. So F7 was never a standalone token: it needed the whole transient layer.
+   All of it now ports, decoded + built in `research_transients.md` (sub-steps
+   1-5): the **FE** token (F3-twin, `case_0B16`); the F7 handler + 6 sub-paths
+   (≈F0); `buildWaveStream`'s `c_25A2` transient insertion (`byte0` count + the
+   `rlc c` per-transient redmoth/yellowbee bit) with a **deterministic xorshift**
+   substitute for `c_1000` (whose entropy is the hardware Z80 R register); and the
+   launcher's `res 6` remap → `0x38-0x3E` + sprite + `e.transient` despawn
+   lifecycle. Verified end-to-end at stage 4 (6 transients swoop + despawn, 40
+   formation members still land). The only remaining sub-step is the cosmetic
+   final squash. Aside from sound, every token the ported stages exercise is now
+   implemented (F5's 0-arg skip is byte-correct; FE is reached via F7).
 9. Bonus-bee ✅ implemented (BB-1..5, `research_bonus_bee.md`). ⚠ follow-up: the
    attack-dispatcher yellow/moth scan (§4.1) should skip `state.bonusBee.obj` so the
    reserved/flashing bee can't also be launched as a normal diver mid-flash (Z80

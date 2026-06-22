@@ -123,6 +123,9 @@ function rawYToCanvasY(rawY) {
 // at offset 18 of ATTACK_PATH_YELLOW, producing vy=-7 (strong upward) and
 // flying the enemy off-screen instead of snapping to formation at FB.
 const TOKEN_ARG_BYTES = {
+    0xFE: 8,    // case_0B16 (gg1-5.s:1876): token + 8-byte LUT (FIXED, like F3 —
+                // NOT "variable-length"). Handled by the dedicated 0xFE case;
+                // this entry is the documentation/safety net.
     0xFD: 2,
     0xFC: 1,
     0xFA: 2,
@@ -183,6 +186,7 @@ function spawnClone(leader, state, subOffset) {
         c.negateRotation = leader.negateRotation;
         c.bbeeColorIndex = leader.bbeeColorIndex;  // identical 0x5x sprite + color
         c.bbeeClone      = true;                   // FF / off-screen → despawn
+        c.transient      = false;                  // a bonus-bee clone, not an F7 transient
         c.pathBase       = leader.pathBase;        // same CONVOY_REGION array
         c.pathOffset     = subOffset;
         c.segTimer       = 0;                       // load first segment next tick
@@ -230,9 +234,10 @@ function loadSegment(e, state) {
                 // so they despawn here — the bonus-stage exit. Combat bugs always
                 // FB-home before FF, so they never reach this; the 'formation'
                 // branch is a defensive fallback only.
-                if (isChallengeStage(state) || e.bbeeClone) {
-                    // Challenge fly-through bugs AND bonus-bee convoy clones are
-                    // transients with no home — FF makes them GONE, not homed.
+                if (isChallengeStage(state) || e.bbeeClone || e.transient) {
+                    // Challenge fly-through bugs, bonus-bee convoy clones, AND
+                    // stage-4+ transients (F7 swoop) all have no home — FF makes
+                    // them GONE, not homed. research_transients.md §5.
                     e.state    = 'dead';
                     e.alive    = false;
                     e.pathBase = null;
@@ -437,6 +442,34 @@ function loadSegment(e, state) {
                 return;                              // keep vx/vy/rotRate (hold turn)
             }
 
+            // ── 0xFE player-region turn-hold (case_0B16, gg1-5.s:1849) ──
+            // The F3-twin used by the transient (F7) sub-paths. NOT reached yet —
+            // no ported path uses it until F7/transients land (research_transients.md
+            // §5.2); ported now as sub-step 1 of that feature. Like F3 it picks a
+            // turn-HOLD DURATION from an 8-byte LUT and keeps the current
+            // vx/vy/rotRate (jp l_0BFF_flite_pth_skip_load), but it indexes by the
+            // PLAYER'S SCREEN REGION (absolute shipX), not the bug-to-player delta:
+            //   shipX   = player sprite-register X = canvas player.x + 9 (CLAUDE.md)
+            //   targetX = (negateRotation ? shipX : 0xF2−shipX) + 0x0E   ; pair mirror
+            //             (flip-screen b_9215 not modelled → carry = the 0x13 negate bit)
+            //   idx     = floor(targetX / 0x1E)        ; c_0EAA: H/0x1E high byte
+            //   segTimer = path[token + idx] == LUT[idx−1]
+            // FE omits F3's +1 token-skip on purpose: for valid shipX (0x12..0xE1)
+            // targetX is 0x20..0xEF so idx is 1..7 and path[token+idx] already lands
+            // in the LUT. 9-byte arg (token + 8-byte LUT); idx clamped to [1,8]
+            // defensively. (Z80's 0x80 "no ship" default is an unmodelled edge case,
+            // like F3's skipped flip-screen branch.)
+            if (b0 === 0xFE) {
+                const shipX   = (Math.round(state.player.x) + 9) & 0xFF;
+                let   targetX = (e.negateRotation ? shipX : (0xF2 - shipX)) & 0xFF;
+                targetX = (targetX + 0x0E) & 0xFF;
+                let idx = Math.floor(targetX / 0x1E);
+                idx = idx < 1 ? 1 : (idx > 8 ? 8 : idx);
+                e.segTimer    = e.pathBase[e.pathOffset + idx];  // path[token+idx] = LUT[idx-1]
+                e.pathOffset += 9;                               // token + 8-byte LUT
+                return;                                          // keep vx/vy/rotRate (hold turn)
+            }
+
             // ── 0xF8 (case_0B87, gg1-5.s:1929) ──────────────────────────
             // "flew through the bottom of the screen to the TOP, heading
             // for home." Repositions the bug's Y to the top edge:
@@ -611,6 +644,32 @@ function loadSegment(e, state) {
                 continue;
             }
 
+            // ── 0xF7 ATTACK_TURN (case_0B98, gg1-5.s:1947) ──────────────
+            // The transient branch — F0's twin, but OBJECT-gated instead of
+            // stage-gated. Gate (e.objectId & 0x38)==0x38 is true only for
+            // transient caravan members (slots 0x38-0x3E; sub-steps 4-5 launch
+            // them). On the gate, jp l_0B46 (= the FD handler) reads the embedded
+            // 2-byte sub-path address and replaces the path pointer; the sub-path
+            // does an FE player-region pass then despawns (FF). Formation bugs
+            // (gate false) skip the 3 bytes and continue to their FB-home tail —
+            // byte-identical to before this handler existed. Sub-paths aren't in
+            // this array, so (like F0) we look the target up in e.pathBase.subPaths
+            // and switch e.pathBase. research_transients.md §5.
+            if (b0 === 0xF7) {
+                if ((e.objectId & 0x38) === 0x38) {
+                    const lo     = e.pathBase[e.pathOffset + 1];
+                    const hi     = e.pathBase[e.pathOffset + 2];
+                    const target = (hi << 8) | lo;
+                    const sub    = e.pathBase.subPaths && e.pathBase.subPaths[target];
+                    if (!sub) { turnHome(e, state); return; }   // unknown target → home (defensive)
+                    e.pathBase   = sub;
+                    e.pathOffset = 0;
+                } else {
+                    e.pathOffset += 3;   // skip token + 2-byte address (formation bugs)
+                }
+                continue;
+            }
+
             // Everything else: no-op for now, but skip past any argument
             // bytes so .dw addresses don't get mis-read as segments.
             // Full semantics for the remaining 12 tokens come later.
@@ -665,9 +724,16 @@ export function launchEnemy(state, objectId, pathInfo) {
     if (!pathInfo) return null;
 
     const e = state.enemies.find(en => en.objectId === objectId);
-    if (!e || e.state !== 'pending') return null;
+    if (!e) return null;
+    // Formation members launch once (from 'pending'). The transient slots
+    // (0x38-0x3E) relaunch every wave they appear in, so accept 'dead' there too
+    // — a despawned transient is the Z80's inactive (0x80) slot, free to reuse.
+    // research_transients.md §5.
+    const transientSlot = (objectId & 0x38) === 0x38;
+    if (e.state !== 'pending' && !(transientSlot && e.state === 'dead')) return null;
 
     e.state      = 'flying';
+    e.alive      = true;          // revive a reused (dead) transient slot
     e.x          = pathInfo.startX;
     e.y          = pathInfo.startY;
     e.vx         = 0;

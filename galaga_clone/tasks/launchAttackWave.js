@@ -194,8 +194,14 @@ function runFlyInWave(state) {
 
     // Read object ID (next byte in the stream) and decode the wave byte
     // into a complete launch info struct.
-    const objectId = state.waveStream[state.waveStreamCursor + 1];
-    const pathInfo = resolveWaveByte(b);
+    // Z80 l_2953 (gg1-3.s:1750-1761): a stream ID with the 0x38 bits set is a
+    // TRANSIENT — an extra fly-in bug that swoops once + leaves (stage 4+). The
+    // actual slot is the 0x38-0x3E form, so clear bit 6 (res 6); the RAW bit 6
+    // selects the sprite at setup below. research_transients.md §4.
+    const rawId       = state.waveStream[state.waveStreamCursor + 1];
+    const isTransient = (rawId & 0x38) === 0x38;
+    const objectId    = isTransient ? (rawId & 0xBF) : rawId;   // res 6
+    const pathInfo    = resolveWaveByte(b);
 
     if (!pathInfo) {
         // Defensive: byte refers to an unported path. Skip the pair so
@@ -224,6 +230,22 @@ function runFlyInWave(state) {
         // drop bombs on the way in. bombUpdate (case_0DF5) consumes it exactly
         // like an attack dive's. research_stage_init.md §6.2.
         e.bombEnable     = e.bombCapable ? state.flyInBombFlags : 0;
+
+        if (isTransient) {
+            // _setup_transients (gg1-3.s:1807-1822): sprite by RAW bit 6 —
+            // redmoth (butterfly, pal 2) if set, else yellowbee (wasp, pal 3),
+            // or boss (pal 0) on wave 2. Transients never bomb (0x0F=0) and
+            // never home — FF despawns them (e.transient, the bbeeClone-style
+            // lifecycle). They reuse the 0x38-0x3E reserved slots, so reset any
+            // stale bonus-bee render state. research_transients.md §4.3/§5.
+            e.type           = (rawId & 0x40) ? 'butterfly'
+                             : (state.attkwvCtr === 2 ? 'boss' : 'wasp');
+            e.transient      = true;
+            e.bbeeClone      = false;
+            e.bbeeColorIndex = null;
+            e.hits           = 0;
+            e.bombEnable     = 0;
+        }
     }
 
     // Advance past path byte + object ID.

@@ -94,12 +94,30 @@ const path_0173 = new Uint8Array([0x66, 0x20, 0x14, 0xFB, 0x44, 0x00, 0xFF, 0xFF
 const path_01A8 = new Uint8Array([0x66, 0xE0, 0x10, 0xFB, 0x44, 0x00, 0xFF, 0xFF]); // F0 of db_flv_017b
 const path_01E0 = new Uint8Array([0x44, 0x20, 0x14, 0xFB, 0x44, 0x00, 0xFF, 0xFF]); // F0 of db_flv_01b0
 
-path_001D.subPaths = { 0x005E: path_005E };
-path_0067.subPaths = { 0x0097: path_0097 };
-path_009F.subPaths = { 0x00CC: path_00CC };
-path_00D4.subPaths = { 0x0173: path_0173 };
-path_017B.subPaths = { 0x01A8: path_01A8 };
-path_01B0.subPaths = { 0x01E0: path_01E0 };
+// ── F7 (ATTACK_TURN) jump-target sub-paths — the TRANSIENT swoop ────────
+// Each token-bearing fly-in path also carries an F7 token (case_0B98,
+// gg1-5.s:1947) gated on (obj_id & 0x38)==0x38 — TRUE only for transient
+// caravan members (slots 0x38-0x3E). On the gate it JUMPs here (pointer-replace,
+// no return); a formation bug skips it and continues to its FB-home tail. Each
+// sub-path: a couple of segments → FE (player-region turn-hold,
+// research_transients.md §5.2) → segment(s) → FF (despawn — transients never
+// home). Source gg1-5.s:136/150/164/193/207/221. (Reached once transients are
+// launched — sub-steps 4-5.)
+const path_004B = new Uint8Array([0x23,0xF0,0x26, 0x23,0x14,0x13, 0xFE, 0x0D,0x0B,0x0A,0x08,0x06,0x04,0x03,0x01, 0x23,0xFF, 0xFF,0xFF]);              // F7 of db_flv_001d
+const path_0084 = new Uint8Array([0x23,0x16,0x01, 0xFE, 0x0D,0x0C,0x0A,0x08,0x06,0x04,0x03,0x01, 0x23,0xFC,0x30, 0x23,0x00,0xFF, 0xFF]);              // F7 of db_flv_0067
+const path_00B6 = new Uint8Array([0x23,0xF0,0x20, 0x23,0x10,0x0D, 0xFE, 0x1A,0x18,0x15,0x10,0x0C,0x08,0x05,0x03, 0x23,0xFE,0x30, 0x23,0x00,0xFF, 0xFF]); // F7 of db_flv_009f
+const path_0160 = new Uint8Array([0x44,0x16,0x06, 0xFE, 0x0C,0x0B,0x0A,0x08,0x06,0x04,0x02,0x01, 0x23,0xFE,0x30, 0x23,0x00,0xFF, 0xFF]);              // F7 of db_flv_00d4
+const path_0192 = new Uint8Array([0x44,0xF0,0x26, 0x23,0x10,0x0B, 0xFE, 0x22,0x20,0x1E,0x1B,0x18,0x15,0x12,0x10, 0x23,0xFE,0x30, 0x23,0x00,0xFF, 0xFF]); // F7 of db_flv_017b
+const path_01CA = new Uint8Array([0x23,0x16,0x01, 0xFE, 0x0D,0x0C,0x0B,0x09,0x07,0x05,0x03,0x02, 0x23,0x02,0x20, 0x23,0xFC,0x12, 0x23,0x00,0xFF, 0xFF]); // F7 of db_flv_01b0
+
+// Each main path's .subPaths maps BOTH its F0 (stage-8) and F7 (transient) jump
+// targets by Z80 address — the F0 and F7 handlers each look up their own.
+path_001D.subPaths = { 0x005E: path_005E, 0x004B: path_004B };
+path_0067.subPaths = { 0x0097: path_0097, 0x0084: path_0084 };
+path_009F.subPaths = { 0x00CC: path_00CC, 0x00B6: path_00B6 };
+path_00D4.subPaths = { 0x0173: path_0173, 0x0160: path_0160 };
+path_017B.subPaths = { 0x01A8: path_01A8, 0x0192: path_0192 };
+path_01B0.subPaths = { 0x01E0: path_01E0, 0x01CA: path_01CA };
 
 // gg1-5.s:229 — token-free; phase 2 test target.
 const path_01E8 = new Uint8Array([
@@ -1096,32 +1114,87 @@ export function getFlyInBombFlags(stage, rank = 3) {
     return table[off + 1];
 }
 
+// ── c_1000 substitute (Z80 randomizer, gg1-2.s:33) ────────────────────
+// c_1000's entropy is the Z80 R register (DRAM-refresh counter, `ld a,r`) — a
+// hardware artifact with no JS counterpart (reproducing it = a cycle-accurate
+// CPU core). So we substitute the WHOLE routine with a deterministic xorshift32
+// (Marsaglia 13/17/5, logical `>>>`); buildWaveStream reseeds it per stage.
+// Determinism keeps the clone reproducible/testable; the dropped randomness is
+// cosmetic — byte0 fixes the transient COUNT and the placement DISTRIBUTION
+// stays uniform. research_transients.md §6. (Per-play variety = clock seed.)
+const transientRng = (() => {
+    let s = 0x12345678;                                   // never 0
+    return {
+        reseed(seed) { s = (seed | 0) || 0x12345678; },
+        byte() { let x = s; x ^= x << 13; x ^= x >>> 17; x ^= x << 5; s = x; return x & 0xFF; },
+    };
+})();
+
 export function buildWaveStream(stage, rank = 3) {
     const { table, off } = stageCaravanRow(stage, rank);
+    transientRng.reseed(0x12345678 ^ stage);             // deterministic per-stage placement
 
-    // Row layout: [0,1] header (unused here), [2..16] 5 triplets, [17] 0xFF.
-    // Same builder for combat + challenge — only the source table differs.
+    // Faithful port of c_25A2 (gg1-3.s:1259-1385). Row: [0,1] header, [2..16]
+    // 5 triplets (byte0 = transient control, byte1/byte2 = lefty/righty path
+    // bytes), [17] 0xFF. Per wave: assemble a 16-slot temp buffer (lefty 0-7 /
+    // righty 8-15) by random-placing N transients (byte0 & 0x0F) then filling
+    // the rest with the 8 formation IDs, and emit pairs [byte1, tmp[i], byte2,
+    // tmp[i+8]] until a free (0xFF) lefty slot. With no transients (byte0=0, e.g.
+    // stages 1-3 + all challenge rows) this is byte-identical to the old
+    // 4-pairs-from-ATTK_WAV_IDS builder. research_transients.md §3.
     const stream = [];
     for (let w = 0; w < 5; w++) {
         const t       = off + 2 + w * 3;
-        const byte1   = table[t + 1];    // member-1 path byte
-        const byte2   = table[t + 2];    // member-2 path byte
+        const byte0   = table[t];        // transient control
+        const byte1   = table[t + 1];    // lefty path byte
+        const byte2   = table[t + 2];    // righty path byte
         const idsBase = w * 8;
-        stream.push(0x7E);                          // wave-start marker
-        // Z80 c_25A2 (gg1-3.s:1357-1383) splits the 8 IDs into a lefty half
-        // (temp-buf slots 0-3) and a righty half (slots 8-11), then pairs
-        // lefty[i] with the CORRESPONDING righty[i] — NOT two consecutive IDs.
-        // So the stream interleaves [lefty, righty, lefty, righty]: wave 2 =
-        // boss,moth,boss,moth (each boss with its butterfly escort), not
-        // boss×4 then moth×4. ATTK_WAV_IDS stores the 8 as
-        // [L0,L1,L2,L3, R0,R1,R2,R3] (transient slots 4-7/12-15 dropped — none
-        // in stage 1), so the matching righty is idsBase + 4 + i.
-        for (let i = 0; i < 4; i++) {
-            stream.push(byte1, ATTK_WAV_IDS[idsBase + i]);     // lefty  (slots 0-3)
-            stream.push(byte2, ATTK_WAV_IDS[idsBase + 4 + i]); // righty (slots 4-7)
+
+        const tmp = new Array(16).fill(0xFF);
+
+        // l_2612: random-place `count` transients. ID = (b<<1)|0x38, +0x40 when
+        // the MSB-first bit of byte0 (rotated via `rlc c` each iteration) is set —
+        // that 0x40 (raw-ID bit 6) is the redmoth/yellowbee selector read at
+        // launch. Slot = rng % E (+8 on odd b → righty half), re-rolled on
+        // collision. b counts DOWN (count..1), matching the Z80 djnz counter.
+        const count = byte0 & 0x0F;
+        if (count > 0) {
+            const E = (count >> 1) + 4;
+            let c = byte0;
+            for (let b = count; b >= 1; b--) {
+                let slot, guard = 0;
+                do {
+                    slot = transientRng.byte() % E;
+                    if (b & 1) slot += 8;
+                } while (tmp[slot] !== 0xFF && ++guard < 64);
+                const bit7 = (c >> 7) & 1;
+                c = ((c << 1) | bit7) & 0xFF;                 // RLC: bit7 → carry AND bit0
+                tmp[slot] = ((b << 1) | 0x38 | (bit7 ? 0x40 : 0)) & 0xFF;
+            }
+        }
+
+        // l_2636: fill the 8 formation IDs into the remaining free slots — first
+        // 4 into the lefty half (walking from slot 0), next 4 into the righty
+        // half (jump to slot 8 after the 4th).
+        let fi = idsBase, placed = 0, slot = 0;
+        while (placed < 8) {
+            if (placed === 4) slot = 8;
+            while (slot < 16 && tmp[slot] !== 0xFF) slot++;
+            if (slot >= 16) break;                            // (won't happen for valid data)
+            tmp[slot] = ATTK_WAV_IDS[fi++];
+            placed++; slot++;
+        }
+
+        // l_2662: emit [byte1, lefty, byte2, righty] per slot until a 0xFF lefty.
+        // (Righty is emitted unchecked, exactly like the Z80 — a 0xFF righty just
+        // launches nothing.) Each pair is the iconic two-by-two arc entrance.
+        stream.push(0x7E);
+        for (let i = 0; i < 8; i++) {
+            if (tmp[i] === 0xFF) break;
+            stream.push(byte1, tmp[i], byte2, tmp[i + 8]);
         }
     }
-    stream.push(0x7F);                              // end-of-stage marker
+    stream.push(0x7F);
     return new Uint8Array(stream);
 }
 
