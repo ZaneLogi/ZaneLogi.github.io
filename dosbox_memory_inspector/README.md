@@ -54,9 +54,13 @@ Or edit `.mcp.json` by hand (note the doubled backslashes on Windows paths):
 }
 ```
 
-**Run as Administrator.** Claude Code spawns this server as a child process,
-and `ReadProcessMemory`/`OpenProcess` need elevation. Start DOSBox elevated and
-start Claude Code elevated, otherwise opening the process is denied.
+**Elevation — only if DOSBox is elevated.** For the usual case (DOSBox and
+Claude Code both launched normally by the same user), `OpenProcess` /
+`ReadProcessMemory` work **without** Administrator — opening a same-user,
+same-integrity process is allowed. You only need to run Claude Code elevated if
+DOSBox itself was started elevated (or by another user); otherwise opening the
+process is denied. (Verified: a non-elevated, medium-integrity shell opens and
+reads/writes a normally-launched DOSBox fine.)
 
 The server itself has no dependency on DOSBox being open — it just registers its
 tools and waits. You can load it before or after launching DOSBox. It only
