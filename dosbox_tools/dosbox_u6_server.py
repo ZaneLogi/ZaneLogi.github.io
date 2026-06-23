@@ -3,7 +3,9 @@
 DOSBox Ultima VI decoder - "dosbox-u6" MCP server (Windows).
 
 A per-game DECODER server: it knows Ultima VI's in-memory layout and exposes it
-as high-level tools (avatar/NPC inventory, single-object decode). It does NOT
+as high-level tools (avatar/NPC inventory, single-object decode, live
+conversation state) plus an ACTION channel (DOSBox keystroke injection via the
+shared dosbox_input lib -- move/talk/say). It does NOT
 include the discovery workbench (scan/fuzzy/struct_dump/table) -- that lives in
 the generic `dosbox-memory` server, used only when reverse-engineering something
 new. This server is self-sufficient for U6 inspection: the routine plumbing
@@ -18,9 +20,12 @@ it must be DERIVED PER RUN. u6_hook() does that from the avatar's name -- the
 name's bytes pin Names[0] at DS:0x3236, giving DS = (name_linear - 0x3236) / 16.
 """
 
+import time
+
 from mcp.server.fastmcp import FastMCP
 
 import dosbox_mem as dm
+import dosbox_input as di
 
 mcp = FastMCP("dosbox-u6")
 
@@ -41,6 +46,38 @@ U6_MAX_SLOTS    = 0xD00    # NPCs 0..0xFF + world objects 0x100..0xCFF
 _COORDUSE = {0: "LOCXYZ", 0x08: "CONTAINED", 0x10: "INVEN", 0x18: "EQUIP"}
 
 
+# ----------------------------------------------------------------------------
+# Ultima VI conversation / "talk" engine -- DGROUP globals (offsets from the
+# u6-decompiled seg_1703.c "talkdr" module, u6.h, BSS.ASM). On talk start the VM
+# loads the current NPC's WHOLE script from converse.a into TalkBuf, then
+# interprets it with Talk_PC as the program counter (PARSE_U8 == TalkBuf[Talk_PC++]).
+# It prints text (OP_PRINTSTR) until an input opcode, then BLOCKS on CON_gets /
+# CON_getch for the player's keyword -- so the conversation is turn-based by
+# construction, and BOTH the NPC's text and the valid keyword branches live in
+# TalkBuf (no screen scrape needed).
+# ----------------------------------------------------------------------------
+U6_IsInConversation = 0x098B   # 1 B; 1 while a conversation is active
+U6_TalkBuf_ptr      = 0x4D50   # far ptr (off:2, seg:2) -> loaded script buffer
+U6_TalkBuf_SIZE     = 0x2800   # TalkBuf allocation size (__MemAlloc, seg_0903.c)
+U6_Talk_PC          = 0xE7AB   # 2 B; VM program counter = index into TalkBuf
+U6_TalkInterloc     = 0xE796   # 2 words: [0]=interlocutor (active NPC#), [1]=locutor (party speaker)
+U6_TalkInput        = 0xE732   # 0x32 B; player's last typed input (CON_gets buffer)
+U6_TalkSavedPC      = 0xE7A7   # 4 B; Talk_PC saved at the current prompt (D_E7A7)
+U6_NpcName          = 0xE764   # up to ~50 B; current NPC name (D_E764), high-bit terminates
+
+# Conversation-VM opcodes where the VM blocks waiting for player input. The byte
+# at TalkBuf[Talk_PC] being one of these means "the game is waiting for a reply".
+_TALK_INPUT_OPS = {
+    0xf7: "ASKTOP",    # free keyword via CON_gets -- the main "you say:" prompt
+    0xf9: "GETSTR",    # read a string -> VarStr
+    0xfb: "GETINT",    # read an integer -> VarInt
+    0xfc: "GETDIGIT",  # read a single digit
+    0xfa: "GETCHR",    # read a single char
+    0xf8: "GET",       # menu of single keys, list terminated by OP_KEY (0xef)
+    0xcb: "WAIT",      # wait for any key
+}
+
+
 # A session that also remembers the per-run U6 data segment, derived by u6_hook.
 class U6State(dm.Session):
     def __init__(self):
@@ -57,6 +94,12 @@ S = U6State()
 # Shared base tools (find_dosbox / find_membase_auto / set_membase_from /
 # read_dos / read_linear / write_dos / status / disconnect) on this session.
 base = dm.register_base_tools(mcp, S)
+
+# Generic input tools (find_window / focus_window / send_key / send_text) -- the
+# ACTION channel, so this one server both PERCEIVES (read) and ACTS (keys) on the
+# same DOSBox session. SendInput needs DOSBox foreground (DirectInput); see
+# dosbox_input for the why and the future focus-independent backend.
+inp = di.register_input_tools(mcp, S)
 
 
 def _derive_ds(name: str):
@@ -139,7 +182,8 @@ def u6_hook(avatar_name: str = "") -> str:
     return (f"Hooked U6: MemBase=0x{S.membase:x}, DS=0x{ds:04x} "
             f"(derived from {avatar_name!r} @ host 0x{host:x}).\n"
             f"Names[0] reads back as {readback!r}.{extra}\n"
-            f"Ready: u6_inventory(slot) / u6_object(slot). Avatar = slot 1.")
+            f"Ready -- read: u6_object / u6_inventory / u6_conversation; "
+            f"act: u6_move / u6_talk / u6_say / u6_key. Avatar = slot 1.")
 
 
 @mcp.tool()
@@ -209,6 +253,147 @@ def u6_inventory(npc_slot: int, segment: int = -1,
     for slot, use, typ, frame, quan, qual in rows:
         out.append(f"  0x{slot:03x}  {use:<5}  {typ:>4}  {frame:>5}  {quan:>4}  {qual:>4}")
     return "\n".join(out)
+
+
+@mcp.tool()
+def u6_conversation(segment: int = -1, dump: int = 64) -> str:
+    """Ultima VI: decode the live conversation / "talk" engine state (seg_1703.c
+    "talkdr"). Reports whether a conversation is active (IsInConversation), the
+    interlocutor NPC# and the party speaker (D_E796), the NPC name, the VM
+    program counter (Talk_PC), the player's last input (D_E732), and the resolved
+    TalkBuf far pointer -- plus a hex window of the loaded script starting at
+    Talk_PC, annotated if the current byte is an input-wait opcode.
+
+    The VM loads the NPC's whole script into TalkBuf and runs PARSE_U8 ==
+    TalkBuf[Talk_PC++], printing text then blocking on input -- so the NPC's text
+    and the valid keyword branches both live in TalkBuf. `dump` = bytes of TalkBuf
+    to show from Talk_PC (0 to skip). DS comes from u6_hook unless overridden with
+    segment=."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base_addr = S.membase + (ds << 4)
+    try:
+        active   = dm.read(S.handle, base_addr + U6_IsInConversation, 1)[0]
+        interloc = int.from_bytes(dm.read(S.handle, base_addr + U6_TalkInterloc, 2), "little")
+        locutor  = int.from_bytes(dm.read(S.handle, base_addr + U6_TalkInterloc + 2, 2), "little")
+        pc       = int.from_bytes(dm.read(S.handle, base_addr + U6_Talk_PC, 2), "little")
+        inp_raw  = dm.read(S.handle, base_addr + U6_TalkInput, 0x32)
+        name_raw = dm.read(S.handle, base_addr + U6_NpcName, 50)
+        fp       = dm.read(S.handle, base_addr + U6_TalkBuf_ptr, 4)
+    except OSError as ex:
+        return f"Read failed reading talk-engine state (DS=0x{ds:04x}): {ex}"
+
+    inp = inp_raw.split(b"\x00", 1)[0].decode("latin-1", "replace")
+    # NPC name: a high-bit byte terminates (per C_1703_00A0); NUL also stops it.
+    name_b = bytearray()
+    for b in name_raw:
+        if b == 0 or (b & 0x80):
+            break
+        name_b.append(b)
+    name = name_b.decode("latin-1", "replace")
+
+    tb_off = fp[0] | (fp[1] << 8)
+    tb_seg = fp[2] | (fp[3] << 8)
+    tb_lin = (tb_seg << 4) + tb_off
+
+    out = [
+        f"IsInConversation = {active}  ({'ACTIVE' if active else 'idle'})",
+        f"interlocutor (NPC#) = {interloc} (0x{interloc:x});  locutor (speaker slot) = {locutor}",
+        f"NPC name = {name!r}",
+        f"Talk_PC = {pc} (0x{pc:x})   last input (D_E732) = {inp!r}",
+        f"TalkBuf = {tb_seg:04x}:{tb_off:04x}  (linear 0x{tb_lin:x}, size 0x{U6_TalkBuf_SIZE:x})",
+    ]
+
+    n = min(dump, U6_TalkBuf_SIZE - pc) if (dump > 0 and 0 <= pc < U6_TalkBuf_SIZE) else 0
+    if n > 0:
+        try:
+            window = dm.read(S.handle, S.membase + tb_lin + pc, n)
+            op = window[0]
+            opn = _TALK_INPUT_OPS.get(op)
+            tag = f"  (opcode at Talk_PC = 0x{op:02x}{' = ' + opn + ' [waiting for input]' if opn else ''})"
+            out.append(f"TalkBuf[Talk_PC .. +{n}]:{tag}")
+            out.append("  " + " ".join(f"{b:02x}" for b in window))
+        except OSError as ex:
+            out.append(f"(TalkBuf window read failed: {ex})")
+    return "\n".join(out)
+
+
+# ----------------------------------------------------------------------------
+# Ultima VI action verbs -- semantic wrappers over the generic input tools
+# (dosbox_input). Movement/talk encode U6's key bindings; u6_say picks line- vs
+# single-key input from the converse-VM opcode at Talk_PC.
+# ----------------------------------------------------------------------------
+_U6_DIR = {
+    "n": "up", "north": "up", "up": "up",
+    "s": "down", "south": "down", "down": "down",
+    "w": "left", "west": "left", "left": "left",
+    "e": "right", "east": "right", "right": "right",
+}
+# Converse opcodes that read a SINGLE key (vs a typed line) -- see _TALK_INPUT_OPS.
+_TALK_SINGLEKEY_OPS = {0xf8, 0xfa, 0xfc, 0xcb}  # GET, GETCHR, GETDIGIT, WAIT
+
+
+@mcp.tool()
+def u6_move(direction: str) -> str:
+    """Ultima VI: step the party one tile. direction = n/s/e/w (also
+    north/south/east/west or up/down/left/right). Sends the arrow key via
+    SendInput (DOSBox focused first). Verify the binding live."""
+    key = _U6_DIR.get(direction.strip().lower())
+    if not key:
+        return f"Unknown direction {direction!r}. Use n/s/e/w."
+    return inp.send_key(key)
+
+
+@mcp.tool()
+def u6_talk(direction: str) -> str:
+    """Ultima VI: open a conversation with the NPC in `direction` -- presses 'T'
+    then the direction key. Afterward poll u6_conversation() and reply with
+    u6_say() / u6_key(). (Verify the talk-input flow live.)"""
+    key = _U6_DIR.get(direction.strip().lower())
+    if not key:
+        return f"Unknown direction {direction!r}. Use n/s/e/w."
+    r1 = inp.send_key("t")
+    time.sleep(0.15)
+    r2 = inp.send_key(key)
+    return f"talk {direction}: [{r1}] [{r2}]"
+
+
+@mcp.tool()
+def u6_say(text: str, segment: int = -1) -> str:
+    """Ultima VI: answer the current conversation prompt. Peeks the converse-VM
+    opcode at Talk_PC: at a single-key prompt (GET/GETCHR/GETDIGIT/WAIT) it sends
+    just the first character; otherwise (ASKTOP/GETSTR/GETINT) it types `text` +
+    Enter. Falls back to line input if the VM state can't be read. DS from
+    u6_hook."""
+    single = False
+    if S.membase is not None:
+        ds, err = _ds(segment)
+        if not err:
+            base_addr = S.membase + (ds << 4)
+            try:
+                pc = int.from_bytes(dm.read(S.handle, base_addr + U6_Talk_PC, 2), "little")
+                fp = dm.read(S.handle, base_addr + U6_TalkBuf_ptr, 4)
+                tb_lin = ((fp[2] | (fp[3] << 8)) << 4) + (fp[0] | (fp[1] << 8))
+                op = dm.read(S.handle, S.membase + tb_lin + pc, 1)[0]
+                single = op in _TALK_SINGLEKEY_OPS
+            except OSError:
+                pass
+    if single:
+        ch = text[:1]
+        return f"[single-key] {inp.send_key(ch if ch else 'enter')}"
+    out = inp.send_text(text)
+    ent = inp.send_key("enter")
+    return f"[line] {out} [{ent}]"
+
+
+@mcp.tool()
+def u6_key(key: str) -> str:
+    """Ultima VI: send one keypress (for single-key conversation prompts, menus,
+    or any raw key). `key` = a single char or a name (enter/esc/space/up/...)."""
+    return inp.send_key(key)
 
 
 if __name__ == "__main__":

@@ -1,24 +1,61 @@
-# DOSBox Memory Inspector
+# DOSBox Tools
 
-An MCP server that lets Claude Code inspect (and optionally modify) DOSBox's
-emulated memory, like a programmable Cheat Engine. Built for reverse
-engineering 16-bit real-mode DOS programs running under DOSBox on Windows.
+A small toolkit that lets Claude Code (or any MCP client) **inspect and drive**
+programs running under DOSBox on Windows — read and write the emulated memory
+like a programmable Cheat Engine, *and* inject keystrokes to control the program.
+Built for reverse-engineering and agent-driving 16-bit real-mode DOS software.
 
-## How it works
+It is **layered**: two shared cores provide the primitives, and per-purpose MCP
+servers compose them — a generic memory workbench, plus per-game decoders.
+
+## Components
+
+| File | Role |
+|------|------|
+| `dosbox_mem.py` | Shared **perception** core: attach, MemBase calibration, read/write. Exposes `register_base_tools(mcp, S)`. No game/UI knowledge. |
+| `dosbox_input.py` | Shared **action** core: find/focus the DOSBox window, send keys/text via SendInput. Exposes `register_input_tools(mcp, S)`. Game-agnostic. |
+| `dosbox_mcp_server.py` | The **`dosbox-memory`** server — a generic Cheat-Engine-style discovery workbench (scan / fuzzy / AOB / struct dump / address table). Use when reverse-engineering something new. |
+| `dosbox_u6_server.py` | The **`dosbox-u6`** server — an Ultima VI decoder (avatar/NPC/objects, inventory, live conversation state) **plus** U6 action verbs (move / talk / say). Composes both cores. |
+
+How they stack:
+
+```
+dosbox_mem   (read / write / calibrate) ─┐
+                                         ├─►  dosbox-u6 server   (U6 decode + verbs)
+dosbox_input (window / focus / keys)   ──┘
+dosbox_mem  ─────────────────────────────►  dosbox-memory server (RE workbench)
+```
+
+A per-game server is self-sufficient: it pulls the routine plumbing from the
+shared cores and adds only its own game knowledge.
+
+## How it works — perception
 
 DOSBox stores its emulated 8086 memory as one contiguous block inside its own
 process, starting at a pointer called `MemBase`. A DOS address is
-`segment:offset`, so once you know `MemBase`, any `seg:off` from your
-disassembly maps straight to a real host address:
+`segment:offset`, so once you know `MemBase`, any `seg:off` from your disassembly
+maps straight to a real host address:
 
 ```
 host address = MemBase + (segment * 16 + offset)
 ```
 
-The whole tool is built around one idea: **calibrate `MemBase` once, then read
-any variable by its `seg:off`.** Reads are done from outside the process with
-`ReadProcessMemory`, so it works with any DOSBox variant (staging, -x, vanilla)
-without patching it.
+The whole perception side is built around one idea: **calibrate `MemBase` once,
+then read any variable by its `seg:off`.** Reads are done from outside the
+process with `ReadProcessMemory`, so it works with any DOSBox variant (staging,
+-x, vanilla) without patching it. (The per-game `dosbox-u6` server additionally
+derives the program's data segment `DS` per run — see its section below.)
+
+## How it works — action
+
+DOSBox (SDL 1.2) forces the DirectX video backend on Windows, so it reads the
+keyboard via **DirectInput**. DirectInput sees real injected input (Win32
+`SendInput`) but maps SDL keysyms to DOS scancodes — so `dosbox_input` sends
+hardware **scancode** events, and **focuses the DOSBox SDL window first**
+(DirectInput only delivers input while DOSBox is the foreground window). The MCP
+tool boundary keeps this swappable: a future injection-DLL backend that calls
+DOSBox's internal `KEYBOARD_AddKey` would drop the foreground requirement without
+changing the tools or the agent that calls them.
 
 ## Requirements
 
@@ -30,16 +67,19 @@ without patching it.
 pip install "mcp[cli]"
 ```
 
-Put `dosbox_mcp_server.py` **and `dosbox_mem.py`** (the shared library it
-imports) together in the same folder, e.g. `C:\tools\dosbox_mcp\`.
+Keep the shared libraries (`dosbox_mem.py`, `dosbox_input.py`) in the **same
+folder** as the server(s) that import them, e.g. `C:\tools\dosbox_tools\`.
 
 ## Register with Claude Code
 
-Easiest via the CLI (run inside your project folder, or add `--scope user` to
-make it available everywhere):
+Register whichever server(s) you need (run inside your project folder, or add
+`--scope user` to make them available everywhere):
 
 ```powershell
-claude mcp add dosbox-memory python C:\tools\dosbox_mcp\dosbox_mcp_server.py
+# generic reverse-engineering workbench
+claude mcp add dosbox-memory python C:\tools\dosbox_tools\dosbox_mcp_server.py
+# Ultima VI decoder + action verbs
+claude mcp add dosbox-u6 python C:\tools\dosbox_tools\dosbox_u6_server.py
 ```
 
 Or edit `.mcp.json` by hand (note the doubled backslashes on Windows paths):
@@ -49,24 +89,36 @@ Or edit `.mcp.json` by hand (note the doubled backslashes on Windows paths):
   "mcpServers": {
     "dosbox-memory": {
       "command": "python",
-      "args": ["C:\\tools\\dosbox_mcp\\dosbox_mcp_server.py"]
+      "args": ["C:\\tools\\dosbox_tools\\dosbox_mcp_server.py"]
+    },
+    "dosbox-u6": {
+      "command": "python",
+      "args": ["C:\\tools\\dosbox_tools\\dosbox_u6_server.py"]
     }
   }
 }
 ```
 
-**Elevation — only if DOSBox is elevated.** For the usual case (DOSBox and
-Claude Code both launched normally by the same user), `OpenProcess` /
-`ReadProcessMemory` work **without** Administrator — opening a same-user,
-same-integrity process is allowed. You only need to run Claude Code elevated if
-DOSBox itself was started elevated (or by another user); otherwise opening the
-process is denied. (Verified: a non-elevated, medium-integrity shell opens and
-reads/writes a normally-launched DOSBox fine.)
+**Elevation — only if DOSBox is elevated.** For the usual case (DOSBox and Claude
+Code both launched normally by the same user), `OpenProcess` /
+`ReadProcessMemory` and `SendInput` work **without** Administrator — same-user,
+same-integrity access is allowed. You only need to run Claude Code elevated if
+DOSBox itself was started elevated (or by another user). (Verified: a
+non-elevated, medium-integrity shell opens and reads/writes a normally-launched
+DOSBox fine.)
 
-The server itself has no dependency on DOSBox being open — it just registers its
-tools and waits. You can load it before or after launching DOSBox. It only
-touches the emulator when you call `find_dosbox()`, and by then DOSBox should be
-at its prompt so its BDA (and any program values you want to read) are in memory.
+The servers have no dependency on DOSBox being open — they register their tools
+and wait. Load them before or after launching DOSBox; they only touch the
+emulator when you call a tool (`find_dosbox` / `u6_hook`), by which point DOSBox
+should be at its prompt so its BDA and program values are in memory.
+
+---
+
+# The `dosbox-memory` server (RE workbench)
+
+A generic, Cheat-Engine-style server for reverse-engineering an unknown DOS
+program: scan for values, narrow them down, dump structs, and persist what you
+find. It exposes the shared `dosbox_mem` base tools plus the discovery toolkit.
 
 ## Calibrating MemBase
 
@@ -117,7 +169,7 @@ the program isn't loaded yet), so you don't have to chain three calls yourself.
 session_init(known_segment=0x1234, known_offset=0x10, known_value=50)
 
 # later runs, with a saved table:
-session_init(table_path="C:\\tools\\dosbox_mcp\\vars.json",
+session_init(table_path="C:\\tools\\dosbox_tools\\vars.json",
              known_segment=0x1234, known_offset=0x10, known_value=50)
 ```
 
@@ -186,12 +238,12 @@ Typical flow:
 # build it up as you find variables
 table_add("player_x", 0x1234, 0x10, "u16", "world X coordinate")
 table_add("player_hp", 0x1234, 0x20, "i16", "current hit points")
-table_save("C:\\tools\\dosbox_mcp\\vars.json")
+table_save("C:\\tools\\dosbox_tools\\vars.json")
 
 # next session
 find_dosbox()
 find_membase_auto(known_segment=0x1234, known_offset=0x10, known_value=50)
-table_load("C:\\tools\\dosbox_mcp\\vars.json")
+table_load("C:\\tools\\dosbox_tools\\vars.json")
 table_read_all          # dumps every variable's current value at once
 ```
 
@@ -240,12 +292,86 @@ Table tools: `table_add`, `table_remove`, `table_list`, `table_save`,
 | `disconnect()` | Close the handle, clear scan/MemBase state (keeps table) |
 | `status()` | Show connection and calibration state |
 
+---
+
+# The `dosbox-u6` server (Ultima VI)
+
+A per-game **decoder + driver** for Ultima VI. It bakes in U6's in-memory layout
+(the parallel object arrays, the conversation VM) from the
+[u6-decompiled](https://github.com/ergonomy-joe/u6-decompiled) source, and it
+registers the shared `dosbox_mem` (read/write) and `dosbox_input` (keys) tools —
+so this **one server both perceives and acts** on the same DOSBox session. It
+does **not** include the RE workbench; use `dosbox-memory` for new RE.
+
+## Hooking
+
+```
+u6_hook("<avatar name>")
+```
+
+Attaches, auto-calibrates MemBase, and **derives the U6 data segment `DS`** from
+the avatar's name. `DS` is the program's DOS load segment — it shifts with the
+memory layout (drivers/TSRs/env/config), so it is never hardcoded; the name's
+bytes pin `Names[0]` at `DS:0x3236`, giving `DS = (name_linear - 0x3236) / 16`.
+After this, the decoders work with no `segment=` argument.
+
+## Perception
+
+- `u6_object(slot)` — decode one object/NPC slot: world `x/y/z` (or holder),
+  shape type/frame, quantity/quality. The Avatar is slot 1; NPCs are `0..0xFF`.
+- `u6_inventory(npc_slot)` — list everything an NPC holds (INVEN/EQUIP).
+- `u6_conversation()` — live talk-engine state. On talk start the VM loads the
+  NPC's whole script from `converse.a` into **`TalkBuf`** and interprets it with
+  **`Talk_PC`** as the program counter; it prints text then **blocks on input**,
+  so a conversation is turn-based by construction and both the NPC's text and the
+  valid keyword branches live in `TalkBuf`. This tool reports `IsInConversation`,
+  the interlocutor NPC#, the NPC name, `Talk_PC`, the last typed input, the
+  resolved `TalkBuf` pointer, and a hex window of the script at `Talk_PC`
+  (flagged when the current opcode is an input-wait).
+
+## Action verbs
+
+Built on `dosbox_input` (SendInput; DOSBox is focused first):
+
+- `u6_move(dir)` — step one tile (`n/s/e/w`, or north/…/up/down/left/right).
+- `u6_talk(dir)` — open a conversation with the NPC in `dir` (`T` + direction).
+- `u6_say(text)` — answer the current prompt; peeks the opcode at `Talk_PC` and
+  types a line + Enter (`ASKTOP`/`GETSTR`) or sends a single key
+  (`GET`/`GETCHR`/`WAIT`).
+- `u6_key(key)` — send one raw keypress.
+
+The server also exposes the shared base tools (`find_dosbox`, `read_dos`,
+`write_dos`, `status`, …) and input tools (`find_window`, `focus_window`,
+`send_key`, `send_text`).
+
+## Tools
+
+| Tool | Purpose |
+|------|---------|
+| `u6_hook(avatar_name)` | Attach + calibrate MemBase + derive DS from the avatar name |
+| `u6_object(slot, segment=-1)` | Decode one object/NPC slot |
+| `u6_inventory(npc_slot, segment=-1)` | List an NPC's INVEN/EQUIP items |
+| `u6_conversation(segment=-1, dump=64)` | Live conversation/talk-engine state + TalkBuf window |
+| `u6_move(direction)` | Step the party one tile |
+| `u6_talk(direction)` | Start a conversation with the NPC in `direction` |
+| `u6_say(text, segment=-1)` | Answer the current conversation prompt |
+| `u6_key(key)` | Send one keypress |
+| `find_window` / `focus_window` | Locate / foreground the DOSBox window |
+| `send_key(key)` / `send_text(text)` | Generic scancode injection |
+
+---
+
 ## Notes
 
 - `width`: 16-bit values use `2`; single-byte flags use `1`.
-- Save the program state before writing memory.
+- **Save the program state before writing memory.**
 - Slow first scan just means the process is large; it gets fast after one or two
   narrowing steps. Setting `dos_only=True` (once `MemBase` is known) keeps scans
   inside the ~1MB emulated window and is much faster.
-- All state (handle, `MemBase`, scan sets) lives in the running server process
-  for the session. Restarting Claude Code or reloading the MCP config resets it.
+- **Input needs focus.** `SendInput` only reaches DOSBox while its SDL window is
+  the foreground window; the input tools focus it first. The window is matched by
+  the `"cpu speed"` signature in its title (the real SDL render window), not just
+  any window containing "dosbox".
+- All state (handle, `MemBase`, derived `DS`, scan sets, cached window) lives in
+  the running server process for the session. Restarting Claude Code or reloading
+  the MCP config resets it; reopening DOSBox requires re-calibration.
