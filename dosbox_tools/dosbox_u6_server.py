@@ -475,24 +475,33 @@ def _dir_to(dx, dy):
 
 
 def _build_grid(base_addr):
-    """Read terrain + static objects -> (walk[H][W] bool, cost[H][W] int, AreaX,
+    """Read terrain + map objects -> (walk[H][W] bool, cost[H][W] int, AreaX,
     AreaY). Mirrors the engine (seg_1E0F.c __ComputeResistance): a cell is blocked
-    by impassable terrain, or by a STATIC object on it (slot >= 0x100) whose tile
-    is impassable; NPC slots (< 0x100) are excluded (resolved at per-step time).
-    The per-cell move cost is the engine's `(TerrainType[ground] >> 4) + 1`, so
-    weighted search skirts costly terrain (forest/swamp) the way the game does."""
+    by impassable terrain, or by a map object ON IT whose tile is impassable.
+
+    Objects are placed by their OWN world position -- exactly like the engine's
+    `for(obj = SearchArea(...); ...)` loop, where `area_x = GetX(obj) - origin`.
+    We do NOT follow the Link chain from a cell's head object: Link (0xBDDA) is the
+    AREA-WIDE object scan chain (row-major, what SearchArea/NextArea traverse), not
+    a per-cell stack, so walking it from a cell wanders onto other cells' objects
+    and spuriously blocks the start cell. NPC slots (< 0x100) are excluded
+    (resolved at per-step time). The per-cell move cost is the engine's
+    `(TerrainType[ground] >> 4) + 1`, so weighted search skirts costly terrain
+    (forest/swamp) the way the game does."""
     ax = int.from_bytes(dm.read(S.handle, base_addr + U6_AreaX, 2), "little")
     ay = int.from_bytes(dm.read(S.handle, base_addr + U6_AreaY, 2), "little")
-    tiles = dm.read(S.handle, base_addr + U6_AreaTiles, U6_AREA_H * U6_AREA_W)
-    mop = dm.read(S.handle, base_addr + U6_MapObjPtr, U6_AREA_H * U6_AREA_W * 2)
-    link = dm.read(S.handle, base_addr + U6_Link, U6_MAX_SLOTS * 2)
-    shape = dm.read(S.handle, base_addr + U6_ObjShapeType, U6_MAX_SLOTS * 2)
+    _, _, z0 = _avatar_xyz(base_addr)
+    tiles  = dm.read(S.handle, base_addr + U6_AreaTiles, U6_AREA_H * U6_AREA_W)
+    status = dm.read(S.handle, base_addr + U6_ObjStatus, U6_MAX_SLOTS)
+    objpos = dm.read(S.handle, base_addr + U6_ObjPos, U6_MAX_SLOTS * 3)
+    shape  = dm.read(S.handle, base_addr + U6_ObjShapeType, U6_MAX_SLOTS * 2)
     terr = dm.read(S.handle, _read_far_ptr(base_addr, U6_TerrainType_ptr), _TILEFLAG_N)
     basetile = dm.read(S.handle, _read_far_ptr(base_addr, U6_BaseTile_ptr), _BASETILE_N * 2)
 
     def tflag(tile):
         return terr[tile] if 0 <= tile < len(terr) else 0
 
+    # Ground terrain: per-cell move cost + impassability.
     walk = [[True] * U6_AREA_W for _ in range(U6_AREA_H)]
     cost = [[1] * U6_AREA_W for _ in range(U6_AREA_H)]
     for r in range(U6_AREA_H):
@@ -501,23 +510,28 @@ def _build_grid(base_addr):
             cost[r][c] = (gf >> 4) + 1                   # engine move cost: forest/swamp > road
             if gf & TERRAIN_IMPASS:
                 walk[r][c] = False
-                continue
-            slot = _s16(mop, r * U6_AREA_W + c)
-            guard = 0
-            while 0 <= slot < U6_MAX_SLOTS and guard < 64:
-                if slot >= 0x100:                       # map object, not an NPC
-                    sh = shape[slot * 2] | (shape[slot * 2 + 1] << 8)
-                    typ = sh & 0x3ff
-                    if typ < _BASETILE_N:
-                        tile = (basetile[typ * 2] | (basetile[typ * 2 + 1] << 8)) + (sh >> 10)
-                        if tflag(tile) & TERRAIN_IMPASS:
-                            walk[r][c] = False
-                            break
-                nxt = _s16(link, slot)
-                if nxt == slot:
-                    break
-                slot = nxt
-                guard += 1
+
+    # Map objects: each impassable object blocks its OWN cell. Single pass over the
+    # world-object slots (engine SearchArea + C_1E0F_4265). Skip NPCs (< 0x100),
+    # empty slots, anything not loose on the map (CoordUse != LOCXYZ), or off-level.
+    for slot in range(0x100, U6_MAX_SLOTS):
+        sh = shape[slot * 2] | (shape[slot * 2 + 1] << 8)
+        if sh == 0:                                      # empty slot
+            continue
+        if status[slot] & 0x18:                          # not LOCXYZ (held/contained/equipped)
+            continue
+        typ = sh & 0x3ff
+        if typ >= _BASETILE_N:
+            continue
+        tile = (basetile[typ * 2] | (basetile[typ * 2 + 1] << 8)) + (sh >> 10)
+        if not (tflag(tile) & TERRAIN_IMPASS):
+            continue
+        p = objpos[slot * 3] | (objpos[slot * 3 + 1] << 8) | (objpos[slot * 3 + 2] << 16)
+        if ((p >> 20) & 0xf) != z0:                      # different map level
+            continue
+        cell = _world_to_cell(p & 0x3ff, (p >> 10) & 0x3ff, ax, ay)
+        if cell is not None:
+            walk[cell[0]][cell[1]] = False
     return walk, cost, ax, ay
 
 
