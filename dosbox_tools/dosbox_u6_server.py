@@ -4,8 +4,9 @@ DOSBox Ultima VI decoder - "dosbox-u6" MCP server (Windows).
 
 A per-game DECODER server: it knows Ultima VI's in-memory layout and exposes it
 as high-level tools (avatar/NPC inventory, single-object decode, live
-conversation state) plus an ACTION channel (DOSBox keystroke injection via the
-shared dosbox_input lib -- move/talk/say). It does NOT
+conversation state, local walkable map) plus an ACTION channel (DOSBox keystroke
+injection via the shared dosbox_input lib -- move/talk/say) and closed-loop
+NAVIGATION (pathfind/goto to an NPC). It does NOT
 include the discovery workbench (scan/fuzzy/struct_dump/table) -- that lives in
 the generic `dosbox-memory` server, used only when reverse-engineering something
 new. This server is self-sufficient for U6 inspection: the routine plumbing
@@ -20,6 +21,7 @@ it must be DERIVED PER RUN. u6_hook() does that from the avatar's name -- the
 name's bytes pin Names[0] at DS:0x3236, giving DS = (name_linear - 0x3236) / 16.
 """
 
+import heapq
 import time
 
 from mcp.server.fastmcp import FastMCP
@@ -76,6 +78,38 @@ _TALK_INPUT_OPS = {
     0xf8: "GET",       # menu of single keys, list terminated by OP_KEY (0xef)
     0xcb: "WAIT",      # wait for any key
 }
+
+
+# ----------------------------------------------------------------------------
+# Map / navigation layout -- the local 40x40 "area" window + the tile-flag
+# tables (u6.h, seg_101C.c GetTileAtXYZ, seg_1E0F.c __ComputeResistance). All
+# DGROUP / DS-relative. Ground tiles are bytes 0-255; high tile.h IDs are
+# objects drawn on top (the object arrays). Walkability mirrors the engine:
+# terrain impassable OR a STATIC object (slot >= 0x100) whose tile is impassable;
+# NPC slots (< 0x100) are excluded from the plan (resolved at per-step time).
+# ----------------------------------------------------------------------------
+U6_AREA_W = 40
+U6_AREA_H = 40
+U6_WORLD_MASK = 0x3ff             # world is 1024x1024
+U6_AreaTiles  = 0x8E51            # AREA_H*AREA_W bytes; ground tile per cell
+U6_AreaX      = 0xBBC8            # int; world X of the area-window origin
+U6_AreaY      = 0xBBCA            # int; world Y of the area-window origin
+U6_MapObjPtr  = 0xD8E7            # AREA_H*AREA_W int16; head object slot/cell, -1 = none
+U6_Link       = 0xBDDA            # int16[U6_MAX_SLOTS]; per-cell object stack chain
+U6_NPCFlag_ptr     = 0x4D4C       # far ptr -> NPCFlag[]; dir = NPCFlag[slot] & 7
+U6_TerrainType_ptr = 0xB3EB       # far ptr -> TerrainType[tile]; & 0x02 = impassable
+U6_BaseTile_ptr    = 0x6824       # far ptr -> BaseTile[type] (int16); tile = BaseTile[type]+frame
+TERRAIN_IMPASS = 0x02
+TERRAIN_WALL   = 0x04
+TERRAIN_WET    = 0x01
+_TILEFLAG_N = 0x800               # tile-flag tables span all 2048 tile ids
+_BASETILE_N = 0x400               # BaseTile indexed by 10-bit object type
+
+# 4-connected movement (U6 arrow-key cardinals; diagonals deferred -- they need
+# numpad keys + an 8-connected search, both unverified). step (dr,dc) -> labels.
+_DIR_DELTAS = ((-1, 0), (1, 0), (0, -1), (0, 1))
+_STEP_NAME = {(-1, 0): "n", (1, 0): "s", (0, -1): "w", (0, 1): "e"}
+_STEP_ARROW = {(-1, 0): "up", (1, 0): "down", (0, -1): "left", (0, 1): "right"}
 
 
 # A session that also remembers the per-run U6 data segment, derived by u6_hook.
@@ -182,8 +216,9 @@ def u6_hook(avatar_name: str = "") -> str:
     return (f"Hooked U6: MemBase=0x{S.membase:x}, DS=0x{ds:04x} "
             f"(derived from {avatar_name!r} @ host 0x{host:x}).\n"
             f"Names[0] reads back as {readback!r}.{extra}\n"
-            f"Ready -- read: u6_object / u6_inventory / u6_conversation; "
-            f"act: u6_move / u6_talk / u6_say / u6_key. Avatar = slot 1.")
+            f"Ready -- read: u6_avatar / u6_object / u6_inventory / u6_npcs_near "
+            f"/ u6_walkable / u6_conversation; act: u6_move / u6_talk / u6_say / "
+            f"u6_key; navigate: u6_pathfind / u6_goto / u6_talk_to. Avatar = slot 1.")
 
 
 @mcp.tool()
@@ -394,6 +429,372 @@ def u6_key(key: str) -> str:
     """Ultima VI: send one keypress (for single-key conversation prompts, menus,
     or any raw key). `key` = a single char or a name (enter/esc/space/up/...)."""
     return inp.send_key(key)
+
+
+# ----------------------------------------------------------------------------
+# Navigation helpers -- build the walkable + cost grid from terrain + static
+# objects, 4-connected weighted Dijkstra to adjacency. All read from u6_hook DS.
+# ----------------------------------------------------------------------------
+def _s16(buf, i):
+    v = buf[i * 2] | (buf[i * 2 + 1] << 8)
+    return v - 0x10000 if v >= 0x8000 else v
+
+
+def _read_far_ptr(base_addr, ds_off):
+    """Resolve a Borland far pointer stored at DS:ds_off to a host linear addr."""
+    fp = dm.read(S.handle, base_addr + ds_off, 4)
+    off = fp[0] | (fp[1] << 8)
+    seg = fp[2] | (fp[3] << 8)
+    return S.membase + (seg << 4) + off
+
+
+def _avatar_xyz(base_addr):
+    pos = dm.read(S.handle, base_addr + U6_ObjPos + 1 * 3, 3)
+    v = pos[0] | (pos[1] << 8) | (pos[2] << 16)
+    return v & 0x3ff, (v >> 10) & 0x3ff, (v >> 20) & 0xf
+
+
+def _world_to_cell(x, y, ax, ay):
+    c = (x - ax) & U6_WORLD_MASK
+    r = (y - ay) & U6_WORLD_MASK
+    return (r, c) if (c < U6_AREA_W and r < U6_AREA_H) else None
+
+
+def _compass(dx, dy):
+    ns = "N" if dy < 0 else ("S" if dy > 0 else "")
+    ew = "E" if dx > 0 else ("W" if dx < 0 else "")
+    return (ns + ew) or "@"
+
+
+def _dir_to(dx, dy):
+    if dx == 1:
+        return "e"
+    if dx == -1:
+        return "w"
+    return "s" if dy == 1 else "n"
+
+
+def _build_grid(base_addr):
+    """Read terrain + static objects -> (walk[H][W] bool, cost[H][W] int, AreaX,
+    AreaY). Mirrors the engine (seg_1E0F.c __ComputeResistance): a cell is blocked
+    by impassable terrain, or by a STATIC object on it (slot >= 0x100) whose tile
+    is impassable; NPC slots (< 0x100) are excluded (resolved at per-step time).
+    The per-cell move cost is the engine's `(TerrainType[ground] >> 4) + 1`, so
+    weighted search skirts costly terrain (forest/swamp) the way the game does."""
+    ax = int.from_bytes(dm.read(S.handle, base_addr + U6_AreaX, 2), "little")
+    ay = int.from_bytes(dm.read(S.handle, base_addr + U6_AreaY, 2), "little")
+    tiles = dm.read(S.handle, base_addr + U6_AreaTiles, U6_AREA_H * U6_AREA_W)
+    mop = dm.read(S.handle, base_addr + U6_MapObjPtr, U6_AREA_H * U6_AREA_W * 2)
+    link = dm.read(S.handle, base_addr + U6_Link, U6_MAX_SLOTS * 2)
+    shape = dm.read(S.handle, base_addr + U6_ObjShapeType, U6_MAX_SLOTS * 2)
+    terr = dm.read(S.handle, _read_far_ptr(base_addr, U6_TerrainType_ptr), _TILEFLAG_N)
+    basetile = dm.read(S.handle, _read_far_ptr(base_addr, U6_BaseTile_ptr), _BASETILE_N * 2)
+
+    def tflag(tile):
+        return terr[tile] if 0 <= tile < len(terr) else 0
+
+    walk = [[True] * U6_AREA_W for _ in range(U6_AREA_H)]
+    cost = [[1] * U6_AREA_W for _ in range(U6_AREA_H)]
+    for r in range(U6_AREA_H):
+        for c in range(U6_AREA_W):
+            gf = tflag(tiles[r * U6_AREA_W + c])
+            cost[r][c] = (gf >> 4) + 1                   # engine move cost: forest/swamp > road
+            if gf & TERRAIN_IMPASS:
+                walk[r][c] = False
+                continue
+            slot = _s16(mop, r * U6_AREA_W + c)
+            guard = 0
+            while 0 <= slot < U6_MAX_SLOTS and guard < 64:
+                if slot >= 0x100:                       # map object, not an NPC
+                    sh = shape[slot * 2] | (shape[slot * 2 + 1] << 8)
+                    typ = sh & 0x3ff
+                    if typ < _BASETILE_N:
+                        tile = (basetile[typ * 2] | (basetile[typ * 2 + 1] << 8)) + (sh >> 10)
+                        if tflag(tile) & TERRAIN_IMPASS:
+                            walk[r][c] = False
+                            break
+                nxt = _s16(link, slot)
+                if nxt == slot:
+                    break
+                slot = nxt
+                guard += 1
+    return walk, cost, ax, ay
+
+
+def _dijkstra(walk, cost, start, goals):
+    """4-connected weighted Dijkstra from start to the LOWEST-COST cell in `goals`
+    (path cost = sum of entered cells' move cost). Returns a list of (dr,dc)
+    steps, [] if already at a goal, or None if unreachable. Weighting is what
+    keeps routes on roads/plains instead of cutting through forest/swamp."""
+    if start in goals:
+        return []
+    INF = 1 << 30
+    dist = {start: 0}
+    prev = {start: None}
+    pq = [(0, start)]
+    while pq:
+        d, cur = heapq.heappop(pq)
+        if d > dist.get(cur, INF):
+            continue                                     # stale heap entry
+        if cur in goals:
+            steps, node = [], cur
+            while prev[node] is not None:
+                parent, mv = prev[node]
+                steps.append(mv)
+                node = parent
+            steps.reverse()
+            return steps
+        for dr, dc in _DIR_DELTAS:
+            nr, nc = cur[0] + dr, cur[1] + dc
+            if 0 <= nr < U6_AREA_H and 0 <= nc < U6_AREA_W and walk[nr][nc]:
+                nd = d + cost[nr][nc]
+                if nd < dist.get((nr, nc), INF):
+                    dist[(nr, nc)] = nd
+                    prev[(nr, nc)] = (cur, (dr, dc))
+                    heapq.heappush(pq, (nd, (nr, nc)))
+    return None
+
+
+def _adjacent_goals(grid, ncell):
+    goals = set()
+    for dr, dc in _DIR_DELTAS:
+        gr, gc = ncell[0] + dr, ncell[1] + dc
+        if 0 <= gr < U6_AREA_H and 0 <= gc < U6_AREA_W and grid[gr][gc]:
+            goals.add((gr, gc))
+    return goals
+
+
+def _npc_xyz(base_addr, slot):
+    """(x, y, z, coorduse) for an object/NPC slot."""
+    st = dm.read(S.handle, base_addr + U6_ObjStatus + slot, 1)[0]
+    pos = dm.read(S.handle, base_addr + U6_ObjPos + slot * 3, 3)
+    v = pos[0] | (pos[1] << 8) | (pos[2] << 16)
+    return v & 0x3ff, (v >> 10) & 0x3ff, (v >> 20) & 0xf, st & 0x18
+
+
+@mcp.tool()
+def u6_avatar(segment: int = -1) -> str:
+    """Ultima VI: the avatar's world position (x/y/z) + facing. The position is
+    the closed-loop nav primitive (confirm a move actually happened). DS from
+    u6_hook unless overridden with segment=."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    try:
+        x, y, z = _avatar_xyz(base)
+        d = dm.read(S.handle, _read_far_ptr(base, U6_NPCFlag_ptr) + 1, 1)[0] & 7
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    return f"avatar (slot 1): x={x} y={y} z={z}  dir(NPCFlag&7)={d}"
+
+
+@mcp.tool()
+def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
+    """Ultima VI: NPCs/creatures placed in the world (LOCXYZ) within `radius`
+    (Chebyshev) of the avatar on the same level. Reports slot, position, compass
+    direction, distance and shape type -- the agent's situational awareness for
+    picking a target. DS from u6_hook unless overridden with segment=."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    try:
+        x0, y0, z0 = _avatar_xyz(base)
+        status = dm.read(S.handle, base + U6_ObjStatus, 0x100)
+        pos = dm.read(S.handle, base + U6_ObjPos, 0x100 * 3)
+        shape = dm.read(S.handle, base + U6_ObjShapeType, 0x100 * 2)
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    rows = []
+    for i in range(0x100):
+        if i == 1 or (status[i] & 0x18) != 0:           # avatar / not in world
+            continue
+        v = pos[i * 3] | (pos[i * 3 + 1] << 8) | (pos[i * 3 + 2] << 16)
+        x, y, z = v & 0x3ff, (v >> 10) & 0x3ff, (v >> 20) & 0xf
+        typ = (shape[i * 2] | (shape[i * 2 + 1] << 8)) & 0x3ff
+        if typ == 0 or z != z0:                          # empty slot / other level
+            continue
+        dist = max(abs(x - x0), abs(y - y0))
+        if dist > radius:
+            continue
+        rows.append((dist, i, x, y, _compass(x - x0, y - y0), typ))
+    if not rows:
+        return f"No NPCs within {radius} of avatar ({x0},{y0},z{z0})."
+    rows.sort()
+    out = [f"NPCs within {radius} of avatar ({x0},{y0},z{z0}):",
+           "  dist  slot     x    y   dir  type"]
+    for dist, i, x, y, comp, typ in rows:
+        out.append(f"  {dist:>4}  0x{i:02x}  {x:>4} {y:>4}  {comp:<3}  {typ}")
+    return "\n".join(out)
+
+
+@mcp.tool()
+def u6_walkable(segment: int = -1) -> str:
+    """Ultima VI: the local 40x40 passability grid as ASCII (terrain + static
+    objects; NPCs overlaid but NOT treated as walls -- engine rule). Legend:
+    @=avatar  N=npc  .=open  #=blocked. DS from u6_hook unless overridden."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    try:
+        x0, y0, z0 = _avatar_xyz(base)
+        walk, cost, ax, ay = _build_grid(base)
+        status = dm.read(S.handle, base + U6_ObjStatus, 0x100)
+        pos = dm.read(S.handle, base + U6_ObjPos, 0x100 * 3)
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    npc_cells = set()
+    for i in range(0x100):
+        if i == 1 or (status[i] & 0x18) != 0:
+            continue
+        v = pos[i * 3] | (pos[i * 3 + 1] << 8) | (pos[i * 3 + 2] << 16)
+        if ((v >> 20) & 0xf) != z0:
+            continue
+        cell = _world_to_cell(v & 0x3ff, (v >> 10) & 0x3ff, ax, ay)
+        if cell:
+            npc_cells.add(cell)
+    av = _world_to_cell(x0, y0, ax, ay)
+    out = [f"Walkable grid (window origin world {ax},{ay}; z={z0}; "
+           f"@=avatar N=npc .=open #=blocked):"]
+    for r in range(U6_AREA_H):
+        line = []
+        for c in range(U6_AREA_W):
+            if (r, c) == av:
+                line.append("@")
+            elif (r, c) in npc_cells:
+                line.append("N")
+            else:
+                line.append("." if walk[r][c] else "#")
+        out.append("  " + "".join(line))
+    return "\n".join(out)
+
+
+@mcp.tool()
+def u6_pathfind(npc_slot: int, segment: int = -1) -> str:
+    """Ultima VI: PLAN a route to get adjacent to an NPC. Returns the cardinal
+    step list (n/s/w/e) WITHOUT sending input -- pure computation over the
+    walkable grid (NPCs excluded; moving-NPC blocks are u6_goto's job). DS from
+    u6_hook unless overridden with segment=."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    try:
+        x0, y0, z0 = _avatar_xyz(base)
+        nx, ny, nz, cu = _npc_xyz(base, npc_slot)
+        walk, cost, ax, ay = _build_grid(base)
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    if cu != 0:
+        return f"NPC slot 0x{npc_slot:x} is not placed in the world (in a party/container?)."
+    if nz != z0:
+        return f"NPC slot 0x{npc_slot:x} is on z={nz}; avatar on z={z0} -- not the same level."
+    start = _world_to_cell(x0, y0, ax, ay)
+    ncell = _world_to_cell(nx, ny, ax, ay)
+    if start is None:
+        return "Avatar not within the local area window (unexpected)."
+    if ncell is None:
+        return (f"NPC 0x{npc_slot:x} at ({nx},{ny}) is outside the 40x40 local window "
+                f"-- global routing not implemented yet.")
+    if abs(nx - x0) + abs(ny - y0) == 1:
+        return f"Already adjacent to NPC 0x{npc_slot:x} (to the {_dir_to(nx - x0, ny - y0)})."
+    goals = _adjacent_goals(walk, ncell)
+    if not goals:
+        return f"No walkable tile adjacent to NPC 0x{npc_slot:x}."
+    steps = _dijkstra(walk, cost, start, goals)
+    if steps is None:
+        return f"No path to NPC 0x{npc_slot:x} within the local area (blocked)."
+    dirs = [_STEP_NAME[s] for s in steps]
+    return (f"Path to adjacent NPC 0x{npc_slot:x}: {len(dirs)} steps -> "
+            f"{' '.join(dirs)}\n(execute with u6_goto, or step via u6_move)")
+
+
+@mcp.tool()
+def u6_goto(npc_slot: int, max_steps: int = 60, segment: int = -1) -> str:
+    """Ultima VI: walk the avatar adjacent to an NPC, CLOSED-LOOP -- plan -> one
+    u6_move -> confirm via re-read -> replan on block, until adjacent or stuck.
+    Handles moving NPCs reactively (re-plans each step). Returns a step log;
+    when it arrives, follow with u6_talk(dir). DS from u6_hook unless overridden."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    log, stuck = [], 0
+    for step_i in range(max_steps):
+        try:
+            x0, y0, z0 = _avatar_xyz(base)
+            nx, ny, nz, cu = _npc_xyz(base, npc_slot)
+            walk, cost, ax, ay = _build_grid(base)
+        except OSError as ex:
+            return "\n".join(log + [f"Read failed: {ex}"])
+        if cu != 0:
+            return "\n".join(log + [f"NPC 0x{npc_slot:x} left the world (party/container?) -- stop."])
+        if nz != z0:
+            return "\n".join(log + [f"NPC now on z={nz}, avatar z={z0} -- stop."])
+        if abs(nx - x0) + abs(ny - y0) == 1:
+            td = _dir_to(nx - x0, ny - y0)
+            return "\n".join(log + [f"Arrived adjacent to NPC 0x{npc_slot:x} at avatar "
+                                    f"({x0},{y0}); it's to the {td}. Now u6_talk('{td}')."])
+        start = _world_to_cell(x0, y0, ax, ay)
+        ncell = _world_to_cell(nx, ny, ax, ay)
+        if start is None or ncell is None:
+            return "\n".join(log + [f"Target/avatar left the local window (global routing "
+                                    f"not implemented). avatar=({x0},{y0}) npc=({nx},{ny})."])
+        steps = _dijkstra(walk, cost, start, _adjacent_goals(walk, ncell))
+        if not steps:
+            return "\n".join(log + [f"No path to NPC 0x{npc_slot:x} (blocked). avatar=({x0},{y0})."])
+        mv = steps[0]
+        inp.send_key(_STEP_ARROW[mv])
+        time.sleep(0.15)
+        try:
+            x1, y1, _ = _avatar_xyz(base)
+        except OSError:
+            x1, y1 = x0, y0
+        if (x1, y1) == (x0, y0):
+            stuck += 1
+            log.append(f"step {step_i}: {_STEP_NAME[mv]} blocked (no move) [{stuck}/3]")
+            if stuck >= 3:
+                return "\n".join(log + [f"Stuck at ({x0},{y0}) after 3 blocked tries "
+                                        f"(NPC parked in the way?) -- giving up."])
+        else:
+            stuck = 0
+            log.append(f"step {step_i}: {_STEP_NAME[mv]} -> ({x1},{y1})")
+    return "\n".join(log + [f"Hit max_steps={max_steps} without arriving."])
+
+
+@mcp.tool()
+def u6_talk_to(npc_slot: int, max_steps: int = 60, segment: int = -1) -> str:
+    """Ultima VI: the demo one-liner -- u6_goto(npc) then open the conversation
+    (T + direction). On success, poll u6_conversation() and reply with u6_say().
+    DS from u6_hook unless overridden with segment=."""
+    r = u6_goto(npc_slot, max_steps, segment)
+    if S.membase is None:
+        return r
+    ds, err = _ds(segment)
+    if err:
+        return r
+    base = S.membase + (ds << 4)
+    try:
+        x0, y0, _ = _avatar_xyz(base)
+        nx, ny, _nz, _cu = _npc_xyz(base, npc_slot)
+    except OSError:
+        return r + "\n(could not re-read positions; talk skipped)"
+    if abs(nx - x0) + abs(ny - y0) != 1:
+        return r + "\n(not adjacent; talk skipped)"
+    td = _dir_to(nx - x0, ny - y0)
+    return f"{r}\n{u6_talk(td)}\nNow poll u6_conversation() and reply with u6_say()."
 
 
 if __name__ == "__main__":
