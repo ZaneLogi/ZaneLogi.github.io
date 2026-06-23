@@ -11,10 +11,15 @@ Asteroids. "Faithful" matters: behavior should match the original ROM.
 
 ## Status
 
-Early. First slice = a **vector-ROM font demo**
-(`demos/vector_rom.html`) that decodes the letter glyphs out of the
-picture ROM and renders the whole alphabet as a font sheet. No
-gameplay / runtime / CPU-side port yet.
+Early — two vector-ROM demos so far, both faithful byte-decodes:
+- **Font sheet** (`demos/vector_rom.html`) — the A-Z + space glyphs from
+  `034598-01.np3`.
+- **Lander poses** (`demos/lander.html`) — the 9 tilt attitudes from
+  `034599-01.r3` (8 shared base octagons + per-angle leg/thruster SVECs).
+
+No gameplay / runtime / CPU-side port yet. (Note: a faithful byte-decode
+renders the lander legs correctly — earlier non-faithful attempts had
+"legs too small"; staying byte-true to the ROM avoids it.)
 
 ## DVG reuse — same chip as Asteroids
 
@@ -35,26 +40,31 @@ Raw ROM dumps live at `C:\Z_Temp\lunar_lander\` on this PC (2 KB each):
 
 | File             | Maps at        | Holds |
 |------------------|----------------|-------|
-| `034598-01.np3`  | CPU `$5000-$57FF` | picture/glyph ROM — the A-Z + space font (+ picture shapes, TBD) |
-| `034599-01.r3`   | TBD (`$5800+`?)   | second picture ROM — lander / terrain / flag / digits (TBD) |
-| `034597-01.m3`   | —              | shape index PROM — opens with a `$58xx-$5Bxx` pointer table (TBD) |
+| `034598-01.np3`  | CPU `$5000-$57FF` | picture/glyph ROM — the A-Z + space font (+ more shapes, TBD) |
+| `034599-01.r3`   | CPU `$4800-$4FFF` | picture ROM #2 — the lander (8 base octagons `$4800-$48F8` + 9 tilt poses `$4916-$4B64`, dispatch table `$4BA2`); terrain / flag / digits TBD |
+| `034597-01.m3`   | TBD            | shape index PROM — opens with a `$58xx-$5Bxx` pointer table (region not yet identified) |
 
-File offset within `034598` = `addr − $5000`. The committed artifact is
-the **decoded** `vector_rom_data.js`, not the ROM. Add the other PC's
-path to `tools/build_vector_rom.py` when known.
+File offset = `addr − base` (`$5000` for `034598`, `$4800` for
+`034599`). The committed artifacts are the **decoded** `vector_rom_data.js`
+(font) and `lander_rom_data.js` (lander), not the ROMs. Add the other
+PC's paths to `tools/build_vector_rom.py` when known.
 
 ## Build + run
 
 ```bash
-# regenerate the font data (reads the per-PC ROM, writes vector_rom_data.js)
+# regenerate both data files (reads the per-PC ROMs):
+#   vector_rom_data.js (font) + lander_rom_data.js (lander)
 python lunar_lander/tools/build_vector_rom.py
 
-# serve from the repo root, then open /lunar_lander/demos/vector_rom.html
+# serve from the repo root, then open a demo:
+#   /lunar_lander/demos/vector_rom.html   (font sheet)
+#   /lunar_lander/demos/lander.html       (9 lander poses)
 python -m http.server -b 127.0.0.1 8080
 ```
 
-`vector_rom_data.js` is **generated** — edit the build script, not the
-data file.
+`vector_rom_data.js` and `lander_rom_data.js` are **generated** — edit
+the build script, not the data files. (Preview config: launch.json
+`lunar_lander` serves this dir on port 8085.)
 
 ## Letter address table (034598-01.np3, $5000-$57FF)
 
@@ -69,5 +79,6 @@ V $56EA  W $56F4  X $5702  Y $570C  Z $571A  space $5726
 
 ## Next steps (user will provide info)
 
-Picture shapes — lander, terrain, flag, digits — from `034599-01.r3`
-plus the `034597-01.m3` index table. Addresses TBD.
+Remaining picture shapes — terrain, flag, digits (numeric readouts) —
+plus identifying where the `034597-01.m3` index table's `$58xx-$5Bxx`
+pointers map. Addresses TBD; the user supplies ROM context per shape set.

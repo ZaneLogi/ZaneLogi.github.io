@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Build lunar_lander/vector_rom_data.js from the Lunar Lander vector ROM.
+"""Build the Lunar Lander decoded-vector JS modules from the raw vector ROMs.
 
-Lunar Lander uses the SAME Atari DVG as Asteroids, so the opcode decoder
-is identical. Unlike asteroids_clone (which parses a markdown disassembly),
-this reads the RAW ROM bytes (034598-01.np3 — the $5000-$57FF picture/glyph
-ROM) and walks each glyph subroutine from a known entry address until RTS.
+Lunar Lander uses the SAME Atari DVG as Asteroids, so the opcode decoder is
+identical. Unlike asteroids_clone (which parses a markdown disassembly), this
+reads RAW ROM bytes and walks each subroutine from a known entry address until
+RTS.
 
-Scope: the letters/font block (A-Z + space). Picture shapes come later.
+Two ROMs / two outputs:
+  * 034598-01.np3  (CPU $5000-$57FF)  -> vector_rom_data.js : the A-Z + space font
+  * 034599-01.r3   (CPU $4800-$4FFF)  -> lander_rom_data.js : 8 base shapes + 9 tilt poses
 
 `decode_opcode()`, `format_op()` and `_signed()` are copied verbatim from
-asteroids_clone/tools/build_vector_rom.py (pure DVG byte decode + JS
-formatter); see asteroids_clone/docs/research_dvg.md §6 / §10 / §11.
+asteroids_clone/tools/build_vector_rom.py (pure DVG byte decode + JS formatter);
+see asteroids_clone/docs/research_dvg.md §6 / §10 / §11.
 """
 
 from __future__ import annotations
@@ -18,22 +20,17 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Per-PC raw-ROM paths (first existing wins). The ROM stays OUT of the repo;
-# the committed artifact is the decoded vector_rom_data.js this emits.
-DEFAULT_ROM_PATHS = [
+OUT_DIR = Path(__file__).resolve().parents[1]
+
+# --- ROM #1: the font (034598-01.np3, CPU $5000-$57FF) ----------------------
+FONT_ROM_PATHS = [
     Path("C:/Z_Temp/lunar_lander/034598-01.np3"),
     Path("D:/tmp/lunar_lander/034598-01.np3"),  # other PC — fill in when known
 ]
+FONT_BASE, FONT_END = 0x5000, 0x5800
 
-OUT_PATH = Path(__file__).resolve().parents[1] / "vector_rom_data.js"
-
-# 034598-01.np3 maps at CPU $5000; file offset = addr - ROM_BASE.
-ROM_BASE = 0x5000
-ROM_END = 0x5800  # one past the $5000-$57FF window
-
-# Letter -> CPU entry address (user-supplied; verified strictly monotonic,
-# and each gap matches the decoded glyph length). 26 letters + space, in
-# address order. Each glyph subroutine ends in RTS.
+# Letter -> CPU entry address (verified strictly monotonic; each gap matches the
+# decoded glyph length). 26 letters + space, in address order; each ends in RTS.
 GLYPHS = [
     ("A", 0x55BE), ("B", 0x55CE), ("C", 0x55E8), ("D", 0x55F4),
     ("E", 0x5604), ("F", 0x5614), ("G", 0x5622), ("H", 0x5634),
@@ -43,6 +40,28 @@ GLYPHS = [
     ("U", 0x56DE), ("V", 0x56EA), ("W", 0x56F4), ("X", 0x5702),
     ("Y", 0x570C), ("Z", 0x571A), ("Space", 0x5726),
 ]
+
+# --- ROM #2: the lander (034599-01.r3, CPU $4800-$4FFF) ----------------------
+LANDER_ROM_PATHS = [
+    Path("C:/Z_Temp/lunar_lander/034599-01.r3"),
+    Path("D:/tmp/lunar_lander/034599-01.r3"),  # other PC — fill in when known
+]
+LANDER_BASE, LANDER_END = 0x4800, 0x5000
+
+# Base shapes (octagon cabin / box body), one row at $4800-$48F8. Each pose
+# JSRs one of these, then adds that angle's legs/thruster SVECs. $4800 is
+# shared by pose #0 and the standing pose #8.
+LANDER_BASES = [
+    ("Base0", 0x4800), ("Base1", 0x4826), ("Base2", 0x4844), ("Base3", 0x486A),
+    ("Base4", 0x4890), ("Base5", 0x48AC), ("Base6", 0x48D2), ("Base7", 0x48F8),
+]
+# 9 tilt poses; #8 ($4B64) is the upright/standing attitude.
+LANDER_POSES = [
+    ("Pose0", 0x4916), ("Pose1", 0x495C), ("Pose2", 0x49AA), ("Pose3", 0x49F6),
+    ("Pose4", 0x4A42), ("Pose5", 0x4A80), ("Pose6", 0x4AC8), ("Pose7", 0x4B16),
+    ("Pose8", 0x4B64),
+]
+LANDER_MASTER = 0x4BA2  # direction dispatch table (9 JSRs) — end-bound for pose #8
 
 
 def decode_opcode(addr: int, byte_seq: list[int]) -> dict:
@@ -106,29 +125,72 @@ def decode_opcode(addr: int, byte_seq: list[int]) -> dict:
     raise ValueError(f"Unknown opcode nibble {op:X} at ${addr:04X}")
 
 
-def decode_glyph(rom: bytes, start_cpu: int, next_cpu: int | None) -> tuple[list[dict], int]:
-    """Walk a glyph subroutine from `start_cpu` until RTS (inclusive).
+def decode_sub(rom: bytes, start_cpu: int, rom_base: int, rom_end: int) -> tuple[list[dict], int]:
+    """Walk a subroutine from `start_cpu` until RTS (inclusive).
 
-    Opcode width: VEC (nibble 0-9) and LABS (nibble A) are 4 bytes; every
-    other opcode is 2 bytes. Returns (opcodes, end_cpu)."""
+    Opcode width: VEC (nibble 0-9) and LABS (nibble A) are 4 bytes; everything
+    else is 2. Returns (opcodes, end_cpu)."""
     ops: list[dict] = []
-    pc = start_cpu - ROM_BASE
+    pc = start_cpu - rom_base
     while True:
         if pc + 2 > len(rom):
-            raise ValueError(f"glyph @ ${start_cpu:04X}: ran past ROM end")
+            raise ValueError(f"sub @ ${start_cpu:04X}: ran past ROM end")
         word1 = rom[pc] | (rom[pc + 1] << 8)
         op = (word1 >> 12) & 0xF
         width = 4 if op <= 0xA else 2
         if pc + width > len(rom):
-            raise ValueError(f"glyph @ ${start_cpu:04X}: opcode runs past ROM end")
-        opcode = decode_opcode(ROM_BASE + pc, list(rom[pc:pc + width]))
+            raise ValueError(f"sub @ ${start_cpu:04X}: opcode runs past ROM end")
+        opcode = decode_opcode(rom_base + pc, list(rom[pc:pc + width]))
         ops.append(opcode)
         pc += width
         if opcode["op"] == "RTS":
             break
-        if ROM_BASE + pc >= ROM_END:
-            raise ValueError(f"glyph @ ${start_cpu:04X}: hit ROM end without RTS")
-    return ops, ROM_BASE + pc
+        if rom_base + pc >= rom_end:
+            raise ValueError(f"sub @ ${start_cpu:04X}: hit region end without RTS")
+    return ops, rom_base + pc
+
+
+def decode_region(
+    rom: bytes, base: int, end: int, entries: list[tuple[str, int]],
+    label_prefix: str, region_end: int | None = None,
+) -> tuple[dict[str, list[dict]], dict[str, int], dict[int, str], list[str]]:
+    """Decode every (name, addr) entry in a ROM region. `region_end` is the
+    cross-check end address for the LAST entry (the next thing after it);
+    intermediate entries cross-check against the following entry's start."""
+    subs: dict[str, list[dict]] = {}
+    label_to_addr: dict[str, int] = {}
+    addr_to_label: dict[int, str] = {}
+    warnings: list[str] = []
+    for i, (name, addr) in enumerate(entries):
+        full = f"{label_prefix}{name}" if label_prefix else name
+        next_addr = entries[i + 1][1] if i + 1 < len(entries) else region_end
+        ops, end_cpu = decode_sub(rom, addr, base, end)
+        subs[full] = ops
+        label_to_addr[full] = addr
+        addr_to_label[addr] = full
+        if ops[-1]["op"] != "RTS":
+            warnings.append(f"{full} (${addr:04X}) does not end with RTS")
+        if next_addr is not None and end_cpu != next_addr:
+            warnings.append(
+                f"{full} (${addr:04X}) decoded to ${end_cpu:04X}, "
+                f"but next entry starts at ${next_addr:04X}"
+            )
+    return subs, label_to_addr, addr_to_label, warnings
+
+
+def resolve_targets(subs: dict[str, list[dict]], addr_to_label: dict[int, str]) -> list[str]:
+    """Replace numeric JSR/JMP `_target_word` with symbolic `target` names.
+    Target word -> CPU byte = word*2 + 0x4000 (DVG byte 0 == CPU $4000)."""
+    warnings: list[str] = []
+    for name, ops in subs.items():
+        for op in ops:
+            if op["op"] in ("JSR", "JMP"):
+                cpu = op["_target_word"] * 2 + 0x4000
+                op["target"] = addr_to_label.get(cpu, f"_at_{cpu:04X}")
+                if op["target"].startswith("_at_"):
+                    warnings.append(f"{op['op']} in {name} -> ${cpu:04X} (no matching sub)")
+                del op["_target_word"]
+    return warnings
 
 
 def _signed(val: int, width: int) -> str:
@@ -171,26 +233,14 @@ def format_op(op: dict) -> str:
     raise ValueError(f"Cannot format opcode {op}")
 
 
-def emit_js(subs: dict[str, list[dict]], label_to_addr: dict[str, int]) -> str:
-    lines = [
-        "// lunar_lander/vector_rom_data.js",
-        "//",
-        "// GENERATED FILE — do not edit by hand.",
-        "// Source: 034598-01.np3 (Lunar Lander picture/glyph ROM, CPU $5000-$57FF)",
-        "// Build:  python lunar_lander/tools/build_vector_rom.py",
-        "// Spec:   asteroids_clone/docs/research_dvg.md §11 (shared DVG format)",
-        "//",
-        "// Scope: the letters/font block (A-Z + space). Each glyph is a DVG",
-        "// subroutine ending in RTS, decoded byte-faithfully from the ROM.",
-        "// Picture shapes (lander/terrain/flag/digits) are a later pass.",
-        "",
-        "export const VROM = {",
-    ]
+def emit_js(var: str, subs: dict[str, list[dict]], label_to_addr: dict[str, int],
+            header: list[str], comment) -> str:
+    lines = list(header)
+    lines.append("")
+    lines.append(f"export const {var} = {{")
     for name, ops in subs.items():
         addr = label_to_addr[name]
-        letter = name[len("Char_"):]
-        disp = "space" if letter == "Space" else f"'{letter}'"
-        lines.append(f"  // ${addr:04X} — {disp} — {len(ops)} opcodes")
+        lines.append(f"  // ${addr:04X} — {comment(name)} — {len(ops)} opcodes")
         lines.append(f"  {name}: [")
         for op in ops:
             lines.append(f"    {format_op(op)},")
@@ -203,57 +253,97 @@ def emit_js(subs: dict[str, list[dict]], label_to_addr: dict[str, int]) -> str:
     return "\n".join(lines)
 
 
+def _font_comment(name: str) -> str:
+    letter = name[len("Char_"):]
+    return "space" if letter == "Space" else f"'{letter}'"
+
+
+def _lander_comment(name: str) -> str:
+    if name.startswith("Base"):
+        return f"base shape {name[len('Base'):]} (octagon cabin)"
+    if name == "Pose8":
+        return "pose 8 — standing/upright"
+    return f"pose {name[len('Pose'):]} (tilt)"
+
+
+def build_font(rom: bytes) -> list[str]:
+    entries = [(f"Char_{l}", a) for l, a in GLYPHS]
+    subs, label_to_addr, addr_to_label, warnings = decode_region(
+        rom, FONT_BASE, FONT_END, entries, label_prefix="")
+    warnings += resolve_targets(subs, addr_to_label)
+    header = [
+        "// lunar_lander/vector_rom_data.js",
+        "//",
+        "// GENERATED FILE — do not edit by hand.",
+        "// Source: 034598-01.np3 (Lunar Lander picture/glyph ROM, CPU $5000-$57FF)",
+        "// Build:  python lunar_lander/tools/build_vector_rom.py",
+        "// Spec:   asteroids_clone/docs/research_dvg.md §11 (shared DVG format)",
+        "//",
+        "// Scope: the letters/font block (A-Z + space). Each glyph is a DVG",
+        "// subroutine ending in RTS, decoded byte-faithfully from the ROM.",
+        "// Picture shapes (lander) live in lander_rom_data.js.",
+    ]
+    (OUT_DIR / "vector_rom_data.js").write_text(
+        emit_js("VROM", subs, label_to_addr, header, _font_comment), encoding="utf-8")
+    return [f"font: {len(subs)} glyphs"] + [f"  warning: {w}" for w in warnings]
+
+
+def build_lander(rom: bytes) -> list[str]:
+    base_entries = list(LANDER_BASES)
+    pose_entries = list(LANDER_POSES)
+    # Bases first (so poses can reference them); the last base end-bounds at the
+    # first pose, the last pose end-bounds at the master dispatch table.
+    bsubs, blta, bata, bwarn = decode_region(
+        rom, LANDER_BASE, LANDER_END, base_entries, "", region_end=pose_entries[0][1])
+    psubs, plta, pata, pwarn = decode_region(
+        rom, LANDER_BASE, LANDER_END, pose_entries, "", region_end=LANDER_MASTER)
+
+    subs = {**bsubs, **psubs}
+    label_to_addr = {**blta, **plta}
+    addr_to_label = {**bata, **pata}
+    warnings = bwarn + pwarn + resolve_targets(subs, addr_to_label)
+
+    header = [
+        "// lunar_lander/lander_rom_data.js",
+        "//",
+        "// GENERATED FILE — do not edit by hand.",
+        "// Source: 034599-01.r3 (Lunar Lander picture ROM #2, CPU $4800-$4FFF)",
+        "// Build:  python lunar_lander/tools/build_vector_rom.py",
+        "// Spec:   asteroids_clone/docs/research_dvg.md §11 (shared DVG format)",
+        "//",
+        "// The lander: 8 base shapes (octagon cabin) + 9 tilt poses. Each pose",
+        "// JSRs a base shape then adds that angle's legs/thruster SVECs. The",
+        "// master direction table at $4BA2 (9 JSRs, tilt-indexed) is not ported;",
+        "// the demo renders each pose subroutine directly. Byte-faithful decode.",
+    ]
+    (OUT_DIR / "lander_rom_data.js").write_text(
+        emit_js("LANDER", subs, label_to_addr, header, _lander_comment), encoding="utf-8")
+    return [f"lander: {len(bsubs)} base shapes + {len(psubs)} poses"] + \
+           [f"  warning: {w}" for w in warnings]
+
+
+def _load(paths: list[Path], what: str) -> bytes | None:
+    p = next((p for p in paths if p.exists()), None)
+    if p is None:
+        print(f"ERROR: {what} not found in any known per-PC path:", file=sys.stderr)
+        for q in paths:
+            print(f"  - {q}", file=sys.stderr)
+        return None
+    print(f"reading: {p} ({p.stat().st_size} bytes)")
+    return p.read_bytes()
+
+
 def main() -> int:
-    rom_path = next((p for p in DEFAULT_ROM_PATHS if p.exists()), None)
-    if rom_path is None:
-        print("ERROR: 034598-01.np3 not found in any known per-PC path:", file=sys.stderr)
-        for p in DEFAULT_ROM_PATHS:
-            print(f"  - {p}", file=sys.stderr)
+    font_rom = _load(FONT_ROM_PATHS, "034598-01.np3 (font)")
+    lander_rom = _load(LANDER_ROM_PATHS, "034599-01.r3 (lander)")
+    if font_rom is None or lander_rom is None:
         return 1
 
-    rom = rom_path.read_bytes()
-    print(f"reading: {rom_path} ({len(rom)} bytes)")
-
-    subs: dict[str, list[dict]] = {}
-    label_to_addr: dict[str, int] = {}
-    addr_to_label: dict[int, str] = {}
-    warnings: list[str] = []
-
-    for i, (letter, addr) in enumerate(GLYPHS):
-        name = f"Char_{letter}"
-        next_cpu = GLYPHS[i + 1][1] if i + 1 < len(GLYPHS) else None
-        ops, end_cpu = decode_glyph(rom, addr, next_cpu)
-        subs[name] = ops
-        label_to_addr[name] = addr
-        addr_to_label[addr] = name
-        if ops[-1]["op"] != "RTS":
-            warnings.append(f"{name} (${addr:04X}) does not end with RTS")
-        if next_cpu is not None and end_cpu != next_cpu:
-            warnings.append(
-                f"{name} (${addr:04X}) decoded to ${end_cpu:04X}, "
-                f"but next glyph starts at ${next_cpu:04X}"
-            )
-
-    # Resolve any JSR/JMP targets against the glyph entry addresses. None are
-    # expected for the font block (glyphs are self-contained SVEC + RTS), but
-    # handle them so a stray inter-glyph call surfaces as a warning, not a crash.
-    for name, ops in subs.items():
-        for op in ops:
-            if op["op"] in ("JSR", "JMP"):
-                cpu = op["_target_word"] * 2 + 0x4000
-                op["target"] = addr_to_label.get(cpu, f"_at_{cpu:04X}")
-                if op["target"].startswith("_at_"):
-                    warnings.append(f"{op['op']} in {name} -> ${cpu:04X} (no matching glyph)")
-                del op["_target_word"]
-
-    for w in warnings:
-        print(f"  warning: {w}", file=sys.stderr)
-    print(f"  decoded {len(subs)} glyphs"
-          f"{' — all end in RTS, no warnings' if not warnings else ''}")
-
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUT_PATH.write_text(emit_js(subs, label_to_addr), encoding="utf-8")
-    print(f"wrote:   {OUT_PATH}")
+    report = build_font(font_rom) + build_lander(lander_rom)
+    for line in report:
+        (print(line, file=sys.stderr) if line.lstrip().startswith("warning:") else print(line))
+    print(f"wrote:   {OUT_DIR / 'vector_rom_data.js'}")
+    print(f"wrote:   {OUT_DIR / 'lander_rom_data.js'}")
     return 0
 
 

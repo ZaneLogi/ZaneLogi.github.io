@@ -7,7 +7,7 @@
 //
 // Scope: the letters/font block (A-Z + space). Each glyph is a DVG
 // subroutine ending in RTS, decoded byte-faithfully from the ROM.
-// Picture shapes (lander/terrain/flag/digits) are a later pass.
+// Picture shapes (lander) live in lander_rom_data.js.
 
 export const VROM = {
   // $55BE — 'A' — 8 opcodes
