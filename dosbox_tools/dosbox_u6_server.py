@@ -80,6 +80,29 @@ U6_MouseMode     = 0x04BE   # int; nonzero => mouse-driven UI mode (keyboard pla
 
 
 # ----------------------------------------------------------------------------
+# Character stats + item weight -- the inputs for "suit the party" gear decisions
+# (u6.h, seg_2337.c GetStr/GetDex/GetInt, seg_155D.c STAT_GetEquipSlot). STREN/
+# DEXTE/INTEL are direct DGROUP byte arrays per slot; Level/TypeWeight are far
+# pointers. Equip slot is decided by an object's TILE id (BaseTile[type]+frame),
+# not its type. Load caps: carry = STR*20 (seg_1944.c:1945), equip = STR*10
+# (seg_155D.c:546); both comparable to TypeWeight[type].
+# ----------------------------------------------------------------------------
+U6_STREN = 0x8C4A           # unsigned char[]; Strength per slot (direct)
+U6_DEXTE = 0x3316           # unsigned char[]; Dexterity per slot (direct)
+U6_INTEL = 0x3433           # unsigned char[]; Intelligence per slot (direct)
+U6_Level_ptr      = 0x8E4C  # far ptr -> Level[] (unsigned char per slot)
+U6_TypeWeight_ptr = 0xB417  # far ptr -> TypeWeight[type] (unsigned char)
+U6_EquipWeaponTbl = 0x07DD  # int[33] (D_07DD) stored DIRECTLY in DGROUP; RHND weapon TILE ids
+CARRY_PER_STR = 20          # max carried weight = STR * 20
+EQUIP_PER_STR = 10          # max readied weight = STR * 10
+
+# Equip-slot index -> name (u6.h SLOT_*). STAT_GetEquipSlot returns one of these
+# or -1 (not readyable); 8/9 are input slots resolved to a free hand/finger.
+_EQUIP_SLOT_NAME = {0: "HEAD", 1: "NECK", 2: "RHND", 3: "RFNG", 4: "CHST",
+                    5: "LHND", 6: "LFNG", 7: "FEET", 8: "2HND", 9: "RING"}
+
+
+# ----------------------------------------------------------------------------
 # Ultima VI conversation / "talk" engine -- DGROUP globals (offsets from the
 # u6-decompiled seg_1703.c "talkdr" module, u6.h, BSS.ASM). On talk start the VM
 # loads the current NPC's WHOLE script from converse.a into TalkBuf, then
@@ -274,18 +297,20 @@ def u6_hook(avatar_name: str = "") -> str:
     return (f"Hooked U6: MemBase=0x{S.membase:x}, DS=0x{ds:04x} "
             f"(derived from {avatar_name!r} @ host 0x{host:x}).\n"
             f"Names[0] reads back as {readback!r}.{extra}\n"
-            f"Ready -- read: u6_avatar / u6_party / u6_input_state / u6_object / "
-            f"u6_inventory / u6_npcs_near / u6_walkable / u6_conversation; act: u6_move "
-            f"/ u6_talk / u6_say / u6_key; navigate: u6_pathfind / u6_goto / u6_talk_to; "
-            f"verify: u6_validate_passability. Avatar = slot 1.")
+            f"Ready -- read: u6_avatar / u6_party / u6_roster_status / u6_input_state "
+            f"/ u6_object / u6_inventory / u6_npcs_near / u6_objects_near / u6_walkable "
+            f"/ u6_conversation; act: u6_move / u6_talk / u6_say / u6_key; navigate: "
+            f"u6_pathfind / u6_goto / u6_talk_to; verify: u6_validate_passability. "
+            f"Avatar = slot 1.")
 
 
 @mcp.tool()
 def u6_object(slot: int, segment: int = -1) -> str:
     """Ultima VI: decode one object/NPC slot from the parallel arrays
     (ObjStatus/ObjPos/ObjShapeType/Amount). Shows CoordUse + world x/y/z (LOCXYZ)
-    or assoc holder (CONTAINED/INVEN/EQUIP), plus shape type/frame and quan/qual.
-    DS comes from u6_hook unless you override it with segment=."""
+    or assoc holder (CONTAINED/INVEN/EQUIP), plus shape type/frame, quan/qual, and
+    gear metadata (tile, weight, and the equip slot or 'not readyable'). DS comes
+    from u6_hook unless you override it with segment=."""
     if S.membase is None:
         return dm.HINT_NO_MEMBASE
     ds, err = _ds(segment)
@@ -297,14 +322,18 @@ def u6_object(slot: int, segment: int = -1) -> str:
         pos = dm.read(S.handle, base_addr + U6_ObjPos + slot * 3, 3)
         sh  = int.from_bytes(dm.read(S.handle, base_addr + U6_ObjShapeType + slot * 2, 2), "little")
         am  = int.from_bytes(dm.read(S.handle, base_addr + U6_Amount + slot * 2, 2), "little")
+        basetile, tw, weapons = _gear_tables(base_addr)
     except OSError as ex:
         return f"Read failed for slot 0x{slot:x} (DS=0x{ds:04x}): {ex}"
     cu = st & 0x18
     V = pos[0] | (pos[1] << 8) | (pos[2] << 16)
     where = (f"x={V & 0x3ff} y={(V >> 10) & 0x3ff} z={(V >> 20) & 0xf}"
              if cu == 0 else f"assoc=0x{V & 0xffff:x}")
+    tile, wt, eslot = _gear_of(sh, basetile, tw, weapons)
+    ready = "not readyable" if eslot < 0 else f"ready->{_EQUIP_SLOT_NAME[eslot]}"
     return (f"slot 0x{slot:x}: status=0x{st:02x} {_COORDUSE.get(cu, '?')}  {where}  "
-            f"type={sh & 0x3ff} frame={sh >> 10}  quan={am & 0xff} qual={am >> 8}")
+            f"type={sh & 0x3ff} frame={sh >> 10}  quan={am & 0xff} qual={am >> 8}  "
+            f"tile={tile}  weight={wt}  {ready}")
 
 
 @mcp.tool()
@@ -508,22 +537,67 @@ def _read_far_ptr(base_addr, ds_off):
     return S.membase + (seg << 4) + off
 
 
-def _static_table(base_addr, ds_off, nbytes, name):
-    """Read a STATIC DGROUP far-pointer table (TerrainType / TileFlag / D_B3EF /
-    BaseTile) once and cache it. These are loaded from the game's data files at
-    boot and don't change during play, so re-reading them on every grid build is
-    pure waste. The read is LAZY (first navigation call, not session start). The
-    cache is keyed to base_addr (= MemBase + DS<<4), so a DOSBox restart or a
-    different-avatar re-hook -- which rebases the segment -- transparently flushes
-    it. (Game data is identical across saves in one process, so reuse is safe.)"""
+def _static_table(base_addr, ds_off, nbytes, name, far=True):
+    """Read a STATIC table once and cache it. `far=True` (default) resolves a
+    DGROUP far pointer at ds_off (TerrainType / TileFlag / D_B3EF / BaseTile /
+    TypeWeight); `far=False` reads a table stored directly in DGROUP at ds_off
+    (e.g. the D_07DD weapon-tile list). All are game data loaded at boot that
+    doesn't change during play, so re-reading per call is pure waste. The read is
+    LAZY (first use, not session start); the cache is keyed to base_addr (= MemBase
+    + DS<<4), so a DOSBox restart or different-avatar re-hook -- which rebases the
+    segment -- transparently flushes it. (Game data is identical across saves in
+    one process, so reuse is safe.)"""
     if S.static_key != base_addr:
         S.static_cache.clear()
         S.static_key = base_addr
     table = S.static_cache.get(name)
     if table is None:
-        table = dm.read(S.handle, _read_far_ptr(base_addr, ds_off), nbytes)
+        addr = _read_far_ptr(base_addr, ds_off) if far else base_addr + ds_off
+        table = dm.read(S.handle, addr, nbytes)
         S.static_cache[name] = table
     return table
+
+
+def _equip_slot(tile, weapon_tiles):
+    """Port of STAT_GetEquipSlot (seg_155D.c:129): given an object's TILE id
+    (BaseTile[type] + frame), return its equip slot 0..9 (see _EQUIP_SLOT_NAME) or
+    -1 if it can't be readied. Checks run in SOURCE ORDER -- first match wins -- so
+    the 0x219 overlap correctly resolves to NECK (tested before CHST). weapon_tiles
+    is the D_07DD right-hand-weapon tile set."""
+    s = tile
+    if s in (0x21A, 0x21B):                                       return 7   # FEET
+    if s == 0x258 or 0x37D <= s <= 0x37F:                         return 9   # RING
+    if s in (0x219, 0x217, 0x101) or 0x250 <= s <= 0x252:         return 1   # NECK
+    if 0x200 <= s <= 0x207:                                       return 0   # HEAD
+    if (0x210 <= s <= 0x216) or s in (0x218, 0x219, 0x28C, 0x28E, 0x29D, 0x257):
+        return 4                                                             # CHST
+    if s in (0x228, 0x229, 0x231, 0x235) or 0x22B <= s <= 0x22E:  return 8   # 2HND
+    if (0x208 <= s <= 0x20F) or s == 0x222:                       return 5   # LHND
+    if s in weapon_tiles:                                         return 2   # RHND
+    return -1
+
+
+def _gear_tables(base_addr):
+    """(BaseTile, TypeWeight, weapon-tile set) from the lazy static cache. BaseTile
+    maps object type -> base tile; TypeWeight maps type -> weight (comparable to the
+    STR*N caps); the weapon set is D_07DD (RHND tiles for the equip-slot decode)."""
+    basetile = _static_table(base_addr, U6_BaseTile_ptr, _BASETILE_N * 2, "basetile")
+    tw = _static_table(base_addr, U6_TypeWeight_ptr, _BASETILE_N, "typeweight")
+    raw = _static_table(base_addr, U6_EquipWeaponTbl, 33 * 2, "d07dd", far=False)
+    weapons = frozenset((raw[i * 2] | (raw[i * 2 + 1] << 8)) for i in range(33))
+    return basetile, tw, weapons
+
+
+def _gear_of(sh, basetile, tw, weapons):
+    """For a packed ObjShapeType `sh` -> (tile, weight, equip_slot). equip_slot is
+    -1 (not readyable) or 0..9. tile = BaseTile[type] + frame."""
+    typ = sh & 0x3ff
+    if typ >= _BASETILE_N:
+        return -1, 0, -1
+    tile = (basetile[typ * 2] | (basetile[typ * 2 + 1] << 8)) + (sh >> 10)
+    wt = tw[typ] if typ < len(tw) else 0
+    eslot = _equip_slot(tile, weapons) if 0 <= tile < 0x800 else -1
+    return tile, wt, eslot
 
 
 def _controlled_slot(base_addr):
@@ -931,6 +1005,62 @@ def u6_input_state(segment: int = -1) -> str:
 
 
 @mcp.tool()
+def u6_roster_status(segment: int = -1) -> str:
+    """Ultima VI: per-member STR/DEX/INT/Level + load (carried & readied vs max) --
+    the inputs for deciding who can use/bear which gear. Max carry = STR*20, max
+    readied = STR*10 (engine caps). Current load is summed from each member's
+    INVEN/EQUIP items by TypeWeight (top-level held items; contents of carried
+    containers are not recursed). DS from u6_hook unless overridden with segment=."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    try:
+        psize  = dm.read(S.handle, base + U6_PartySize, 1)[0]
+        party  = dm.read(S.handle, base + U6_Party, 17)
+        names  = dm.read(S.handle, base + U6_Names, (psize + 1) * 14)
+        stren  = dm.read(S.handle, base + U6_STREN, 0x100)
+        dexte  = dm.read(S.handle, base + U6_DEXTE, 0x100)
+        intel  = dm.read(S.handle, base + U6_INTEL, 0x100)
+        level  = dm.read(S.handle, _read_far_ptr(base, U6_Level_ptr), 0x100)
+        status = dm.read(S.handle, base + U6_ObjStatus, U6_MAX_SLOTS)
+        objpos = dm.read(S.handle, base + U6_ObjPos, U6_MAX_SLOTS * 3)
+        shape  = dm.read(S.handle, base + U6_ObjShapeType, U6_MAX_SLOTS * 2)
+        amount = dm.read(S.handle, base + U6_Amount, U6_MAX_SLOTS * 2)
+        _bt, tw, _wp = _gear_tables(base)
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    if not 0 < psize <= 16:
+        return (f"PartySize={psize} out of range -- DS likely wrong or no game "
+                f"loaded (DS=0x{ds:04x}).")
+    # Current load per holder: INVEN -> carried, EQUIP -> readied.
+    carried, readied = {}, {}
+    for i in range(0x100, U6_MAX_SLOTS):
+        cu = status[i] & 0x18
+        if cu not in (0x10, 0x18):
+            continue
+        holder = objpos[i * 3] | (objpos[i * 3 + 1] << 8)
+        typ = (shape[i * 2] | (shape[i * 2 + 1] << 8)) & 0x3ff
+        quan = amount[i * 2] or 1
+        w = (tw[typ] if typ < len(tw) else 0) * quan
+        d = readied if cu == 0x18 else carried
+        d[holder] = d.get(holder, 0) + w
+    out = [f"Party roster status ({psize} members):",
+           "  idx  slot  name           STR DEX INT Lvl   carry(cur/max)  ready(cur/max)"]
+    for k in range(psize):
+        s = party[k]
+        nm = (names[k * 14:k * 14 + 14].split(b"\x00", 1)[0]
+              .decode("latin-1", "replace") or f"<{k}>")
+        STR = stren[s]
+        out.append(f"  {k:>3}  0x{s:02x}  {nm:<13}  {STR:>3} {dexte[s]:>3} {intel[s]:>3} "
+                   f"{level[s]:>3}   {carried.get(s, 0):>5}/{STR * CARRY_PER_STR:<5}  "
+                   f"{readied.get(s, 0):>4}/{STR * EQUIP_PER_STR:<4}")
+    return "\n".join(out)
+
+
+@mcp.tool()
 def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
     """Ultima VI: NPCs/creatures placed in the world (LOCXYZ) within `radius`
     (Chebyshev) of the CONTROLLED actor (where you are -- the avatar in party
@@ -971,6 +1101,61 @@ def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
            "  dist  slot     x    y   dir  type"]
     for dist, i, x, y, comp, typ in rows:
         out.append(f"  {dist:>4}  0x{i:02x}  {x:>4} {y:>4}  {comp:<3}  {typ}")
+    return "\n".join(out)
+
+
+@mcp.tool()
+def u6_objects_near(radius: int = 8, max_items: int = 30, segment: int = -1) -> str:
+    """Ultima VI: world OBJECTS (slot >= 0x100, placed on the map) within `radius`
+    (Chebyshev) of the controlled actor on the same level -- find gear/items to
+    Look or Get. Reports slot, position, compass dir, distance, type, weight, and
+    the equip slot if readyable. Capped at the nearest `max_items` (any dropped are
+    noted). DS from u6_hook unless overridden with segment=."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    try:
+        x0, y0, z0 = _controlled_xyz(base)
+        status = dm.read(S.handle, base + U6_ObjStatus, U6_MAX_SLOTS)
+        pos = dm.read(S.handle, base + U6_ObjPos, U6_MAX_SLOTS * 3)
+        shape = dm.read(S.handle, base + U6_ObjShapeType, U6_MAX_SLOTS * 2)
+        basetile, tw, weapons = _gear_tables(base)
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    rows = []
+    for i in range(0x100, U6_MAX_SLOTS):
+        if (status[i] & 0x18) != 0:                      # only LOCXYZ (loose on the map)
+            continue
+        sh = shape[i * 2] | (shape[i * 2 + 1] << 8)
+        typ = sh & 0x3ff
+        if typ == 0:                                     # empty slot
+            continue
+        v = pos[i * 3] | (pos[i * 3 + 1] << 8) | (pos[i * 3 + 2] << 16)
+        x, y, z = v & 0x3ff, (v >> 10) & 0x3ff, (v >> 20) & 0xf
+        if z != z0:
+            continue
+        dist = max(abs(x - x0), abs(y - y0))
+        if dist > radius:
+            continue
+        _t, wt, eslot = _gear_of(sh, basetile, tw, weapons)
+        rows.append((dist, i, x, y, _compass(x - x0, y - y0), typ, wt, eslot))
+    if not rows:
+        return f"No world objects within {radius} of you ({x0},{y0},z{z0})."
+    rows.sort()
+    dropped = max(0, len(rows) - max_items)
+    rows = rows[:max_items]
+    out = [f"World objects within {radius} of you ({x0},{y0},z{z0}):",
+           "  dist  slot     x    y   dir  type  weight  ready"]
+    for dist, i, x, y, comp, typ, wt, eslot in rows:
+        rd = "-" if eslot < 0 else _EQUIP_SLOT_NAME[eslot]
+        out.append(f"  {dist:>4}  0x{i:03x}  {x:>4} {y:>4}  {comp:<3}  {typ:>4}  "
+                   f"{wt:>6}  {rd}")
+    if dropped:
+        out.append(f"  (+{dropped} more beyond the nearest {max_items}; "
+                   f"raise max_items or lower radius)")
     return "\n".join(out)
 
 

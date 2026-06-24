@@ -86,9 +86,11 @@ internally, so they fire only on a real turn boundary.
 ## 4. Tool surface
 
 **Perceive:** `u6_avatar` (controlled actor pos+facing), `u6_party` (solo/party,
-combat, who's controlled), `u6_input_state` (turn-readiness), `u6_object(slot)`,
-`u6_inventory(npc_slot)`, `u6_npcs_near(radius)`, `u6_walkable` (40×40 grid),
-`u6_conversation` (live talk + TalkBuf).
+combat, who's controlled), `u6_roster_status` (STR/DEX/INT/Level + load caps),
+`u6_input_state` (turn-readiness), `u6_object(slot)` (incl. tile/weight/equip-slot),
+`u6_inventory(npc_slot)`, `u6_npcs_near(radius)`, `u6_objects_near(radius)` (map
+items + gear hints), `u6_walkable` (40×40 grid), `u6_conversation` (live talk +
+TalkBuf).
 **Act:** `u6_move` · `u6_talk` · `u6_say` · `u6_key`.
 **Navigate:** `u6_pathfind` (plan) · `u6_goto` (closed-loop) · `u6_talk_to`.
 **Verify:** `u6_validate_passability` (predict-vs-live passability gate).
@@ -105,11 +107,11 @@ combat, who's controlled), `u6_input_state` (turn-readiness), `u6_object(slot)`,
 | Move / explore | `u6_move` / `u6_goto` | `u6_walkable` / `u6_avatar` | ✅ HAVE |
 | Solo↔party / combat awareness | `u6_key('0')` / `'1'..'8'` | `u6_party` | ✅ HAVE (act = key) |
 | Check party inventory | — | `u6_inventory(member)` | ✅ HAVE |
-| Roster STR/DEX/INT + load | — | **`u6_roster_status`** | ❌ GAP |
-| Locate gear in the world | — | **`u6_objects_near`** | ❌ GAP |
+| Roster STR/DEX/INT + load | — | `u6_roster_status` | ✅ HAVE |
+| Locate gear in the world | — | `u6_objects_near` | ✅ HAVE |
+| Is it readyable + which slot | — | `u6_object` (tile/weight/slot) | ✅ HAVE |
 | Identify / search (`L`) | `u6_look` | name via decode/scroll | ❌ GAP |
 | Pick up gear (`G`) | `u6_get` | `u6_inventory` | ❌ GAP |
-| Is it readyable + which slot | — | enrich **`u6_object`** (slot/weight) | ❌ GAP |
 | Equip gear (panel UI) | **`u6_ready`** (`<tab>`→nav→`<enter>`) | `u6_inventory` (EQUIP) | ❌ GAP (hard) |
 | Use key / open door / leave gate (`U`) | **`u6_use`** | `u6_walkable` (cell opens) | ❌ GAP |
 
@@ -125,12 +127,14 @@ explore → leave the castle. (On foot, party mode, no combat.)
 
 - **Slice 1 (talk + explore + leave-if-open):** needs no new gameplay tools beyond
   `u6_input_state` — it's the live validation of the whole perceive/act/nav stack.
-- **Gear slice (full M1):** `u6_use`, `u6_get`, `u6_look`, `u6_objects_near`,
-  `u6_roster_status`, enrich `u6_object`; **`u6_ready` last** (panel UI).
+- **Gear slice (full M1):** *perception done* — `u6_roster_status`, `u6_objects_near`,
+  and `u6_object` (tile/weight/equip-slot) give the full "suit yourself" inputs.
+  *Remaining (action verbs):* `u6_look`, `u6_get`, `u6_use`; **`u6_ready` last**
+  (inventory-panel UI). These send keys, so they're confirmed live, not offline.
 
-**Sequence:** (1) `u6_input_state` + poll-before-send ✅ done → (2) live Slice 1
-(validates the stack; reveals whether the gate needs a key) → (3) build the gear
-slice based on what Slice 1 surfaces.
+**Sequence:** (1) `u6_input_state` + poll-before-send ✅ done → (2) gear perception
+✅ done (offline-verified) → (3) live Slice 1 (validates the stack; reveals whether
+the gate needs a key) → (4) build the gear action verbs from what Slice 1 surfaces.
 
 ---
 

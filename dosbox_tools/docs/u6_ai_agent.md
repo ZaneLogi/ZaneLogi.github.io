@@ -66,8 +66,10 @@ Implemented (logic verified; **memory offsets pending live verification** — se
   move-confirm primitive; the avatar in party mode, the active member in solo),
   `u6_party` (solo/party mode, combat on/off, and who's controlled now),
   `u6_input_state` (**turn-readiness** — poll for `COMMAND_READY` before acting;
-  U6 is turn-based with buffered input), `u6_object(slot)`,
-  `u6_inventory(npc_slot)`, `u6_npcs_near(radius)`, `u6_walkable` (40×40 ASCII
+  U6 is turn-based with buffered input), `u6_roster_status` (per-member
+  STR/DEX/INT/Level + carry/equip load), `u6_object(slot)` (incl. tile/weight/
+  equip-slot), `u6_inventory(npc_slot)`, `u6_npcs_near(radius)`,
+  `u6_objects_near(radius)` (map items + gear hints), `u6_walkable` (40×40 ASCII
   passability grid), `u6_conversation` (live talk state + TalkBuf window).
 - **Act:** `u6_move(dir)`, `u6_talk(dir)`, `u6_say(text)`, `u6_key(key)`.
 - **Navigate:** `u6_pathfind(npc_slot)` (planner), `u6_goto(npc_slot)`
