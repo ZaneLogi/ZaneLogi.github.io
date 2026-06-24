@@ -30,6 +30,12 @@ from mcp.server.fastmcp import FastMCP
 import dosbox_mem as dm
 import dosbox_input as di
 
+try:                                    # committed name table decoded from LOOK.LZD
+    from u6_look_names import tile_name as _tile_name
+except Exception:                       # module missing in deployment -> numeric fallback
+    def _tile_name(_tile):
+        return f"tile{_tile}"
+
 mcp = FastMCP("dosbox-u6")
 
 
@@ -339,8 +345,9 @@ def u6_object(slot: int, segment: int = -1) -> str:
     where = (f"x={V & 0x3ff} y={(V >> 10) & 0x3ff} z={(V >> 20) & 0xf}"
              if cu == 0 else f"assoc=0x{V & 0xffff:x}")
     tile, wt, eslot = _gear_of(sh, basetile, tw, weapons)
+    name = _tile_name(tile)                                  # LOOK.LZD name for this tile
     ready = "not readyable" if eslot < 0 else f"ready->{_EQUIP_SLOT_NAME[eslot]}"
-    return (f"slot 0x{slot:x}: status=0x{st:02x} {_COORDUSE.get(cu, '?')}  {where}  "
+    return (f"slot 0x{slot:x} '{name}': status=0x{st:02x} {_COORDUSE.get(cu, '?')}  {where}  "
             f"type={sh & 0x3ff} frame={sh >> 10}  quan={am & 0xff} qual={am >> 8}  "
             f"tile={tile}  weight={wt}  {ready}")
 
@@ -351,8 +358,8 @@ def u6_inventory(npc_slot: int, segment: int = -1,
     """Ultima VI: list an NPC's inventory -- every object flagged INVEN or EQUIP
     whose assoc (holder slot) == npc_slot. Walks the whole object-slot range
     in-process and returns the decoded items (slot, INVEN/EQUIP, shape type,
-    frame, quan, qual). The Avatar is its roster[0] slot (usually 1). DS comes
-    from u6_hook unless you override it with segment=."""
+    frame, quan, qual, and the LOOK.LZD name). The Avatar is its roster[0] slot
+    (usually 1). DS comes from u6_hook unless you override it with segment=."""
     if S.membase is None:
         return dm.HINT_NO_MEMBASE
     ds, err = _ds(segment)
@@ -364,6 +371,7 @@ def u6_inventory(npc_slot: int, segment: int = -1,
         pos    = dm.read(S.handle, base_addr + U6_ObjPos, max_slots * 3)
         shape  = dm.read(S.handle, base_addr + U6_ObjShapeType, max_slots * 2)
         amount = dm.read(S.handle, base_addr + U6_Amount, max_slots * 2)
+        basetile, tw, weapons = _gear_tables(base_addr)
     except OSError as ex:
         return f"Read failed walking object arrays (DS=0x{ds:04x}): {ex}"
     rows = []
@@ -376,14 +384,16 @@ def u6_inventory(npc_slot: int, segment: int = -1,
             continue
         sh = shape[i * 2] | (shape[i * 2 + 1] << 8)
         am = amount[i * 2] | (amount[i * 2 + 1] << 8)
+        tile, _wt, _es = _gear_of(sh, basetile, tw, weapons)   # tile -> LOOK.LZD name
         rows.append((i, "EQUIP" if cu == 0x18 else "INVEN",
-                     sh & 0x3ff, sh >> 10, am & 0xff, am >> 8))
+                     sh & 0x3ff, sh >> 10, am & 0xff, am >> 8, _tile_name(tile)))
     if not rows:
         return f"No INVEN/EQUIP objects with assoc={npc_slot} (DS=0x{ds:04x})."
     out = [f"{len(rows)} item(s) held by NPC slot {npc_slot} (DS=0x{ds:04x}):",
-           "  slot   use    type  frame  quan  qual"]
-    for slot, use, typ, frame, quan, qual in rows:
-        out.append(f"  0x{slot:03x}  {use:<5}  {typ:>4}  {frame:>5}  {quan:>4}  {qual:>4}")
+           "  slot   use    type  frame  quan  qual  name"]
+    for slot, use, typ, frame, quan, qual, name in rows:
+        out.append(f"  0x{slot:03x}  {use:<5}  {typ:>4}  {frame:>5}  {quan:>4}  "
+                   f"{qual:>4}  {name}")
     return "\n".join(out)
 
 
@@ -927,6 +937,21 @@ _U6_DIR = {
     "w": "left", "west": "left", "left": "left",
     "e": "right", "east": "right", "right": "right",
 }
+# 8-way cursor map for the SelectRange=7 commands (LOOK / TALK): the cross-cursor can
+# travel diagonally and several tiles, so a direction expands to the ORDERED arrow
+# presses that walk it one tile that way (a diagonal = two arrows). GET stays on the
+# 4-way _U6_DIR -- its SelectRange=-1 auto-commits on the first arrow, so it can only
+# ever reach a cardinal-adjacent tile.
+_U6_DIR8 = {
+    "n": ["up"], "north": ["up"], "up": ["up"],
+    "s": ["down"], "south": ["down"], "down": ["down"],
+    "w": ["left"], "west": ["left"], "left": ["left"],
+    "e": ["right"], "east": ["right"], "right": ["right"],
+    "ne": ["up", "right"], "northeast": ["up", "right"],
+    "nw": ["up", "left"], "northwest": ["up", "left"],
+    "se": ["down", "right"], "southeast": ["down", "right"],
+    "sw": ["down", "left"], "southwest": ["down", "left"],
+}
 # Converse opcodes that read a SINGLE key (vs a typed line) -- see _TALK_INPUT_OPS.
 _TALK_SINGLEKEY_OPS = {0xf8, 0xfa, 0xfc, 0xcb}  # GET, GETCHR, GETDIGIT, WAIT
 
@@ -947,59 +972,134 @@ def u6_move(direction: str) -> str:
 
 @mcp.tool()
 def u6_talk(direction: str) -> str:
-    """Ultima VI: open a conversation with the NPC in `direction` -- presses 'T'
-    then the direction key. Afterward poll u6_conversation() and reply with
-    u6_say() / u6_key(). (Verify the talk-input flow live.)"""
-    key = _U6_DIR.get(direction.strip().lower())
-    if not key:
-        return f"Unknown direction {direction!r}. Use n/s/e/w."
+    """Ultima VI: open a conversation with the NPC in `direction` (n/s/e/w, or a
+    diagonal ne/nw/se/sw). TALK is a CURSOR-targeting command like LOOK (source
+    seg_0A33.c:1061 -- SelectMode=1, SelectRange=7): it presses 'T', walks the
+    cross-cursor onto the NPC's tile, then ENTER to commit (Enter->CMD_8E at
+    seg_0C9C.c:1206; arrows only move the cursor, they do NOT commit). On a valid NPC
+    this starts a conversation
+    (IsInConversation=1 -> state CONVERSATION); then poll u6_conversation() and reply
+    with u6_say()/u6_key(). Turn-gated."""
+    arrows = _U6_DIR8.get(direction.strip().lower())
+    if not arrows:
+        return (f"Unknown direction {direction!r}. Use n/s/e/w or a diagonal "
+                f"(ne/nw/se/sw).")
     b = _session_base()
-    if b is not None:
-        _wait_command_ready(b)          # 'T' must land as a fresh command
-    r1 = inp.send_key("t")
-    time.sleep(0.15)
-    r2 = inp.send_key(key)
-    return f"talk {direction}: [{r1}] [{r2}]"
+    if b is None:                                    # not hooked: best-effort blind
+        inp.send_key("t"); time.sleep(0.15)
+        for a in arrows:
+            inp.send_key(a); time.sleep(0.12)
+        inp.send_key("enter")
+        return f"talk {direction}: sent t+{'+'.join(arrows)}+enter blind (not hooked)."
+    _wait_command_ready(b)                            # 'T' must land as a fresh command
+    inp.send_key("t")
+    st, _ = _wait_state(b, "SELECTING")               # cross-cursor up
+    if st != "SELECTING":
+        return f"talk {direction}: 'T' did not enter select mode (state={st})."
+    for a in arrows:                                  # walk the cross-cursor onto the NPC
+        time.sleep(0.12)
+        inp.send_key(a)
+    time.sleep(0.12)
+    inp.send_key("enter")                             # commit (CMD_8E) -> TALK_talkTo
+    state, _ = _wait_state(b, ("CONVERSATION", "COMMAND_READY"), timeout=3.0)
+    if state == "CONVERSATION":
+        return (f"talk {direction}: conversation started. "
+                f"Poll u6_conversation(); reply with u6_say()/u6_key().")
+    state, _ = _drain_to_ready(b)                     # clear any "no response" message
+    return (f"talk {direction}: no conversation (now {state}). "
+            f"Is a talkable NPC adjacent that way?")
 
 
 @mcp.tool()
 def u6_look(direction: str) -> str:
-    """Ultima VI: LOOK at the tile one step in `direction` (n/s/e/w) -- presses 'L'
-    then the direction. Identifies whatever is there, and on an ADJACENT tile it
-    also SEARCHES (reveals chest/bag contents, hidden items, secret doors). The
-    description prints to the game's message scroll; confirm effects by re-reading
-    state (u6_object / u6_objects_near / u6_inventory). Turn-gated. Verify the
-    binding live."""
-    key = _U6_DIR.get(direction.strip().lower())
-    if not key:
-        return f"Unknown direction {direction!r}. Use n/s/e/w."
+    """Ultima VI: LOOK at the adjacent tile in `direction` (n/s/e/w, or a diagonal
+    ne/nw/se/sw). LOOK is a CURSOR-targeting command (source seg_0A33.c:1070 --
+    SelectMode=1, SelectRange=7, so the cursor may move diagonally and up to 7 tiles):
+    it presses 'L', walks the cross-cursor onto the target tile, then ENTER to
+    commit (Enter->CMD_8E at seg_0C9C.c:1206). The result prints to the message scroll
+    -- an NPC shows name + portrait, an object its name/weight, a container/book its
+    contents (which can span several pages). This drives the whole sequence and then
+    DRAINS the result back to COMMAND_READY (dismiss key = Enter) so variable-length
+    output needs no key-counting. Because the agent cannot read the scroll, the return
+    also lists the NOTABLE objects (weight>0 or readyable) now on the looked tile: LOOK's
+    search surfaces a corpse/container's hidden items to LOCXYZ, and reading that state
+    is the agent's real result (e.g. a looted corpse's club/helm appear here). Floor and
+    scenery are omitted (use u6_walkable for terrain). Turn-gated."""
+    arrows = _U6_DIR8.get(direction.strip().lower())
+    if not arrows:
+        return (f"Unknown direction {direction!r}. Use n/s/e/w or a diagonal "
+                f"(ne/nw/se/sw).")
     b = _session_base()
-    if b is not None:
-        _wait_command_ready(b)          # 'L' must land as a fresh command
-    r1 = inp.send_key("l")
-    time.sleep(0.15)
-    r2 = inp.send_key(key)
-    return f"look {direction}: [{r1}] [{r2}]  (read the scroll; confirm via u6_object/u6_objects_near)"
+    if b is None:                                    # not hooked: best-effort blind
+        inp.send_key("l"); time.sleep(0.15)
+        for a in arrows:
+            inp.send_key(a); time.sleep(0.12)
+        inp.send_key("enter")
+        return f"look {direction}: sent l+{'+'.join(arrows)}+enter blind (not hooked)."
+    _wait_command_ready(b)                            # 'L' must land as a fresh command
+    inp.send_key("l")
+    st, _ = _wait_state(b, "SELECTING")               # cross-cursor up
+    if st != "SELECTING":
+        return f"look {direction}: 'L' did not enter select mode (state={st})."
+    for a in arrows:                                  # walk the cross-cursor onto the target
+        time.sleep(0.12)
+        inp.send_key(a)
+    time.sleep(0.12)
+    inp.send_key("enter")                             # commit (CMD_8E)
+    state, pages = _drain_to_ready(b)                 # dismiss the result page(s)
+    # The agent can't read the scroll, so report the notable objects now on the looked
+    # tile -- LOOK's search surfaces a corpse/container's hidden items to LOCXYZ, and
+    # that state change IS the readable result.
+    note = ""
+    try:
+        x0, y0, z0 = _controlled_xyz(b)
+        dx = sum(_ARROW_DXY[a][0] for a in arrows)
+        dy = sum(_ARROW_DXY[a][1] for a in arrows)
+        tx, ty = x0 + dx, y0 + dy
+        items = _notable_at_tile(b, tx, ty, z0)
+        if items:
+            desc = ", ".join(
+                f"{name} (0x{i:03x} type{typ} w{wt}"
+                + ("" if e < 0 else f" {_EQUIP_SLOT_NAME[e]}") + ")"
+                for i, name, typ, wt, e in items)
+            note = f" Notable at ({tx},{ty}): {desc}."
+        else:
+            note = f" No notable objects at ({tx},{ty})."
+    except OSError:
+        note = ""
+    return f"look {direction}: committed; dismissed {pages} page(s); now {state}.{note}"
 
 
 @mcp.tool()
 def u6_get(direction: str) -> str:
     """Ultima VI: GET (pick up) the object on the adjacent tile in `direction`
-    (n/s/e/w) -- presses 'G' then the direction. The avatar must be standing next
-    to the object and it must not exceed the carry cap (see u6_roster_status). On
-    success the object's CoordUse flips LOCXYZ -> INVEN (assoc = the member);
-    confirm via u6_inventory or u6_object(slot). Turn-gated. Verify the binding
-    live."""
+    (n/s/e/w). GET is adjacent-ONLY (source seg_0A33.c:1079 -- SelectMode=1,
+    SelectRange=-1), so the direction arrow AUTO-COMMITS to that tile -- NO Enter is
+    sent (seg_0C9C.c:1242: SelectRange==-1 -> CMD_8E on the arrow). This presses 'G',
+    sends the arrow to commit, then drains the result message back to COMMAND_READY.
+    The avatar must be next to the object and within the carry cap (see
+    u6_roster_status); on success the object's CoordUse flips LOCXYZ -> INVEN
+    (assoc = the member). Confirm via u6_inventory / u6_object(slot). Turn-gated."""
     key = _U6_DIR.get(direction.strip().lower())
     if not key:
-        return f"Unknown direction {direction!r}. Use n/s/e/w."
+        return (f"Invalid GET direction {direction!r}. GET is adjacent-only "
+                f"(cardinal n/s/e/w) -- its arrow auto-commits (SelectRange=-1), so "
+                f"diagonal/far tiles aren't reachable by keyboard.")
     b = _session_base()
-    if b is not None:
-        _wait_command_ready(b)          # 'G' must land as a fresh command
-    r1 = inp.send_key("g")
-    time.sleep(0.15)
-    r2 = inp.send_key(key)
-    return f"get {direction}: [{r1}] [{r2}]  (confirm pickup via u6_inventory / u6_object)"
+    if b is None:                                    # not hooked: best-effort blind
+        inp.send_key("g"); time.sleep(0.15)
+        inp.send_key(key); time.sleep(0.15)
+        return f"get {direction}: sent g+{key} blind (not hooked -- state ungated)."
+    _wait_command_ready(b)                            # 'G' must land as a fresh command
+    inp.send_key("g")
+    st, _ = _wait_state(b, "SELECTING")               # cross-cursor up
+    if st != "SELECTING":
+        return f"get {direction}: 'G' did not enter select mode (state={st})."
+    time.sleep(0.12)
+    inp.send_key(key)                                 # arrow auto-commits (SelectRange==-1)
+    state, msgs = _drain_to_ready(b)                  # clear the result message(s)
+    return (f"get {direction}: committed; cleared {msgs} message(s); now {state}. "
+            f"Confirm pickup via u6_inventory / u6_object.")
 
 
 @mcp.tool()
@@ -1185,6 +1285,104 @@ def _wait_command_ready(base_addr, timeout=3.0, poll=0.03):
         time.sleep(poll)
         state, flags = _input_state(base_addr)
     return state, flags
+
+
+def _wait_state(base_addr, targets, timeout=2.5, poll=0.03):
+    """Block until _input_state is one of `targets` (a str or an iterable of states),
+    else return the last-seen (state, flags) on timeout. Lets a cursor-command verb
+    wait for the cross-cursor to come up (SELECTING) or for a talk to land
+    (CONVERSATION) before it sends the next keystroke."""
+    if isinstance(targets, str):
+        targets = (targets,)
+    deadline = time.time() + timeout
+    state, flags = _input_state(base_addr)
+    while state not in targets and time.time() < deadline:
+        time.sleep(poll)
+        state, flags = _input_state(base_addr)
+    return state, flags
+
+
+# Seconds to let DOSBox fully process a keystroke and finish redrawing before we read
+# the input state again. The NPC-look portrait/inventory redraw (seg_27a1.c:231-258) is
+# throttled (DOSBox ~3000 cycles) and runs with MouseMode=1; read too early, that redraw
+# looks like another page and the drain over-fires one key into the command prompt -> a
+# stray command ('>What?' / 'Not possible'). 0.5s clears the race; bump to 1.0 if a
+# slower box still races.
+_DRAIN_SETTLE = 0.5
+
+
+def _drain_to_ready(base_addr, key="enter", cap=40, settle=_DRAIN_SETTLE):
+    """Dismiss whatever result/page waits a look/get/talk left behind, until the engine
+    is back at the top-level command prompt (COMMAND_READY) -- count-free, by state.
+
+    Every read is taken AFTER a `settle` pause, so it reflects the engine's RESTING state
+    rather than a mid-redraw transient -- and a transient (the processing/redraw between
+    the handler returning and the prompt coming back) has resolved to COMMAND_READY by
+    read time. So ANY non-COMMAND_READY state we still see after settling is a genuine
+    "press a key to continue" wait and gets an Enter. Those waits come in two flavors:
+      - MOUSE_MODE: the NPC-look portrait/inventory getch, run while the dispatch's
+        MouseMode=1 (seg_0A33.c:1248) is still set (seg_27a1.c:258).
+      - BUSY (all flags 0): a container / empty-corpse look's down-arrow prompt, e.g.
+        the "Searching here, you find nothing." page (seg_27a1.c:507-509).
+    COMMAND_READY (AllowMouseMov=1, raised ONLY at the top-level getch, seg_0A33.c:1029)
+    is the exact, count-free end signal -- a 2-item and a 20-item container end there
+    alike. A stray re-entered command (SELECTING) is cancelled with ESC x2 rather than
+    committed. `cap` bounds total iterations. If a slower box still over-fires, raise
+    _DRAIN_SETTLE (0.5 -> 1.0)."""
+    sent = 0
+    time.sleep(settle)                          # let the just-committed result finish drawing
+    for _ in range(cap):
+        state, _ = _input_state(base_addr)
+        if state == "COMMAND_READY":
+            break
+        if state == "SELECTING":                # a command got re-entered -> cancel it
+            inp.send_key("esc"); time.sleep(0.12)
+            inp.send_key("esc")
+        else:                                   # MOUSE_MODE or BUSY: a real dismiss wait
+            inp.send_key(key)
+            sent += 1
+        time.sleep(settle)                      # so the next read is of the RESTING state
+    state, _ = _input_state(base_addr)
+    return state, sent
+
+
+# Per-arrow tile delta (dx, dy): up=north=-y, down=+y, left=-x, right=+x. Maps a look
+# direction (its _U6_DIR8 arrow list) to the tile the cross-cursor lands on, so the verb
+# can re-read object state there -- the agent reads state, never the scroll.
+_ARROW_DXY = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
+
+
+def _notable_at_tile(base_addr, tx, ty, tz, cap=12):
+    """World objects (LOCXYZ, slot >= 0x100) on tile (tx,ty,tz) that the agent would ACT
+    on -- weight>0 (carryable) OR readyable (has an equip slot). Floor/scenery (weight 0,
+    not readyable) is dropped: the agent has u6_walkable for terrain and never decides on
+    floor type. Returns decoded (slot, name, type, weight, eslot) tuples (name from the
+    LOOK.LZD table via _tile_name), capped at `cap`. This is the perception path for a
+    LOOK/search result -- LOOK surfaces hidden/contained items to LOCXYZ, and reading
+    that change here is how the agent 'sees' the loot (the 'you find a ...' scroll text
+    is invisible to it)."""
+    status = dm.read(S.handle, base_addr + U6_ObjStatus, U6_MAX_SLOTS)
+    pos = dm.read(S.handle, base_addr + U6_ObjPos, U6_MAX_SLOTS * 3)
+    shape = dm.read(S.handle, base_addr + U6_ObjShapeType, U6_MAX_SLOTS * 2)
+    basetile, tw, weapons = _gear_tables(base_addr)
+    out = []
+    for i in range(0x100, U6_MAX_SLOTS):
+        if (status[i] & 0x18) != 0:                  # not LOCXYZ (held/contained/equipped)
+            continue
+        sh = shape[i * 2] | (shape[i * 2 + 1] << 8)
+        typ = sh & 0x3ff
+        if typ == 0:                                 # empty slot
+            continue
+        v = pos[i * 3] | (pos[i * 3 + 1] << 8) | (pos[i * 3 + 2] << 16)
+        if (v & 0x3ff) != tx or ((v >> 10) & 0x3ff) != ty or ((v >> 20) & 0xf) != tz:
+            continue
+        tile, wt, eslot = _gear_of(sh, basetile, tw, weapons)
+        if wt <= 0 and eslot < 0:                     # floor/scenery -> not actionable
+            continue
+        out.append((i, _tile_name(tile), typ, wt, eslot))  # name via LOOK.LZD table
+        if len(out) >= cap:
+            break
+    return out
 
 
 def _world_to_cell(x, y, ax, ay):
@@ -1577,8 +1775,10 @@ def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
     """Ultima VI: NPCs/creatures placed in the world (LOCXYZ) within `radius`
     (Chebyshev) of the CONTROLLED actor (where you are -- the avatar in party
     mode, the active member in solo) on the same level. Reports slot, position,
-    compass direction, distance and shape type -- the agent's situational
-    awareness for picking a target. DS from u6_hook unless overridden."""
+    compass direction, distance, shape type and name (party members by their
+    Names[] name; creatures/NPCs by LOOK.LZD appearance -- rat/guard/...) -- the
+    agent's situational awareness for picking a target. DS from u6_hook unless
+    overridden."""
     if S.membase is None:
         return dm.HINT_NO_MEMBASE
     ds, err = _ds(segment)
@@ -1588,31 +1788,45 @@ def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
     try:
         self_slot, _idx, _veh = _controlled_slot(base)
         x0, y0, z0 = _controlled_xyz(base)
+        psize = dm.read(S.handle, base + U6_PartySize, 1)[0]
+        party = dm.read(S.handle, base + U6_Party, 17)
+        names = dm.read(S.handle, base + U6_Names, (psize + 1) * 14) if 0 < psize <= 16 else b""
         status = dm.read(S.handle, base + U6_ObjStatus, 0x100)
         pos = dm.read(S.handle, base + U6_ObjPos, 0x100 * 3)
         shape = dm.read(S.handle, base + U6_ObjShapeType, 0x100 * 2)
+        basetile, tw, weapons = _gear_tables(base)
     except OSError as ex:
         return f"Read failed (DS=0x{ds:04x}): {ex}"
+    # party object-slot -> roster index, so party members show their Names[] name
+    # (GetObjectString's IsPlrControl path, seg_1184.c:1921) rather than a tile appearance.
+    party_idx = {party[k]: k for k in range(psize)} if 0 < psize <= 16 else {}
     rows = []
     for i in range(0x100):
         if i == self_slot or (status[i] & 0x18) != 0:   # the controlled actor / not in world
             continue
         v = pos[i * 3] | (pos[i * 3 + 1] << 8) | (pos[i * 3 + 2] << 16)
         x, y, z = v & 0x3ff, (v >> 10) & 0x3ff, (v >> 20) & 0xf
-        typ = (shape[i * 2] | (shape[i * 2 + 1] << 8)) & 0x3ff
+        sh = shape[i * 2] | (shape[i * 2 + 1] << 8)
+        typ = sh & 0x3ff
         if typ == 0 or z != z0:                          # empty slot / other level
             continue
         dist = max(abs(x - x0), abs(y - y0))
         if dist > radius:
             continue
-        rows.append((dist, i, x, y, _compass(x - x0, y - y0), typ))
+        if i in party_idx:                               # party member -> personal name
+            k = party_idx[i]
+            nm = names[k * 14:(k + 1) * 14].split(b"\x00", 1)[0].decode("latin-1", "replace")
+        else:                                            # creature / NPC -> LOOK.LZD appearance
+            tile, _w, _e = _gear_of(sh, basetile, tw, weapons)
+            nm = _tile_name(tile)
+        rows.append((dist, i, x, y, _compass(x - x0, y - y0), typ, nm))
     if not rows:
         return f"No NPCs within {radius} of you ({x0},{y0},z{z0})."
     rows.sort()
     out = [f"NPCs within {radius} of you ({x0},{y0},z{z0}):",
-           "  dist  slot     x    y   dir  type"]
-    for dist, i, x, y, comp, typ in rows:
-        out.append(f"  {dist:>4}  0x{i:02x}  {x:>4} {y:>4}  {comp:<3}  {typ}")
+           "  dist  slot     x    y   dir  type  name"]
+    for dist, i, x, y, comp, typ, nm in rows:
+        out.append(f"  {dist:>4}  0x{i:02x}  {x:>4} {y:>4}  {comp:<3}  {typ:>4}  {nm}")
     return "\n".join(out)
 
 
@@ -1652,19 +1866,20 @@ def u6_objects_near(radius: int = 8, max_items: int = 30, segment: int = -1) -> 
         dist = max(abs(x - x0), abs(y - y0))
         if dist > radius:
             continue
-        _t, wt, eslot = _gear_of(sh, basetile, tw, weapons)
-        rows.append((dist, i, x, y, _compass(x - x0, y - y0), typ, wt, eslot))
+        tile, wt, eslot = _gear_of(sh, basetile, tw, weapons)
+        rows.append((dist, i, x, y, _compass(x - x0, y - y0), typ, wt, eslot,
+                     _tile_name(tile)))
     if not rows:
         return f"No world objects within {radius} of you ({x0},{y0},z{z0})."
     rows.sort()
     dropped = max(0, len(rows) - max_items)
     rows = rows[:max_items]
     out = [f"World objects within {radius} of you ({x0},{y0},z{z0}):",
-           "  dist  slot     x    y   dir  type  weight  ready"]
-    for dist, i, x, y, comp, typ, wt, eslot in rows:
+           "  dist  slot     x    y   dir  type  weight  ready  name"]
+    for dist, i, x, y, comp, typ, wt, eslot, name in rows:
         rd = "-" if eslot < 0 else _EQUIP_SLOT_NAME[eslot]
         out.append(f"  {dist:>4}  0x{i:03x}  {x:>4} {y:>4}  {comp:<3}  {typ:>4}  "
-                   f"{wt:>6}  {rd}")
+                   f"{wt:>6}  {rd:<4}  {name}")
     if dropped:
         out.append(f"  (+{dropped} more beyond the nearest {max_items}; "
                    f"raise max_items or lower radius)")
