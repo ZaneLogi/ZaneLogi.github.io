@@ -8,7 +8,10 @@ human player.
 
 This doc is the cross-PC source of truth for the effort. The authoritative spec
 for memory offsets is the code (`dosbox_tools/dosbox_u6_server.py`); this doc is
-the design + plan around it.
+the design + plan around it. The agent-facing **capability manifest** — premise,
+how-to-play (the U6 keyboard command model), and the perceive/act tool surface
+with source citations — is `dosbox_u6_passability.md`'s sibling
+`u6_agent_capabilities.md`.
 
 ## 1. How the agent operates
 
@@ -62,9 +65,10 @@ Implemented (logic verified; **memory offsets pending live verification** — se
 - **Perceive:** `u6_avatar` (pos+facing of the **controlled actor** — the
   move-confirm primitive; the avatar in party mode, the active member in solo),
   `u6_party` (solo/party mode, combat on/off, and who's controlled now),
-  `u6_object(slot)`, `u6_inventory(npc_slot)`, `u6_npcs_near(radius)`,
-  `u6_walkable` (40×40 ASCII passability grid), `u6_conversation` (live talk state
-  + TalkBuf window).
+  `u6_input_state` (**turn-readiness** — poll for `COMMAND_READY` before acting;
+  U6 is turn-based with buffered input), `u6_object(slot)`,
+  `u6_inventory(npc_slot)`, `u6_npcs_near(radius)`, `u6_walkable` (40×40 ASCII
+  passability grid), `u6_conversation` (live talk state + TalkBuf window).
 - **Act:** `u6_move(dir)`, `u6_talk(dir)`, `u6_say(text)`, `u6_key(key)`.
 - **Navigate:** `u6_pathfind(npc_slot)` (planner), `u6_goto(npc_slot)`
   (closed-loop), `u6_talk_to(npc_slot)` (goto + talk).
