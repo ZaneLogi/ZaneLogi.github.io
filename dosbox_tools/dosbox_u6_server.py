@@ -65,6 +65,21 @@ COMBAT_LEASH = 8        # in combat, player moves are gated to Chebyshev<=8 of t
 
 
 # ----------------------------------------------------------------------------
+# Turn / input context -- what input the engine will accept RIGHT NOW. The game
+# loop C_0A33_1CB4 (seg_0A33.c:1020) sets AllowMouseMov=1 immediately before its
+# top-level CON_getch and =0 right after, so AllowMouseMov==1 UNIQUELY means
+# "parked at the command prompt = your turn" (sub-prompts/conversation use their
+# own getch). DOS keyboard input is BUFFERED, so a key sent in the wrong context
+# isn't lost -- it's consumed in whatever state the engine reaches next (a command
+# letter eaten as a sub-prompt's target, etc.); hence every send must be gated.
+# ----------------------------------------------------------------------------
+U6_AllowMouseMov = 0x04C4   # int; ==1 only while blocked at the top-level command getch
+U6_SelectMode    = 0x0492   # unsigned char; nonzero => a command is awaiting a target
+U6_MouseMode     = 0x04BE   # int; nonzero => mouse-driven UI mode (keyboard play wants 0)
+# (conversation state is U6_IsInConversation = 0x098B, defined in the talk section.)
+
+
+# ----------------------------------------------------------------------------
 # Ultima VI conversation / "talk" engine -- DGROUP globals (offsets from the
 # u6-decompiled seg_1703.c "talkdr" module, u6.h, BSS.ASM). On talk start the VM
 # loads the current NPC's WHOLE script from converse.a into TalkBuf, then
@@ -259,10 +274,10 @@ def u6_hook(avatar_name: str = "") -> str:
     return (f"Hooked U6: MemBase=0x{S.membase:x}, DS=0x{ds:04x} "
             f"(derived from {avatar_name!r} @ host 0x{host:x}).\n"
             f"Names[0] reads back as {readback!r}.{extra}\n"
-            f"Ready -- read: u6_avatar / u6_party / u6_object / u6_inventory / "
-            f"u6_npcs_near / u6_walkable / u6_conversation; act: u6_move / u6_talk / u6_say / "
-            f"u6_key; navigate: u6_pathfind / u6_goto / u6_talk_to; verify: "
-            f"u6_validate_passability. Avatar = slot 1.")
+            f"Ready -- read: u6_avatar / u6_party / u6_input_state / u6_object / "
+            f"u6_inventory / u6_npcs_near / u6_walkable / u6_conversation; act: u6_move "
+            f"/ u6_talk / u6_say / u6_key; navigate: u6_pathfind / u6_goto / u6_talk_to; "
+            f"verify: u6_validate_passability. Avatar = slot 1.")
 
 
 @mcp.tool()
@@ -423,6 +438,9 @@ def u6_move(direction: str) -> str:
     key = _U6_DIR.get(direction.strip().lower())
     if not key:
         return f"Unknown direction {direction!r}. Use n/s/e/w."
+    b = _session_base()
+    if b is not None:
+        _wait_command_ready(b)          # act only on our turn (input is buffered)
     return inp.send_key(key)
 
 
@@ -434,6 +452,9 @@ def u6_talk(direction: str) -> str:
     key = _U6_DIR.get(direction.strip().lower())
     if not key:
         return f"Unknown direction {direction!r}. Use n/s/e/w."
+    b = _session_base()
+    if b is not None:
+        _wait_command_ready(b)          # 'T' must land as a fresh command
     r1 = inp.send_key("t")
     time.sleep(0.15)
     r2 = inp.send_key(key)
@@ -529,6 +550,55 @@ def _controlled_xyz(base_addr):
     pos = dm.read(S.handle, base_addr + U6_ObjPos + slot * 3, 3)
     v = pos[0] | (pos[1] << 8) | (pos[2] << 16)
     return v & 0x3ff, (v >> 10) & 0x3ff, (v >> 20) & 0xf
+
+
+def _session_base():
+    """base_addr from the session's derived DS, or None if not hooked. Lets the
+    no-segment action verbs gate their keystrokes on turn-readiness when possible."""
+    if S.membase is None or S.u6_ds is None:
+        return None
+    return S.membase + (S.u6_ds << 4)
+
+
+def _input_state(base_addr):
+    """Classify what input the engine will accept right now (turn/input context).
+    Returns (state, flags). state is one of:
+      CONVERSATION  -- a talk is active; answer with u6_say
+      COMMAND_READY -- parked at the top-level prompt; your turn (send a move/command)
+      SELECTING     -- a command is awaiting a target/direction; supply it
+      MOUSE_MODE    -- mouse UI mode; keyboard play wants this off
+      BUSY          -- processing the turn / animating; wait
+    Priority matters: AllowMouseMov==1 fires only at the top-level getch, so it
+    cleanly dominates SELECTING/BUSY (which run with it 0)."""
+    conv  = dm.read(S.handle, base_addr + U6_IsInConversation, 1)[0]
+    amm   = int.from_bytes(dm.read(S.handle, base_addr + U6_AllowMouseMov, 2), "little")
+    sel   = dm.read(S.handle, base_addr + U6_SelectMode, 1)[0]
+    mouse = int.from_bytes(dm.read(S.handle, base_addr + U6_MouseMode, 2), "little")
+    flags = {"IsInConversation": conv, "AllowMouseMov": amm,
+             "SelectMode": sel, "MouseMode": mouse}
+    if conv:
+        state = "CONVERSATION"
+    elif amm == 1:
+        state = "COMMAND_READY"
+    elif sel:
+        state = "SELECTING"
+    elif mouse:
+        state = "MOUSE_MODE"
+    else:
+        state = "BUSY"
+    return state, flags
+
+
+def _wait_command_ready(base_addr, timeout=3.0, poll=0.03):
+    """Block until the engine is at the top-level command prompt (COMMAND_READY) so
+    a keystroke lands as a fresh command. Returns (state, flags): COMMAND_READY on
+    success, or the last-seen state on timeout (caller can proceed best-effort)."""
+    deadline = time.time() + timeout
+    state, flags = _input_state(base_addr)
+    while state != "COMMAND_READY" and time.time() < deadline:
+        time.sleep(poll)
+        state, flags = _input_state(base_addr)
+    return state, flags
 
 
 def _world_to_cell(x, y, ax, ay):
@@ -829,6 +899,38 @@ def u6_party(segment: int = -1) -> str:
 
 
 @mcp.tool()
+def u6_input_state(segment: int = -1) -> str:
+    """Ultima VI: what input the engine will accept RIGHT NOW -- the turn-readiness
+    gate. U6 is turn-based and DOS keyboard input is buffered, so a key sent in the
+    wrong context is consumed wrongly, not lost. Poll this before acting. States:
+    COMMAND_READY (your turn -- send a move/command), CONVERSATION (answer via
+    u6_say), SELECTING (a command awaits a target/direction), MOUSE_MODE (keyboard
+    play wants this off), BUSY (turn processing/animating -- wait). Derived from
+    AllowMouseMov/IsInConversation/SelectMode/MouseMode (game loop C_0A33_1CB4).
+    DS from u6_hook unless overridden with segment=."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    try:
+        state, flags = _input_state(base)
+        slot, idx, _veh = _controlled_slot(base)
+        nm = dm.read(S.handle, base + U6_Names + idx * 14, 14).split(b"\x00", 1)[0]
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    who = nm.decode("latin-1", "replace") or f"idx{idx}"
+    fl = "  ".join(f"{k}={v}" for k, v in flags.items())
+    note = {"COMMAND_READY": "your turn -- send a move/command",
+            "CONVERSATION": "in dialogue -- reply with u6_say",
+            "SELECTING": "a command is awaiting a target/direction",
+            "MOUSE_MODE": "mouse UI mode -- keyboard commands may not land",
+            "BUSY": "engine processing the turn -- wait"}[state]
+    return f"input_state = {state}  ({note})\n  controlled: {who} (slot 0x{slot:x})\n  {fl}"
+
+
+@mcp.tool()
 def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
     """Ultima VI: NPCs/creatures placed in the world (LOCXYZ) within `radius`
     (Chebyshev) of the CONTROLLED actor (where you are -- the avatar in party
@@ -989,8 +1091,10 @@ def u6_goto(npc_slot: int, max_steps: int = 60, segment: int = -1) -> str:
         if not steps:
             return "\n".join(log + [f"No path to NPC 0x{npc_slot:x} (blocked). avatar=({x0},{y0})."])
         mv = steps[0]
+        _wait_command_ready(base)            # our turn before we step
         inp.send_key(_STEP_ARROW[mv])
-        time.sleep(0.15)
+        time.sleep(0.05)                     # let the key register (AllowMouseMov drops)
+        _wait_command_ready(base)            # wait for the turn to resolve, then re-read
         try:
             x1, y1, _ = _controlled_xyz(base)
         except OSError:
@@ -1098,6 +1202,7 @@ def u6_validate_passability(restore: bool = True, settle_ms: int = 160,
     mismatches = 0
     for dr, dc in _DIR_DELTAS:
         name = _STEP_NAME[(dr, dc)]
+        _wait_command_ready(base)            # predict from a stable turn boundary
         try:
             self_slot, _idx, _veh = _controlled_slot(base)
             x0, y0, z0 = _controlled_xyz(base)
@@ -1116,6 +1221,7 @@ def u6_validate_passability(restore: bool = True, settle_ms: int = 160,
         wx, wy = (x0 + dc) & 0x3ff, (y0 + dr) & 0x3ff
         inp.send_key(_STEP_ARROW[(dr, dc)])
         time.sleep(settle_ms / 1000.0)
+        _wait_command_ready(base)            # wait for the turn to resolve before re-reading
         try:
             x1, y1, _ = _controlled_xyz(base)
         except OSError:
@@ -1130,6 +1236,7 @@ def u6_validate_passability(restore: bool = True, settle_ms: int = 160,
             line += "  | " + _cell_diag(base, wx, wy, z0, ax, ay)
         out.append(line)
         if actual and restore:                              # we moved -- step back
+            _wait_command_ready(base)
             inp.send_key(_RESTORE_ARROW[name])
             time.sleep(settle_ms / 1000.0)
     out.append("-- " + ("ALL 4 MATCH: oracle faithful here." if mismatches == 0
