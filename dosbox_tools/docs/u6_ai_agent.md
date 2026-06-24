@@ -71,7 +71,8 @@ Implemented (logic verified; **memory offsets pending live verification** — se
   equip-slot), `u6_inventory(npc_slot)`, `u6_npcs_near(radius)`,
   `u6_objects_near(radius)` (map items + gear hints), `u6_walkable` (40×40 ASCII
   passability grid), `u6_conversation` (live talk state + TalkBuf window).
-- **Act:** `u6_move(dir)`, `u6_talk(dir)`, `u6_say(text)`, `u6_key(key)`.
+- **Act:** `u6_move(dir)`, `u6_talk(dir)`, `u6_say(text)`, `u6_look(dir)`,
+  `u6_get(dir)`, `u6_key(key)`.
 - **Navigate:** `u6_pathfind(npc_slot)` (planner), `u6_goto(npc_slot)`
   (closed-loop), `u6_talk_to(npc_slot)` (goto + talk).
 - **Verify:** `u6_validate_passability` (predict-vs-live fidelity gate for the
@@ -140,19 +141,22 @@ start and repeatable scoring.
 |---|---|---|
 | A. Talk to LB | go to Lord British, converse, learn the story + the gear list | have |
 | B. Explore the castle | walk the rooms, build a mental map | have |
-| C. Leave the castle | navigate to the gate, walk out (success = Avatar outside the castle bounds) | have |
-| D. Collect the gear LB named | find the items, pick them up | needs new verbs |
-| E. Equip the party | ready the gear onto each member | needs new verbs (UI-heavy) |
+| C. Leave the castle | navigate to the gate, walk out (success = Avatar outside the castle bounds) | have (+ `u6_use` if the gate's locked — not built) |
+| D. Collect the gear LB named | find the items, pick them up | built: `u6_objects_near`/`u6_look`/`u6_get` (verify live) |
+| E. Equip the party | ready the gear onto each member | `u6_ready` not built (panel UI) |
 
 LB is the **task-giver** — the agent learns *what gear* by reading LB's dialogue
 live, not from a list we hand it. Consistent with §4.
 
 **Sequencing (dovetails with live-test-first):**
-- **Slice 1 = A + B + C** — needs **zero new tools**, so this is the live-test
-  target for the existing stack (validates hooking, conversation, navigation,
-  the exit check, and the §6 offsets in one run).
-- **Slice 2** — build `u6_look` + `u6_objects_near` + `u6_get` → *collect*.
-- **Slice 3** — build `u6_ready`/`u6_equip` → *equip* (UI-heavy; last).
+- **Slice 1 = A + B + C** — **zero new tools**; the live-test target for the
+  existing stack (validates hooking, conversation, navigation, the turn-readiness
+  gate, the exit check, and the offsets in one run). Needs `u6_use` (not built)
+  only if the gate turns out locked.
+- **Slice 2 = D (collect)** — gear **perception** done (`u6_roster_status`,
+  `u6_objects_near`, `u6_object` tile/weight/equip-slot) + the collect verbs
+  `u6_look`/`u6_get` **built** (live-unconfirmed — they send keys).
+- **Slice 3 = E (equip)** — `u6_ready` (inventory-panel UI) **not built**; last.
 
 **Success criteria:** talked to LB and extracted the gear list; collected the
 named gear; equipped the party; Avatar exited the castle. Each phase is
@@ -167,19 +171,23 @@ independently checkable.
 
 ## 6. Status & verification
 
-- All §2 tools are implemented and the **algorithmic** logic is unit-tested
-  (pathfinding, helpers).
-- **Not yet live-verified against a running U6:** the memory offsets used by the
-  tools (object arrays, conversation VM, map/nav tables, NPCFlag/BaseTile/
-  TerrainType pointers), and specifically the assumption that **`MapObjPtr`
-  shares `AreaTiles`'s `AreaX/AreaY` origin**. First live check: run
-  `u6_walkable` and eyeball the grid against the on-screen map.
+- Tools are implemented and **offline-verified where they're pure memory-reads**:
+  faithful passability (`C_1E0F_000F` port), party/control + combat awareness, the
+  turn-readiness gate (`u6_input_state`), and the gear-perception layer (equip-slot
+  / weight / roster) all have stub unit tests against the real functions (in
+  `D:\tmp\u6_grid_test\`); pathfinding/helpers too.
+- **Not yet live-verified against a running U6:** the memory offsets, and every
+  **key-sending verb** (`u6_move`/`u6_talk`/`u6_look`/`u6_get`/…) — their
+  *bindings* only prove out live. First live checks: the §7 validation gate, then
+  `u6_validate_passability` (predict-vs-live). (The old `MapObjPtr`-origin caveat
+  is gone — passability no longer uses `MapObjPtr`; it's a faithful `C_1E0F_000F`
+  port, see `dosbox_u6_passability.md`.)
 - 4-connected movement only (cardinal arrows); diagonals (numpad + 8-connected
   search) and global chunk routing are deferred.
 
 **Next step:** live-test Milestone 1 Slice 1 (talk to LB → explore → leave)
-against a real DOSBox + the prepared save. That both delivers the first
-milestone slice and validates the offsets. Then build the collect/equip verbs.
+against a real DOSBox + the prepared save — delivers the first slice and validates
+the offsets + bindings. Then build `u6_use` / `u6_ready` for collect → equip.
 
 ## 7. Running the agent (per session)
 

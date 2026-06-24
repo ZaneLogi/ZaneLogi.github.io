@@ -299,9 +299,9 @@ def u6_hook(avatar_name: str = "") -> str:
             f"Names[0] reads back as {readback!r}.{extra}\n"
             f"Ready -- read: u6_avatar / u6_party / u6_roster_status / u6_input_state "
             f"/ u6_object / u6_inventory / u6_npcs_near / u6_objects_near / u6_walkable "
-            f"/ u6_conversation; act: u6_move / u6_talk / u6_say / u6_key; navigate: "
-            f"u6_pathfind / u6_goto / u6_talk_to; verify: u6_validate_passability. "
-            f"Avatar = slot 1.")
+            f"/ u6_conversation; act: u6_move / u6_talk / u6_say / u6_look / u6_get "
+            f"/ u6_key; navigate: u6_pathfind / u6_goto / u6_talk_to; verify: "
+            f"u6_validate_passability. Avatar = slot 1.")
 
 
 @mcp.tool()
@@ -488,6 +488,46 @@ def u6_talk(direction: str) -> str:
     time.sleep(0.15)
     r2 = inp.send_key(key)
     return f"talk {direction}: [{r1}] [{r2}]"
+
+
+@mcp.tool()
+def u6_look(direction: str) -> str:
+    """Ultima VI: LOOK at the tile one step in `direction` (n/s/e/w) -- presses 'L'
+    then the direction. Identifies whatever is there, and on an ADJACENT tile it
+    also SEARCHES (reveals chest/bag contents, hidden items, secret doors). The
+    description prints to the game's message scroll; confirm effects by re-reading
+    state (u6_object / u6_objects_near / u6_inventory). Turn-gated. Verify the
+    binding live."""
+    key = _U6_DIR.get(direction.strip().lower())
+    if not key:
+        return f"Unknown direction {direction!r}. Use n/s/e/w."
+    b = _session_base()
+    if b is not None:
+        _wait_command_ready(b)          # 'L' must land as a fresh command
+    r1 = inp.send_key("l")
+    time.sleep(0.15)
+    r2 = inp.send_key(key)
+    return f"look {direction}: [{r1}] [{r2}]  (read the scroll; confirm via u6_object/u6_objects_near)"
+
+
+@mcp.tool()
+def u6_get(direction: str) -> str:
+    """Ultima VI: GET (pick up) the object on the adjacent tile in `direction`
+    (n/s/e/w) -- presses 'G' then the direction. The avatar must be standing next
+    to the object and it must not exceed the carry cap (see u6_roster_status). On
+    success the object's CoordUse flips LOCXYZ -> INVEN (assoc = the member);
+    confirm via u6_inventory or u6_object(slot). Turn-gated. Verify the binding
+    live."""
+    key = _U6_DIR.get(direction.strip().lower())
+    if not key:
+        return f"Unknown direction {direction!r}. Use n/s/e/w."
+    b = _session_base()
+    if b is not None:
+        _wait_command_ready(b)          # 'G' must land as a fresh command
+    r1 = inp.send_key("g")
+    time.sleep(0.15)
+    r2 = inp.send_key(key)
+    return f"get {direction}: [{r1}] [{r2}]  (confirm pickup via u6_inventory / u6_object)"
 
 
 @mcp.tool()

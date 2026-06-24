@@ -91,7 +91,7 @@ combat, who's controlled), `u6_roster_status` (STR/DEX/INT/Level + load caps),
 `u6_inventory(npc_slot)`, `u6_npcs_near(radius)`, `u6_objects_near(radius)` (map
 items + gear hints), `u6_walkable` (40×40 grid), `u6_conversation` (live talk +
 TalkBuf).
-**Act:** `u6_move` · `u6_talk` · `u6_say` · `u6_key`.
+**Act:** `u6_move` · `u6_talk` · `u6_say` · `u6_look` · `u6_get` · `u6_key`.
 **Navigate:** `u6_pathfind` (plan) · `u6_goto` (closed-loop) · `u6_talk_to`.
 **Verify:** `u6_validate_passability` (predict-vs-live passability gate).
 **Inherited:** base mem tools + input tools (escape hatches).
@@ -110,8 +110,8 @@ TalkBuf).
 | Roster STR/DEX/INT + load | — | `u6_roster_status` | ✅ HAVE |
 | Locate gear in the world | — | `u6_objects_near` | ✅ HAVE |
 | Is it readyable + which slot | — | `u6_object` (tile/weight/slot) | ✅ HAVE |
-| Identify / search (`L`) | `u6_look` | name via decode/scroll | ❌ GAP |
-| Pick up gear (`G`) | `u6_get` | `u6_inventory` | ❌ GAP |
+| Identify / search (`L`) | `u6_look` | name via scroll; re-read state | ✅ HAVE (verify live) |
+| Pick up gear (`G`) | `u6_get` | `u6_inventory` / `u6_object` | ✅ HAVE (verify live) |
 | Equip gear (panel UI) | **`u6_ready`** (`<tab>`→nav→`<enter>`) | `u6_inventory` (EQUIP) | ❌ GAP (hard) |
 | Use key / open door / leave gate (`U`) | **`u6_use`** | `u6_walkable` (cell opens) | ❌ GAP |
 
@@ -129,12 +129,14 @@ explore → leave the castle. (On foot, party mode, no combat.)
   `u6_input_state` — it's the live validation of the whole perceive/act/nav stack.
 - **Gear slice (full M1):** *perception done* — `u6_roster_status`, `u6_objects_near`,
   and `u6_object` (tile/weight/equip-slot) give the full "suit yourself" inputs.
-  *Remaining (action verbs):* `u6_look`, `u6_get`, `u6_use`; **`u6_ready` last**
-  (inventory-panel UI). These send keys, so they're confirmed live, not offline.
+  *Simple action verbs built* — `u6_look`, `u6_get` (letter+target, turn-gated;
+  confirmed live, not offline). *Remaining:* `u6_use` (key qual-match) and
+  **`u6_ready`** (inventory-panel UI, hardest) — both held for live Slice 1.
 
-**Sequence:** (1) `u6_input_state` + poll-before-send ✅ done → (2) gear perception
-✅ done (offline-verified) → (3) live Slice 1 (validates the stack; reveals whether
-the gate needs a key) → (4) build the gear action verbs from what Slice 1 surfaces.
+**The authoritative M1 phase plan + the live Slice-1 runbook/validation gate live
+in `u6_ai_agent.md` §5 & §7** (single source — not duplicated here). Progress:
+turn gate ✅, gear perception ✅, `u6_look`/`u6_get` ✅ (live-unconfirmed);
+remaining `u6_use` + `u6_ready` held for live Slice 1.
 
 ---
 
