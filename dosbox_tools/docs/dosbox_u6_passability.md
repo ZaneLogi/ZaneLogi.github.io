@@ -63,6 +63,18 @@ and is free to diverge. So the two are layered, and never fight:
   `u6_goto` confirms each step empirically (re-read position) so a real block is
   always caught regardless.
 
+### The mover is the controlled member, not "slot 1"
+
+The engine excludes the *mover itself* from blocking (`C_1E0F_000F`: `if (i ==
+objNum) continue`), and the mover is whoever the player drives — `Party[Active]`,
+not a hardcoded avatar. So every nav reference (the grid origin / `@`, the
+pathfind start, the move-confirm, and the `_actor_cells` self-exclusion) uses
+`_controlled_xyz` / `_controlled_slot`. In **party** mode that's the avatar (slot
+1); in **solo** mode it's the detached member, and the avatar then correctly
+appears as a *blocking* actor. `u6_party` reports the mode + who's controlled;
+`u6_avatar` reports that controlled actor (so it stays the right move-confirm
+target in both modes).
+
 ## Performance: static-table cache
 
 `TerrainType`, `TileFlag`, `D_B3EF`, `BaseTile` are loaded from the game's data at
@@ -95,6 +107,13 @@ across saves within one process, so reuse is safe. Only the dynamic arrays
 - **Ig-Br ordering edge.** When an *Ignore* breakthrough and an impassable object
   share a cell, the engine's verdict is `Link`-order dependent; the forward pass
   approximates by scan (slot) order. Vanishingly rare; the harness would flag it.
+- **Combat leash.** This grid is the `C_1E0F_000F` gate; its *caller*
+  `TryStraightMove` (`seg_1E0F.c:1428`) adds one more rule for a player-controlled
+  mover: while `InCombat`, a step is allowed only within `CLOSE_ENOUGH0(8, …)`
+  (Chebyshev ≤ 8) of the combat centre `(MapX,MapY)`. Not modeled in the grid —
+  `u6_party` reports `InCombat` so the agent knows to fight/break off rather than
+  roam; Milestone 1 has no combat. Model it as a post-filter on the grid if/when
+  combat navigation matters.
 
 ## Fidelity gate: `u6_validate_passability`
 

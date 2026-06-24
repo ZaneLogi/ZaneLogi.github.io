@@ -49,6 +49,22 @@ _COORDUSE = {0: "LOCXYZ", 0x08: "CONTAINED", 0x10: "INVEN", 0x18: "EQUIP"}
 
 
 # ----------------------------------------------------------------------------
+# Party / control state -- whether the player drives the whole party as one
+# (PARTY mode) or a single detached member (SOLO mode), and WHO is driven now.
+# DGROUP globals from u6-decompiled (u6.h, D_2C4A.h, seg_0A33.c SetActive /
+# SetPartyMode). Party[0] is always the avatar/leader.
+# ----------------------------------------------------------------------------
+U6_Party     = 0x3533   # unsigned char[]; party index -> object slot
+U6_PartySize = 0x8E50   # unsigned char; number of party members
+U6_Active    = 0x2C54   # unsigned char; party index the player drives now (Party[Active])
+U6_SoloFlag  = 0x2CC3   # signed char (D_2CC3): < 0 => PARTY mode; >= 0 => SOLO mode (value == Active)
+U6_InCombat  = 0x2CC2   # char (InCombat): nonzero => combat is active
+U6_EnemiesNum = 0xEBFB  # int; count of hostiles engaged
+COMBAT_LEASH = 8        # in combat, player moves are gated to Chebyshev<=8 of the combat centre
+# Names[][14] @ U6_Names is indexed by PARTY index for roster names.
+
+
+# ----------------------------------------------------------------------------
 # Ultima VI conversation / "talk" engine -- DGROUP globals (offsets from the
 # u6-decompiled seg_1703.c "talkdr" module, u6.h, BSS.ASM). On talk start the VM
 # loads the current NPC's WHOLE script from converse.a into TalkBuf, then
@@ -243,8 +259,8 @@ def u6_hook(avatar_name: str = "") -> str:
     return (f"Hooked U6: MemBase=0x{S.membase:x}, DS=0x{ds:04x} "
             f"(derived from {avatar_name!r} @ host 0x{host:x}).\n"
             f"Names[0] reads back as {readback!r}.{extra}\n"
-            f"Ready -- read: u6_avatar / u6_object / u6_inventory / u6_npcs_near "
-            f"/ u6_walkable / u6_conversation; act: u6_move / u6_talk / u6_say / "
+            f"Ready -- read: u6_avatar / u6_party / u6_object / u6_inventory / "
+            f"u6_npcs_near / u6_walkable / u6_conversation; act: u6_move / u6_talk / u6_say / "
             f"u6_key; navigate: u6_pathfind / u6_goto / u6_talk_to; verify: "
             f"u6_validate_passability. Avatar = slot 1.")
 
@@ -489,8 +505,28 @@ def _static_table(base_addr, ds_off, nbytes, name):
     return table
 
 
-def _avatar_xyz(base_addr):
-    pos = dm.read(S.handle, base_addr + U6_ObjPos + 1 * 3, 3)
+def _controlled_slot(base_addr):
+    """The object slot the player currently DRIVES = Party[Active] (seg_0A33.c
+    SetActive). In party mode Active==0 (the avatar); in solo mode it's the
+    detached member; if Active==PartySize the party is aboard a vehicle and
+    Party[Active] is the vehicle slot. This is the mover the engine's move gate
+    excludes from blocking (C_1E0F_000F: `if(i==objNum) continue`), so it -- not a
+    hardcoded slot 1 -- is the reference for all navigation. Returns (slot,
+    party_index, in_vehicle)."""
+    active = dm.read(S.handle, base_addr + U6_Active, 1)[0]
+    psize  = dm.read(S.handle, base_addr + U6_PartySize, 1)[0]
+    idx = active if active <= 16 else 0
+    slot = dm.read(S.handle, base_addr + U6_Party + idx, 1)[0]
+    return slot, active, (active == psize)
+
+
+def _controlled_xyz(base_addr):
+    """(x, y, z) of the actor the player currently drives (Party[Active]). The
+    local area window + map level are centred on this actor, so it is the correct
+    origin for the walkable grid and pathfinding -- in party mode it's the avatar,
+    in solo mode the detached member."""
+    slot, _idx, _veh = _controlled_slot(base_addr)
+    pos = dm.read(S.handle, base_addr + U6_ObjPos + slot * 3, 3)
     v = pos[0] | (pos[1] << 8) | (pos[2] << 16)
     return v & 0x3ff, (v >> 10) & 0x3ff, (v >> 20) & 0xf
 
@@ -543,7 +579,7 @@ def _build_grid(base_addr):
     way the game does. Static tables come from the lazy per-process cache."""
     ax = int.from_bytes(dm.read(S.handle, base_addr + U6_AreaX, 2), "little")
     ay = int.from_bytes(dm.read(S.handle, base_addr + U6_AreaY, 2), "little")
-    _, _, z0 = _avatar_xyz(base_addr)
+    _, _, z0 = _controlled_xyz(base_addr)
     tiles  = dm.read(S.handle, base_addr + U6_AreaTiles, U6_AREA_H * U6_AREA_W)
     status = dm.read(S.handle, base_addr + U6_ObjStatus, U6_MAX_SLOTS)
     objpos = dm.read(S.handle, base_addr + U6_ObjPos, U6_MAX_SLOTS * 3)
@@ -613,19 +649,22 @@ def _build_grid(base_addr):
     return walk, cost, ax, ay
 
 
-def _actor_cells(base_addr, z0, ax, ay):
+def _actor_cells(base_addr, z0, ax, ay, self_slot=1):
     """Cells blocked by an ACTOR -- the dynamic half of C_1E0F_000F's legality
     (seg_1E0F.c:213): every in-world actor (slot 1..0xFF, LOCXYZ, same level)
-    blocks the avatar EXCEPT the walk-through field/effect types and the avatar
-    itself (slot 1). Returns a set of (r, c) in the local window. Kept separate
-    from _build_grid so the planner can route optimistically through a transient
-    NPC (and re-plan), while per-step legality still honours it."""
+    blocks the mover EXCEPT the walk-through field/effect types and the mover
+    ITSELF (`self_slot` -- the controlled member, which the engine skips via
+    `if(i==objNum) continue`). In solo mode self_slot is the detached member, so
+    the avatar then correctly shows as a blocking actor. Returns a set of (r, c)
+    in the local window. Kept separate from _build_grid so the planner can route
+    optimistically through a transient NPC (and re-plan), while per-step legality
+    still honours it."""
     status = dm.read(S.handle, base_addr + U6_ObjStatus, 0x100)
     pos    = dm.read(S.handle, base_addr + U6_ObjPos, 0x100 * 3)
     shape  = dm.read(S.handle, base_addr + U6_ObjShapeType, 0x100 * 2)
     cells = set()
     for i in range(0x100):
-        if i == 1 or (status[i] & 0x18) != 0:               # avatar / not in world
+        if i == self_slot or (status[i] & 0x18) != 0:       # the mover / not in world
             continue
         typ = (shape[i * 2] | (shape[i * 2 + 1] << 8)) & 0x3ff
         if typ == 0 or typ in _PASSABLE_ACTOR_TYPES:
@@ -692,8 +731,44 @@ def _npc_xyz(base_addr, slot):
 
 @mcp.tool()
 def u6_avatar(segment: int = -1) -> str:
-    """Ultima VI: the avatar's world position (x/y/z) + facing. The position is
-    the closed-loop nav primitive (confirm a move actually happened). DS from
+    """Ultima VI: world position (x/y/z) + facing of the actor you currently
+    CONTROL -- the closed-loop nav primitive (confirm a move actually happened).
+    In PARTY mode that's the avatar (slot 1); in SOLO mode it's the detached
+    member you drive (Party[Active]), which is what u6_move actually steers, so
+    this tracks the right actor in both. Use u6_party for the full mode/roster.
+    DS from u6_hook unless overridden with segment=."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    try:
+        slot, idx, in_veh = _controlled_slot(base)
+        x, y, z = _controlled_xyz(base)
+        d = dm.read(S.handle, _read_far_ptr(base, U6_NPCFlag_ptr) + slot, 1)[0] & 7
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    who = "avatar" if slot == 1 else f"party idx {idx}"
+    veh = "  [aboard vehicle]" if in_veh else ""
+    return f"controlled: slot 0x{slot:x} ({who})  x={x} y={y} z={z}  dir(NPCFlag&7)={d}{veh}"
+
+
+@mcp.tool()
+def u6_party(segment: int = -1) -> str:
+    """Ultima VI: party control state -- whether the game is in PARTY mode (the
+    whole party marches together, led by the avatar) or SOLO mode (one detached
+    member is driven on its own), WHO the player controls right now, and whether
+    a fight is on (InCombat). In combat the player's moves are leashed to within
+    Chebyshev 8 of the combat centre (TryStraightMove), so this also tells the
+    agent when to switch from roaming to attacking ('a') / breaking off.
+
+    Mode is the engine's D_2CC3 (seg_0A33.c SetPartyMode/solo handler): < 0 =>
+    PARTY mode (Active forced to 0, the avatar/leader); >= 0 => SOLO mode (the
+    value equals Active, the chosen member). Active is the party index the
+    keystrokes drive; the controlled object slot is Party[Active] and the map is
+    centred on it. Active == PartySize means the party is aboard a vehicle (moved
+    as one). The roster is listed with the controlled member marked '*'. DS from
     u6_hook unless overridden with segment=."""
     if S.membase is None:
         return dm.HINT_NO_MEMBASE
@@ -702,19 +777,64 @@ def u6_avatar(segment: int = -1) -> str:
         return err
     base = S.membase + (ds << 4)
     try:
-        x, y, z = _avatar_xyz(base)
-        d = dm.read(S.handle, _read_far_ptr(base, U6_NPCFlag_ptr) + 1, 1)[0] & 7
+        solo_b = dm.read(S.handle, base + U6_SoloFlag, 1)[0]
+        active = dm.read(S.handle, base + U6_Active, 1)[0]
+        psize  = dm.read(S.handle, base + U6_PartySize, 1)[0]
+        party  = dm.read(S.handle, base + U6_Party, 17)
+        names  = dm.read(S.handle, base + U6_Names, (psize + 1) * 14)
+        objpos = dm.read(S.handle, base + U6_ObjPos, 0x100 * 3)
+        incombat = dm.read(S.handle, base + U6_InCombat, 1)[0]
+        enemies  = int.from_bytes(dm.read(S.handle, base + U6_EnemiesNum, 2), "little")
     except OSError as ex:
         return f"Read failed (DS=0x{ds:04x}): {ex}"
-    return f"avatar (slot 1): x={x} y={y} z={z}  dir(NPCFlag&7)={d}"
+    if not 0 < psize <= 16:
+        return (f"PartySize={psize} out of range -- DS likely wrong or no game "
+                f"loaded (DS=0x{ds:04x}). Re-run u6_hook with the avatar name.")
+    solo = solo_b - 256 if solo_b >= 128 else solo_b    # D_2CC3 is a signed char
+    in_vehicle = (active == psize)
+    mode = "SOLO" if solo >= 0 else "PARTY"
+    combat = f"COMBAT (enemies={enemies})" if incombat else "no combat"
+
+    def name_of(k):
+        raw = names[k * 14:k * 14 + 14]
+        return raw.split(b"\x00", 1)[0].decode("latin-1", "replace") or f"<member {k}>"
+
+    def xyz(slot):
+        v = objpos[slot * 3] | (objpos[slot * 3 + 1] << 8) | (objpos[slot * 3 + 2] << 16)
+        return v & 0x3ff, (v >> 10) & 0x3ff, (v >> 20) & 0xf
+
+    out = [f"Party control: mode={mode}  {combat}  PartySize={psize}  "
+           f"Active(idx)={active}" + ("  [aboard vehicle]" if in_vehicle else "")]
+    if incombat:
+        out.append(f"  In combat: player moves are leashed to Chebyshev <= "
+                   f"{COMBAT_LEASH} of the combat centre (TryStraightMove); use 'a' "
+                   f"to attack, or break off combat to roam freely.")
+    if in_vehicle:
+        veh = party[psize] if psize < len(party) else 0
+        out.append(f"Controlled now: the whole party is aboard a vehicle "
+                   f"(slot 0x{veh:x}) -- moves as one.")
+    else:
+        cs = party[active]
+        cx, cy, cz = xyz(cs)
+        tail = "" if solo >= 0 else "  (avatar / leader -- the party follows in formation)"
+        out.append(f"Controlled now: party index {active} -> slot 0x{cs:x} "
+                   f"{name_of(active)!r} at ({cx},{cy},z{cz}){tail}")
+    out.append("   idx  slot    x    y   z  name")
+    for k in range(psize):
+        slot = party[k]
+        x, y, z = xyz(slot)
+        mark = "*" if (not in_vehicle and k == active) else " "
+        out.append(f" {mark} {k:>3}  0x{slot:02x}  {x:>4} {y:>4} {z:>2}  {name_of(k)}")
+    return "\n".join(out)
 
 
 @mcp.tool()
 def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
     """Ultima VI: NPCs/creatures placed in the world (LOCXYZ) within `radius`
-    (Chebyshev) of the avatar on the same level. Reports slot, position, compass
-    direction, distance and shape type -- the agent's situational awareness for
-    picking a target. DS from u6_hook unless overridden with segment=."""
+    (Chebyshev) of the CONTROLLED actor (where you are -- the avatar in party
+    mode, the active member in solo) on the same level. Reports slot, position,
+    compass direction, distance and shape type -- the agent's situational
+    awareness for picking a target. DS from u6_hook unless overridden."""
     if S.membase is None:
         return dm.HINT_NO_MEMBASE
     ds, err = _ds(segment)
@@ -722,7 +842,8 @@ def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
         return err
     base = S.membase + (ds << 4)
     try:
-        x0, y0, z0 = _avatar_xyz(base)
+        self_slot, _idx, _veh = _controlled_slot(base)
+        x0, y0, z0 = _controlled_xyz(base)
         status = dm.read(S.handle, base + U6_ObjStatus, 0x100)
         pos = dm.read(S.handle, base + U6_ObjPos, 0x100 * 3)
         shape = dm.read(S.handle, base + U6_ObjShapeType, 0x100 * 2)
@@ -730,7 +851,7 @@ def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
         return f"Read failed (DS=0x{ds:04x}): {ex}"
     rows = []
     for i in range(0x100):
-        if i == 1 or (status[i] & 0x18) != 0:           # avatar / not in world
+        if i == self_slot or (status[i] & 0x18) != 0:   # the controlled actor / not in world
             continue
         v = pos[i * 3] | (pos[i * 3 + 1] << 8) | (pos[i * 3 + 2] << 16)
         x, y, z = v & 0x3ff, (v >> 10) & 0x3ff, (v >> 20) & 0xf
@@ -742,9 +863,9 @@ def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
             continue
         rows.append((dist, i, x, y, _compass(x - x0, y - y0), typ))
     if not rows:
-        return f"No NPCs within {radius} of avatar ({x0},{y0},z{z0})."
+        return f"No NPCs within {radius} of you ({x0},{y0},z{z0})."
     rows.sort()
-    out = [f"NPCs within {radius} of avatar ({x0},{y0},z{z0}):",
+    out = [f"NPCs within {radius} of you ({x0},{y0},z{z0}):",
            "  dist  slot     x    y   dir  type"]
     for dist, i, x, y, comp, typ in rows:
         out.append(f"  {dist:>4}  0x{i:02x}  {x:>4} {y:>4}  {comp:<3}  {typ}")
@@ -757,8 +878,9 @@ def u6_walkable(segment: int = -1) -> str:
     engine's land-walker move gate C_1E0F_000F (terrain + objects, incl. multi-tile
     spread + bridge/breakthrough overrides). NPCs are overlaid as N -- they DO
     block a step (engine rule), but are kept off the planning grid so routes can
-    re-plan around moving NPCs. Legend: @=avatar  N=npc  .=open  #=blocked. DS from
-    u6_hook unless overridden."""
+    re-plan around moving NPCs. '@' is the actor you control (the avatar in party
+    mode, the detached member in solo). Legend: @=you  N=npc  .=open  #=blocked. DS
+    from u6_hook unless overridden."""
     if S.membase is None:
         return dm.HINT_NO_MEMBASE
     ds, err = _ds(segment)
@@ -766,14 +888,15 @@ def u6_walkable(segment: int = -1) -> str:
         return err
     base = S.membase + (ds << 4)
     try:
-        x0, y0, z0 = _avatar_xyz(base)
+        self_slot, _idx, _veh = _controlled_slot(base)
+        x0, y0, z0 = _controlled_xyz(base)
         walk, cost, ax, ay = _build_grid(base)
-        npc_cells = _actor_cells(base, z0, ax, ay)
+        npc_cells = _actor_cells(base, z0, ax, ay, self_slot)
     except OSError as ex:
         return f"Read failed (DS=0x{ds:04x}): {ex}"
     av = _world_to_cell(x0, y0, ax, ay)
     out = [f"Walkable grid (window origin world {ax},{ay}; z={z0}; "
-           f"@=avatar N=npc .=open #=blocked):"]
+           f"@=you N=npc .=open #=blocked):"]
     for r in range(U6_AREA_H):
         line = []
         for c in range(U6_AREA_W):
@@ -800,7 +923,7 @@ def u6_pathfind(npc_slot: int, segment: int = -1) -> str:
         return err
     base = S.membase + (ds << 4)
     try:
-        x0, y0, z0 = _avatar_xyz(base)
+        x0, y0, z0 = _controlled_xyz(base)
         nx, ny, nz, cu = _npc_xyz(base, npc_slot)
         walk, cost, ax, ay = _build_grid(base)
     except OSError as ex:
@@ -812,7 +935,7 @@ def u6_pathfind(npc_slot: int, segment: int = -1) -> str:
     start = _world_to_cell(x0, y0, ax, ay)
     ncell = _world_to_cell(nx, ny, ax, ay)
     if start is None:
-        return "Avatar not within the local area window (unexpected)."
+        return "Controlled actor not within the local area window (unexpected)."
     if ncell is None:
         return (f"NPC 0x{npc_slot:x} at ({nx},{ny}) is outside the 40x40 local window "
                 f"-- global routing not implemented yet.")
@@ -844,7 +967,7 @@ def u6_goto(npc_slot: int, max_steps: int = 60, segment: int = -1) -> str:
     log, stuck = [], 0
     for step_i in range(max_steps):
         try:
-            x0, y0, z0 = _avatar_xyz(base)
+            x0, y0, z0 = _controlled_xyz(base)
             nx, ny, nz, cu = _npc_xyz(base, npc_slot)
             walk, cost, ax, ay = _build_grid(base)
         except OSError as ex:
@@ -869,7 +992,7 @@ def u6_goto(npc_slot: int, max_steps: int = 60, segment: int = -1) -> str:
         inp.send_key(_STEP_ARROW[mv])
         time.sleep(0.15)
         try:
-            x1, y1, _ = _avatar_xyz(base)
+            x1, y1, _ = _controlled_xyz(base)
         except OSError:
             x1, y1 = x0, y0
         if (x1, y1) == (x0, y0):
@@ -897,7 +1020,7 @@ def u6_talk_to(npc_slot: int, max_steps: int = 60, segment: int = -1) -> str:
         return r
     base = S.membase + (ds << 4)
     try:
-        x0, y0, _ = _avatar_xyz(base)
+        x0, y0, _ = _controlled_xyz(base)
         nx, ny, _nz, _cu = _npc_xyz(base, npc_slot)
     except OSError:
         return r + "\n(could not re-read positions; talk skipped)"
@@ -967,18 +1090,19 @@ def u6_validate_passability(restore: bool = True, settle_ms: int = 160,
         return err
     base = S.membase + (ds << 4)
     try:
-        sx, sy, sz = _avatar_xyz(base)
+        sx, sy, sz = _controlled_xyz(base)
     except OSError as ex:
         return f"Read failed (DS=0x{ds:04x}): {ex}"
-    out = [f"Passability validation at avatar ({sx},{sy},z{sz}) "
+    out = [f"Passability validation at controlled actor ({sx},{sy},z{sz}) "
            f"-- predict (oracle) vs actual (live move):"]
     mismatches = 0
     for dr, dc in _DIR_DELTAS:
         name = _STEP_NAME[(dr, dc)]
         try:
-            x0, y0, z0 = _avatar_xyz(base)
+            self_slot, _idx, _veh = _controlled_slot(base)
+            x0, y0, z0 = _controlled_xyz(base)
             walk, _cost, ax, ay = _build_grid(base)
-            actors = _actor_cells(base, z0, ax, ay)
+            actors = _actor_cells(base, z0, ax, ay, self_slot)
         except OSError as ex:
             out.append(f"  {name}: read failed: {ex}")
             continue
@@ -993,7 +1117,7 @@ def u6_validate_passability(restore: bool = True, settle_ms: int = 160,
         inp.send_key(_STEP_ARROW[(dr, dc)])
         time.sleep(settle_ms / 1000.0)
         try:
-            x1, y1, _ = _avatar_xyz(base)
+            x1, y1, _ = _controlled_xyz(base)
         except OSError:
             x1, y1 = x0, y0
         actual = (x1, y1) == (wx, wy)

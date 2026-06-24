@@ -59,13 +59,17 @@ Implemented (logic verified; **memory offsets pending live verification** — se
 
 - **Boot:** `u6_hook(avatar_name)` — attach, BDA-calibrate MemBase, derive DS
   from the avatar's name.
-- **Perceive:** `u6_avatar` (pos+facing, the position-confirm primitive),
+- **Perceive:** `u6_avatar` (pos+facing of the **controlled actor** — the
+  move-confirm primitive; the avatar in party mode, the active member in solo),
+  `u6_party` (solo/party mode, combat on/off, and who's controlled now),
   `u6_object(slot)`, `u6_inventory(npc_slot)`, `u6_npcs_near(radius)`,
-  `u6_walkable` (40×40 ASCII passability grid), `u6_conversation` (live talk
-  state + TalkBuf window).
+  `u6_walkable` (40×40 ASCII passability grid), `u6_conversation` (live talk state
+  + TalkBuf window).
 - **Act:** `u6_move(dir)`, `u6_talk(dir)`, `u6_say(text)`, `u6_key(key)`.
 - **Navigate:** `u6_pathfind(npc_slot)` (planner), `u6_goto(npc_slot)`
   (closed-loop), `u6_talk_to(npc_slot)` (goto + talk).
+- **Verify:** `u6_validate_passability` (predict-vs-live fidelity gate for the
+  passability oracle — see `dosbox_u6_passability.md`).
 - **Inherited:** base tools (`read_dos`/`write_dos`/`status`/…) and input tools
   (`find_window`/`focus_window`/`send_key`/`send_text`) — escape hatches; the
   agent normally stays in the `u6_*` verbs.
@@ -79,9 +83,11 @@ Planned (gaps — see the milestones for which are needed when):
 
 ## 3. Pathfinding
 
-4-connected **weighted Dijkstra** over a walkable+cost grid built from the
-engine's own data (terrain + static objects; NPCs excluded — exactly as U6's
-`__ComputeResistance` does), with per-cell cost `(TerrainType[ground]>>4)+1` so
+4-connected **weighted Dijkstra** over a walkable+cost grid that is a faithful
+port of the engine's land-walker move gate `C_1E0F_000F` (terrain + objects incl.
+multi-tile spread + bridge/breakthrough overrides; NPCs kept off the plan as a
+separate dynamic layer so routes re-plan around them — see
+`dosbox_u6_passability.md`), with per-cell cost `(TerrainType[ground]>>4)+1` so
 routes skirt forest/swamp instead of cutting through. Moving NPCs are handled
 **reactively** by `u6_goto`'s closed loop (plan → one step → confirm via
 `u6_avatar` → replan on block, stuck-guard), mirroring how the engine resolves
