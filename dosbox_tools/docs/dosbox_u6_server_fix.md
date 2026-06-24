@@ -85,18 +85,18 @@ for slot in range(0x100, U6_MAX_SLOTS):
 (they are resolved at per-step time). The ground-terrain pass (cost +
 impassability) is unchanged.
 
-## Deferred (intentional, under-block only)
+## Follow-up: both refinements are now ported
 
-The engine adds two refinements this pass omits; both only ever *under*-block, so
-they are safe to defer:
+This fix corrected the over-blocking but left two refinements out. Both are now
+closed by porting the engine's actual move gate `C_1E0F_000F` — see
+`dosbox_u6_passability.md` for the full model:
 
-- **Multi-tile object spread** — `TILE_FLAG1_40 / TILE_FLAG1_80` extend a large
-  object's block to its north/west neighbor cells. Not modeled, so a big
-  impassable object blocks only its anchor cell.
-- **Door / passthrough special cases** — `OBJ_129..12C` (doors) and
-  `OBJ_116/118` (passthrough) get bespoke handling in `__ComputeResistance`. A
-  plain `IsTerrainImpass` test approximates doors (closed-door tiles are
-  impassable, open-door tiles are not).
+- **Multi-tile object spread** (`TileFlag` DoubleH/DoubleV/2×2 → W/N/NW neighbour
+  cells, reading `tile-1/-2/-3`) — now implemented in `_build_grid`.
+- **Doors / passthrough** — for the avatar these need no special case: the
+  `OBJ_129..12C` / `OBJ_116/118` handling in the engine is on the *NPC*-mover
+  branch, so a door is just an object whose tile is impassable (closed) or
+  passable (open), which the general object rule already tests.
 
 ## Verification
 

@@ -82,11 +82,19 @@ _TALK_INPUT_OPS = {
 
 # ----------------------------------------------------------------------------
 # Map / navigation layout -- the local 40x40 "area" window + the tile-flag
-# tables (u6.h, seg_101C.c GetTileAtXYZ, seg_1E0F.c __ComputeResistance). All
-# DGROUP / DS-relative. Ground tiles are bytes 0-255; high tile.h IDs are
-# objects drawn on top (the object arrays). Walkability mirrors the engine:
-# terrain impassable OR a STATIC object (slot >= 0x100) whose tile is impassable;
-# NPC slots (< 0x100) are excluded from the plan (resolved at per-step time).
+# tables (u6.h, seg_101C.c GetTileAtXYZ). All DGROUP / DS-relative. Ground tiles
+# are bytes 0-255; high tile ids are objects drawn on top (the object arrays).
+#
+# Passability is a faithful port of the engine's move-legality gate C_1E0F_000F
+# (seg_1E0F.c:66) -- the function EVERY real step goes through (TryStraightMove
+# @ :1421). For a cardinal step the verdict depends only on the destination cell
+# + the mover, so the grid IS the per-step oracle. On foot the avatar is a plain
+# land-walker, which collapses the gate to "passable ground AND no impassable
+# object on the cell", with multi-tile-object spread + breakthrough overrides
+# (see _build_grid). Actors (slot < 0x100) block too, but that half stays a
+# separate dynamic layer (_actor_cells) so a transient NPC doesn't wall off a
+# plan; movement-type (boat/horse/balloon) is Phase 2 (the branch skeleton is in
+# place, its inputs hardwired to land-walker).
 # ----------------------------------------------------------------------------
 U6_AREA_W = 40
 U6_AREA_H = 40
@@ -94,16 +102,31 @@ U6_WORLD_MASK = 0x3ff             # world is 1024x1024
 U6_AreaTiles  = 0x8E51            # AREA_H*AREA_W bytes; ground tile per cell
 U6_AreaX      = 0xBBC8            # int; world X of the area-window origin
 U6_AreaY      = 0xBBCA            # int; world Y of the area-window origin
-U6_MapObjPtr  = 0xD8E7            # AREA_H*AREA_W int16; head object slot/cell, -1 = none
-U6_Link       = 0xBDDA            # int16[U6_MAX_SLOTS]; per-cell object stack chain
 U6_NPCFlag_ptr     = 0x4D4C       # far ptr -> NPCFlag[]; dir = NPCFlag[slot] & 7
-U6_TerrainType_ptr = 0xB3EB       # far ptr -> TerrainType[tile]; & 0x02 = impassable
+U6_TerrainType_ptr = 0xB3EB       # far ptr -> TerrainType[tile] (u6.h); flags below
+U6_TileFlag_ptr    = 0x8C46       # far ptr -> TileFlag[tile]  (u6.h); DoubleH/DoubleV below
+U6_TileFlag2_ptr   = 0xB3EF       # far ptr -> D_B3EF[tile]    (u6.h); Br/Ig below
 U6_BaseTile_ptr    = 0x6824       # far ptr -> BaseTile[type] (int16); tile = BaseTile[type]+frame
+
+# TerrainType[tile] bits (u6.h). Low nibble = properties; high nibble feeds the
+# engine path cost `(TerrainType>>4)+1`. Only IMPASS blocks the land-walker.
+TERRAIN_WET    = 0x01
 TERRAIN_IMPASS = 0x02
 TERRAIN_WALL   = 0x04
-TERRAIN_WET    = 0x01
+TERRAIN_DAMAGE = 0x08
+# TileFlag[tile] bits (u6.h): a multi-tile object's extent from its anchor.
+TILE_DOUBLE_V  = 0x40             # object also covers the cell to its NORTH
+TILE_DOUBLE_H  = 0x80             # object also covers the cell to its WEST
+# D_B3EF[tile] bits (u6.h): land-walker passability overrides (seg_1E0F.c:142).
+TILE2_BREAKTHROUGH = 0x04         # Br: enterable even over impassable terrain (bridges)
+TILE2_IGNORE       = 0x10         # Ig: keep scanning -- the Br/match is non-definitive
+
 _TILEFLAG_N = 0x800               # tile-flag tables span all 2048 tile ids
 _BASETILE_N = 0x400               # BaseTile indexed by 10-bit object type
+
+# Actor types that DON'T block movement (C_1E0F_000F c_04ed @ seg_1E0F.c:215:
+# fields/effects you walk through); every other in-world actor blocks the avatar.
+_PASSABLE_ACTOR_TYPES = frozenset({0x157, 0x162, 0x164, 0x165, 0x167})
 
 # 4-connected movement (U6 arrow-key cardinals; diagonals deferred -- they need
 # numpad keys + an 8-connected search, both unverified). step (dr,dc) -> labels.
@@ -117,10 +140,14 @@ class U6State(dm.Session):
     def __init__(self):
         super().__init__()
         self.u6_ds = None        # derived per run; never hardcoded
+        self.static_cache = {}   # name -> table bytes; lazy, see _static_table
+        self.static_key = None   # base_addr the cache is valid for
 
     def reset(self):
         super().reset()
         self.u6_ds = None
+        self.static_cache = {}
+        self.static_key = None
 
 
 S = U6State()
@@ -218,7 +245,8 @@ def u6_hook(avatar_name: str = "") -> str:
             f"Names[0] reads back as {readback!r}.{extra}\n"
             f"Ready -- read: u6_avatar / u6_object / u6_inventory / u6_npcs_near "
             f"/ u6_walkable / u6_conversation; act: u6_move / u6_talk / u6_say / "
-            f"u6_key; navigate: u6_pathfind / u6_goto / u6_talk_to. Avatar = slot 1.")
+            f"u6_key; navigate: u6_pathfind / u6_goto / u6_talk_to; verify: "
+            f"u6_validate_passability. Avatar = slot 1.")
 
 
 @mcp.tool()
@@ -435,17 +463,30 @@ def u6_key(key: str) -> str:
 # Navigation helpers -- build the walkable + cost grid from terrain + static
 # objects, 4-connected weighted Dijkstra to adjacency. All read from u6_hook DS.
 # ----------------------------------------------------------------------------
-def _s16(buf, i):
-    v = buf[i * 2] | (buf[i * 2 + 1] << 8)
-    return v - 0x10000 if v >= 0x8000 else v
-
-
 def _read_far_ptr(base_addr, ds_off):
     """Resolve a Borland far pointer stored at DS:ds_off to a host linear addr."""
     fp = dm.read(S.handle, base_addr + ds_off, 4)
     off = fp[0] | (fp[1] << 8)
     seg = fp[2] | (fp[3] << 8)
     return S.membase + (seg << 4) + off
+
+
+def _static_table(base_addr, ds_off, nbytes, name):
+    """Read a STATIC DGROUP far-pointer table (TerrainType / TileFlag / D_B3EF /
+    BaseTile) once and cache it. These are loaded from the game's data files at
+    boot and don't change during play, so re-reading them on every grid build is
+    pure waste. The read is LAZY (first navigation call, not session start). The
+    cache is keyed to base_addr (= MemBase + DS<<4), so a DOSBox restart or a
+    different-avatar re-hook -- which rebases the segment -- transparently flushes
+    it. (Game data is identical across saves in one process, so reuse is safe.)"""
+    if S.static_key != base_addr:
+        S.static_cache.clear()
+        S.static_key = base_addr
+    table = S.static_cache.get(name)
+    if table is None:
+        table = dm.read(S.handle, _read_far_ptr(base_addr, ds_off), nbytes)
+        S.static_cache[name] = table
+    return table
 
 
 def _avatar_xyz(base_addr):
@@ -475,19 +516,31 @@ def _dir_to(dx, dy):
 
 
 def _build_grid(base_addr):
-    """Read terrain + map objects -> (walk[H][W] bool, cost[H][W] int, AreaX,
-    AreaY). Mirrors the engine (seg_1E0F.c __ComputeResistance): a cell is blocked
-    by impassable terrain, or by a map object ON IT whose tile is impassable.
+    """Faithful per-step passability for the LAND-WALKING avatar, ported from the
+    engine's move-legality gate C_1E0F_000F (seg_1E0F.c:66). Returns (walk[H][W]
+    bool, cost[H][W] int, AreaX, AreaY); for a cardinal step the destination cell's
+    walk flag IS the engine verdict.
 
-    Objects are placed by their OWN world position -- exactly like the engine's
-    `for(obj = SearchArea(...); ...)` loop, where `area_x = GetX(obj) - origin`.
-    We do NOT follow the Link chain from a cell's head object: Link (0xBDDA) is the
-    AREA-WIDE object scan chain (row-major, what SearchArea/NextArea traverse), not
-    a per-cell stack, so walking it from a cell wanders onto other cells' objects
-    and spuriously blocks the start cell. NPC slots (< 0x100) are excluded
-    (resolved at per-step time). The per-cell move cost is the engine's
-    `(TerrainType[ground] >> 4) + 1`, so weighted search skirts costly terrain
-    (forest/swamp) the way the game does."""
+    On foot the avatar is a plain land-walker (bp_10=1; flies/swims/raft/ethereal
+    all 0), so the gate collapses to: ground passable (TerrainType & IMPASS == 0)
+    AND no object on the cell whose tile is impassable -- with the two refinements
+    the previous own-cell-only version skipped:
+
+      * Multi-tile objects spread their block. A DoubleH object (TileFlag & 0x80)
+        also covers the cell to its WEST reading tile-1; DoubleV (0x40) the cell to
+        its NORTH; a 2x2 (both) the W/N/NW cells reading tile-1/-2/-3. This mirrors
+        the engine both ways: __ComputeResistance's forward spread (seg_1E0F.c:1907)
+        and FindLoc's anchor-from-the-NW enumeration (seg_1184.c:240).
+      * Breakthrough tiles (D_B3EF & Br) make a cell enterable even over impassable
+        terrain (bridges); they win over an impassable object on the same cell. An
+        Ignore tile (& Ig) leaves the Br non-definitive (seg_1E0F.c:142-145).
+
+    ACTORS (slot < 0x100) are NOT folded in -- the engine blocks on them too, but
+    for PLANNING we keep the grid actor-free so a transient NPC doesn't wall off a
+    route (u6_goto re-plans each step; the faithful actor block is _actor_cells,
+    applied at legality / per-step time). Move cost is the engine's
+    `(TerrainType[ground] >> 4) + 1`, so weighted search skirts costly terrain the
+    way the game does. Static tables come from the lazy per-process cache."""
     ax = int.from_bytes(dm.read(S.handle, base_addr + U6_AreaX, 2), "little")
     ay = int.from_bytes(dm.read(S.handle, base_addr + U6_AreaY, 2), "little")
     _, _, z0 = _avatar_xyz(base_addr)
@@ -495,44 +548,95 @@ def _build_grid(base_addr):
     status = dm.read(S.handle, base_addr + U6_ObjStatus, U6_MAX_SLOTS)
     objpos = dm.read(S.handle, base_addr + U6_ObjPos, U6_MAX_SLOTS * 3)
     shape  = dm.read(S.handle, base_addr + U6_ObjShapeType, U6_MAX_SLOTS * 2)
-    terr = dm.read(S.handle, _read_far_ptr(base_addr, U6_TerrainType_ptr), _TILEFLAG_N)
-    basetile = dm.read(S.handle, _read_far_ptr(base_addr, U6_BaseTile_ptr), _BASETILE_N * 2)
+    terr     = _static_table(base_addr, U6_TerrainType_ptr, _TILEFLAG_N, "terr")
+    tflag1   = _static_table(base_addr, U6_TileFlag_ptr,    _TILEFLAG_N, "tflag1")
+    tflag2   = _static_table(base_addr, U6_TileFlag2_ptr,   _TILEFLAG_N, "tflag2")
+    basetile = _static_table(base_addr, U6_BaseTile_ptr,    _BASETILE_N * 2, "basetile")
 
-    def tflag(tile):
+    def terr_of(tile):
         return terr[tile] if 0 <= tile < len(terr) else 0
 
     # Ground terrain: per-cell move cost + impassability.
     walk = [[True] * U6_AREA_W for _ in range(U6_AREA_H)]
     cost = [[1] * U6_AREA_W for _ in range(U6_AREA_H)]
+    brk  = [[False] * U6_AREA_W for _ in range(U6_AREA_H)]   # a Br tile locked the cell open
     for r in range(U6_AREA_H):
         for c in range(U6_AREA_W):
-            gf = tflag(tiles[r * U6_AREA_W + c])
-            cost[r][c] = (gf >> 4) + 1                   # engine move cost: forest/swamp > road
+            gf = terr_of(tiles[r * U6_AREA_W + c])
+            cost[r][c] = (gf >> 4) + 1                       # engine move cost: forest/swamp > road
             if gf & TERRAIN_IMPASS:
                 walk[r][c] = False
 
-    # Map objects: each impassable object blocks its OWN cell. Single pass over the
-    # world-object slots (engine SearchArea + C_1E0F_4265). Skip NPCs (< 0x100),
-    # empty slots, anything not loose on the map (CoordUse != LOCXYZ), or off-level.
+    # Apply one object-tile to one cell, land-walker rules (C_1E0F_000F :142-164).
+    def apply(r, c, qtile):
+        if not (0 <= r < U6_AREA_H and 0 <= c < U6_AREA_W):
+            return
+        if not (0 <= qtile < _TILEFLAG_N):
+            return
+        if tflag2[qtile] & TILE2_BREAKTHROUGH:              # bridge etc.: enterable
+            walk[r][c] = True
+            if not (tflag2[qtile] & TILE2_IGNORE):
+                brk[r][c] = True                            # definitive open; later impass can't re-block
+        elif (terr_of(qtile) & TERRAIN_IMPASS) and not brk[r][c]:
+            walk[r][c] = False
+
+    # Map objects: one pass over the world-object slots (engine SearchArea loop).
+    # Skip NPCs (< 0x100), empty slots, anything not loose on the map (CoordUse !=
+    # LOCXYZ), or off-level. Place each by its OWN world position, then spread its
+    # multi-tile extent to the W/N/NW neighbour cells.
     for slot in range(0x100, U6_MAX_SLOTS):
         sh = shape[slot * 2] | (shape[slot * 2 + 1] << 8)
-        if sh == 0:                                      # empty slot
+        if sh == 0:                                         # empty slot
             continue
-        if status[slot] & 0x18:                          # not LOCXYZ (held/contained/equipped)
+        if status[slot] & 0x18:                             # not LOCXYZ (held/contained/equipped)
             continue
         typ = sh & 0x3ff
         if typ >= _BASETILE_N:
             continue
-        tile = (basetile[typ * 2] | (basetile[typ * 2 + 1] << 8)) + (sh >> 10)
-        if not (tflag(tile) & TERRAIN_IMPASS):
-            continue
         p = objpos[slot * 3] | (objpos[slot * 3 + 1] << 8) | (objpos[slot * 3 + 2] << 16)
-        if ((p >> 20) & 0xf) != z0:                      # different map level
+        if ((p >> 20) & 0xf) != z0:                         # different map level
             continue
         cell = _world_to_cell(p & 0x3ff, (p >> 10) & 0x3ff, ax, ay)
-        if cell is not None:
-            walk[cell[0]][cell[1]] = False
+        if cell is None:
+            continue
+        r, c = cell
+        tile = (basetile[typ * 2] | (basetile[typ * 2 + 1] << 8)) + (sh >> 10)
+        fl = tflag1[tile] if 0 <= tile < len(tflag1) else 0
+        apply(r, c, tile)                                   # own (anchor) cell
+        if fl & TILE_DOUBLE_H:                              # also covers WEST
+            apply(r, c - 1, tile - 1)
+            if fl & TILE_DOUBLE_V:                          # 2x2: also N + NW
+                apply(r - 1, c, tile - 2)
+                apply(r - 1, c - 1, tile - 3)
+        elif fl & TILE_DOUBLE_V:                            # also covers NORTH
+            apply(r - 1, c, tile - 1)
     return walk, cost, ax, ay
+
+
+def _actor_cells(base_addr, z0, ax, ay):
+    """Cells blocked by an ACTOR -- the dynamic half of C_1E0F_000F's legality
+    (seg_1E0F.c:213): every in-world actor (slot 1..0xFF, LOCXYZ, same level)
+    blocks the avatar EXCEPT the walk-through field/effect types and the avatar
+    itself (slot 1). Returns a set of (r, c) in the local window. Kept separate
+    from _build_grid so the planner can route optimistically through a transient
+    NPC (and re-plan), while per-step legality still honours it."""
+    status = dm.read(S.handle, base_addr + U6_ObjStatus, 0x100)
+    pos    = dm.read(S.handle, base_addr + U6_ObjPos, 0x100 * 3)
+    shape  = dm.read(S.handle, base_addr + U6_ObjShapeType, 0x100 * 2)
+    cells = set()
+    for i in range(0x100):
+        if i == 1 or (status[i] & 0x18) != 0:               # avatar / not in world
+            continue
+        typ = (shape[i * 2] | (shape[i * 2 + 1] << 8)) & 0x3ff
+        if typ == 0 or typ in _PASSABLE_ACTOR_TYPES:
+            continue
+        v = pos[i * 3] | (pos[i * 3 + 1] << 8) | (pos[i * 3 + 2] << 16)
+        if ((v >> 20) & 0xf) != z0:
+            continue
+        cell = _world_to_cell(v & 0x3ff, (v >> 10) & 0x3ff, ax, ay)
+        if cell:
+            cells.add(cell)
+    return cells
 
 
 def _dijkstra(walk, cost, start, goals):
@@ -649,9 +753,12 @@ def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
 
 @mcp.tool()
 def u6_walkable(segment: int = -1) -> str:
-    """Ultima VI: the local 40x40 passability grid as ASCII (terrain + static
-    objects; NPCs overlaid but NOT treated as walls -- engine rule). Legend:
-    @=avatar  N=npc  .=open  #=blocked. DS from u6_hook unless overridden."""
+    """Ultima VI: the local 40x40 passability grid as ASCII, faithful to the
+    engine's land-walker move gate C_1E0F_000F (terrain + objects, incl. multi-tile
+    spread + bridge/breakthrough overrides). NPCs are overlaid as N -- they DO
+    block a step (engine rule), but are kept off the planning grid so routes can
+    re-plan around moving NPCs. Legend: @=avatar  N=npc  .=open  #=blocked. DS from
+    u6_hook unless overridden."""
     if S.membase is None:
         return dm.HINT_NO_MEMBASE
     ds, err = _ds(segment)
@@ -661,20 +768,9 @@ def u6_walkable(segment: int = -1) -> str:
     try:
         x0, y0, z0 = _avatar_xyz(base)
         walk, cost, ax, ay = _build_grid(base)
-        status = dm.read(S.handle, base + U6_ObjStatus, 0x100)
-        pos = dm.read(S.handle, base + U6_ObjPos, 0x100 * 3)
+        npc_cells = _actor_cells(base, z0, ax, ay)
     except OSError as ex:
         return f"Read failed (DS=0x{ds:04x}): {ex}"
-    npc_cells = set()
-    for i in range(0x100):
-        if i == 1 or (status[i] & 0x18) != 0:
-            continue
-        v = pos[i * 3] | (pos[i * 3 + 1] << 8) | (pos[i * 3 + 2] << 16)
-        if ((v >> 20) & 0xf) != z0:
-            continue
-        cell = _world_to_cell(v & 0x3ff, (v >> 10) & 0x3ff, ax, ay)
-        if cell:
-            npc_cells.add(cell)
     av = _world_to_cell(x0, y0, ax, ay)
     out = [f"Walkable grid (window origin world {ax},{ay}; z={z0}; "
            f"@=avatar N=npc .=open #=blocked):"]
@@ -809,6 +905,112 @@ def u6_talk_to(npc_slot: int, max_steps: int = 60, segment: int = -1) -> str:
         return r + "\n(not adjacent; talk skipped)"
     td = _dir_to(nx - x0, ny - y0)
     return f"{r}\n{u6_talk(td)}\nNow poll u6_conversation() and reply with u6_say()."
+
+
+# ----------------------------------------------------------------------------
+# Passability validation harness -- the fidelity gate. We have BOTH the oracle
+# (ported C_1E0F_000F) and the live game + action channel, so "is the port 100%
+# faithful?" is answerable, not arguable: predict each cardinal step, actually
+# take it, and compare to what the avatar's position did.
+# ----------------------------------------------------------------------------
+_RESTORE_ARROW = {"n": "down", "s": "up", "w": "right", "e": "left"}
+
+
+def _cell_diag(base_addr, wx, wy, z0, ax, ay):
+    """One-line why diagnostic for world cell (wx,wy,z0): ground tile + terrain
+    flags, plus any in-world object/actor on it. Called only on an oracle mismatch,
+    so it re-reads freely."""
+    terr = _static_table(base_addr, U6_TerrainType_ptr, _TILEFLAG_N, "terr")
+    parts = []
+    cell = _world_to_cell(wx, wy, ax, ay)
+    if cell:
+        tiles = dm.read(S.handle, base_addr + U6_AreaTiles, U6_AREA_H * U6_AREA_W)
+        gt = tiles[cell[0] * U6_AREA_W + cell[1]]
+        gf = terr[gt] if 0 <= gt < len(terr) else 0
+        parts.append(f"ground tile={gt} terr=0x{gf:02x}")
+    status = dm.read(S.handle, base_addr + U6_ObjStatus, U6_MAX_SLOTS)
+    pos    = dm.read(S.handle, base_addr + U6_ObjPos, U6_MAX_SLOTS * 3)
+    shape  = dm.read(S.handle, base_addr + U6_ObjShapeType, U6_MAX_SLOTS * 2)
+    hits = []
+    for i in range(1, U6_MAX_SLOTS):
+        if (status[i] & 0x18) != 0:
+            continue
+        v = pos[i * 3] | (pos[i * 3 + 1] << 8) | (pos[i * 3 + 2] << 16)
+        if (v & 0x3ff) != wx or ((v >> 10) & 0x3ff) != wy or ((v >> 20) & 0xf) != z0:
+            continue
+        typ = (shape[i * 2] | (shape[i * 2 + 1] << 8)) & 0x3ff
+        if typ == 0:
+            continue
+        hits.append(f"slot 0x{i:x} type 0x{typ:x}" + (" ACTOR" if i < 0x100 else ""))
+    if hits:
+        parts.append("on cell: " + ", ".join(hits[:5]))
+    return "; ".join(parts) if parts else "(no terrain/obj info)"
+
+
+@mcp.tool()
+def u6_validate_passability(restore: bool = True, settle_ms: int = 160,
+                            segment: int = -1) -> str:
+    """Ultima VI: EMPIRICALLY verify the ported passability oracle (C_1E0F_000F)
+    against the live game -- the fidelity gate. For each cardinal direction it
+    (re-)reads avatar + grid + actors, PREDICTS pass/block, sends the move, re-reads
+    the avatar position to see what the game DID, and reports MATCH / MISMATCH.
+
+    By default it steps back after any successful move so the avatar ends where it
+    started -- but each probe still costs game turns, so run it on a SAFE save
+    (e.g. standing in the castle), not mid-combat. A mismatch dumps the destination
+    tile id + flags + any object/actor, so a wrong prediction is debuggable on the
+    spot. DOSBox must be focused (SendInput). DS from u6_hook unless overridden."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    try:
+        sx, sy, sz = _avatar_xyz(base)
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    out = [f"Passability validation at avatar ({sx},{sy},z{sz}) "
+           f"-- predict (oracle) vs actual (live move):"]
+    mismatches = 0
+    for dr, dc in _DIR_DELTAS:
+        name = _STEP_NAME[(dr, dc)]
+        try:
+            x0, y0, z0 = _avatar_xyz(base)
+            walk, _cost, ax, ay = _build_grid(base)
+            actors = _actor_cells(base, z0, ax, ay)
+        except OSError as ex:
+            out.append(f"  {name}: read failed: {ex}")
+            continue
+        av = _world_to_cell(x0, y0, ax, ay)
+        if av is None:
+            out.append(f"  {name}: avatar outside window -- skipped")
+            continue
+        nr, nc = av[0] + dr, av[1] + dc
+        in_win = 0 <= nr < U6_AREA_H and 0 <= nc < U6_AREA_W
+        predict = bool(in_win and walk[nr][nc] and (nr, nc) not in actors)
+        wx, wy = (x0 + dc) & 0x3ff, (y0 + dr) & 0x3ff
+        inp.send_key(_STEP_ARROW[(dr, dc)])
+        time.sleep(settle_ms / 1000.0)
+        try:
+            x1, y1, _ = _avatar_xyz(base)
+        except OSError:
+            x1, y1 = x0, y0
+        actual = (x1, y1) == (wx, wy)
+        ok = (actual == predict)
+        if not ok:
+            mismatches += 1
+        line = (f"  {name}: predict={'pass' if predict else 'block'} "
+                f"actual={'pass' if actual else 'block'}  {'OK' if ok else '**MISMATCH**'}")
+        if not ok:
+            line += "  | " + _cell_diag(base, wx, wy, z0, ax, ay)
+        out.append(line)
+        if actual and restore:                              # we moved -- step back
+            inp.send_key(_RESTORE_ARROW[name])
+            time.sleep(settle_ms / 1000.0)
+    out.append("-- " + ("ALL 4 MATCH: oracle faithful here." if mismatches == 0
+                        else f"{mismatches} MISMATCH(es): oracle diverges -- inspect the diag + C_1E0F_000F."))
+    return "\n".join(out)
 
 
 if __name__ == "__main__":
