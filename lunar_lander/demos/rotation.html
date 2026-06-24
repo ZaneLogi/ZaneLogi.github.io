@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>lunar_lander — 360° rotation, both size banks</title>
+  <style>
+    body { background:#111; color:#ccc; font-family:-apple-system,"Segoe UI",sans-serif; margin:16px; }
+    h1 { font-size:17px; margin:0 0 4px; }
+    h2 { font-size:13px; margin:22px 0 8px; color:#9c9; }
+    p  { font-size:12px; color:#999; margin:6px 0; max-width:1000px; line-height:1.5; }
+    code { color:#9c9; }
+    canvas { background:#000; border:1px solid #333; image-rendering:pixelated; }
+    .pair { display:flex; gap:28px; align-items:flex-start; }
+    .lander { text-align:center; }
+    .lander .tag { font-size:12px; color:#bcb; margin-top:6px; }
+    .lander .sub { font-size:11px; color:#777; }
+    .controls { display:flex; align-items:center; gap:16px; margin:14px 0 4px; font-size:13px; flex-wrap:wrap; }
+    button { background:#222; color:#cdc; border:1px solid #444; border-radius:4px; padding:4px 12px; cursor:pointer; font-size:13px; }
+    button:hover { background:#2c2c2c; }
+    input[type=range]{ width:240px; }
+    #readout { font-family:monospace; font-size:12px; color:#8c8; }
+    .size-row { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
+    .cell { text-align:center; }
+    .cell .cap { font-size:11px; color:#888; margin-top:4px; font-family:monospace; }
+    b { color:#cdc; }
+  </style>
+</head>
+<body>
+  <h1>Lunar Lander — full 360° rotation, at both ROM sizes</h1>
+  <p>
+    The lander ROM (<code>034599</code>) stores the craft as <b>9 poses spanning one
+    ~90° quadrant</b> (upright → laid on its side). The full 360° is reconstructed
+    here by <b>X/Y mirroring</b> (<code>dvg.js</code> <code>xFlip</code>/<code>yFlip</code>) —
+    the same reflection trick Atari's Asteroids uses for its ship at <code>$750B</code>.
+    There are <b>two such 9-pose banks</b> at two native sizes: the <b>zoom-out</b> set
+    (dispatch table <code>$4DF4</code>, ~15 units — the far view) and the <b>zoom-in</b>
+    set (<code>$4BA2</code>, ~29 units — the close view as you near the surface).
+  </p>
+  <p style="color:#a98">
+    Note: the exact <i>direction→pose+flip</i> fold lives in the LL CPU ROM, which
+    isn't decoded yet — so the frame ordering below is reconstructed geometrically
+    (frames sorted by each rendered shape's actual orientation). It sweeps smoothly
+    but may not match the original's exact thresholds.
+  </p>
+
+  <div class="controls">
+    <button id="play">⏸ Pause</button>
+    <label>heading <input id="slider" type="range" min="0" max="359" value="0"></label>
+    <span id="readout">—</span>
+  </div>
+
+  <div class="pair">
+    <div class="lander">
+      <canvas id="cv-out" width="220" height="220"></canvas>
+      <div class="tag">Zoom-out · far view</div>
+      <div class="sub"><code>$4DF4</code> set · native ~15u</div>
+    </div>
+    <div class="lander">
+      <canvas id="cv-in" width="220" height="220"></canvas>
+      <div class="tag">Zoom-in · close view</div>
+      <div class="sub"><code>$4BA2</code> set · native ~29u</div>
+    </div>
+  </div>
+  <p>Both drawn at the <b>same pixels-per-unit</b>, so the ~2× native size difference
+     between the two banks is real, not a zoom on this page. Each lander pivots about
+     the <b>DVG origin <code>(0,0)</code></b> (the red dot ≈ the cabin centre) — a fixed
+     point, so it spins in place instead of wobbling on a per-frame bounding box.</p>
+
+  <h2>Drawing the lander at different sizes</h2>
+  <p>
+    Two independent mechanisms. (1) The ROM ships the two native sizes above.
+    (2) The DVG <code>globalScale</code> resizes <i>any</i> shape — each step doubles
+    the drawing. Below is the upright zoom-in pose (<code>$4B64</code>) at
+    <code>globalScale</code> 0–5, same pixels-per-unit, so each is twice the previous.
+    Beyond 5 the 4-bit scale field <code>(localScale+globalScale) &amp; 0x0F</code> wraps,
+    so gs≥6 distorts — that's faithful DVG behaviour, not a bug.
+  </p>
+  <div class="size-row" id="size-row"></div>
+
+  <script type="module" src="./rotation.js"></script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>lunar_lander — demo index</title>
+  <style>
+    body { background:#0e0e0e; color:#ccc; font-family:-apple-system,"Segoe UI",sans-serif; margin:0; padding:28px; }
+    h1 { font-size:20px; margin:0 0 4px; color:#cdc; }
+    p.lead { font-size:13px; color:#999; margin:4px 0 22px; max-width:760px; line-height:1.5; }
+    code { color:#9c9; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:14px; max-width:960px; }
+    a.card { display:block; text-decoration:none; background:#161616; border:1px solid #2c2c2c; border-radius:8px;
+             padding:14px 16px; color:inherit; transition:border-color .15s, background .15s; }
+    a.card:hover { border-color:#3a6; background:#191c19; }
+    a.card .name { font-size:15px; color:#9fe6b0; margin:0 0 4px; }
+    a.card .desc { font-size:12px; color:#9a9a9a; line-height:1.45; margin:0; }
+    a.card .src  { font-size:11px; color:#6f7f6f; font-family:monospace; margin-top:6px; }
+    footer { margin-top:26px; font-size:11px; color:#666; max-width:760px; line-height:1.5; }
+  </style>
+</head>
+<body>
+  <h1>Lunar Lander — vector-ROM demos</h1>
+  <p class="lead">
+    Faithful byte-decodes of Atari <b>Lunar Lander</b> (1979), which drives the same
+    Atari DVG as Asteroids. No gameplay/runtime yet — these pages render shapes straight
+    from the picture ROMs through <code>dvg.js</code>. Pick one:
+  </p>
+
+  <div class="grid">
+    <a class="card" href="demos/rotation.html">
+      <div class="name">360° rotation ↻</div>
+      <p class="desc">The lander spun through a full circle (9-pose quadrant + X/Y mirror),
+         shown at both ROM sizes, plus a <code>globalScale</code> size demo.</p>
+      <div class="src">demos/rotation.html · 034599</div>
+    </a>
+    <a class="card" href="demos/lander.html">
+      <div class="name">Lander poses</div>
+      <p class="desc">The 9 tilt attitudes — 8 shared base octagons + per-angle
+         leg/thruster SVECs.</p>
+      <div class="src">demos/lander.html · 034599</div>
+    </a>
+    <a class="card" href="demos/gallery.html">
+      <div class="name">Shape gallery</div>
+      <p class="desc">Every JSR/JMP-target subroutine across all three ROMs, fit to a cell
+         and labelled by CPU address. A survey tool.</p>
+      <div class="src">demos/gallery.html · 034597/8/9</div>
+    </a>
+    <a class="card" href="demos/vector_rom.html">
+      <div class="name">Font sheet</div>
+      <p class="desc">The A–Z + space glyphs decoded from the picture/glyph ROM.</p>
+      <div class="src">demos/vector_rom.html · 034598</div>
+    </a>
+    <a class="card" href="demos/title.html">
+      <div class="name">$5458 composite</div>
+      <p class="desc">The 75-JSR mega-composite — almost certainly the in-game
+         HUD / status line.</p>
+      <div class="src">demos/title.html · 034598</div>
+    </a>
+  </div>
+
+  <footer>
+    Served by <code>tools/devserver.py</code> (no-cache) via <code>.claude/launch.json</code>
+    <code>lunar_lander</code> on port 8085. See <code>CLAUDE.md</code> for the ROM map and
+    decode details.
+  </footer>
+</body>
+</html>
