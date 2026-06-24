@@ -23,6 +23,7 @@ name's bytes pin Names[0] at DS:0x3236, giving DS = (name_linear - 0x3236) / 16.
 
 import heapq
 import time
+import types
 
 from mcp.server.fastmcp import FastMCP
 
@@ -43,6 +44,7 @@ U6_ObjStatus    = 0xA0AB   # 1 B/slot; CoordUse = &0x18
 U6_ObjPos       = 0x6828   # 3 B/slot; LOCXYZ packed x10|y10|z4; else assoc = first 2 B (holder slot)
 U6_ObjShapeType = 0x3548   # 2 B/slot; type = &0x3ff, frame = >>10
 U6_Amount       = 0x4EE4   # 2 B/slot; quan = low byte, qual = high byte
+U6_NPCStatus    = 0x9FAB   # 1 B/slot; creature status bits (PLRCONTROL 0x80, etc.) -- != ObjStatus
 U6_MAX_SLOTS    = 0xD00    # NPCs 0..0xFF + world objects 0x100..0xCFF
 
 _COORDUSE = {0: "LOCXYZ", 0x08: "CONTAINED", 0x10: "INVEN", 0x18: "EQUIP"}
@@ -118,8 +120,15 @@ U6_TalkBuf_SIZE     = 0x2800   # TalkBuf allocation size (__MemAlloc, seg_0903.c
 U6_Talk_PC          = 0xE7AB   # 2 B; VM program counter = index into TalkBuf
 U6_TalkInterloc     = 0xE796   # 2 words: [0]=interlocutor (active NPC#), [1]=locutor (party speaker)
 U6_TalkInput        = 0xE732   # 0x32 B; player's last typed input (CON_gets buffer)
-U6_TalkSavedPC      = 0xE7A7   # 4 B; Talk_PC saved at the current prompt (D_E7A7)
+U6_TalkSavedPC      = 0xE7A7   # 4 B; D_E7A7 -- VM scratch save-PC for jumps (NOT the prompt PC)
 U6_NpcName          = 0xE764   # up to ~50 B; current NPC name (D_E764), high-bit terminates
+# Converse-VM variable tables + per-NPC flags, for decoding text/conditions:
+U6_VarInt    = 0xB6E1   # int[36]; converse vars (#0-9 scratch, A-Z = 10-35). IF/expr operands.
+U6_VarStr    = 0xB72D   # char *[36]; string vars -- NEAR ptrs (string at base+off), seg_1703.c
+U6_TalkFlags = 0xB2EB   # unsigned char[]; per-NPC conversation flag byte (OP_TST/SET/CLR)
+U6_HitPoints = 0x66E4   # unsigned char[]; per-slot HP (OP_WOUNDED, vs computed MaxHP)
+OBJ_HORSE    = 0x1AF    # GetType == this => OP_HORSED true
+POISONED_BIT = 0x10     # NPCStatus & 0x10 (OP_POISONNED)
 
 # Conversation-VM opcodes where the VM blocks waiting for player input. The byte
 # at TalkBuf[Talk_PC] being one of these means "the game is waiting for a reply".
@@ -378,20 +387,492 @@ def u6_inventory(npc_slot: int, segment: int = -1,
     return "\n".join(out)
 
 
-@mcp.tool()
-def u6_conversation(segment: int = -1, dump: int = 64) -> str:
-    """Ultima VI: decode the live conversation / "talk" engine state (seg_1703.c
-    "talkdr"). Reports whether a conversation is active (IsInConversation), the
-    interlocutor NPC# and the party speaker (D_E796), the NPC name, the VM
-    program counter (Talk_PC), the player's last input (D_E732), and the resolved
-    TalkBuf far pointer -- plus a hex window of the loaded script starting at
-    Talk_PC, annotated if the current byte is an input-wait opcode.
+# ----------------------------------------------------------------------------
+# Converse-VM decoder -- turns the live TalkBuf bytecode into READABLE dialogue +
+# the askable keywords, a faithful port of seg_1703.c (parse_statement / execute_op
+# / parse_factor / C_1703_1D01 keyword dispatch), cross-checked against the wound-
+# down ultima6_clone's conversation_vm.js. Decodes FORWARD from the live state
+# (greeting from MAIN; a chosen keyword's response previewed ahead of the ASK) so
+# it never has to reconstruct already-run output, and stays blind-discovery-safe
+# (only the greeting + the keyword the agent picks + the keyword NAMES).
+#
+# IF/ELSE conditions are evaluated against LIVE memory (TalkFlags / inventory /
+# party / status via `env`). Three outcomes, per the agreed contract:
+#   * deterministic  -> the exact branch the engine would take.
+#   * OP_RND / a query we don't resolve -> BOTH branches, annotated [either: A | B]
+#     (RND is flavor, not quest-gating), and decoding continues.
+#   * an UNKNOWN opcode (can't safely walk) -> raise _DecoderStop; the tool returns
+#     DECODER_STOP and the agent must halt + report (fail loud, never guess).
+# ----------------------------------------------------------------------------
+class _DecoderStop(Exception):
+    def __init__(self, op, pc):
+        super().__init__(f"unhandled converse opcode 0x{op:02x} at TalkBuf+{pc}")
+        self.op, self.pc = op, pc
 
-    The VM loads the NPC's whole script into TalkBuf and runs PARSE_U8 ==
-    TalkBuf[Talk_PC++], printing text then blocking on input -- so the NPC's text
-    and the valid keyword branches both live in TalkBuf. `dump` = bytes of TalkBuf
-    to show from Talk_PC (0 to skip). DS comes from u6_hook unless overridden with
-    segment=."""
+
+# Statement-level side-effect ops -> how many parse_factor operand expressions to
+# consume (we don't execute the effect, just skip its operands). seg_1703.c:808+.
+_CV_SIDE_EFFECT = {
+    0xa4: 2, 0xa5: 2,            # SET / CLR (npc, bit)
+    0xb9: 4, 0xba: 4,            # GIVEOBJ / TAKEOBJ (npc, obj, qual, qty)
+    0xc8: 2, 0xc9: 4,            # MOVEOBJ / TRANSFEROBJ
+    0xc4: 1, 0xc5: 1,            # ADDKARMA / SUBKARMA
+    0xcd: 2,                     # SETMODE
+    0xd6: 1, 0xd9: 1, 0xdb: 1,   # RESURRECT / HEAL / CURE
+    0x9c: 1, 0xd0: 1,            # GETHORSE / DELAY
+    0xbe: 1, 0xbf: 1,            # SHOW_INVENTORY / SHOW_CONVERSE
+    0xd8: 1, 0xdf: 1,            # D8 / DF ($Y := npc name)
+}
+
+
+def _cv_str_match(keyword, inp, n):
+    """str_i_compare (seg_1703.c:130): any space-separated word of `inp` has
+    `keyword` (first n chars, '?' = wildcard) as a case-insensitive prefix."""
+    for word in str(inp).split(" "):
+        if not word:
+            continue
+        ok = True
+        for i in range(n):
+            k = keyword[i] if i < len(keyword) else ""
+            if k == "?":
+                continue
+            if i >= len(word) or word[i].lower() != k.lower():
+                ok = False
+                break
+        if ok:
+            return True
+    return False
+
+
+class _ConverseVM:
+    """Read-only decoder over a TalkBuf byte image. `env` supplies live state:
+    env.npc (interlocutor, for OP_NPC self), env.varint(i)/env.varstr(i), and
+    env.query(kind, **kw) for world reads (flag/owns/inParty/poisoned/objType/...)."""
+    END_OF_FACTOR, LET_VALUE = 0xa7, 0xa8
+    IF, ENDIF, ELSE = 0xa1, 0xa2, 0xa3
+    GOTO, CALL, VARINT, VARSTR, B4, PRINTSTR, LEAVE = 0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6
+    LET, ADDRESS, BYTE, WORD, D5, RND = 0xa6, 0xd2, 0xd3, 0xd4, 0xd5, 0xa0
+    KEY, RES, ENDRES, NPC = 0xef, 0xf6, 0xee, 0xeb
+
+    def __init__(self, data, env):
+        self.d = data
+        self.n = len(data)
+        self.env = env
+        self.pc = 0
+        self.budget = 20000          # byte-read guard against runaway GOTO loops
+
+    # --- byte readers ---
+    def _u8(self):
+        self.budget -= 1
+        if self.budget < 0:
+            raise _DecoderStop(0xff, self.pc)
+        v = self.d[self.pc] if 0 <= self.pc < self.n else 0
+        self.pc += 1
+        return v
+
+    def _u16(self):
+        v = self._u8(); return v | (self._u8() << 8)
+
+    def _u32(self):
+        v = self._u16(); return v | (self._u16() << 16)
+
+    def _npc(self, x):
+        return self.env.npc if x == self.NPC else x
+
+    # --- parse_factor (seg_1703.c:295): RPN; returns (value, nondeterministic) ---
+    def evaluate(self):
+        st, nd = [], False
+        pop = lambda: st.pop() if st else 0
+        while self.pc < self.n:
+            op = self._u8()
+            if op in (self.END_OF_FACTOR, self.LET_VALUE):
+                break
+            if op == self.ADDRESS:   st.append(self._u32())
+            elif op == self.BYTE:    st.append(self._u8())
+            elif op == self.WORD:    st.append(self._u16())
+            elif op == self.VARINT:  st.append(self.env.varint(pop()))
+            elif op == self.VARSTR:  st.append(self.env.varstr(pop()))
+            elif op == 0x90: b, a = pop(), pop(); st.append(a + b)
+            elif op == 0x91: b, a = pop(), pop(); st.append(a - b)
+            elif op == 0x92: b, a = pop(), pop(); st.append(a * b)
+            elif op == 0x93: b, a = pop(), pop(); st.append(a // b if b else 0)
+            elif op == 0x94: b, a = pop(), pop(); st.append(1 if (a or b) else 0)
+            elif op == 0x95: b, a = pop(), pop(); st.append(1 if (a and b) else 0)
+            elif op == 0x86: b, a = pop(), pop(); st.append(1 if str(a).lower() == str(b).lower() else 0)
+            elif op == 0x85: b, a = pop(), pop(); st.append(1 if a != b else 0)
+            elif op == 0x81: b, a = pop(), pop(); st.append(1 if a > b else 0)
+            elif op == 0x82: b, a = pop(), pop(); st.append(1 if a >= b else 0)
+            elif op == 0x83: b, a = pop(), pop(); st.append(1 if a < b else 0)
+            elif op == 0x84: b, a = pop(), pop(); st.append(1 if a <= b else 0)
+            elif op == self.RND:
+                pop(); pop(); st.append(0); nd = True          # can't predict -> nondeterministic
+            elif op == 0xab:  # TST (npc, bit) -> flag
+                bit = pop(); npc = self._npc(pop()); st.append(self.env.query("flag", npc=npc, bit=bit))
+            elif op == 0x9f:  # OWNS (npc, obj, qual)
+                q = pop(); o = pop(); npc = self._npc(pop()); st.append(self.env.query("owns", npc=npc, obj=o, qual=q))
+            elif op == 0xbb:  # TEST_OBJ (npc, obj)
+                o = pop(); npc = self._npc(pop()); st.append(self.env.query("owns", npc=npc, obj=o, qual=0))
+            elif op == 0xc7:  # WHOSGOT (obj, qual)
+                q = pop(); o = pop(); st.append(self.env.query("whosgot", obj=o, qual=q))
+            elif op == 0xc6:  # ISINPARTY (npc)
+                st.append(self.env.query("inparty", npc=self._npc(pop())))
+            elif op == 0xdc:  # POISONNED (npc)
+                st.append(self.env.query("poisoned", npc=self._npc(pop())))
+            elif op == 0x9d:  # HORSED (npc)
+                st.append(self.env.query("ishorse", npc=self._npc(pop())))
+            elif op == 0xc2:  # OBJTYPE (obj slot)
+                st.append(self.env.query("objtype", obj=pop()))
+            elif op == 0xc1:  # OWNER (obj slot) -> holder
+                st.append(self.env.query("owner", obj=pop()))
+            elif op in (0xda, 0x9a, 0x9b, 0xd7, 0xdd, 0xc0):
+                # WOUNDED/CANCARRY/WEIGHT/ISONSCREEN/partyMember/SELECT_OBJECT:
+                # known but not resolved here -> treat the result as unknown so any
+                # gating IF shows BOTH branches (never a wrong single read).
+                for _ in range(1 if op in (0xda, 0x9a, 0xd7, 0xc0) else 2):
+                    pop()
+                st.append(0); nd = True
+            else:
+                raise _DecoderStop(op, self.pc - 1)
+        return (st[0] if st else 0), nd
+
+    def _skip_factor(self):
+        self.evaluate()
+
+    # --- follow an OP_ADDRESS table ref to its string (seg_1703.c:688) ---
+    def _follow_addr_string(self):
+        target = self._u32()
+        if self.pc < self.n and self.d[self.pc] == self.CALL:
+            self.pc += 1
+            ret = self.pc
+        else:
+            idx, _nd = self.evaluate()
+            ret = self.pc
+            self.pc = target
+            n = idx
+            while n > 0 and self.pc < self.n:      # skip `idx` NUL-terminated strings
+                if self._u8() == 0:
+                    n -= 1
+            target = self.pc
+        self.pc = target
+        s = bytearray()
+        while self.pc < self.n:
+            c = self._u8()
+            if c == 0:
+                break
+            s.append(c)
+        self.pc = ret
+        return s.decode("latin-1", "replace")
+
+    # --- OP_PRINTSTR (seg_1703.c:729) ---
+    def _printstr(self):
+        tag = self._u8()
+        if tag == self.ADDRESS:
+            return self._follow_addr_string()
+        if tag != self.D5:
+            di = self._u8()
+            if self._u8() != self.VARSTR:
+                return ""
+            return self.env.varstr(di)
+        return ""
+
+    # --- parse_statement (seg_1703.c:945): decode a block of text + control,
+    # stopping (peek, not consume) at any op in `stops` or a structural terminator.
+    def decode_block(self, stops, depth=0):
+        if depth > 40:
+            raise _DecoderStop(self.IF, self.pc)
+        out = []
+        while self.pc < self.n:
+            op = self.d[self.pc]
+            if op == 0 or op == self.ENDRES or op == self.KEY or op >= 0xf0 or op in stops:
+                break
+            self.pc += 1
+            if op < 0x80:                                  # raw inline ASCII text
+                out.append(chr(op))
+            elif op == self.PRINTSTR:
+                out.append(self._printstr())
+            elif op == self.LEAVE:
+                break
+            elif op == self.GOTO:
+                self.pc = self._u32()
+            elif op == self.IF:
+                _val, nd = self.evaluate()
+                ta = self.decode_block({self.ELSE, self.ENDIF}, depth + 1)
+                tb = ""
+                if self.pc < self.n and self.d[self.pc] == self.ELSE:
+                    self.pc += 1
+                    tb = self.decode_block({self.ENDIF}, depth + 1)
+                if self.pc < self.n and self.d[self.pc] == self.ENDIF:
+                    self.pc += 1
+                if nd:
+                    out.append(f"[either: «{ta.strip()}»" + (f" | «{tb.strip()}»]" if tb.strip() else "]"))
+                else:
+                    out.append(ta if _val else tb)
+            elif op in (self.ENDIF, self.ELSE):
+                pass                                        # stray (outside an IF) -> no-op
+            elif op == self.LET:
+                self._let()
+            elif op in _CV_SIDE_EFFECT:
+                for _ in range(_CV_SIDE_EFFECT[op]):
+                    self._skip_factor()
+            elif op in (0x9e, 0xb6):                        # REST / (LEAVE handled above)
+                pass
+            else:
+                raise _DecoderStop(op, self.pc - 1)
+        return "".join(out)
+
+    def _let(self):
+        di = self._u8()
+        if di == self.ADDRESS:
+            self.pc += 4
+            if self._u8() == self.LET_VALUE:
+                self._skip_factor()
+            return
+        kind = self._u8()
+        if self._u8() != self.LET_VALUE:
+            return
+        if kind == self.VARINT:
+            self._skip_factor()
+        else:                                               # string assignment
+            tag = self._u8()
+            if tag == self.ADDRESS:
+                self._follow_addr_string()
+            elif self.pc < self.n and self.d[self.pc] == self.VARSTR:
+                self.pc += 1
+
+    # --- keyword headers at an ASK: OP_KEY <kw[,kw...]> OP_RES <body> ... (C_1703_1D01) ---
+    def keyword_list(self):
+        kws, guard = [], 0
+        while self.pc < self.n and guard < 64:
+            guard += 1
+            op = self._u8()
+            if op != self.KEY:
+                self.pc -= 1
+                if op == self.ENDRES or op >= 0xf0 or op == 0:
+                    break
+                # not a keyword section here -> stop scanning
+                break
+            # read comma-separated keyword(s) until OP_RES
+            while True:
+                kw = bytearray()
+                c = self._u8()
+                while c not in (0x2c, self.RES) and self.pc <= self.n:
+                    kw.append(c)
+                    c = self._u8()
+                k = kw.decode("latin-1", "replace")
+                kws.append("(anything)" if k == "*" else k)
+                if c != 0x2c:
+                    break
+            # skip the response body to the next KEY/ENDRES/structural
+            self._skip_body()
+        return kws
+
+    def _skip_body(self):
+        while self.pc < self.n:
+            op = self.d[self.pc]
+            if op == self.KEY or op == self.ENDRES or op >= 0xf0 or op == 0:
+                return
+            self.pc += 1
+            if op == self.GOTO:
+                self.pc += 4
+            elif op == self.BYTE:
+                self.pc += 1
+            elif op == self.WORD:
+                self.pc += 2
+
+    def find_response(self, input_word):
+        """Scan OP_KEY sections from self.pc; return True (pc at the matching OP_RES
+        body) if a keyword matches `input_word` (or '*'), else False."""
+        inp = input_word or "bye"
+        guard = 0
+        while self.pc < self.n and guard < 64:
+            guard += 1
+            if self._u8() != self.KEY:
+                self.pc -= 1
+                return False
+            matched = False
+            while True:
+                kw = bytearray()
+                c = self._u8()
+                while c not in (0x2c, self.RES):
+                    kw.append(c)
+                    c = self._u8()
+                k = kw.decode("latin-1", "replace")
+                if k and (k[0] == "*" or _cv_str_match(k, inp, len(k))):
+                    matched = True
+                if c != 0x2c:
+                    break
+            if matched:
+                if self.d[self.pc - 1] != self.RES:        # consume up to RES
+                    while self._u8() != self.RES:
+                        pass
+                return True
+            self._skip_body()
+        return False
+
+
+def _make_converse_env(base_addr, npc_id):
+    """Live `env` for _ConverseVM: reads VarInt/VarStr/TalkFlags + party/inventory/
+    status from DOSBox memory to evaluate conditions and variable strings."""
+    cache = {}
+
+    def _objarr():
+        if "obj" not in cache:
+            cache["obj"] = (dm.read(S.handle, base_addr + U6_ObjStatus, U6_MAX_SLOTS),
+                            dm.read(S.handle, base_addr + U6_ObjPos, U6_MAX_SLOTS * 3),
+                            dm.read(S.handle, base_addr + U6_ObjShapeType, U6_MAX_SLOTS * 2))
+        return cache["obj"]
+
+    def varint(i):
+        if not 0 <= i < 36:
+            return 0
+        return int.from_bytes(dm.read(S.handle, base_addr + U6_VarInt + i * 2, 2), "little", signed=True)
+
+    def varstr(i):
+        if not 0 <= i < 36:
+            return ""
+        off = int.from_bytes(dm.read(S.handle, base_addr + U6_VarStr + i * 2, 2), "little")
+        if off == 0:
+            return ""
+        raw = dm.read(S.handle, base_addr + off, 64)
+        return raw.split(b"\x00", 1)[0].decode("latin-1", "replace")
+
+    def _owns(npc, obj, qual):
+        status, pos, shape = _objarr()
+        for i in range(1, U6_MAX_SLOTS):
+            if (status[i] & 0x18) not in (0x10, 0x18):        # INVEN / EQUIP
+                continue
+            if (pos[i * 3] | (pos[i * 3 + 1] << 8)) != npc:   # assoc holder
+                continue
+            if ((shape[i * 2] | (shape[i * 2 + 1] << 8)) & 0x3ff) == obj:
+                return 1
+        return 0
+
+    def query(kind, **kw):
+        try:
+            if kind == "flag":
+                b = dm.read(S.handle, base_addr + U6_TalkFlags + kw["npc"], 1)[0]
+                return (b >> kw["bit"]) & 1
+            if kind == "owns":
+                return _owns(kw["npc"], kw["obj"], kw.get("qual", 0))
+            if kind == "whosgot":
+                psize = dm.read(S.handle, base_addr + U6_PartySize, 1)[0]
+                party = dm.read(S.handle, base_addr + U6_Party, max(psize, 0) + 1)
+                for k in range(min(psize, 16)):
+                    if _owns(party[k], kw["obj"], kw.get("qual", 0)):
+                        return party[k]
+                return 0x8001
+            if kind == "inparty":
+                psize = dm.read(S.handle, base_addr + U6_PartySize, 1)[0]
+                party = dm.read(S.handle, base_addr + U6_Party, max(psize, 0) + 1)
+                return 1 if kw["npc"] in party[:max(psize, 0)] else 0
+            if kind == "poisoned":
+                return 1 if (dm.read(S.handle, base_addr + U6_NPCStatus + kw["npc"], 1)[0] & POISONED_BIT) else 0
+            if kind == "ishorse":
+                _s, _p, shape = _objarr()
+                n = kw["npc"]
+                return 1 if ((shape[n * 2] | (shape[n * 2 + 1] << 8)) & 0x3ff) == OBJ_HORSE else 0
+            if kind == "objtype":
+                _s, _p, shape = _objarr()
+                o = kw["obj"]
+                return (shape[o * 2] | (shape[o * 2 + 1] << 8)) & 0x3ff
+            if kind == "owner":
+                _s, pos, _sh = _objarr()
+                o = kw["obj"]
+                return pos[o * 3] | (pos[o * 3 + 1] << 8)
+        except (OSError, IndexError):
+            return 0
+        return 0
+
+    return types.SimpleNamespace(npc=npc_id, varint=varint, varstr=varstr, query=query)
+
+
+def _expand_vars(text, env):
+    """Substitute $X (string) / #X (int) converse vars; pass markup through."""
+    import re
+    text = re.sub(r"\$([A-Za-z0-9])", lambda m: env.varstr(_cv_var_index(m.group(1))) or m.group(0), text)
+    text = re.sub(r"#([A-Za-z0-9])", lambda m: str(env.varint(_cv_var_index(m.group(1)))), text)
+    return text
+
+
+def _cv_var_index(ch):
+    c = ord(ch)
+    return c - 0x30 if 0x30 <= c <= 0x39 else c - 0x37   # '0'-'9'->0-9, 'A'-'Z'->10-35
+
+
+def _decode_conversation(base_addr, keyword):
+    """Read live talk state + TalkBuf and decode the greeting (or the response to
+    `keyword`) + the askable keyword list. Returns a dict (or {'status':...})."""
+    active = dm.read(S.handle, base_addr + U6_IsInConversation, 1)[0]
+    interloc = int.from_bytes(dm.read(S.handle, base_addr + U6_TalkInterloc, 2), "little")
+    pc = int.from_bytes(dm.read(S.handle, base_addr + U6_Talk_PC, 2), "little")
+    inp = dm.read(S.handle, base_addr + U6_TalkInput, 0x32).split(b"\x00", 1)[0].decode("latin-1", "replace")
+    name_raw = dm.read(S.handle, base_addr + U6_NpcName, 50)
+    fp = dm.read(S.handle, base_addr + U6_TalkBuf_ptr, 4)
+    name_b = bytearray()
+    for b in name_raw:
+        if b == 0 or (b & 0x80):
+            break
+        name_b.append(b)
+    name = name_b.decode("latin-1", "replace")
+    tb_lin = (((fp[2] | (fp[3] << 8)) << 4) + (fp[0] | (fp[1] << 8)))
+    data = dm.read(S.handle, S.membase + tb_lin, U6_TalkBuf_SIZE)
+    env = _make_converse_env(base_addr, interloc)
+    res = {"active": active, "npc": name, "npc_num": interloc, "pc": pc, "last_input": inp}
+
+    op_at = data[pc] if 0 <= pc < len(data) else 0
+    res["prompt"] = _TALK_INPUT_OPS.get(op_at, f"op_0x{op_at:02x}")
+
+    vm = _ConverseVM(data, env)
+    try:
+        if keyword:                                   # preview the response to `keyword`
+            vm.pc = (pc + 1) if op_at in _TALK_INPUT_OPS else pc
+            if vm.find_response(keyword):
+                res["said"] = _expand_vars(vm.decode_block({}).strip(), env)
+            else:
+                res["said"] = f"(no keyword section matches {keyword!r} at this prompt)"
+        else:                                         # greeting: MAIN body -> first ASK
+            vm.pc = 0
+            if vm.pc < vm.n and data[vm.pc] == 0xff:  # OP_ID
+                vm.pc += 1
+            vm._u8()                                   # npcId
+            while vm.pc < vm.n and data[vm.pc] != 0xf1:  # to OP_DESC
+                vm.pc += 1
+            while vm.pc < vm.n and vm._u8() != 0xf1:     # past OP_DESC
+                pass
+            desc = vm.decode_block({})                 # "You see ..." description
+            while vm.pc < vm.n:                         # past OP_MAIN / OP_PREFIX run
+                c = vm._u8()
+                if c in (0xf2, 0xf3):
+                    while vm.pc < vm.n and data[vm.pc] in (0xf2, 0xf3):
+                        vm.pc += 1
+                    break
+            greet = vm.decode_block({}) if (vm.pc < vm.n and data[vm.pc] != 0xf7) else ""
+            res["said"] = _expand_vars((("You see " + desc).strip() + "\n" + greet.strip()).strip(), env)
+        # keyword list: scan the OP_KEY sections at the current ASK
+        kvm = _ConverseVM(data, env)
+        kvm.pc = (pc + 1) if op_at in _TALK_INPUT_OPS else pc
+        res["keywords"] = kvm.keyword_list()
+        res["status"] = "OK"
+    except _DecoderStop as st:
+        res["status"] = "DECODER_STOP"
+        res["stop"] = str(st)
+        lo = max(0, st.pc - 4)
+        res["hex"] = " ".join(f"{b:02x}" for b in data[lo:st.pc + 12])
+    return res
+
+
+@mcp.tool()
+def u6_conversation(keyword: str = "", raw: int = 0, segment: int = -1) -> str:
+    """Ultima VI: read the live conversation as READABLE dialogue. With no args it
+    returns the NPC, the greeting (decoded from TalkBuf), the prompt type, and the
+    askable keywords. Pass keyword="gargoyle" to preview that keyword's response
+    (decoded ahead of the prompt -- so the agent reads it before committing with
+    u6_say). Conditions (flags/inventory/party/status) are evaluated against live
+    memory; random-flavor branches show as [either: A | B]; an UNKNOWN opcode
+    returns status=DECODER_STOP -- the agent MUST halt and report it (don't guess).
+
+    `raw=1` appends the old hex window of TalkBuf from Talk_PC (for debugging). DS
+    from u6_hook unless overridden with segment=."""
     if S.membase is None:
         return dm.HINT_NO_MEMBASE
     ds, err = _ds(segment)
@@ -399,48 +880,39 @@ def u6_conversation(segment: int = -1, dump: int = 64) -> str:
         return err
     base_addr = S.membase + (ds << 4)
     try:
-        active   = dm.read(S.handle, base_addr + U6_IsInConversation, 1)[0]
-        interloc = int.from_bytes(dm.read(S.handle, base_addr + U6_TalkInterloc, 2), "little")
-        locutor  = int.from_bytes(dm.read(S.handle, base_addr + U6_TalkInterloc + 2, 2), "little")
-        pc       = int.from_bytes(dm.read(S.handle, base_addr + U6_Talk_PC, 2), "little")
-        inp_raw  = dm.read(S.handle, base_addr + U6_TalkInput, 0x32)
-        name_raw = dm.read(S.handle, base_addr + U6_NpcName, 50)
-        fp       = dm.read(S.handle, base_addr + U6_TalkBuf_ptr, 4)
+        r = _decode_conversation(base_addr, keyword.strip())
     except OSError as ex:
         return f"Read failed reading talk-engine state (DS=0x{ds:04x}): {ex}"
 
-    inp = inp_raw.split(b"\x00", 1)[0].decode("latin-1", "replace")
-    # NPC name: a high-bit byte terminates (per C_1703_00A0); NUL also stops it.
-    name_b = bytearray()
-    for b in name_raw:
-        if b == 0 or (b & 0x80):
-            break
-        name_b.append(b)
-    name = name_b.decode("latin-1", "replace")
+    if not r["active"]:
+        head = "IsInConversation = 0 (idle -- no conversation open)"
+    else:
+        head = f"NPC = {r['npc']!r} (#{r['npc_num']})   prompt = {r['prompt']}"
+    out = [head]
+    if r.get("status") == "DECODER_STOP":
+        out += [f"** DECODER_STOP: {r['stop']} **",
+                f"  hex: {r.get('hex','')}",
+                "  -> HALT and report: the converse decoder hit an opcode it can't "
+                "handle; do not act on partial dialogue."]
+        return "\n".join(out)
+    if "said" in r:
+        out.append(f"said: {r['said']}")
+    if r.get("keywords"):
+        out.append("keywords: " + ", ".join(r["keywords"]))
+    if r.get("last_input"):
+        out.append(f"(last input: {r['last_input']!r})")
 
-    tb_off = fp[0] | (fp[1] << 8)
-    tb_seg = fp[2] | (fp[3] << 8)
-    tb_lin = (tb_seg << 4) + tb_off
-
-    out = [
-        f"IsInConversation = {active}  ({'ACTIVE' if active else 'idle'})",
-        f"interlocutor (NPC#) = {interloc} (0x{interloc:x});  locutor (speaker slot) = {locutor}",
-        f"NPC name = {name!r}",
-        f"Talk_PC = {pc} (0x{pc:x})   last input (D_E732) = {inp!r}",
-        f"TalkBuf = {tb_seg:04x}:{tb_off:04x}  (linear 0x{tb_lin:x}, size 0x{U6_TalkBuf_SIZE:x})",
-    ]
-
-    n = min(dump, U6_TalkBuf_SIZE - pc) if (dump > 0 and 0 <= pc < U6_TalkBuf_SIZE) else 0
-    if n > 0:
-        try:
-            window = dm.read(S.handle, S.membase + tb_lin + pc, n)
-            op = window[0]
-            opn = _TALK_INPUT_OPS.get(op)
-            tag = f"  (opcode at Talk_PC = 0x{op:02x}{' = ' + opn + ' [waiting for input]' if opn else ''})"
-            out.append(f"TalkBuf[Talk_PC .. +{n}]:{tag}")
-            out.append("  " + " ".join(f"{b:02x}" for b in window))
-        except OSError as ex:
-            out.append(f"(TalkBuf window read failed: {ex})")
+    if raw:
+        pc = r["pc"]
+        n = min(64, U6_TalkBuf_SIZE - pc) if 0 <= pc < U6_TalkBuf_SIZE else 0
+        if n > 0:
+            try:
+                fp = dm.read(S.handle, base_addr + U6_TalkBuf_ptr, 4)
+                tb_lin = (((fp[2] | (fp[3] << 8)) << 4) + (fp[0] | (fp[1] << 8)))
+                window = dm.read(S.handle, S.membase + tb_lin + pc, n)
+                out.append(f"raw TalkBuf[Talk_PC..+{n}]: " + " ".join(f"{b:02x}" for b in window))
+            except OSError:
+                pass
     return "\n".join(out)
 
 

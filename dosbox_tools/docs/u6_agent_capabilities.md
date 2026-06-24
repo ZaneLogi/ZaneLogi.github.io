@@ -60,6 +60,15 @@ U6 is mouse-or-keyboard; we drive the **keyboard** path (SendInput into DOSBox).
 - **Talk:** type single words + `<enter>` (abbreviate to 4 letters). Everyone
   answers `name`/`job`/`bye`; some answer `join`/`leave`. Empty `<enter>` or `bye`
   ends. (We read the valid keyword branches straight from `TalkBuf`.)
+- **Reading dialogue (`u6_conversation`).** TalkBuf is a bytecode VM, not plain
+  text, so `u6_conversation` **decodes** it (faithful port of `seg_1703.c`'s
+  parse_statement / parse_factor / keyword dispatch): with no args → the NPC, the
+  greeting, the prompt type, and the **askable keyword list**; `keyword="gargoyle"`
+  → previews that keyword's response (decoded *ahead* of the prompt, so the agent
+  reads it before committing with `u6_say`). IF/ELSE conditions are evaluated
+  against **live** memory (flags/inventory/party/status); random-flavor branches
+  show as `[either: A | B]`. **An unknown opcode → `status=DECODER_STOP`: the agent
+  MUST halt and report it (never act on partial dialogue).**
 - **Turn-based + buffered input:** a key sent in the wrong context is consumed
   wrongly, not lost. **Gate every send on `u6_input_state == COMMAND_READY`** (the
   action tools already do this).
@@ -89,8 +98,8 @@ internally, so they fire only on a real turn boundary.
 combat, who's controlled), `u6_roster_status` (STR/DEX/INT/Level + load caps),
 `u6_input_state` (turn-readiness), `u6_object(slot)` (incl. tile/weight/equip-slot),
 `u6_inventory(npc_slot)`, `u6_npcs_near(radius)`, `u6_objects_near(radius)` (map
-items + gear hints), `u6_walkable` (40×40 grid), `u6_conversation` (live talk +
-TalkBuf).
+items + gear hints), `u6_walkable` (40×40 grid), `u6_conversation` (**decoded**
+dialogue + askable keywords — see below).
 **Act:** `u6_move` · `u6_talk` · `u6_say` · `u6_look` · `u6_get` · `u6_key`.
 **Navigate:** `u6_pathfind` (plan) · `u6_goto` (closed-loop) · `u6_talk_to`.
 **Verify:** `u6_validate_passability` (predict-vs-live passability gate).
@@ -155,3 +164,6 @@ All DGROUP / DS-relative (`u6-decompiled`). Re-derive before relying.
 | Equip slot | `STAT_GetEquipSlot` (seg_155D.c:129) on `TILE_FRAME`; weapons table `D_07DD 0x07DD` | −1 = not readyable |
 | Names[][14] | `0x3236` | indexed by party index |
 | Passability tables | TerrainType `0xB3EB` / TileFlag `0x8C46` / D_B3EF `0xB3EF` / BaseTile `0x6824` | see dosbox_u6_passability.md |
+| Converse VM | TalkBuf ptr `0x4D50` / Talk_PC `0xE7AB` / input `0xE732` / interlocutor `0xE796` | OP_NPC `0xeb` → interlocutor (self) |
+| Converse vars / flags | VarInt `0xB6E1` (int[36]) / VarStr `0xB72D` (near ptr[36]) / TalkFlags `0xB2EB` (per-NPC byte) | OP_TST/SET/CLR bit ops; HP `0x66E4`, NPCStatus `0x9FAB` |
+| Keyword dispatch | `OP_KEY 0xef` kw[,kw] `OP_RES 0xf6` body … `OP_ENDRES 0xee` | str_i_compare (seg_1703.c:130/980) |

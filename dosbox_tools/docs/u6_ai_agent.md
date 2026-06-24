@@ -31,8 +31,8 @@ Loop: **perceive → reason → act → observe**, repeated. Boot once with
 batteries-included verb (`u6_goto`, `u6_talk`), read the text result, repeat.
 
 The **conversation sub-loop** is where "AI plays" really happens, and the
-turn-based VM makes it clean: `u6_conversation` (read what the NPC said + whether
-the VM is waiting for input) → LLM picks a keyword → `u6_say` → repeat. Because
+turn-based VM makes it clean: `u6_conversation` (decoded dialogue + the askable
+keywords) → LLM picks a keyword → `u6_say` → repeat. Because
 the VM *blocks* on input, the read→decide→say rhythm matches the game with no
 race.
 
@@ -70,7 +70,8 @@ Implemented (logic verified; **memory offsets pending live verification** — se
   STR/DEX/INT/Level + carry/equip load), `u6_object(slot)` (incl. tile/weight/
   equip-slot), `u6_inventory(npc_slot)`, `u6_npcs_near(radius)`,
   `u6_objects_near(radius)` (map items + gear hints), `u6_walkable` (40×40 ASCII
-  passability grid), `u6_conversation` (live talk state + TalkBuf window).
+  passability grid), `u6_conversation` (**decoded** dialogue + askable keywords;
+  `keyword=` previews a response; unknown opcode → `DECODER_STOP`, halt + report).
 - **Act:** `u6_move(dir)`, `u6_talk(dir)`, `u6_say(text)`, `u6_look(dir)`,
   `u6_get(dir)`, `u6_key(key)`.
 - **Navigate:** `u6_pathfind(npc_slot)` (planner), `u6_goto(npc_slot)`
@@ -83,10 +84,12 @@ Implemented (logic verified; **memory offsets pending live verification** — se
 
 Planned (gaps — see the milestones for which are needed when):
 
-- `u6_look` (examine → object **name**), `u6_objects_near`/search (locate world
-  objects, slot ≥ 0x100), `u6_get`, `u6_use`, `u6_ready`/`u6_equip` (UI-driven),
-  `u6_read` (books/signs → `BOOK.DAT`), `u6_cast`, a one-call `u6_status`, and a
-  **durable agent journal** (the long-horizon backbone).
+- `u6_use` (open/unlock doors via an owned key, ladders, etc.), `u6_ready`/
+  `u6_equip` (inventory-panel UI), `u6_read` (books/signs → `BOOK.DAT`), `u6_cast`,
+  and a **durable agent journal** (the long-horizon backbone). *(Built since the
+  first draft and now under Perceive/Act above: `u6_look`, `u6_get`,
+  `u6_objects_near`, `u6_roster_status`, and the `u6_conversation` bytecode
+  decoder.)*
 
 ## 3. Pathfinding
 
@@ -173,9 +176,10 @@ independently checkable.
 
 - Tools are implemented and **offline-verified where they're pure memory-reads**:
   faithful passability (`C_1E0F_000F` port), party/control + combat awareness, the
-  turn-readiness gate (`u6_input_state`), and the gear-perception layer (equip-slot
-  / weight / roster) all have stub unit tests against the real functions (in
-  `D:\tmp\u6_grid_test\`); pathfinding/helpers too.
+  turn-readiness gate (`u6_input_state`), the gear-perception layer (equip-slot /
+  weight / roster), and the **conversation-VM decoder** (text / keywords / live
+  IF-eval / RND / DECODER_STOP) all have stub unit tests against the real functions
+  (in `D:\tmp\u6_grid_test\`); pathfinding/helpers too.
 - **Not yet live-verified against a running U6:** the memory offsets, and every
   **key-sending verb** (`u6_move`/`u6_talk`/`u6_look`/`u6_get`/…) — their
   *bindings* only prove out live. First live checks: the §7 validation gate, then
@@ -224,7 +228,8 @@ castle save.
      castle layout on screen, and the Avatar position look right?
    - **Then PAUSE: report the self-check results + the grid, and wait for the
      human to confirm the map matches before playing.** A failed self-check
-     pinpoints which offset to fix (§6) first — esp. the `MapObjPtr` origin.
+     pinpoints which offset to fix (§6) first — e.g. DS calibration (name read-
+     back) or the `AreaX/AreaY` terrain-window origin.
 4. Give the agent the goal and let it loop. Starter prompt:
 
    > You are playing Ultima VI through the dosbox-u6 MCP tools. Read
@@ -256,8 +261,8 @@ against a live U6, so escalation is NOT a dead end — it is the trigger to **fi
 the tool**:
 - **Bring-up phase (current, until the tools pass validation + a clean Slice-1
   run):** the DEFAULT suspicion for any tool error or tripped consistency check
-  is **tool un-readiness** — a wrong offset, a bug, or a bad assumption (e.g. the
-  `MapObjPtr` origin). The agent HALTS and escalates; the developer DIAGNOSES and
+  is **tool un-readiness** — a wrong offset, a bug, or a bad assumption (e.g. a
+  wrong DS or terrain-window origin). The agent HALTS and escalates; the developer DIAGNOSES and
   **fixes the tool**, then re-runs the §7 validation gate; only then does play
   resume. Do NOT let the agent "work around" a flaky tool or keep playing on
   unverified reads — fix the root cause first.
@@ -284,7 +289,11 @@ Policy by failure class:
   - `u6_avatar` should change by ±1 per step — an impossible jump, or no change
     after a move that didn't report "blocked", is a red flag.
   - `u6_walkable` should stay sane (not suddenly all-`#` or all-`.`).
-  - `u6_conversation` should report a real NPC name, not garbage.
+  - `u6_conversation` should report a real NPC name, not garbage. **If it returns
+    `status=DECODER_STOP`, HALT and report the opcode + hex** — the converse
+    decoder hit a bytecode it can't handle; acting on partial dialogue could miss
+    or misread quest info. (Random-flavor `[either: A | B]` branches are normal;
+    only `DECODER_STOP` halts.)
 
 **Discipline:** bounded retries only (≈1–2, never an infinite loop); on a genuine
 block, STOP and report. **When in doubt, escalate rather than act** — input goes
