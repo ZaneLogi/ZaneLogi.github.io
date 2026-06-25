@@ -11,8 +11,10 @@ All source citations are `D:\tmp\u6-decompiled\SRC` (ergonomy-joe `u6-decompiled
 This is a **currently-true mechanism reference**; per-verb *build/verification
 status* lives in `u6_agent_capabilities.md` §5 and `u6_ai_agent.md` §6, not here.
 The object-naming subsystem that turns a tile into "club"/"leather helm" for the
-result reports is its own doc, `u6_object_naming.md`. Movement passability is
-`dosbox_u6_passability.md`.
+result reports is its own doc, `u6_object_naming.md`. The conversation subsystem
+that TALK opens (the TalkBuf bytecode VM, and how the MCP reads it with
+`u6_conversation` / `u6_script_disasm` and drives it with `u6_say`) is
+`u6_conversation.md`. Movement passability is `dosbox_u6_passability.md`.
 
 ---
 
@@ -153,10 +155,14 @@ targets. `SR` = `SelectRange`.
 
 ### TALK (`T`)
 
-A `SelectRange=7` cursor command: walk the cross-cursor onto the NPC, **Enter** to
-commit → `TALK_talkTo`. On a valid NPC `IsInConversation=1` (state
-`CONVERSATION`); then the conversation sub-loop (`u6_conversation` → pick keyword
-→ `u6_say`) takes over. Party mode required.
+A `SelectRange=7` cursor command: walk the cross-cursor up to **7 tiles** onto the
+NPC (no need to move the avatar adjacent — drive the cursor), **Enter** to commit →
+`TALK_talkTo`. On a valid NPC `IsInConversation=1` (state `CONVERSATION`). Party
+mode required. Everything after the dialogue opens — reading it (`u6_conversation`
+greeting/keywords/highlighted-cues, `u6_script_disasm` full disassembly), driving
+replies (`u6_say`, incl. the page-pause advance that fixes the first-char-eaten
+bug), and the first-meeting / copy-protection flow — is the **conversation
+subsystem, documented in `u6_conversation.md`**.
 
 ### USE (`U`) — the multi-purpose verb
 

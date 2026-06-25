@@ -71,5 +71,40 @@ u6.S.membase=None                                  # _session_base() -> None
 seq,r = run(u6.u6_use, "n");     chk("use n (blind) -> ['u','up'] + 'not hooked'", seq==["u","up"] and "not hooked" in r)
 u6.S.membase=0
 
+print("page-pause advance (u6_say dismisses '*' pauses before typing -- first-char-eaten fix):")
+def w16r(a): return MEM[a] | (MEM[a+1] << 8)
+# stub: an ENTER while a page-pause shows (PromptCh==1) advances to the live line prompt
+def pause_stub(k):
+    rec.append(k)
+    if k == "enter" and w16r(u6.U6_PromptCh) == 1:
+        MEM[u6.U6_LineInput] = 1; w16(u6.U6_PromptCh, 5)
+    return f"[{k}]"
+u6.inp = types.SimpleNamespace(send_key=pause_stub,
+                               send_text=lambda t: rec.append("TXT:"+t) or "[txt]")
+
+MEM[u6.U6_LineInput]=0; w16(u6.U6_PromptCh,1)               # a page-pause is blocking
+rec.clear(); pages=u6._advance_conv_input(0)
+chk("pause -> 1 ENTER advances to live line input", pages==1 and rec==["enter"] and MEM[u6.U6_LineInput]==1)
+
+MEM[u6.U6_LineInput]=1; w16(u6.U6_PromptCh,5)               # line input already live
+rec.clear(); pages=u6._advance_conv_input(0)
+chk("line input live -> NO key (never submit/exit), 0 pages", pages==0 and rec==[])
+
+MEM[u6.U6_LineInput]=0; w16(u6.U6_PromptCh,5)               # single-key prompt, no pause
+rec.clear(); pages=u6._advance_conv_input(0)
+chk("non-paused single-key -> NO key, 0 pages", pages==0 and rec==[])
+
+# u6_say end-to-end through a pause: advance, THEN type the full word (no eaten char).
+# Talk_PC=0/TalkBuf_ptr=0 -> the opcode peek reads MEM[0]=0 (not single-key) -> line path.
+MEM[u6.U6_LineInput]=0; w16(u6.U6_PromptCh,1); MEM[u6.U6_IsInConversation]=1
+rec.clear(); r=u6.u6_say("name")
+chk("u6_say through a pause: ENTER then types full 'name'+enter",
+    rec==["enter","TXT:name","enter"] and "advanced 1" in r)
+
+# restore shared stub + state
+MEM[u6.U6_IsInConversation]=0; MEM[u6.U6_LineInput]=0; w16(u6.U6_PromptCh,5)
+u6.inp=types.SimpleNamespace(send_key=stub_send_key,
+                             send_text=lambda t: rec.append("TXT:"+t) or "[txt]")
+
 print("ALL PASS" if ok else "SOME FAILED")
 sys.exit(0 if ok else 1)

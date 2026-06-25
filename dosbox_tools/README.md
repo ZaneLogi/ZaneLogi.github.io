@@ -333,14 +333,17 @@ After this, the decoders work with no `segment=` argument.
   (with gear hints), named via `LOOK.LZD` (see `docs/u6_object_naming.md`).
 - `u6_walkable` — a 40×40 ASCII passability grid (faithful `C_1E0F_000F` port;
   see `docs/dosbox_u6_passability.md`).
-- `u6_conversation()` — live talk-engine state. On talk start the VM loads the
-  NPC's whole script from `converse.a` into **`TalkBuf`** and interprets it with
-  **`Talk_PC`** as the program counter; it prints text then **blocks on input**,
-  so a conversation is turn-based by construction and both the NPC's text and the
-  valid keyword branches live in `TalkBuf`. This tool reports `IsInConversation`,
-  the interlocutor NPC#, the NPC name, `Talk_PC`, the last typed input, the
-  resolved `TalkBuf` pointer, and a hex window of the script at `Talk_PC`
-  (flagged when the current opcode is an input-wait).
+- `u6_conversation()` / `u6_script_disasm()` — read the live talk VM. On talk
+  start the engine loads the NPC's whole script from `converse.a` into **`TalkBuf`**
+  and interprets it with **`Talk_PC`** as the program counter; it prints text then
+  **blocks on input**, so a conversation is turn-based and both the NPC's text and
+  the valid keyword branches live in `TalkBuf`. `u6_conversation` **decodes** it into
+  readable dialogue — greeting, askable keywords, the `@`-marked highlighted cues,
+  and (with `keyword=`) a preview of that keyword's response, `IF` evaluated against
+  live memory. `u6_script_disasm` dumps the **whole** script as an addressed,
+  assembly-like listing (opcodes, GOTO labels, factor exprs, side-effects,
+  `??? 0xNN` for unknowns). Driving replies is `u6_say` (with a page-pause advance
+  that fixes the first-char-eaten bug). **Full subsystem: `docs/u6_conversation.md`.**
 
 ## Action verbs
 
@@ -392,7 +395,8 @@ The server also exposes the shared base tools (`find_dosbox`, `read_dos`,
 | `u6_panel_state(segment=-1)` | Status-panel state (view + inventory cursor/slots/Selection) |
 | `u6_npcs_near(radius)` / `u6_objects_near(radius)` | Nearby NPCs / map items (named) |
 | `u6_walkable` | 40×40 ASCII passability grid |
-| `u6_conversation(segment=-1, dump=64)` | Decoded dialogue + askable keywords |
+| `u6_conversation(keyword="", raw=0, segment=-1)` | Decoded dialogue + askable keywords + highlighted cues; `keyword=` previews a response |
+| `u6_script_disasm(segment=-1, max_bytes=4096)` | Whole NPC script as an addressed assembly listing |
 | `u6_move(direction)` | Step the party one tile |
 | `u6_look(direction)` | Examine/search the tile (8-way) |
 | `u6_get(direction)` | Pick up the adjacent object |

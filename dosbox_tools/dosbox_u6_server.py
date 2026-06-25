@@ -84,6 +84,10 @@ COMBAT_LEASH = 8        # in combat, player moves are gated to Chebyshev<=8 of t
 U6_AllowMouseMov = 0x04C4   # int; ==1 only while blocked at the top-level command getch
 U6_SelectMode    = 0x0492   # unsigned char; nonzero => a command is awaiting a target
 U6_MouseMode     = 0x04BE   # int; nonzero => mouse-driven UI mode (keyboard play wants 0)
+U6_LineInput     = 0x049B   # int D_049B; ==1 only WHILE CON_gets reads a typed line
+                            #   (seg_0C9C.c:1593/1626) -- i.e. the keyword prompt is live
+U6_PromptCh      = 0x04D4   # int PromptCh; ==1 during a page-pause "press a key" getch
+                            #   ('*' marker / screen-full, seg_0C9C.c:1698/1830), else 5
 # (conversation state is U6_IsInConversation = 0x098B, defined in the talk section.)
 
 
@@ -496,8 +500,10 @@ def u6_panel_state(segment: int = -1) -> str:
 #   * deterministic  -> the exact branch the engine would take.
 #   * OP_RND / a query we don't resolve -> BOTH branches, annotated [either: A | B]
 #     (RND is flavor, not quest-gating), and decoding continues.
-#   * an UNKNOWN opcode (can't safely walk) -> raise _DecoderStop; the tool returns
-#     DECODER_STOP and the agent must halt + report (fail loud, never guess).
+#   * an unknown STATEMENT opcode (decode_block, a closed set) -> raise _DecoderStop;
+#     the tool returns DECODER_STOP and the agent must halt + report (fail loud).
+#     Inside a FACTOR (parse_factor/evaluate), an unrecognized byte is NOT a stop --
+#     it is pushed as a literal value, exactly as the engine does (seg_1703.c:319).
 # ----------------------------------------------------------------------------
 class _DecoderStop(Exception):
     def __init__(self, op, pc):
@@ -627,7 +633,12 @@ class _ConverseVM:
                     pop()
                 st.append(0); nd = True
             else:
-                raise _DecoderStop(op, self.pc - 1)
+                # parse_factor default (seg_1703.c:314-322): a byte that is neither a
+                # tagged literal (ADDRESS/BYTE/WORD) nor a recognized operator is
+                # pushed as a LITERAL value (the engine's `default: lstack[sidx]=opcode`
+                # then `sidx++`; its operator switch has NO default, so it never stops
+                # here). e.g. a bare 0x00 -> push 0 (SET self 0 reveals the NPC name).
+                st.append(op)
         return (st[0] if st else 0), nd
 
     def _skip_factor(self):
@@ -672,7 +683,7 @@ class _ConverseVM:
 
     # --- parse_statement (seg_1703.c:945): decode a block of text + control,
     # stopping (peek, not consume) at any op in `stops` or a structural terminator.
-    def decode_block(self, stops, depth=0):
+    def decode_block(self, stops, depth=0, follow_goto=True):
         if depth > 40:
             raise _DecoderStop(self.IF, self.pc)
         out = []
@@ -688,14 +699,17 @@ class _ConverseVM:
             elif op == self.LEAVE:
                 break
             elif op == self.GOTO:
-                self.pc = self._u32()
+                tgt = self._u32()
+                if follow_goto:                            # follow for real response text;
+                    self.pc = tgt                          # don't follow when scanning the
+                                                           # keyword table (stay linear)
             elif op == self.IF:
                 _val, nd = self.evaluate()
-                ta = self.decode_block({self.ELSE, self.ENDIF}, depth + 1)
+                ta = self.decode_block({self.ELSE, self.ENDIF}, depth + 1, follow_goto)
                 tb = ""
                 if self.pc < self.n and self.d[self.pc] == self.ELSE:
                     self.pc += 1
-                    tb = self.decode_block({self.ENDIF}, depth + 1)
+                    tb = self.decode_block({self.ENDIF}, depth + 1, follow_goto)
                 if self.pc < self.n and self.d[self.pc] == self.ENDIF:
                     self.pc += 1
                 if nd:
@@ -709,8 +723,10 @@ class _ConverseVM:
             elif op in _CV_SIDE_EFFECT:
                 for _ in range(_CV_SIDE_EFFECT[op]):
                     self._skip_factor()
-            elif op in (0x9e, 0xb6):                        # REST / (LEAVE handled above)
-                pass
+            elif op in (0x9e, 0xa7, 0xcb):                  # 0-operand no-op statements
+                pass                                        # REST / stray END_OF_FACTOR /
+                                                            # WAIT (a key-pause; execute_op
+                                                            # seg_1703.c: break, no text)
             else:
                 raise _DecoderStop(op, self.pc - 1)
         return "".join(out)
@@ -762,17 +778,12 @@ class _ConverseVM:
         return kws
 
     def _skip_body(self):
-        while self.pc < self.n:
-            op = self.d[self.pc]
-            if op == self.KEY or op == self.ENDRES or op >= 0xf0 or op == 0:
-                return
-            self.pc += 1
-            if op == self.GOTO:
-                self.pc += 4
-            elif op == self.BYTE:
-                self.pc += 1
-            elif op == self.WORD:
-                self.pc += 2
+        """Skip a keyword's response body to the next KEY/ENDRES/structural, WITHOUT
+        following GOTOs (stay linear within the keyword table). Uses the full
+        decode_block parser so every opcode's operands are consumed correctly -- a
+        hand-rolled length table (the old version) desynced on ADDRESS/PRINTSTR/IF/
+        side-effect factors and lost the keywords after the first complex body."""
+        self.decode_block(set(), follow_goto=False)
 
     def find_response(self, input_word):
         """Scan OP_KEY sections from self.pc; return True (pc at the matching OP_RES
@@ -894,6 +905,35 @@ def _cv_var_index(ch):
     return c - 0x30 if 0x30 <= c <= 0x39 else c - 0x37   # '0'-'9'->0-9, 'A'-'Z'->10-35
 
 
+# U6 marks a highlighted conversation keyword inline as '@word': CON_putch
+# (seg_0C9C.c:1880-1888) switches to the highlight colour at '@' and restores it at
+# the next word-terminator, CONSUMING the '@'. Those highlighted words are exactly
+# the on-screen cues for what to ask next, so we strip the '@' from the prose and
+# return the words. Terminator set is the engine's own strchr(" ,.:;!?'-\"\n").
+_HL_TERMINATORS = set(" ,.:;!?'-\"\n")
+
+
+def _extract_highlights(text):
+    """Strip U6 '@' highlight markers; return (clean_prose, [highlighted words]).
+    A highlighted word runs from just after '@' to the next terminator; an '@' right
+    before a terminator highlights nothing (just drops the '@'). Words are de-duped
+    case-insensitively, first-seen order (a cue list, not every occurrence)."""
+    out, words, seen, i, n = [], [], set(), 0, len(text)
+    while i < n:
+        if text[i] == "@":
+            i += 1
+            w = []
+            while i < n and text[i] not in _HL_TERMINATORS:
+                w.append(text[i]); i += 1
+            out.extend(w)                       # keep the word in prose, sans '@'
+            word = "".join(w)
+            if word and word.lower() not in seen:
+                seen.add(word.lower()); words.append(word)
+        else:
+            out.append(text[i]); i += 1
+    return "".join(out), words
+
+
 def _decode_conversation(base_addr, keyword):
     """Read live talk state + TalkBuf and decode the greeting (or the response to
     `keyword`) + the askable keyword list. Returns a dict (or {'status':...})."""
@@ -919,34 +959,44 @@ def _decode_conversation(base_addr, keyword):
 
     vm = _ConverseVM(data, env)
     try:
-        if keyword:                                   # preview the response to `keyword`
-            vm.pc = (pc + 1) if op_at in _TALK_INPUT_OPS else pc
+        # Walk the FIXED intro (OP_ID -> DESC -> MAIN/PREFIX -> greeting) to the
+        # keyword table. This anchor is independent of the live Talk_PC, so the
+        # askable keywords AND any keyword's response are readable from ANY VM state
+        # -- the fresh prompt, a mid-response page-pause, or parked on another
+        # keyword -- which is what lets the agent collect the story by asking topics.
+        vm.pc = 0
+        if vm.pc < vm.n and data[vm.pc] == 0xff:      # OP_ID
+            vm.pc += 1
+        vm._u8()                                       # npcId
+        while vm.pc < vm.n and data[vm.pc] != 0xf1:    # to OP_DESC
+            vm.pc += 1
+        while vm.pc < vm.n and vm._u8() != 0xf1:       # past OP_DESC
+            pass
+        desc = vm.decode_block({})                     # "You see ..." description
+        while vm.pc < vm.n:                            # past OP_MAIN / OP_PREFIX run
+            c = vm._u8()
+            if c in (0xf2, 0xf3):
+                while vm.pc < vm.n and data[vm.pc] in (0xf2, 0xf3):
+                    vm.pc += 1
+                break
+        greet = vm.decode_block({}) if (vm.pc < vm.n and data[vm.pc] != 0xf7) else ""
+        if vm.pc < vm.n and data[vm.pc] == 0xf7:       # skip OP_ASKTOP -> first OP_KEY
+            vm.pc += 1
+        kw_anchor = vm.pc                              # start of the keyword table
+
+        if keyword:                                    # preview the response to `keyword`
+            vm.pc = kw_anchor
             if vm.find_response(keyword):
                 res["said"] = _expand_vars(vm.decode_block({}).strip(), env)
             else:
-                res["said"] = f"(no keyword section matches {keyword!r} at this prompt)"
-        else:                                         # greeting: MAIN body -> first ASK
-            vm.pc = 0
-            if vm.pc < vm.n and data[vm.pc] == 0xff:  # OP_ID
-                vm.pc += 1
-            vm._u8()                                   # npcId
-            while vm.pc < vm.n and data[vm.pc] != 0xf1:  # to OP_DESC
-                vm.pc += 1
-            while vm.pc < vm.n and vm._u8() != 0xf1:     # past OP_DESC
-                pass
-            desc = vm.decode_block({})                 # "You see ..." description
-            while vm.pc < vm.n:                         # past OP_MAIN / OP_PREFIX run
-                c = vm._u8()
-                if c in (0xf2, 0xf3):
-                    while vm.pc < vm.n and data[vm.pc] in (0xf2, 0xf3):
-                        vm.pc += 1
-                    break
-            greet = vm.decode_block({}) if (vm.pc < vm.n and data[vm.pc] != 0xf7) else ""
+                res["said"] = f"(no keyword section matches {keyword!r})"
+        else:
             res["said"] = _expand_vars((("You see " + desc).strip() + "\n" + greet.strip()).strip(), env)
-        # keyword list: scan the OP_KEY sections at the current ASK
-        kvm = _ConverseVM(data, env)
-        kvm.pc = (pc + 1) if op_at in _TALK_INPUT_OPS else pc
+        # keyword list: scan ALL OP_KEY sections from the table anchor (NOT live pc)
+        kvm = _ConverseVM(data, env); kvm.pc = kw_anchor
         res["keywords"] = kvm.keyword_list()
+        if "said" in res:                              # strip '@' markup, collect the cues
+            res["said"], res["highlighted"] = _extract_highlights(res["said"])
         res["status"] = "OK"
     except _DecoderStop as st:
         res["status"] = "DECODER_STOP"
@@ -956,13 +1006,190 @@ def _decode_conversation(base_addr, keyword):
     return res
 
 
+# ----------------------------------------------------------------------------
+# Full script disassembler -- decode an NPC's WHOLE TalkBuf into an addressed,
+# assembly-like listing (every opcode in address order, operands resolved, GOTO
+# labels, keyword blocks, IF/factor expressions, side-effects, '??? 0xNN' for an
+# unknown opcode). The agent's structural/reference view of a script: the "what"
+# (which keyword gives what, which flag gates what, a copy-protection answer
+# key). The agent owns the "how" -- see the rule of engagement in u6_ai_agent.md:
+# a manual-lookup/copy-protection answer may be read here directly, but a game
+# PUZZLE must be solved by playing, not lifted from the disassembly. Unlike
+# decode_block this walks LINEARLY (no control-flow following). seg_1703.c.
+# ----------------------------------------------------------------------------
+_DIS_BINOP = {0x90: "+", 0x91: "-", 0x92: "*", 0x93: "/", 0x94: "||", 0x95: "&&",
+              0x81: ">", 0x82: ">=", 0x83: "<", 0x84: "<=", 0x85: "!=", 0x86: "=="}
+_DIS_QUERY = {                                  # parse_factor query op -> (name, argc)
+    0xa0: ("Rand", 2), 0xab: ("Flag", 2), 0x9f: ("Owns", 3), 0xbb: ("HasObj", 2),
+    0xc7: ("WhosGot", 2), 0xc6: ("InParty", 1), 0xdc: ("Poisoned", 1),
+    0x9d: ("Horsed", 1), 0xc2: ("ObjType", 1), 0xc1: ("Owner", 1), 0xda: ("Wounded", 1),
+    0xd7: ("OnScreen", 1), 0x9a: ("CanCarry", 1), 0xca: ("Join", 1), 0xcc: ("LeaveParty", 1),
+}
+_DIS_STMT = {                                   # side-effect opcode -> mnemonic
+    0xa4: "SET", 0xa5: "CLR", 0xb9: "GIVEOBJ", 0xba: "TAKEOBJ", 0xc8: "MOVEOBJ",
+    0xc9: "TRANSFEROBJ", 0xc4: "ADDKARMA", 0xc5: "SUBKARMA", 0xcd: "SETMODE",
+    0xd6: "RESURRECT", 0xd9: "HEAL", 0xdb: "CURE", 0x9c: "GETHORSE", 0xd0: "DELAY",
+    0xbe: "SHOWINVEN", 0xbf: "SHOWPORTRAIT", 0xd8: "SETNAME", 0xdf: "SETNAME2",
+}
+_DIS_MARK = {                                   # 0-operand structural / control markers
+    0xf1: "DESC", 0xf2: "MAIN", 0xf3: "PREFIX", 0xf7: "ASKTOP", 0xee: "ENDRES",
+    0xf6: "RES", 0xa2: "ENDIF", 0xa3: "ELSE", 0xb6: "LEAVE", 0xcb: "WAIT", 0x9e: "REST",
+    0xf8: "GET", 0xf9: "GETSTR", 0xfa: "GETCHR", 0xfb: "GETINT", 0xfc: "GETDIGIT",
+}
+
+
+def _disasm_factor(d, pc):
+    """Decode a parse_factor RPN expression to a readable infix string. Returns
+    (expr, pc_after). Mirrors _ConverseVM.evaluate but builds text; an
+    unrecognized byte is a literal (the engine's default -- seg_1703.c:319)."""
+    n = len(d); st = []
+    pop = lambda: st.pop() if st else "?"
+    guard = 0
+    while pc < n and guard < 256:
+        guard += 1
+        op = d[pc]; pc += 1
+        if op in (0xa7, 0xa8):                  # END_OF_FACTOR / LET_VALUE
+            break
+        if op == 0xd2:                          # ADDRESS
+            st.append(f"@0x{int.from_bytes(d[pc:pc+4],'little'):04x}"); pc += 4
+        elif op == 0xd3:                        # BYTE
+            b = d[pc] if pc < n else 0; pc += 1; st.append("self" if b == 0xeb else str(b))
+        elif op == 0xd4:                        # WORD
+            st.append(str(int.from_bytes(d[pc:pc+2], 'little'))); pc += 2
+        elif op == 0xb2:                        # VARINT
+            st.append(f"VarInt[{pop()}]")
+        elif op == 0xb3:                        # VARSTR
+            st.append(f"VarStr[{pop()}]")
+        elif op in _DIS_BINOP:
+            b = pop(); a = pop(); st.append(f"({a} {_DIS_BINOP[op]} {b})")
+        elif op in _DIS_QUERY:
+            name, ac = _DIS_QUERY[op]
+            args = [pop() for _ in range(ac)][::-1]
+            st.append(f"{name}({', '.join(args)})")
+        else:
+            st.append(str(op))                  # bare literal
+    return (st[-1] if st else "0"), pc
+
+
+def _disasm_let(d, pc):
+    """OP_LET -> 'LET <dest> = <expr>' (seg_1703.c:746)."""
+    n = len(d)
+    di = d[pc] if pc < n else 0; pc += 1
+    if di == 0xd2:                              # ADDRESS destination
+        a = int.from_bytes(d[pc:pc+4], "little"); pc += 4
+        if pc < n and d[pc] == 0xa8: pc += 1
+        expr, pc = _disasm_factor(d, pc)
+        return f"LET @0x{a:04x} = {expr}", pc
+    kind = d[pc] if pc < n else 0; pc += 1       # VARINT (0xb2) / VARSTR (0xb3)
+    if pc < n and d[pc] == 0xa8: pc += 1         # LET_VALUE
+    if kind == 0xb2:
+        expr, pc = _disasm_factor(d, pc)
+        return f"LET VarInt[{di}] = {expr}", pc
+    tag = d[pc] if pc < n else 0; pc += 1        # string assignment
+    if tag == 0xd2:
+        a = int.from_bytes(d[pc:pc+4], "little"); pc += 4
+        return f"LET VarStr[{di}] = @0x{a:04x}", pc
+    if pc < n and d[pc] == 0xb3: pc += 1
+    return f"LET VarStr[{di}] = VarStr[?]", pc
+
+
+def _disassemble(d, n):
+    """Linear disassembly of the first `n` bytes of a TalkBuf image. Text runs
+    render as quoted strings; GOTO targets become L_xxxx labels; an unknown
+    opcode is flagged '??? 0xNN' (not fatal). Stops at >=16 zero bytes (end)."""
+    lines, labels, pc = [], set(), 0
+    while pc < n:
+        if pc + 16 <= n and not any(d[pc:pc + 16]):     # zero padding -> end of script
+            break
+        addr = pc
+        op = d[pc]
+        if op < 0x80:                                   # inline ASCII text run
+            s = bytearray()
+            while pc < n and d[pc] and d[pc] < 0x80:
+                s.append(d[pc]); pc += 1
+            if pc < n and d[pc] == 0:                    # NUL between strings
+                pc += 1
+            lines.append((addr, '"' + s.decode("latin-1", "replace").replace("\n", "\\n") + '"'))
+            continue
+        pc += 1
+        if op == 0xff:                                  # OP_ID + npcId
+            npc = d[pc] if pc < n else 0; pc += 1
+            lines.append((addr, f"ID npc={npc}"))
+        elif op in _DIS_MARK:
+            lines.append((addr, _DIS_MARK[op]))
+        elif op == 0xef:                                # KEY <kw,...>  (until RES)
+            kw = bytearray()
+            while pc < n and d[pc] != 0xf6:
+                kw.append(d[pc]); pc += 1
+            lines.append((addr, 'KEY "' + kw.decode("latin-1", "replace") + '"'))
+        elif op == 0xb0:                                # GOTO u32
+            tgt = int.from_bytes(d[pc:pc + 4], "little"); pc += 4
+            labels.add(tgt); lines.append((addr, f"GOTO L_{tgt:04x}"))
+        elif op == 0xa1:                                # IF <factor>
+            expr, pc = _disasm_factor(d, pc); lines.append((addr, f"IF {expr}"))
+        elif op == 0xa6:                                # LET
+            text, pc = _disasm_let(d, pc); lines.append((addr, text))
+        elif op in _CV_SIDE_EFFECT:                     # SET/GIVEOBJ/HEAL/... <factors>
+            args = []
+            for _ in range(_CV_SIDE_EFFECT[op]):
+                e, pc = _disasm_factor(d, pc); args.append(e)
+            mn = _DIS_STMT.get(op, f"OP_{op:02x}")
+            cmt = f"   ; obj 0x{int(args[1]):02x}" if op in (0xb9, 0xba) and args[1].isdigit() else ""
+            lines.append((addr, f"{mn} {', '.join(args)}{cmt}"))
+        else:
+            lines.append((addr, f"??? 0x{op:02x}"))
+    out, starts = [], {a for a, _ in lines}
+    for addr, text in lines:
+        if addr in labels:
+            out.append(f"L_{addr:04x}:")
+        out.append(f"  0x{addr:04x}: {text}")
+    for t in sorted(labels - starts):                   # jump into a mid-instruction byte
+        out.append(f"; note: L_{t:04x} targets mid-instruction byte 0x{t:04x}")
+    return "\n".join(out)
+
+
+@mcp.tool()
+def u6_script_disasm(segment: int = -1, max_bytes: int = 4096) -> str:
+    """Ultima VI: disassemble the CURRENTLY-LOADED NPC conversation script (the live
+    TalkBuf) into an addressed, assembly-like listing -- every opcode with operands,
+    GOTO labels, keyword (KEY/RES) blocks, IF/factor expressions, side-effects
+    (SET/GIVEOBJ/HEAL/...), and an inline '??? 0xNN' for any unknown opcode. The
+    agent's full structural view of a script: which keyword gives which object, which
+    flag gates which branch, a copy-protection answer key, etc. A conversation must be
+    OPEN (talk to the NPC first) so its script is in TalkBuf. RULE OF ENGAGEMENT:
+    reading the script is allowed, but you may answer a manual-lookup / copy-protection
+    prompt directly ONLY; a game PUZZLE must be solved by playing, never lifted from
+    here -- and say which you are doing. DS from u6_hook unless overridden with
+    segment=. max_bytes caps the window (default 4096; the buffer is 0x2800)."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base_addr = S.membase + (ds << 4)
+    try:
+        active = dm.read(S.handle, base_addr + U6_IsInConversation, 1)[0]
+        fp = dm.read(S.handle, base_addr + U6_TalkBuf_ptr, 4)
+        tb_lin = (((fp[2] | (fp[3] << 8)) << 4) + (fp[0] | (fp[1] << 8)))
+        n = max(1, min(int(max_bytes), U6_TalkBuf_SIZE))
+        data = dm.read(S.handle, S.membase + tb_lin, n)
+    except OSError as ex:
+        return f"Read failed reading TalkBuf (DS=0x{ds:04x}): {ex}"
+    head = ("" if active else "(no conversation open -- TalkBuf may be stale; "
+            "talk to an NPC first)\n")
+    return head + _disassemble(data, len(data))
+
+
 @mcp.tool()
 def u6_conversation(keyword: str = "", raw: int = 0, segment: int = -1) -> str:
     """Ultima VI: read the live conversation as READABLE dialogue. With no args it
-    returns the NPC, the greeting (decoded from TalkBuf), the prompt type, and the
-    askable keywords. Pass keyword="gargoyle" to preview that keyword's response
-    (decoded ahead of the prompt -- so the agent reads it before committing with
-    u6_say). Conditions (flags/inventory/party/status) are evaluated against live
+    returns the NPC, the greeting (decoded from TalkBuf), the prompt type, the
+    askable keywords, and the HIGHLIGHTED words -- the '@'-marked cues U6 draws in a
+    bright colour, i.e. exactly what an on-screen player would see as "ask me about
+    this" (the prose is returned clean, with the '@' stripped). Pass
+    keyword="gargoyle" to preview that keyword's response (decoded ahead of the
+    prompt -- so the agent reads it before committing with u6_say). Conditions
+    (flags/inventory/party/status) are evaluated against live
     memory; random-flavor branches show as [either: A | B]; an UNKNOWN opcode
     returns status=DECODER_STOP -- the agent MUST halt and report it (don't guess).
 
@@ -992,6 +1219,8 @@ def u6_conversation(keyword: str = "", raw: int = 0, segment: int = -1) -> str:
         return "\n".join(out)
     if "said" in r:
         out.append(f"said: {r['said']}")
+    if r.get("highlighted"):
+        out.append("highlighted (ask next): " + ", ".join(r["highlighted"]))
     if r.get("keywords"):
         out.append("keywords: " + ", ".join(r["keywords"]))
     if r.get("last_input"):
@@ -1052,6 +1281,16 @@ _TALK_SINGLEKEY_OPS = {0xf8, 0xfa, 0xfc, 0xcb}  # GET, GETCHR, GETDIGIT, WAIT
 # that feature, not added here where they'd be unused.)
 # ----------------------------------------------------------------------------
 _CURSOR_STEP = 0.12   # seconds between cursor keystrokes -- let DOSBox consume each
+
+# A long greeting/response contains a '*' page-pause (CON_putch '*' -> CON_getch,
+# seg_0C9C.c:1830; also the screen-full auto-break :1698). While it's blocking,
+# PromptCh==1 and a keystroke only ADVANCES the page -- so the first char of a reply
+# typed into a paused conversation is eaten ("name" -> "ame"). The real keyword
+# prompt is CON_gets, which raises D_049B==1 while it reads the line. So u6_say
+# advances past any page-pause (ENTER while PromptCh==1) until D_049B==1, THEN types
+# -- deterministic, not a timing guess. _PAGE_ADVANCE_SETTLE lets the engine render
+# the next page after each ENTER before we re-read.
+_PAGE_ADVANCE_SETTLE = 0.3
 
 
 def _begin_select(base_addr, letter, verb):
@@ -1648,19 +1887,42 @@ def u6_ready(target: str) -> str:
             f"(a cursed/locked item can't be unreadied).")
 
 
+def _advance_conv_input(base_addr, max_pages=8):
+    """Clear any '*' page-pause(s) blocking the keyword prompt so a typed reply's
+    leading char isn't eaten advancing a page. Sends ENTER only WHILE a page-pause is
+    showing (PromptCh==1); stops the instant CON_gets is live (D_049B==1) and NEVER
+    sends a key once D_049B==1 (that would submit an empty line / exit). Also returns
+    early on a non-paused single-key prompt (PromptCh!=1, D_049B!=1 -- nothing to
+    clear). Returns the number of pages advanced."""
+    pages = 0
+    for _ in range(max_pages):
+        if _rd8(base_addr + U6_LineInput) == 1:        # keyword line input is live
+            break
+        if _rd16(base_addr + U6_PromptCh) != 1:        # no page-pause -> nothing to clear
+            break
+        inp.send_key("enter")                          # dismiss this page
+        pages += 1
+        time.sleep(_PAGE_ADVANCE_SETTLE)
+    return pages
+
+
 @mcp.tool()
 def u6_say(text: str, segment: int = -1) -> str:
-    """Ultima VI: answer the current conversation prompt. Peeks the converse-VM
-    opcode at Talk_PC: at a single-key prompt (GET/GETCHR/GETDIGIT/WAIT) it sends
-    just the first character; otherwise (ASKTOP/GETSTR/GETINT) it types `text` +
-    Enter. Falls back to line input if the VM state can't be read. DS from
+    """Ultima VI: answer the current conversation prompt. First advances past any '*'
+    page-pause so the leading char isn't eaten dismissing a page (a long greeting/
+    reply pauses for a keypress -- see _advance_conv_input), then peeks the
+    converse-VM opcode at Talk_PC: at a single-key prompt (GET/GETCHR/GETDIGIT/WAIT)
+    it sends just the first character; otherwise (ASKTOP/GETSTR/GETINT) it types
+    `text` + Enter. Falls back to line input if the VM state can't be read. DS from
     u6_hook."""
-    single = False
+    single, pages = False, 0
     if S.membase is not None:
         ds, err = _ds(segment)
         if not err:
             base_addr = S.membase + (ds << 4)
             try:
+                if dm.read(S.handle, base_addr + U6_IsInConversation, 1)[0]:
+                    pages = _advance_conv_input(base_addr)   # clear page-pauses first
                 pc = int.from_bytes(dm.read(S.handle, base_addr + U6_Talk_PC, 2), "little")
                 fp = dm.read(S.handle, base_addr + U6_TalkBuf_ptr, 4)
                 tb_lin = ((fp[2] | (fp[3] << 8)) << 4) + (fp[0] | (fp[1] << 8))
@@ -1668,12 +1930,13 @@ def u6_say(text: str, segment: int = -1) -> str:
                 single = op in _TALK_SINGLEKEY_OPS
             except OSError:
                 pass
+    adv = f" (advanced {pages} page-pause(s))" if pages else ""
     if single:
         ch = text[:1]
-        return f"[single-key] {inp.send_key(ch if ch else 'enter')}"
+        return f"[single-key]{adv} {inp.send_key(ch if ch else 'enter')}"
     out = inp.send_text(text)
     ent = inp.send_key("enter")
-    return f"[line] {out} [{ent}]"
+    return f"[line]{adv} {out} [{ent}]"
 
 
 @mcp.tool()

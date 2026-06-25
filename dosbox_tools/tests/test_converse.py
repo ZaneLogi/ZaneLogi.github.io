@@ -63,12 +63,64 @@ rndblk=bytes([IF,BYTE,1,BYTE,3,RND,EOF]+T("X")+[ELSE]+T("Y")+[ENDIF]+[ASK])
 res=u6._ConverseVM(rndblk, env()).decode_block(set())
 chk("RND -> [either: X | Y]", "[either:" in res and "X" in res and "Y" in res)
 
-# 6) unknown opcode -> _DecoderStop
+# 6) unknown STATEMENT opcode -> _DecoderStop (decode_block is a closed set)
 try:
     u6._ConverseVM(bytes(T("hi")+[0x88]+T("bye")+[ASK]), env()).decode_block(set())
-    chk("unknown op raises", False)
+    chk("unknown stmt op raises", False)
 except u6._DecoderStop as st:
-    chk("unknown op -> DecoderStop", st.op==0x88)
+    chk("unknown stmt op -> DecoderStop", st.op==0x88)
+
+# 7) factor-level: a bare byte (neither a tagged literal nor an operator) is pushed
+#    as a LITERAL value, NOT a DecoderStop (seg_1703.c:314-322 default case).
+chk("bare literal 5 -> value 5", u6._ConverseVM(bytes([0x05, EOF]), env()).evaluate()==(5, False))
+chk("bare literal 0 -> value 0", u6._ConverseVM(bytes([0x00, EOF]), env()).evaluate()==(0, False))
+
+# 8) regression for the Shamino 'name' false-stop: a response body of SET self,0
+#    (OP_SET=0xa4, 2 factors: BYTE 0xeb=self, then a BARE 0x00=bit 0) followed by
+#    text must decode cleanly without raising. factor2 packs its operand as a bare
+#    byte -- the exact shape that tripped DECODER_STOP before the fix.
+SET=0xa4
+namebody=bytes([KEY]+T("name")+[RES, SET, BYTE,0xeb, EOF, 0x00, EOF]+T("I am Shamino.")+[ENDRES])
+vm=u6._ConverseVM(namebody, env())
+chk("SET self,0 + text decodes (no stop)",
+    vm.find_response("name") and vm.decode_block(set())=="I am Shamino.")
+
+# 8a) OP_WAIT (0xcb, a mid-response "press a key" pause) is a 0-operand no-op for
+#     decoding -- it must NOT DECODER_STOP (it's < 0xf0, so decode_block sees it).
+WAIT=0xcb
+waitbody=bytes([KEY]+T("job")+[RES]+T("I am ")+[WAIT]+T("a ranger.")+[ENDRES])
+vm=u6._ConverseVM(waitbody, env)
+chk("OP_WAIT decodes as a no-op pause (no stop)",
+    vm.find_response("job") and vm.decode_block(set())=="I am a ranger.")
+
+# 8b) keyword scan is robust past a COMPLEX body (SET + GOTO) and enumerates ALL
+#     keywords. The old hand-rolled _skip_body desynced on SET/GOTO and lost every
+#     keyword after the first complex body -- the real reason only 'name' ever showed
+#     for live NPCs. _skip_body now reuses decode_block (GOTO NOT followed).
+GOTO=0xb0
+multi=bytes([KEY]+T("name")+[RES, SET,BYTE,0xeb,EOF,0x00,EOF, GOTO,0,0,0,0]
+            +[KEY]+T("job")+[RES]+T("r2")
+            +[KEY]+T("*")+[RES]+T("r3")+[ENDRES])
+chk("enumerate past SET+GOTO body -> all keywords",
+    u6._ConverseVM(multi, env).keyword_list()==["name","job","(anything)"])
+vm=u6._ConverseVM(multi, env)
+chk("find_response reaches 'job' past the complex 'name' body",
+    vm.find_response("job") and vm.decode_block(set())=="r2")
+
+# 9) '@' highlight markup: strip from prose, return the highlighted cue words
+#    (seg_0C9C.c:1880 -- '@' colours the next word, consumed; word ends at a
+#    terminator " ,.:;!?'-\"\n"). These are the on-screen "ask me about this" cues.
+clean, hl = u6._extract_highlights("Find the @gargoyles near the @castle, friend.")
+chk("highlight: prose stripped of '@'", clean=="Find the gargoyles near the castle, friend.")
+chk("highlight: words collected", hl==["gargoyles","castle"])
+clean, hl = u6._extract_highlights("the @Avatar's quest")          # apostrophe terminates
+chk("highlight: apostrophe ends the word", clean=="the Avatar's quest" and hl==["Avatar"])
+clean, hl = u6._extract_highlights("ends here@")                   # trailing '@' -> nothing
+chk("highlight: trailing '@' drops, no word", clean=="ends here" and hl==[])
+clean, hl = u6._extract_highlights("@gold @GOLD @gold and @silver")  # case-insensitive dedup
+chk("highlight: dedup case-insensitively, first-seen order", hl==["gold","silver"])
+clean, hl = u6._extract_highlights("no markers at all.")
+chk("highlight: plain text unchanged, no words", clean=="no markers at all." and hl==[])
 
 print("ALL PASS" if ok else "SOME FAILED")
 sys.exit(0 if ok else 1)

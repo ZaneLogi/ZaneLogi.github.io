@@ -6,8 +6,30 @@ automation), and the **tool surface** (the MCP tools that perceive state and dri
 actions, each grounded in the `u6-decompiled` source).
 
 Per the blind-discovery principle, the agent is given **premise + how-to-play
-only** — never the quest solution. It discovers the chain by playing and
-journaling. The quest docs are the eval oracle, withheld.
+only** — never a hand-authored quest solution. It discovers the chain by playing
+and journaling. The quest-trace / quest-log docs are the eval oracle, withheld.
+
+**Rule of engagement — reading NPC scripts (`u6_script_disasm`).** The agent
+*is* allowed to disassemble and read the full conversation script of an NPC it is
+talking to (`u6_script_disasm` dumps the live TalkBuf as an addressed listing —
+keywords, branches, flag gates, `GIVEOBJ`, answer keys). Reading it is fine; how
+the agent *acts* on what it reads is governed by honesty:
+
+- **Manual-lookup / copy-protection** (Lord British's "what was in the Compendium"
+  quiz, rune/symbol identification, anything a boxed game's *manual* answers) — the
+  agent **may answer directly** from the script. A legitimate owner has the manual;
+  this is meta, not the quest.
+- **Game puzzle** (a riddle whose answer is discovered by playing, a password hidden
+  in the world, a deduced sequence, a "bring me X / do Y first" gate) — the agent
+  **must solve it through play** (find, earn, deduce) and **must not** lift the answer
+  from the disassembly, even though it could.
+- Whenever it uses script-derived information, the agent **declares which case it is
+  in** ("copy-protection lookup, answering directly" vs "quest gate, going to solve it").
+
+And the load-bearing point: the script is the **"what"** (which keyword gives which
+object, which flag gates which branch), never the **"how."** Navigation, prerequisite
+chains, sequencing, combat, and the multi-NPC threads that actually *conquer* a quest
+are not in any one script — the agent still has to figure those out by playing.
 
 ---
 
@@ -103,7 +125,9 @@ combat, who's controlled), `u6_roster_status` (STR/DEX/INT/Level + load caps),
 `u6_inventory(npc_slot)`, `u6_panel_state` (which side panel is up + the inventory
 cursor/scroll/slots/Selection), `u6_npcs_near(radius)`, `u6_objects_near(radius)` (map
 items + gear hints), `u6_walkable` (40×40 grid), `u6_conversation` (**decoded**
-dialogue + askable keywords — see below).
+dialogue + askable keywords + highlighted cues — see below), `u6_script_disasm`
+(the **whole** NPC script as an addressed assembly listing — see the rule of
+engagement above).
 **Act:** `u6_move` · `u6_talk` · `u6_say` · `u6_look` · `u6_get` · `u6_use` · `u6_ready` · `u6_key`.
 **Navigate:** `u6_pathfind` (plan) · `u6_goto` (closed-loop) · `u6_talk_to`.
 **Verify:** `u6_validate_passability` (predict-vs-live passability gate).
