@@ -15,7 +15,7 @@ servers compose them — a generic memory workbench, plus per-game decoders.
 | `dosbox_mem.py` | Shared **perception** core: attach, MemBase calibration, read/write. Exposes `register_base_tools(mcp, S)`. No game/UI knowledge. |
 | `dosbox_input.py` | Shared **action** core: find/focus the DOSBox window, send keys/text via SendInput. Exposes `register_input_tools(mcp, S)`. Game-agnostic. |
 | `dosbox_mcp_server.py` | The **`dosbox-memory`** server — a generic Cheat-Engine-style discovery workbench (scan / fuzzy / AOB / struct dump / address table). Use when reverse-engineering something new. |
-| `dosbox_u6_server.py` | The **`dosbox-u6`** server — an Ultima VI decoder (avatar/NPC/objects, inventory, live conversation state) **plus** U6 action verbs (move / talk / say). Composes both cores. |
+| `dosbox_u6_server.py` | The **`dosbox-u6`** server — an Ultima VI decoder (avatar/party/NPCs/objects, inventory, roster, passability, live conversation) **plus** U6 action + navigation verbs (move / look / get / use / talk / goto / …). Composes both cores. Design + per-verb mechanism in `docs/`. |
 
 How they stack:
 
@@ -317,9 +317,19 @@ After this, the decoders work with no `segment=` argument.
 
 ## Perception
 
+- `u6_avatar` / `u6_party` — the controlled actor's position+facing; solo/party
+  mode, combat on/off, and who's controlled now.
+- `u6_input_state` — turn-readiness (`COMMAND_READY`/`CONVERSATION`/`SELECTING`/
+  `MOUSE_MODE`/`BUSY`); poll before acting (U6 is turn-based, input is buffered).
+- `u6_roster_status` — per-member STR/DEX/INT/Level + carry/equip load vs caps.
 - `u6_object(slot)` — decode one object/NPC slot: world `x/y/z` (or holder),
-  shape type/frame, quantity/quality. The Avatar is slot 1; NPCs are `0..0xFF`.
+  shape type/frame, quantity/quality, tile/weight/equip-slot. Avatar is slot 1;
+  NPCs are `0..0xFF`.
 - `u6_inventory(npc_slot)` — list everything an NPC holds (INVEN/EQUIP).
+- `u6_npcs_near(radius)` / `u6_objects_near(radius)` — nearby NPCs / map items
+  (with gear hints), named via `LOOK.LZD` (see `docs/u6_object_naming.md`).
+- `u6_walkable` — a 40×40 ASCII passability grid (faithful `C_1E0F_000F` port;
+  see `docs/dosbox_u6_passability.md`).
 - `u6_conversation()` — live talk-engine state. On talk start the VM loads the
   NPC's whole script from `converse.a` into **`TalkBuf`** and interprets it with
   **`Talk_PC`** as the program counter; it prints text then **blocks on input**,
@@ -331,14 +341,32 @@ After this, the decoders work with no `segment=` argument.
 
 ## Action verbs
 
-Built on `dosbox_input` (SendInput; DOSBox is focused first):
+Built on `dosbox_input` (SendInput; DOSBox is focused first). Each verb is
+turn-gated (`u6_input_state == COMMAND_READY`) and drains its result back to the
+prompt. The full per-verb source mechanism + driving model is
+`docs/u6_verb_mechanism.md`.
 
 - `u6_move(dir)` — step one tile (`n/s/e/w`, or north/…/up/down/left/right).
-- `u6_talk(dir)` — open a conversation with the NPC in `dir` (`T` + direction).
+- `u6_look(dir)` — examine/search the tile in `dir` (8-way); reports the notable
+  objects the search surfaces (the agent reads state, not the scroll).
+- `u6_get(dir)` — pick up the adjacent object in `dir` (`LOCXYZ → INVEN`).
+- `u6_use(dir)` — operate the object on the adjacent tile (`n/s/e/w`) or `here`
+  (self tile): open/close doors & chests, leave the gate, ladders. Reports a
+  door/chest's open/closed/locked frame state. *(Inventory-target USE — carried
+  items, the locked-door key flow — is the next step; see the mechanism doc.)*
+- `u6_talk(dir)` — open a conversation with the NPC in `dir` (8-way).
 - `u6_say(text)` — answer the current prompt; peeks the opcode at `Talk_PC` and
   types a line + Enter (`ASKTOP`/`GETSTR`) or sends a single key
   (`GET`/`GETCHR`/`WAIT`).
 - `u6_key(key)` — send one raw keypress.
+
+Navigation (closed-loop, replanning around moving NPCs):
+
+- `u6_pathfind(npc_slot)` — plan a route (weighted Dijkstra).
+- `u6_goto(npc_slot)` — walk the route step-by-step, confirming each move.
+- `u6_talk_to(npc_slot)` — `u6_goto` then `u6_talk`.
+- `u6_validate_passability` — predict-vs-live fidelity gate for the passability
+  oracle.
 
 The server also exposes the shared base tools (`find_dosbox`, `read_dos`,
 `write_dos`, `status`, …) and input tools (`find_window`, `focus_window`,
@@ -349,13 +377,23 @@ The server also exposes the shared base tools (`find_dosbox`, `read_dos`,
 | Tool | Purpose |
 |------|---------|
 | `u6_hook(avatar_name)` | Attach + calibrate MemBase + derive DS from the avatar name |
-| `u6_object(slot, segment=-1)` | Decode one object/NPC slot |
+| `u6_avatar` / `u6_party` | Controlled actor pos+facing; solo/party + combat + who's controlled |
+| `u6_input_state` | Turn-readiness (poll for `COMMAND_READY` before acting) |
+| `u6_roster_status` | Per-member STR/DEX/INT/Level + carry/equip load |
+| `u6_object(slot, segment=-1)` | Decode one object/NPC slot (incl. tile/weight/equip-slot) |
 | `u6_inventory(npc_slot, segment=-1)` | List an NPC's INVEN/EQUIP items |
-| `u6_conversation(segment=-1, dump=64)` | Live conversation/talk-engine state + TalkBuf window |
+| `u6_npcs_near(radius)` / `u6_objects_near(radius)` | Nearby NPCs / map items (named) |
+| `u6_walkable` | 40×40 ASCII passability grid |
+| `u6_conversation(segment=-1, dump=64)` | Decoded dialogue + askable keywords |
 | `u6_move(direction)` | Step the party one tile |
+| `u6_look(direction)` | Examine/search the tile (8-way) |
+| `u6_get(direction)` | Pick up the adjacent object |
+| `u6_use(direction)` | Operate the adjacent / self-tile object (doors, gate, ladders) |
 | `u6_talk(direction)` | Start a conversation with the NPC in `direction` |
 | `u6_say(text, segment=-1)` | Answer the current conversation prompt |
 | `u6_key(key)` | Send one keypress |
+| `u6_pathfind` / `u6_goto` / `u6_talk_to` | Plan / walk a route / goto+talk |
+| `u6_validate_passability` | Predict-vs-live passability fidelity gate |
 | `find_window` / `focus_window` | Locate / foreground the DOSBox window |
 | `send_key(key)` / `send_text(text)` | Generic scancode injection |
 
@@ -363,6 +401,10 @@ The server also exposes the shared base tools (`find_dosbox`, `read_dos`,
 
 ## Notes
 
+- **Tests:** `dosbox_tools/tests/` — stub-based offline tests (no DOSBox needed).
+  Each stubs `mcp`/`dosbox_mem`/`dosbox_input`, imports the real `dosbox_u6_server`,
+  and asserts against the actual functions (verb key sequences, passability, gear,
+  the converse decoder). Run: `python tests/test_*.py` (or loop them).
 - `width`: 16-bit values use `2`; single-byte flags use `1`.
 - **Save the program state before writing memory.**
 - Slow first scan just means the process is large; it gets fast after one or two

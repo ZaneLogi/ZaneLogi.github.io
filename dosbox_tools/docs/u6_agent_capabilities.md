@@ -29,6 +29,9 @@ behavior: premise, not steps.
 ## 2. How to play (U6 keyboard command model)
 
 U6 is mouse-or-keyboard; we drive the **keyboard** path (SendInput into DOSBox).
+The full per-verb source mechanism + how the MCP drives each (the four targeting
+routes, the inventory-panel route, the per-verb handlers and result read-backs)
+is `u6_verb_mechanism.md`; this section is the agent-facing summary.
 
 - **A command = press the first letter of its name, then select a target**
   (a direction key, or a cursor target). The 10 main commands:
@@ -100,7 +103,7 @@ combat, who's controlled), `u6_roster_status` (STR/DEX/INT/Level + load caps),
 `u6_inventory(npc_slot)`, `u6_npcs_near(radius)`, `u6_objects_near(radius)` (map
 items + gear hints), `u6_walkable` (40×40 grid), `u6_conversation` (**decoded**
 dialogue + askable keywords — see below).
-**Act:** `u6_move` · `u6_talk` · `u6_say` · `u6_look` · `u6_get` · `u6_key`.
+**Act:** `u6_move` · `u6_talk` · `u6_say` · `u6_look` · `u6_get` · `u6_use` · `u6_key`.
 **Navigate:** `u6_pathfind` (plan) · `u6_goto` (closed-loop) · `u6_talk_to`.
 **Verify:** `u6_validate_passability` (predict-vs-live passability gate).
 **Inherited:** base mem tools + input tools (escape hatches).
@@ -119,10 +122,11 @@ dialogue + askable keywords — see below).
 | Roster STR/DEX/INT + load | — | `u6_roster_status` | ✅ HAVE |
 | Locate gear in the world | — | `u6_objects_near` | ✅ HAVE |
 | Is it readyable + which slot | — | `u6_object` (tile/weight/slot) | ✅ HAVE |
-| Identify / search (`L`) | `u6_look` | name via scroll; re-read state | ✅ HAVE (verify live) |
-| Pick up gear (`G`) | `u6_get` | `u6_inventory` / `u6_object` | ✅ HAVE (verify live) |
+| Identify / search (`L`) | `u6_look` | re-read state (names via LOOK.LZD) | ✅ live-verified |
+| Pick up gear (`G`) | `u6_get` | `u6_inventory` / `u6_object` | ✅ live-verified |
 | Equip gear (panel UI) | **`u6_ready`** (`<tab>`→nav→`<enter>`) | `u6_inventory` (EQUIP) | ❌ GAP (hard) |
-| Use key / open door / leave gate (`U`) | **`u6_use`** | `u6_walkable` (cell opens) | ❌ GAP |
+| Open/close door, leave gate, ladder (`U`) | `u6_use` (n/s/e/w or `here`) | door/chest frame state in return; `u6_walkable` | ✅ HAVE (verify live) |
+| Open a *locked* door/chest (`U`+key) | **`u6_use` key flow** (`U`→key→target) | matching `OBJ_040` qual | ❌ GAP (drive the game's inventory panel by keystroke — `<tab>`→nav→`<enter>` — to pick the key, like `u6_ready`) |
 
 "Suit the party" = the agent's **reasoning** over readyable+slot+weight (per object)
 × STR caps+free slots (per member) — thin tools, agent decides.
@@ -138,14 +142,19 @@ explore → leave the castle. (On foot, party mode, no combat.)
   `u6_input_state` — it's the live validation of the whole perceive/act/nav stack.
 - **Gear slice (full M1):** *perception done* — `u6_roster_status`, `u6_objects_near`,
   and `u6_object` (tile/weight/equip-slot) give the full "suit yourself" inputs.
-  *Simple action verbs built* — `u6_look`, `u6_get` (letter+target, turn-gated;
-  confirmed live, not offline). *Remaining:* `u6_use` (key qual-match) and
-  **`u6_ready`** (inventory-panel UI, hardest) — both held for live Slice 1.
+  *Action verbs built* — `u6_look`, `u6_get` (cursor-target, turn-gated; LOOK/GET
+  live-verified) and now `u6_use` (plain USE — open/close doors & chests, leave gate,
+  ladders; door/chest open/closed/locked state in the return; live-unconfirmed).
+  *Remaining:* the `u6_use` **locked-door key flow** (`U`→key→target qual-match) and
+  **`u6_ready`** (`<tab>`→nav→`<enter>`) — both need to drive the *original game's*
+  existing inventory panel by keystroke (then read memory to confirm the selection),
+  held as the hardest M1 actions (blind panel navigation, not a UI to build).
 
 **The authoritative M1 phase plan + the live Slice-1 runbook/validation gate live
 in `u6_ai_agent.md` §5 & §7** (single source — not duplicated here). Progress:
-turn gate ✅, gear perception ✅, `u6_look`/`u6_get` ✅ (live-unconfirmed);
-remaining `u6_use` + `u6_ready` held for live Slice 1.
+turn gate ✅, gear perception ✅, `u6_look`/`u6_get` ✅ live-verified, `u6_use`
+✅ built (plain USE, live-unconfirmed); remaining = `u6_use` key flow + `u6_ready`
+(both gated on driving the original game's inventory panel by keystroke).
 
 ---
 

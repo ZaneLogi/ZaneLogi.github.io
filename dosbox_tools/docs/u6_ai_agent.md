@@ -73,7 +73,7 @@ Implemented (logic verified; **memory offsets pending live verification** — se
   passability grid), `u6_conversation` (**decoded** dialogue + askable keywords;
   `keyword=` previews a response; unknown opcode → `DECODER_STOP`, halt + report).
 - **Act:** `u6_move(dir)`, `u6_talk(dir)`, `u6_say(text)`, `u6_look(dir)`,
-  `u6_get(dir)`, `u6_key(key)`.
+  `u6_get(dir)`, `u6_use(dir)`, `u6_key(key)`.
 - **Navigate:** `u6_pathfind(npc_slot)` (planner), `u6_goto(npc_slot)`
   (closed-loop), `u6_talk_to(npc_slot)` (goto + talk).
 - **Verify:** `u6_validate_passability` (predict-vs-live fidelity gate for the
@@ -84,12 +84,16 @@ Implemented (logic verified; **memory offsets pending live verification** — se
 
 Planned (gaps — see the milestones for which are needed when):
 
-- `u6_use` (open/unlock doors via an owned key, ladders, etc.), `u6_ready`/
-  `u6_equip` (inventory-panel UI), `u6_read` (books/signs → `BOOK.DAT`), `u6_cast`,
-  and a **durable agent journal** (the long-horizon backbone). *(Built since the
-  first draft and now under Perceive/Act above: `u6_look`, `u6_get`,
-  `u6_objects_near`, `u6_roster_status`, and the `u6_conversation` bytecode
-  decoder.)*
+- the `u6_use` **inventory/equipment-target** path (drive the game's existing
+  panel by keystroke — `<tab>`→nav→`<enter>`; needed for the locked-door key flow
+  and any use of a carried item) and **`u6_ready`/`u6_equip`** (same panel UI),
+  `u6_read` (books/signs → `BOOK.DAT`), `u6_cast`, and a **durable agent journal**
+  (the long-horizon backbone). *(Built since the first draft and now under
+  Perceive/Act above: `u6_look`, `u6_get`, `u6_use` (map-tile/self USE — doors,
+  leave the gate, ladders), `u6_objects_near`, `u6_roster_status`, and the
+  `u6_conversation` bytecode decoder. The full per-verb source mechanism +
+  MCP-driving model — including the inventory-panel route — is
+  `u6_verb_mechanism.md`.)*
 
 ## 3. Pathfinding
 
@@ -144,7 +148,7 @@ start and repeatable scoring.
 |---|---|---|
 | A. Talk to LB | go to Lord British, converse, learn the story + the gear list | have |
 | B. Explore the castle | walk the rooms, build a mental map | have |
-| C. Leave the castle | navigate to the gate, walk out (success = Avatar outside the castle bounds) | have (+ `u6_use` if the gate's locked — not built) |
+| C. Leave the castle | navigate to the gate, walk out (success = Avatar outside the castle bounds) | have; `u6_use` opens/leaves an unlocked gate (a *locked* gate needs the key flow — inventory-target, not built) |
 | D. Collect the gear LB named | find the items, pick them up | built: `u6_objects_near`/`u6_look`/`u6_get` (verify live) |
 | E. Equip the party | ready the gear onto each member | `u6_ready` not built (panel UI) |
 
@@ -180,12 +184,17 @@ independently checkable.
   weight / roster), and the **conversation-VM decoder** (text / keywords / live
   IF-eval / RND / DECODER_STOP) all have stub unit tests against the real functions
   (in `D:\tmp\u6_grid_test\`); pathfinding/helpers too.
-- **Not yet live-verified against a running U6:** the memory offsets, and every
-  **key-sending verb** (`u6_move`/`u6_talk`/`u6_look`/`u6_get`/…) — their
-  *bindings* only prove out live. First live checks: the §7 validation gate, then
-  `u6_validate_passability` (predict-vs-live). (The old `MapObjPtr`-origin caveat
-  is gone — passability no longer uses `MapObjPtr`; it's a faithful `C_1E0F_000F`
-  port, see `dosbox_u6_passability.md`.)
+- **Live-verified on an in-castle save** (avatar "Monica"): the memory offsets +
+  the read tools (`u6_avatar`/`u6_party`/`u6_input_state` cross-consistent;
+  `u6_roster_status` caps = STR×20 / STR×10) + `u6_move` (a confirmed step) +
+  `u6_look` (drains to `COMMAND_READY` across NPC / diagonal / empty-corpse /
+  corpse-with-contents, no stray GET) + `u6_get` (a helm `LOCXYZ → INVEN`) + the
+  `LOOK.LZD` naming (cross-checked vs the game's own scroll).
+- **Still live-unconfirmed key-senders:** `u6_talk`/`u6_say` (deferred from that
+  run) and the new `u6_use` (map-tile/self) — their *bindings* only prove out
+  live; re-run the §7 validation gate each session before trusting reads. (The old
+  `MapObjPtr`-origin caveat is gone — passability no longer uses `MapObjPtr`; it's
+  a faithful `C_1E0F_000F` port, see `dosbox_u6_passability.md`.)
 - 4-connected movement only (cardinal arrows); diagonals (numpad + 8-connected
   search) and global chunk routing are deferred.
 
@@ -305,6 +314,10 @@ still unverified.
 - Memory layout is baked into `dosbox_tools/dosbox_u6_server.py` (constants with
   citations) — the authoritative offset spec.
 - Server/tool reference + setup: `dosbox_tools/README.md`.
+- Command (verb) mechanism + how the MCP drives each: `u6_verb_mechanism.md`.
+  Movement passability: `dosbox_u6_passability.md`. Object naming (`LOOK.LZD` →
+  `u6_look_names.py`): `u6_object_naming.md`. Agent-facing capability manifest
+  (premise / how-to-play / tool surface): `u6_agent_capabilities.md`.
 - Ground truth for U6 internals: the ergonomy-joe `u6-decompiled` C source
   (`seg_1703.c` talk VM, `seg_101C.c` `GetTileAtXYZ`, `seg_1E0F.c`
   `__ComputeResistance`, `u6.h`, `ai.h`, `tile.h`).

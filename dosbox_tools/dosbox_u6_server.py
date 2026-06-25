@@ -315,7 +315,7 @@ def u6_hook(avatar_name: str = "") -> str:
             f"Ready -- read: u6_avatar / u6_party / u6_roster_status / u6_input_state "
             f"/ u6_object / u6_inventory / u6_npcs_near / u6_objects_near / u6_walkable "
             f"/ u6_conversation; act: u6_move / u6_talk / u6_say / u6_look / u6_get "
-            f"/ u6_key; navigate: u6_pathfind / u6_goto / u6_talk_to; verify: "
+            f"/ u6_use / u6_key; navigate: u6_pathfind / u6_goto / u6_talk_to; verify: "
             f"u6_validate_passability. Avatar = slot 1.")
 
 
@@ -956,6 +956,57 @@ _U6_DIR8 = {
 _TALK_SINGLEKEY_OPS = {0xf8, 0xfa, 0xfc, 0xcb}  # GET, GETCHR, GETDIGIT, WAIT
 
 
+# ----------------------------------------------------------------------------
+# Shared cursor-command skeleton for the cursor-targeting verbs (LOOK/TALK/GET/
+# USE). They are one shape -- validate direction -> (blind if not hooked) ->
+# _begin_select -> _walk_cursor -> _drain_to_ready -> report -- differing only in
+# 8-way vs cardinal, Enter-commit (SelectRange=7) vs arrow auto-commit
+# (SelectRange=-1), and the per-verb result read-back. The scaffolding lives here;
+# the per-verb result text stays in each verb. (The state-machine primitives an
+# inventory-target USE will need -- guarded-send, abort-to-ready -- are deferred to
+# that feature, not added here where they'd be unused.)
+# ----------------------------------------------------------------------------
+_CURSOR_STEP = 0.12   # seconds between cursor keystrokes -- let DOSBox consume each
+
+
+def _begin_select(base_addr, letter, verb):
+    """Enter a cursor command: wait for COMMAND_READY (the letter must land as a fresh
+    command), press `letter`, confirm the cross-cursor came up (SELECTING). Returns an
+    error string on failure, or None on success."""
+    _wait_command_ready(base_addr)
+    inp.send_key(letter)
+    st, _ = _wait_state(base_addr, "SELECTING")
+    if st != "SELECTING":
+        return f"{verb}: '{letter.upper()}' did not enter select mode (state={st})."
+    return None
+
+
+def _walk_cursor(keys, commit_enter):
+    """Walk the cross-cursor: press each key in `keys` a _CURSOR_STEP apart, then -- for
+    a SelectRange=7 command -- press Enter to commit. For SelectRange=-1 the arrow
+    itself auto-commits (commit_enter=False, no Enter). Reproduces the talk/look (Enter)
+    and get/use (auto-commit; `here`=Enter) sequences."""
+    for k in keys:
+        time.sleep(_CURSOR_STEP)
+        inp.send_key(k)
+    if commit_enter:
+        time.sleep(_CURSOR_STEP)
+        inp.send_key("enter")
+
+
+def _blind_cursor_cmd(verb, letter, keys, commit_enter):
+    """Not-hooked fallback for a cursor command: press the letter, the cursor keys, then
+    (if commit_enter) Enter -- ungated best-effort, no state gate. Returns the result
+    string."""
+    inp.send_key(letter); time.sleep(0.15)
+    for k in keys:
+        inp.send_key(k); time.sleep(_CURSOR_STEP)
+    if commit_enter:
+        inp.send_key("enter")
+    seq = "+".join([letter, *keys] + (["enter"] if commit_enter else []))
+    return f"{verb}: sent {seq} blind (not hooked)."
+
+
 @mcp.tool()
 def u6_move(direction: str) -> str:
     """Ultima VI: step the party one tile. direction = n/s/e/w (also
@@ -986,21 +1037,11 @@ def u6_talk(direction: str) -> str:
                 f"(ne/nw/se/sw).")
     b = _session_base()
     if b is None:                                    # not hooked: best-effort blind
-        inp.send_key("t"); time.sleep(0.15)
-        for a in arrows:
-            inp.send_key(a); time.sleep(0.12)
-        inp.send_key("enter")
-        return f"talk {direction}: sent t+{'+'.join(arrows)}+enter blind (not hooked)."
-    _wait_command_ready(b)                            # 'T' must land as a fresh command
-    inp.send_key("t")
-    st, _ = _wait_state(b, "SELECTING")               # cross-cursor up
-    if st != "SELECTING":
-        return f"talk {direction}: 'T' did not enter select mode (state={st})."
-    for a in arrows:                                  # walk the cross-cursor onto the NPC
-        time.sleep(0.12)
-        inp.send_key(a)
-    time.sleep(0.12)
-    inp.send_key("enter")                             # commit (CMD_8E) -> TALK_talkTo
+        return _blind_cursor_cmd(f"talk {direction}", "t", arrows, True)
+    err = _begin_select(b, "t", f"talk {direction}")  # 'T' as a fresh command -> SELECTING
+    if err:
+        return err
+    _walk_cursor(arrows, True)                        # onto the NPC, then Enter -> TALK_talkTo
     state, _ = _wait_state(b, ("CONVERSATION", "COMMAND_READY"), timeout=3.0)
     if state == "CONVERSATION":
         return (f"talk {direction}: conversation started. "
@@ -1031,31 +1072,18 @@ def u6_look(direction: str) -> str:
                 f"(ne/nw/se/sw).")
     b = _session_base()
     if b is None:                                    # not hooked: best-effort blind
-        inp.send_key("l"); time.sleep(0.15)
-        for a in arrows:
-            inp.send_key(a); time.sleep(0.12)
-        inp.send_key("enter")
-        return f"look {direction}: sent l+{'+'.join(arrows)}+enter blind (not hooked)."
-    _wait_command_ready(b)                            # 'L' must land as a fresh command
-    inp.send_key("l")
-    st, _ = _wait_state(b, "SELECTING")               # cross-cursor up
-    if st != "SELECTING":
-        return f"look {direction}: 'L' did not enter select mode (state={st})."
-    for a in arrows:                                  # walk the cross-cursor onto the target
-        time.sleep(0.12)
-        inp.send_key(a)
-    time.sleep(0.12)
-    inp.send_key("enter")                             # commit (CMD_8E)
+        return _blind_cursor_cmd(f"look {direction}", "l", arrows, True)
+    err = _begin_select(b, "l", f"look {direction}")  # 'L' as a fresh command -> SELECTING
+    if err:
+        return err
+    _walk_cursor(arrows, True)                        # onto the target tile, then Enter (commit)
     state, pages = _drain_to_ready(b)                 # dismiss the result page(s)
     # The agent can't read the scroll, so report the notable objects now on the looked
     # tile -- LOOK's search surfaces a corpse/container's hidden items to LOCXYZ, and
     # that state change IS the readable result.
     note = ""
     try:
-        x0, y0, z0 = _controlled_xyz(b)
-        dx = sum(_ARROW_DXY[a][0] for a in arrows)
-        dy = sum(_ARROW_DXY[a][1] for a in arrows)
-        tx, ty = x0 + dx, y0 + dy
+        tx, ty, z0 = _target_tile(b, arrows)
         items = _notable_at_tile(b, tx, ty, z0)
         if items:
             desc = ", ".join(
@@ -1087,19 +1115,59 @@ def u6_get(direction: str) -> str:
                 f"diagonal/far tiles aren't reachable by keyboard.")
     b = _session_base()
     if b is None:                                    # not hooked: best-effort blind
-        inp.send_key("g"); time.sleep(0.15)
-        inp.send_key(key); time.sleep(0.15)
-        return f"get {direction}: sent g+{key} blind (not hooked -- state ungated)."
-    _wait_command_ready(b)                            # 'G' must land as a fresh command
-    inp.send_key("g")
-    st, _ = _wait_state(b, "SELECTING")               # cross-cursor up
-    if st != "SELECTING":
-        return f"get {direction}: 'G' did not enter select mode (state={st})."
-    time.sleep(0.12)
-    inp.send_key(key)                                 # arrow auto-commits (SelectRange==-1)
+        return _blind_cursor_cmd(f"get {direction}", "g", [key], False)
+    err = _begin_select(b, "g", f"get {direction}")   # 'G' as a fresh command -> SELECTING
+    if err:
+        return err
+    _walk_cursor([key], False)                        # the arrow auto-commits (SelectRange==-1)
     state, msgs = _drain_to_ready(b)                  # clear the result message(s)
     return (f"get {direction}: committed; cleared {msgs} message(s); now {state}. "
             f"Confirm pickup via u6_inventory / u6_object.")
+
+
+@mcp.tool()
+def u6_use(direction: str) -> str:
+    """Ultima VI: USE the object on the adjacent tile in `direction` (n/s/e/w), or
+    `here`/`self` for the tile you stand on (ladders, moongates). USE is the
+    multi-purpose interaction: open/close doors & chests, climb ladders, enter/exit
+    ships, ring bells, light fires, eat/drink. Like GET it targets one tile (source
+    seg_0A33.c:1115 -- SelectMode=1, SelectRange=-1): a cardinal arrow AUTO-COMMITS to
+    that tile (NO Enter; seg_0C9C.c:1242 SelectRange==-1 -> CMD_8E on the arrow), while
+    `here` commits the centred cursor with Enter (seg_0C9C.c:1206). This presses 'U',
+    commits, then DRAINS the result back to COMMAND_READY (handler C_27A1_6179).
+    Because the agent can't read the "opened!"/"closed!"/"locked" scroll, the return
+    RE-READS the target tile and reports the STATE change: a door/chest gives its
+    open/closed/locked frame state (its real signal), other objects their name/frame.
+    A LOCKED door/chest only opens with a matching key (OBJ_040 whose GetQual == the
+    target's lock-id qual) -- the engine does NOT auto-find it (seg_27a1.c:1410); that
+    key flow needs inventory selection (not yet wired), so a locked target reports the
+    qual a key would need. Turn-gated."""
+    d = direction.strip().lower()
+    self_use = d in ("here", "self", "@")
+    arrow = None if self_use else _U6_DIR.get(d)
+    if not self_use and not arrow:
+        return (f"Invalid USE target {direction!r}. USE targets one tile: cardinal "
+                f"n/s/e/w (auto-commit) or 'here'/'self' for the tile you stand on "
+                f"(ladders). Diagonals aren't reachable by keyboard.")
+    # cardinal -> the arrow auto-commits (SelectRange=-1); self -> Enter commits at centre
+    keys = [] if self_use else [arrow]
+    b = _session_base()
+    if b is None:                                      # not hooked: best-effort blind
+        return _blind_cursor_cmd(f"use {d}", "u", keys, self_use)
+    err = _begin_select(b, "u", f"use {d}")            # 'U' as a fresh command -> SELECTING
+    if err:
+        return err
+    _walk_cursor(keys, self_use)                       # commit on the target tile
+    state, msgs = _drain_to_ready(b)                   # clear the result message(s)
+    note = ""
+    try:
+        tx, ty, z0 = _target_tile(b, keys)
+        items = _use_result_at_tile(b, tx, ty, z0)
+        note = (f" Now at ({tx},{ty}): " + "; ".join(items) + "."
+                if items else f" No notable objects at ({tx},{ty}).")
+    except OSError:
+        note = ""
+    return f"use {d}: committed; cleared {msgs} message(s); now {state}.{note}"
 
 
 @mcp.tool()
@@ -1352,6 +1420,17 @@ def _drain_to_ready(base_addr, key="enter", cap=40, settle=_DRAIN_SETTLE):
 _ARROW_DXY = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
 
 
+def _target_tile(base_addr, keys):
+    """The world tile the cursor lands on for a cursor command whose walk is `keys`
+    (an _U6_DIR8/_U6_DIR arrow list; an empty list = the controlled actor's own tile).
+    Sums the per-arrow deltas onto the controlled actor's position. Shared by the
+    LOOK/USE result read-back."""
+    x0, y0, z0 = _controlled_xyz(base_addr)
+    dx = sum(_ARROW_DXY[k][0] for k in keys)
+    dy = sum(_ARROW_DXY[k][1] for k in keys)
+    return x0 + dx, y0 + dy, z0
+
+
 def _notable_at_tile(base_addr, tx, ty, tz, cap=12):
     """World objects (LOCXYZ, slot >= 0x100) on tile (tx,ty,tz) that the agent would ACT
     on -- weight>0 (carryable) OR readyable (has an equip slot). Floor/scenery (weight 0,
@@ -1380,6 +1459,72 @@ def _notable_at_tile(base_addr, tx, ty, tz, cap=12):
         if wt <= 0 and eslot < 0:                     # floor/scenery -> not actionable
             continue
         out.append((i, _tile_name(tile), typ, wt, eslot))  # name via LOOK.LZD table
+        if len(out) >= cap:
+            break
+    return out
+
+
+# USE targets whose result is a frame-encoded open/closed/locked STATE the agent must
+# read back (it can't see the "opened!"/"locked" scroll). Door types 0x129-0x12C share
+# one frame band; the chest (0x062) has its own. A locked one only opens with a key
+# (OBJ_040) whose qual matches the lock-id GetQual(target) -- a plain Use just reports
+# "locked" (engine never auto-finds the key, seg_27a1.c:1410).
+_U6_DOOR_TYPES = frozenset((0x129, 0x12a, 0x12b, 0x12c))
+_U6_CHEST_TYPE = 0x062
+
+
+def _door_state(frame):
+    """Door frame band -> (state, locked) per C_27A1_2A44 (seg_27a1.c:1285-1322):
+    0-3 open, 4-7 closed (unlocked), 8-0xB locked (key, qual-match), 0xC-0xF magically
+    locked."""
+    if frame < 4:   return "open", False
+    if frame < 8:   return "closed", False
+    if frame < 0xc: return "locked", True
+    return "magically locked", True
+
+
+def _chest_state(frame):
+    """Chest frame -> (state, locked) per C_27A1_2BBC (seg_27a1.c:1331-1373): 0 open,
+    1 closed (unlocked), 2 locked (key, qual-match), 3 magically locked."""
+    return (("open", False), ("closed", False),
+            ("locked", True), ("magically locked", True))[frame & 3]
+
+
+def _use_result_at_tile(base_addr, tx, ty, tz, cap=12):
+    """LOCXYZ objects on tile (tx,ty,tz) after a USE, reported as the STATE the agent
+    needs to read back -- it can't see the "opened!"/"locked" scroll. Doors
+    (0x129-0x12C) and chests (0x062) always report their open/closed/locked frame state
+    (and, when locked with a nonzero qual, the lock-id a matching key OBJ_040 must
+    carry); other objects report only if actionable (weight>0 or readyable), so floor /
+    scenery is dropped (u6_walkable covers terrain). Returns human strings, capped at
+    `cap`."""
+    status = dm.read(S.handle, base_addr + U6_ObjStatus, U6_MAX_SLOTS)
+    pos    = dm.read(S.handle, base_addr + U6_ObjPos, U6_MAX_SLOTS * 3)
+    shape  = dm.read(S.handle, base_addr + U6_ObjShapeType, U6_MAX_SLOTS * 2)
+    amount = dm.read(S.handle, base_addr + U6_Amount, U6_MAX_SLOTS * 2)
+    basetile, tw, weapons = _gear_tables(base_addr)
+    out = []
+    for i in range(0x100, U6_MAX_SLOTS):
+        if (status[i] & 0x18) != 0:                  # not LOCXYZ (held/contained/equipped)
+            continue
+        sh = shape[i * 2] | (shape[i * 2 + 1] << 8)
+        typ = sh & 0x3ff
+        if typ == 0:                                 # empty slot
+            continue
+        v = pos[i * 3] | (pos[i * 3 + 1] << 8) | (pos[i * 3 + 2] << 16)
+        if (v & 0x3ff) != tx or ((v >> 10) & 0x3ff) != ty or ((v >> 20) & 0xf) != tz:
+            continue
+        frame = sh >> 10
+        qual = amount[i * 2 + 1]                      # high byte of Amount = qual (lock-id)
+        tile, wt, eslot = _gear_of(sh, basetile, tw, weapons)
+        name = _tile_name(tile)
+        if typ in _U6_DOOR_TYPES or typ == _U6_CHEST_TYPE:
+            kind = "door" if typ in _U6_DOOR_TYPES else "chest"
+            state, locked = (_door_state if kind == "door" else _chest_state)(frame)
+            extra = f", key qual={qual}" if (locked and qual) else ""
+            out.append(f"{name} (0x{i:03x} {kind}: {state}{extra})")
+        elif wt > 0 or eslot >= 0:                    # actionable item (else floor/scenery)
+            out.append(f"{name} (0x{i:03x} type{typ} frame{frame})")
         if len(out) >= cap:
             break
     return out
