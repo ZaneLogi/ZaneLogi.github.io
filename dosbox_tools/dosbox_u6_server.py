@@ -88,6 +88,31 @@ U6_MouseMode     = 0x04BE   # int; nonzero => mouse-driven UI mode (keyboard pla
 
 
 # ----------------------------------------------------------------------------
+# Status-panel / inventory-UI state -- the "eyes" into the panel that the keyboard
+# inventory-target route drives (USE/READY on a CARRIED item: <tab> into the panel,
+# arrow to the item, Enter). All source-derived from BSS.ASM (the `;D_xxxx` layout +
+# the `Selection`/`Equipment` declarations) and the .c `/*xxxx*/` offset annotations
+# -- convention verified: SelectMode /*0492*/, MouseMode /*04BE*/, AllowMouseMov
+# /*04C4*/ match the turn-gate offsets above.
+# ----------------------------------------------------------------------------
+U6_StatusDisplay = 0x04C0   # int; which status view is shown (CMD_90/91/92), seg_0C9C.c:39
+U6_PanelChar     = 0x04B3   # int (D_04B3); party index whose panel is displayed
+U6_PanelCol      = 0x0499   # char (D_0499); inventory-panel cursor column
+U6_PanelRow      = 0x049A   # char (D_049A); inventory-panel cursor row
+U6_InvScroll     = 0x07CE   # unsigned char (D_07CE); backpack scroll offset (paged by 4)
+U6_VisBackpack   = 0xE70F   # int[12] (D_E70F); the visible backpack slots (4 col x 3 row)
+U6_Equipment     = 0xE6E4   # int[8]; equipped object slots, indexed SLOT_HEAD..FEET (0..7)
+U6_Sel_x         = 0xB6AF   # int; Selection.x  (u6.h: struct {int x,y,obj} @ B6AF/B6B1/B6B3)
+U6_Sel_y         = 0xB6B1   # int; Selection.y
+U6_Sel_obj       = 0xB6B3   # int; Selection.obj -- the committed target object slot
+# Status-view modes (cmd.h CMD_9x). The panel must be INVENTORY (CMD_92) to target a
+# carried item; F1-F8 select a member's view, '*' toggles PORTRAIT<->INVENTORY.
+_PANEL_VIEW = {0x90: "PORTRAIT", 0x91: "PARTY", 0x92: "INVENTORY"}
+U6_BACKPACK_COLS = 4        # backpack grid is 4 cols x 3 visible rows (C_155D_1267);
+U6_BACKPACK_ROWS = 3        # visible index = row*4 + col, object = D_E70F[index]
+
+
+# ----------------------------------------------------------------------------
 # Character stats + item weight -- the inputs for "suit the party" gear decisions
 # (u6.h, seg_2337.c GetStr/GetDex/GetInt, seg_155D.c STAT_GetEquipSlot). STREN/
 # DEXTE/INTEL are direct DGROUP byte arrays per slot; Level/TypeWeight are far
@@ -313,8 +338,8 @@ def u6_hook(avatar_name: str = "") -> str:
             f"(derived from {avatar_name!r} @ host 0x{host:x}).\n"
             f"Names[0] reads back as {readback!r}.{extra}\n"
             f"Ready -- read: u6_avatar / u6_party / u6_roster_status / u6_input_state "
-            f"/ u6_object / u6_inventory / u6_npcs_near / u6_objects_near / u6_walkable "
-            f"/ u6_conversation; act: u6_move / u6_talk / u6_say / u6_look / u6_get "
+            f"/ u6_object / u6_inventory / u6_panel_state / u6_npcs_near / u6_objects_near "
+            f"/ u6_walkable / u6_conversation; act: u6_move / u6_talk / u6_say / u6_look / u6_get "
             f"/ u6_use / u6_key; navigate: u6_pathfind / u6_goto / u6_talk_to; verify: "
             f"u6_validate_passability. Avatar = slot 1.")
 
@@ -394,6 +419,66 @@ def u6_inventory(npc_slot: int, segment: int = -1,
     for slot, use, typ, frame, quan, qual, name in rows:
         out.append(f"  0x{slot:03x}  {use:<5}  {typ:>4}  {frame:>5}  {quan:>4}  "
                    f"{qual:>4}  {name}")
+    return "\n".join(out)
+
+
+@mcp.tool()
+def u6_panel_state(segment: int = -1) -> str:
+    """Ultima VI: read the STATUS-PANEL state -- the agent's "eyes" into the inventory
+    UI that a USE/READY on a CARRIED item must drive by keyboard (the engine offers no
+    way to target inventory except through the panel). Reports the current view
+    (PORTRAIT/PARTY/INVENTORY = StatusDisplay CMD_90/91/92), which member's panel is
+    shown (D_04B3), the backpack cursor (D_0499 col / D_049A row) and scroll (D_07CE),
+    the visible 4x3 backpack slots (D_E70F[12], decoded, the cursor cell marked), the
+    equipped items (Equipment[8] by slot), and the live Selection (x/y/obj at
+    B6AF/B6B1/B6B3 -- what a commit would act on). The keyboard route to target a
+    carried item: F<member> -> view becomes INVENTORY (CMD_92); <tab> -> SelectMode==2
+    (panel cursor); arrows move the cursor to the item's (row,col); Enter commits.
+    Read-only. DS from u6_hook unless overridden with segment=."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    b = S.membase + (ds << 4)
+    try:
+        sd    = int.from_bytes(dm.read(S.handle, b + U6_StatusDisplay, 2), "little")
+        pch   = int.from_bytes(dm.read(S.handle, b + U6_PanelChar, 2), "little")
+        col   = dm.read(S.handle, b + U6_PanelCol, 1)[0]
+        row   = dm.read(S.handle, b + U6_PanelRow, 1)[0]
+        scr   = dm.read(S.handle, b + U6_InvScroll, 1)[0]
+        pack  = dm.read(S.handle, b + U6_VisBackpack, U6_BACKPACK_COLS * U6_BACKPACK_ROWS * 2)
+        equip = dm.read(S.handle, b + U6_Equipment, 8 * 2)
+        sx   = int.from_bytes(dm.read(S.handle, b + U6_Sel_x, 2), "little", signed=True)
+        sy   = int.from_bytes(dm.read(S.handle, b + U6_Sel_y, 2), "little", signed=True)
+        sobj = int.from_bytes(dm.read(S.handle, b + U6_Sel_obj, 2), "little", signed=True)
+    except OSError as ex:
+        return f"Panel read failed (DS=0x{ds:04x}): {ex}"
+    view = _PANEL_VIEW.get(sd, f"0x{sd:02x}")
+    out = [f"Panel (DS=0x{ds:04x}): view={view} char#={pch} "
+           f"cursor=(col{col},row{row}) scroll={scr}"]
+    # visible backpack: 4 cols x 3 rows, index = row*4 + col; 0 = empty cell
+    rows_seen = []
+    for i in range(U6_BACKPACK_COLS * U6_BACKPACK_ROWS):
+        slot = pack[i * 2] | (pack[i * 2 + 1] << 8)
+        if slot == 0:
+            continue
+        r, c = divmod(i, U6_BACKPACK_COLS)
+        mark = " <-cursor" if (c == col and r == row) else ""
+        rows_seen.append(f"  ({r},{c}) slot 0x{slot:03x} {_obj_name(b, slot)}{mark}")
+    out.append(f"backpack ({len(rows_seen)} visible):" if rows_seen
+               else "backpack: none visible")
+    out.extend(rows_seen)
+    # equipped silhouette: 0/1 = empty slot (the C_155D_130E self-ref guard)
+    eq = []
+    for s in range(8):
+        slot = equip[s * 2] | (equip[s * 2 + 1] << 8)
+        if slot > 1:
+            eq.append(f"  {_EQUIP_SLOT_NAME[s]}: 0x{slot:03x} {_obj_name(b, slot)}")
+    out.append("equipped:" if eq else "equipped: none")
+    out.extend(eq)
+    sel = "none" if sobj < 0 else f"0x{sobj:03x} {_obj_name(b, sobj)}"
+    out.append(f"Selection: obj={sel}  x={sx} y={sy}")
     return "\n".join(out)
 
 
@@ -1007,6 +1092,44 @@ def _blind_cursor_cmd(verb, letter, keys, commit_enter):
     return f"{verb}: sent {seq} blind (not hooked)."
 
 
+# ----------------------------------------------------------------------------
+# State-machine primitives for the multi-step inventory-target route (USE on a
+# carried item / the locked-door key flow). Every step is a GUARDED send: send a
+# key, then poll a memory read until it confirms the key landed -- the receipt is
+# the read, not a sleep (the agent can't see the screen). _abort_to_ready is the
+# universal bail (the engine's own ESC cancel) for any mid-sequence mismatch.
+# ----------------------------------------------------------------------------
+def _guarded_send(base_addr, key, want, timeout=2.5):
+    """Send `key`, then poll until confirmed. `want` is a state name / an iterable of
+    names (checked against _input_state) OR a zero-arg predicate () -> bool that reads
+    whatever memory it needs. Returns (ok, last_state). The receipt is the read."""
+    inp.send_key(key)
+    if callable(want):
+        test = want
+    else:
+        targets = (want,) if isinstance(want, str) else tuple(want)
+        test = lambda: _input_state(base_addr)[0] in targets
+    deadline = time.time() + timeout
+    ok = test()
+    while not ok and time.time() < deadline:
+        time.sleep(0.03)
+        ok = test()
+    return ok, _input_state(base_addr)[0]
+
+
+def _abort_to_ready(base_addr, cap=8):
+    """Universal bail: ESC -> drain to COMMAND_READY (the engine's own cancel -- first
+    ESC clears SelectMode, the next clears MouseMode). Bounded; returns the final state.
+    A USE that aborts BEFORE its commit costs no turn, so bailing is cheap and safe."""
+    for _ in range(cap):
+        state, _ = _input_state(base_addr)
+        if state == "COMMAND_READY":
+            return state
+        inp.send_key("esc")
+        time.sleep(_CURSOR_STEP)
+    return _input_state(base_addr)[0]
+
+
 @mcp.tool()
 def u6_move(direction: str) -> str:
     """Ultima VI: step the party one tile. direction = n/s/e/w (also
@@ -1125,49 +1248,308 @@ def u6_get(direction: str) -> str:
             f"Confirm pickup via u6_inventory / u6_object.")
 
 
-@mcp.tool()
-def u6_use(direction: str) -> str:
-    """Ultima VI: USE the object on the adjacent tile in `direction` (n/s/e/w), or
-    `here`/`self` for the tile you stand on (ladders, moongates). USE is the
-    multi-purpose interaction: open/close doors & chests, climb ladders, enter/exit
-    ships, ring bells, light fires, eat/drink. Like GET it targets one tile (source
-    seg_0A33.c:1115 -- SelectMode=1, SelectRange=-1): a cardinal arrow AUTO-COMMITS to
-    that tile (NO Enter; seg_0C9C.c:1242 SelectRange==-1 -> CMD_8E on the arrow), while
-    `here` commits the centred cursor with Enter (seg_0C9C.c:1206). This presses 'U',
-    commits, then DRAINS the result back to COMMAND_READY (handler C_27A1_6179).
-    Because the agent can't read the "opened!"/"closed!"/"locked" scroll, the return
-    RE-READS the target tile and reports the STATE change: a door/chest gives its
-    open/closed/locked frame state (its real signal), other objects their name/frame.
-    A LOCKED door/chest only opens with a matching key (OBJ_040 whose GetQual == the
-    target's lock-id qual) -- the engine does NOT auto-find it (seg_27a1.c:1410); that
-    key flow needs inventory selection (not yet wired), so a locked target reports the
-    qual a key would need. Turn-gated."""
-    d = direction.strip().lower()
-    self_use = d in ("here", "self", "@")
-    arrow = None if self_use else _U6_DIR.get(d)
-    if not self_use and not arrow:
-        return (f"Invalid USE target {direction!r}. USE targets one tile: cardinal "
-                f"n/s/e/w (auto-commit) or 'here'/'self' for the tile you stand on "
-                f"(ladders). Diagonals aren't reachable by keyboard.")
-    # cardinal -> the arrow auto-commits (SelectRange=-1); self -> Enter commits at centre
-    keys = [] if self_use else [arrow]
-    b = _session_base()
-    if b is None:                                      # not hooked: best-effort blind
-        return _blind_cursor_cmd(f"use {d}", "u", keys, self_use)
-    err = _begin_select(b, "u", f"use {d}")            # 'U' as a fresh command -> SELECTING
+# ----------------------------------------------------------------------------
+# Inventory-target USE -- driving the status panel to USE a CARRIED item, and the
+# locked-door key flow. The panel is the ONLY route to an inventory target: F<member>
+# shows that member's INVENTORY view (StatusDisplay==CMD_92), <tab> arms the panel
+# cursor (SelectMode==2), Enter commits on the cell under the cursor (C_155D_1267).
+# The tool absorbs this keyboard mechanism; the agent supplies only a SEMANTIC `on=`
+# choice when an item needs one (potion->member, orb->where, dig->direction, ...).
+# ----------------------------------------------------------------------------
+_USE_POTION     = 0x113                              # potion -> on = a party member
+_USE_ORB        = 0x057                              # orb of the moons -> on = a 'where' (map dir)
+_USE_DIR        = frozenset((0x067, 0x068, 0x09a))   # pick/shovel/telescope -> on = a direction
+_USE_INSTRUMENT = frozenset((0x09d, 0x09c, 0x09e, 0x099, 0x128))  # -> on = a digit tune
+_DOOR_LOCKED    = range(8, 0xc)                      # door frame band: locked (key, qual match)
+
+
+def _rd8(addr):   return dm.read(S.handle, addr, 1)[0]
+def _rd16(addr):  return int.from_bytes(dm.read(S.handle, addr, 2), "little")
+def _rd16s(addr): return int.from_bytes(dm.read(S.handle, addr, 2), "little", signed=True)
+
+
+def _obj_tfq(base_addr, slot):
+    """(type, frame, qual) for an object slot."""
+    sh = _rd16(base_addr + U6_ObjShapeType + slot * 2)
+    am = _rd16(base_addr + U6_Amount + slot * 2)
+    return sh & 0x3ff, sh >> 10, am >> 8
+
+
+def _party_member_slot(base_addr, idx):
+    """Object slot of party member `idx` (Party[idx])."""
+    return _rd8(base_addr + U6_Party + idx)
+
+
+def _visible_backpack(base_addr):
+    """The 12 visible backpack object slots (D_E70F); 0 = an empty cell."""
+    n = U6_BACKPACK_COLS * U6_BACKPACK_ROWS
+    raw = dm.read(S.handle, base_addr + U6_VisBackpack, n * 2)
+    return [raw[i * 2] | (raw[i * 2 + 1] << 8) for i in range(n)]
+
+
+def _door_at_tile(base_addr, tx, ty, tz):
+    """A door (OBJ_129..12C) on tile (tx,ty,tz) -> (slot, type, frame, qual), else None."""
+    status = dm.read(S.handle, base_addr + U6_ObjStatus, U6_MAX_SLOTS)
+    pos    = dm.read(S.handle, base_addr + U6_ObjPos, U6_MAX_SLOTS * 3)
+    shape  = dm.read(S.handle, base_addr + U6_ObjShapeType, U6_MAX_SLOTS * 2)
+    amount = dm.read(S.handle, base_addr + U6_Amount, U6_MAX_SLOTS * 2)
+    for i in range(0x100, U6_MAX_SLOTS):
+        if status[i] & 0x18:                              # not LOCXYZ
+            continue
+        typ = (shape[i * 2] | (shape[i * 2 + 1] << 8)) & 0x3ff
+        if typ not in _U6_DOOR_TYPES:
+            continue
+        v = pos[i * 3] | (pos[i * 3 + 1] << 8) | (pos[i * 3 + 2] << 16)
+        if (v & 0x3ff) == tx and ((v >> 10) & 0x3ff) == ty and ((v >> 20) & 0xf) == tz:
+            return i, typ, (shape[i * 2 + 1] >> 2), amount[i * 2 + 1]   # frame=sh>>10, qual=am>>8
+    return None
+
+
+def _find_matching_key(base_addr, member_slot, lock_qual):
+    """The member's owned key that opens a lock of `lock_qual` (an OBJ_040 with qual ==
+    lock_qual, qual != 0; or a lockpick OBJ_03F on a qual-0 lock) -- searching CONTAINED
+    items too (a key inside a bag still belongs to the member). Returns
+    (key_slot, container_slot): container_slot is -1 when the key is held DIRECTLY
+    (INVEN/EQUIP, so USE can reach it), else the bag/chest it sits inside (the agent must
+    take it out first -- USE can't target a contained item). (-1, -1) if none owned. The
+    agent does the ownership/qual check the engine skips (seg_27a1.c:1410)."""
+    status = dm.read(S.handle, base_addr + U6_ObjStatus, U6_MAX_SLOTS)
+    pos    = dm.read(S.handle, base_addr + U6_ObjPos, U6_MAX_SLOTS * 3)
+    shape  = dm.read(S.handle, base_addr + U6_ObjShapeType, U6_MAX_SLOTS * 2)
+    amount = dm.read(S.handle, base_addr + U6_Amount, U6_MAX_SLOTS * 2)
+
+    def owner(slot):
+        """Walk the held-by chain (INVEN/EQUIP/CONTAINED assoc) up to the < 0x100 holder
+        -- a member slot, or a world slot if the chain roots in a ground container."""
+        for _ in range(64):
+            if slot < 0x100 or not (status[slot] & 0x18):
+                break
+            slot = pos[slot * 3] | (pos[slot * 3 + 1] << 8)
+        return slot
+
+    for i in range(0x100, U6_MAX_SLOTS):
+        cu = status[i] & 0x18
+        if cu not in (0x08, 0x10, 0x18):                  # CONTAINED / INVEN / EQUIP
+            continue
+        typ = (shape[i * 2] | (shape[i * 2 + 1] << 8)) & 0x3ff
+        qual = amount[i * 2 + 1]
+        if not ((lock_qual and typ == 0x040 and qual == lock_qual)
+                or (not lock_qual and typ == 0x03f)):
+            continue
+        if owner(i) != member_slot:                       # not in this member's possession
+            continue
+        container = (pos[i * 3] | (pos[i * 3 + 1] << 8)) if cu == 0x08 else -1
+        return i, container
+    return -1, -1
+
+
+def _resolve_member(base_addr, on):
+    """`on` -> a party-select digit '1'..'8' (route 3: a digit selects Party[n-1],
+    seg_0C9C.c:1298). Accepts a digit or a member NAME (matched against Names[]).
+    Returns the digit char, or None."""
+    on = (on or "").strip()
+    if on in tuple("12345678"):
+        return on
+    if not on:
+        return None
+    psize = _rd8(base_addr + U6_PartySize)
+    for i in range(min(psize, 8)):
+        nm = dm.read(S.handle, base_addr + U6_Names + i * 14, 14).split(b"\x00", 1)[0]
+        if nm.decode("latin-1", "replace").lower() == on.lower():
+            return str(i + 1)
+    return None
+
+
+def _parse_slot(t):
+    """A USE target string -> an inventory object slot int, or None if it's a map
+    direction. Accepts `inv:0x305` / `inv:773` / `0x305` / `773`."""
+    s = t[4:] if t.startswith("inv:") else t
+    try:
+        if s.startswith("0x"):
+            return int(s, 16)
+        if s.isdigit():
+            return int(s)
+    except ValueError:
+        pass
+    return None
+
+
+def _select_backpack_item(base_addr, member_index, target_slot):
+    """Drive the status panel to commit on `target_slot` in member `member_index`'s
+    backpack -- the only route to an inventory target. Returns (ok, err). Each step is
+    confirmed by a memory read; any mismatch ESC-aborts to COMMAND_READY (a USE that
+    aborts before commit costs no turn). The cursor is PLACED by WRITING D_0499/D_049A
+    rather than counting arrows: blind arrow-nav across scroll + the equip/backpack
+    boundary is brittle, and the Enter redraw recomputes PointerX/Y from D_0499/D_049A
+    (C_0C9C_1AE5(2)) so the write lands exactly. Backpack cell (row r, col c 0..3) ->
+    cursor (D_0499=c+3, D_049A=r); cols 0-2 are the equip silhouette. Bounded to the
+    VISIBLE page (D_E70F[12]); a deeper item reports 'not on the visible page'."""
+    fkey = f"f{member_index + 1}"                          # F1..F8 select a member's view
+    ok, _ = _guarded_send(base_addr, fkey,
+                          lambda: _rd16(base_addr + U6_StatusDisplay) == 0x92)
+    if not ok:
+        return False, (f"could not open member {member_index}'s INVENTORY view "
+                       f"(F{member_index + 1} -> StatusDisplay != CMD_92)")
+    ok, _ = _guarded_send(base_addr, "u", "SELECTING")
+    if not ok:
+        _abort_to_ready(base_addr); return False, "'U' did not enter select mode"
+    ok, _ = _guarded_send(base_addr, "tab", lambda: _rd8(base_addr + U6_SelectMode) == 2)
+    if not ok:
+        _abort_to_ready(base_addr); return False, "<tab> did not arm the panel cursor (SelectMode != 2)"
+    pack = _visible_backpack(base_addr)
+    if target_slot not in pack:
+        _abort_to_ready(base_addr)
+        return False, f"slot 0x{target_slot:03x} not on the visible backpack page (scroll first)"
+    r, c = divmod(pack.index(target_slot), U6_BACKPACK_COLS)
+    dm.write(S.handle, base_addr + U6_PanelCol, bytes([c + 3]))   # backpack col c -> cursor col c+3
+    dm.write(S.handle, base_addr + U6_PanelRow, bytes([r]))
+    if _visible_backpack(base_addr)[r * U6_BACKPACK_COLS + c] != target_slot:
+        _abort_to_ready(base_addr); return False, "panel cell mismatch before commit"
+    ok, _ = _guarded_send(base_addr, "enter",
+                          lambda: _rd16s(base_addr + U6_Sel_obj) == target_slot)
+    if not ok:
+        _abort_to_ready(base_addr); return False, "commit did not select the item"
+    return True, ""
+
+
+def _use_key_flow(base_addr, keys, door, label):
+    """Open a LOCKED door (frame 8-0xB) by USE-ing the matching key: find the owned key
+    (the qual/ownership check the engine skips), select it in the panel, then the
+    engine's "On " prompt (C_27A1_2D8E) targets the door -- the arrow auto-commits
+    (SelectRange=-1 from 'U')."""
+    slot, _typ, _frame, qual = door
+    ai = _controlled_slot(base_addr)[1]
+    member_slot = _party_member_slot(base_addr, ai)
+    key, container = _find_matching_key(base_addr, member_slot, qual)
+    if key < 0:
+        need = f"a key (OBJ_040) of qual {qual}" if qual else "a lockpick (OBJ_03F)"
+        return f"{label}: door locked (qual={qual}); no matching {need} in inventory."
+    if container >= 0:                                          # key exists but is in a bag/chest
+        return (f"{label}: door locked (qual={qual}); the matching key {_obj_name(base_addr, key)} "
+                f"(0x{key:03x}) is INSIDE {_obj_name(base_addr, container)} (0x{container:03x}) -- "
+                f"take it out of the container first (USE can't reach a contained item).")
+    ok, err = _select_backpack_item(base_addr, ai, key)
+    if not ok:
+        return f"{label}: locked door; couldn't select the key -- {err}"
+    st, _ = _wait_state(base_addr, "SELECTING", timeout=2.0)   # the "On <target>" prompt
+    if st != "SELECTING":
+        _abort_to_ready(base_addr)
+        return f"{label}: key selected but the 'On <target>' prompt didn't appear (state={st})."
+    inp.send_key(keys[0] if keys else "enter")                 # the door direction (auto-commits)
+    state, _ = _drain_to_ready(base_addr)
+    nframe = _obj_tfq(base_addr, slot)[1]
+    verdict = f"unlocked (frame {nframe})" if nframe < 8 else f"still locked (frame {nframe})"
+    return f"{label}: used key 0x{key:03x} on the door -> {verdict}; now {state}."
+
+
+def _use_map(base_addr, keys, self_use, on, label):
+    """Map-tile USE: a plain USE on the target tile -- EXCEPT a LOCKED door, where the
+    tool auto-runs the key flow (find the matching owned key, drive U->key->door)."""
+    try:
+        tx, ty, tz = _target_tile(base_addr, keys)
+        door = _door_at_tile(base_addr, tx, ty, tz)
+    except OSError:
+        door = None
+    if door and door[2] in _DOOR_LOCKED:
+        return _use_key_flow(base_addr, keys, door, label)
+    err = _begin_select(base_addr, "u", label)
     if err:
         return err
-    _walk_cursor(keys, self_use)                       # commit on the target tile
-    state, msgs = _drain_to_ready(b)                   # clear the result message(s)
+    _walk_cursor(keys, self_use)                               # commit on the target tile
+    state, msgs = _drain_to_ready(base_addr)
     note = ""
     try:
-        tx, ty, z0 = _target_tile(b, keys)
-        items = _use_result_at_tile(b, tx, ty, z0)
+        tx, ty, tz = _target_tile(base_addr, keys)
+        items = _use_result_at_tile(base_addr, tx, ty, tz)
         note = (f" Now at ({tx},{ty}): " + "; ".join(items) + "."
                 if items else f" No notable objects at ({tx},{ty}).")
     except OSError:
         note = ""
-    return f"use {d}: committed; cleared {msgs} message(s); now {state}.{note}"
+    return f"{label}: committed; cleared {msgs} message(s); now {state}.{note}"
+
+
+def _use_inventory(base_addr, slot, on):
+    """USE a CARRIED item (`slot` from u6_inventory / u6_panel_state): drive the panel
+    select, then supply any second SEMANTIC input the item needs from `on` (potion ->
+    member, orb -> where, pick/shovel/telescope -> direction, instrument -> digit tune);
+    single-use items (food/drink/torch/gem/...) just drain. If a needed `on` is missing
+    it ESC-aborts (no turn) and asks -- it never guesses."""
+    try:
+        ai = _controlled_slot(base_addr)[1]
+        typ, frame, _q = _obj_tfq(base_addr, slot)
+        name = _obj_name(base_addr, slot)
+    except OSError as ex:
+        return f"use inv 0x{slot:03x}: read failed ({ex})."
+    label = f"use {name} (0x{slot:03x})"
+    ok, err = _select_backpack_item(base_addr, ai, slot)
+    if not ok:
+        return f"{label}: {err}"
+    second = ""
+    if typ == _USE_POTION:
+        m = _resolve_member(base_addr, on)
+        if not m:
+            _abort_to_ready(base_addr)
+            return f"{label}: a potion needs a target -- re-call with on=<member 1..8 or name>."
+        inp.send_key(m); second = f" on member {m}"
+    elif typ == _USE_ORB:
+        a = _U6_DIR.get(on)
+        if not a:
+            _abort_to_ready(base_addr)
+            return f"{label}: the orb needs a destination -- re-call with on=<n/s/e/w>."
+        inp.send_key(a); second = f" where={on}"
+    elif typ in _USE_DIR:
+        a = _U6_DIR.get(on)
+        if not a:
+            _abort_to_ready(base_addr)
+            return f"{label}: needs a direction -- re-call with on=<n/s/e/w>."
+        inp.send_key(a); second = f" dir={on}"
+    elif typ in _USE_INSTRUMENT:
+        for ch in on:
+            if ch.isdigit():
+                inp.send_key(ch); time.sleep(_CURSOR_STEP)
+        inp.send_key("enter"); second = f" tune={on!r}"
+    state, _ = _drain_to_ready(base_addr)
+    ntyp, nframe, _nq = _obj_tfq(base_addr, slot)
+    res = ("consumed" if ntyp == 0 else
+           f"frame {frame}->{nframe}" if nframe != frame else "used")
+    return f"{label}{second}: {res}; now {state}."
+
+
+@mcp.tool()
+def u6_use(target: str, on: str = "") -> str:
+    """Ultima VI: USE an object. `target` is EITHER a MAP tile -- a cardinal direction
+    (n/s/e/w) or `here`/`self` for the tile you stand on (ladders) -- OR a CARRIED item
+    by object slot: `inv:0x305` / `inv:773` / `0x305` / `773` (get the slot from
+    u6_inventory / u6_panel_state). The tool absorbs the keyboard mechanism; the agent
+    supplies a SEMANTIC choice via `on=` only when an item needs one:
+      * a LOCKED door (map target): NO `on` -- the tool auto-finds the matching owned
+        key (OBJ_040, qual match; or a lockpick on a qual-0 lock) and drives
+        U->key->door, so the door 'just opens' (or it reports no matching key).
+      * a potion: on=<member 1..8 or name>.  * the orb: on=<n/s/e/w> ('where').
+      * pick/shovel/telescope: on=<n/s/e/w>.  * an instrument: on=<digits 0-9> (tune).
+    Single-use items (food/drink/torch/gem/book) and unlocked map objects need no `on`.
+    If a required `on` is missing the tool ESC-aborts (no turn spent) and asks -- it
+    never guesses. The inventory route drives the status panel (F<member> -> INVENTORY
+    view, <tab> -> panel cursor, Enter -> commit), each step confirmed by a memory read
+    (the agent can't see the screen). The return reports the resulting STATE (door
+    open/closed/locked, item consumed / frame change). Sources: dispatch seg_0A33.c:1115,
+    handler C_27A1_6179, key C_27A1_2D8E:1410, panel C_155D_1267. Turn-gated."""
+    t = target.strip().lower()
+    b = _session_base()
+    slot = _parse_slot(t)
+    if slot is not None:                              # carried-item USE (the panel route)
+        if b is None:
+            return f"use inv 0x{slot:03x}: not hooked (inventory USE needs the panel state)."
+        return _use_inventory(b, slot, on.strip())
+    self_use = t in ("here", "self", "@")             # map-tile USE
+    arrow = None if self_use else _U6_DIR.get(t)
+    if not self_use and not arrow:
+        return (f"Invalid USE target {target!r}. Use a map tile (n/s/e/w or here/self) "
+                f"or a carried item (inv:<slot> / 0x... / a slot number).")
+    keys = [] if self_use else [arrow]
+    if b is None:                                     # not hooked: best-effort blind
+        return _blind_cursor_cmd(f"use {t}", "u", keys, self_use)
+    return _use_map(b, keys, self_use, on.strip(), f"use {t}")
 
 
 @mcp.tool()
@@ -1278,6 +1660,14 @@ def _gear_of(sh, basetile, tw, weapons):
     wt = tw[typ] if typ < len(tw) else 0
     eslot = _equip_slot(tile, weapons) if 0 <= tile < 0x800 else -1
     return tile, wt, eslot
+
+
+def _obj_name(base_addr, slot):
+    """LOOK.LZD name for an object slot (tile = BaseTile[type]+frame, via _gear_of)."""
+    sh = int.from_bytes(dm.read(S.handle, base_addr + U6_ObjShapeType + slot * 2, 2), "little")
+    basetile, tw, weapons = _gear_tables(base_addr)
+    tile, _wt, _es = _gear_of(sh, basetile, tw, weapons)
+    return _tile_name(tile)
 
 
 def _controlled_slot(base_addr):
