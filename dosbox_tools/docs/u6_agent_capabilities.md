@@ -100,10 +100,11 @@ internally, so they fire only on a real turn boundary.
 **Perceive:** `u6_avatar` (controlled actor pos+facing), `u6_party` (solo/party,
 combat, who's controlled), `u6_roster_status` (STR/DEX/INT/Level + load caps),
 `u6_input_state` (turn-readiness), `u6_object(slot)` (incl. tile/weight/equip-slot),
-`u6_inventory(npc_slot)`, `u6_npcs_near(radius)`, `u6_objects_near(radius)` (map
+`u6_inventory(npc_slot)`, `u6_panel_state` (which side panel is up + the inventory
+cursor/scroll/slots/Selection), `u6_npcs_near(radius)`, `u6_objects_near(radius)` (map
 items + gear hints), `u6_walkable` (40×40 grid), `u6_conversation` (**decoded**
 dialogue + askable keywords — see below).
-**Act:** `u6_move` · `u6_talk` · `u6_say` · `u6_look` · `u6_get` · `u6_use` · `u6_key`.
+**Act:** `u6_move` · `u6_talk` · `u6_say` · `u6_look` · `u6_get` · `u6_use` · `u6_ready` · `u6_key`.
 **Navigate:** `u6_pathfind` (plan) · `u6_goto` (closed-loop) · `u6_talk_to`.
 **Verify:** `u6_validate_passability` (predict-vs-live passability gate).
 **Inherited:** base mem tools + input tools (escape hatches).
@@ -124,9 +125,11 @@ dialogue + askable keywords — see below).
 | Is it readyable + which slot | — | `u6_object` (tile/weight/slot) | ✅ HAVE |
 | Identify / search (`L`) | `u6_look` | re-read state (names via LOOK.LZD) | ✅ live-verified |
 | Pick up gear (`G`) | `u6_get` | `u6_inventory` / `u6_object` | ✅ live-verified |
-| Equip gear (panel UI) | **`u6_ready`** (`<tab>`→nav→`<enter>`) | `u6_inventory` (EQUIP) | ❌ GAP (hard) |
-| Open/close door, leave gate, ladder (`U`) | `u6_use` (n/s/e/w or `here`) | door/chest frame state in return; `u6_walkable` | ✅ HAVE (verify live) |
-| Open a *locked* door/chest (`U`+key) | **`u6_use` key flow** (`U`→key→target) | matching `OBJ_040` qual | ❌ GAP (drive the game's inventory panel by keystroke — `<tab>`→nav→`<enter>` — to pick the key, like `u6_ready`) |
+| Equip / unequip gear | `u6_ready(slot)` | `u6_panel_state` / `u6_inventory` (INVEN↔EQUIP flip) | ✅ built (live-unconfirmed) |
+| See which side panel + the inventory | — | `u6_panel_state` | ✅ built |
+| Open/close door, leave gate, ladder (`U`) | `u6_use` (n/s/e/w or `here`) | door/chest frame state in return | ✅ built (live-unconfirmed) |
+| USE a carried item (drink/eat/light/play…) | `u6_use(inv:slot[, on=…])` | re-read the item (consumed / frame change) | ✅ built (live-unconfirmed) |
+| Open a *locked* door/chest (`U`) | `u6_use` (auto key flow) | finds the owned `OBJ_040` qual-match; reports a key stuck in a bag | ✅ built (live-unconfirmed) |
 
 "Suit the party" = the agent's **reasoning** over readyable+slot+weight (per object)
 × STR caps+free slots (per member) — thin tools, agent decides.
@@ -142,19 +145,18 @@ explore → leave the castle. (On foot, party mode, no combat.)
   `u6_input_state` — it's the live validation of the whole perceive/act/nav stack.
 - **Gear slice (full M1):** *perception done* — `u6_roster_status`, `u6_objects_near`,
   and `u6_object` (tile/weight/equip-slot) give the full "suit yourself" inputs.
-  *Action verbs built* — `u6_look`, `u6_get` (cursor-target, turn-gated; LOOK/GET
-  live-verified) and now `u6_use` (plain USE — open/close doors & chests, leave gate,
-  ladders; door/chest open/closed/locked state in the return; live-unconfirmed).
-  *Remaining:* the `u6_use` **locked-door key flow** (`U`→key→target qual-match) and
-  **`u6_ready`** (`<tab>`→nav→`<enter>`) — both need to drive the *original game's*
-  existing inventory panel by keystroke (then read memory to confirm the selection),
-  held as the hardest M1 actions (blind panel navigation, not a UI to build).
+  *Action verbs built* — `u6_look`, `u6_get` (LOOK/GET live-verified) and the full
+  inventory-action set: `u6_use` (map tiles, carried items, and the **auto** locked-
+  door key flow — it finds the matching owned key), `u6_ready` (equip/unequip via the
+  inventory panel), and `u6_panel_state` (the panel-state read those drive). The
+  inventory-panel verbs are built and offline-tested but **live-unconfirmed**. **M1's
+  toolset is complete** — what remains is the live run.
 
 **The authoritative M1 phase plan + the live Slice-1 runbook/validation gate live
 in `u6_ai_agent.md` §5 & §7** (single source — not duplicated here). Progress:
-turn gate ✅, gear perception ✅, `u6_look`/`u6_get` ✅ live-verified, `u6_use`
-✅ built (plain USE, live-unconfirmed); remaining = `u6_use` key flow + `u6_ready`
-(both gated on driving the original game's inventory panel by keystroke).
+turn gate ✅, gear perception ✅, `u6_look`/`u6_get` ✅ live-verified, `u6_use` +
+`u6_ready` + `u6_panel_state` ✅ built (inventory + auto key flow + equip;
+live-unconfirmed). **M1 toolset complete; awaiting the live Slice-1 + gear run.**
 
 ---
 
@@ -168,6 +170,9 @@ All DGROUP / DS-relative (`u6-decompiled`). Re-derive before relying.
 | Solo flag `D_2CC3` | `0x2CC3` (signed) | `<0` party, `≥0` solo (= Active) |
 | InCombat / EnemiesNum | `0x2CC2` / `0xEBFB` | combat leash = Chebyshev 8 |
 | Turn gate: AllowMouseMov / SelectMode / MouseMode | `0x04C4` / `0x0492` / `0x04BE` | + IsInConversation `0x098B` |
+| Status panel: StatusDisplay / PanelChar `D_04B3` | `0x04C0` / `0x04B3` | view = CMD_90 PORTRAIT / 91 PARTY / 92 INVENTORY |
+| Inventory panel: cursor `D_0499`/`D_049A` / scroll `D_07CE` / visible `D_E70F[12]` / `Equipment[8]` / open-container `D_E709` | `0x0499` `0x049A` (char) / `0x07CE` / `0xE70F` / `0xE6E4` / `0xE709` | backpack cell (r,c)→cursor (c+3,r); `D_E709<0x100`=plain backpack, `≥0x100`=open container; cells via `D_054B`/`D_0559` (seg_0C9C.c:103) |
+| Selection (committed target) x/y/obj | `0xB6AF` / `0xB6B1` / `0xB6B3` | u6.h struct `int x,y,obj`; obj is the 3rd word |
 | STR / DEX / INT / Level | `STREN 0x8C4A` / `DEXTE 0x3316` / `INTEL 0x3433` / `0x8E4C` | per-slot bytes |
 | Load caps | carry = STR×20 (seg_1944.c:1945); equip = STR×10 (seg_155D.c:546) | current load via `TypeWeight 0xB417` |
 | Equip slot | `STAT_GetEquipSlot` (seg_155D.c:129) on `TILE_FRAME`; weapons table `D_07DD 0x07DD` | −1 = not readyable |

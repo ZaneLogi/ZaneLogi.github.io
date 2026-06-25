@@ -128,4 +128,4 @@ branch to fix. This is the acceptance test for the port and for every future
 refinement (e.g. when Phase 2 lands, validate again from a boat).
 
 Offline, `_build_grid`'s multi-tile + Br/Ig logic and the static cache have unit
-coverage (stub-driven, `D:\tmp\u6_grid_test\`); the live harness covers the rest.
+coverage (stub-driven, `dosbox_tools/tests/`); the live harness covers the rest.

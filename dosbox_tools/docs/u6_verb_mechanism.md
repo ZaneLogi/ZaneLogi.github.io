@@ -239,31 +239,40 @@ Listed for completeness (not yet built as MCP verbs):
 
 The dosbox-u6 model is **drive input, read state** — never re-implement an
 effect. Each route is a keystroke sequence; correctness is confirmed by re-reading
-memory.
+memory. Implemented today: `u6_use` (map tiles + carried items + the auto key
+flow), `u6_ready` (equip/unequip), `u6_panel_state` (the panel-state read those
+drive). Per-verb build/verification status lives in `u6_agent_capabilities.md` §5
+and `u6_ai_agent.md` §6.
 
-**Targeting** composes the four §1 routes — `u6_use` (and future MOVE/DROP) take a
-target spec:
+**Targeting** composes the four §1 routes — `u6_use` takes a target spec:
 - `n/s/e/w` → adjacent map tile (arrow auto-commit).
 - `here`/`self` → self tile (Enter).
 - party member → digit `1`–`8` (route 3, clean and exact).
-- inventory / equipment item (by slot, or resolved by name/type via
-  `u6_inventory`) → the panel route (§2).
+- carried item (`inv:<slot>` / a slot id from `u6_inventory` / `u6_panel_state`) →
+  the panel route (§2).
 
-**Inventory-select procedure** (the new capability):
-1. Read the active char + backpack order → locate the item's `(page, row, col)`.
-2. Ensure `StatusDisplay==CMD_92` for the active char (`F<active+1>`; verify in
-   memory).
-3. `U` → `SELECTING` → `Tab` → `SelectMode=2` (verify) → scroll to the page →
-   move the cursor to `(row,col)` **confirming `D_0499/D_049A` by read-back each
-   step** → `Enter`.
-4. **Read back `Selection.obj` == the expected slot before the effect lands**;
-   ESC and abort on mismatch.
+**Inventory-select (`_panel_commit`, shared by USE-on-item + READY):** `F<member>`
+→ INVENTORY view (`StatusDisplay==CMD_92`); a `locate()` finds the item's cursor
+cell; [the command letter `U` → `SELECTING`, for USE; **none** for the
+command-less READY toggle]; `Tab` → `SelectMode==2`; **place the cursor by WRITING
+`D_0499/D_049A`** to the cell; `Enter` → confirm (USE: `Selection.obj==slot`;
+READY: the `INVEN↔EQUIP` flip). Each step is a guarded read; any mismatch
+ESC-aborts (an abort before the effect costs no turn).
 
-This mirrors the documented human keyboard flow exactly (manual: `<tab>` → arrows
-→ `<enter>`), so it is the **faithful** route — preferred over poking the cursor
-in memory. (Memory-writing `D_0499/D_049A` to place the cursor is a possible
-robustness fallback on a slow box, since the commit still goes through the real
-`mkMouseSelection`+handler.)
+The cursor is **memory-written**, not arrow-counted: blind arrow-nav across scroll
++ the equip/backpack boundary is brittle, and the Enter redraw (`C_0C9C_1AE5(2)`)
+sets `PointerX/Y = D_054B[col]/D_0559[row][col]`, so the write lands exactly. The
+cell maps are verified against those tables (seg_0C9C.c:103) — backpack cell (r,c)
+→ cursor `(c+3, r)`; equip slot → `HEAD(1,0) NECK(0,0) RHND(0,1) RFNG(0,2)
+CHST(2,0) LHND(2,1) LFNG(2,2) FEET(1,2)`. The commit + handler still run in the
+real engine; only the placement is a poke.
+
+**Plain backpack vs open container.** Within `CMD_92` the grid shows either the
+member's backpack or an opened container's contents — distinguished by `D_E709`
+(`< 0x100` = plain backpack; `≥ 0x100` = the open container). The inventory-select
+assumes top level, and `F<member>` redraws the member's view (resets `D_E709`), so
+it lands on the plain backpack. A carried item must be on the **visible page**
+(`D_E70F[12]`); a deeper item reports "scroll first".
 
 **Second-input handling** makes a multi-input USE a small state machine, not a
 fixed key sequence — the agent branches on the selected item's type (read from
@@ -275,6 +284,14 @@ cancels the sub-prompt):
 - pick/shovel (`067/068`), telescope (`09A`) → drive a direction.
 - instrument → send a digit string + Enter.
 - single-prompt / none → drain as usual.
+
+In `u6_use` the **locked-door key flow is automatic**: USE a locked door (frame
+`8–0xB`) → the tool reads its qual, finds the member's owned matching key
+(`_find_matching_key`: an `OBJ_040` of equal qual, or a lockpick on a qual-0 lock)
+and drives `U → key (panel) → door (arrow)`. It is **container-aware** — the search
+includes CONTAINED items and resolves ownership up the assoc chain — so a key inside
+a bag is **reported** ("take it out first"), not silently missed. (USE can't reach a
+contained item; extracting it needs MOVE / container drill-in, deferred.)
 
 **Result read-back** (the agent reads STATE, never the scroll):
 - map fixtures → re-read the tile (a door/chest's open/closed/locked **frame

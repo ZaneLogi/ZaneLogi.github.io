@@ -326,6 +326,9 @@ After this, the decoders work with no `segment=` argument.
   shape type/frame, quantity/quality, tile/weight/equip-slot. Avatar is slot 1;
   NPCs are `0..0xFF`.
 - `u6_inventory(npc_slot)` — list everything an NPC holds (INVEN/EQUIP).
+- `u6_panel_state()` — the status-panel state the inventory verbs drive: which view
+  is up (PORTRAIT/PARTY/INVENTORY), the panel cursor/scroll, the visible backpack
+  slots + equipped gear, and the live `Selection`.
 - `u6_npcs_near(radius)` / `u6_objects_near(radius)` — nearby NPCs / map items
   (with gear hints), named via `LOOK.LZD` (see `docs/u6_object_naming.md`).
 - `u6_walkable` — a 40×40 ASCII passability grid (faithful `C_1E0F_000F` port;
@@ -350,10 +353,14 @@ prompt. The full per-verb source mechanism + driving model is
 - `u6_look(dir)` — examine/search the tile in `dir` (8-way); reports the notable
   objects the search surfaces (the agent reads state, not the scroll).
 - `u6_get(dir)` — pick up the adjacent object in `dir` (`LOCXYZ → INVEN`).
-- `u6_use(dir)` — operate the object on the adjacent tile (`n/s/e/w`) or `here`
-  (self tile): open/close doors & chests, leave the gate, ladders. Reports a
-  door/chest's open/closed/locked frame state. *(Inventory-target USE — carried
-  items, the locked-door key flow — is the next step; see the mechanism doc.)*
+- `u6_use(target, on="")` — operate a MAP tile (`n/s/e/w` or `here`) **or** a
+  CARRIED item (`inv:<slot>`): open/close doors & chests, leave the gate, ladders,
+  drink/eat/light a held item. **Auto-opens a locked door** (finds the matching owned
+  key; container-aware — reports a key stuck in a bag). `on=` supplies a needed second
+  choice (potion→member, dig→direction, …). Reports the resulting state.
+- `u6_ready(slot)` — equip (`INVEN→EQUIP`) a carried item, or unequip an equipped
+  one, via the inventory panel; auto-detects the member + ready/unready from the
+  item's state.
 - `u6_talk(dir)` — open a conversation with the NPC in `dir` (8-way).
 - `u6_say(text)` — answer the current prompt; peeks the opcode at `Talk_PC` and
   types a line + Enter (`ASKTOP`/`GETSTR`) or sends a single key
@@ -382,13 +389,15 @@ The server also exposes the shared base tools (`find_dosbox`, `read_dos`,
 | `u6_roster_status` | Per-member STR/DEX/INT/Level + carry/equip load |
 | `u6_object(slot, segment=-1)` | Decode one object/NPC slot (incl. tile/weight/equip-slot) |
 | `u6_inventory(npc_slot, segment=-1)` | List an NPC's INVEN/EQUIP items |
+| `u6_panel_state(segment=-1)` | Status-panel state (view + inventory cursor/slots/Selection) |
 | `u6_npcs_near(radius)` / `u6_objects_near(radius)` | Nearby NPCs / map items (named) |
 | `u6_walkable` | 40×40 ASCII passability grid |
 | `u6_conversation(segment=-1, dump=64)` | Decoded dialogue + askable keywords |
 | `u6_move(direction)` | Step the party one tile |
 | `u6_look(direction)` | Examine/search the tile (8-way) |
 | `u6_get(direction)` | Pick up the adjacent object |
-| `u6_use(direction)` | Operate the adjacent / self-tile object (doors, gate, ladders) |
+| `u6_use(target, on="")` | Operate a map tile or a carried item; auto-opens a locked door |
+| `u6_ready(slot)` | Equip / unequip a carried/worn item via the inventory panel |
 | `u6_talk(direction)` | Start a conversation with the NPC in `direction` |
 | `u6_say(text, segment=-1)` | Answer the current conversation prompt |
 | `u6_key(key)` | Send one keypress |

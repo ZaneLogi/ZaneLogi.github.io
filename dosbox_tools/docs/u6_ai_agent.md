@@ -68,12 +68,15 @@ Implemented (logic verified; **memory offsets pending live verification** — se
   `u6_input_state` (**turn-readiness** — poll for `COMMAND_READY` before acting;
   U6 is turn-based with buffered input), `u6_roster_status` (per-member
   STR/DEX/INT/Level + carry/equip load), `u6_object(slot)` (incl. tile/weight/
-  equip-slot), `u6_inventory(npc_slot)`, `u6_npcs_near(radius)`,
+  equip-slot), `u6_inventory(npc_slot)`, `u6_panel_state` (which side panel is up +
+  the inventory cursor/scroll/visible slots/Selection — the eyes for the inventory
+  route), `u6_npcs_near(radius)`,
   `u6_objects_near(radius)` (map items + gear hints), `u6_walkable` (40×40 ASCII
   passability grid), `u6_conversation` (**decoded** dialogue + askable keywords;
   `keyword=` previews a response; unknown opcode → `DECODER_STOP`, halt + report).
 - **Act:** `u6_move(dir)`, `u6_talk(dir)`, `u6_say(text)`, `u6_look(dir)`,
-  `u6_get(dir)`, `u6_use(dir)`, `u6_key(key)`.
+  `u6_get(dir)`, `u6_use(target, on)` (map tile **or** carried item; auto key flow
+  for a locked door), `u6_ready(slot)` (equip/unequip via the panel), `u6_key(key)`.
 - **Navigate:** `u6_pathfind(npc_slot)` (planner), `u6_goto(npc_slot)`
   (closed-loop), `u6_talk_to(npc_slot)` (goto + talk).
 - **Verify:** `u6_validate_passability` (predict-vs-live fidelity gate for the
@@ -84,16 +87,17 @@ Implemented (logic verified; **memory offsets pending live verification** — se
 
 Planned (gaps — see the milestones for which are needed when):
 
-- the `u6_use` **inventory/equipment-target** path (drive the game's existing
-  panel by keystroke — `<tab>`→nav→`<enter>`; needed for the locked-door key flow
-  and any use of a carried item) and **`u6_ready`/`u6_equip`** (same panel UI),
-  `u6_read` (books/signs → `BOOK.DAT`), `u6_cast`, and a **durable agent journal**
-  (the long-horizon backbone). *(Built since the first draft and now under
-  Perceive/Act above: `u6_look`, `u6_get`, `u6_use` (map-tile/self USE — doors,
-  leave the gate, ladders), `u6_objects_near`, `u6_roster_status`, and the
-  `u6_conversation` bytecode decoder. The full per-verb source mechanism +
-  MCP-driving model — including the inventory-panel route — is
-  `u6_verb_mechanism.md`.)*
+- `u6_read` (books/signs → `BOOK.DAT`, by driving LOOK then reading `TalkBuf`),
+  `u6_drop` / `u6_move`-object (inventory↔map / push / transfer between members —
+  the two-selection idiom, and the route to extract a key stuck in a container),
+  `u6_cast` (the spell subsystem), `u6_rest`, combat (`u6_attack` / begin-combat),
+  and a **durable agent journal** (the long-horizon backbone). *(Built since the
+  first draft and now under Perceive/Act above: `u6_look`, `u6_get`, `u6_use` (map
+  tiles + carried items + the **auto** locked-door key flow), `u6_ready`
+  (equip/unequip via the inventory panel), `u6_panel_state`, `u6_objects_near`,
+  `u6_roster_status`, and the `u6_conversation` decoder. The inventory-panel verbs
+  are built but **live-unconfirmed** — see §6. Full per-verb source + MCP-driving
+  model: `u6_verb_mechanism.md`.)*
 
 ## 3. Pathfinding
 
@@ -148,22 +152,24 @@ start and repeatable scoring.
 |---|---|---|
 | A. Talk to LB | go to Lord British, converse, learn the story + the gear list | have |
 | B. Explore the castle | walk the rooms, build a mental map | have |
-| C. Leave the castle | navigate to the gate, walk out (success = Avatar outside the castle bounds) | have; `u6_use` opens/leaves an unlocked gate (a *locked* gate needs the key flow — inventory-target, not built) |
-| D. Collect the gear LB named | find the items, pick them up | built: `u6_objects_near`/`u6_look`/`u6_get` (verify live) |
-| E. Equip the party | ready the gear onto each member | `u6_ready` not built (panel UI) |
+| C. Leave the castle | navigate to the gate, walk out (success = Avatar outside the castle bounds) | have; `u6_use` opens/leaves a gate — and **auto-opens a *locked* one** (finds the matching owned key), live-unconfirmed |
+| D. Collect the gear LB named | find the items, pick them up | `u6_objects_near` + `u6_look`/`u6_get` (LOOK/GET live-verified) |
+| E. Equip the party | ready the gear onto each member | `u6_ready` **built** (equip/unequip via the panel; live-unconfirmed) |
 
 LB is the **task-giver** — the agent learns *what gear* by reading LB's dialogue
 live, not from a list we hand it. Consistent with §4.
 
 **Sequencing (dovetails with live-test-first):**
-- **Slice 1 = A + B + C** — **zero new tools**; the live-test target for the
-  existing stack (validates hooking, conversation, navigation, the turn-readiness
-  gate, the exit check, and the offsets in one run). Needs `u6_use` (not built)
-  only if the gate turns out locked.
+- **Slice 1 = A + B + C** — the live-test target for the perceive/act/nav stack
+  (validates hooking, conversation, navigation, the turn-readiness gate, the exit
+  check, and the offsets in one run). `u6_use` (incl. the **auto** key flow) is
+  built, so a locked gate is covered too — live-unconfirmed.
 - **Slice 2 = D (collect)** — gear **perception** done (`u6_roster_status`,
   `u6_objects_near`, `u6_object` tile/weight/equip-slot) + the collect verbs
-  `u6_look`/`u6_get` **built** (live-unconfirmed — they send keys).
-- **Slice 3 = E (equip)** — `u6_ready` (inventory-panel UI) **not built**; last.
+  `u6_look`/`u6_get` **live-verified**.
+- **Slice 3 = E (equip)** — `u6_ready` **built** (equip/unequip via the panel;
+  live-unconfirmed) — the last M1 tool. **The M1 toolset is now complete**;
+  Slices 2–3 await the live run.
 
 **Success criteria:** talked to LB and extracted the gear list; collected the
 named gear; equipped the party; Avatar exited the castle. Each phase is
@@ -172,35 +178,39 @@ independently checkable.
 **Open wrinkles to pin:**
 1. Does LB literally enumerate the gear in dialogue, or is it "the armory
    equipment lying around"? (decides the collect success-check.)
-2. Equip via keystroke-driven UI (faithful) vs poking equip state in memory
-   (simpler shortcut).
+2. Equip via keystroke-driven UI vs memory poke — **resolved**: `u6_ready` drives
+   the real panel keys (`F<member>`/`<tab>`/`<enter>`) but *places the cursor* by a
+   memory write (the commit + ready toggle still run in the engine). Confirm live.
 3. Define the castle bounding box for the leave-check.
 
 ## 6. Status & verification
 
-- Tools are implemented and **offline-verified where they're pure memory-reads**:
-  faithful passability (`C_1E0F_000F` port), party/control + combat awareness, the
-  turn-readiness gate (`u6_input_state`), the gear-perception layer (equip-slot /
-  weight / roster), and the **conversation-VM decoder** (text / keywords / live
-  IF-eval / RND / DECODER_STOP) all have stub unit tests against the real functions
-  (in `D:\tmp\u6_grid_test\`); pathfinding/helpers too.
+- Tools are implemented and **offline-verified where the logic is checkable**: the
+  pure memory-reads (faithful passability `C_1E0F_000F`, party/control + combat, the
+  `u6_input_state` turn gate, gear-perception, the conversation-VM decoder), the
+  panel-state decode, AND the **inventory-action sequences/decisions** (`u6_use`
+  carried-item + the key flow, `u6_ready` equip/unequip, the `_panel_commit` panel
+  drive) — all with stub unit tests against the real functions (in
+  `dosbox_tools/tests/`); pathfinding/helpers too.
 - **Live-verified on an in-castle save** (avatar "Monica"): the memory offsets +
   the read tools (`u6_avatar`/`u6_party`/`u6_input_state` cross-consistent;
   `u6_roster_status` caps = STR×20 / STR×10) + `u6_move` (a confirmed step) +
   `u6_look` (drains to `COMMAND_READY` across NPC / diagonal / empty-corpse /
   corpse-with-contents, no stray GET) + `u6_get` (a helm `LOCXYZ → INVEN`) + the
   `LOOK.LZD` naming (cross-checked vs the game's own scroll).
-- **Still live-unconfirmed key-senders:** `u6_talk`/`u6_say` (deferred from that
-  run) and the new `u6_use` (map-tile/self) — their *bindings* only prove out
-  live; re-run the §7 validation gate each session before trusting reads. (The old
-  `MapObjPtr`-origin caveat is gone — passability no longer uses `MapObjPtr`; it's
-  a faithful `C_1E0F_000F` port, see `dosbox_u6_passability.md`.)
+- **Still live-unconfirmed:** `u6_talk`/`u6_say` (deferred from that run); `u6_use`
+  (map-tile, carried-item, key flow); `u6_ready`; `u6_panel_state` + its offsets
+  (`StatusDisplay`/`Selection`/`D_E70F`/`Equipment`/`D_0499`-`049A`/`D_07CE`). These
+  send keys and/or read new offsets — *bindings prove out only live*; run
+  `u6_panel_state` first (confirm the inventory reads), then the inventory verbs.
+  Re-run the §7 validation gate each session before trusting reads.
 - 4-connected movement only (cardinal arrows); diagonals (numpad + 8-connected
   search) and global chunk routing are deferred.
 
-**Next step:** live-test Milestone 1 Slice 1 (talk to LB → explore → leave)
-against a real DOSBox + the prepared save — delivers the first slice and validates
-the offsets + bindings. Then build `u6_use` / `u6_ready` for collect → equip.
+**Next step:** live-test Milestone 1 — Slice 1 (talk to LB → explore → leave),
+then the gear slices (collect → equip). The **M1 toolset is complete**, so this is
+the live-validation pass: confirm the offsets/bindings + `u6_panel_state`, then run
+`u6_use`/`u6_ready` for the locked gate + equip.
 
 ## 7. Running the agent (per session)
 

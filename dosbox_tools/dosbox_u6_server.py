@@ -340,7 +340,7 @@ def u6_hook(avatar_name: str = "") -> str:
             f"Ready -- read: u6_avatar / u6_party / u6_roster_status / u6_input_state "
             f"/ u6_object / u6_inventory / u6_panel_state / u6_npcs_near / u6_objects_near "
             f"/ u6_walkable / u6_conversation; act: u6_move / u6_talk / u6_say / u6_look / u6_get "
-            f"/ u6_use / u6_key; navigate: u6_pathfind / u6_goto / u6_talk_to; verify: "
+            f"/ u6_use / u6_ready / u6_key; navigate: u6_pathfind / u6_goto / u6_talk_to; verify: "
             f"u6_validate_passability. Avatar = slot 1.")
 
 
@@ -1261,6 +1261,12 @@ _USE_ORB        = 0x057                              # orb of the moons -> on = 
 _USE_DIR        = frozenset((0x067, 0x068, 0x09a))   # pick/shovel/telescope -> on = a direction
 _USE_INSTRUMENT = frozenset((0x09d, 0x09c, 0x09e, 0x099, 0x128))  # -> on = a digit tune
 _DOOR_LOCKED    = range(8, 0xc)                      # door frame band: locked (key, qual match)
+# Equipment-silhouette cursor cells -- equip slot -> (D_0499 col, D_049A row), derived
+# from D_054B/D_0559 (seg_0C9C.c:103) feeding C_155D_130E's hit rectangles (the Enter
+# redraw C_0C9C_1AE5(2) sets PointerX/Y = D_054B[col]/D_0559[row][col]). Verified
+# against both tables: HEAD NECK RHND RFNG CHST LHND LFNG FEET (SLOT_* 0..7).
+_EQUIP_CELL = {0: (1, 0), 1: (0, 0), 2: (0, 1), 3: (0, 2),
+               4: (2, 0), 5: (2, 1), 6: (2, 2), 7: (1, 2)}
 
 
 def _rd8(addr):   return dm.read(S.handle, addr, 1)[0]
@@ -1278,6 +1284,16 @@ def _obj_tfq(base_addr, slot):
 def _party_member_slot(base_addr, idx):
     """Object slot of party member `idx` (Party[idx])."""
     return _rd8(base_addr + U6_Party + idx)
+
+
+def _holder_party_index(base_addr, holder_slot):
+    """Party index (0..7) whose object slot == `holder_slot` (an item's INVEN/EQUIP
+    assoc), or -1 if the holder isn't a party member."""
+    psize = _rd8(base_addr + U6_PartySize)
+    for i in range(min(psize, 8)):
+        if _rd8(base_addr + U6_Party + i) == holder_slot:
+            return i
+    return -1
 
 
 def _visible_backpack(base_addr):
@@ -1374,42 +1390,53 @@ def _parse_slot(t):
     return None
 
 
-def _select_backpack_item(base_addr, member_index, target_slot):
-    """Drive the status panel to commit on `target_slot` in member `member_index`'s
-    backpack -- the only route to an inventory target. Returns (ok, err). Each step is
-    confirmed by a memory read; any mismatch ESC-aborts to COMMAND_READY (a USE that
-    aborts before commit costs no turn). The cursor is PLACED by WRITING D_0499/D_049A
-    rather than counting arrows: blind arrow-nav across scroll + the equip/backpack
-    boundary is brittle, and the Enter redraw recomputes PointerX/Y from D_0499/D_049A
-    (C_0C9C_1AE5(2)) so the write lands exactly. Backpack cell (row r, col c 0..3) ->
-    cursor (D_0499=c+3, D_049A=r); cols 0-2 are the equip silhouette. Bounded to the
-    VISIBLE page (D_E70F[12]); a deeper item reports 'not on the visible page'."""
+def _panel_commit(base_addr, member_index, command, locate, confirm):
+    """Shared status-panel drive for inventory-target commands (USE-on-item, READY/
+    UNREADY) -- the only route to an inventory target. Steps, each confirmed by a memory
+    read: F<member+1> -> INVENTORY view (CMD_92); `locate()` finds the target's cursor
+    cell (col,row) in the now-shown panel (or None); [`command` -> SELECTING, for a verb
+    like USE; None for the command-less Ready toggle]; <tab> -> panel cursor
+    (SelectMode==2); **WRITE D_0499/D_049A to the cell** (the Enter redraw C_0C9C_1AE5(2)
+    sets PointerX/Y = D_054B[col]/D_0559[row][col], so the write lands exactly); <enter>
+    -> `confirm()`. Any mismatch ESC-aborts to COMMAND_READY (a command that aborts
+    before its effect costs no turn). Returns (ok, err)."""
     fkey = f"f{member_index + 1}"                          # F1..F8 select a member's view
     ok, _ = _guarded_send(base_addr, fkey,
                           lambda: _rd16(base_addr + U6_StatusDisplay) == 0x92)
     if not ok:
         return False, (f"could not open member {member_index}'s INVENTORY view "
                        f"(F{member_index + 1} -> StatusDisplay != CMD_92)")
-    ok, _ = _guarded_send(base_addr, "u", "SELECTING")
-    if not ok:
-        _abort_to_ready(base_addr); return False, "'U' did not enter select mode"
+    cell = locate()
+    if cell is None:
+        _abort_to_ready(base_addr)
+        return False, "target not on the panel (a carried item must be on the visible backpack page -- scroll first)"
+    col, row = cell
+    if command:
+        ok, _ = _guarded_send(base_addr, command, "SELECTING")
+        if not ok:
+            _abort_to_ready(base_addr); return False, f"'{command.upper()}' did not enter select mode"
     ok, _ = _guarded_send(base_addr, "tab", lambda: _rd8(base_addr + U6_SelectMode) == 2)
     if not ok:
         _abort_to_ready(base_addr); return False, "<tab> did not arm the panel cursor (SelectMode != 2)"
-    pack = _visible_backpack(base_addr)
-    if target_slot not in pack:
-        _abort_to_ready(base_addr)
-        return False, f"slot 0x{target_slot:03x} not on the visible backpack page (scroll first)"
-    r, c = divmod(pack.index(target_slot), U6_BACKPACK_COLS)
-    dm.write(S.handle, base_addr + U6_PanelCol, bytes([c + 3]))   # backpack col c -> cursor col c+3
-    dm.write(S.handle, base_addr + U6_PanelRow, bytes([r]))
-    if _visible_backpack(base_addr)[r * U6_BACKPACK_COLS + c] != target_slot:
-        _abort_to_ready(base_addr); return False, "panel cell mismatch before commit"
-    ok, _ = _guarded_send(base_addr, "enter",
-                          lambda: _rd16s(base_addr + U6_Sel_obj) == target_slot)
+    dm.write(S.handle, base_addr + U6_PanelCol, bytes([col]))
+    dm.write(S.handle, base_addr + U6_PanelRow, bytes([row]))
+    ok, _ = _guarded_send(base_addr, "enter", confirm)
     if not ok:
-        _abort_to_ready(base_addr); return False, "commit did not select the item"
+        _abort_to_ready(base_addr); return False, "commit did not take effect"
     return True, ""
+
+
+def _select_backpack_item(base_addr, member_index, target_slot):
+    """USE-commit on `target_slot` in member `member_index`'s backpack: _panel_commit
+    with the 'u' command, the backpack cell, and confirm = Selection.obj == target."""
+    def locate():
+        pack = _visible_backpack(base_addr)
+        if target_slot not in pack:
+            return None
+        r, c = divmod(pack.index(target_slot), U6_BACKPACK_COLS)
+        return (c + 3, r)             # backpack col c -> cursor col c+3 (cols 0-2 = equip silhouette)
+    return _panel_commit(base_addr, member_index, "u", locate,
+                         lambda: _rd16s(base_addr + U6_Sel_obj) == target_slot)
 
 
 def _use_key_flow(base_addr, keys, door, label):
@@ -1550,6 +1577,75 @@ def u6_use(target: str, on: str = "") -> str:
     if b is None:                                     # not hooked: best-effort blind
         return _blind_cursor_cmd(f"use {t}", "u", keys, self_use)
     return _use_map(b, keys, self_use, on.strip(), f"use {t}")
+
+
+@mcp.tool()
+def u6_ready(target: str) -> str:
+    """Ultima VI: READY (equip) a carried item, or UNREADY (take off) an equipped one
+    -- the inventory-panel toggle. Ready is NOT a letter command (R is Rest); it's the
+    panel interaction the manual describes: <tab> to the panel, move to the item, <enter>
+    to ready/unready. `target` = an object slot (`inv:0x305` / `0x305` / `773`, from
+    u6_inventory / u6_panel_state). The tool reads the item's holder + current state and
+    figures out the rest: which party member's panel to open, and whether to READY
+    (INVEN->EQUIP, a backpack item) or UNREADY (EQUIP->INVEN, an equipped item). It then
+    drives the panel (F<member> -> INVENTORY, <tab> -> cursor, place on the item's cell,
+    <enter> -> C_155D_144B Ready / C_155D_1738 Unready), each step confirmed by a memory
+    read, and leaves the panel. Result = the item's CoordUse flip. A READY can be refused
+    by the engine (no equip slot / too heavy > STR*10 / that slot occupied -- printed to
+    the scroll the agent can't see); the tool detects the no-flip and says so, and the
+    agent can diagnose via u6_object (equip-slot), u6_roster_status (STR*10 cap), and
+    u6_panel_state (which slots are occupied). Ready is a free action (no turn). DS from
+    u6_hook."""
+    b = _session_base()
+    if b is None:
+        return "ready: not hooked (panel state needed)."
+    slot = _parse_slot(target.strip().lower())
+    if slot is None:
+        return (f"Invalid ready target {target!r}. Give an object slot "
+                f"(inv:<slot> / 0x.. / a number) from u6_inventory / u6_panel_state.")
+    try:
+        cu = _rd8(b + U6_ObjStatus + slot) & 0x18
+        assoc = _rd16(b + U6_ObjPos + slot * 3)           # INVEN/EQUIP: first 2 bytes = holder slot
+        name = _obj_name(b, slot)
+    except OSError as ex:
+        return f"ready 0x{slot:03x}: read failed ({ex})."
+    if cu not in (0x10, 0x18):
+        return (f"ready {name} (0x{slot:03x}): not in a member's inventory "
+                f"(CoordUse=0x{cu:02x}) -- only a carried or worn item can be readied.")
+    mi = _holder_party_index(b, assoc)
+    if mi < 0:
+        return f"ready {name} (0x{slot:03x}): its holder (slot 0x{assoc:03x}) isn't a party member."
+
+    if cu == 0x10:                                         # INVEN -> READY (equip)
+        def locate():
+            pack = _visible_backpack(b)
+            if slot not in pack:
+                return None
+            r, c = divmod(pack.index(slot), U6_BACKPACK_COLS)
+            return (c + 3, r)
+        equipped = lambda: (_rd8(b + U6_ObjStatus + slot) & 0x18) == 0x18
+        ok, err = _panel_commit(b, mi, None, locate, equipped)
+        _abort_to_ready(b)                                 # Ready stays in the panel -> ESC out
+        if equipped():
+            return f"ready {name} (0x{slot:03x}): equipped (INVEN -> EQUIP) on member {mi + 1}."
+        return (f"ready {name} (0x{slot:03x}): NOT equipped -- {err}. If the panel drove OK, "
+                f"the engine refused (no equip slot / too heavy / that slot occupied); check "
+                f"u6_object equip-slot, u6_roster_status STR*10 cap, u6_panel_state free slot.")
+
+    # EQUIP -> UNREADY (take off)
+    def locate():
+        equip = dm.read(S.handle, b + U6_Equipment, 8 * 2)
+        for s in range(8):
+            if (equip[s * 2] | (equip[s * 2 + 1] << 8)) == slot:
+                return _EQUIP_CELL[s]
+        return None
+    stowed = lambda: (_rd8(b + U6_ObjStatus + slot) & 0x18) == 0x10
+    ok, err = _panel_commit(b, mi, None, locate, stowed)
+    _abort_to_ready(b)
+    if stowed():
+        return f"unready {name} (0x{slot:03x}): taken off (EQUIP -> INVEN) on member {mi + 1}."
+    return (f"unready {name} (0x{slot:03x}): NOT removed -- {err} "
+            f"(a cursed/locked item can't be unreadied).")
 
 
 @mcp.tool()
