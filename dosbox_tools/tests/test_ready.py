@@ -27,13 +27,14 @@ mf.FastMCP=FastMCP
 sys.modules["mcp"]=mm; sys.modules["mcp.server"]=ms; sys.modules["mcp.server.fastmcp"]=mf
 sys.path.insert(0, os.path.join(os.path.dirname(__file__),".."))
 import dosbox_u6_server as u6
+from u6 import act  # action tools live here now; patch inp/time on it
 u6.S.handle=1; u6.S.membase=0; u6.S.u6_ds=0
 # fast fake clock (advances per .time() call so timeout loops exit quickly; no real sleep)
 class _Clock:
     def __init__(s): s.t=0.0
     def time(s): s.t += 0.2; return s.t
     def sleep(s, d): pass
-u6.time = _Clock()
+act.time = _Clock()
 
 def w8(a,v):  MEM[a]=v&0xff
 def w16(a,v): MEM[a]=v&0xff; MEM[a+1]=(v>>8)&0xff
@@ -85,7 +86,7 @@ def eng(k):
     elif k=="esc":
         set_ready()
     return f"[{k}]"
-u6.inp=types.SimpleNamespace(send_key=eng, send_text=lambda t:"[txt]")
+act.inp=types.SimpleNamespace(send_key=eng, send_text=lambda t:"[txt]")
 
 ok=True
 def chk(label, cond):

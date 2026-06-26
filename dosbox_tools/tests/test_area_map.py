@@ -41,13 +41,16 @@ import dosbox_u6_server as u6
 u6.S.handle = 1
 u6.S.membase = 0
 
+# u6_area_map_data + the helpers it calls now live in u6.navigate; patch THERE so the
+# function (which resolves these names in navigate's namespace) sees the stubs.
+from u6 import navigate as nav
 # ---- stub the heavy deps so we isolate the MapObjPtr decode ----
 AX, AY, X0, Y0 = 0, 0, 0, 0
-u6._build_grid       = lambda base: ([[True] * u6.U6_AREA_W for _ in range(u6.U6_AREA_H)], None, AX, AY)
-u6._actor_map        = lambda *a, **k: {}
-u6._controlled_slot  = lambda base: (1, 0, 0)
-u6._controlled_xyz   = lambda base: (X0, Y0, 0)
-u6._obj_name         = lambda base, slot: f"door{slot:03x}"
+nav._build_grid       = lambda base: ([[True] * u6.U6_AREA_W for _ in range(u6.U6_AREA_H)], None, AX, AY)
+nav._actor_map        = lambda *a, **k: {}
+nav._controlled_slot  = lambda base: (1, 0, 0)
+nav._controlled_xyz   = lambda base: (X0, Y0, 0)
+nav._obj_name         = lambda base, slot: f"door{slot:03x}"
 
 def w16(a, v): MEM[a] = v & 0xff; MEM[a + 1] = (v >> 8) & 0xff
 
@@ -68,7 +71,7 @@ set_cell(3, 3, 0x302);  set_obj(0x302, 0x12a, 1)
 set_cell(4, 4, 0x303);  set_obj(0x303, 0x050, 0)      # not a door type -> ignored
 set_cell(6, 6, 0x002)                                 # actor slot (<0x100) -> ignored
 
-x0, y0, z0, av, ax, ay, walk, amap, doorcells, doors = u6.u6_area_map_data(0, 0)
+x0, y0, z0, av, ax, ay, walk, amap, doorcells, doors = nav.u6_area_map_data(0, 0)
 
 ok = True
 def chk(label, cond):

@@ -26,9 +26,10 @@ mf.FastMCP=FastMCP
 sys.modules["mcp"]=mm; sys.modules["mcp.server"]=ms; sys.modules["mcp.server.fastmcp"]=mf
 sys.path.insert(0, os.path.join(os.path.dirname(__file__),".."))
 import dosbox_u6_server as u6
+from u6 import act  # action tools live here now; patch inp/time on it
 u6.S.handle=1; u6.S.membase=0; u6.S.u6_ds=0
 # instant sleeps (state transitions are synchronous in the stub) -- keep real time.time
-u6.time = types.SimpleNamespace(time=_time.time, sleep=lambda s: None)
+act.time = types.SimpleNamespace(time=_time.time, sleep=lambda s: None)
 
 def w16(a,v): MEM[a]=v&0xff; MEM[a+1]=(v>>8)&0xff
 def set_ready():     w16(u6.U6_AllowMouseMov,1); MEM[u6.U6_SelectMode]=0   # COMMAND_READY
@@ -43,7 +44,7 @@ def stub_send_key(k):
     rec.append(k)
     set_selecting() if k in ("t","l","g","u") else set_ready()
     return f"[{k}]"
-u6.inp = types.SimpleNamespace(send_key=stub_send_key,
+act.inp = types.SimpleNamespace(send_key=stub_send_key,
                                send_text=lambda t: rec.append("TXT:"+t) or "[txt]")
 
 ok=True
@@ -79,7 +80,7 @@ def pause_stub(k):
     if k == "enter" and w16r(u6.U6_PromptCh) == 1:
         MEM[u6.U6_LineInput] = 1; w16(u6.U6_PromptCh, 5)
     return f"[{k}]"
-u6.inp = types.SimpleNamespace(send_key=pause_stub,
+act.inp = types.SimpleNamespace(send_key=pause_stub,
                                send_text=lambda t: rec.append("TXT:"+t) or "[txt]")
 
 MEM[u6.U6_LineInput]=0; w16(u6.U6_PromptCh,1)               # a page-pause is blocking
@@ -103,7 +104,7 @@ chk("u6_say through a pause: ENTER then types full 'name'+enter",
 
 # restore shared stub + state
 MEM[u6.U6_IsInConversation]=0; MEM[u6.U6_LineInput]=0; w16(u6.U6_PromptCh,5)
-u6.inp=types.SimpleNamespace(send_key=stub_send_key,
+act.inp=types.SimpleNamespace(send_key=stub_send_key,
                              send_text=lambda t: rec.append("TXT:"+t) or "[txt]")
 
 print("ALL PASS" if ok else "SOME FAILED")

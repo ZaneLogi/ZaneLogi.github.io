@@ -27,8 +27,9 @@ mf.FastMCP=FastMCP
 sys.modules["mcp"]=mm; sys.modules["mcp.server"]=ms; sys.modules["mcp.server.fastmcp"]=mf
 sys.path.insert(0, os.path.join(os.path.dirname(__file__),".."))
 import dosbox_u6_server as u6
+from u6 import act  # action tools live here now; patch inp/time on it
 u6.S.handle=1; u6.S.membase=0; u6.S.u6_ds=0
-u6.time = types.SimpleNamespace(time=_time.time, sleep=lambda s: None)
+act.time = types.SimpleNamespace(time=_time.time, sleep=lambda s: None)
 
 def w8(a,v):  MEM[a]=v&0xff
 def w16(a,v): MEM[a]=v&0xff; MEM[a+1]=(v>>8)&0xff
@@ -84,7 +85,7 @@ def eng_send(k):
     elif k == "esc":
         state["await"]=False; set_ready()
     return f"[{k}]"
-u6.inp = types.SimpleNamespace(send_key=eng_send, send_text=lambda t: "[txt]")
+act.inp = types.SimpleNamespace(send_key=eng_send, send_text=lambda t: "[txt]")
 
 ok=True
 def chk(label, cond):
