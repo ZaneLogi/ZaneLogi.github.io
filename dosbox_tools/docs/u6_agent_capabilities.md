@@ -123,13 +123,18 @@ internally, so they fire only on a real turn boundary.
 combat, who's controlled), `u6_roster_status` (STR/DEX/INT/Level + load caps),
 `u6_input_state` (turn-readiness), `u6_object(slot)` (incl. tile/weight/equip-slot),
 `u6_inventory(npc_slot)`, `u6_panel_state` (which side panel is up + the inventory
-cursor/scroll/slots/Selection), `u6_npcs_near(radius)`, `u6_objects_near(radius)` (map
-items + gear hints), `u6_walkable` (40×40 grid), `u6_conversation` (**decoded**
+cursor/scroll/slots/Selection), `u6_npcs_near(radius)` (+ allegiance **`class`**:
+party/enemy/ally/npc), `u6_objects_near(radius)` (map items + gear hints),
+`u6_walkable` (40×40 passability, **allegiance overlay** `P`/`E`/`a`/`N`),
+`u6_area_map` (40×40 decoded from **MapObjPtr** — doors drawn by state + a door
+list), `u6_conversation` (**decoded**
 dialogue + askable keywords + highlighted cues — see below), `u6_script_disasm`
 (the **whole** NPC script as an addressed assembly listing — see the rule of
 engagement above).
 **Act:** `u6_move` · `u6_talk` · `u6_say` · `u6_look` · `u6_get` · `u6_use` · `u6_ready` · `u6_key`.
-**Navigate:** `u6_pathfind` (plan) · `u6_goto` (closed-loop) · `u6_talk_to`.
+**Navigate:** `u6_pathfind` (plan) · `u6_goto` (closed-loop, NPC target) ·
+`u6_goto_xy` (closed-loop, world `(x,y)` — re-plans each step, **routes around
+non-party NPCs**, stops adjacent to a closed door so you `u6_use` it) · `u6_talk_to`.
 **Verify:** `u6_validate_passability` (predict-vs-live passability gate).
 **Inherited:** base mem tools + input tools (escape hatches).
 
@@ -151,9 +156,12 @@ engagement above).
 | Pick up gear (`G`) | `u6_get` | `u6_inventory` / `u6_object` | ✅ live-verified |
 | Equip / unequip gear | `u6_ready(slot)` | `u6_panel_state` / `u6_inventory` (INVEN↔EQUIP flip) | ✅ live-verified |
 | See which side panel + the inventory | — | `u6_panel_state` | ✅ live-verified |
-| Open/close door, leave gate, ladder (`U`) | `u6_use` (n/s/e/w or `here`) | door/chest frame state in return | ✅ built (live-unconfirmed) |
+| Open/close door, leave gate, ladder (`U`) | `u6_use` (n/s/e/w or `here`) | door/chest frame state in return | ✅ live-verified (opened oaken doors en route to the Avatar's room, 2026-06-26) |
 | USE a carried item (drink/eat/light/play…) | `u6_use(inv:slot[, on=…])` | re-read the item (consumed / frame change) | ✅ built (live-unconfirmed) |
 | Open a *locked* door/chest (`U`) | `u6_use` (auto key flow) | finds the owned `OBJ_040` qual-match; reports a key stuck in a bag | ✅ built (live-unconfirmed) |
+| Tell friend from foe / spot threats | — | `u6_npcs_near` (`class`) · `u6_walkable` / `u6_area_map` (`P`=party swap-through · `E`=enemy · `a`=ally · `N`=npc, via NPCStatus alignment) | ✅ live-verified |
+| See doors on the map (a *closed* door reads as a wall on `u6_walkable`) | — | `u6_area_map` (MapObjPtr → `+`closed / `=`locked / `'`open + door list w/ key-qual + bearing) | ✅ live-verified |
+| Walk to a world coordinate | `u6_goto_xy(x,y)` | step log / `u6_avatar` | ✅ live-verified (drove across the castle to the west wing, 2026-06-26) |
 
 "Suit the party" = the agent's **reasoning** over readyable+slot+weight (per object)
 × STR caps+free slots (per member) — thin tools, agent decides.
@@ -172,17 +180,21 @@ explore → leave the castle. (On foot, party mode, no combat.)
   *Action verbs built* — `u6_look`, `u6_get` (LOOK/GET live-verified), `u6_ready`
   (equip/unequip via the inventory panel) and `u6_panel_state` both **live-verified
   2026-06-26** (repeated back-to-back unready→ready on a party member, no manual ESC,
-  `SelectMode` self-cleared after each — see `u6_verb_mechanism.md` §2). `u6_use` (map
-  tiles, carried items, and the **auto** locked-door key flow) is built + offline-tested
-  but still **live-unconfirmed** — the one remaining gear-slice gap. **M1's toolset is
-  complete.**
+  `SelectMode` self-cleared after each — see `u6_verb_mechanism.md` §2). `u6_use`
+  **map-tile path live-verified 2026-06-26** (opened oaken doors en route to the Avatar's
+  room); its carried-item and **auto** locked-door key flows are built + offline-tested
+  but still **live-unconfirmed**. **M1's toolset is complete.** Navigation/perception also
+  gained `u6_area_map` (doors decoded from MapObjPtr), `u6_goto_xy` (closed-loop coordinate
+  nav that routes around non-party NPCs) and the allegiance-aware grid (`P`/`E`/`a`/`N`) —
+  all live-verified on the "find the Avatar's room" run.
 
 **The authoritative M1 phase plan + the live Slice-1 runbook/validation gate live
 in `u6_ai_agent.md` §5 & §7** (single source — not duplicated here). Progress:
 turn gate ✅, gear perception ✅, `u6_look`/`u6_get`/`u6_ready`/`u6_panel_state` ✅
-live-verified, plus TALK/`u6_conversation`/`u6_script_disasm` ✅ live-verified; `u6_use`
-✅ built + offline-tested but **live-unconfirmed** (the lone remaining verb). **M1 toolset
-complete; remaining live gap = `u6_use` + the full Slice-1 run.**
+live-verified, plus TALK/`u6_conversation`/`u6_script_disasm` ✅ live-verified;
+`u6_use` ✅ map-tile path live-verified (carried-item + locked-key flows still
+offline-only); `u6_area_map` / `u6_goto_xy` / allegiance-aware grid ✅ live-verified.
+**M1 toolset complete; remaining live gap = `u6_use` carried-item/locked-key + the full Slice-1 run.**
 
 ---
 
@@ -204,6 +216,8 @@ All DGROUP / DS-relative (`u6-decompiled`). Re-derive before relying.
 | Equip slot | `STAT_GetEquipSlot` (seg_155D.c:129) on `TILE_FRAME`; weapons table `D_07DD 0x07DD` | −1 = not readyable |
 | Names[][14] | `0x3236` | indexed by party index |
 | Passability tables | TerrainType `0xB3EB` / TileFlag `0x8C46` / D_B3EF `0xB3EF` / BaseTile `0x6824` | see dosbox_u6_passability.md |
+| Area window | AreaTiles `0x8E51` (floor tile[40][40]) / **MapObjPtr `0xD8E7`** (int[40][40] top object slot, −1=none) / AreaX·Y `0xBBC8`·`0xBBCA` | `u6_area_map` decodes each cell's object → doors (seg_1184.c:663) |
+| NPCStatus alignment | `0x9FAB`: &0x80 PLRCONTROL (party→swap-through) / &0x20 ATKPLR (enemy) / &0x40 ATKMON (ally) | friend-or-foe for the grid (u6.h:120-123); incap = &0x16, dragged = NPCFlag&0x10 |
 | Converse VM | TalkBuf ptr `0x4D50` / Talk_PC `0xE7AB` / input `0xE732` / interlocutor `0xE796` | OP_NPC `0xeb` → interlocutor (self) |
 | Converse vars / flags | VarInt `0xB6E1` (int[36]) / VarStr `0xB72D` (near ptr[36]) / TalkFlags `0xB2EB` (per-NPC byte) | OP_TST/SET/CLR bit ops; HP `0x66E4`, NPCStatus `0x9FAB` |
 | Keyword dispatch | `OP_KEY 0xef` kw[,kw] `OP_RES 0xf6` body … `OP_ENDRES 0xee` | str_i_compare (seg_1703.c:130/980) |

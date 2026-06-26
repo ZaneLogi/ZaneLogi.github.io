@@ -53,6 +53,18 @@ U6_Amount       = 0x4EE4   # 2 B/slot; quan = low byte, qual = high byte
 U6_NPCStatus    = 0x9FAB   # 1 B/slot; creature status bits (PLRCONTROL 0x80, etc.) -- != ObjStatus
 U6_MAX_SLOTS    = 0xD00    # NPCs 0..0xFF + world objects 0x100..0xCFF
 
+# NPCStatus[] bit fields (u6.h:120-149), per actor slot < 0x100. Alignment lives
+# in bits 0x60 and IS the engine's own threat signal: Is_ATKPLR -> attacks the
+# player (hostile); Is_ATKMON -> attacks monsters (fights on the party's side).
+U6_NPC_PARALYZED  = 0x02
+U6_NPC_ASLEEP     = 0x04
+U6_NPC_DEAD       = 0x10
+U6_NPC_ATKPLR     = 0x20   # alignment: hostile to the player (an ENEMY)
+U6_NPC_ATKMON     = 0x40   # alignment: hostile to monsters (an ally-side fighter)
+U6_NPC_PLRCONTROL = 0x80   # player-controlled => a PARTY member (avatar swaps with it)
+U6_NPC_INCAP      = U6_NPC_DEAD | U6_NPC_ASLEEP | U6_NPC_PARALYZED   # Isbis_0016
+U6_NPCFLAG_DRAGGED = 0x10  # IsDraggedUnder (NPCFlag[i] & 0x10) -- disables the swap
+
 _COORDUSE = {0: "LOCXYZ", 0x08: "CONTAINED", 0x10: "INVEN", 0x18: "EQUIP"}
 
 
@@ -198,6 +210,7 @@ U6_AREA_W = 40
 U6_AREA_H = 40
 U6_WORLD_MASK = 0x3ff             # world is 1024x1024
 U6_AreaTiles  = 0x8E51            # AREA_H*AREA_W bytes; ground tile per cell
+U6_MapObjPtr  = 0xD8E7            # int[AREA_H][AREA_W]; per-cell TOP object slot (-1=none)
 U6_AreaX      = 0xBBC8            # int; world X of the area-window origin
 U6_AreaY      = 0xBBCA            # int; world Y of the area-window origin
 U6_NPCFlag_ptr     = 0x4D4C       # far ptr -> NPCFlag[]; dir = NPCFlag[slot] & 7
@@ -2471,20 +2484,50 @@ def _build_grid(base_addr):
     return walk, cost, ax, ay
 
 
-def _actor_cells(base_addr, z0, ax, ay, self_slot=1):
-    """Cells blocked by an ACTOR -- the dynamic half of C_1E0F_000F's legality
-    (seg_1E0F.c:213): every in-world actor (slot 1..0xFF, LOCXYZ, same level)
-    blocks the mover EXCEPT the walk-through field/effect types and the mover
-    ITSELF (`self_slot` -- the controlled member, which the engine skips via
-    `if(i==objNum) continue`). In solo mode self_slot is the detached member, so
-    the avatar then correctly shows as a blocking actor. Returns a set of (r, c)
-    in the local window. Kept separate from _build_grid so the planner can route
-    optimistically through a transient NPC (and re-plan), while per-step legality
-    still honours it."""
+# Display priority when >1 actor shares a cell: enemy outranks a plain npc/ally,
+# which outrank a (passable) party member.
+_ACTOR_RANK = {"party": 0, "ally": 1, "npc": 1, "enemy": 2}
+
+
+def _npc_class(st):
+    """Allegiance of an actor from its NPCStatus byte (u6.h:120-123): 'party'
+    (PLRCONTROL -- your own), 'enemy' (Is_ATKPLR, hostile to the player), 'ally'
+    (Is_ATKMON, fights monsters for you) or 'npc' (neutral)."""
+    if st & U6_NPC_PLRCONTROL: return "party"
+    if st & U6_NPC_ATKPLR:     return "enemy"
+    if st & U6_NPC_ATKMON:     return "ally"
+    return "npc"
+
+
+def _actor_map(base_addr, z0, ax, ay, self_slot=1):
+    """Per-cell ACTOR classification for the local window -- the dynamic half of
+    C_1E0F_000F's legality (seg_1E0F.c:191-213), now telling friend from foe.
+    Returns {(r, c): (category, blocks)} for every in-world actor (slot 1..0xFF,
+    LOCXYZ, same level) except the walk-through field/effect types and the mover
+    itself (`self_slot`):
+
+        category  meaning                          blocks the controlled mover?
+        'party'   player-controlled (PLRCONTROL)   NO  -- avatar<->party SWAP
+        'enemy'   alignment Is_ATKPLR (0x20)       yes (a threat)
+        'ally'    alignment Is_ATKMON (0x40)       yes (fights monsters for you)
+        'npc'     neutral townsfolk                yes
+
+    The party-pass mirrors the gate exactly (seg_1E0F.c:191): for a player-
+    controlled mover, a blocker that is ALSO player-controlled and not
+    incapacitated (Isbis_0016 = DEAD|ASLEEP|PARALYZED) nor dragged-under
+    (NPCFlag&0x10) is SKIPPED -- the engine then swaps them in C_1E0F_1B0E. A
+    dead/asleep party member keeps blocking. Threat is the engine's own NPCStatus
+    alignment bits (u6.h:120-123), not a shape-name guess. Kept separate from
+    _build_grid so the planner can route optimistically through a transient NPC."""
     status = dm.read(S.handle, base_addr + U6_ObjStatus, 0x100)
     pos    = dm.read(S.handle, base_addr + U6_ObjPos, 0x100 * 3)
     shape  = dm.read(S.handle, base_addr + U6_ObjShapeType, 0x100 * 2)
-    cells = set()
+    npcst  = dm.read(S.handle, base_addr + U6_NPCStatus, 0x100)
+    try:
+        npcflag = dm.read(S.handle, _read_far_ptr(base_addr, U6_NPCFlag_ptr), 0x100)
+    except OSError:
+        npcflag = bytes(0x100)
+    out = {}
     for i in range(0x100):
         if i == self_slot or (status[i] & 0x18) != 0:       # the mover / not in world
             continue
@@ -2495,9 +2538,34 @@ def _actor_cells(base_addr, z0, ax, ay, self_slot=1):
         if ((v >> 20) & 0xf) != z0:
             continue
         cell = _world_to_cell(v & 0x3ff, (v >> 10) & 0x3ff, ax, ay)
-        if cell:
-            cells.add(cell)
-    return cells
+        if cell is None:
+            continue
+        st = npcst[i]
+        if st & U6_NPC_PLRCONTROL:                           # party member
+            incap = (st & U6_NPC_INCAP) or (npcflag[i] & U6_NPCFLAG_DRAGGED)
+            cat, blocks = "party", bool(incap)               # swap-through unless down
+        elif st & U6_NPC_ATKPLR:
+            cat, blocks = "enemy", True
+        elif st & U6_NPC_ATKMON:
+            cat, blocks = "ally", True
+        else:
+            cat, blocks = "npc", True
+        prev = out.get(cell)
+        if prev is None:
+            out[cell] = (cat, blocks)
+        else:                                                # >1 actor on a tile
+            top = cat if _ACTOR_RANK[cat] > _ACTOR_RANK[prev[0]] else prev[0]
+            out[cell] = (top, prev[1] or blocks)
+    return out
+
+
+def _actor_cells(base_addr, z0, ax, ay, self_slot=1):
+    """Cells that BLOCK the controlled mover -- the set the planner / legality
+    probe consume. Derived from _actor_map: every classified actor cell except a
+    party member the avatar swaps through (C_1E0F_1B0E). Kept as a bare set for
+    back-compat with _build_grid's planner and u6_validate_passability."""
+    return {cell for cell, (cat, blk) in
+            _actor_map(base_addr, z0, ax, ay, self_slot).items() if blk}
 
 
 def _dijkstra(walk, cost, start, goals):
@@ -2541,6 +2609,39 @@ def _adjacent_goals(grid, ncell):
         if 0 <= gr < U6_AREA_H and 0 <= gc < U6_AREA_W and grid[gr][gc]:
             goals.add((gr, gc))
     return goals
+
+
+def _mask_walk(walk, blocked):
+    """Copy of `walk` with the cells in `blocked` (current non-party NPC cells)
+    cleared -- so the planner routes AROUND standing NPCs instead of through them."""
+    if not blocked:
+        return walk
+    return [[walk[r][c] and (r, c) not in blocked for c in range(U6_AREA_W)]
+            for r in range(U6_AREA_H)]
+
+
+def _closest_reachable(walk, start, ax, ay, tx, ty):
+    """BFS the cells reachable from `start` over `walk`, returning the reachable cell
+    whose WORLD position is closest (Manhattan) to target (tx,ty). For an in-window,
+    reachable target this is the target itself; for an off-window target it is the
+    edge cell nearest it (step toward it, then the window scrolls and we re-plan);
+    if the avatar is boxed in it returns `start`. This unifies in-window and
+    off-window routing into one goal pick."""
+    seen = {start}
+    q = [start]
+    best, bestd = start, abs(((ax + start[1]) & U6_WORLD_MASK) - tx) + \
+                          abs(((ay + start[0]) & U6_WORLD_MASK) - ty)
+    qi = 0
+    while qi < len(q):
+        cur = q[qi]; qi += 1
+        for dr, dc in _DIR_DELTAS:
+            nr, nc = cur[0] + dr, cur[1] + dc
+            if 0 <= nr < U6_AREA_H and 0 <= nc < U6_AREA_W and walk[nr][nc] and (nr, nc) not in seen:
+                seen.add((nr, nc)); q.append((nr, nc))
+                d = abs(((ax + nc) & U6_WORLD_MASK) - tx) + abs(((ay + nr) & U6_WORLD_MASK) - ty)
+                if d < bestd:
+                    best, bestd = (nr, nc), d
+    return best
 
 
 def _npc_xyz(base_addr, slot):
@@ -2743,10 +2844,13 @@ def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
     """Ultima VI: NPCs/creatures placed in the world (LOCXYZ) within `radius`
     (Chebyshev) of the CONTROLLED actor (where you are -- the avatar in party
     mode, the active member in solo) on the same level. Reports slot, position,
-    compass direction, distance, shape type and name (party members by their
-    Names[] name; creatures/NPCs by LOOK.LZD appearance -- rat/guard/...) -- the
-    agent's situational awareness for picking a target. DS from u6_hook unless
-    overridden."""
+    compass direction, distance, shape type, name (party members by their Names[]
+    name; creatures/NPCs by LOOK.LZD appearance -- rat/guard/...) and CLASS -- the
+    allegiance read from each actor's NPCStatus (u6.h:120-123): `party` (your own,
+    walk-through -- the avatar swaps with it), `enemy` (Is_ATKPLR, hostile to YOU
+    -- the threat), `ally` (Is_ATKMON, fights monsters for you) or `npc` (neutral).
+    This is the agent's friend-or-foe gate, not a shape-name guess. DS from u6_hook
+    unless overridden."""
     if S.membase is None:
         return dm.HINT_NO_MEMBASE
     ds, err = _ds(segment)
@@ -2762,6 +2866,7 @@ def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
         status = dm.read(S.handle, base + U6_ObjStatus, 0x100)
         pos = dm.read(S.handle, base + U6_ObjPos, 0x100 * 3)
         shape = dm.read(S.handle, base + U6_ObjShapeType, 0x100 * 2)
+        npcst = dm.read(S.handle, base + U6_NPCStatus, 0x100)
         basetile, tw, weapons = _gear_tables(base)
     except OSError as ex:
         return f"Read failed (DS=0x{ds:04x}): {ex}"
@@ -2787,14 +2892,14 @@ def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
         else:                                            # creature / NPC -> LOOK.LZD appearance
             tile, _w, _e = _gear_of(sh, basetile, tw, weapons)
             nm = _tile_name(tile)
-        rows.append((dist, i, x, y, _compass(x - x0, y - y0), typ, nm))
+        rows.append((dist, i, x, y, _compass(x - x0, y - y0), typ, _npc_class(npcst[i]), nm))
     if not rows:
         return f"No NPCs within {radius} of you ({x0},{y0},z{z0})."
     rows.sort()
     out = [f"NPCs within {radius} of you ({x0},{y0},z{z0}):",
-           "  dist  slot     x    y   dir  type  name"]
-    for dist, i, x, y, comp, typ, nm in rows:
-        out.append(f"  {dist:>4}  0x{i:02x}  {x:>4} {y:>4}  {comp:<3}  {typ:>4}  {nm}")
+           "  dist  slot     x    y   dir  type  class  name"]
+    for dist, i, x, y, comp, typ, cls, nm in rows:
+        out.append(f"  {dist:>4}  0x{i:02x}  {x:>4} {y:>4}  {comp:<3}  {typ:>4}  {cls:<5}  {nm}")
     return "\n".join(out)
 
 
@@ -2858,11 +2963,13 @@ def u6_objects_near(radius: int = 8, max_items: int = 30, segment: int = -1) -> 
 def u6_walkable(segment: int = -1) -> str:
     """Ultima VI: the local 40x40 passability grid as ASCII, faithful to the
     engine's land-walker move gate C_1E0F_000F (terrain + objects, incl. multi-tile
-    spread + bridge/breakthrough overrides). NPCs are overlaid as N -- they DO
-    block a step (engine rule), but are kept off the planning grid so routes can
-    re-plan around moving NPCs. '@' is the actor you control (the avatar in party
-    mode, the detached member in solo). Legend: @=you  N=npc  .=open  #=blocked. DS
-    from u6_hook unless overridden."""
+    spread + bridge/breakthrough overrides). Actors are overlaid by ALLEGIANCE, not
+    a flat 'N', because they don't all block: a PARTY member (P) is walk-THROUGH --
+    the avatar swaps places with it (C_1E0F_1B0E) -- so it never walls you in. An
+    enemy (E, hostile per NPCStatus alignment), an ally (a, fights monsters for you)
+    and a neutral npc (N) each block a step; only E is a threat. '@' is the actor
+    you control. Legend: @=you  P=party(swap-through)  E=enemy  a=ally  N=npc
+    .=open  #=blocked. DS from u6_hook unless overridden."""
     if S.membase is None:
         return dm.HINT_NO_MEMBASE
     ds, err = _ds(segment)
@@ -2873,22 +2980,115 @@ def u6_walkable(segment: int = -1) -> str:
         self_slot, _idx, _veh = _controlled_slot(base)
         x0, y0, z0 = _controlled_xyz(base)
         walk, cost, ax, ay = _build_grid(base)
-        npc_cells = _actor_cells(base, z0, ax, ay, self_slot)
+        amap = _actor_map(base, z0, ax, ay, self_slot)
     except OSError as ex:
         return f"Read failed (DS=0x{ds:04x}): {ex}"
     av = _world_to_cell(x0, y0, ax, ay)
-    out = [f"Walkable grid (window origin world {ax},{ay}; z={z0}; "
-           f"@=you N=npc .=open #=blocked):"]
+    glyph = {"party": "P", "enemy": "E", "ally": "a", "npc": "N"}
+    out = [f"Walkable grid (window origin world {ax},{ay}; z={z0}; @=you "
+           f"P=party(swap-through) E=enemy a=ally N=npc .=open #=blocked):"]
     for r in range(U6_AREA_H):
         line = []
         for c in range(U6_AREA_W):
             if (r, c) == av:
                 line.append("@")
-            elif (r, c) in npc_cells:
-                line.append("N")
+            elif (r, c) in amap:
+                line.append(glyph[amap[(r, c)][0]])
             else:
                 line.append("." if walk[r][c] else "#")
         out.append("  " + "".join(line))
+    return "\n".join(out)
+
+
+# Per-cell object map (MapObjPtr @ U6_MapObjPtr): an int[40][40] holding the TOP
+# object slot at each cell, -1 (0xffff) = none. Doors live in the object list
+# (OBJ_129..12C); a closed door is impassable, so on u6_walkable it is INVISIBLE --
+# indistinguishable from a wall. This is what u6_walkable cannot show.
+_DOOR_GLYPH = {"open": "'", "closed": "+", "locked": "=", "magically locked": "x"}
+
+
+def u6_area_map_data(base, segment_ds):
+    """Shared decode for u6_area_map: read AreaTiles + MapObjPtr for the live 40x40
+    window and resolve every cell's TOP object (MapObjPtr) into a feature. Returns
+    (x0,y0,z0, av, ax, ay, walk, amap, doorcells, doors). `doorcells` maps (r,c) ->
+    glyph; `doors` is a list of (dist, wx, wy, state, qual, name, bearing)."""
+    self_slot, _idx, _veh = _controlled_slot(base)
+    x0, y0, z0 = _controlled_xyz(base)
+    walk, _cost, ax, ay = _build_grid(base)
+    amap = _actor_map(base, z0, ax, ay, self_slot)
+    mop    = dm.read(S.handle, base + U6_MapObjPtr, U6_AREA_H * U6_AREA_W * 2)
+    shape  = dm.read(S.handle, base + U6_ObjShapeType, U6_MAX_SLOTS * 2)
+    amount = dm.read(S.handle, base + U6_Amount, U6_MAX_SLOTS * 2)
+    doorcells, doors, seen = {}, [], set()
+    for r in range(U6_AREA_H):
+        for c in range(U6_AREA_W):
+            raw = mop[(r * U6_AREA_W + c) * 2] | (mop[(r * U6_AREA_W + c) * 2 + 1] << 8)
+            if raw == 0xffff or raw >= U6_MAX_SLOTS or raw < 0x100:   # none / actor / oob
+                continue
+            slot = raw
+            typ = (shape[slot * 2] | (shape[slot * 2 + 1] << 8)) & 0x3ff
+            if typ not in _U6_DOOR_TYPES:
+                continue
+            frame = (shape[slot * 2] | (shape[slot * 2 + 1] << 8)) >> 10
+            state, _locked = _door_state(frame)
+            doorcells[(r, c)] = _DOOR_GLYPH[state]
+            wx, wy = (ax + c) & U6_WORLD_MASK, (ay + r) & U6_WORLD_MASK
+            if (wx, wy) in seen:
+                continue
+            seen.add((wx, wy))
+            qual = amount[slot * 2 + 1]
+            doors.append((max(abs(wx - x0), abs(wy - y0)), wx, wy, state, qual,
+                          _obj_name(base, slot), _compass(wx - x0, wy - y0)))
+    av = _world_to_cell(x0, y0, ax, ay)
+    return x0, y0, z0, av, ax, ay, walk, amap, doorcells, doors
+
+
+@mcp.tool()
+def u6_area_map(segment: int = -1) -> str:
+    """Ultima VI: the live 40x40 area decoded DIRECTLY from the engine's own per-cell
+    object map -- AreaTiles (floor) + MapObjPtr (the TOP object slot at each cell,
+    @ U6_MapObjPtr) -- so OBJECTS are identified by NAME, not just passable/blocked.
+    The point: on u6_walkable a CLOSED DOOR is impassable and shows as '#', exactly
+    like a wall -- invisible. Here each cell's MapObjPtr slot is decoded type/frame ->
+    name/state, and every door is drawn distinctly AND listed with its world (x,y),
+    state, key-qual and bearing from you -- so 'find the door I can open' is a glance,
+    not a maze-walk. Party/enemy overlay is shared with u6_walkable. Legend:
+    @=you  +=closed door  ==locked door  '=open door  x=magically locked
+    P=party  E=enemy  a=ally  N=npc  #=blocked  .=open. DS from u6_hook."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    try:
+        x0, y0, z0, av, ax, ay, walk, amap, doorcells, doors = u6_area_map_data(base, ds)
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    glyph = {"party": "P", "enemy": "E", "ally": "a", "npc": "N"}
+    out = [f"Area map (window origin world {ax},{ay}; z={z0}; you at ({x0},{y0}); "
+           f"@=you +=closed door ==locked '=open x=magically-locked "
+           f"P=party E=enemy a=ally N=npc .=open #=blocked):"]
+    for r in range(U6_AREA_H):
+        line = []
+        for c in range(U6_AREA_W):
+            if (r, c) == av:
+                line.append("@")
+            elif (r, c) in doorcells:
+                line.append(doorcells[(r, c)])
+            elif (r, c) in amap:
+                line.append(glyph[amap[(r, c)][0]])
+            else:
+                line.append("." if walk[r][c] else "#")
+        out.append("  " + "".join(line))
+    if doors:
+        doors.sort()
+        out.append(f"Doors in view ({len(doors)}):")
+        for dist, wx, wy, state, qual, name, bearing in doors:
+            keyq = f", key qual={qual}" if (state == "locked" and qual) else ""
+            out.append(f"  ({wx},{wy})  {bearing:<2} d{dist:<2}  {state}{keyq}  {name}")
+    else:
+        out.append("Doors in view: none.")
     return "\n".join(out)
 
 
@@ -2989,6 +3189,85 @@ def u6_goto(npc_slot: int, max_steps: int = 60, segment: int = -1) -> str:
             stuck = 0
             log.append(f"step {step_i}: {_STEP_NAME[mv]} -> ({x1},{y1})")
     return "\n".join(log + [f"Hit max_steps={max_steps} without arriving."])
+
+
+@mcp.tool()
+def u6_goto_xy(x: int, y: int, max_steps: int = 150, segment: int = -1) -> str:
+    """Ultima VI: walk the controlled actor to world tile (x,y) on the current level,
+    CLOSED-LOOP -- the coordinate counterpart of u6_goto. Each step: re-read the live
+    position, rebuild the grid, route AROUND the current non-party NPCs (a party
+    member never blocks -- the avatar swaps with it; only a townsperson/guard/monster
+    does), take ONE u6_move, and confirm it landed. NPCs move every turn, so a static
+    path goes stale -- this re-plans every step and, when an NPC sits in the only
+    corridor, bump-waits a few turns for it to clear before giving up. Off-window
+    targets are handled by stepping toward the nearest edge cell (the window scrolls,
+    then we re-plan). Stops when standing on (x,y), or reports where/why it stalled
+    (boxed in, NPC parked in the sole path, or target tile itself blocked -- e.g. a
+    closed door you must u6_use). Reads N (each step is a real game turn); raise
+    max_steps for long hauls. North=-y South=+y West=-x East=+x. DS from u6_hook."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    tx, ty = x & U6_WORLD_MASK, y & U6_WORLD_MASK
+    log, stuck = [], 0
+    STUCK_CAP = 8                                         # bump-wait budget for a parked NPC
+    for step_i in range(max_steps):
+        try:
+            self_slot, _idx, _veh = _controlled_slot(base)
+            x0, y0, z0 = _controlled_xyz(base)
+            walk, cost, ax, ay = _build_grid(base)
+            actors = _actor_cells(base, z0, ax, ay, self_slot)
+        except OSError as ex:
+            return "\n".join(log + [f"Read failed: {ex}"])
+        if (x0, y0) == (tx, ty):
+            return "\n".join(log + [f"Arrived at ({tx},{ty}) in {step_i} step(s)."])
+        start = _world_to_cell(x0, y0, ax, ay)
+        if start is None:
+            return "\n".join(log + [f"Controlled actor ({x0},{y0}) outside its own window -- stop."])
+        # Primary plan: route AROUND current NPCs (mask them out of the grid).
+        walkm = _mask_walk(walk, actors)
+        goal = _closest_reachable(walkm, start, ax, ay, tx, ty)
+        using = "around-npcs"
+        if goal == start:                                # can't get closer avoiding NPCs...
+            goal = _closest_reachable(walk, start, ax, ay, tx, ty)   # ...try through them (bump-wait)
+            walkm, using = walk, "through-npcs"
+            if goal == start:                            # boxed by walls/doors even ignoring NPCs
+                gx, gy = (ax + start[1]) & U6_WORLD_MASK, (ay + start[0]) & U6_WORLD_MASK
+                if abs(gx - tx) + abs(gy - ty) == 1:
+                    td = _dir_to(tx - x0, ty - y0)
+                    return "\n".join(log + [f"Adjacent to ({tx},{ty}) at ({x0},{y0}); it's to the "
+                                            f"{td} but that tile is blocked (wall / closed door / "
+                                            f"occupied). If a door, u6_use('{td}')."])
+                return "\n".join(log + [f"No route toward ({tx},{ty}); boxed in at ({x0},{y0}) "
+                                        f"(walls/doors). Closest reachable is here."])
+        steps = _dijkstra(walkm, cost, start, {goal})
+        if not steps:
+            return "\n".join(log + [f"Planner found a goal but no path (unexpected) at ({x0},{y0})."])
+        mv = steps[0]
+        _wait_command_ready(base)
+        inp.send_key(_STEP_ARROW[mv])
+        time.sleep(0.05)
+        _wait_command_ready(base)
+        try:
+            x1, y1, _ = _controlled_xyz(base)
+        except OSError:
+            x1, y1 = x0, y0
+        if (x1, y1) == (x0, y0):
+            stuck += 1
+            log.append(f"step {step_i}: {_STEP_NAME[mv]} blocked ({using}) [{stuck}/{STUCK_CAP}]")
+            if stuck >= STUCK_CAP:
+                nx, ny = (x0 + mv[1]) & U6_WORLD_MASK, (y0 + mv[0]) & U6_WORLD_MASK   # mv=(dr=dy,dc=dx)
+                return "\n".join(log + [f"Stuck at ({x0},{y0}) after {STUCK_CAP} blocked tries -- an "
+                                        f"NPC is parked at ({nx},{ny}) in the only path, or the way is "
+                                        f"sealed. Re-run later, or clear the NPC. Target ({tx},{ty})."])
+        else:
+            stuck = 0
+            if len(log) < 40:                            # keep the log bounded on long hauls
+                log.append(f"step {step_i}: {_STEP_NAME[mv]} -> ({x1},{y1})")
+    return "\n".join(log + [f"Hit max_steps={max_steps} at -> stopped short of ({tx},{ty})."])
 
 
 @mcp.tool()
