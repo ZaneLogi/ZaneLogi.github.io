@@ -257,13 +257,40 @@ and `u6_ai_agent.md` §6.
 - carried item (`inv:<slot>` / a slot id from `u6_inventory` / `u6_panel_state`) →
   the panel route (§2).
 
-**Inventory-select (`_panel_commit`, shared by USE-on-item + READY):** `F<member>`
-→ INVENTORY view (`StatusDisplay==CMD_92`); a `locate()` finds the item's cursor
-cell; [the command letter `U` → `SELECTING`, for USE; **none** for the
-command-less READY toggle]; `Tab` → `SelectMode==2`; **place the cursor by WRITING
-`D_0499/D_049A`** to the cell; `Enter` → confirm (USE: `Selection.obj==slot`;
-READY: the `INVEN↔EQUIP` flip). Each step is a guarded read; any mismatch
-ESC-aborts (an abort before the effect costs no turn).
+**Inventory-select (`_panel_commit`, shared by USE-on-item + READY):** the **open is
+view-robust**. The panel view left by the prior action is *not* deterministic — esp.
+after a conversation it can be `CMD_90` PORTRAIT or `CMD_92` INVENTORY — and `F<member>`
+only opens INVENTORY *from the roster/inventory view*; from PORTRAIT it merely swaps the
+portrait's member (`seg_0C9C.c:1345-1371`, confirmed live 2026-06-26). So the open is:
+**`/`** (only if not already roster) → roster `CMD_91`; **`F<member+1>`** → that member's
+INVENTORY (`CMD_92`), which sets `D_04B3=member` **directly** so any party member works,
+not just the Avatar (`:1369-1371`); **`*`** (defensive, only if it somehow landed in
+PORTRAIT) → INVENTORY (`:1351`). Then a `locate()` finds the item's cursor cell; [the
+command letter `U` → `SELECTING`, for USE; **none** for the command-less READY toggle];
+**one `Tab` → `SelectMode==2`**. In the INVENTORY view a single `Tab` sets `SelectMode=2`
+directly (`:1313-1316`: `Tab` in `CMD_92` → 2; a map-select `1` → 2 as well, `:1183`) — so
+both READY (starts at `SelectMode=0`) and USE (the `U` command set it to `1`) arm in one tap.
+**Clean-entry invariant (important):** the arm only works from a clean `SelectMode=0`. A
+commit leaves the panel armed (`SelectMode=2`), and the cleanup must drive it back to `0` —
+that is the postcondition **every** action verb shares (`_abort_to_ready` for ready/use,
+`_drain_to_ready` for look/get/talk). It was defeated by a single bug: `_input_state` read
+`SelectMode=2` as `COMMAND_READY` (it checked `AllowMouseMov==1` before `SelectMode`, but the
+panel-armed state runs with `AllowMouseMov=1` too), so the cleanups stopped early and stranded
+the panel armed; the *next* ready then opened from `SelectMode=2` and the arm misfired. Fix:
+`_input_state` checks `SelectMode!=0 → SELECTING` first, so the existing cleanups reach `0`;
+`_panel_commit` also clears at entry (belt-and-suspenders). Then **place the cursor by WRITING
+`D_0499/D_049A`** to the cell; `Enter` → confirm (USE: `Selection.obj==slot`; READY: the
+`INVEN↔EQUIP` flip). Each step is a guarded read; any mismatch ESC-aborts (no turn spent).
+
+> **Live-verified 2026-06-26.** `u6_ready` was exercised against the running DOSBox (post-
+> conversation, in-castle save): repeated back-to-back `unready → ready` cycles on a party
+> member (Dupre's kite shield) through the tool with **no manual ESC** — all flips succeeded
+> and `SelectMode` returned to `0` after each, confirming the clean-entry/clean-exit invariant.
+> Single-`Tab` arm and per-member targeting (`F<n>`) confirmed live for the Avatar and
+> non-Avatar members. (Failures during bring-up traced to two non-logic causes: the wrong
+> hypotheses about timing — since reverted — and the server running a stale copy from
+> `C:\Z_Temp\tools\dosbox_mcp\` rather than the repo, which is where the registered MCP
+> server actually launches, so repo edits must be copied there before they take effect.)
 
 The cursor is **memory-written**, not arrow-counted: blind arrow-nav across scroll
 + the equip/backpack boundary is brittle, and the Enter redraw (`C_0C9C_1AE5(2)`)

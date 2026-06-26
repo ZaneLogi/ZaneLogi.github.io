@@ -140,7 +140,7 @@ engagement above).
 | Intent | Act | Perceive / confirm | Status |
 |---|---|---|---|
 | Know it's my turn | — | `u6_input_state` | ✅ HAVE |
-| Talk to LB / NPCs | `u6_goto`→`u6_talk`→`u6_say` (party mode!) | `u6_npcs_near` + `u6_conversation` | ✅ HAVE |
+| Talk to LB / NPCs | `u6_goto`→`u6_talk`→`u6_say` (party mode!) | `u6_npcs_near` + `u6_conversation` + `u6_script_disasm` | ✅ live-verified |
 | Move / explore | `u6_move` / `u6_goto` | `u6_walkable` / `u6_avatar` | ✅ HAVE |
 | Solo↔party / combat awareness | `u6_key('0')` / `'1'..'8'` | `u6_party` | ✅ HAVE (act = key) |
 | Check party inventory | — | `u6_inventory(member)` | ✅ HAVE |
@@ -149,8 +149,8 @@ engagement above).
 | Is it readyable + which slot | — | `u6_object` (tile/weight/slot) | ✅ HAVE |
 | Identify / search (`L`) | `u6_look` | re-read state (names via LOOK.LZD) | ✅ live-verified |
 | Pick up gear (`G`) | `u6_get` | `u6_inventory` / `u6_object` | ✅ live-verified |
-| Equip / unequip gear | `u6_ready(slot)` | `u6_panel_state` / `u6_inventory` (INVEN↔EQUIP flip) | ✅ built (live-unconfirmed) |
-| See which side panel + the inventory | — | `u6_panel_state` | ✅ built |
+| Equip / unequip gear | `u6_ready(slot)` | `u6_panel_state` / `u6_inventory` (INVEN↔EQUIP flip) | ✅ live-verified |
+| See which side panel + the inventory | — | `u6_panel_state` | ✅ live-verified |
 | Open/close door, leave gate, ladder (`U`) | `u6_use` (n/s/e/w or `here`) | door/chest frame state in return | ✅ built (live-unconfirmed) |
 | USE a carried item (drink/eat/light/play…) | `u6_use(inv:slot[, on=…])` | re-read the item (consumed / frame change) | ✅ built (live-unconfirmed) |
 | Open a *locked* door/chest (`U`) | `u6_use` (auto key flow) | finds the owned `OBJ_040` qual-match; reports a key stuck in a bag | ✅ built (live-unconfirmed) |
@@ -169,18 +169,20 @@ explore → leave the castle. (On foot, party mode, no combat.)
   `u6_input_state` — it's the live validation of the whole perceive/act/nav stack.
 - **Gear slice (full M1):** *perception done* — `u6_roster_status`, `u6_objects_near`,
   and `u6_object` (tile/weight/equip-slot) give the full "suit yourself" inputs.
-  *Action verbs built* — `u6_look`, `u6_get` (LOOK/GET live-verified) and the full
-  inventory-action set: `u6_use` (map tiles, carried items, and the **auto** locked-
-  door key flow — it finds the matching owned key), `u6_ready` (equip/unequip via the
-  inventory panel), and `u6_panel_state` (the panel-state read those drive). The
-  inventory-panel verbs are built and offline-tested but **live-unconfirmed**. **M1's
-  toolset is complete** — what remains is the live run.
+  *Action verbs built* — `u6_look`, `u6_get` (LOOK/GET live-verified), `u6_ready`
+  (equip/unequip via the inventory panel) and `u6_panel_state` both **live-verified
+  2026-06-26** (repeated back-to-back unready→ready on a party member, no manual ESC,
+  `SelectMode` self-cleared after each — see `u6_verb_mechanism.md` §2). `u6_use` (map
+  tiles, carried items, and the **auto** locked-door key flow) is built + offline-tested
+  but still **live-unconfirmed** — the one remaining gear-slice gap. **M1's toolset is
+  complete.**
 
 **The authoritative M1 phase plan + the live Slice-1 runbook/validation gate live
 in `u6_ai_agent.md` §5 & §7** (single source — not duplicated here). Progress:
-turn gate ✅, gear perception ✅, `u6_look`/`u6_get` ✅ live-verified, `u6_use` +
-`u6_ready` + `u6_panel_state` ✅ built (inventory + auto key flow + equip;
-live-unconfirmed). **M1 toolset complete; awaiting the live Slice-1 + gear run.**
+turn gate ✅, gear perception ✅, `u6_look`/`u6_get`/`u6_ready`/`u6_panel_state` ✅
+live-verified, plus TALK/`u6_conversation`/`u6_script_disasm` ✅ live-verified; `u6_use`
+✅ built + offline-tested but **live-unconfirmed** (the lone remaining verb). **M1 toolset
+complete; remaining live gap = `u6_use` + the full Slice-1 run.**
 
 ---
 

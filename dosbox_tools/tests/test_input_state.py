@@ -42,7 +42,7 @@ print("input_state classification:")
 chk("command ready",        0,1,0,0, "COMMAND_READY")
 chk("conversation dominates",1,1,0,0, "CONVERSATION")   # conv wins even if amm==1
 chk("selecting (amm 0)",    0,0,1,0, "SELECTING")
-chk("command beats select", 0,1,1,0, "COMMAND_READY")   # amm==1 dominates SelectMode
+chk("select beats command", 0,1,1,0, "SELECTING")       # SelectMode!=0 + amm==1 = panel armed -> must ESC
 chk("mouse mode",           0,0,0,1, "MOUSE_MODE")
 chk("busy (all idle)",      0,0,0,0, "BUSY")
 chk("select beats mouse",   0,0,1,1, "SELECTING")

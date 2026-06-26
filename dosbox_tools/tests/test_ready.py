@@ -1,8 +1,8 @@
 """Structural test for u6_ready: READY (INVEN->EQUIP, backpack item) / UNREADY
 (EQUIP->INVEN, equipped item), member derivation from the item's holder, the
 equip-silhouette cell math, refused-ready detection, and not-on-page / not-carried
-guards -- against the REAL function with a stub modelling the panel toggle (F<member>
--> INVENTORY, <tab> -> cursor, <enter> on the cell flips CoordUse; ESC -> ready)."""
+guards -- against the REAL function with a stub modelling the panel toggle ('/' -> roster,
+F<member> -> INVENTORY, <tab> -> cursor, <enter> on the cell flips CoordUse; ESC -> ready)."""
 import sys, types, os
 MEM = bytearray(0x10000)
 dm = types.ModuleType("dosbox_mem")
@@ -53,10 +53,21 @@ def set_selecting(): w16(u6.U6_AllowMouseMov,0); MEM[u6.U6_SelectMode]=1
 rec=[]
 def eng(k):
     rec.append(k)
-    if k.startswith("f") and k[1:].isdigit():
-        w16(u6.U6_StatusDisplay, 0x92); w16(u6.U6_PanelChar, int(k[1:])-1)
-    elif k=="tab":
-        if u6._rd16(u6.U6_StatusDisplay)==0x92: MEM[u6.U6_SelectMode]=2; w16(u6.U6_AllowMouseMov,0)
+    if k=="/":                                               # any view -> roster (CMD_91)
+        w16(u6.U6_StatusDisplay, 0x91)
+    elif k.startswith("f") and k[1:].isdigit():
+        w16(u6.U6_PanelChar, int(k[1:])-1)
+        if u6._rd16(u6.U6_StatusDisplay) in (0x91, 0x92):   # roster/inventory -> member INVENTORY
+            w16(u6.U6_StatusDisplay, 0x92)
+        # from PORTRAIT (0x90) the F-key only swaps the member, view stays portrait
+    elif k=="*":                                             # toggle PORTRAIT<->INVENTORY
+        sd=u6._rd16(u6.U6_StatusDisplay)
+        w16(u6.U6_StatusDisplay, 0x92 if sd==0x90 else 0x90)
+    elif k=="tab":                                          # seg_0C9C.c:1313/1183
+        sm=MEM[u6.U6_SelectMode]; sd=u6._rd16(u6.U6_StatusDisplay)
+        if sm==1: MEM[u6.U6_SelectMode]=2                              # map-select -> panel
+        elif sm==0: MEM[u6.U6_SelectMode]=2 if sd==0x92 else 1         # CMD_92: ->2 directly; else ->1
+        if MEM[u6.U6_SelectMode]==2: w16(u6.U6_AllowMouseMov,0)
     elif k=="enter":                                         # ready-mode toggle (no command active)
         col=MEM[u6.U6_PanelCol]; row=MEM[u6.U6_PanelRow]
         if col>=3:                                           # backpack cell -> READY
@@ -82,13 +93,15 @@ def chk(label, cond):
 def reset(items=()):
     for i in range(12): w16(u6.U6_VisBackpack+i*2, items[i] if i<len(items) else 0)
     for s in range(8): w16(u6.U6_Equipment+s*2, 0)
-    w8(u6.U6_PanelCol,3); w8(u6.U6_PanelRow,0); set_ready(); rec.clear()
+    w8(u6.U6_PanelCol,3); w8(u6.U6_PanelRow,0); set_ready()
+    w16(u6.U6_StatusDisplay, 0x90)                  # start non-roster (e.g. post-conversation PORTRAIT)
+    rec.clear()
 
 print("READY a backpack item (INVEN -> EQUIP), member from the item's holder:")
 set_obj(0x305, status=0x10, assoc=1)            # held by Party[0]=1 -> member 0 -> F1
 reset([0x305])                                  # visible at backpack cell (0,0)
 r = u6.u6_ready("inv:0x305")
-chk("drove F1 + tab + enter (no 'u'!) + esc", rec==["f1","tab","enter","esc"])
+chk("drove / + F1 + tab + enter (no 'u'!) + esc", rec==["/","f1","tab","enter","esc"])
 chk("item now EQUIP",                          coorduse(0x305)==0x18)
 chk("reports equipped on member 1",            "equipped" in r and "member 1" in r)
 
@@ -96,7 +109,7 @@ print("UNREADY an equipped item (EQUIP -> INVEN); member + equip-cell math:")
 set_obj(0x320, status=0x18, assoc=3)            # worn by Party[2]=3 -> member 2 -> F3
 reset(); w16(u6.U6_Equipment+0*2, 0x320)        # in SLOT_HEAD (equip cell (1,0))
 r = u6.u6_ready("0x320")
-chk("opened member 3's panel (F3)",            rec[0]=="f3")
+chk("opened member 3's panel (/ then F3)",     rec[:2]==["/","f3"])
 chk("cursor placed on HEAD cell (col1,row0)",  MEM[u6.U6_PanelCol]==1 and MEM[u6.U6_PanelRow]==0)
 chk("item now INVEN",                          coorduse(0x320)==0x10)
 chk("reports taken off",                       "taken off" in r)

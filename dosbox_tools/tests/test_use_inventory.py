@@ -1,7 +1,7 @@
 """Structural test for the inventory-target USE path: _parse_slot / _find_matching_key
 / _resolve_member (pure decisions) + _select_backpack_item, single-item USE, potion
 on=member, and the locked-door key flow -- against the REAL functions with a send_key
-stub that MODELS the engine's panel transitions (F<n>->INVENTORY, U->SELECTING,
+stub that MODELS the engine's panel transitions ('/'->roster, F<n>->INVENTORY, U->SELECTING,
 <tab>->panel cursor, Enter->commit on the cursor cell, key/potion->re-arm 'On')."""
 import sys, types, os, time as _time
 MEM = bytearray(0x10000)
@@ -54,12 +54,22 @@ def set_selecting(): w16(u6.U6_AllowMouseMov,0); MEM[u6.U6_SelectMode]=1
 rec=[]
 def eng_send(k):
     rec.append(k)
-    if k in ("f1","f2","f3","f4","f5","f6","f7","f8"):
-        w16(u6.U6_StatusDisplay, 0x92); w16(u6.U6_PanelChar, int(k[1])-1)
+    if k == "/":                                            # any view -> roster (CMD_91)
+        w16(u6.U6_StatusDisplay, 0x91)
+    elif k in ("f1","f2","f3","f4","f5","f6","f7","f8"):
+        w16(u6.U6_PanelChar, int(k[1])-1)
+        if u6._rd16(u6.U6_StatusDisplay) in (0x91, 0x92):   # roster/inventory -> member INVENTORY
+            w16(u6.U6_StatusDisplay, 0x92)
+    elif k == "*":                                          # toggle PORTRAIT<->INVENTORY
+        sd=u6._rd16(u6.U6_StatusDisplay)
+        w16(u6.U6_StatusDisplay, 0x92 if sd==0x90 else 0x90)
     elif k == "u":
         set_selecting()
-    elif k == "tab":
-        if u6._rd16(u6.U6_StatusDisplay) == 0x92: MEM[u6.U6_SelectMode]=2; w16(u6.U6_AllowMouseMov,0)
+    elif k == "tab":                                        # seg_0C9C.c:1313/1183
+        sm=MEM[u6.U6_SelectMode]; sd=u6._rd16(u6.U6_StatusDisplay)
+        if sm==1: MEM[u6.U6_SelectMode]=2                              # map-select -> panel
+        elif sm==0: MEM[u6.U6_SelectMode]=2 if sd==0x92 else 1         # CMD_92: ->2 directly; else ->1
+        if MEM[u6.U6_SelectMode]==2: w16(u6.U6_AllowMouseMov,0)
     elif k == "enter":
         col=MEM[u6.U6_PanelCol]; row=MEM[u6.U6_PanelRow]; idx=row*4+(col-3)
         pack=u6._visible_backpack(0); sel=pack[idx] if 0<=idx<12 else 0
@@ -108,13 +118,15 @@ chk("_resolve_member 'nobody' -> None", u6._resolve_member(0,"nobody") is None)
 
 def reset_panel(items):
     for i in range(12): w16(u6.U6_VisBackpack+i*2, items[i] if i<len(items) else 0)
-    w8(u6.U6_PanelCol,3); w8(u6.U6_PanelRow,0); set_ready(); state["await"]=False; state["door"]=None; rec.clear()
+    w8(u6.U6_PanelCol,3); w8(u6.U6_PanelRow,0); set_ready(); state["await"]=False; state["door"]=None
+    w16(u6.U6_StatusDisplay, 0x90)                  # start non-roster (post-conversation PORTRAIT)
+    rec.clear()
 
 print("inventory single-item USE (food, no second input):")
 set_obj(0x305, 0x05f, status=0x10, assoc=1)              # a food item (not a SECOND type)
 reset_panel([0x305])                                     # at cell (0,0)
 r = u6.u6_use("inv:0x305")
-chk("sequence f1,u,tab,enter", rec==["f1","u","tab","enter"])
+chk("sequence /,f1,u,tab,enter", rec==["/","f1","u","tab","enter"])
 chk("cursor written to (col3,row0)", MEM[u6.U6_PanelCol]==3 and MEM[u6.U6_PanelRow]==0)
 chk("committed + COMMAND_READY", "now COMMAND_READY" in r and "0x305" in r)
 
@@ -123,7 +135,7 @@ set_obj(0x306, 0x113, status=0x10, assoc=1)              # a potion
 reset_panel([0x306]); r = u6.u6_use("inv:0x306")          # no on=
 chk("missing on -> ESC abort + asks", "needs a target" in r and rec[-1]=="esc")
 reset_panel([0x306]); r = u6.u6_use("inv:0x306", on="2")  # on=member 2
-chk("on=2 -> sends member digit", rec==["f1","u","tab","enter","2"] and "on member 2" in r)
+chk("on=2 -> sends member digit", rec==["/","f1","u","tab","enter","2"] and "on member 2" in r)
 
 print("locked-door key flow (auto-find the matching key, U->key->door):")
 set_obj(0x400, 0x129, frame=8, qual=5, status=0, x=10, y=9, z=0)   # locked door north of avatar
@@ -131,7 +143,7 @@ reset_panel([0x307]); state["door"]=0x400                 # the key (qual5) is v
 r = u6.u6_use("north")
 chk("used the qual-matched key 0x307", "0x307" in r)
 chk("door reported unlocked", "unlocked" in r)
-chk("drove panel-select then the door arrow", rec==["f1","u","tab","enter","up"])
+chk("drove panel-select then the door arrow", rec==["/","f1","u","tab","enter","up"])
 
 set_obj(0x401, 0x129, frame=8, qual=7, status=0, x=10, y=9, z=0)   # door needs qual7 (none owned)
 set_obj(0x400, 0, status=0)                               # remove the qual5 door

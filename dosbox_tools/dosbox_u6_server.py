@@ -1672,20 +1672,44 @@ def _parse_slot(t):
 
 def _panel_commit(base_addr, member_index, command, locate, confirm):
     """Shared status-panel drive for inventory-target commands (USE-on-item, READY/
-    UNREADY) -- the only route to an inventory target. Steps, each confirmed by a memory
-    read: F<member+1> -> INVENTORY view (CMD_92); `locate()` finds the target's cursor
-    cell (col,row) in the now-shown panel (or None); [`command` -> SELECTING, for a verb
-    like USE; None for the command-less Ready toggle]; <tab> -> panel cursor
-    (SelectMode==2); **WRITE D_0499/D_049A to the cell** (the Enter redraw C_0C9C_1AE5(2)
-    sets PointerX/Y = D_054B[col]/D_0559[row][col], so the write lands exactly); <enter>
-    -> `confirm()`. Any mismatch ESC-aborts to COMMAND_READY (a command that aborts
-    before its effect costs no turn). Returns (ok, err)."""
-    fkey = f"f{member_index + 1}"                          # F1..F8 select a member's view
-    ok, _ = _guarded_send(base_addr, fkey,
-                          lambda: _rd16(base_addr + U6_StatusDisplay) == 0x92)
-    if not ok:
+    UNREADY) -- the only route to an inventory target. Opens the target member's
+    INVENTORY panel robustly, then drives the cursor. Steps, each confirmed by a memory
+    read:
+      OPEN (the view left by the prior action is NOT deterministic -- esp. after a
+      conversation it may be PORTRAIT or INVENTORY -- and F<member> only opens INVENTORY
+      from the ROSTER/INVENTORY view; from PORTRAIT it just swaps the portrait's member,
+      seg_0C9C.c:1345-1371): '/' (only if not already roster) -> roster CMD_91;
+      F<member+1> -> that member's INVENTORY (CMD_92), setting D_04B3=member DIRECTLY so
+      any party member works, not just the Avatar (:1369-1371); '*' (defensive, only if
+      it somehow landed in PORTRAIT) -> INVENTORY (:1351).
+      THEN: `locate()` finds the target's cursor cell (col,row) in the now-shown panel
+      (or None); [`command` -> SELECTING, for a verb like USE; None for the command-less
+      Ready toggle]; <tab> -> panel cursor (SelectMode==2 -- arriving via F<member> into
+      CMD_92, this TAB skips the D_04B3=Active reset gated on StatusDisplay!=CMD_92 at
+      :1185, so a non-Avatar target is preserved); **WRITE D_0499/D_049A to the cell**
+      (the Enter redraw C_0C9C_1AE5(2) sets PointerX/Y = D_054B[col]/D_0559[row][col], so
+      the write lands exactly); <enter> -> `confirm()`.
+    Any mismatch ESC-aborts to COMMAND_READY (a command that aborts before its effect
+    costs no turn). Returns (ok, err)."""
+    # A prior panel op leaves the cursor armed (SelectMode=2); the open keys are only
+    # interpreted from a clean COMMAND_READY, so clear any lingering select mode first
+    # (also the per-tool postcondition, belt-and-suspenders against a dirty entry).
+    _abort_to_ready(base_addr)
+    # OPEN: normalize to roster, then F<member> -> that member's INVENTORY (CMD_92).
+    sd = lambda: _rd16(base_addr + U6_StatusDisplay)
+    if sd() != 0x91:                                       # CMD_91 = roster
+        ok, _ = _guarded_send(base_addr, "/", lambda: sd() == 0x91)
+        if not ok:
+            _abort_to_ready(base_addr)
+            return False, "could not reach the roster view to open the panel (StatusDisplay != CMD_91)"
+    fkey = f"f{member_index + 1}"                          # F1..F8 -> that member's INVENTORY
+    _guarded_send(base_addr, fkey, lambda: sd() in (0x90, 0x92))
+    if sd() == 0x90:                                       # defensive: F landed in PORTRAIT
+        _guarded_send(base_addr, "*", lambda: sd() == 0x92)
+    if sd() != 0x92:
+        _abort_to_ready(base_addr)
         return False, (f"could not open member {member_index}'s INVENTORY view "
-                       f"(F{member_index + 1} -> StatusDisplay != CMD_92)")
+                       f"(F{member_index + 1}; StatusDisplay=0x{sd():04x})")
     cell = locate()
     if cell is None:
         _abort_to_ready(base_addr)
@@ -1695,8 +1719,14 @@ def _panel_commit(base_addr, member_index, command, locate, confirm):
         ok, _ = _guarded_send(base_addr, command, "SELECTING")
         if not ok:
             _abort_to_ready(base_addr); return False, f"'{command.upper()}' did not enter select mode"
-    ok, _ = _guarded_send(base_addr, "tab", lambda: _rd8(base_addr + U6_SelectMode) == 2)
-    if not ok:
+    # Arm the panel cursor. In the INVENTORY view (CMD_92) a SINGLE TAB sets SelectMode=2
+    # directly (seg_0C9C.c:1313-1316: TAB in CMD_92 -> 2; and a map-select(1) -> 2 too).
+    # Reliable because the clean entry (SelectMode=0) above means the open lands squarely
+    # in CMD_92 before this TAB.
+    sm = lambda: _rd8(base_addr + U6_SelectMode)
+    if sm() != 2:
+        _guarded_send(base_addr, "tab", lambda: sm() == 2)
+    if sm() != 2:
         _abort_to_ready(base_addr); return False, "<tab> did not arm the panel cursor (SelectMode != 2)"
     dm.write(S.handle, base_addr + U6_PanelCol, bytes([col]))
     dm.write(S.handle, base_addr + U6_PanelRow, bytes([row]))
@@ -1836,8 +1866,8 @@ def u6_use(target: str, on: str = "") -> str:
       * pick/shovel/telescope: on=<n/s/e/w>.  * an instrument: on=<digits 0-9> (tune).
     Single-use items (food/drink/torch/gem/book) and unlocked map objects need no `on`.
     If a required `on` is missing the tool ESC-aborts (no turn spent) and asks -- it
-    never guesses. The inventory route drives the status panel (F<member> -> INVENTORY
-    view, <tab> -> panel cursor, Enter -> commit), each step confirmed by a memory read
+    never guesses. The inventory route drives the status panel (normalize to roster ->
+    F<member> -> INVENTORY view, <tab> -> panel cursor, Enter -> commit), each step confirmed by a memory read
     (the agent can't see the screen). The return reports the resulting STATE (door
     open/closed/locked, item consumed / frame change). Sources: dispatch seg_0A33.c:1115,
     handler C_27A1_6179, key C_27A1_2D8E:1410, panel C_155D_1267. Turn-gated."""
@@ -1868,9 +1898,9 @@ def u6_ready(target: str) -> str:
     u6_inventory / u6_panel_state). The tool reads the item's holder + current state and
     figures out the rest: which party member's panel to open, and whether to READY
     (INVEN->EQUIP, a backpack item) or UNREADY (EQUIP->INVEN, an equipped item). It then
-    drives the panel (F<member> -> INVENTORY, <tab> -> cursor, place on the item's cell,
-    <enter> -> C_155D_144B Ready / C_155D_1738 Unready), each step confirmed by a memory
-    read, and leaves the panel. Result = the item's CoordUse flip. A READY can be refused
+    drives the panel (normalize to roster -> F<member> -> INVENTORY, <tab> -> cursor,
+    place on the item's cell, <enter> -> C_155D_144B Ready / C_155D_1738 Unready), each
+    step confirmed by a memory read, and leaves the panel. Result = the item's CoordUse flip. A READY can be refused
     by the engine (no equip slot / too heavy > STR*10 / that slot occupied -- printed to
     the scroll the agent can't see); the tool detects the no-flip and says so, and the
     agent can diagnose via u6_object (equip-slot), u6_roster_status (STR*10 cap), and
@@ -2112,8 +2142,11 @@ def _input_state(base_addr):
       SELECTING     -- a command is awaiting a target/direction; supply it
       MOUSE_MODE    -- mouse UI mode; keyboard play wants this off
       BUSY          -- processing the turn / animating; wait
-    Priority matters: AllowMouseMov==1 fires only at the top-level getch, so it
-    cleanly dominates SELECTING/BUSY (which run with it 0)."""
+    Priority matters: SelectMode!=0 means a target/panel cursor is armed and MUST be
+    cleared (ESC) before the next command -- it is checked BEFORE AllowMouseMov, because
+    the panel-armed state runs with AllowMouseMov==1 too (a TAB into the inventory leaves
+    SelectMode=2 AND AllowMouseMov=1; classifying that as COMMAND_READY made the cleanup
+    helpers stop early and stranded the panel armed)."""
     conv  = dm.read(S.handle, base_addr + U6_IsInConversation, 1)[0]
     amm   = int.from_bytes(dm.read(S.handle, base_addr + U6_AllowMouseMov, 2), "little")
     sel   = dm.read(S.handle, base_addr + U6_SelectMode, 1)[0]
@@ -2122,10 +2155,10 @@ def _input_state(base_addr):
              "SelectMode": sel, "MouseMode": mouse}
     if conv:
         state = "CONVERSATION"
+    elif sel:                                   # a target/panel cursor is armed -> must ESC
+        state = "SELECTING"
     elif amm == 1:
         state = "COMMAND_READY"
-    elif sel:
-        state = "SELECTING"
     elif mouse:
         state = "MOUSE_MODE"
     else:
