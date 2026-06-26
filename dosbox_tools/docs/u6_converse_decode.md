@@ -207,10 +207,22 @@ Each file is `NNN_Name.txt` (`005_Lord_British.txt`); `00_INDEX.txt` lists
 
 - **`--trace`: 200/200 scripts fully traced, 0 untraced bytes**, ~2.1 KB total
   genuine leftover data across the corpus.
-- **`--linear`: 92/200 scripts** carry cosmetic `??? 0xNN` flags — the live tool's
-  forward sweep desyncing on input-prompt / PRINTSTR-list / data-section opcodes.
-  These are harmless to the *agent* (it plays via `u6_conversation`/`u6_say`, not the
-  disassembler), but they are why the offline trace exists.
+- **`--linear`: 10/200 scripts** carry cosmetic `??? 0xNN` flags — down from **92**
+  before the operand-model fixes below were ported into the live `_disassemble`
+  (`GET*`/`PRINTSTR`/`LET` now consume their operands; stray `0xa7` tolerated). The
+  residual 10 are the linear sweep's *inherent* limit: a forward pass can't help
+  grazing an inline data table after a diverging `IF` — only the reachability trace
+  avoids that. Harmless to the agent either way (it plays via `u6_conversation` /
+  `u6_say`, not the disassembler).
+
+**Ported back to the live server.** The §4 operand fixes are not offline-only — the
+same bugs sat in `dosbox_u6_server.py`. `_disasm_let`/`_disassemble` got the `LET`
+chain, the string-`LET` index factor, `PRINTSTR`, the `GET*` operand, and the stray-
+`0xa7` no-op (92→10 `???`); `_ConverseVM._let` got the list-element chain (closing a
+real `DECODER_STOP` on the gameplay path — Budo). What does NOT port is the
+reachability itself: the live `u6_script_disasm` stays a linear sweep, because the
+recursive trace is the offline tool's job. (It *could* adopt it — the live tool reads
+the whole `TalkBuf` — but that's a separate decision.)
 
 This decodes the data segments the tech-doc-built `ultima6/script.js` could not —
 `script.js` lacked the source, so its `skipCodeBlock` asserts on the STRSEARCH /

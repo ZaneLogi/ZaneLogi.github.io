@@ -733,9 +733,15 @@ class _ConverseVM:
 
     def _let(self):
         di = self._u8()
-        if di == self.ADDRESS:
+        if di == self.ADDRESS:                              # var-cell / list-element dest
             self.pc += 4
-            if self._u8() == self.LET_VALUE:
+            if self.pc < self.n and self.d[self.pc] == self.LET_VALUE:
+                self.pc += 1                                # optional leading LET_VALUE
+            self._skip_factor()                             # value factor(s): an a8-separated
+            guard = 0                                       # chain -- list-element LET is
+            while (0 < self.pc <= self.n and guard < 8      # `@a[idx] a8 @b[idx] a7`; the old
+                   and self.d[self.pc - 1] == self.LET_VALUE):  # 1-factor read DECODER_STOPped
+                guard += 1
                 self._skip_factor()
             return
         kind = self._u8()
@@ -1034,7 +1040,10 @@ _DIS_STMT = {                                   # side-effect opcode -> mnemonic
 _DIS_MARK = {                                   # 0-operand structural / control markers
     0xf1: "DESC", 0xf2: "MAIN", 0xf3: "PREFIX", 0xf7: "ASKTOP", 0xee: "ENDRES",
     0xf6: "RES", 0xa2: "ENDIF", 0xa3: "ELSE", 0xb6: "LEAVE", 0xcb: "WAIT", 0x9e: "REST",
-    0xf8: "GET", 0xf9: "GETSTR", 0xfa: "GETCHR", 0xfb: "GETINT", 0xfc: "GETDIGIT",
+    0xf8: "GET",                                 # GET's permitted-keys string renders as text
+    0xa7: "(eof)",                               # stray END_OF_FACTOR -> VM no-op (decode_block)
+    # NOTE: GETSTR/GETCHR/GETINT/GETDIGIT (0xf9-0xfc) are NOT here -- they carry a
+    # <idx><b2/b3> var operand and are handled explicitly in _disassemble.
 }
 
 
@@ -1075,22 +1084,46 @@ def _disasm_let(d, pc):
     """OP_LET -> 'LET <dest> = <expr>' (seg_1703.c:746)."""
     n = len(d)
     di = d[pc] if pc < n else 0; pc += 1
-    if di == 0xd2:                              # ADDRESS destination
+    if di == 0xd2:                              # ADDRESS dest (var cell / list element)
         a = int.from_bytes(d[pc:pc+4], "little"); pc += 4
         if pc < n and d[pc] == 0xa8: pc += 1
-        expr, pc = _disasm_factor(d, pc)
-        return f"LET @0x{a:04x} = {expr}", pc
+        expr, pc = _disasm_factor(d, pc)         # value factor(s): an a8-separated chain
+        parts, guard = [expr], 0                 # (list-element LET: <idx> a8 <val> a7)
+        while 0 < pc <= n and d[pc - 1] == 0xa8 and guard < 8:
+            guard += 1
+            e2, pc = _disasm_factor(d, pc); parts.append(e2)
+        rhs = f"[{parts[0]}] = {parts[1]}" if len(parts) == 2 else "= " + " | ".join(parts)
+        return f"LET @0x{a:04x}{rhs}", pc
     kind = d[pc] if pc < n else 0; pc += 1       # VARINT (0xb2) / VARSTR (0xb3)
     if pc < n and d[pc] == 0xa8: pc += 1         # LET_VALUE
     if kind == 0xb2:
         expr, pc = _disasm_factor(d, pc)
         return f"LET VarInt[{di}] = {expr}", pc
     tag = d[pc] if pc < n else 0; pc += 1        # string assignment
-    if tag == 0xd2:
+    if tag == 0xd2:                              # = @addr[index] (string-list ref)
         a = int.from_bytes(d[pc:pc+4], "little"); pc += 4
-        return f"LET VarStr[{di}] = @0x{a:04x}", pc
+        if pc < n and d[pc] == 0xb1:             # CALL -> direct ref
+            return f"LET VarStr[{di}] = @0x{a:04x}", pc + 1
+        idx, pc = _disasm_factor(d, pc)          # index factor selects the Nth string
+        return f"LET VarStr[{di}] = @0x{a:04x}[{idx}]", pc
     if pc < n and d[pc] == 0xb3: pc += 1
     return f"LET VarStr[{di}] = VarStr[?]", pc
+
+
+def _disasm_printstr(d, pc):
+    """OP_PRINTSTR -> 'PRINTSTR @addr[index]' / VarStr (seg_1703.c:729)."""
+    n = len(d)
+    tag = d[pc] if pc < n else 0; pc += 1
+    if tag == 0xd2:                              # ADDRESS -> string-list
+        a = int.from_bytes(d[pc:pc+4], "little"); pc += 4
+        if pc < n and d[pc] == 0xb1:             # CALL -> direct ref
+            return f"PRINTSTR @0x{a:04x}", pc + 1
+        idx, pc = _disasm_factor(d, pc)          # index factor selects the Nth string
+        return f"PRINTSTR @0x{a:04x}[{idx}]", pc
+    if tag != 0xd5:                              # VarStr form: di + checked byte
+        di = d[pc] if pc < n else 0; pc += 2
+        return f"PRINTSTR VarStr[{di}]", pc
+    return "PRINTSTR", pc
 
 
 def _disassemble(d, n):
@@ -1136,6 +1169,14 @@ def _disassemble(d, n):
             mn = _DIS_STMT.get(op, f"OP_{op:02x}")
             cmt = f"   ; obj 0x{int(args[1]):02x}" if op in (0xb9, 0xba) and args[1].isdigit() else ""
             lines.append((addr, f"{mn} {', '.join(args)}{cmt}"))
+        elif op == 0xb5:                                # PRINTSTR @addr[index] / VarStr
+            text, pc = _disasm_printstr(d, pc)
+            lines.append((addr, text))
+        elif op in (0xf9, 0xfa, 0xfb, 0xfc):            # GET* var input: <idx><b2/b3>
+            idx = d[pc] if pc < n else 0; pc += 1
+            if pc < n and d[pc] in (0xb2, 0xb3): pc += 1
+            nm = {0xf9: "GETSTR", 0xfa: "GETCHR", 0xfb: "GETINT", 0xfc: "GETDIGIT"}[op]
+            lines.append((addr, f"{nm} Var[{idx}]"))
         else:
             lines.append((addr, f"??? 0x{op:02x}"))
     out, starts = [], {a for a, _ in lines}

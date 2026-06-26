@@ -122,5 +122,17 @@ chk("highlight: dedup case-insensitively, first-seen order", hl==["gold","silver
 clean, hl = u6._extract_highlights("no markers at all.")
 chk("highlight: plain text unchanged, no words", clean=="no markers at all." and hl==[])
 
+# 10) list-element LET `@a[idx] a8 @b[idx] a7` -- the value is an a8-SEPARATED factor
+#     chain. The old _let read a single factor after the ADDRESS dest and desynced
+#     -> DECODER_STOP mid-conversation (Budo). The fix consumes the whole chain, so
+#     the body decodes cleanly to the trailing text.
+ADDR, B4 = 0xd2, 0xb4
+listlet = bytes([KEY]+T("x")+[RES]
+                + [0xa6, ADDR, 0x1b,0x11,0,0, BYTE,0, B4, 0xa8, ADDR, 0x2b,0x11,0,0, BYTE,0, B4, EOF]
+                + T("done.")+[ENDRES])
+vm=u6._ConverseVM(listlet, env())
+chk("list-element LET decodes, no DECODER_STOP",
+    vm.find_response("x") and vm.decode_block(set())=="done.")
+
 print("ALL PASS" if ok else "SOME FAILED")
 sys.exit(0 if ok else 1)

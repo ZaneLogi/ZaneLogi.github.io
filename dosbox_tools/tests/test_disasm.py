@@ -61,5 +61,20 @@ chk("LET = RND",                 "LET VarInt[7] = Rand(1, 10)" in out)
 chk("GIVEOBJ + obj comment",     "GIVEOBJ self, 64, 1, 1" in out and "obj 0x40" in out)
 chk("unknown opcode flagged",    "??? 0x88" in out)
 
+# Second script: the operand-bearing ops that used to desync the linear sweep --
+# PRINTSTR @addr[index], GET* var input, and a list-element LET. All must now
+# decode cleanly (no '??? 0x..').
+PRINT, GETDIGIT, ADDR, B4, CALL = 0xb5, 0xfc, 0xd2, 0xb4, 0xb1
+s2 = bytes(
+    [ID, 9] + T("Q") + [DESC] + T("x") + [MAIN] +
+    [PRINT, ADDR, 0x40, 0, 0, 0, BYTE, 1, RND, EOF] +          # PRINTSTR @0x40[Rand]
+    [GETDIGIT, 0, VARINT] +                                    # GETDIGIT Var[0]
+    [LET, ADDR, 0x50, 0, 0, 0, BYTE, 0, B4, 0xa8, ADDR, 0x60, 0, 0, 0, BYTE, 0, B4, EOF])
+o2 = u6._disassemble(s2, len(s2))
+chk("PRINTSTR @addr[index]",   "PRINTSTR @0x0040[" in o2)
+chk("GETDIGIT var operand",    "GETDIGIT Var[0]" in o2)
+chk("list-element LET (a8-chain rendered)", "LET @0x0050[" in o2)
+chk("no desync in s2 (full a8-chain consumed, no ???)", "???" not in o2)
+
 print("ALL PASS" if ok else "SOME FAILED")
 sys.exit(0 if ok else 1)
