@@ -50,7 +50,7 @@ them via `ctx.py`.
 | `decode` | "**what is this**" — bytes → meaning | — | `_obj_tfq/_obj_name`, `_gear_*`, `_equip_slot`, `_door_state/_chest_state`, `_npc_class`, `_actor_map/_actor_cells`, `_door_at_tile`, `_holder_party_index`, `_party_member_slot`, `_visible_backpack`, `_npc_xyz`, `_compass`, `_dir_to`, `_tile_name`, `_ACTOR_RANK` |
 | `converse` | the dialogue VM + decoder + offline disassembler | `u6_conversation`, `u6_script_disasm` | `_ConverseVM`, `_DecoderStop`, `_decode_conversation`, `_extract_highlights`, `_disassemble`, `_DIS_*`, `_CV_SIDE_EFFECT`, … |
 | `navigate` | walkable/cost grid (`C_1E0F_000F` port), Dijkstra, live area map, **live-window** movement | `u6_walkable`, `u6_area_map`, `u6_pathfind`, `u6_goto`, `u6_goto_xy`, `u6_validate_passability` | `_build_grid`, `_dijkstra`, `_adjacent_goals`, `_mask_walk`, `_closest_reachable`, `_cell_diag`, `u6_area_map_data`, `_DOOR_GLYPH`, `_RESTORE_ARROW` |
-| `affordance` | **what does USE do** — `USE_DISPATCH`, an exhaustive mirror of `seg_27a1.c`'s USE switch (all 85 case-types / 48 rows, A/B/C/TBD) + the predict-from-source layer (**A-mechanisms built**; B/C predictors are the next slice — they return a graceful operate-note for now) | `u6_affordance` | `USE_DISPATCH`, `_BY_TYPE`, `predict_use`, `_use_target`, `_search_area/_search_type_at`, `_predict_qual_toggle/_open_close/_unlock`, the B/C `_predict_*` stubs, `_NOT_IMPL` |
+| `affordance` | **what does USE do** — `USE_DISPATCH`, an exhaustive mirror of `seg_27a1.c`'s USE switch (all 85 case-types / 48 rows, A/B/C/TBD) + the predict-from-source layer (**A + B + C all built**; C is operate-mechanic only, quest payload withheld; **10 TBD rows** left return a graceful operate-note) | `u6_affordance` | `USE_DISPATCH`, `_BY_TYPE`, `predict_use`, `_use_target`, `_search_area/_search_type_at`, `_predict_*` (qual_toggle/open_close/unlock/light/consume/eat/vehicle/play/simple/quest_mechanic + weathervane/study/squeak/self_toggle), `_NOT_IMPL` |
 | `cartography` | **whole-level** routing over the baked terrain (`mapdata`), beyond the 40x40 window + the **structured spatial-query layer** (#1) | `u6_route`, `u6_at`, `u6_nearest`, `u6_interactables_near` | `_baked_region_grid`, `_region_dijkstra`, `_use_from`, `_top_object_slot`, `_describe_obj`, `_actor_on_tile`, `_level_tiles`, `_runlength` |
 | `perceive` | read-only perception | `u6_object`, `u6_inventory`, `u6_panel_state`, `u6_avatar`, `u6_party`, `u6_input_state`, `u6_roster_status`, `u6_npcs_near`, `u6_objects_near` | — (tools are self-contained) |
 | `act` | action verbs + their keyboard mechanisms | `u6_move`, `u6_talk`, `u6_look`, `u6_get`, `u6_use`, `u6_ready`, `u6_say`, `u6_key`, `u6_talk_to`, `u6_use_object` (#2: go-adjacent + USE) | `_adjacency_action`, `_in_window`, `_panel_commit`, `_begin_select/_walk_cursor`, `_use_map/_use_inventory/_use_key_flow`, `_select_backpack_item`, `_find_matching_key`, `_drain_to_ready`, `_USE_*`, `_U6_DIR/_DIR8`, `_EQUIP_CELL`, … |
@@ -60,7 +60,7 @@ them via `ctx.py`.
 `u6_at`/`u6_nearest`/`u6_interactables_near`) + affordance 1 (`u6_affordance`) + perceive 9 +
 act 10 + hook 1 = **33 built U6 tools** (no stubs left) = 33 registered, plus the shared
 base/input tools registered by `ctx`. (`mapdata` is data + helpers — no built tools.
-`affordance`'s `u6_affordance` predicts A-mechanisms now; its B/C predictors are stubs.)
+`affordance`'s `u6_affordance` predicts A/B/C now; 10 TBD rows remain (graceful note).)
 
 ---
 
@@ -220,9 +220,25 @@ case); suite green; **33 tools, no stubs left**. **Live-verified** (castle/Monic
 extinguished (frame change), re-USE from adjacent (no nav) re-lit it; the now-reachable
 `_use_from` correctly omitted the inside-unreachable door.
 
-**Next:** affordance **B** (utility predictors), then **C-operate-mechanic**, then `#3`
-(give `u6_route` a door-as-passable object overlay so the planner can route through doors).
-All identified by the 2026-06-27 castle-escape play-test (see `u6_ai_agent.md`).
+**Step 3 done (2026-06-27): affordance B + C predictors (+ 4 former-TBD quick wins).**
+**B (utility):** `_predict_light` (lit/doused from frame), `_predict_consume` (potion/keg/
+torch), `_predict_eat` (food), `_predict_vehicle` (board/mount/dismount), `_predict_play`
+(instruments), `_predict_simple` (cow/churn/beehive/fishing/fountain/crystal-ball/telescope).
+**C (quest, operate-mechanic ONLY):** `_predict_quest_mechanic` for orb/moonstone/rune/silver
+horn/balloon plans/vortex cube — HOW to operate each; the moongate destination, the rune
+mantra, the summon, and the **vortex-cube win are deliberately WITHHELD** (blind-discovery;
+the handlers were read only to the operate surface). **Manifest correction:** `C_27A1_5F43`
+is the **food/eat** handler (the old "incl. 0x87 Orb" note was wrong — the row is all food);
+the real **Orb of the Moons is `0x057` → `C_27A1_5789`** (now C). **4 quick wins** off TBD:
+weathervane (`0x0D4`), scroll (`0x061`), squeak toy (`0x0A9`), self-toggle (`0x14E`). Tests
+`test_affordance.py` 24/24; suite green. **Live-verified** (castle/Monica): food → "eat"
+(B), the Orb at type `0x057` → C operate-note "a red moongate opens… where it leads is
+yours to discover", braziers → "douses/lights". **10 TBD rows remain** (peripheral handlers,
+each carrying its `C_27A1_*`+line; `predict_use` returns the graceful note for them).
+
+**Next:** the remaining **10 TBD rows** (low-value peripheral USE handlers — a later cleanup
+slice), and `#3` (give `u6_route` a door-as-passable object overlay so the whole-level
+planner can route through doors). See the 2026-06-27 castle-escape play-test in `u6_ai_agent.md`.
 
 ---
 

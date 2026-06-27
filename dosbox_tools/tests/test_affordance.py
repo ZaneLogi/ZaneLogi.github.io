@@ -188,13 +188,106 @@ def test_predict_use_lever_end_to_end():
     assert p["handler"] == "C_27A1_4479"
 
 
-def test_predict_use_b_row_graceful_note():
+def test_predict_use_tbd_row_graceful_note():
     from u6 import affordance as A
-    objs = build_objs([{"slot": 0x100, "type": 0x05A, "frame": 0, "x": 1, "y": 1}])  # torch (B)
+    objs = build_objs([{"slot": 0x100, "type": 0x073, "frame": 0, "x": 1, "y": 1}])  # a TBD row
     _stub_dm_read(objs)
     p = A.predict_use(0, 0x100, 0)
-    assert p["decoded"] is False and p["category"] == A.AFF_UTILITY, p
+    assert p["decoded"] is False and p["category"] == A.AFF_TBD, p
     assert "not decoded this slice" in p["effect"]
+
+
+def test_predict_use_brazier_b_end_to_end():
+    from u6 import affordance as A
+    objs = build_objs([{"slot": 0x100, "type": 0x0CE, "frame": 1, "x": 2, "y": 2}])  # lit brazier
+    _stub_dm_read(objs)
+    p = A.predict_use(0, 0x100, 0)
+    assert p["decoded"] and p["category"] == A.AFF_UTILITY, p
+    assert "douses the brazier" in p["effect"]
+
+
+# --- B predictors -------------------------------------------------------------------
+def test_predict_light_toggle():
+    from u6 import affordance as A
+    no = build_objs([])
+    lit = A._predict_light(no, (0x0CE, 1, 0, 0, 0), 0)         # brazier, frame bit0 = lit
+    assert lit["verb"] == "douse" and "douses the brazier" in lit["effect"], lit
+    unlit = A._predict_light(no, (0x0A4, 0, 0, 0, 0), 0)       # fireplace, unlit
+    assert unlit["verb"] == "light" and "lights the fireplace" in unlit["effect"], unlit
+
+
+def test_predict_consume_and_eat():
+    from u6 import affordance as A
+    no = build_objs([])
+    assert "potion" in A._predict_consume(no, (0x113, 0, 0, 0, 0), 0)["effect"]
+    assert "torch" in A._predict_consume(no, (0x05A, 0, 0, 0, 0), 0)["effect"]
+    eat = A._predict_eat(no, (0x087, 0, 0, 0, 0), 0)           # 0x87 is FOOD, not the orb
+    assert eat["verb"] == "eat" and eat["category"] == A.AFF_UTILITY, eat
+
+
+def test_predict_vehicle_simple_play():
+    from u6 import affordance as A
+    no = build_objs([])
+    assert "mount" in A._predict_vehicle(no, (0x1AE, 0, 0, 0, 0), 0)["effect"]
+    assert "dismount" in A._predict_vehicle(no, (0x1AF, 0, 0, 0, 0), 0)["effect"]
+    assert "cow" in A._predict_simple(no, (0x1AC, 0, 0, 0, 0), 0)["effect"]
+    assert "instrument" in A._predict_play(no, (0x09D, 0, 0, 0, 0), 0)["effect"]
+
+
+# --- C predictors: operate-mechanic only, outcome WITHHELD --------------------------
+def test_predict_quest_operate_only_withholds_outcome():
+    from u6 import affordance as A
+    no = build_objs([])
+    orb = A._predict_quest_mechanic(no, (0x057, 0, 0, 0, 0), 0)
+    assert orb["category"] == A.AFF_QUEST and "moongate" in orb["effect"]
+    assert "discover" in orb["effect"]                        # destination withheld
+    rune = A._predict_quest_mechanic(no, (0x0F5, 0, 0, 0, 0), 0)   # a virtue rune (0xF2..0xF9)
+    assert "Mantra" in rune["effect"] and "discover" in rune["effect"]  # mantra NOT revealed
+    cube = A._predict_quest_mechanic(no, (0x03E, 0, 0, 0, 0), 0)
+    assert "withheld" in cube["effect"]                       # the WIN is not revealed
+
+
+# --- manifest reclassification (the 5F43-is-food / orb-is-057 correction) -----------
+def test_food_row_is_utility_not_quest():
+    from u6 import affordance as A
+    for t in (0x05F, 0x087, 0x109):                           # the old 'orb' row is all FOOD
+        row = A._BY_TYPE[t]
+        assert row["cat"] == A.AFF_UTILITY and row["pat"] is A._predict_eat, (hex(t), row)
+
+
+def test_orb_row_is_quest_057():
+    from u6 import affordance as A
+    row = A._BY_TYPE[0x057]
+    assert row["cat"] == A.AFF_QUEST and row["pat"] is A._predict_quest_mechanic, row
+
+
+def test_all_abc_rows_have_a_predictor():
+    from u6 import affordance as A
+    bad = [r["h"] for r in A.USE_DISPATCH
+           if r["cat"] in (A.AFF_MECHANISM, A.AFF_UTILITY, A.AFF_QUEST) and r["pat"] is None]
+    assert bad == [], bad                                     # only TBD rows may lack a predictor
+
+
+def test_quickwin_former_tbd_rows():
+    from u6 import affordance as A
+    no = build_objs([])
+    assert "wind" in A._predict_weathervane(no, (0x0D4, 0, 0, 0, 0), 0)["effect"]
+    assert "scroll" in A._predict_study(no, (0x061, 0, 0, 0, 0), 0)["effect"]
+    assert "squeak" in A._predict_squeak(no, (0x0A9, 0, 0, 0, 0), 0)["effect"].lower()
+    st = A._predict_self_toggle(no, (0x14E, 1, 0, 0, 0), 0)    # frame bit0 set = on
+    assert st["current_state"] == "on" and st["predicted_state"] == "off", st
+    # rows wired (no longer TBD)
+    for t, cat in [(0x0D4, A.AFF_UTILITY), (0x061, A.AFF_UTILITY),
+                   (0x0A9, A.AFF_UTILITY), (0x14E, A.AFF_MECHANISM)]:
+        row = A._BY_TYPE[t]
+        assert row["cat"] == cat and row["pat"] is not None, (hex(t), row)
+
+
+def test_tbd_rows_remaining_count():
+    from u6 import affordance as A
+    # after A/B/C + the 4 quick wins, exactly 10 TBD rows should remain.
+    tbd = [r["h"] for r in A.USE_DISPATCH if r["cat"] == A.AFF_TBD]
+    assert len(tbd) == 10, tbd
 
 
 def test_predict_use_absent_type():

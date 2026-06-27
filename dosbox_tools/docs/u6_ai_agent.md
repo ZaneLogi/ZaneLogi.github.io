@@ -165,10 +165,18 @@ dimension.
 `_predict_unlock` (key/lockpick), the `SearchArea`/`__SearchTypeAt` object scanner +
 `_use_target`, `predict_use` dispatch, and the `u6_affordance` tool. The old `pat:None`
 bell/chain row is RESOLVED -- reading `C_27A1_338D` showed it only animates + plays a note
-(no world target; the qual-link guess was wrong). B/C predictors remain stubs (next
-slices); `predict_use` returns a graceful "not decoded this slice" operate-note for them
-rather than the loud `_NOT_IMPL`, so the #1 query layer can list those objects without
-alarm. The 15 TBD rows still carry their `C_27A1_*`+line so nothing is missed.
+(no world target; the qual-link guess was wrong).
+
+**B + C BUILT 2026-06-27** (offline-tested, live-verified): **B (utility)** light/consume/
+eat/vehicle/play/simple predictors; **C (quest)** `_predict_quest_mechanic` gives the
+operate-mechanic ONLY for orb/moonstone/rune/silver-horn/balloon-plans/vortex-cube -- the
+moongate destination, the rune mantra, the summon, and the **vortex-cube win are WITHHELD**
+(blind-discovery). **Manifest correction:** `C_27A1_5F43` is the **food/eat** handler (the
+old "incl. 0x87 Orb" note was wrong); the real **Orb of the Moons is `0x057`** (`C_27A1_5789`,
+now C) -- confirmed live (Monica's inventory shows the Orb at type `0x057`). Plus 4 former-TBD
+quick wins (weathervane/scroll/squeak/self-toggle). **10 TBD rows remain** (peripheral
+handlers, each carrying its `C_27A1_*`+line); `predict_use` returns a graceful "not decoded"
+note for them (no `_NOT_IMPL` alarm, no quest payload), so the query layer lists them safely.
 
 **Live-verified (castle/Monica, deployed):** the full A-set against real RAM — `u6_nearest`
 gave lever→"opens the portcullis at (307,384)" and crank→"opens the drawbridge at

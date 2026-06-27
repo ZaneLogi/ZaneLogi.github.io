@@ -223,42 +223,136 @@ def _predict_unlock(objs, used, z0):
                 "picks a selected qual-0 (non-magical) lock; may break on a failed DEX test")
 
 
-# B/C predictors -- NOT built this slice (the first step is A-mechanisms only). predict_use
-# turns a B/C/TBD row into a graceful "not decoded yet" operate-note rather than the loud
-# _NOT_IMPL, so the query layer can list these objects without alarm. Build order: B next,
-# then C-operate-mechanic. New signature: (objs, used, z0); kept as stubs.
+# ---- B (utility) predictors: operate-mechanic + the immediate generic effect ----------
+# Source-derived verbs/effects; where current state matters (a light source) we read the
+# frame, else a per-type effect string. These are operate-level -- e.g. WHICH potion does
+# what is the item's payload, not an operate fact, so the note stays generic.
+
+_LIGHT_NAMES = {0x07A: "candle", 0x091: "candelabra", 0x0A4: "fireplace",
+                0x0CE: "brazier", 0x0FD: "campfire"}                      # C_27A1_31F6 switch
+_CONSUME = {                                                             # single-use items
+    0x113: ("drink", "drink the potion -- consumed (the effect depends on the potion)"),
+    0x0DF: ("detonate", "detonate the powder keg -- it explodes (consumed)"),
+    0x05A: ("light", "light the torch -- a held light source that burns down over time"),
+}
+_VEHICLE = {                                                            # board / mount / ...
+    0x19C: ("board", "board the ship (then sail it)"),
+    0x19E: ("board", "board the ship (then sail it)"),
+    0x19F: ("board", "board the raft"),
+    0x1A7: ("board", "board the skiff"),
+    0x1A4: ("inflate", "inflate & board the balloon (only from the surface / a balloon level)"),
+    0x1AE: ("mount", "mount the horse (ride it)"),
+    0x1AF: ("dismount", "dismount the horse"),
+}
+_SIMPLE = {                                                            # produce / view, no target
+    0x0B6: "gather honey from the beehive",
+    0x0B5: "churn butter",
+    0x1AC: "milk the cow",
+    0x09B: "gaze into the crystal ball (scry)",
+    0x108: "fish with the pole (at water)",
+    0x0EA: "drink from the fountain",
+    0x09A: "look through the telescope",
+}
+
 
 def _predict_light(objs, used, z0):
-    """B. light sources (C_27A1_31F6): light <-> extinguish from the frame. PLANNED."""
-    return _NOT_IMPL
+    """B. light sources (C_27A1_31F6): toggle lit<->doused from frame bit0 (lit = frm&1)."""
+    typ, frm, _q, _x, _y = used
+    nm = _LIGHT_NAMES.get(typ, "light source")
+    lit = bool(frm & 1)
+    return _aff(AFF_UTILITY, "douse" if lit else "light",
+                f"{'douses' if lit else 'lights'} the {nm}",
+                current="lit" if lit else "unlit",
+                predicted="unlit" if lit else "lit")
 
 
 def _predict_consume(objs, used, z0):
-    """B. single-use (potion/torch/powder keg): immediate generic effect + consumed. PLANNED."""
-    return _NOT_IMPL
+    """B. single-use potion (C_27A1_3832) / powder keg (3B59) / torch (2FD1)."""
+    typ, _frm, _q, _x, _y = used
+    verb, eff = _CONSUME.get(typ, ("use", "single-use item -- consumed on use"))
+    return _aff(AFF_UTILITY, verb, eff)
+
+
+def _predict_eat(objs, used, z0):
+    """B. food (C_27A1_5F43 -- the shared handler is just 'You eat the food.', consumed)."""
+    return _aff(AFF_UTILITY, "eat", "eat it -- food, consumed (reduces hunger)")
 
 
 def _predict_vehicle(objs, used, z0):
-    """B. horse / ship / balloon: mount/dismount/board + the movement-type granted. PLANNED."""
-    return _NOT_IMPL
+    """B. ship/raft/skiff/balloon/horse (C_27A1_5289/49C3/5503/55F0): board/mount/dismount."""
+    typ, _frm, _q, _x, _y = used
+    verb, eff = _VEHICLE.get(typ, ("board", "board/mount the vehicle"))
+    return _aff(AFF_UTILITY, verb, eff)
 
 
 def _predict_play(objs, used, z0):
-    """B. instruments (C_27A1_335A): 'play / tune' (the on=<digits> sub-flow). PLANNED."""
-    return _NOT_IMPL
+    """B. instruments (C_27A1_335A): play / tune (pass on=<digits 0-9> to pick notes)."""
+    return _aff(AFF_UTILITY, "play",
+                "play the instrument (pass on=<digits 0-9> to pick the notes/tune)")
 
 
 def _predict_simple(objs, used, z0):
     """B. produce/view with no world target (cow/churn/beehive/fishing/fountain/crystal
-    ball/telescope): the generic effect. PLANNED."""
-    return _NOT_IMPL
+    ball/telescope): the generic immediate effect."""
+    typ, _frm, _q, _x, _y = used
+    return _aff(AFF_UTILITY, "use", _SIMPLE.get(typ, "use it (produces an item / a view)"))
+
+
+# ---- C (quest) predictors: the OPERATE-MECHANIC ONLY -- never the quest-gated outcome ---
+# Blind-discovery rule: tell the agent HOW to operate the item once it has it; NEVER the
+# moongate destination, the rune mantra, the summon, or the win. The source handlers were
+# read only to the operate surface; their quest payloads are deliberately NOT encoded here.
+_QUEST_OPERATE = {
+    0x057: ("aim", "USE the Orb of the Moons (from inventory) -> pass on=<n/s/e/w> ('where'); "
+                   "a red moongate opens on a nearby open tile. WHERE it leads is yours to "
+                   "discover."),
+    0x049: ("bury", "USE the moonstone -> it buries in open ground/sand under you and a "
+                    "moongate forms here. Its destination is yours to discover."),
+    0x0F2: ("attune", "USE a virtue rune at its shrine -> you are prompted for the Mantra (a "
+                      "short word). The correct mantra is yours to discover."),
+    0x139: ("sound", "USE the silver horn -> it sounds and summons. What it calls and why is "
+                     "yours to discover."),
+    0x10E: ("assemble", "USE the balloon plans -> assembles the hot-air balloon from its parts "
+                        "(mammoth silk bag, basket, burner, cable) when you have them."),
+    0x03E: ("activate", "USE the Vortex Cube -> the endgame device. Its effect is the "
+                        "main-quest climax -- withheld; discover it by playing."),
+}
 
 
 def _predict_quest_mechanic(objs, used, z0):
-    """C. orb/moonstone/rune/silver horn/balloon plans/vortex cube: ONLY the operate-
-    mechanic, NEVER the quest-gated outcome / destination / win. PLANNED -- do NOT decode
-    the handler's quest payload here."""
-    return _NOT_IMPL
+    """C. orb/moonstone/rune/silver horn/balloon plans/vortex cube: ONLY the operate-mechanic,
+    NEVER the quest-gated outcome / destination / win. The 8 virtue runes (0xF2..0xF9) share
+    one note. Outcome is deliberately withheld (blind-discovery)."""
+    typ, _frm, _q, _x, _y = used
+    key = 0x0F2 if 0x0F2 <= typ <= 0x0F9 else typ
+    verb, eff = _QUEST_OPERATE.get(key, ("use", "a quest item -- operate-mechanic only; the "
+                                                "outcome is yours to discover"))
+    return _aff(AFF_QUEST, verb, eff)
+
+
+# ---- former-TBD rows now characterised (the 4 quick wins) ------------------------------
+def _predict_weathervane(objs, used, z0):
+    """B. weathervane (C_27A1_60D6): USE rotates WindDir by one ('you feel a breeze')."""
+    return _aff(AFF_UTILITY, "turn", "rotates the wind direction one step (you feel a breeze)")
+
+
+def _predict_study(objs, used, z0):
+    """B. scroll (C_27A1_47E0): USE studies it ('you study the scroll'; sets a progress flag)."""
+    return _aff(AFF_UTILITY, "study", "study the scroll -- you learn something from it")
+
+
+def _predict_squeak(objs, used, z0):
+    """B. squeak toy (C_27A1_60BD): USE makes a 'Squeak!' sound; no world effect."""
+    return _aff(AFF_UTILITY, "squeeze", "squeaks (just a sound); no world state change")
+
+
+def _predict_self_toggle(objs, used, z0):
+    """A. self-toggling object (C_27A1_32FA): USE flips frame bit0 (its own on/off state);
+    no qual-linked target."""
+    _typ, frm, _q, _x, _y = used
+    on = bool(frm & 1)
+    return _aff(AFF_MECHANISM, "use", "toggles its own state (frame flips); no linked target",
+                current="on" if on else "off", predicted="off" if on else "on")
 
 
 # --- USE_DISPATCH: exhaustive mirror of seg_27a1.c:3016-3158 (source order) -----
@@ -272,7 +366,7 @@ USE_DISPATCH = [
     {"t": [0x0EC, 0x1A3], "h": "C_27A1_338D", "ln": 3039, "cat": AFF_MECHANISM, "pat": _predict_qual_toggle, "note": "use bell / pull chain -- RESOLVED: animation + OSI_playWavedNote only, NO world target (the qual-link guess was wrong)"},
     {"t": [0x0B6], "h": "C_27A1_37D3", "ln": 3040, "cat": AFF_UTILITY, "pat": _predict_simple, "note": "use beehive (honey)"},
     {"t": [0x07A, 0x091, 0x0A4, 0x0CE, 0x0FD], "h": "C_27A1_31F6", "ln": 3049, "cat": AFF_UTILITY, "pat": _predict_light, "note": "light sources: candle/candelabra/fireplace/brazier/campfire -- light/extinguish"},
-    {"t": [0x05F, 0x060, 0x080, 0x081, 0x082, 0x083, 0x084, 0x085, 0x087, 0x0B4, 0x0B8, 0x0D1, 0x0D2, 0x109], "h": "C_27A1_5F43", "ln": 3064, "cat": AFF_QUEST, "pat": _predict_quest_mechanic, "note": "shared handler; incl. 0x87 Orb of the Moons [C: operate=choose dir->moongate]; rest TBD -- read C_27A1_5F43"},
+    {"t": [0x05F, 0x060, 0x080, 0x081, 0x082, 0x083, 0x084, 0x085, 0x087, 0x0B4, 0x0B8, 0x0D1, 0x0D2, 0x109], "h": "C_27A1_5F43", "ln": 3064, "cat": AFF_UTILITY, "pat": _predict_eat, "note": "FOOD -- handler is just 'You eat the food.' (consumed). RESOLVED: the old 'incl. 0x87 Orb' note was WRONG; the Orb of the Moons is OBJ_057 (C_27A1_5789), not here"},
     {"t": [0x0DD], "h": "C_27A1_3A35", "ln": 3065, "cat": AFF_TBD, "pat": None, "note": "TBD -- read C_27A1_3A35"},
     {"t": [0x129, 0x12A, 0x12B, 0x12C], "h": "C_27A1_2A44", "ln": 3069, "cat": AFF_MECHANISM, "pat": _predict_open_close, "note": "use door -- open/close/locked"},
     {"t": [0x062], "h": "C_27A1_2BBC", "ln": 3074, "cat": AFF_MECHANISM, "pat": _predict_open_close, "note": "use chest (container)"},
@@ -281,10 +375,10 @@ USE_DISPATCH = [
     {"t": [0x120], "h": "C_27A1_433D", "ln": 3078, "cat": AFF_MECHANISM, "pat": _predict_qual_toggle, "note": "use crank -> qual-linked drawbridge (OBJ_10D)"},
     {"t": [0x09B], "h": "C_27A1_5935", "ln": 3079, "cat": AFF_UTILITY, "pat": _predict_simple, "note": "use crystal ball (view)"},
     {"t": [0x1A4], "h": "C_27A1_49C3", "ln": 3084, "cat": AFF_UTILITY, "pat": _predict_vehicle, "note": "use deflated balloon (z-gated) -- inflate/board"},
-    {"t": [0x0D4], "h": "C_27A1_60D6", "ln": 3086, "cat": AFF_TBD, "pat": None, "note": "TBD -- read C_27A1_60D6"},
+    {"t": [0x0D4], "h": "C_27A1_60D6", "ln": 3086, "cat": AFF_UTILITY, "pat": _predict_weathervane, "note": "use weathervane -> rotate wind direction (WindDir++)"},
     {"t": [0x108], "h": "C_27A1_4D46", "ln": 3087, "cat": AFF_UTILITY, "pat": _predict_simple, "note": "use fishing pole"},
     {"t": [0x0EA], "h": "C_27A1_4E9B", "ln": 3088, "cat": AFF_UTILITY, "pat": _predict_simple, "note": "use fountain (drink/effect)"},
-    {"t": [0x061], "h": "C_27A1_47E0", "ln": 3089, "cat": AFF_TBD, "pat": None, "note": "TBD -- read C_27A1_47E0"},
+    {"t": [0x061], "h": "C_27A1_47E0", "ln": 3089, "cat": AFF_UTILITY, "pat": _predict_study, "note": "use scroll -> 'study the scroll' (sets a progress flag D_2CA8)"},
     {"t": [0x04D], "h": "C_27A1_319F", "ln": 3090, "cat": AFF_TBD, "pat": None, "note": "TBD -- read C_27A1_319F"},
     {"t": [0x09D], "h": "C_27A1_335A", "ln": 3091, "cat": AFF_UTILITY, "pat": _predict_play, "note": "instrument (335A arg 2)"},
     {"t": [0x09C], "h": "C_27A1_335A", "ln": 3092, "cat": AFF_UTILITY, "pat": _predict_play, "note": "instrument (335A arg 3)"},
@@ -295,15 +389,15 @@ USE_DISPATCH = [
     {"t": [0x10C], "h": "C_27A1_4479", "ln": 3103, "cat": AFF_MECHANISM, "pat": _predict_qual_toggle, "note": "use lever -> qual-linked portcullis@doorway"},
     {"t": [0x09E], "h": "C_27A1_335A", "ln": 3104, "cat": AFF_UTILITY, "pat": _predict_play, "note": "instrument (335A arg 0x12)"},
     {"t": [0x049], "h": "C_27A1_3425", "ln": 3105, "cat": AFF_QUEST, "pat": _predict_quest_mechanic, "note": "use moonstone (bury -> moongate) -- quest"},
-    {"t": [0x057], "h": "C_27A1_5789", "ln": 3110, "cat": AFF_TBD, "pat": None, "note": "TBD (inventory-gated) -- read C_27A1_5789"},
+    {"t": [0x057], "h": "C_27A1_5789", "ln": 3110, "cat": AFF_QUEST, "pat": _predict_quest_mechanic, "note": "use Orb of the Moons (inventory) -> on=<where>; a red moongate appears [C: operate only, destination withheld]"},
     {"t": [0x099], "h": "C_27A1_335A", "ln": 3112, "cat": AFF_UTILITY, "pat": _predict_play, "note": "instrument (335A arg 0x13)"},
     {"t": [0x116, 0x118], "h": "C_27A1_5DF2", "ln": 3114, "cat": AFF_TBD, "pat": None, "note": "TBD -- read C_27A1_5DF2"},
     {"t": [0x067, 0x068], "h": "C_27A1_4FC6", "ln": 3118, "cat": AFF_TBD, "pat": None, "note": "TBD (equip-gated) -- read C_27A1_4FC6"},
     {"t": [0x113], "h": "C_27A1_3832", "ln": 3122, "cat": AFF_UTILITY, "pat": _predict_consume, "note": "use potion (drink)"},
     {"t": [0x0DF], "h": "C_27A1_3B59", "ln": 3123, "cat": AFF_UTILITY, "pat": _predict_consume, "note": "use powder keg (detonate)"},
-    {"t": [0x0A9], "h": "C_27A1_60BD", "ln": 3124, "cat": AFF_TBD, "pat": None, "note": "TBD -- read C_27A1_60BD"},
+    {"t": [0x0A9], "h": "C_27A1_60BD", "ln": 3124, "cat": AFF_UTILITY, "pat": _predict_squeak, "note": "use -> 'Squeak!' (sound toy; no world effect)"},
     {"t": [0x0F2, 0x0F3, 0x0F4, 0x0F5, 0x0F6, 0x0F7, 0x0F8, 0x0F9], "h": "C_27A1_4B98", "ln": 3132, "cat": AFF_QUEST, "pat": _predict_quest_mechanic, "note": "use rune (at a shrine, mantra) -- the 8 virtue runes; quest"},
-    {"t": [0x14E], "h": "C_27A1_32FA", "ln": 3133, "cat": AFF_TBD, "pat": None, "note": "TBD -- read C_27A1_32FA"},
+    {"t": [0x14E], "h": "C_27A1_32FA", "ln": 3133, "cat": AFF_MECHANISM, "pat": _predict_self_toggle, "note": "use -> toggles its own frame bit0 (on/off); no qual-linked target"},
     {"t": [0x05D], "h": "C_1944_42AC", "ln": 3138, "cat": AFF_TBD, "pat": None, "note": "TBD (z-gated; seg_1944) -- read C_1944_42AC"},
     {"t": [0x139], "h": "C_27A1_5BCF", "ln": 3140, "cat": AFF_QUEST, "pat": _predict_quest_mechanic, "note": "use silver horn (summon) -- quest"},
     {"t": [0x04E], "h": "C_27A1_3537", "ln": 3145, "cat": AFF_TBD, "pat": None, "note": "TBD (equip-gated) -- read C_27A1_3537"},
@@ -471,8 +565,9 @@ __all__ = [
     "_DRAWBRIDGE_OPEN_HEAD", "_DRAWBRIDGE_CLOSED_HEAD",
     "_load_objs", "_slot_tfqxyz", "_search_area", "_search_type_at",
     "_aff", "_predict_qual_toggle", "_predict_open_close", "_predict_unlock",
-    "_predict_light", "_predict_consume", "_predict_vehicle", "_predict_play",
-    "_predict_simple", "_predict_quest_mechanic",
+    "_predict_light", "_predict_consume", "_predict_eat", "_predict_vehicle",
+    "_predict_play", "_predict_simple", "_predict_quest_mechanic",
+    "_predict_weathervane", "_predict_study", "_predict_squeak", "_predict_self_toggle",
     "USE_DISPATCH", "_BY_TYPE", "_use_target", "_undecoded_note", "predict_use",
     "_resolve_slot", "_format_affordance", "u6_affordance",
 ]
