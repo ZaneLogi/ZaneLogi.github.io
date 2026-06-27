@@ -790,7 +790,24 @@ def u6_talk_to(npc_slot: int, max_steps: int = 60, segment: int = -1) -> str:
     return f"{r}\n{u6_talk(td)}\nNow poll u6_conversation() and reply with u6_say()."
 
 
+@mcp.tool()
+def u6_use_object(target: str, max_steps: int = 40, segment: int = -1) -> str:
+    """Ultima VI: CLOSED-LOOP "go to an object and USE it" -- the one-call version of
+    the lever/crank dance from the castle-escape run (find a walkable cell adjacent to
+    the object, route there, face it, USE). `target` is an object SLOT ('0x4e6' /
+    '1254') or a NAME ('lever', 'crank' -- nearest match). The tool resolves the
+    object's world cell, picks an adjacent WALKABLE cell (handling diagonally-placed
+    mechanisms whose own neighbours are blocked by other objects), drives there with
+    the closed-loop navigator (u6_goto_xy), then issues the cardinal USE in the
+    object's direction (composing the existing u6_use map / inventory / key sub-flows).
+    Removes the manual repositioning the agent had to do to reach the crank.
+    PLANNED -- stub (#2 from the castle-escape experiment, 2026-06-27; not yet
+    implemented)."""
+    pass
+
+
 __all__ = [
+    "u6_use_object",
     "_USE_POTION",
     "_USE_ORB",
     "_USE_DIR",

@@ -35,6 +35,7 @@ from u6.ctx import (mcp, S, U6State, base, inp, _ds, _derive_ds,  # noqa: F401
 from u6.decode import *  # noqa: F401,F403  -- object/tile decoders
 from u6.converse import *  # noqa: F401,F403  -- dialogue VM + tools
 from u6.navigate import *  # noqa: F401,F403  -- grid/area-map/nav tools
+from u6.cartography import *  # noqa: F401,F403  -- whole-level baked-terrain routing
 from u6.perceive import *  # noqa: F401,F403  -- read tools
 from u6.act import *  # noqa: F401,F403  -- action verbs
 from u6.hook import *  # noqa: F401,F403  -- u6_hook

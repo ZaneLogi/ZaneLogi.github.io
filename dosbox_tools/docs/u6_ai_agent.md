@@ -78,7 +78,12 @@ Implemented (logic verified; **memory offsets pending live verification** — se
   `u6_get(dir)`, `u6_use(target, on)` (map tile **or** carried item; auto key flow
   for a locked door), `u6_ready(slot)` (equip/unequip via the panel), `u6_key(key)`.
 - **Navigate:** `u6_pathfind(npc_slot)` (planner), `u6_goto(npc_slot)`
-  (closed-loop), `u6_talk_to(npc_slot)` (goto + talk).
+  (closed-loop), `u6_goto_xy(x,y)` (closed-loop to a tile, live 40x40 window),
+  `u6_talk_to(npc_slot)` (goto + talk), and `u6_route(x,y)` — a **whole-level**
+  planner over the BAKED static terrain (`mapdata`: `MAP`+`CHUNKS` expanded to the full
+  1024x1024 surface / 5x256x256 dungeons), so the agent can plan to a tile it can't
+  currently see, beyond the live window. Terrain-only (doorways passable; a closed door
+  is opened at move time); see the egress finding in §2b.
 - **Verify:** `u6_validate_passability` (predict-vs-live fidelity gate for the
   passability oracle — see `dosbox_u6_passability.md`).
 - **Inherited:** base tools (`read_dos`/`write_dos`/`status`/…) and input tools
@@ -98,6 +103,35 @@ Planned (gaps — see the milestones for which are needed when):
   `u6_roster_status`, and the `u6_conversation` decoder. The inventory-panel verbs
   are built but **live-unconfirmed** — see §6. Full per-verb source + MCP-driving
   model: `u6_verb_mechanism.md`.)*
+
+## 2b. Castle-escape play-test + the tool roadmap (2026-06-27)
+
+A directed end-to-end play-test (the human gave 7 high-level steps; the agent discovered
+all specifics LIVE, **no oracle docs**): hold LB's key → drive south → confirm the
+portcullis closed → find the qual-1 gatehouse doors → unlock + enter → pull the lever
+(opens the portcullis) + turn the crank (lowers the drawbridge) → walk OUT across the
+lowered bridge. **It succeeded** — the full perceive→reason→act→observe loop held across
+navigation, a locked door, a key, a two-part mechanism, and egress.
+
+It also exposed the agent's real weaknesses (efficiency, not capability), which set the
+build order:
+- **#1 (urgent) structured spatial queries** — `u6_at` / `u6_nearest` /
+  `u6_interactables_near` (stubbed in `cartography`): the agent kept mis-counting ASCII
+  grid columns and re-surveying the same area; it should query decoded, decision-ready
+  facts (terrain + object + state + how-to-reach) instead of parsing maps.
+- **#2 (urgent) `u6_use_object`** (stubbed in `act`): one-call "go adjacent + USE",
+  removing the manual repositioning the diagonally-placed crank forced (~3 wasted rounds).
+- **#3 (after #1/#2)** give `u6_route` a door-as-passable object-overlay — then it could
+  plan the whole castle→gate route; today only the live-grid driver `u6_goto_xy` crosses
+  closed doors / the lowered drawbridge.
+- **#4/#5 (later)** persistent spatial memory (the "big picture" — kill re-surveying) and
+  decoded mechanism states (portcullis/drawbridge open/closed vs raw frames).
+
+**Egress finding (validates the terrain-only / live-grid split):** `u6_route` (terrain-
+only) correctly **cannot** cross the moat, while `u6_goto_xy` (live grid, objects
+included) **crossed the lowered drawbridge** fine. So castle egress works at drive-time
+the moment the bridge is down; the object-overlay (#3) is only needed for the *planner*
+to predict a path out, not for actually leaving.
 
 ## 3. Pathfinding
 

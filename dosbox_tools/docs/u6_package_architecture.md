@@ -21,9 +21,11 @@ dosbox_tools/
     constants.py          # layout offsets, bit-fields, area/terrain flags, dir tables
     ctx.py                # runtime singletons (mcp/S/inp/base) + session read/position primitives
     look_names.py         # LOOK.LZD tile-name table (auto-generated data); tile_name()
+    mapdata.py            # baked MAP+CHUNKS -> expand_surface/expand_dungeon/tile_at (static terrain data)
     decode.py             # object/tile interpreters (names, gear, doors, allegiance, actor map)
     converse.py           # TalkBuf bytecode VM + disassembler + the 2 dialogue tools
-    navigate.py           # walkable/cost grid, Dijkstra, area map, movement tools
+    navigate.py           # walkable/cost grid, Dijkstra, area map, live-window movement tools
+    cartography.py        # whole-level routing over BAKED terrain (u6_route) + planned spatial-query stubs
     perceive.py           # read-only tools (avatar/party/inventory/panel/npcs/objects)
     act.py                # action verbs + the keyboard mechanisms (cursor/panel/use)
     hook.py               # u6_hook (attach/calibrate/derive DS)
@@ -43,15 +45,19 @@ them via `ctx.py`.
 | `constants` | the in-memory **spec**: DGROUP/DS-relative offsets, `NPCStatus`/door/terrain bit-fields, `AREA_*`, direction tables, `_U6_DOOR_TYPES` (shared) | — | `U6_*`, `_DIR_DELTAS/_STEP_*`, `_PASSABLE_ACTOR_TYPES`, … |
 | `ctx` | **runtime singletons** + lowest-level guest-RAM access | (re-exports base+input tools) | `mcp, S, U6State, base, inp, dm, di`, `_ds, _derive_ds`, `_rd8/16/16s`, `_read_far_ptr`, `_static_table`, `_session_base`, `_controlled_slot/xyz`, `_world_to_cell`, `_wait_command_ready`, `_input_state` |
 | `look_names` | the LOOK.LZD name table (immutable game data) | — | `tile_name` |
+| `mapdata` | the **baked static terrain**: `MAP` (chunk-index) + `CHUNKS` (8x8 tile dict) as verbatim base64 blobs, expanded into the full 1024x1024 surface / 5x256x256 dungeons | — | `expand_surface`, `expand_dungeon`, `tile_at`, `SURFACE_W`, `DUNGEON_W` |
 | `decode` | "**what is this**" — bytes → meaning | — | `_obj_tfq/_obj_name`, `_gear_*`, `_equip_slot`, `_door_state/_chest_state`, `_npc_class`, `_actor_map/_actor_cells`, `_door_at_tile`, `_holder_party_index`, `_party_member_slot`, `_visible_backpack`, `_npc_xyz`, `_compass`, `_dir_to`, `_tile_name`, `_ACTOR_RANK` |
 | `converse` | the dialogue VM + decoder + offline disassembler | `u6_conversation`, `u6_script_disasm` | `_ConverseVM`, `_DecoderStop`, `_decode_conversation`, `_extract_highlights`, `_disassemble`, `_DIS_*`, `_CV_SIDE_EFFECT`, … |
-| `navigate` | walkable/cost grid (`C_1E0F_000F` port), Dijkstra, live area map, movement | `u6_walkable`, `u6_area_map`, `u6_pathfind`, `u6_goto`, `u6_goto_xy`, `u6_validate_passability` | `_build_grid`, `_dijkstra`, `_adjacent_goals`, `_mask_walk`, `_closest_reachable`, `_cell_diag`, `u6_area_map_data`, `_DOOR_GLYPH`, `_RESTORE_ARROW` |
+| `navigate` | walkable/cost grid (`C_1E0F_000F` port), Dijkstra, live area map, **live-window** movement | `u6_walkable`, `u6_area_map`, `u6_pathfind`, `u6_goto`, `u6_goto_xy`, `u6_validate_passability` | `_build_grid`, `_dijkstra`, `_adjacent_goals`, `_mask_walk`, `_closest_reachable`, `_cell_diag`, `u6_area_map_data`, `_DOOR_GLYPH`, `_RESTORE_ARROW` |
+| `cartography` | **whole-level** routing over the baked terrain (`mapdata`), beyond the 40x40 window + the planned structured spatial-query layer | `u6_route` · *planned stubs:* `u6_at`, `u6_nearest`, `u6_interactables_near` | `_baked_region_grid`, `_region_dijkstra`, `_level_tiles`, `_runlength`, `_ROUTE_MARGIN/_MAX_SPAN` |
 | `perceive` | read-only perception | `u6_object`, `u6_inventory`, `u6_panel_state`, `u6_avatar`, `u6_party`, `u6_input_state`, `u6_roster_status`, `u6_npcs_near`, `u6_objects_near` | — (tools are self-contained) |
-| `act` | action verbs + their keyboard mechanisms | `u6_move`, `u6_talk`, `u6_look`, `u6_get`, `u6_use`, `u6_ready`, `u6_say`, `u6_key`, `u6_talk_to` | `_panel_commit`, `_begin_select/_walk_cursor`, `_use_map/_use_inventory/_use_key_flow`, `_select_backpack_item`, `_find_matching_key`, `_drain_to_ready`, `_USE_*`, `_U6_DIR/_DIR8`, `_EQUIP_CELL`, … |
+| `act` | action verbs + their keyboard mechanisms | `u6_move`, `u6_talk`, `u6_look`, `u6_get`, `u6_use`, `u6_ready`, `u6_say`, `u6_key`, `u6_talk_to` · *planned stub:* `u6_use_object` | `_panel_commit`, `_begin_select/_walk_cursor`, `_use_map/_use_inventory/_use_key_flow`, `_select_backpack_item`, `_find_matching_key`, `_drain_to_ready`, `_USE_*`, `_U6_DIR/_DIR8`, `_EQUIP_CELL`, … |
 | `hook` | attach + BDA-calibrate + derive DS from the avatar name | `u6_hook` | — |
 
-**Tool count:** converse 2 + navigate 6 + perceive 9 + act 9 + hook 1 = **27 U6 tools**,
-plus the shared base/input tools registered by `ctx`.
+**Tool count:** converse 2 + navigate 6 + cartography 1 (`u6_route`) + perceive 9 + act 9 +
+hook 1 = **28 built U6 tools**, plus **4 registered-but-stubbed** planned tools (`u6_at`,
+`u6_nearest`, `u6_interactables_near`, `u6_use_object`) = 32 registered, plus the shared
+base/input tools registered by `ctx`. (`mapdata` is data + helpers, exposes no tools.)
 
 ---
 
@@ -62,14 +68,15 @@ constants ─┬─────────────────────�
            │
 ctx ───────┤ (imports constants, dosbox_mem, dosbox_input, FastMCP)
            │
-look_names ┘ (leaf data)
+look_names ┤ (leaf data)
+mapdata    ┘ (leaf data: baked MAP+CHUNKS, no deps)
            │
 decode ◄── constants, ctx, look_names
            │
-   ┌───────┼─────────────┐
-converse  navigate     perceive   ◄── constants, ctx, decode
-   │       │
-   └───┬───┘
+   ┌───────┼──────────────┬───────────┐
+converse  navigate    cartography   perceive   ◄── constants, ctx, decode
+   │       │           (+ mapdata)
+   └───┬───┴──────────────┘
        ▼
       act ◄── constants, ctx, decode, converse, navigate
        │
@@ -164,9 +171,14 @@ rm -rf <tools>/__pycache__ <tools>/u6/__pycache__      # avoid stale .pyc
    `u6.<name>`.
 6. Deploy (§7) + live smoke-test.
 
-The planned Phase-1 modules — `mapdata` (decode the static map files), `mapstore`
-(the SQLite chunked world map), `cartography` (the map-memory tools) — slot in exactly
-this way, as new leaves, without touching the existing modules.
+Phase-1 status (2026-06-27): **`mapdata` + `cartography` are built** and slotted in
+exactly this way (new leaves, no existing module touched). `mapstore` (the SQLite
+chunked world map) was **dropped** — baking both `MAP` and `CHUNKS` makes the terrain a
+pure, deterministic function of import-time data, so there is no incremental fill to
+persist. Next on `cartography`: implement the `#1` structured-query stubs (`u6_at`,
+`u6_nearest`, `u6_interactables_near`) and the `#2` `u6_use_object` stub in `act` — both
+identified as the top efficiency wins by the 2026-06-27 castle-escape play-test (see
+`u6_ai_agent.md`).
 
 ---
 
