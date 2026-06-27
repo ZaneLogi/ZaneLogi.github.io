@@ -76,7 +76,9 @@ Implemented (logic verified; **memory offsets pending live verification** — se
   `keyword=` previews a response; unknown opcode → `DECODER_STOP`, halt + report).
 - **Act:** `u6_move(dir)`, `u6_talk(dir)`, `u6_say(text)`, `u6_look(dir)`,
   `u6_get(dir)`, `u6_use(target, on)` (map tile **or** carried item; auto key flow
-  for a locked door), `u6_ready(slot)` (equip/unequip via the panel), `u6_key(key)`.
+  for a locked door), `u6_use_object(target)` (#2: resolve a map object by slot/name,
+  drive to a reachable cardinal cell, face it, USE — the executor of the query tools'
+  use-from handles), `u6_ready(slot)` (equip/unequip via the panel), `u6_key(key)`.
 - **Navigate:** `u6_pathfind(npc_slot)` (planner), `u6_goto(npc_slot)`
   (closed-loop), `u6_goto_xy(x,y)` (closed-loop to a tile, live 40x40 window),
   `u6_talk_to(npc_slot)` (goto + talk), and `u6_route(x,y)` — a **whole-level**
@@ -127,9 +129,13 @@ build order:
   the same area; now it queries decoded, decision-ready facts (terrain + object + state +
   predicted USE effect + the walkable use-from cell & face direction) instead of parsing
   maps. Backed by the affordance A-mechanism predictors (below).
-- **#2 (urgent, NEXT) `u6_use_object`** (stubbed in `act`): one-call "go adjacent + USE",
-  removing the manual repositioning the diagonally-placed crank forced (~3 wasted rounds).
-  The natural executor of the #1 query trio's `use-from` handles.
+- **#2 (urgent) `u6_use_object`** — **BUILT + live-verified 2026-06-27** in `act`: one-call
+  "go adjacent + USE" (resolve target → route to a reachable cardinal use-from cell via
+  `u6_goto_xy` → `u6_use(dir)`), removing the manual repositioning the diagonally-placed
+  crank forced (~3 wasted rounds). The natural executor of the #1 query trio's `use-from`
+  handles. Its live test found + fixed a `_use_from` reachability bug (it had picked a
+  walkable-but-unreachable far-side neighbour — a castle door's outside-courtyard tile;
+  now it floods from the avatar and returns the reachable side).
 - **#3 (after #1/#2)** give `u6_route` a door-as-passable object-overlay — then it could
   plan the whole castle→gate route; today only the live-grid driver `u6_goto_xy` crosses
   closed doors / the lowered drawbridge.

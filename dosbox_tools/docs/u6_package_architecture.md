@@ -53,13 +53,12 @@ them via `ctx.py`.
 | `affordance` | **what does USE do** — `USE_DISPATCH`, an exhaustive mirror of `seg_27a1.c`'s USE switch (all 85 case-types / 48 rows, A/B/C/TBD) + the predict-from-source layer (**A-mechanisms built**; B/C predictors are the next slice — they return a graceful operate-note for now) | `u6_affordance` | `USE_DISPATCH`, `_BY_TYPE`, `predict_use`, `_use_target`, `_search_area/_search_type_at`, `_predict_qual_toggle/_open_close/_unlock`, the B/C `_predict_*` stubs, `_NOT_IMPL` |
 | `cartography` | **whole-level** routing over the baked terrain (`mapdata`), beyond the 40x40 window + the **structured spatial-query layer** (#1) | `u6_route`, `u6_at`, `u6_nearest`, `u6_interactables_near` | `_baked_region_grid`, `_region_dijkstra`, `_use_from`, `_top_object_slot`, `_describe_obj`, `_actor_on_tile`, `_level_tiles`, `_runlength` |
 | `perceive` | read-only perception | `u6_object`, `u6_inventory`, `u6_panel_state`, `u6_avatar`, `u6_party`, `u6_input_state`, `u6_roster_status`, `u6_npcs_near`, `u6_objects_near` | — (tools are self-contained) |
-| `act` | action verbs + their keyboard mechanisms | `u6_move`, `u6_talk`, `u6_look`, `u6_get`, `u6_use`, `u6_ready`, `u6_say`, `u6_key`, `u6_talk_to` · *planned stub:* `u6_use_object` | `_panel_commit`, `_begin_select/_walk_cursor`, `_use_map/_use_inventory/_use_key_flow`, `_select_backpack_item`, `_find_matching_key`, `_drain_to_ready`, `_USE_*`, `_U6_DIR/_DIR8`, `_EQUIP_CELL`, … |
+| `act` | action verbs + their keyboard mechanisms | `u6_move`, `u6_talk`, `u6_look`, `u6_get`, `u6_use`, `u6_ready`, `u6_say`, `u6_key`, `u6_talk_to`, `u6_use_object` (#2: go-adjacent + USE) | `_adjacency_action`, `_in_window`, `_panel_commit`, `_begin_select/_walk_cursor`, `_use_map/_use_inventory/_use_key_flow`, `_select_backpack_item`, `_find_matching_key`, `_drain_to_ready`, `_USE_*`, `_U6_DIR/_DIR8`, `_EQUIP_CELL`, … |
 | `hook` | attach + BDA-calibrate + derive DS from the avatar name | `u6_hook` | — |
 
 **Tool count:** converse 2 + navigate 6 + cartography 4 (`u6_route` + the #1 query trio
 `u6_at`/`u6_nearest`/`u6_interactables_near`) + affordance 1 (`u6_affordance`) + perceive 9 +
-act 9 + hook 1 = **32 built U6 tools**, plus **1 registered-but-stubbed** planned tool
-(`u6_use_object`, the #2 act-layer verb — next slice) = 33 registered, plus the shared
+act 10 + hook 1 = **33 built U6 tools** (no stubs left) = 33 registered, plus the shared
 base/input tools registered by `ctx`. (`mapdata` is data + helpers — no built tools.
 `affordance`'s `u6_affordance` predicts A-mechanisms now; its B/C predictors are stubs.)
 
@@ -206,9 +205,24 @@ payload). **Two wrinkles for the B/C slice:** (a) `u6_nearest('door')` substring
 handler `C_27A1_5F43` row is tagged C wholesale, so food (bread/meat/cake) reads "category
 C" — the real per-type split IS the B/C decode work (outcome stays withheld, so safe).
 
-**Next:** the `#2` `u6_use_object` stub in `act` (the natural executor of the query trio's
-use-from handles), then affordance B, then C-operate-mechanic. All identified by the
-2026-06-27 castle-escape play-test (see `u6_ai_agent.md`).
+**Step 2 done (2026-06-27): #2 `u6_use_object`** — closed-loop "go to an object and USE
+it" in `act`: resolve target (slot/name) → `_adjacency_action` (carried / other-level /
+on-tile / cardinally-adjacent / far) → for 'far', route to a **cardinal** use-from cell
+(`cartography._use_from`) via `u6_goto_xy`, then `u6_use(dir)`; forwards `on`. The live
+test surfaced + fixed a **`_use_from` reachability bug**: it had picked the *first
+walkable* cardinal neighbour, which for a castle door is the **outside courtyard** (passable
+grass) the avatar can't reach from inside → `u6_goto_xy` "boxed in". `_use_from` now floods
+from the avatar (`navigate._closest_reachable`) and returns the nearest **reachable**
+cardinal neighbour (or None) — fixing both `u6_use_object` and the #1 query tools' "act:"
+advice. Tests: `test_use_object.py` 9/9 + `test_query.py` 6/6 (incl. a reachable-vs-far-side
+case); suite green; **33 tools, no stubs left**. **Live-verified** (castle/Monica): drove
+`u6_use_object('0x1a6')` 1 step to the reachable use-from cell + USE → the brazier
+extinguished (frame change), re-USE from adjacent (no nav) re-lit it; the now-reachable
+`_use_from` correctly omitted the inside-unreachable door.
+
+**Next:** affordance **B** (utility predictors), then **C-operate-mechanic**, then `#3`
+(give `u6_route` a door-as-passable object overlay so the planner can route through doors).
+All identified by the 2026-06-27 castle-escape play-test (see `u6_ai_agent.md`).
 
 ---
 

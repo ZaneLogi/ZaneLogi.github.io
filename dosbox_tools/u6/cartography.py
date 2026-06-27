@@ -184,23 +184,30 @@ def u6_route(x: int, y: int, z: int = -1, segment: int = -1) -> str:
 # ----------------------------------------------------------------------------
 
 def _use_from(base, ox, oy):
-    """For a world object at (ox,oy) on the controlled actor's level, find an adjacent
-    WALKABLE cell in the live 40x40 grid + the cardinal direction to FACE the object
-    from it (the USE/LOOK/GET direction). Returns (from_xy, face_dir) or (None, None) if
-    the object is outside the live window or boxed in. This is the decision-ready bit:
-    answers 'stand here, face X' instead of leaving the agent to solve the neighbour
-    puzzle the diagonally-placed crank forced in the castle-escape run."""
+    """For a world object at (ox,oy) on the controlled actor's level, the REACHABLE
+    cardinal cell to USE it from + the direction to FACE it. Returns (from_xy, face_dir)
+    or (None, None) when the object is off the live 40x40 window or has no reachable
+    n/s/e/w neighbour. This is the decision-ready bit: answers 'stand here, face X'
+    instead of leaving the agent the neighbour puzzle the diagonally-placed crank forced.
+
+    Reachability is the whole point. A bare 'walkable neighbour' can sit on the FAR side
+    of a wall/door -- e.g. a castle door whose north tile is the outside courtyard
+    (passable grass) while the avatar is inside; picking it sends u6_goto_xy 'boxed in'.
+    So we flood from the AVATAR (navigate._closest_reachable, a BFS over the live grid)
+    and take the reachable cell nearest the object: if it's cardinally adjacent it IS a
+    use-from cell on the avatar's side; otherwise no cardinal approach is reachable."""
+    ox &= U6_WORLD_MASK
+    oy &= U6_WORLD_MASK
     walk, _cost, ax, ay = navigate._build_grid(base)
-    ocell = _world_to_cell(ox, oy, ax, ay)
-    if ocell is None:
+    x0, y0, _z0 = _controlled_xyz(base)
+    start = _world_to_cell(x0, y0, ax, ay)
+    if start is None:
         return None, None
-    orow, ocol = ocell
-    H, W = len(walk), len(walk[0])
-    for dr, dc in _DIR_DELTAS:
-        nr, nc = orow + dr, ocol + dc
-        if 0 <= nr < H and 0 <= nc < W and walk[nr][nc]:
-            fx, fy = (ax + nc) & U6_WORLD_MASK, (ay + nr) & U6_WORLD_MASK
-            return (fx, fy), _STEP_NAME[(-dr, -dc)]      # face from neighbour back to object
+    nr, nc = navigate._closest_reachable(walk, start, ax, ay, ox, oy)
+    wx, wy = (ax + nc) & U6_WORLD_MASK, (ay + nr) & U6_WORLD_MASK
+    dx, dy = ox - wx, oy - wy
+    if abs(dx) + abs(dy) == 1:                           # reachable cardinal neighbour
+        return (wx, wy), _dir_to(dx, dy)                 # face from that cell toward the object
     return None, None
 
 

@@ -71,44 +71,48 @@ def _ram_reader(regions, size=0x10000):
     return reader
 
 
-# --- _use_from --------------------------------------------------------------------
-def test_use_from_picks_walkable_neighbour_and_faces_object():
+# --- _use_from (reachability-aware: floods from the avatar) ------------------------
+def _run_use_from(cells, ax, ay, avatar_xy, obj_xy):
+    """Drive g._use_from over a full 40x40 stub grid (real _closest_reachable uses the
+    U6_AREA bounds, so the grid must be that size) + a stubbed avatar position. `cells`
+    is the set of walkable (row,col), or "all". Restores both patched names."""
     from u6 import cartography as g, navigate
-    # 8x8 grid, all blocked except the cell EAST of the object at (5,5): cell (5,6).
-    W = H = 8
-    walk = [[False] * W for _ in range(H)]
-    walk[5][6] = True
-    saved = navigate._build_grid
-    navigate._build_grid = lambda base: (walk, None, 0, 0)        # ax=ay=0
+    walk = [[True] * U6_AREA_W for _ in range(U6_AREA_H)] if cells == "all" else \
+           [[False] * U6_AREA_W for _ in range(U6_AREA_H)]
+    if cells != "all":
+        for (r, c) in cells:
+            walk[r][c] = True
+    sb, sc = navigate._build_grid, g._controlled_xyz
+    navigate._build_grid = lambda base: (walk, None, ax, ay)
+    g._controlled_xyz = lambda base: (avatar_xy[0], avatar_xy[1], 0)
     try:
-        fxy, face = g._use_from(0, 5, 5)
+        return g._use_from(0, obj_xy[0], obj_xy[1])
     finally:
-        navigate._build_grid = saved
-    assert fxy == (6, 5), fxy            # stand on the east neighbour (world == cell, ax=0)
-    assert face == "w", face             # from the east, face WEST to reach the object
+        navigate._build_grid, g._controlled_xyz = sb, sc
+
+
+def test_use_from_picks_reachable_cardinal_and_faces_object():
+    # object world (5,5); avatar inside at (5,7); the SOUTH neighbour (5,6) is reachable.
+    fxy, face = _run_use_from({(6, 5), (7, 5)}, 0, 0, (5, 7), (5, 5))
+    assert fxy == (5, 6) and face == "n", (fxy, face)   # stand south of it, face north
+
+
+def test_use_from_prefers_reachable_side_not_far_walkable():
+    # the bug fix: object (5,5) has a walkable NORTH neighbour (5,4) isolated on the far
+    # side of the wall, and a reachable SOUTH neighbour (5,6). Old code returned the north
+    # (first walkable); reachability-aware must return the south the avatar can actually reach.
+    # (5,5) blocked splits the north region (rows 3,4) from the avatar's south region.
+    fxy, face = _run_use_from({(4, 5), (3, 5), (6, 5), (7, 5)}, 0, 0, (5, 7), (5, 5))
+    assert fxy == (5, 6) and face == "n", (fxy, face)   # NOT the far-side north cell (5,4)
 
 
 def test_use_from_none_when_object_off_window():
-    from u6 import cartography as g, navigate
-    walk = [[True] * 8 for _ in range(8)]
-    saved = navigate._build_grid
-    navigate._build_grid = lambda base: (walk, None, 100, 100)    # window at (100,100)
-    try:
-        fxy, face = g._use_from(0, 5, 5)                          # object far from window
-    finally:
-        navigate._build_grid = saved
+    fxy, face = _run_use_from("all", 100, 100, (100, 100), (5, 5))  # object far from window
     assert fxy is None and face is None
 
 
 def test_use_from_none_when_boxed_in():
-    from u6 import cartography as g, navigate
-    walk = [[False] * 8 for _ in range(8)]                        # no walkable neighbour
-    saved = navigate._build_grid
-    navigate._build_grid = lambda base: (walk, None, 0, 0)
-    try:
-        fxy, face = g._use_from(0, 4, 4)
-    finally:
-        navigate._build_grid = saved
+    fxy, face = _run_use_from({(4, 4)}, 0, 0, (4, 4), (2, 4))    # only own cell; can't reach sides
     assert fxy is None and face is None
 
 

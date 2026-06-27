@@ -10,7 +10,9 @@ from u6.constants import *  # noqa: F401,F403
 from u6.ctx import *        # noqa: F401,F403
 from u6.decode import *     # noqa: F401,F403
 from u6.converse import *   # noqa: F401,F403  -- u6_say peeks the converse VM
-from u6.navigate import *   # noqa: F401,F403  -- u6_talk_to drives u6_goto
+from u6.navigate import *   # noqa: F401,F403  -- u6_talk_to/u6_use_object drive u6_goto(_xy)
+from u6 import cartography   # _use_from: cardinal use-from cell for u6_use_object
+from u6 import affordance    # _resolve_slot: target name/slot -> object slot
 
 
 _U6_DIR = {
@@ -790,24 +792,101 @@ def u6_talk_to(npc_slot: int, max_steps: int = 60, segment: int = -1) -> str:
     return f"{r}\n{u6_talk(td)}\nNow poll u6_conversation() and reply with u6_say()."
 
 
+def _in_window(base_addr, wx, wy):
+    """Is world tile (wx,wy) inside the live 40x40 AreaTiles window right now?"""
+    ax = int.from_bytes(dm.read(S.handle, base_addr + U6_AreaX, 2), "little")
+    ay = int.from_bytes(dm.read(S.handle, base_addr + U6_AreaY, 2), "little")
+    return _world_to_cell(wx, wy, ax, ay) is not None
+
+
+def _adjacency_action(base_addr, slot):
+    """Decide u6_use_object's next move from LIVE positions (pure read, no input).
+    Returns one of:
+        ('err',  msg)        -- object not usable from the map (carried / other level)
+        ('here', None)       -- avatar stands ON the object's tile -> USE 'here'
+        ('use',  dir)        -- cardinally adjacent -> USE that direction (n/s/e/w)
+        ('far',  (ox,oy))    -- not adjacent -> navigate toward the object."""
+    x0, y0, z0 = _controlled_xyz(base_addr)
+    ox, oy, oz, cu = _npc_xyz(base_addr, slot)
+    if cu != 0:
+        return ("err", "it is not loose on the map (carried/equipped/contained) -- "
+                       f"use u6_use('inv:0x{slot:03x}') instead")
+    if oz != z0:
+        return ("err", f"it is on level z{oz} but you are on z{z0}")
+    dx, dy = ox - x0, oy - y0
+    md = abs(dx) + abs(dy)
+    if md == 0:
+        return ("here", None)
+    if md == 1:
+        return ("use", _dir_to(dx, dy))
+    return ("far", (ox, oy))
+
+
 @mcp.tool()
-def u6_use_object(target: str, max_steps: int = 40, segment: int = -1) -> str:
-    """Ultima VI: CLOSED-LOOP "go to an object and USE it" -- the one-call version of
-    the lever/crank dance from the castle-escape run (find a walkable cell adjacent to
-    the object, route there, face it, USE). `target` is an object SLOT ('0x4e6' /
-    '1254') or a NAME ('lever', 'crank' -- nearest match). The tool resolves the
-    object's world cell, picks an adjacent WALKABLE cell (handling diagonally-placed
-    mechanisms whose own neighbours are blocked by other objects), drives there with
-    the closed-loop navigator (u6_goto_xy), then issues the cardinal USE in the
-    object's direction (composing the existing u6_use map / inventory / key sub-flows).
-    Removes the manual repositioning the agent had to do to reach the crank.
-    PLANNED -- stub (#2 from the castle-escape experiment, 2026-06-27; not yet
-    implemented)."""
-    pass
+def u6_use_object(target: str, max_steps: int = 40, on: str = "", segment: int = -1) -> str:
+    """Ultima VI: CLOSED-LOOP "go to an object and USE it" -- the one-call version of the
+    lever/crank dance from the castle-escape run (find a walkable cell adjacent to the
+    object, route there, face it, USE). `target` is an object SLOT ('0x4e6'/'1254') or a
+    NAME ('lever','crank' -- nearest match). The tool resolves the object's world cell,
+    picks an adjacent CARDINAL-walkable cell (handling diagonally-placed mechanisms whose
+    own neighbours are blocked by other objects -- u6_use only targets n/s/e/w), drives
+    there closed-loop with u6_goto_xy, then issues the cardinal USE toward the object
+    (composing the existing u6_use map / key sub-flows; pass `on` for the few items u6_use
+    needs it). Removes the manual repositioning the agent had to do to reach the crank."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    try:
+        x0, y0, z0 = _controlled_xyz(base)
+        slot, rerr = affordance._resolve_slot(base, target, z0, x0, y0)
+        if rerr:
+            return rerr
+        name = _obj_name(base, slot)
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+
+    nav = []
+    for _attempt in range(3):                      # approach object -> (reposition) -> USE
+        try:
+            kind, info = _adjacency_action(base, slot)
+        except OSError as ex:
+            return "\n".join(nav + [f"Read failed: {ex}"])
+        if kind == "err":
+            return "\n".join(nav + [f"{name} (0x{slot:03x}): {info}"])
+        if kind in ("use", "here"):
+            d = info if kind == "use" else "here"
+            res = u6_use(d, on)
+            head = f"Reached {name} (0x{slot:03x}); USE {d}" + (f" on={on}" if on else "") + ":"
+            return "\n".join(nav + [head, res])
+        # 'far' -> navigate toward a cardinal use-from cell (or the object if off-window).
+        ox, oy = info
+        try:
+            fxy, _face = cartography._use_from(base, ox, oy)
+            visible = _in_window(base, ox, oy)
+        except OSError as ex:
+            return "\n".join(nav + [f"Read failed: {ex}"])
+        if fxy is None and visible:                # in view but no walkable n/s/e/w neighbour
+            return "\n".join(nav + [
+                f"{name} (0x{slot:03x}) at ({ox},{oy}) has no walkable cardinal (n/s/e/w) "
+                f"neighbour to USE it from -- its sides are blocked. Clear an adjacent tile, "
+                f"or USE it manually once you can stand beside it."])
+        goal = fxy if fxy is not None else (ox, oy)
+        drive = u6_goto_xy(goal[0], goal[1], max_steps)
+        nav.append(f"approach {name} via ({goal[0]},{goal[1]}): {drive.splitlines()[-1]}")
+
+    return "\n".join(nav + [
+        f"Could not get cardinally adjacent to {name} (0x{slot:03x}) within the approach "
+        f"budget -- the path may be blocked (closed door / NPC / wall). Inspect with "
+        f"u6_at near it, clear the way, or raise max_steps and retry."])
 
 
 __all__ = [
     "u6_use_object",
+    "_adjacency_action",
+    "_in_window",
     "_USE_POTION",
     "_USE_ORB",
     "_USE_DIR",
