@@ -287,6 +287,15 @@ def _use_from(base, ox, oy):
     start = _world_to_cell(x0, y0, ax, ay)
     if start is None:
         return None, None
+    # A use-from cell is ADJACENT to the object, never the object's OWN cell. Many usable
+    # objects sit on passable floor (a lever's tile is walkable), so without this the flood
+    # would return the object's own cell at distance 0 and the `== 1` test below would wrongly
+    # report "no walkable cardinal neighbour". Mark the object's cell unwalkable so
+    # _closest_reachable yields the nearest reachable ADJACENT cell instead. (_build_grid
+    # returns a fresh grid each call, so mutating it here is local.)
+    ocell = _world_to_cell(ox, oy, ax, ay)
+    if ocell is not None:
+        walk[ocell[0]][ocell[1]] = False
     nr, nc = navigate._closest_reachable(walk, start, ax, ay, ox, oy)
     wx, wy = (ax + nc) & U6_WORLD_MASK, (ay + nr) & U6_WORLD_MASK
     dx, dy = ox - wx, oy - wy

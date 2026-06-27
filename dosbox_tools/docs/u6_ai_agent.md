@@ -146,6 +146,14 @@ build order:
   blocks on impassable objects (furniture/portcullis), and crosses a lowered drawbridge
   (breakthrough). Live-verified planning the castle→gate route (46 steps, 4 doors, routed
   adjacent to the blocking portcullis). The `u6_nearest('door')` whole-word fix rode along.
+- **#3.5 — DONE 2026-06-27** `u6_travel(x,y)`: the route-follower that drives a destination
+  while **auto-opening (and unlocking) doors**, so navigation that took ~15 manual calls per
+  escape collapses to one call. Built on #3's door-passable route + `u6_goto_xy` + `u6_use`; a
+  plain door opens in one USE, a locked one in two (key-flow unlock → open), and it stops
+  cleanly if a door won't open (no matching key / magically locked). **Live-verified** across
+  three castle escapes — auto-opening regular doors AND unlock-then-opening the locked
+  gatehouse door with the qual-1 key, and stopping gracefully at that locked door once the key
+  was removed. (Lever/crank stay manual — they're mechanisms, not doors.)
 - **#4/#5 (later)** persistent spatial memory (the "big picture" — kill re-surveying) and
   decoded mechanism states (portcullis/drawbridge open/closed vs raw frames).
 

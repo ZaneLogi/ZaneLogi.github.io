@@ -253,11 +253,29 @@ the one-call cross-castle/escape verb that drives a destination while **auto-ope
 Where `u6_goto_xy` is greedy (closest-to-goal) and dead-ends in pockets when a closed door
 walls off the direct line, `u6_travel` follows the GLOBAL door-passable route leg by leg —
 `_first_closed_door_on_path` finds the next shut door, it drives to the cell just before it
-(always reachable: the prefix is door-free), opens it with `u6_use` (auto key-flow for a
-locked door), and repeats; an already-open door on the path is skipped. Composes the
-proven pieces (`_baked_region_grid`/`_region_dijkstra` + `u6_goto_xy` + `u6_use`) — the
-automation of the exact manual loop that drove the 2026-06-27 castle escape. Tests
-`test_travel.py` 4/4 (door-finder + drive→open→arrive); suite green; **34 tools**.
+(always reachable: the prefix is door-free), opens it with `u6_use` — a plain closed door in
+one USE, a **LOCKED** door in two (the key-flow unlocks it, then a second USE opens it) — and
+repeats; an already-open door is skipped, and it STOPS with a clear message if a USE makes no
+progress (magically locked, or no matching key). Composes the proven pieces
+(`_baked_region_grid`/`_region_dijkstra` + `u6_goto_xy` + `u6_use`). Tests `test_travel.py`
+5/5 (door-finder + drive→open→arrive + the locked-door two-step); suite green; **34 tools**.
+**Live-verified** (castle/Monica): `u6_travel` drove the whole escape navigation across three
+runs — auto-opening regular doors AND unlock-then-opening the locked gatehouse door (qual-1
+key), and stopping gracefully at that locked door once the key was removed ("stuck at
+'locked' — no matching key"). *(Coverage note: the no-key stop is live-verified but has no
+offline regression test yet — a small TODO.)*
+
+**Fix (2026-06-27, found in the castle-escape play-test): `_use_from` passable-object bug.**
+A use-from cell must be ADJACENT to the object, never the object's OWN cell — but a lever
+(and other usable objects) sits on **passable floor**, so its own grid cell is walkable.
+`_use_from` took `navigate._closest_reachable`'s nearest-reachable cell, which for a passable
+object is the object's own cell at distance 0, then failed the `dist == 1` adjacency test →
+wrongly reported "no walkable cardinal neighbour" (the castle gate lever couldn't be reached
+even from the tile beside it; the crank worked only because its cell is impassable). Fix:
+mark the object's own cell unwalkable in the (fresh, local) flood grid so `_closest_reachable`
+yields the nearest reachable **adjacent** cell. Regression test in `test_query.py`
+(object-on-walkable-cell → adjacent); **live-verified** on the real lever (303,383): own cell
+`walk=True`, only the E neighbour open → `_use_from` now returns `(304,383),'w'`.
 
 **Next:** the remaining **10 TBD rows** (low-value peripheral USE handlers — a later cleanup
 slice), then **#4/#5** (persistent spatial memory + decoded mechanism states). See the

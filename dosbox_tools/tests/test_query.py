@@ -106,6 +106,15 @@ def test_use_from_prefers_reachable_side_not_far_walkable():
     assert fxy == (5, 6) and face == "n", (fxy, face)   # NOT the far-side north cell (5,4)
 
 
+def test_use_from_object_on_walkable_cell_returns_adjacent():
+    # regression (castle-escape lever bug): a lever sits on PASSABLE floor, so the object's
+    # OWN cell (5,5) is walkable + reachable. _use_from must still return an ADJACENT cell,
+    # not None -- the old code took the dist-0 own-cell and failed the `== 1` check.
+    # walkable: object cell (5,5) + its south neighbour (5,6) + the avatar at (5,7).
+    fxy, face = _run_use_from({(5, 5), (6, 5), (7, 5)}, 0, 0, (5, 7), (5, 5))
+    assert fxy == (5, 6) and face == "n", (fxy, face)   # stand adjacent (5,6), face the lever
+
+
 def test_use_from_none_when_object_off_window():
     fxy, face = _run_use_from("all", 100, 100, (100, 100), (5, 5))  # object far from window
     assert fxy is None and face is None
