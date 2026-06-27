@@ -33,6 +33,7 @@ globals().update({k: v for k, v in vars(_const).items() if not k.startswith('__'
 from u6.ctx import (mcp, S, U6State, base, inp, _ds, _derive_ds,  # noqa: F401
     _rd8, _rd16, _rd16s, _read_far_ptr, _static_table, _session_base, _controlled_slot, _controlled_xyz, _world_to_cell, _wait_command_ready, _input_state)
 from u6.decode import *  # noqa: F401,F403  -- object/tile decoders
+from u6.affordance import *  # noqa: F401,F403  -- USE-effect prediction (scaffold/stubs)
 from u6.converse import *  # noqa: F401,F403  -- dialogue VM + tools
 from u6.navigate import *  # noqa: F401,F403  -- grid/area-map/nav tools
 from u6.cartography import *  # noqa: F401,F403  -- whole-level baked-terrain routing

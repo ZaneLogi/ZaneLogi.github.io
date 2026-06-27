@@ -23,6 +23,7 @@ dosbox_tools/
     look_names.py         # LOOK.LZD tile-name table (auto-generated data); tile_name()
     mapdata.py            # baked MAP+CHUNKS -> expand_surface/expand_dungeon/tile_at (static terrain data)
     decode.py             # object/tile interpreters (names, gear, doors, allegiance, actor map)
+    affordance.py         # USE-effect prediction: exhaustive USE_DISPATCH manifest + predict stubs
     converse.py           # TalkBuf bytecode VM + disassembler + the 2 dialogue tools
     navigate.py           # walkable/cost grid, Dijkstra, area map, live-window movement tools
     cartography.py        # whole-level routing over BAKED terrain (u6_route) + planned spatial-query stubs
@@ -49,15 +50,17 @@ them via `ctx.py`.
 | `decode` | "**what is this**" — bytes → meaning | — | `_obj_tfq/_obj_name`, `_gear_*`, `_equip_slot`, `_door_state/_chest_state`, `_npc_class`, `_actor_map/_actor_cells`, `_door_at_tile`, `_holder_party_index`, `_party_member_slot`, `_visible_backpack`, `_npc_xyz`, `_compass`, `_dir_to`, `_tile_name`, `_ACTOR_RANK` |
 | `converse` | the dialogue VM + decoder + offline disassembler | `u6_conversation`, `u6_script_disasm` | `_ConverseVM`, `_DecoderStop`, `_decode_conversation`, `_extract_highlights`, `_disassemble`, `_DIS_*`, `_CV_SIDE_EFFECT`, … |
 | `navigate` | walkable/cost grid (`C_1E0F_000F` port), Dijkstra, live area map, **live-window** movement | `u6_walkable`, `u6_area_map`, `u6_pathfind`, `u6_goto`, `u6_goto_xy`, `u6_validate_passability` | `_build_grid`, `_dijkstra`, `_adjacent_goals`, `_mask_walk`, `_closest_reachable`, `_cell_diag`, `u6_area_map_data`, `_DOOR_GLYPH`, `_RESTORE_ARROW` |
+| `affordance` | **what does USE do** — `USE_DISPATCH`, an exhaustive mirror of `seg_27a1.c`'s USE switch (all 85 case-types / 48 rows, A/B/C/TBD) + the predict-from-source layer | `u6_affordance` *(stub)* | `USE_DISPATCH`, `_BY_TYPE`, `predict_use`, `_use_target`, `_predict_*` patterns, `_NOT_IMPL` |
 | `cartography` | **whole-level** routing over the baked terrain (`mapdata`), beyond the 40x40 window + the planned structured spatial-query layer | `u6_route` · *planned stubs:* `u6_at`, `u6_nearest`, `u6_interactables_near` | `_baked_region_grid`, `_region_dijkstra`, `_level_tiles`, `_runlength`, `_ROUTE_MARGIN/_MAX_SPAN` |
 | `perceive` | read-only perception | `u6_object`, `u6_inventory`, `u6_panel_state`, `u6_avatar`, `u6_party`, `u6_input_state`, `u6_roster_status`, `u6_npcs_near`, `u6_objects_near` | — (tools are self-contained) |
 | `act` | action verbs + their keyboard mechanisms | `u6_move`, `u6_talk`, `u6_look`, `u6_get`, `u6_use`, `u6_ready`, `u6_say`, `u6_key`, `u6_talk_to` · *planned stub:* `u6_use_object` | `_panel_commit`, `_begin_select/_walk_cursor`, `_use_map/_use_inventory/_use_key_flow`, `_select_backpack_item`, `_find_matching_key`, `_drain_to_ready`, `_USE_*`, `_U6_DIR/_DIR8`, `_EQUIP_CELL`, … |
 | `hook` | attach + BDA-calibrate + derive DS from the avatar name | `u6_hook` | — |
 
 **Tool count:** converse 2 + navigate 6 + cartography 1 (`u6_route`) + perceive 9 + act 9 +
-hook 1 = **28 built U6 tools**, plus **4 registered-but-stubbed** planned tools (`u6_at`,
-`u6_nearest`, `u6_interactables_near`, `u6_use_object`) = 32 registered, plus the shared
-base/input tools registered by `ctx`. (`mapdata` is data + helpers, exposes no tools.)
+hook 1 = **28 built U6 tools**, plus **5 registered-but-stubbed** planned tools (`u6_at`,
+`u6_nearest`, `u6_interactables_near`, `u6_use_object`, `u6_affordance`) = 33 registered,
+plus the shared base/input tools registered by `ctx`. (`mapdata` is data + helpers and
+`affordance` is currently a data manifest + stubs — both expose no built tools yet.)
 
 ---
 
@@ -73,9 +76,12 @@ mapdata    ┘ (leaf data: baked MAP+CHUNKS, no deps)
            │
 decode ◄── constants, ctx, look_names
            │
+affordance ◄── constants, ctx, decode   (exhaustive USE_DISPATCH; feeds cartography #1 / act #2)
+           │
    ┌───────┼──────────────┬───────────┐
 converse  navigate    cartography   perceive   ◄── constants, ctx, decode
-   │       │           (+ mapdata)
+   │       │           (+ mapdata,
+   │       │            + affordance)
    └───┬───┴──────────────┘
        ▼
       act ◄── constants, ctx, decode, converse, navigate

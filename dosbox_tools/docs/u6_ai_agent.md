@@ -133,6 +133,19 @@ included) **crossed the lowered drawbridge** fine. So castle egress works at dri
 the moment the bridge is down; the object-overlay (#3) is only needed for the *planner*
 to predict a path out, not for actually leaving.
 
+**USE-affordance layer (scaffolded 2026-06-27 -- the deduce-not-probe upgrade):** the gate
+puzzle was solved by trial-and-observe (pull lever, read frames, pull crank, read frames).
+The fix is `u6/affordance.py` -- an EXHAUSTIVE port-manifest of U6's USE dispatch
+(`USE_DISPATCH`: all **85** `seg_27a1.c:3016` case-types / 48 rows, each tagged
+A=mechanism / B=utility / C=quest / TBD with its handler+line). Mechanisms link by the
+`qual` field (crank->drawbridge, lever->portcullis@doorway, switch), so "USE this lever ->
+opens that portcullis" is PREDICTABLE, not a probe. Scope: A/B fully predicted (operate-
+mechanic + resolved target); **C operate-mechanic only** -- the quest payload is withheld
+(orb/moonstone/rune/balloon-plans/silver-horn and the **vortex-cube WIN** are left
+undecoded past "how to operate it"). It underpins the #1 query layer's "USE -> effect"
+dimension. All predictors return a loud `_NOT_IMPL` until built; the 15 TBD rows carry
+their `C_27A1_*`+line so nothing is missed after this.
+
 ## 3. Pathfinding
 
 4-connected **weighted Dijkstra** over a walkable+cost grid that is a faithful
