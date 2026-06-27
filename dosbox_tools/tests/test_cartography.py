@@ -108,13 +108,16 @@ def test_runlength():
 def test_baked_region_grid_over_real_terrain(monkeypatch):
     """Build a region grid over REAL baked mapdata with a stub TerrainType table:
     mark exactly tile-id 1 (grass) impassable, everything else open, and confirm the
-    grid flags the right cells -- proves the mapdata->grid wiring + indexing."""
+    grid flags the right cells -- proves the mapdata->grid wiring + indexing. The object
+    overlay runs over EMPTY object arrays (zeroed dm.read), so the result is terrain-only."""
     from u6 import cartography as g
     fake_terr = bytearray(0x800)
     fake_terr[1] = 0x02                              # tile 1 -> IMPASS bit
     monkeypatch.setattr(g, "_static_table", lambda *a, **k: fake_terr)
+    monkeypatch.setattr(dm, "read", lambda h, a, n: bytes(n))   # no objects loaded
     # surface region around (300,350); base unused (terr is stubbed)
-    walk, cost, ox, oy, R, C = g._baked_region_grid(0, 300, 350, 305, 352, 0)
+    walk, cost, ox, oy, R, C, door_cells = g._baked_region_grid(0, 300, 350, 305, 352, 0)
+    assert door_cells == []
     tiles = g._level_tiles(0)[0]
     W = g.mapdata.SURFACE_W
     # every cell's walk flag must equal "underlying baked tile != 1"
@@ -126,6 +129,62 @@ def test_baked_region_grid_over_real_terrain(monkeypatch):
                 bad += 1
     assert bad == 0, bad
     assert R > 0 and C > 0
+
+
+def _obj_arrays(objects):
+    """(status, pos, shape) bytes for U6_MAX_SLOTS from a list of placed objects."""
+    from u6.constants import U6_MAX_SLOTS
+    status = bytearray(U6_MAX_SLOTS)
+    pos    = bytearray(U6_MAX_SLOTS * 3)
+    shape  = bytearray(U6_MAX_SLOTS * 2)
+    for o in objects:
+        i = o["slot"]
+        status[i] = o.get("coorduse", 0)
+        sh = (o["type"] & 0x3ff) | ((o.get("frame", 0) & 0x3f) << 10)
+        shape[i * 2] = sh & 0xff; shape[i * 2 + 1] = (sh >> 8) & 0xff
+        v = (o["x"] & 0x3ff) | ((o["y"] & 0x3ff) << 10) | ((o.get("z", 0) & 0xf) << 20)
+        pos[i * 3] = v & 0xff; pos[i * 3 + 1] = (v >> 8) & 0xff; pos[i * 3 + 2] = (v >> 16) & 0xff
+    return bytes(status), bytes(pos), bytes(shape)
+
+
+def test_overlay_objects_door_block_breakthrough(monkeypatch):
+    """The #3 overlay: a door stays PASSABLE (+ in door_cells), an impassable object
+    BLOCKS, and a breakthrough tile (lowered drawbridge) OPENS an impassable cell."""
+    from u6 import cartography as g
+    from u6.constants import (U6_ObjStatus, U6_ObjPos, U6_ObjShapeType,
+                              U6_TerrainType_ptr, U6_TileFlag_ptr, U6_TileFlag2_ptr, U6_BaseTile_ptr)
+    FURN, BRIDGE = 0x200, 0x300            # arbitrary object types
+    terr = bytearray(0x800); terr[300] = 0x02          # tile 300 (furniture) impassable
+    tflag1 = bytearray(0x800)
+    tflag2 = bytearray(0x800); tflag2[400] = 0x04       # tile 400 (bridge) breakthrough
+    basetile = bytearray(0x800)
+    basetile[FURN * 2] = 300 & 0xff;   basetile[FURN * 2 + 1] = 300 >> 8
+    basetile[BRIDGE * 2] = 400 & 0xff; basetile[BRIDGE * 2 + 1] = 400 >> 8
+    TABLES = {U6_TerrainType_ptr: terr, U6_TileFlag_ptr: tflag1,
+              U6_TileFlag2_ptr: tflag2, U6_BaseTile_ptr: basetile}
+    monkeypatch.setattr(g, "_static_table", lambda base, ptr, *a, **k: TABLES[ptr])
+    status, pos, shape = _obj_arrays([
+        {"slot": 0x100, "type": 0x129, "frame": 4, "x": 1, "y": 1},   # closed door
+        {"slot": 0x101, "type": FURN,  "frame": 0, "x": 2, "y": 2},   # impassable furniture
+        {"slot": 0x102, "type": BRIDGE, "frame": 0, "x": 3, "y": 3},  # breakthrough bridge
+    ])
+    table = {U6_ObjStatus: status, U6_ObjPos: pos, U6_ObjShapeType: shape}
+    monkeypatch.setattr(dm, "read", lambda h, a, n: table[a][:n])
+    walk = [[True] * 5 for _ in range(5)]
+    walk[3][3] = False                                  # water under the (lowered) drawbridge
+    door_cells = g._overlay_objects(0, walk, 0, 0, 5, 5, 0)
+    assert walk[1][1] is True and (1, 1) in door_cells  # door: routable
+    assert walk[2][2] is False                          # furniture: blocks
+    assert walk[3][3] is True                           # drawbridge: crosses impassable water
+
+
+def test_name_match_score_word_vs_substring():
+    from u6 import cartography as g
+    assert g._name_match_score("door", "oaken door") == 0     # whole-word match (best)
+    assert g._name_match_score("door", "steel door") == 0
+    assert g._name_match_score("door", "doorway") == 1        # substring only (the anchor)
+    assert g._name_match_score("lever", "lever") == 0         # exact
+    assert g._name_match_score("door", "stone wall") is None  # no match
 
 
 if __name__ == "__main__":

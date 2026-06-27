@@ -47,11 +47,82 @@ def _level_tiles(z):
     return _dun_cache[z], mapdata.DUNGEON_W
 
 
+def _overlay_objects(base, walk, ox, oy, R, C, z):
+    """#3: overlay the CURRENTLY-LOADED world objects onto a region walk-grid using the
+    land-walker object rules (a port of navigate._build_grid's object pass), mapped to the
+    region by (wy-oy, wx-ox). Two differences from the live-window grid:
+
+      * DOORS (OBJ_129..12C) are forced PASSABLE and returned as `door_cells` -- the
+        whole-level PLANNER routes through a closed door and opens it at move time, so it
+        must not treat it as a wall.
+      * everything else follows the engine: an impassable object tile BLOCKS, a
+        breakthrough tile (bridge / a LOWERED drawbridge) makes the cell enterable even
+        over impassable terrain (so u6_route can finally cross a lowered drawbridge), and
+        multi-tile objects spread their block W/N/NW.
+
+    Only objects resident in RAM (the loaded super-chunks around the avatar) are applied;
+    tiles outside the loaded region stay terrain-only. Mutates `walk`; returns door_cells."""
+    status = dm.read(S.handle, base + U6_ObjStatus, U6_MAX_SLOTS)
+    objpos = dm.read(S.handle, base + U6_ObjPos, U6_MAX_SLOTS * 3)
+    shape  = dm.read(S.handle, base + U6_ObjShapeType, U6_MAX_SLOTS * 2)
+    terr     = _static_table(base, U6_TerrainType_ptr, _TILEFLAG_N, "terr")
+    tflag1   = _static_table(base, U6_TileFlag_ptr,    _TILEFLAG_N, "tflag1")
+    tflag2   = _static_table(base, U6_TileFlag2_ptr,   _TILEFLAG_N, "tflag2")
+    basetile = _static_table(base, U6_BaseTile_ptr,    _BASETILE_N * 2, "basetile")
+    brk = [[False] * C for _ in range(R)]
+
+    def terr_of(t):
+        return terr[t] if 0 <= t < len(terr) else 0
+
+    def apply(r, c, qtile):
+        if not (0 <= r < R and 0 <= c < C) or not (0 <= qtile < _TILEFLAG_N):
+            return
+        if tflag2[qtile] & TILE2_BREAKTHROUGH:
+            walk[r][c] = True
+            if not (tflag2[qtile] & TILE2_IGNORE):
+                brk[r][c] = True
+        elif (terr_of(qtile) & TERRAIN_IMPASS) and not brk[r][c]:
+            walk[r][c] = False
+
+    door_cells = []
+    for slot in range(0x100, U6_MAX_SLOTS):
+        sh = shape[slot * 2] | (shape[slot * 2 + 1] << 8)
+        if sh == 0 or (status[slot] & 0x18):                # empty / not LOCXYZ
+            continue
+        typ = sh & 0x3ff
+        if typ >= _BASETILE_N:
+            continue
+        p = objpos[slot * 3] | (objpos[slot * 3 + 1] << 8) | (objpos[slot * 3 + 2] << 16)
+        if ((p >> 20) & 0xf) != z:
+            continue
+        r, c = ((p >> 10) & 0x3ff) - oy, (p & 0x3ff) - ox
+        if not (0 <= r < R and 0 <= c < C):
+            continue
+        if typ in _U6_DOOR_TYPES:
+            door_cells.append((r, c))                       # keep passable; opened en route
+            continue
+        tile = (basetile[typ * 2] | (basetile[typ * 2 + 1] << 8)) + (sh >> 10)
+        fl = tflag1[tile] if 0 <= tile < len(tflag1) else 0
+        apply(r, c, tile)
+        if fl & TILE_DOUBLE_H:
+            apply(r, c - 1, tile - 1)
+            if fl & TILE_DOUBLE_V:
+                apply(r - 1, c, tile - 2)
+                apply(r - 1, c - 1, tile - 3)
+        elif fl & TILE_DOUBLE_V:
+            apply(r - 1, c, tile - 1)
+    for (r, c) in door_cells:                               # doors win, even over an overlap
+        walk[r][c] = True
+    return door_cells
+
+
 def _baked_region_grid(base, x0, y0, tx, ty, z):
     """Passability + cost over the world bbox covering (x0,y0)->(tx,ty) (+margin) on
-    level z, from the BAKED terrain (mapdata) + the resident TerrainType table. Returns
-    (walk[R][C], cost[R][C], ox, oy, R, C); world cell (wx,wy) maps to (wy-oy, wx-ox).
-    Terrain-only -- walls/water block, doorways stay passable (doors are objects)."""
+    level z, from the BAKED terrain (mapdata) + the resident TerrainType table, THEN the
+    live object overlay (#3). Returns (walk[R][C], cost[R][C], ox, oy, R, C, door_cells);
+    world cell (wx,wy) maps to (wy-oy, wx-ox). Walls/water block; doorways + closed doors
+    stay passable (opened en route); impassable objects (furniture/portcullis) block; a
+    lowered drawbridge (breakthrough) is crossable."""
     terr = _static_table(base, U6_TerrainType_ptr, _TILEFLAG_N, "terr")
     tiles, W = _level_tiles(z)
     ox = max(0, min(x0, tx) - _ROUTE_MARGIN)
@@ -68,7 +139,8 @@ def _baked_region_grid(base, x0, y0, tx, ty, z):
             cr[c] = (gf >> 4) + 1
             if gf & TERRAIN_IMPASS:
                 wr[c] = False
-    return walk, cost, ox, oy, R, C
+    door_cells = _overlay_objects(base, walk, ox, oy, R, C, z)
+    return walk, cost, ox, oy, R, C, door_cells
 
 
 def _region_dijkstra(walk, cost, R, C, start, goals):
@@ -125,11 +197,14 @@ def u6_route(x: int, y: int, z: int = -1, segment: int = -1) -> str:
     across the castle). Returns the cardinal step list (n/s/w/e) + the next direction +
     straight-line bearing/distance, WITHOUT sending input.
 
-    Routes over the wall/floor STRUCTURE: doorways are passable (a door is an object --
-    open a closed one when you reach it with u6_use), and the cost weight skirts
-    forest/swamp like the engine. z defaults to the avatar's level; pass 1..5 for a
-    dungeon level (start is taken at the avatar's x,y). Execute the steps with u6_move,
-    or hand the target to u6_goto_xy for the closed-loop drive. DS from u6_hook."""
+    Routes over the wall/floor STRUCTURE plus the live OBJECT overlay (#3): doors are
+    routable (the plan crosses a closed door and tells you to open it en route), impassable
+    objects (furniture/portcullis) block, and a LOWERED drawbridge is crossable -- so it can
+    plan the whole castle->gate route, not just terrain. The object overlay only covers the
+    loaded region around the avatar; far tiles are terrain-only. Cost skirts forest/swamp
+    like the engine. z defaults to the avatar's level; pass 1..5 for a dungeon level (start
+    is the avatar's x,y). Execute with u6_move, or hand the target to u6_goto_xy for the
+    closed-loop drive. DS from u6_hook."""
     if S.membase is None:
         return dm.HINT_NO_MEMBASE
     ds, err = _ds(segment)
@@ -142,7 +217,7 @@ def u6_route(x: int, y: int, z: int = -1, segment: int = -1) -> str:
         tx, ty = x & U6_WORLD_MASK, y & U6_WORLD_MASK
         if (x0, y0) == (tx, ty) and zz == z0:
             return f"Already at ({tx},{ty})."
-        walk, cost, ox, oy, R, C = _baked_region_grid(base, x0, y0, tx, ty, zz)
+        walk, cost, ox, oy, R, C, door_cells = _baked_region_grid(base, x0, y0, tx, ty, zz)
     except OSError as ex:
         return f"Read failed (DS=0x{ds:04x}): {ex}"
     sr, sc = y0 - oy, x0 - ox
@@ -169,11 +244,20 @@ def u6_route(x: int, y: int, z: int = -1, segment: int = -1) -> str:
     dirs = [_STEP_NAME[s] for s in steps]
     bearing = _compass(tx - x0, ty - y0)
     cheb = max(abs(tx - x0), abs(ty - y0))
-    return (f"Route to ({tx},{ty}) z={zz}: {len(dirs)} steps{tnote}.\n"
+    door_set = set(door_cells)
+    doors_on_path, rr, cc = 0, sr, sc                    # count closed-door tiles the path crosses
+    for dr, dc in steps:
+        rr, cc = rr + dr, cc + dc
+        if (rr, cc) in door_set:
+            doors_on_path += 1
+    dnote = (f"\n  crosses {doors_on_path} door(s) -- open each with u6_use when you reach it"
+             if doors_on_path else "")
+    return (f"Route to ({tx},{ty}) z={zz}: {len(dirs)} steps{tnote}.{dnote}\n"
             f"  next: {dirs[0]}    straight-line: {bearing} (dist {cheb})\n"
             f"  path: {_runlength(dirs)}\n"
             f"(plan only -- step it with u6_move, or drive it closed-loop with "
-            f"u6_goto_xy({tx},{ty}). Open any closed door en route with u6_use.)")
+            f"u6_goto_xy({tx},{ty}). Objects included: doors are routable (open en route), "
+            f"furniture/portcullis block, a lowered drawbridge is crossable.)")
 
 
 # ----------------------------------------------------------------------------
@@ -267,6 +351,17 @@ def _actor_on_tile(base, tx, ty, tz):
     return None
 
 
+def _name_match_score(needle, name):
+    """Rank a LOOK.LZD name against a (lowercased) query: 0 = exact or whole-word match
+    (best), 1 = substring-only, None = no match. Lets u6_nearest('door') prefer 'oaken
+    door' / 'steel door' (word match) over the substring-only 'doorway' (the invisible
+    OBJ_12D lever anchor)."""
+    nm = name.lower()
+    if needle not in nm:
+        return None
+    return 0 if (needle == nm or needle in nm.split()) else 1
+
+
 @mcp.tool()
 def u6_at(x: int, y: int, z: int = -1, segment: int = -1) -> str:
     """Ultima VI: STRUCTURED single-cell query -- decode exactly what is at world tile
@@ -319,7 +414,7 @@ def u6_nearest(name: str, radius: int = 16, segment: int = -1) -> str:
         x0, y0, z0 = _controlled_xyz(base)
         objs = affordance._load_objs(base)
         status = objs[0]
-        best = None
+        best = None                                      # (score, dist, slot, typ, x, y)
         for i in range(0x100, U6_MAX_SLOTS):
             if status[i] & 0x18:
                 continue
@@ -327,13 +422,17 @@ def u6_nearest(name: str, radius: int = 16, segment: int = -1) -> str:
             if typ == 0 or z != z0:
                 continue
             d = max(abs(x - x0), abs(y - y0))
-            if d > radius or (best is not None and d >= best[0]):
+            if d > radius:
                 continue
-            if needle in _obj_name(base, i).lower():
-                best = (d, i, typ, x, y)
+            score = _name_match_score(needle, _obj_name(base, i))   # 0=word/exact, 1=substring
+            if score is None:
+                continue
+            cand = (score, d, i, typ, x, y)
+            if best is None or cand[:2] < best[:2]:       # prefer a whole-word match, then nearer
+                best = cand
         if best is None:
             return f"No object named like '{name}' within {radius} of you ({x0},{y0},z{z0})."
-        d, slot, typ, ox, oy = best
+        _score, d, slot, typ, ox, oy = best
         nm = _obj_name(base, slot)
         lines = [f"Nearest '{nm}' (slot 0x{slot:03x}, type 0x{typ:03x}): "
                  f"({ox},{oy}) {_compass(ox - x0, oy - y0)} dist {d}"]
@@ -406,10 +505,12 @@ __all__ = [
     "_ROUTE_MARGIN",
     "_ROUTE_MAX_SPAN",
     "_level_tiles",
+    "_overlay_objects",
     "_baked_region_grid",
     "_region_dijkstra",
     "_runlength",
     "u6_route",
+    "_name_match_score",
     "_use_from",
     "_top_object_slot",
     "_describe_obj",

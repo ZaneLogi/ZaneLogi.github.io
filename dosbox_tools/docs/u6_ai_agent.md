@@ -78,14 +78,19 @@ Implemented (logic verified; **memory offsets pending live verification** — se
   `u6_get(dir)`, `u6_use(target, on)` (map tile **or** carried item; auto key flow
   for a locked door), `u6_use_object(target)` (#2: resolve a map object by slot/name,
   drive to a reachable cardinal cell, face it, USE — the executor of the query tools'
-  use-from handles), `u6_ready(slot)` (equip/unequip via the panel), `u6_key(key)`.
+  use-from handles), `u6_travel(x,y)` (#3.5: drive to a tile over the whole-level
+  door-passable route, **auto-opening/unlocking doors** en route — the one-call
+  cross-castle/escape verb that doesn't dead-end like `u6_goto_xy`), `u6_ready(slot)`
+  (equip/unequip via the panel), `u6_key(key)`.
 - **Navigate:** `u6_pathfind(npc_slot)` (planner), `u6_goto(npc_slot)`
   (closed-loop), `u6_goto_xy(x,y)` (closed-loop to a tile, live 40x40 window),
   `u6_talk_to(npc_slot)` (goto + talk), and `u6_route(x,y)` — a **whole-level**
   planner over the BAKED static terrain (`mapdata`: `MAP`+`CHUNKS` expanded to the full
   1024x1024 surface / 5x256x256 dungeons), so the agent can plan to a tile it can't
-  currently see, beyond the live window. Terrain-only (doorways passable; a closed door
-  is opened at move time); see the egress finding in §2b.
+  currently see, beyond the live window. Now object-aware (#3): doors are routable (the
+  plan reports "crosses N doors -- open each with u6_use"), furniture/portcullis block, a
+  lowered drawbridge is crossable -- over the loaded region (far tiles stay terrain-only);
+  see the egress finding in §2b.
 - **Query (structured spatial #1 — built 2026-06-27):** `u6_at(x,y,z)` (decode one cell:
   terrain + name + passability, the top object's name/state/predicted USE effect, any
   actor + allegiance), `u6_nearest(name,radius)` (nearest named object + state + the
@@ -136,17 +141,19 @@ build order:
   handles. Its live test found + fixed a `_use_from` reachability bug (it had picked a
   walkable-but-unreachable far-side neighbour — a castle door's outside-courtyard tile;
   now it floods from the avatar and returns the reachable side).
-- **#3 (after #1/#2)** give `u6_route` a door-as-passable object-overlay — then it could
-  plan the whole castle→gate route; today only the live-grid driver `u6_goto_xy` crosses
-  closed doors / the lowered drawbridge.
+- **#3 — DONE 2026-06-27** give `u6_route` a door-as-passable object overlay: it now
+  routes through closed doors (reporting "crosses N doors -- open each with u6_use"),
+  blocks on impassable objects (furniture/portcullis), and crosses a lowered drawbridge
+  (breakthrough). Live-verified planning the castle→gate route (46 steps, 4 doors, routed
+  adjacent to the blocking portcullis). The `u6_nearest('door')` whole-word fix rode along.
 - **#4/#5 (later)** persistent spatial memory (the "big picture" — kill re-surveying) and
   decoded mechanism states (portcullis/drawbridge open/closed vs raw frames).
 
-**Egress finding (validates the terrain-only / live-grid split):** `u6_route` (terrain-
-only) correctly **cannot** cross the moat, while `u6_goto_xy` (live grid, objects
-included) **crossed the lowered drawbridge** fine. So castle egress works at drive-time
-the moment the bridge is down; the object-overlay (#3) is only needed for the *planner*
-to predict a path out, not for actually leaving.
+**Egress finding (validates the terrain-only / live-grid split):** before #3, `u6_route`
+(terrain-only) correctly could **not** cross the moat while `u6_goto_xy` (live grid, objects
+included) **crossed the lowered drawbridge** fine. #3 closes that gap for the *planner*:
+`u6_route` now carries the same object overlay (doors routable, portcullis blocks, a lowered
+drawbridge crossable), so it can predict the path out — not just drive it.
 
 **USE-affordance layer (`u6/affordance.py` -- the deduce-not-probe upgrade):** the gate
 puzzle was solved by trial-and-observe (pull lever, read frames, pull crank, read frames).

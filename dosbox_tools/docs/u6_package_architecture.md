@@ -51,14 +51,14 @@ them via `ctx.py`.
 | `converse` | the dialogue VM + decoder + offline disassembler | `u6_conversation`, `u6_script_disasm` | `_ConverseVM`, `_DecoderStop`, `_decode_conversation`, `_extract_highlights`, `_disassemble`, `_DIS_*`, `_CV_SIDE_EFFECT`, … |
 | `navigate` | walkable/cost grid (`C_1E0F_000F` port), Dijkstra, live area map, **live-window** movement | `u6_walkable`, `u6_area_map`, `u6_pathfind`, `u6_goto`, `u6_goto_xy`, `u6_validate_passability` | `_build_grid`, `_dijkstra`, `_adjacent_goals`, `_mask_walk`, `_closest_reachable`, `_cell_diag`, `u6_area_map_data`, `_DOOR_GLYPH`, `_RESTORE_ARROW` |
 | `affordance` | **what does USE do** — `USE_DISPATCH`, an exhaustive mirror of `seg_27a1.c`'s USE switch (all 85 case-types / 48 rows, A/B/C/TBD) + the predict-from-source layer (**A + B + C all built**; C is operate-mechanic only, quest payload withheld; **10 TBD rows** left return a graceful operate-note) | `u6_affordance` | `USE_DISPATCH`, `_BY_TYPE`, `predict_use`, `_use_target`, `_search_area/_search_type_at`, `_predict_*` (qual_toggle/open_close/unlock/light/consume/eat/vehicle/play/simple/quest_mechanic + weathervane/study/squeak/self_toggle), `_NOT_IMPL` |
-| `cartography` | **whole-level** routing over the baked terrain (`mapdata`), beyond the 40x40 window + the **structured spatial-query layer** (#1) | `u6_route`, `u6_at`, `u6_nearest`, `u6_interactables_near` | `_baked_region_grid`, `_region_dijkstra`, `_use_from`, `_top_object_slot`, `_describe_obj`, `_actor_on_tile`, `_level_tiles`, `_runlength` |
+| `cartography` | **whole-level** routing over baked terrain + the **live object overlay** (#3: doors routable, furniture/portcullis block, lowered drawbridge crossable), beyond the 40x40 window + the **structured spatial-query layer** (#1) | `u6_route`, `u6_at`, `u6_nearest`, `u6_interactables_near` | `_overlay_objects`, `_baked_region_grid`, `_region_dijkstra`, `_use_from`, `_name_match_score`, `_top_object_slot`, `_describe_obj`, `_actor_on_tile`, `_level_tiles`, `_runlength` |
 | `perceive` | read-only perception | `u6_object`, `u6_inventory`, `u6_panel_state`, `u6_avatar`, `u6_party`, `u6_input_state`, `u6_roster_status`, `u6_npcs_near`, `u6_objects_near` | — (tools are self-contained) |
-| `act` | action verbs + their keyboard mechanisms | `u6_move`, `u6_talk`, `u6_look`, `u6_get`, `u6_use`, `u6_ready`, `u6_say`, `u6_key`, `u6_talk_to`, `u6_use_object` (#2: go-adjacent + USE) | `_adjacency_action`, `_in_window`, `_panel_commit`, `_begin_select/_walk_cursor`, `_use_map/_use_inventory/_use_key_flow`, `_select_backpack_item`, `_find_matching_key`, `_drain_to_ready`, `_USE_*`, `_U6_DIR/_DIR8`, `_EQUIP_CELL`, … |
+| `act` | action verbs + their keyboard mechanisms | `u6_move`, `u6_talk`, `u6_look`, `u6_get`, `u6_use`, `u6_ready`, `u6_say`, `u6_key`, `u6_talk_to`, `u6_use_object` (#2: go-adjacent + USE), `u6_travel` (#3.5: route-follow + auto-open doors) | `_adjacency_action`, `_in_window`, `_first_closed_door_on_path`, `_panel_commit`, `_begin_select/_walk_cursor`, `_use_map/_use_inventory/_use_key_flow`, `_select_backpack_item`, `_find_matching_key`, `_drain_to_ready`, `_USE_*`, `_U6_DIR/_DIR8`, `_EQUIP_CELL`, … |
 | `hook` | attach + BDA-calibrate + derive DS from the avatar name | `u6_hook` | — |
 
 **Tool count:** converse 2 + navigate 6 + cartography 4 (`u6_route` + the #1 query trio
 `u6_at`/`u6_nearest`/`u6_interactables_near`) + affordance 1 (`u6_affordance`) + perceive 9 +
-act 10 + hook 1 = **33 built U6 tools** (no stubs left) = 33 registered, plus the shared
+act 11 (+`u6_travel`) + hook 1 = **34 built U6 tools** (no stubs left) = 34 registered, plus the shared
 base/input tools registered by `ctx`. (`mapdata` is data + helpers — no built tools.
 `affordance`'s `u6_affordance` predicts A/B/C now; 10 TBD rows remain (graceful note).)
 
@@ -236,9 +236,32 @@ weathervane (`0x0D4`), scroll (`0x061`), squeak toy (`0x0A9`), self-toggle (`0x1
 yours to discover", braziers → "douses/lights". **10 TBD rows remain** (peripheral handlers,
 each carrying its `C_27A1_*`+line; `predict_use` returns the graceful note for them).
 
+**Step 4 done (2026-06-27): #3 `u6_route` object overlay + #3.5 `u6_travel`.** New
+`cartography._overlay_objects` ports `navigate._build_grid`'s land-walker object pass onto
+the whole-level baked grid: impassable objects (furniture/portcullis) **block**, breakthrough
+tiles (a **lowered drawbridge**) become **crossable**, and **doors are forced passable** +
+returned as `door_cells`. `_baked_region_grid` now applies it (returns a 7-tuple incl.
+`door_cells`) and `u6_route` reports "crosses N door(s)". Only RAM-resident objects (the
+loaded region) are overlaid; far tiles stay terrain-only. **Folded in** the `u6_nearest`
+whole-word fix (`_name_match_score`: 'door' prefers 'oaken door' over the 'doorway' anchor).
+Tests `test_cartography.py` 9/9; **live-verified** (castle/Monica): `u6_route(307,384)`
+planned a 46-step route, "crosses 4 doors", routed adjacent to the blocking portcullis;
+`u6_nearest('door')` → 'oaken door'.
+
+**#3.5 `u6_travel(x,y)`** (in `act`, the natural follow-on the castle-escape play-test wanted):
+the one-call cross-castle/escape verb that drives a destination while **auto-opening doors**.
+Where `u6_goto_xy` is greedy (closest-to-goal) and dead-ends in pockets when a closed door
+walls off the direct line, `u6_travel` follows the GLOBAL door-passable route leg by leg —
+`_first_closed_door_on_path` finds the next shut door, it drives to the cell just before it
+(always reachable: the prefix is door-free), opens it with `u6_use` (auto key-flow for a
+locked door), and repeats; an already-open door on the path is skipped. Composes the
+proven pieces (`_baked_region_grid`/`_region_dijkstra` + `u6_goto_xy` + `u6_use`) — the
+automation of the exact manual loop that drove the 2026-06-27 castle escape. Tests
+`test_travel.py` 4/4 (door-finder + drive→open→arrive); suite green; **34 tools**.
+
 **Next:** the remaining **10 TBD rows** (low-value peripheral USE handlers — a later cleanup
-slice), and `#3` (give `u6_route` a door-as-passable object overlay so the whole-level
-planner can route through doors). See the 2026-06-27 castle-escape play-test in `u6_ai_agent.md`.
+slice), then **#4/#5** (persistent spatial memory + decoded mechanism states). See the
+2026-06-27 castle-escape play-test in `u6_ai_agent.md`.
 
 ---
 

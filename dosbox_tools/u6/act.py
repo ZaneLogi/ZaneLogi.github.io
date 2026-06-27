@@ -883,8 +883,111 @@ def u6_use_object(target: str, max_steps: int = 40, on: str = "", segment: int =
         f"u6_at near it, clear the way, or raise max_steps and retry."])
 
 
+def _first_closed_door_on_path(base, steps, sr, sc, ox, oy, z0, door_set):
+    """Walk the route `steps` from cell (sr,sc); return (approach_world, door_world) for the
+    FIRST cell that is a CLOSED/locked door (in `door_set` AND not currently open), or
+    (None, None) if the path crosses no shut door. Open doors on the path are skipped (the
+    avatar just walks through them next leg)."""
+    r, c = sr, sc
+    for dr, dc in steps:
+        nr, nc = r + dr, c + dc
+        if (nr, nc) in door_set:
+            dw = ((ox + nc) & U6_WORLD_MASK, (oy + nr) & U6_WORLD_MASK)
+            d = _door_at_tile(base, dw[0], dw[1], z0)
+            if d is not None and _door_state(d[2])[0] != "open":   # a shut door to open
+                return ((ox + c) & U6_WORLD_MASK, (oy + r) & U6_WORLD_MASK), dw
+        r, c = nr, nc
+    return None, None
+
+
+@mcp.tool()
+def u6_travel(x: int, y: int, max_legs: int = 24, segment: int = -1) -> str:
+    """Ultima VI: TRAVEL to world tile (x,y) over the whole-level door-passable route,
+    automatically OPENING (and unlocking with an owned key) every closed door en route --
+    the one-call cross-castle / escape verb. Where u6_goto_xy DEAD-ENDS (it greedily dives
+    toward the goal and gets stuck in a pocket when a closed door walls off the direct line),
+    u6_travel follows the GLOBAL route (cartography's door-passable Dijkstra) leg by leg:
+    drive to the cell just before the next shut door (always reachable -- the prefix is
+    door-free), open that door, repeat. Stops at the goal, when a door won't open (locked,
+    no matching key), or when the way is genuinely blocked. DS from u6_hook."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    gx, gy = x & U6_WORLD_MASK, y & U6_WORLD_MASK
+    log = []
+    for leg in range(max_legs):
+        try:
+            x0, y0, z0 = _controlled_xyz(base)
+        except OSError as ex:
+            return "\n".join(log + [f"Read failed: {ex}"])
+        if (x0, y0) == (gx, gy):
+            return "\n".join(log + [f"Arrived at ({gx},{gy}) in {leg} leg(s)."])
+        try:
+            walk, cost, ox, oy, R, C, door_cells = cartography._baked_region_grid(base, x0, y0, gx, gy, z0)
+        except OSError as ex:
+            return "\n".join(log + [f"Read failed: {ex}"])
+        sr, sc, gr, gc = y0 - oy, x0 - ox, gy - oy, gx - ox
+        if not (0 <= sr < R and 0 <= sc < C):
+            return "\n".join(log + ["Avatar fell outside the routing region -- unexpected."])
+        if not (0 <= gr < R and 0 <= gc < C):
+            return "\n".join(log + [f"Target ({gx},{gy}) is beyond the routing span; travel closer first."])
+        if walk[gr][gc]:
+            goals = {(gr, gc)}
+        else:
+            goals = {(gr + dr, gc + dc) for dr, dc in _DIR_DELTAS
+                     if 0 <= gr + dr < R and 0 <= gc + dc < C and walk[gr + dr][gc + dc]}
+            if not goals:
+                return "\n".join(log + [f"Target ({gx},{gy}) is walled in -- no approach tile."])
+        steps = cartography._region_dijkstra(walk, cost, R, C, (sr, sc), goals)
+        if steps is None:
+            return "\n".join(log + [f"No route to ({gx},{gy}) over the known map -- blocked by walls."])
+        if not steps:
+            return "\n".join(log + [f"Arrived at/adjacent to ({gx},{gy}) in {leg} leg(s)."])
+        approach, door_world = _first_closed_door_on_path(base, steps, sr, sc, ox, oy, z0, set(door_cells))
+        if door_world is None:                          # no shut door blocks -> drive straight
+            res = u6_goto_xy(gx, gy, 200)
+            return "\n".join(log + [f"final leg -> ({gx},{gy}): {res.splitlines()[-1]}"])
+        if approach != (x0, y0):                         # drive to the door's approach cell
+            res = u6_goto_xy(approach[0], approach[1], 200)
+            log.append(f"leg {leg}: -> approach ({approach[0]},{approach[1]}): {res.splitlines()[-1]}")
+            try:
+                ax_, ay_, _ = _controlled_xyz(base)
+            except OSError as ex:
+                return "\n".join(log + [f"Read failed: {ex}"])
+            if (ax_, ay_) != approach:
+                return "\n".join(log + [f"Stalled reaching the approach ({approach[0]},{approach[1]}) for "
+                                        f"the door at ({door_world[0]},{door_world[1]}) -- blocked or an NPC."])
+        ddir = _dir_to(door_world[0] - approach[0], door_world[1] - approach[1])
+        # USE until the door is OPEN: a plain closed door opens in one USE; a LOCKED one
+        # takes two -- u6_use's key-flow first UNLOCKS it (-> closed), then a second USE
+        # opens it. Stop early if a USE makes no progress (magically locked / no key).
+        opened, prev_state = False, None
+        for _try in range(3):
+            ur = u6_use(ddir)                            # auto key-flow unlocks a locked door
+            log.append(f"leg {leg}: USE '{ddir}' on door ({door_world[0]},{door_world[1]}): "
+                       f"{ur.splitlines()[-1]}")
+            d = _door_at_tile(base, door_world[0], door_world[1], z0)
+            state = _door_state(d[2])[0] if d is not None else "open"
+            if state == "open":
+                opened = True
+                break
+            if state == prev_state:                      # USE changed nothing -> give up on it
+                break
+            prev_state = state
+        if not opened:
+            return "\n".join(log + [f"Door at ({door_world[0]},{door_world[1]}) stuck at "
+                                    f"'{prev_state}' -- locked with no matching key, or magically "
+                                    f"locked. Can't get through."])
+    return "\n".join(log + [f"Hit max_legs={max_legs} short of ({gx},{gy})."])
+
+
 __all__ = [
     "u6_use_object",
+    "u6_travel",
+    "_first_closed_door_on_path",
     "_adjacency_action",
     "_in_window",
     "_USE_POTION",
