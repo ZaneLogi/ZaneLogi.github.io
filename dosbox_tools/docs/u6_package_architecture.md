@@ -50,17 +50,18 @@ them via `ctx.py`.
 | `decode` | "**what is this**" — bytes → meaning | — | `_obj_tfq/_obj_name`, `_gear_*`, `_equip_slot`, `_door_state/_chest_state`, `_npc_class`, `_actor_map/_actor_cells`, `_door_at_tile`, `_holder_party_index`, `_party_member_slot`, `_visible_backpack`, `_npc_xyz`, `_compass`, `_dir_to`, `_tile_name`, `_ACTOR_RANK` |
 | `converse` | the dialogue VM + decoder + offline disassembler | `u6_conversation`, `u6_script_disasm` | `_ConverseVM`, `_DecoderStop`, `_decode_conversation`, `_extract_highlights`, `_disassemble`, `_DIS_*`, `_CV_SIDE_EFFECT`, … |
 | `navigate` | walkable/cost grid (`C_1E0F_000F` port), Dijkstra, live area map, **live-window** movement | `u6_walkable`, `u6_area_map`, `u6_pathfind`, `u6_goto`, `u6_goto_xy`, `u6_validate_passability` | `_build_grid`, `_dijkstra`, `_adjacent_goals`, `_mask_walk`, `_closest_reachable`, `_cell_diag`, `u6_area_map_data`, `_DOOR_GLYPH`, `_RESTORE_ARROW` |
-| `affordance` | **what does USE do** — `USE_DISPATCH`, an exhaustive mirror of `seg_27a1.c`'s USE switch (all 85 case-types / 48 rows, A/B/C/TBD) + the predict-from-source layer | `u6_affordance` *(stub)* | `USE_DISPATCH`, `_BY_TYPE`, `predict_use`, `_use_target`, `_predict_*` patterns, `_NOT_IMPL` |
-| `cartography` | **whole-level** routing over the baked terrain (`mapdata`), beyond the 40x40 window + the planned structured spatial-query layer | `u6_route` · *planned stubs:* `u6_at`, `u6_nearest`, `u6_interactables_near` | `_baked_region_grid`, `_region_dijkstra`, `_level_tiles`, `_runlength`, `_ROUTE_MARGIN/_MAX_SPAN` |
+| `affordance` | **what does USE do** — `USE_DISPATCH`, an exhaustive mirror of `seg_27a1.c`'s USE switch (all 85 case-types / 48 rows, A/B/C/TBD) + the predict-from-source layer (**A-mechanisms built**; B/C predictors are the next slice — they return a graceful operate-note for now) | `u6_affordance` | `USE_DISPATCH`, `_BY_TYPE`, `predict_use`, `_use_target`, `_search_area/_search_type_at`, `_predict_qual_toggle/_open_close/_unlock`, the B/C `_predict_*` stubs, `_NOT_IMPL` |
+| `cartography` | **whole-level** routing over the baked terrain (`mapdata`), beyond the 40x40 window + the **structured spatial-query layer** (#1) | `u6_route`, `u6_at`, `u6_nearest`, `u6_interactables_near` | `_baked_region_grid`, `_region_dijkstra`, `_use_from`, `_top_object_slot`, `_describe_obj`, `_actor_on_tile`, `_level_tiles`, `_runlength` |
 | `perceive` | read-only perception | `u6_object`, `u6_inventory`, `u6_panel_state`, `u6_avatar`, `u6_party`, `u6_input_state`, `u6_roster_status`, `u6_npcs_near`, `u6_objects_near` | — (tools are self-contained) |
 | `act` | action verbs + their keyboard mechanisms | `u6_move`, `u6_talk`, `u6_look`, `u6_get`, `u6_use`, `u6_ready`, `u6_say`, `u6_key`, `u6_talk_to` · *planned stub:* `u6_use_object` | `_panel_commit`, `_begin_select/_walk_cursor`, `_use_map/_use_inventory/_use_key_flow`, `_select_backpack_item`, `_find_matching_key`, `_drain_to_ready`, `_USE_*`, `_U6_DIR/_DIR8`, `_EQUIP_CELL`, … |
 | `hook` | attach + BDA-calibrate + derive DS from the avatar name | `u6_hook` | — |
 
-**Tool count:** converse 2 + navigate 6 + cartography 1 (`u6_route`) + perceive 9 + act 9 +
-hook 1 = **28 built U6 tools**, plus **5 registered-but-stubbed** planned tools (`u6_at`,
-`u6_nearest`, `u6_interactables_near`, `u6_use_object`, `u6_affordance`) = 33 registered,
-plus the shared base/input tools registered by `ctx`. (`mapdata` is data + helpers and
-`affordance` is currently a data manifest + stubs — both expose no built tools yet.)
+**Tool count:** converse 2 + navigate 6 + cartography 4 (`u6_route` + the #1 query trio
+`u6_at`/`u6_nearest`/`u6_interactables_near`) + affordance 1 (`u6_affordance`) + perceive 9 +
+act 9 + hook 1 = **32 built U6 tools**, plus **1 registered-but-stubbed** planned tool
+(`u6_use_object`, the #2 act-layer verb — next slice) = 33 registered, plus the shared
+base/input tools registered by `ctx`. (`mapdata` is data + helpers — no built tools.
+`affordance`'s `u6_affordance` predicts A-mechanisms now; its B/C predictors are stubs.)
 
 ---
 
@@ -181,10 +182,33 @@ Phase-1 status (2026-06-27): **`mapdata` + `cartography` are built** and slotted
 exactly this way (new leaves, no existing module touched). `mapstore` (the SQLite
 chunked world map) was **dropped** — baking both `MAP` and `CHUNKS` makes the terrain a
 pure, deterministic function of import-time data, so there is no incremental fill to
-persist. Next on `cartography`: implement the `#1` structured-query stubs (`u6_at`,
-`u6_nearest`, `u6_interactables_near`) and the `#2` `u6_use_object` stub in `act` — both
-identified as the top efficiency wins by the 2026-06-27 castle-escape play-test (see
-`u6_ai_agent.md`).
+persist.
+
+**Step 1 done (2026-06-27): #1 structured queries + affordance A-mechanisms.** The
+`affordance` A-set predictors (crank→drawbridge, lever→portcullis, switch→force-field,
+bell, door/chest open-close, key/lockpick unlock — ports of `seg_27a1.c`'s
+`C_27A1_433D/4479/4672/2A44/2BBC/2D8E/338D`), `predict_use` + the `u6_affordance` tool,
+and the `cartography` query trio `u6_at`/`u6_nearest`/`u6_interactables_near` (composing
+`predict_use` + `navigate._build_grid`'s live grid for the use-from cell) are all built
+and offline-tested (`tests/test_affordance.py` 14/14, `tests/test_query.py` 5/5; full
+suite green; 33 tools register clean). The `pat:None` bell/chain row is resolved (338D is
+sound + animation only, no world target).
+
+**Live-verified** (deployed to `tools\dosbox_mcp\`, server reloaded, in-castle save
+"Monica"): the whole A-set against real RAM — `u6_nearest('lever')`→"opens the portcullis
+at (307,384)" and `u6_nearest('crank')`→"opens the drawbridge at (303,385)" (BOTH
+qual-links cross-checked vs `u6_nearest('portcullis'/'drawbridge')`; crank head frame
+6→"up (closed)"), the locked oaken door's key-qual 14, a closed steel door closed→open,
+`u6_at` terrain/object/actor decode, `u6_interactables_near` listing with in-window
+use-from face directions, and B/C/TBD rows showing the graceful operate-note (no quest
+payload). **Two wrinkles for the B/C slice:** (a) `u6_nearest('door')` substring-matches
+'doorway' (the invisible OBJ_12D anchor) — consider exact-word ranking; (b) the shared
+handler `C_27A1_5F43` row is tagged C wholesale, so food (bread/meat/cake) reads "category
+C" — the real per-type split IS the B/C decode work (outcome stays withheld, so safe).
+
+**Next:** the `#2` `u6_use_object` stub in `act` (the natural executor of the query trio's
+use-from handles), then affordance B, then C-operate-mechanic. All identified by the
+2026-06-27 castle-escape play-test (see `u6_ai_agent.md`).
 
 ---
 

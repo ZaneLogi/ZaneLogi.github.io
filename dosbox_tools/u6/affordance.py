@@ -63,60 +63,200 @@ _NOT_IMPL = ("u6.affordance NOT IMPLEMENTED -- scaffold only (USE_DISPATCH cover
              "REPORT IT to the user and do NOT rely on the result.")
 
 
+# --- mechanism object types (the A-set targets; module-local per the convention) -----
+# Used only here, so they travel with this module (constants.py is for cross-module).
+OBJ_CRANK      = 0x120   # use crank -> qual-linked drawbridge
+OBJ_DRAWBRIDGE = 0x10D   # head frame 3 = open, 6 = closed (C_27A1_3F47)
+OBJ_LEVER      = 0x10C   # use lever -> qual-linked doorway -> add/del portcullis
+OBJ_SWITCH     = 0x0AE   # use switch -> qual-linked doorway -> add/del force field
+OBJ_DOORWAY    = 0x12D   # the qual-keyed anchor a lever/switch acts through (not a door)
+OBJ_PORTCULLIS = 0x136   # toggled at the doorway tile by a lever
+OBJ_FORCEFIELD = 0x0AF   # toggled at the doorway tile by a switch
+OBJ_KEY        = 0x040   # qual-keyed key (unlocks a same-qual lock)
+OBJ_LOCKPICK   = 0x03F   # lockpick (unlocks a qual-0 lock; dex-test break risk)
+_BELL_CHAIN    = frozenset((0x0EC, 0x1A3))   # ring bell / pull chain: sound only, no target
+
+_DRAWBRIDGE_OPEN_HEAD   = 3   # the crank's drawbridge head tile when the span is DOWN/open
+_DRAWBRIDGE_CLOSED_HEAD = 6   # ... when the span is UP/closed
+
+
+# --- the SearchArea / __SearchTypeAt port (how a handler finds its target) -----------
+# The C_27A1_* mechanism handlers locate their target with SearchArea(0,0,0x3ff,0x3ff)
+# (whole-map scan, filtered by type [+ qual]) and __SearchTypeAt(x,y,z,type) (a specific
+# tile). Both reduce to a single pass over the world-object slots (0x100..) that are
+# LOCXYZ on the relevant level -- the same loop u6_objects_near / _door_at_tile use.
+
+def _load_objs(base):
+    """One read of the four parallel object arrays (status/pos/shape/amount)."""
+    return (dm.read(S.handle, base + U6_ObjStatus, U6_MAX_SLOTS),
+            dm.read(S.handle, base + U6_ObjPos, U6_MAX_SLOTS * 3),
+            dm.read(S.handle, base + U6_ObjShapeType, U6_MAX_SLOTS * 2),
+            dm.read(S.handle, base + U6_Amount, U6_MAX_SLOTS * 2))
+
+def _slot_tfqxyz(objs, i):
+    """(type, frame, qual, x, y, z) for slot i from loaded arrays."""
+    _st, pos, shape, amount = objs
+    sh = shape[i * 2] | (shape[i * 2 + 1] << 8)
+    v = pos[i * 3] | (pos[i * 3 + 1] << 8) | (pos[i * 3 + 2] << 16)
+    return (sh & 0x3ff, sh >> 10, amount[i * 2 + 1],
+            v & 0x3ff, (v >> 10) & 0x3ff, (v >> 20) & 0xf)
+
+def _search_area(objs, want_type, z0, qual=None):
+    """Port of SearchArea(0,0,0x3ff,0x3ff) filtered to `want_type` (+ optional `qual`)
+    on level z0: yield (slot, x, y, frame) for each matching LOCXYZ world object. Source
+    order (low slot first), like the engine's NextArea() walk."""
+    status, _pos, _shape, _amount = objs
+    for i in range(0x100, U6_MAX_SLOTS):
+        if status[i] & 0x18:                       # not LOCXYZ
+            continue
+        typ, frm, ql, x, y, z = _slot_tfqxyz(objs, i)
+        if typ != want_type or z != z0:
+            continue
+        if qual is not None and ql != qual:
+            continue
+        yield i, x, y, frm
+
+def _search_type_at(objs, want_type, tx, ty, z0):
+    """Port of __SearchTypeAt(x,y,z,type): the first LOCXYZ `want_type` object on tile
+    (tx,ty,z0) -> (slot, frame), else None."""
+    status, _pos, _shape, _amount = objs
+    for i in range(0x100, U6_MAX_SLOTS):
+        if status[i] & 0x18:
+            continue
+        typ, frm, _ql, x, y, z = _slot_tfqxyz(objs, i)
+        if typ == want_type and x == tx and y == ty and z == z0:
+            return i, frm
+    return None
+
+
 # --- affordance PATTERN predictors (the shared logic; ~one per behaviour) ------
-# Each takes (base, slot) -> the structured prediction dict (see predict_use). Stubs.
+# Each takes (base, slot) -> the structured prediction dict (see predict_use).
 
-def _predict_qual_toggle(base, slot):
-    """A. crank/lever/switch: resolve the `qual`-linked target (drawbridge OBJ_10D /
-    portcullis OBJ_136 at doorway OBJ_12D), read its frame, report toggle + result.
-    Ports C_27A1_433D / _4479 / _4672. PLANNED -- stub."""
+def _aff(category, verb, effect, target_slot=-1, target_xy=None,
+         current=None, predicted=None):
+    """Build a uniform prediction dict (predict_use adds type/handler)."""
+    return {"category": category, "verb": verb, "effect": effect,
+            "target_slot": target_slot, "target_xy": target_xy,
+            "current_state": current, "predicted_state": predicted}
+
+
+def _predict_qual_toggle(objs, used, z0):
+    """A. crank/lever/switch/bell -- resolve the `qual`-linked target + the toggle.
+    Ports C_27A1_433D (crank->drawbridge OBJ_10D), _4479 (lever->portcullis OBJ_136 at
+    doorway OBJ_12D), _4672 (switch->force-field OBJ_0AF at doorway), and _338D
+    (bell/chain). Reading 338D resolved its old `pat:None`: it only animates + plays a
+    note -- a mechanism with NO world target (the qual-link was a guess; there isn't one)."""
+    typ, frm, qual, _ux, _uy = used
+    if typ in _BELL_CHAIN:
+        return _aff(AFF_MECHANISM, "ring",
+                    "rings (sound + animation); no world state change")
+    if typ == OBJ_CRANK:
+        head = next((h for h in _search_area(objs, OBJ_DRAWBRIDGE, z0, qual)
+                     if h[3] in (_DRAWBRIDGE_OPEN_HEAD, _DRAWBRIDGE_CLOSED_HEAD)), None)
+        if head is None:
+            return _aff(AFF_MECHANISM, "turn",
+                        f"no correspondent drawbridge (qual {qual})")
+        slot, x, y, f = head
+        opened = (f == _DRAWBRIDGE_OPEN_HEAD)
+        return _aff(AFF_MECHANISM, "turn",
+                    f"{'closes' if opened else 'opens'} the drawbridge at ({x},{y})",
+                    target_slot=slot, target_xy=(x, y),
+                    current="down (open)" if opened else "up (closed)",
+                    predicted="up (closed)" if opened else "down (open)")
+    if typ in (OBJ_LEVER, OBJ_SWITCH):
+        tgt_type = OBJ_PORTCULLIS if typ == OBJ_LEVER else OBJ_FORCEFIELD
+        name = "portcullis" if typ == OBJ_LEVER else "force field"
+        verb = "pull" if typ == OBJ_LEVER else "flip"
+        res = _use_target(objs, TGT_QUAL_TILE, qual, z0, OBJ_DOORWAY, at_tile_type=tgt_type)
+        if res is None:
+            return _aff(AFF_MECHANISM, verb,
+                        f"no qual-linked doorway (qual {qual}) -- nothing happens")
+        ax, ay, present_slot, _pf = res
+        present = present_slot >= 0
+        return _aff(AFF_MECHANISM, verb,
+                    f"{'opens' if present else 'closes'} the {name} at ({ax},{ay})",
+                    target_slot=present_slot, target_xy=(ax, ay),
+                    current="present (closed)" if present else "clear (open)",
+                    predicted="removed (open)" if present else "added (closed)")
     return _NOT_IMPL
 
 
-def _predict_open_close(base, slot):
-    """A. door (C_27A1_2A44) / chest (C_27A1_2BBC): open / close / blocked-by-lock from
-    the object's own frame+lock state. PLANNED -- stub."""
-    return _NOT_IMPL
+def _predict_open_close(objs, used, z0):
+    """A. door (OBJ_129..12C, C_27A1_2A44) / chest (OBJ_062, C_27A1_2BBC): open / close /
+    blocked-by-lock from the object's own frame -- via decode._door_state/_chest_state
+    (the same frame bands the handlers switch on). A bare USE toggles an unlocked door/
+    chest; a locked one bounces ("locked") -- opening it needs the key flow (_predict_unlock)."""
+    typ, frm, qual, _ux, _uy = used
+    if typ == 0x062:
+        state, locked = _chest_state(frm)
+        kind = "chest"
+    else:
+        state, locked = _door_state(frm)
+        kind = "door"
+    if state == "open":
+        return _aff(AFF_MECHANISM, "use", f"closes the {kind}",
+                    current="open", predicted="closed")
+    if state == "closed":
+        return _aff(AFF_MECHANISM, "use", f"opens the {kind}",
+                    current="closed", predicted="open")
+    if state == "locked":
+        return _aff(AFF_MECHANISM, "use",
+                    f"{kind} is locked (needs a qual-{qual} key) -- a bare USE won't open it; "
+                    f"USE a matching key on it instead",
+                    current="locked", predicted="locked")
+    return _aff(AFF_MECHANISM, "use",
+                f"{kind} is magically locked -- needs a dispel/unlock spell, not a key",
+                current="magically locked", predicted="magically locked")
 
 
-def _predict_unlock(base, slot):
-    """A. lockpick/key (C_27A1_2D8E): USE unlocks the SELECTED locked door/chest if the
-    key qual matches (the flow `act._use_key_flow` drives). PLANNED -- stub."""
-    return _NOT_IMPL
+def _predict_unlock(objs, used, z0):
+    """A. key (OBJ_040) / lockpick (OBJ_03F), C_27A1_2D8E: USE this item, then SELECT a
+    locked door/chest -- a key unlocks a lock of MATCHING qual; a lockpick picks a qual-0
+    (non-magical) lock and may break on a failed DEX test. (act._use_key_flow drives the
+    selection; here we just predict what the item can open.)"""
+    typ, _frm, qual, _ux, _uy = used
+    if typ == OBJ_KEY:
+        return _aff(AFF_MECHANISM, "use-key",
+                    f"unlocks a selected locked door/chest of matching qual {qual} "
+                    f"(SELECT the lock after USE; u6_use's key flow auto-matches)")
+    return _aff(AFF_MECHANISM, "use-lockpick",
+                "picks a selected qual-0 (non-magical) lock; may break on a failed DEX test")
 
 
-def _predict_light(base, slot):
+# B/C predictors -- NOT built this slice (the first step is A-mechanisms only). predict_use
+# turns a B/C/TBD row into a graceful "not decoded yet" operate-note rather than the loud
+# _NOT_IMPL, so the query layer can list these objects without alarm. Build order: B next,
+# then C-operate-mechanic. New signature: (objs, used, z0); kept as stubs.
+
+def _predict_light(objs, used, z0):
     """B. light sources (C_27A1_31F6): light <-> extinguish from the frame. PLANNED."""
     return _NOT_IMPL
 
 
-def _predict_consume(base, slot):
-    """B. single-use (potion/torch/powder keg): immediate generic effect + consumed.
-    PLANNED -- stub."""
+def _predict_consume(objs, used, z0):
+    """B. single-use (potion/torch/powder keg): immediate generic effect + consumed. PLANNED."""
     return _NOT_IMPL
 
 
-def _predict_vehicle(base, slot):
-    """B. horse / ship / balloon: mount/dismount/board + the movement-type granted
-    (Phase-2 nav). PLANNED -- stub."""
+def _predict_vehicle(objs, used, z0):
+    """B. horse / ship / balloon: mount/dismount/board + the movement-type granted. PLANNED."""
     return _NOT_IMPL
 
 
-def _predict_play(base, slot):
+def _predict_play(objs, used, z0):
     """B. instruments (C_27A1_335A): 'play / tune' (the on=<digits> sub-flow). PLANNED."""
     return _NOT_IMPL
 
 
-def _predict_simple(base, slot):
+def _predict_simple(objs, used, z0):
     """B. produce/view with no world target (cow/churn/beehive/fishing/fountain/crystal
-    ball/telescope): the generic effect. PLANNED -- stub."""
+    ball/telescope): the generic effect. PLANNED."""
     return _NOT_IMPL
 
 
-def _predict_quest_mechanic(base, slot):
-    """C. orb/moonstone/rune/silver horn/balloon plans/vortex cube: report ONLY the
-    operate-mechanic ("USE the orb -> choose a direction -> a moongate opens"). NEVER
-    the quest-gated outcome / flag / destination / win. PLANNED -- stub; do NOT decode
+def _predict_quest_mechanic(objs, used, z0):
+    """C. orb/moonstone/rune/silver horn/balloon plans/vortex cube: ONLY the operate-
+    mechanic, NEVER the quest-gated outcome / destination / win. PLANNED -- do NOT decode
     the handler's quest payload here."""
     return _NOT_IMPL
 
@@ -129,7 +269,7 @@ USE_DISPATCH = [
     {"t": [0x19C, 0x19E, 0x19F, 0x1A7], "h": "C_27A1_5289", "ln": 3027, "cat": AFF_UTILITY, "pat": _predict_vehicle, "note": "use ship/skiff/raft/balloon (board)"},
     {"t": [0x10E], "h": "C_27A1_47F3", "ln": 3029, "cat": AFF_QUEST, "pat": _predict_quest_mechanic, "note": "use balloon plans (assemble) -- quest item"},
     {"t": [0x0BA, 0x0C0], "h": "C_27A1_09A1", "ln": 3036, "cat": AFF_TBD, "pat": None, "note": "TBD (frame-gated) -- read C_27A1_09A1"},
-    {"t": [0x0EC, 0x1A3], "h": "C_27A1_338D", "ln": 3039, "cat": AFF_MECHANISM, "pat": None, "note": "use bell / pull chain -- mechanism; pattern TBD (qual-linked? read C_27A1_338D)"},
+    {"t": [0x0EC, 0x1A3], "h": "C_27A1_338D", "ln": 3039, "cat": AFF_MECHANISM, "pat": _predict_qual_toggle, "note": "use bell / pull chain -- RESOLVED: animation + OSI_playWavedNote only, NO world target (the qual-link guess was wrong)"},
     {"t": [0x0B6], "h": "C_27A1_37D3", "ln": 3040, "cat": AFF_UTILITY, "pat": _predict_simple, "note": "use beehive (honey)"},
     {"t": [0x07A, 0x091, 0x0A4, 0x0CE, 0x0FD], "h": "C_27A1_31F6", "ln": 3049, "cat": AFF_UTILITY, "pat": _predict_light, "note": "light sources: candle/candelabra/fireplace/brazier/campfire -- light/extinguish"},
     {"t": [0x05F, 0x060, 0x080, 0x081, 0x082, 0x083, 0x084, 0x085, 0x087, 0x0B4, 0x0B8, 0x0D1, 0x0D2, 0x109], "h": "C_27A1_5F43", "ln": 3064, "cat": AFF_QUEST, "pat": _predict_quest_mechanic, "note": "shared handler; incl. 0x87 Orb of the Moons [C: operate=choose dir->moongate]; rest TBD -- read C_27A1_5F43"},
@@ -179,21 +319,120 @@ USE_DISPATCH = [
 _BY_TYPE = {t: row for row in USE_DISPATCH for t in row["t"]}
 
 
-def _use_target(base, slot, rule=None):
-    """Resolve the object USE on `slot` would AFFECT, by the row's targeting rule
-    (TGT_QUAL / TGT_QUAL_TILE / TGT_SELECTION / TGT_SELF / TGT_NONE) -- mirroring the
-    SearchArea / __SearchTypeAt logic in the C_27A1_* handlers. Returns the target's
-    slot + world (x,y), or None ("No correspondent ..."). PLANNED -- stub."""
-    return _NOT_IMPL
+def _use_target(objs, rule, qual, z0, target_type, at_tile_type=None):
+    """Resolve the object USE would AFFECT, by the row's targeting rule -- mirroring the
+    SearchArea / __SearchTypeAt logic in the C_27A1_* handlers.
+
+      TGT_QUAL       -> first `target_type` with matching `qual`:
+                        returns (target_slot, tx, ty, target_frame) or None.
+      TGT_QUAL_TILE  -> first OBJ_DOORWAY with matching `qual` (the anchor), then
+                        `at_tile_type` AT that tile (lever->portcullis, switch->field):
+                        returns (anchor_x, anchor_y, present_slot or -1, present_frame
+                        or None) -- present=None means the tile is currently clear.
+
+    qual==0 has no link (the engine guards `if(objQual)`), so TGT_QUAL_TILE returns
+    None then. Lowest matching slot wins (engine NextArea() order)."""
+    if rule == TGT_QUAL:
+        for slot, x, y, frm in _search_area(objs, target_type, z0, qual):
+            return slot, x, y, frm
+        return None
+    if rule == TGT_QUAL_TILE:
+        if not qual:                                   # `if(objQual)` guard
+            return None
+        for _anchor, ax, ay, _frm in _search_area(objs, OBJ_DOORWAY, z0, qual):
+            hit = _search_type_at(objs, at_tile_type, ax, ay, z0)
+            if hit is None:
+                return ax, ay, -1, None
+            return ax, ay, hit[0], hit[1]
+        return None
+    return None
 
 
-def predict_use(base, slot):
+def _undecoded_note(row):
+    """The graceful 'not decoded this slice' operate-note for a B/C/TBD row."""
+    cat = {"A": "mechanism", "B": "utility", "C": "quest",
+           "TBD": "uncharacterised"}.get(row["cat"], row["cat"])
+    return (f"category {row['cat']} ({cat}): USE effect not decoded this slice "
+            f"(first step = A-mechanisms); handler {row['h']} -- \"{row['note']}\"")
+
+
+def predict_use(base, slot, z0=None):
     """Core predictor: look up _BY_TYPE[GetType(slot)] and run its `pat` against LIVE
-    state, returning {category, verb, target_slot, target_xy, current_state,
-    predicted_state}. Category-C rows return only the operate-mechanic. A TBD row (or a
-    type absent from the dispatch) returns a "not characterised -- handler C_27A1_xxxx"
-    note rather than guessing. Consumed by the #1 query layer. PLANNED -- stub."""
-    return _NOT_IMPL
+    state, returning {type, handler, category, verb, effect, target_slot, target_xy,
+    current_state, predicted_state, decoded}. A-mechanism rows return the resolved target
+    + toggle; a B/C/TBD row (not built this slice) returns decoded=False with a graceful
+    operate-note (NOT the loud _NOT_IMPL); a type absent from the dispatch says USE
+    likely does nothing. Consumed by the #1 query layer."""
+    objs = _load_objs(base)
+    typ, frm, qual, x, y, z = _slot_tfqxyz(objs, slot)
+    if z0 is None:
+        z0 = z
+    row = _BY_TYPE.get(typ)
+    if row is None:
+        return {"type": typ, "category": None, "decoded": False,
+                "effect": f"type 0x{typ:03x} is not in the USE dispatch -- USE likely does nothing"}
+    pat = row["pat"]
+    if pat is not None:
+        res = pat(objs, (typ, frm, qual, x, y), z0)
+        if isinstance(res, dict):
+            res.setdefault("type", typ)
+            res.setdefault("handler", row["h"])
+            res.setdefault("decoded", True)
+            return res
+    return {"type": typ, "category": row["cat"], "handler": row["h"], "decoded": False,
+            "effect": _undecoded_note(row)}
+
+
+def _resolve_slot(base, target, z0, x0, y0):
+    """`target` -> object slot. Accepts a SLOT ('0x4e8'/'1256') or a NAME ('lever') ->
+    the NEAREST world object on level z0 whose LOOK.LZD name contains it (case-insensitive).
+    Returns (slot, None) or (None, error-string)."""
+    t = target.strip()
+    try:
+        return (int(t, 0) if t.lower().startswith(("0x", "-0x")) else int(t)), None
+    except ValueError:
+        pass
+    objs = _load_objs(base)
+    status = objs[0]
+    needle = t.lower()
+    best = None
+    for i in range(0x100, U6_MAX_SLOTS):
+        if status[i] & 0x18:
+            continue
+        typ, _frm, _ql, x, y, z = _slot_tfqxyz(objs, i)
+        if typ == 0 or z != z0:
+            continue
+        nm = _obj_name(base, i)
+        if needle in nm.lower():
+            d = max(abs(x - x0), abs(y - y0))
+            if best is None or d < best[0]:
+                best = (d, i)
+    if best is None:
+        return None, f"No world object named like '{target}' on this level."
+    return best[1], None
+
+
+def _format_affordance(name, slot, p):
+    """Render a predict_use dict as agent-readable text."""
+    typ = p.get("type", 0)
+    catname = {"A": "A mechanism", "B": "B utility", "C": "C quest",
+               "TBD": "TBD", None: "not in USE dispatch"}.get(p.get("category"),
+                                                              str(p.get("category")))
+    lines = [f"USE {name} (slot 0x{slot:03x}, type 0x{typ:03x})  [{catname}]",
+             f"  -> {p.get('effect', '(no effect)')}"]
+    if p.get("verb"):
+        lines.append(f"  verb: {p['verb']}")
+    cur, nxt = p.get("current_state"), p.get("predicted_state")
+    if cur is not None or nxt is not None:
+        lines.append(f"  state: {cur} -> {nxt}")
+    tslot, txy = p.get("target_slot", -1), p.get("target_xy")
+    if txy is not None and tslot is not None and tslot >= 0:
+        lines.append(f"  target: slot 0x{tslot:03x} at {txy}")
+    elif txy is not None:
+        lines.append(f"  target tile: {txy}")
+    if not p.get("decoded", True):
+        lines.append("  (not fully decoded this slice -- operate-note only)")
+    return "\n".join(lines)
 
 
 @mcp.tool()
@@ -202,19 +441,38 @@ def u6_affordance(target: str, segment: int = -1) -> str:
     `target` WITHOUT doing it, so the agent can DEDUCE a plan instead of trial-and-
     observe. `target` is an object SLOT ('0x4e8'/'1256') or a NAME ('lever','crank' --
     nearest match). MECHANISM (A): names the resolved target + resulting state, e.g.
-    "USE -> opens the portcullis at (307,384)". UTILITY (B): operate-mechanic + generic
-    effect. QUEST item (C: orb/moonstone/rune/cube): ONLY how to operate it (the quest
-    outcome is yours to discover by play). Backed by USE_DISPATCH, an exhaustive port of
-    the seg_27a1.c USE handlers.
-    PLANNED -- stub (the affordance layer for the #1 query work; not yet implemented)."""
-    return _NOT_IMPL
+    "USE -> opens the portcullis at (307,384)". UTILITY (B) / QUEST item (C: orb/
+    moonstone/rune/cube): currently the operate-note only -- those predictors are the
+    next build slice (the quest OUTCOME stays withheld for blind discovery regardless).
+    Backed by USE_DISPATCH, an exhaustive port of the seg_27a1.c USE handlers."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    try:
+        x0, y0, z0 = _controlled_xyz(base)
+        slot, rerr = _resolve_slot(base, target, z0, x0, y0)
+        if rerr:
+            return rerr
+        name = _obj_name(base, slot)
+        pred = predict_use(base, slot, z0)
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    return _format_affordance(name, slot, pred)
 
 
 __all__ = [
     "AFF_MECHANISM", "AFF_UTILITY", "AFF_QUEST", "AFF_TBD",
     "TGT_SELF", "TGT_QUAL", "TGT_QUAL_TILE", "TGT_SELECTION", "TGT_NONE",
-    "_predict_qual_toggle", "_predict_open_close", "_predict_unlock", "_predict_light",
-    "_predict_consume", "_predict_vehicle", "_predict_play", "_predict_simple",
-    "_predict_quest_mechanic",
-    "USE_DISPATCH", "_BY_TYPE", "_use_target", "predict_use", "u6_affordance",
+    "OBJ_CRANK", "OBJ_DRAWBRIDGE", "OBJ_LEVER", "OBJ_SWITCH", "OBJ_DOORWAY",
+    "OBJ_PORTCULLIS", "OBJ_FORCEFIELD", "OBJ_KEY", "OBJ_LOCKPICK", "_BELL_CHAIN",
+    "_DRAWBRIDGE_OPEN_HEAD", "_DRAWBRIDGE_CLOSED_HEAD",
+    "_load_objs", "_slot_tfqxyz", "_search_area", "_search_type_at",
+    "_aff", "_predict_qual_toggle", "_predict_open_close", "_predict_unlock",
+    "_predict_light", "_predict_consume", "_predict_vehicle", "_predict_play",
+    "_predict_simple", "_predict_quest_mechanic",
+    "USE_DISPATCH", "_BY_TYPE", "_use_target", "_undecoded_note", "predict_use",
+    "_resolve_slot", "_format_affordance", "u6_affordance",
 ]

@@ -84,6 +84,12 @@ Implemented (logic verified; **memory offsets pending live verification** — se
   1024x1024 surface / 5x256x256 dungeons), so the agent can plan to a tile it can't
   currently see, beyond the live window. Terrain-only (doorways passable; a closed door
   is opened at move time); see the egress finding in §2b.
+- **Query (structured spatial #1 — built 2026-06-27):** `u6_at(x,y,z)` (decode one cell:
+  terrain + name + passability, the top object's name/state/predicted USE effect, any
+  actor + allegiance), `u6_nearest(name,radius)` (nearest named object + state + the
+  walkable use-from cell & face direction), `u6_interactables_near(radius)` (the
+  "what can I do here" affordance scan), and `u6_affordance(target)` (predict what USE
+  does to an object WITHOUT doing it — A-mechanisms resolved; B/C operate-note for now).
 - **Verify:** `u6_validate_passability` (predict-vs-live fidelity gate for the
   passability oracle — see `dosbox_u6_passability.md`).
 - **Inherited:** base tools (`read_dos`/`write_dos`/`status`/…) and input tools
@@ -116,11 +122,14 @@ navigation, a locked door, a key, a two-part mechanism, and egress.
 It also exposed the agent's real weaknesses (efficiency, not capability), which set the
 build order:
 - **#1 (urgent) structured spatial queries** — `u6_at` / `u6_nearest` /
-  `u6_interactables_near` (stubbed in `cartography`): the agent kept mis-counting ASCII
-  grid columns and re-surveying the same area; it should query decoded, decision-ready
-  facts (terrain + object + state + how-to-reach) instead of parsing maps.
-- **#2 (urgent) `u6_use_object`** (stubbed in `act`): one-call "go adjacent + USE",
+  `u6_interactables_near` — **BUILT 2026-06-27** in `cartography` (offline-tested,
+  `tests/test_query.py`): the agent kept mis-counting ASCII grid columns and re-surveying
+  the same area; now it queries decoded, decision-ready facts (terrain + object + state +
+  predicted USE effect + the walkable use-from cell & face direction) instead of parsing
+  maps. Backed by the affordance A-mechanism predictors (below).
+- **#2 (urgent, NEXT) `u6_use_object`** (stubbed in `act`): one-call "go adjacent + USE",
   removing the manual repositioning the diagonally-placed crank forced (~3 wasted rounds).
+  The natural executor of the #1 query trio's `use-from` handles.
 - **#3 (after #1/#2)** give `u6_route` a door-as-passable object-overlay — then it could
   plan the whole castle→gate route; today only the live-grid driver `u6_goto_xy` crosses
   closed doors / the lowered drawbridge.
@@ -133,18 +142,35 @@ included) **crossed the lowered drawbridge** fine. So castle egress works at dri
 the moment the bridge is down; the object-overlay (#3) is only needed for the *planner*
 to predict a path out, not for actually leaving.
 
-**USE-affordance layer (scaffolded 2026-06-27 -- the deduce-not-probe upgrade):** the gate
+**USE-affordance layer (`u6/affordance.py` -- the deduce-not-probe upgrade):** the gate
 puzzle was solved by trial-and-observe (pull lever, read frames, pull crank, read frames).
-The fix is `u6/affordance.py` -- an EXHAUSTIVE port-manifest of U6's USE dispatch
-(`USE_DISPATCH`: all **85** `seg_27a1.c:3016` case-types / 48 rows, each tagged
-A=mechanism / B=utility / C=quest / TBD with its handler+line). Mechanisms link by the
-`qual` field (crank->drawbridge, lever->portcullis@doorway, switch), so "USE this lever ->
-opens that portcullis" is PREDICTABLE, not a probe. Scope: A/B fully predicted (operate-
-mechanic + resolved target); **C operate-mechanic only** -- the quest payload is withheld
+The fix is an EXHAUSTIVE port-manifest of U6's USE dispatch (`USE_DISPATCH`: all **85**
+`seg_27a1.c:3016` case-types / 48 rows, each tagged A=mechanism / B=utility / C=quest / TBD
+with its handler+line). Mechanisms link by the `qual` field (crank->drawbridge,
+lever->portcullis@doorway, switch->force-field), so "USE this lever -> opens that
+portcullis at (x,y)" is PREDICTABLE, not a probe. Scope: A/B predict the operate-mechanic +
+resolved target; **C operate-mechanic only** -- the quest payload is withheld
 (orb/moonstone/rune/balloon-plans/silver-horn and the **vortex-cube WIN** are left
 undecoded past "how to operate it"). It underpins the #1 query layer's "USE -> effect"
-dimension. All predictors return a loud `_NOT_IMPL` until built; the 15 TBD rows carry
-their `C_27A1_*`+line so nothing is missed after this.
+dimension.
+
+**A-mechanisms BUILT 2026-06-27** (step 1, offline-tested `tests/test_affordance.py`):
+`_predict_qual_toggle` (crank/lever/switch + bell), `_predict_open_close` (door/chest),
+`_predict_unlock` (key/lockpick), the `SearchArea`/`__SearchTypeAt` object scanner +
+`_use_target`, `predict_use` dispatch, and the `u6_affordance` tool. The old `pat:None`
+bell/chain row is RESOLVED -- reading `C_27A1_338D` showed it only animates + plays a note
+(no world target; the qual-link guess was wrong). B/C predictors remain stubs (next
+slices); `predict_use` returns a graceful "not decoded this slice" operate-note for them
+rather than the loud `_NOT_IMPL`, so the #1 query layer can list those objects without
+alarm. The 15 TBD rows still carry their `C_27A1_*`+line so nothing is missed.
+
+**Live-verified (castle/Monica, deployed):** the full A-set against real RAM — `u6_nearest`
+gave lever→"opens the portcullis at (307,384)" and crank→"opens the drawbridge at
+(303,385)" (both qual-links cross-checked; the gate seen from inside, still shut), the
+locked door's key-qual 14, and closed→open; B/C/TBD rows showed the graceful note. Two
+B/C-slice wrinkles noted: `u6_nearest('door')` substring-matches the 'doorway' anchor, and
+the shared `C_27A1_5F43` row over-tags food as "category C" (the per-type split is the B/C
+work; outcome stays withheld). See `u6_package_architecture.md` §8.
 
 ## 3. Pathfinding
 

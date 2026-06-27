@@ -21,6 +21,8 @@ from u6.constants import *  # noqa: F401,F403
 from u6.ctx import *        # noqa: F401,F403
 from u6.decode import *     # noqa: F401,F403
 from u6 import mapdata
+from u6 import navigate     # live walkable grid (_build_grid) for the use-from cell
+from u6 import affordance   # predict_use + the shared object scanner
 
 _ROUTE_MARGIN = 96          # grow the start->goal bbox generously: a winding corridor can
                             # detour far from the straight line, so a tight box (the path
@@ -175,12 +177,88 @@ def u6_route(x: int, y: int, z: int = -1, segment: int = -1) -> str:
 
 
 # ----------------------------------------------------------------------------
-# PLANNED -- the structured spatial-query layer (#1 from the castle-escape
-# experiment, 2026-06-27). Empty bodies; the docstrings ARE the spec. These exist
-# to replace ASCII-grid counting + repeated re-surveying with decision-ready
-# answers (terrain + object + decoded state + how-to-reach), so the agent stops
-# parsing maps and stops re-perceiving the same area. Implement next.
+# The structured spatial-query layer (#1 from the castle-escape experiment,
+# 2026-06-27): decision-ready answers (terrain + object + decoded state + how-to-
+# reach) so the agent stops counting ASCII columns and re-surveying the same area.
+# Composes decode (names/state), affordance (predict_use), navigate (the live grid).
 # ----------------------------------------------------------------------------
+
+def _use_from(base, ox, oy):
+    """For a world object at (ox,oy) on the controlled actor's level, find an adjacent
+    WALKABLE cell in the live 40x40 grid + the cardinal direction to FACE the object
+    from it (the USE/LOOK/GET direction). Returns (from_xy, face_dir) or (None, None) if
+    the object is outside the live window or boxed in. This is the decision-ready bit:
+    answers 'stand here, face X' instead of leaving the agent to solve the neighbour
+    puzzle the diagonally-placed crank forced in the castle-escape run."""
+    walk, _cost, ax, ay = navigate._build_grid(base)
+    ocell = _world_to_cell(ox, oy, ax, ay)
+    if ocell is None:
+        return None, None
+    orow, ocol = ocell
+    H, W = len(walk), len(walk[0])
+    for dr, dc in _DIR_DELTAS:
+        nr, nc = orow + dr, ocol + dc
+        if 0 <= nr < H and 0 <= nc < W and walk[nr][nc]:
+            fx, fy = (ax + nc) & U6_WORLD_MASK, (ay + nr) & U6_WORLD_MASK
+            return (fx, fy), _STEP_NAME[(-dr, -dc)]      # face from neighbour back to object
+    return None, None
+
+
+def _top_object_slot(base, tx, ty, tz):
+    """The TOP object slot on tile (tx,ty,tz): the engine's per-cell MapObjPtr when the
+    tile is inside the live 40x40 window, else the lowest-slot LOCXYZ world object on
+    the tile (off-window fallback). Returns a slot (>=0x100) or None."""
+    ax = int.from_bytes(dm.read(S.handle, base + U6_AreaX, 2), "little")
+    ay = int.from_bytes(dm.read(S.handle, base + U6_AreaY, 2), "little")
+    cell = _world_to_cell(tx, ty, ax, ay)
+    if cell is not None:
+        r, c = cell
+        raw = int.from_bytes(
+            dm.read(S.handle, base + U6_MapObjPtr + (r * U6_AREA_W + c) * 2, 2), "little")
+        if 0x100 <= raw < U6_MAX_SLOTS:
+            return raw
+    objs = affordance._load_objs(base)
+    status = objs[0]
+    for i in range(0x100, U6_MAX_SLOTS):
+        if status[i] & 0x18:
+            continue
+        typ, _frm, _ql, x, y, z = affordance._slot_tfqxyz(objs, i)
+        if typ and x == tx and y == ty and z == tz:
+            return i
+    return None
+
+
+def _describe_obj(base, slot, z0, with_use=True):
+    """One-line decode of a world object: 'slot name (type) [state] -- USE: effect'.
+    State + USE effect come from affordance.predict_use for usable types."""
+    name = _obj_name(base, slot)
+    typ, _frm, _qual = _obj_tfq(base, slot)
+    desc = f"0x{slot:03x} '{name}' (type 0x{typ:03x})"
+    if with_use and typ in affordance._BY_TYPE:
+        p = affordance.predict_use(base, slot, z0)
+        cur = p.get("current_state")
+        if cur is not None:
+            desc += f" [{cur}]"
+        if p.get("decoded") and p.get("category") == affordance.AFF_MECHANISM:
+            desc += f" -- USE: {p['effect']}"
+        elif not p.get("decoded"):
+            desc += " -- usable (USE effect not decoded this slice)"
+    return desc
+
+
+def _actor_on_tile(base, tx, ty, tz):
+    """A creature/NPC (slot < 0x100) on the tile -> 'slot name (allegiance)', else None."""
+    objs = affordance._load_objs(base)
+    status = objs[0]
+    npcst = dm.read(S.handle, base + U6_NPCStatus, 0x100)
+    for i in range(0x100):
+        if status[i] & 0x18:
+            continue
+        typ, _frm, _ql, x, y, z = affordance._slot_tfqxyz(objs, i)
+        if typ and x == tx and y == ty and z == tz:
+            return f"0x{i:02x} '{_obj_name(base, i)}' ({_npc_class(npcst[i])})"
+    return None
+
 
 @mcp.tool()
 def u6_at(x: int, y: int, z: int = -1, segment: int = -1) -> str:
@@ -188,33 +266,133 @@ def u6_at(x: int, y: int, z: int = -1, segment: int = -1) -> str:
     (x,y,z), so the agent never has to count ASCII columns. Reports the terrain tile
     id + name + passability (baked mapdata + the live TerrainType table), the TOP
     object on the cell (live MapObjPtr) decoded to name + state (door open/closed/
-    locked+key-qual, container open/closed, lever/switch state, frame meaning), and any
-    actor on it with allegiance. z defaults to the avatar's level.
-    PLANNED -- stub (#1 structured-query layer; not yet implemented)."""
-    pass
+    locked, container, lever/switch/portcullis state) + its predicted USE effect, and
+    any actor on it with allegiance. z defaults to the avatar's level."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    tx, ty = x & U6_WORLD_MASK, y & U6_WORLD_MASK
+    try:
+        x0, y0, z0 = _controlled_xyz(base)
+        zz = z0 if z < 0 else z
+        tile = mapdata.tile_at(tx, ty, zz)
+        terr = _static_table(base, U6_TerrainType_ptr, _TILEFLAG_N, "terr")
+        passable = not (terr[tile] & TERRAIN_IMPASS) if 0 <= tile < len(terr) else True
+        slot = _top_object_slot(base, tx, ty, zz)
+        objline = _describe_obj(base, slot, zz) if slot is not None else "(none)"
+        actor = _actor_on_tile(base, tx, ty, zz)
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    out = [f"({tx},{ty},z{zz}):",
+           f"  terrain: tile {tile} '{_tile_name(tile)}' -- {'passable' if passable else 'BLOCKED'}",
+           f"  object: {objline}",
+           f"  actor: {actor if actor else '(none)'}"]
+    return "\n".join(out)
 
 
 @mcp.tool()
 def u6_nearest(name: str, radius: int = 16, segment: int = -1) -> str:
     """Ultima VI: find the NEAREST world object whose name matches `name` (e.g.
     'lever', 'crank', 'key', 'chest', 'door') within `radius` of the controlled actor.
-    Returns its world (x,y), compass bearing + distance, decoded state, AND the
-    decision-ready part: the WALKABLE cell to use it from + the cardinal direction to
-    face -- so the agent skips the "which neighbour is reachable" puzzle that the
-    diagonally-placed crank forced in the castle-escape run.
-    PLANNED -- stub (#1; not yet implemented)."""
-    pass
+    Returns its world (x,y), compass bearing + distance, decoded state + predicted USE
+    effect, AND the decision-ready part: the WALKABLE cell to use it from + the cardinal
+    direction to face -- so the agent skips the "which neighbour is reachable" puzzle the
+    diagonally-placed crank forced in the castle-escape run. DS from u6_hook."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    needle = name.strip().lower()
+    try:
+        x0, y0, z0 = _controlled_xyz(base)
+        objs = affordance._load_objs(base)
+        status = objs[0]
+        best = None
+        for i in range(0x100, U6_MAX_SLOTS):
+            if status[i] & 0x18:
+                continue
+            typ, _frm, _ql, x, y, z = affordance._slot_tfqxyz(objs, i)
+            if typ == 0 or z != z0:
+                continue
+            d = max(abs(x - x0), abs(y - y0))
+            if d > radius or (best is not None and d >= best[0]):
+                continue
+            if needle in _obj_name(base, i).lower():
+                best = (d, i, typ, x, y)
+        if best is None:
+            return f"No object named like '{name}' within {radius} of you ({x0},{y0},z{z0})."
+        d, slot, typ, ox, oy = best
+        nm = _obj_name(base, slot)
+        lines = [f"Nearest '{nm}' (slot 0x{slot:03x}, type 0x{typ:03x}): "
+                 f"({ox},{oy}) {_compass(ox - x0, oy - y0)} dist {d}"]
+        if typ in affordance._BY_TYPE:
+            p = affordance.predict_use(base, slot, z0)
+            if p.get("current_state") is not None:
+                lines.append(f"  state: {p['current_state']}")
+            lines.append(f"  USE: {p['effect']}")
+        fxy, face = _use_from(base, ox, oy)
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    if fxy is not None:
+        lines.append(f"  use-from: stand at {fxy} facing '{face}' "
+                     f"(or u6_use_object(0x{slot:03x}) to drive it)")
+    else:
+        lines.append("  use-from: outside the live window or boxed in -- "
+                     "u6_goto_xy nearer, then re-query")
+    return "\n".join(lines)
 
 
 @mcp.tool()
 def u6_interactables_near(radius: int = 6, segment: int = -1) -> str:
     """Ultima VI: the "what can I do here" affordance scan -- list the USABLE objects
     within `radius` of the controlled actor (levers, cranks, switches, doors,
-    containers, readyable items, ...), each with world (x,y), decoded state, and HOW to
-    act on it (the walkable cell + cardinal USE direction, or a u6_use_object(slot)
-    handle). Turns a raw survey into a ready-to-execute action list.
-    PLANNED -- stub (#1; not yet implemented)."""
-    pass
+    containers, readyable items, ...), each with world (x,y), decoded state + predicted
+    USE effect, and HOW to act on it (the walkable cell + cardinal USE direction, or a
+    u6_use_object(slot) handle). Turns a raw survey into a ready-to-execute action list.
+    Only types in the USE dispatch are listed (plain scenery is skipped). DS from u6_hook."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    try:
+        x0, y0, z0 = _controlled_xyz(base)
+        objs = affordance._load_objs(base)
+        status = objs[0]
+        found = []
+        for i in range(0x100, U6_MAX_SLOTS):
+            if status[i] & 0x18:
+                continue
+            typ, _frm, _ql, x, y, z = affordance._slot_tfqxyz(objs, i)
+            if typ == 0 or z != z0 or typ not in affordance._BY_TYPE:
+                continue
+            d = max(abs(x - x0), abs(y - y0))
+            if d <= radius:
+                found.append((d, i, typ, x, y))
+        if not found:
+            return f"No usable objects within {radius} of you ({x0},{y0},z{z0})."
+        found.sort()
+        out = [f"Usable objects within {radius} of you ({x0},{y0},z{z0}):"]
+        for d, slot, typ, ox, oy in found:
+            nm = _obj_name(base, slot)
+            p = affordance.predict_use(base, slot, z0)
+            st = f" [{p['current_state']}]" if p.get("current_state") is not None else ""
+            out.append(f"  0x{slot:03x} '{nm}' @ ({ox},{oy}) {_compass(ox - x0, oy - y0)} "
+                       f"dist {d}{st}")
+            out.append(f"      USE: {p['effect']}")
+            fxy, face = _use_from(base, ox, oy)
+            if fxy is not None:
+                out.append(f"      act: stand {fxy} face '{face}' "
+                           f"(or u6_use_object(0x{slot:03x}))")
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    return "\n".join(out)
 
 
 __all__ = [
@@ -225,6 +403,10 @@ __all__ = [
     "_region_dijkstra",
     "_runlength",
     "u6_route",
+    "_use_from",
+    "_top_object_slot",
+    "_describe_obj",
+    "_actor_on_tile",
     "u6_at",
     "u6_nearest",
     "u6_interactables_near",
