@@ -529,7 +529,7 @@ def _format_affordance(name, slot, p):
     return "\n".join(lines)
 
 
-@mcp.tool()
+@hot_tool
 def u6_affordance(target: str, segment: int = -1) -> str:
     """Ultima VI: "what does USE do to this object?" -- predict the effect of USE on
     `target` WITHOUT doing it, so the agent can DEDUCE a plan instead of trial-and-

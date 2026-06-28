@@ -1,9 +1,10 @@
 # `dosbox-u6` package architecture (the module spec)
 
 The `dosbox-u6` MCP server used to be one 3407-line `dosbox_u6_server.py`. It is now
-a **44-line launcher** over the `u6/` package — one module per subsystem. This doc is
-the map: what each module owns, how they depend on each other, how tools register,
-the conventions to keep, and the gotchas the split surfaced.
+a small **launcher + hot-reload layer** over the `u6/` package — one module per
+subsystem. This doc is the map: what each module owns, how they depend on each other,
+how tools register and **hot-reload without a restart** (§4), the conventions to keep,
+and the gotchas the split surfaced.
 
 > Scope: this is the *code structure* of the U6 decoder server. It is orthogonal to
 > the agent-facing surface (`u6_agent_capabilities.md`), the per-verb mechanism
@@ -15,7 +16,7 @@ the conventions to keep, and the gotchas the split surfaced.
 
 ```
 dosbox_tools/
-  dosbox_u6_server.py     # LAUNCHER: imports every u6.* module (registers tools) -> mcp.run()
+  dosbox_u6_server.py     # LAUNCHER + HOT-RELOAD: registers a dispatch-wrapper per @hot_tool, mtime-reloads logic modules per call -> mcp.run()
   u6/
     __init__.py
     constants.py          # layout offsets, bit-fields, area/terrain flags, dir tables
@@ -97,16 +98,38 @@ imports `act` except the launcher, so it stays a sink.
 
 ---
 
-## 4. How tools register (the runtime mechanism)
+## 4. How tools register + HOT-RELOAD (the runtime mechanism)
+
+The server hot-reloads tool **bodies** with no restart. The pieces:
 
 - `ctx.py` creates the singletons once: `mcp = FastMCP("dosbox-u6")`, `S = U6State()`,
-  and `base/inp = register_base/input_tools(mcp, S)`.
-- Every tool module does `from u6.ctx import *` and decorates its tools with
-  `@mcp.tool()` — so they register on the **one shared `mcp`**.
-- The **launcher** imports every module. Importing a module runs its body, which runs
-  the `@mcp.tool()` decorators → registration. Then `mcp.run()`.
-- Python caches modules, so each registers exactly once regardless of how many modules
-  `import *` it.
+  `base/inp = register_base/input_tools(mcp, S)`. It also defines the **`hot_tool`
+  marker** + the `_HOT_TOOLS` registry list.
+- Tool modules tag their tools with **`@hot_tool`** (NOT `@mcp.tool()`). `hot_tool` only
+  records `(module, func_name)` into `_HOT_TOOLS`; it does NOT register on `mcp` — that
+  would capture *this* function object and defeat reload (see §6).
+- The **launcher** imports every module (which populates `_HOT_TOOLS` and re-exports the
+  functions for tests), then for each tagged tool registers ONE stable **dispatch-wrapper**
+  via `mcp.tool()(_make_wrapper(mod, name))`. The wrapper is `functools.wraps`-copied from
+  the impl so FastMCP builds the correct schema (it reads `inspect.signature`, which follows
+  `__wrapped__`); its body is `_maybe_reload(); return getattr(import_module(mod), name)(...)`
+  — re-resolving the CURRENT function each call, so a reload swaps the code in transparently.
+- **`_maybe_reload()`** stats the 8 logic modules on every call; on any mtime change it
+  `importlib.reload`s them in **dependency order** (decode → converse/navigate/cartography/
+  affordance/perceive → act → hook). Tool calls are serialized over stdio, so a reload only
+  ever happens BETWEEN calls (no lock needed); `importlib.reload` recompiles from source (no
+  pycache clearing needed). The mtime baseline is primed at startup so the first call is a
+  no-op. `u6_dev_reload` forces a reload on demand.
+- **NOT reloaded:** `ctx`, `constants`, `mapdata`, `look_names`. `ctx` holds the live
+  session `S` + `mcp` + the base/input registrations — reloading it would drop the hook.
+
+**Restart vs. no restart:**
+- Tool **body** edit (logic, a return string, a bug fix) → **no restart**; the next call
+  auto-reloads.
+- **Schema** change — a new/renamed param, a new or renamed tool, or a docstring the agent
+  must re-read — → **restart** (the MCP *client* caches each tool's schema at connect; the
+  server can swap code but cannot push a new schema to a live connection).
+- Editing `ctx`/`constants`/`mapdata`/`look_names` → **restart**.
 
 ---
 
@@ -147,6 +170,11 @@ imports `act` except the launcher, so it stays a sink.
 - The hermetic tests stub `FastMCP.tool` as identity, so they prove the **import graph**
   but **not real registration** — a live smoke-test (hook + one tool per module) is the
   only thing that confirms tools actually register on the server.
+- **FastMCP `add_tool` ignores duplicate names** (`ToolManager.add_tool`: if the name
+  already exists it returns the EXISTING tool and keeps the OLD function). So a plain
+  `importlib.reload` of a tool module re-runs its decorators but does NOT swap the
+  registered function — which is exactly why hot-reload (§4) uses register-once dispatch
+  wrappers that re-resolve the function each call, instead of re-registering on reload.
 
 ---
 
@@ -154,14 +182,27 @@ imports `act` except the launcher, so it stays a sink.
 
 The registered MCP server launches from a **separate copy** at
 `C:\Z_Temp\tools\dosbox_mcp\` (see `reference_dosbox_mcp_runs_from_tools_copy` in
-agent memory), not from the repo. To deploy a change:
+agent memory), not from the repo.
+
+**Tool-body fixes (the common case) no longer need a restart** (§4). Edit the file in
+the running copy (or edit here + copy it over) and SAVE — the next tool call mtime-reloads
+it. To deploy a body change:
+
+```
+cp u6/<changed>.py   <tools>/u6/<changed>.py     # the edited logic/tool module(s)
+# live on the next tool call -- NO restart, NO pycache clear (reload recompiles).
+```
+
+**Restart only when** the launcher/registration changed, a tool **schema** changed (new
+param / new or renamed tool / a docstring the agent re-reads), or you edited
+`ctx`/`constants`/`mapdata`/`look_names`:
 
 ```
 cp dosbox_u6_server.py            <tools>/dosbox_u6_server.py
 rm -rf <tools>/u6 && cp -r u6     <tools>/u6           # copy the WHOLE package
 rm -rf <tools>/__pycache__ <tools>/u6/__pycache__      # avoid stale .pyc
-# then RESTART the dosbox-u6 MCP server, then smoke-test (a new tool only
-# appears after the process reloads)
+# then RESTART the dosbox-u6 MCP server, then smoke-test (a new tool / new schema
+# only reaches the client after the process reloads + the client reconnects)
 ```
 
 ---
@@ -170,9 +211,12 @@ rm -rf <tools>/__pycache__ <tools>/u6/__pycache__      # avoid stale .pyc
 
 1. Create `u6/<name>.py`; start with `from u6.constants import *` and
    `from u6.ctx import *` (+ `from u6.decode import *` if it needs interpreters).
-2. Put its tools behind `@mcp.tool()` and list everything public in `__all__`.
+2. Tag its tools with `@hot_tool` (the marker; NOT `@mcp.tool()` — see §4) and list
+   everything public in `__all__`. (A genuinely NEW tool still needs one restart to
+   register; thereafter its body hot-reloads.)
 3. Keep it on the right side of the DAG (import only leftward).
-4. Add `from u6.<name> import *` to the launcher.
+4. Add `from u6.<name> import *` to the launcher, AND add `"u6.<name>"` to `_RELOAD_ORDER`
+   (in dependency position) so its body hot-reloads.
 5. Add a stub-driven `tests/test_<name>.py`; if it monkeypatches, patch on
    `u6.<name>`.
 6. Deploy (§7) + live smoke-test.

@@ -773,7 +773,7 @@ def _disassemble(d, n):
     return "\n".join(out)
 
 
-@mcp.tool()
+@hot_tool
 def u6_script_disasm(segment: int = -1, max_bytes: int = 4096) -> str:
     """Ultima VI: disassemble the CURRENTLY-LOADED NPC conversation script (the live
     TalkBuf) into an addressed, assembly-like listing -- every opcode with operands,
@@ -805,7 +805,7 @@ def u6_script_disasm(segment: int = -1, max_bytes: int = 4096) -> str:
     return head + _disassemble(data, len(data))
 
 
-@mcp.tool()
+@hot_tool
 def u6_conversation(keyword: str = "", raw: int = 0, segment: int = -1) -> str:
     """Ultima VI: read the live conversation as READABLE dialogue. With no args it
     returns the NPC, the greeting (decoded from TalkBuf), the prompt type, the
@@ -865,7 +865,7 @@ def u6_conversation(keyword: str = "", raw: int = 0, segment: int = -1) -> str:
     return "\n".join(out)
 
 
-@mcp.tool()
+@hot_tool
 def u6_npc_flags(npc: int = -1, segment: int = -1) -> str:
     """Ultima VI: read an NPC's CONVERSATION flag byte (TalkFlags[npc]) -- the per-NPC
     bits the converse VM SETs / CLRs / TSTs (OP_SET/CLR/TST). Conversation progression

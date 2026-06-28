@@ -8,7 +8,7 @@ from u6.ctx import *        # noqa: F401,F403
 from u6.decode import *     # noqa: F401,F403
 
 
-@mcp.tool()
+@hot_tool
 def u6_object(slot: int, segment: int = -1) -> str:
     """Ultima VI: decode one object/NPC slot from the parallel arrays
     (ObjStatus/ObjPos/ObjShapeType/Amount). Shows CoordUse + world x/y/z (LOCXYZ)
@@ -40,7 +40,7 @@ def u6_object(slot: int, segment: int = -1) -> str:
             f"type={sh & 0x3ff} frame={sh >> 10}  quan={am & 0xff} qual={am >> 8}  "
             f"tile={tile}  weight={wt}  {ready}")
 
-@mcp.tool()
+@hot_tool
 def u6_inventory(npc_slot: int, segment: int = -1,
                  max_slots: int = U6_MAX_SLOTS) -> str:
     """Ultima VI: list an NPC's inventory -- every object flagged INVEN or EQUIP
@@ -86,7 +86,7 @@ def u6_inventory(npc_slot: int, segment: int = -1,
                    f"{qual:>4}  {name}")
     return "\n".join(out)
 
-@mcp.tool()
+@hot_tool
 def u6_container(slot: int, segment: int = -1, max_slots: int = U6_MAX_SLOTS) -> str:
     """Ultima VI: list the CONTENTS of a container (bag/chest/etc.) -- every object whose
     CoordUse is CONTAINED and whose assoc (holder) == `slot`, recursing into nested
@@ -133,7 +133,7 @@ def u6_container(slot: int, segment: int = -1, max_slots: int = U6_MAX_SLOTS) ->
     head = f"Container 0x{slot:03x} '{_obj_name(b, slot)}' contents (DS=0x{ds:04x}):"
     return head + ("\n" + "\n".join(lines) if lines else "\n  (empty)")
 
-@mcp.tool()
+@hot_tool
 def u6_panel_state(segment: int = -1) -> str:
     """Ultima VI: read the STATUS-PANEL state -- the agent's "eyes" into the inventory
     UI that a USE/READY on a CARRIED item must drive by keyboard (the engine offers no
@@ -203,7 +203,7 @@ def u6_panel_state(segment: int = -1) -> str:
     out.append(f"Selection: obj={sel}  x={sx} y={sy}")
     return "\n".join(out)
 
-@mcp.tool()
+@hot_tool
 def u6_avatar(segment: int = -1) -> str:
     """Ultima VI: world position (x/y/z) + facing of the actor you currently
     CONTROL -- the closed-loop nav primitive (confirm a move actually happened).
@@ -227,7 +227,7 @@ def u6_avatar(segment: int = -1) -> str:
     veh = "  [aboard vehicle]" if in_veh else ""
     return f"controlled: slot 0x{slot:x} ({who})  x={x} y={y} z={z}  dir(NPCFlag&7)={d}{veh}"
 
-@mcp.tool()
+@hot_tool
 def u6_time(segment: int = -1) -> str:
     """Ultima VI: the in-game CLOCK + date. U6 is turn-based: time advances ~1 MINUTE
     per step/turn (the move scheduler, seg_1E0F.c); LOOK / TALK / USE are FREE (0
@@ -263,7 +263,7 @@ def u6_time(segment: int = -1) -> str:
             f"karma={karma}.  (a step = ~1 game minute; look/talk/use = free; "
             f"NPCs follow daily schedules.)")
 
-@mcp.tool()
+@hot_tool
 def u6_party(segment: int = -1) -> str:
     """Ultima VI: party control state -- whether the game is in PARTY mode (the
     whole party marches together, led by the avatar) or SOLO mode (one detached
@@ -336,7 +336,7 @@ def u6_party(segment: int = -1) -> str:
         out.append(f" {mark} {k:>3}  0x{slot:02x}  {x:>4} {y:>4} {z:>2}  {name_of(k)}")
     return "\n".join(out)
 
-@mcp.tool()
+@hot_tool
 def u6_input_state(segment: int = -1) -> str:
     """Ultima VI: what input the engine will accept RIGHT NOW -- the turn-readiness
     gate. U6 is turn-based and DOS keyboard input is buffered, so a key sent in the
@@ -367,7 +367,7 @@ def u6_input_state(segment: int = -1) -> str:
             "BUSY": "engine processing the turn -- wait"}[state]
     return f"input_state = {state}  ({note})\n  controlled: {who} (slot 0x{slot:x})\n  {fl}"
 
-@mcp.tool()
+@hot_tool
 def u6_roster_status(segment: int = -1) -> str:
     """Ultima VI: per-member STR/DEX/INT/Level + load (carried & readied vs max) --
     the inputs for deciding who can use/bear which gear. Max carry = STR*20, max
@@ -422,7 +422,7 @@ def u6_roster_status(segment: int = -1) -> str:
                    f"{readied.get(s, 0):>4}/{STR * EQUIP_PER_STR:<4}")
     return "\n".join(out)
 
-@mcp.tool()
+@hot_tool
 def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
     """Ultima VI: NPCs/creatures placed in the world (LOCXYZ) within `radius`
     (Chebyshev) of the CONTROLLED actor (where you are -- the avatar in party
@@ -485,7 +485,7 @@ def u6_npcs_near(radius: int = 12, segment: int = -1) -> str:
         out.append(f"  {dist:>4}  0x{i:02x}  {x:>4} {y:>4}  {comp:<3}  {typ:>4}  {cls:<5}  {nm}")
     return "\n".join(out)
 
-@mcp.tool()
+@hot_tool
 def u6_objects_near(radius: int = 8, max_items: int = 30, segment: int = -1) -> str:
     """Ultima VI: world OBJECTS (slot >= 0x100, placed on the map) within `radius`
     (Chebyshev) of the controlled actor on the same level -- find gear/items to

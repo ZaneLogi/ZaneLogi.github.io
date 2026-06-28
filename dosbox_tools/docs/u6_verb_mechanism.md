@@ -318,10 +318,11 @@ cancels the sub-prompt):
 - instrument → send a digit string + Enter.
 - single-prompt / none → drain as usual.
 
-In `u6_use` the **locked-door key flow is automatic**: USE a locked door (frame
-`8–0xB`) → the tool reads its qual, finds the member's owned matching key
-(`_find_matching_key`: an `OBJ_040` of equal qual, or a lockpick on a qual-0 lock)
-and drives `U → key (panel) → door (arrow)`. It is **container-aware** — the search
+In `u6_use` the **locked-door/chest key flow is automatic**: USE a locked door (frame
+`8–0xB`) OR a locked chest (frame `2`) → the tool reads its qual, finds the member's
+owned matching key (`_find_matching_key`: an `OBJ_040` of equal qual, or a lockpick on a
+qual-0 lock) and drives `U → key (panel) → door/chest (arrow)` (`_use_key_flow(kind=…)`;
+a picked chest goes locked→closed, USE again to open). It is **container-aware** — the search
 includes CONTAINED items and resolves ownership up the assoc chain — so a key inside
 a bag is **reported** ("take it out first"), not silently missed. (USE can't reach a
 contained item; extracting it needs MOVE / container drill-in, deferred.)
@@ -340,7 +341,9 @@ Object names in these reports come from `u6_object_naming.md`.
 ## Deployment note
 
 The MCP server runs from a **deployment copy** (e.g. `C:\Z_Temp\tools\dosbox_mcp\`);
-both `dosbox_u6_server.py` **and** `u6_look_names.py` must be copied there.
-Impl-only changes need a **server reconnect**; adding/changing tool signatures
-needs a **full Claude restart**. `read_linear`/`read_dos` take **decimal** ints,
-not `0x..` strings.
+copy `dosbox_u6_server.py` and the `u6/` package there. The server **hot-reloads tool
+bodies** (mtime check per call — see `u6_package_architecture.md` §4), so an **impl-only
+change is live on the next call, no restart**. Only a **schema change** (new/renamed
+param or tool, or a docstring the agent re-reads) or editing `ctx`/`constants`/`mapdata`/
+`look_names` needs a **server reconnect / Claude restart**. `read_linear`/`read_dos`
+take **decimal** ints, not `0x..` strings.

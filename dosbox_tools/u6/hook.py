@@ -6,7 +6,7 @@ from u6.constants import *  # noqa: F401,F403
 from u6.ctx import *        # noqa: F401,F403  -- mcp, S, dm, _derive_ds, _ds
 
 
-@mcp.tool()
+@hot_tool
 def u6_hook(avatar_name: str = "") -> str:
     """Hook DOSBox for Ultima VI: attach, BDA-calibrate MemBase, and DERIVE the
     U6 data segment (DS) from the avatar's name.

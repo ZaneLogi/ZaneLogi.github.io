@@ -12,6 +12,26 @@ from u6.constants import *  # noqa: F401,F403  -- U6_Names etc.
 
 mcp = FastMCP("dosbox-u6")
 
+# --- hot-reload support -----------------------------------------------------
+# Tool modules tag their functions with @hot_tool INSTEAD of @mcp.tool(). The
+# launcher (dosbox_u6_server.py) reads _HOT_TOOLS and registers ONE stable
+# dispatching wrapper per tool; editing a tool BODY + saving then lets the
+# launcher's _maybe_reload() importlib.reload the logic modules, and the wrapper
+# picks up the fresh function -- no server restart. ctx is NEVER reloaded, so
+# `mcp`, the session `S`, and the base/input tool registrations all survive.
+# (Schema changes -- new params / renamed tools / docstrings -- still need a
+# client reconnect, because the client caches the tool schema at connect time.)
+_HOT_TOOLS = []   # [(module_name, func_name)], populated as tool modules import
+
+def hot_tool(fn):
+    """Marker: record (module, name) for the launcher's dynamic registration; do
+    NOT register on mcp here (that would capture THIS function object and defeat
+    reload). Returns fn unchanged, so the module still exposes it normally."""
+    key = (fn.__module__, fn.__name__)
+    if key not in _HOT_TOOLS:
+        _HOT_TOOLS.append(key)
+    return fn
+
 
 # A session that also remembers the per-run U6 data segment, derived by u6_hook.
 class U6State(dm.Session):
@@ -197,7 +217,7 @@ def _world_to_cell(x, y, ax, ay):
 
 
 
-__all__ = ["mcp", "S", "U6State", "base", "inp", "_ds", "_derive_ds", "dm", "di",
+__all__ = ["mcp", "hot_tool", "_HOT_TOOLS", "S", "U6State", "base", "inp", "_ds", "_derive_ds", "dm", "di",
     "_rd8",
     "_rd16",
     "_rd16s",

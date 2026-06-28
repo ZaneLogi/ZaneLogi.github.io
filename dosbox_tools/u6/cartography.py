@@ -189,7 +189,7 @@ def _runlength(dirs):
     return " ".join(out)
 
 
-@mcp.tool()
+@hot_tool
 def u6_route(x: int, y: int, z: int = -1, segment: int = -1) -> str:
     """Ultima VI: PLAN a route to world tile (x,y) using the FULL baked terrain map --
     NOT limited to the live 40x40 window like u6_pathfind/u6_goto_xy. This is the tool
@@ -371,7 +371,7 @@ def _name_match_score(needle, name):
     return 0 if (needle == nm or needle in nm.split()) else 1
 
 
-@mcp.tool()
+@hot_tool
 def u6_at(x: int, y: int, z: int = -1, segment: int = -1) -> str:
     """Ultima VI: STRUCTURED single-cell query -- decode exactly what is at world tile
     (x,y,z), so the agent never has to count ASCII columns. Reports the terrain tile
@@ -404,7 +404,7 @@ def u6_at(x: int, y: int, z: int = -1, segment: int = -1) -> str:
     return "\n".join(out)
 
 
-@mcp.tool()
+@hot_tool
 def u6_nearest(name: str, radius: int = 16, segment: int = -1) -> str:
     """Ultima VI: find the NEAREST world object whose name matches `name` (e.g.
     'lever', 'crank', 'key', 'chest', 'door') within `radius` of the controlled actor.
@@ -462,7 +462,7 @@ def u6_nearest(name: str, radius: int = 16, segment: int = -1) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@hot_tool
 def u6_interactables_near(radius: int = 6, segment: int = -1) -> str:
     """Ultima VI: the "what can I do here" affordance scan -- list the USABLE objects
     within `radius` of the controlled actor (levers, cranks, switches, doors,
@@ -559,7 +559,7 @@ def _region_actors(base, z0, ox, oy, R, C, self_slot):
     return cells, lst
 
 
-@mcp.tool()
+@hot_tool
 def u6_area(radius: int = 24, segment: int = -1) -> str:
     """Ultima VI: a BIGGER bird's-eye map than the live 40x40 window -- a square of side
     (2*radius+1) centred on the avatar, built from the BAKED terrain + the LOADED objects

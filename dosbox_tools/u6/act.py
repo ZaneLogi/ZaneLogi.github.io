@@ -123,7 +123,7 @@ def _abort_to_ready(base_addr, cap=8):
         time.sleep(_CURSOR_STEP)
     return _input_state(base_addr)[0]
 
-@mcp.tool()
+@hot_tool
 def u6_move(direction: str) -> str:
     """Ultima VI: step the party one tile. direction = n/s/e/w (also
     north/south/east/west or up/down/left/right). Sends the arrow key via
@@ -136,7 +136,7 @@ def u6_move(direction: str) -> str:
         _wait_command_ready(b)          # act only on our turn (input is buffered)
     return inp.send_key(key)
 
-@mcp.tool()
+@hot_tool
 def u6_talk(direction: str) -> str:
     """Ultima VI: open a conversation with the NPC in `direction` (n/s/e/w, or a
     diagonal ne/nw/se/sw). TALK is a CURSOR-targeting command like LOOK (source
@@ -165,7 +165,7 @@ def u6_talk(direction: str) -> str:
     return (f"talk {direction}: no conversation (now {state}). "
             f"Is a talkable NPC adjacent that way?")
 
-@mcp.tool()
+@hot_tool
 def u6_look(direction: str) -> str:
     """Ultima VI: LOOK at the adjacent tile in `direction` (n/s/e/w, or a diagonal
     ne/nw/se/sw). LOOK is a CURSOR-targeting command (source seg_0A33.c:1070 --
@@ -211,7 +211,7 @@ def u6_look(direction: str) -> str:
         note = ""
     return f"look {direction}: committed; dismissed {pages} page(s); now {state}.{note}"
 
-@mcp.tool()
+@hot_tool
 def u6_get(direction: str) -> str:
     """Ultima VI: GET (pick up) the object on the adjacent tile in `direction`
     (n/s/e/w). GET is adjacent-ONLY (source seg_0A33.c:1079 -- SelectMode=1,
@@ -345,6 +345,15 @@ def _panel_commit(base_addr, member_index, command, locate, confirm):
                        f"(F{member_index + 1}; StatusDisplay=0x{sd():04x})")
     cell = locate()
     if cell is None:
+        # StatusDisplay flips to CMD_92 a frame before the draw routine (C_155D_1267)
+        # refills the visible-backpack array D_E70F, so the first read can see it empty.
+        # DOSBox keeps rendering between our reads, so poll briefly before giving up.
+        for _ in range(10):
+            time.sleep(_CURSOR_STEP)
+            cell = locate()
+            if cell is not None:
+                break
+    if cell is None:
         _abort_to_ready(base_addr)
         return False, "target not on the panel (a carried item must be on the visible backpack page -- scroll first)"
     col, row = cell
@@ -380,45 +389,72 @@ def _select_backpack_item(base_addr, member_index, target_slot):
     return _panel_commit(base_addr, member_index, "u", locate,
                          lambda: _rd16s(base_addr + U6_Sel_obj) == target_slot)
 
-def _use_key_flow(base_addr, keys, door, label):
-    """Open a LOCKED door (frame 8-0xB) by USE-ing the matching key: find the owned key
-    (the qual/ownership check the engine skips), select it in the panel, then the
-    engine's "On " prompt (C_27A1_2D8E) targets the door -- the arrow auto-commits
-    (SelectRange=-1 from 'U')."""
-    slot, _typ, _frame, qual = door
+def _chest_at_tile(base_addr, tx, ty, tz):
+    """A chest (OBJ_062) on tile (tx,ty,tz) -> (slot, type, frame, qual), else None.
+    Mirror of _door_at_tile for the locked-chest USE flow."""
+    status = dm.read(S.handle, base_addr + U6_ObjStatus, U6_MAX_SLOTS)
+    pos    = dm.read(S.handle, base_addr + U6_ObjPos, U6_MAX_SLOTS * 3)
+    shape  = dm.read(S.handle, base_addr + U6_ObjShapeType, U6_MAX_SLOTS * 2)
+    amount = dm.read(S.handle, base_addr + U6_Amount, U6_MAX_SLOTS * 2)
+    for i in range(0x100, U6_MAX_SLOTS):
+        if status[i] & 0x18:                              # not LOCXYZ
+            continue
+        typ = (shape[i * 2] | (shape[i * 2 + 1] << 8)) & 0x3ff
+        if typ != _U6_CHEST_TYPE:
+            continue
+        v = pos[i * 3] | (pos[i * 3 + 1] << 8) | (pos[i * 3 + 2] << 16)
+        if (v & 0x3ff) == tx and ((v >> 10) & 0x3ff) == ty and ((v >> 20) & 0xf) == tz:
+            return i, typ, (shape[i * 2 + 1] >> 2), amount[i * 2 + 1]   # frame=sh>>10, qual=am>>8
+    return None
+
+def _use_key_flow(base_addr, keys, obj, label, kind="door"):
+    """Open a LOCKED door (frame 8-0xB) OR a locked chest (frame 2) by USE-ing the matching
+    key/lockpick: find the owned key (the qual/ownership check the engine skips), select it
+    in the panel, then the engine's "On " prompt (C_27A1_2D8E) targets the door/chest -- the
+    arrow auto-commits (SelectRange=-1 from 'U'). qual 0 -> a lockpick (OBJ_03F) picks it."""
+    slot, _typ, frame, qual = obj
+    stfn = _door_state if kind == "door" else _chest_state
+    if (kind == "door" and frame >= 0xc) or (kind == "chest" and (frame & 3) == 3):
+        return f"{label}: {kind} is magically locked -- a key or lockpick won't open it."
     ai = _controlled_slot(base_addr)[1]
     member_slot = _party_member_slot(base_addr, ai)
     key, container = _find_matching_key(base_addr, member_slot, qual)
     if key < 0:
         need = f"a key (OBJ_040) of qual {qual}" if qual else "a lockpick (OBJ_03F)"
-        return f"{label}: door locked (qual={qual}); no matching {need} in inventory."
+        return f"{label}: {kind} locked (qual={qual}); no matching {need} in inventory."
     if container >= 0:                                          # key exists but is in a bag/chest
-        return (f"{label}: door locked (qual={qual}); the matching key {_obj_name(base_addr, key)} "
+        return (f"{label}: {kind} locked (qual={qual}); the matching key {_obj_name(base_addr, key)} "
                 f"(0x{key:03x}) is INSIDE {_obj_name(base_addr, container)} (0x{container:03x}) -- "
                 f"take it out of the container first (USE can't reach a contained item).")
     ok, err = _select_backpack_item(base_addr, ai, key)
     if not ok:
-        return f"{label}: locked door; couldn't select the key -- {err}"
+        return f"{label}: locked {kind}; couldn't select the key -- {err}"
     st, _ = _wait_state(base_addr, "SELECTING", timeout=2.0)   # the "On <target>" prompt
     if st != "SELECTING":
         _abort_to_ready(base_addr)
         return f"{label}: key selected but the 'On <target>' prompt didn't appear (state={st})."
-    inp.send_key(keys[0] if keys else "enter")                 # the door direction (auto-commits)
+    inp.send_key(keys[0] if keys else "enter")                 # the door/chest direction (auto-commits)
     state, _ = _drain_to_ready(base_addr)
     nframe = _obj_tfq(base_addr, slot)[1]
-    verdict = f"unlocked (frame {nframe})" if nframe < 8 else f"still locked (frame {nframe})"
-    return f"{label}: used key 0x{key:03x} on the door -> {verdict}; now {state}."
+    nstate, still_locked = stfn(nframe)
+    tool = "lockpick" if qual == 0 else f"key 0x{key:03x}"
+    verdict = ("unlocked" if not still_locked else "still locked") + f" ({nstate}, frame {nframe})"
+    return f"{label}: used {tool} on the {kind} -> {verdict}; now {state}."
 
 def _use_map(base_addr, keys, self_use, on, label):
-    """Map-tile USE: a plain USE on the target tile -- EXCEPT a LOCKED door, where the
-    tool auto-runs the key flow (find the matching owned key, drive U->key->door)."""
+    """Map-tile USE: a plain USE on the target tile -- EXCEPT a LOCKED door or chest, where
+    the tool auto-runs the key flow (find the matching owned key/lockpick, drive
+    U->key->door/chest)."""
     try:
         tx, ty, tz = _target_tile(base_addr, keys)
         door = _door_at_tile(base_addr, tx, ty, tz)
+        chest = None if door else _chest_at_tile(base_addr, tx, ty, tz)
     except OSError:
-        door = None
+        door = chest = None
     if door and door[2] in _DOOR_LOCKED:
-        return _use_key_flow(base_addr, keys, door, label)
+        return _use_key_flow(base_addr, keys, door, label, "door")
+    if chest and _chest_state(chest[2])[1]:                     # locked chest (frame 2 mundane / 3 magical)
+        return _use_key_flow(base_addr, keys, chest, label, "chest")
     err = _begin_select(base_addr, "u", label)
     if err:
         return err
@@ -480,16 +516,17 @@ def _use_inventory(base_addr, slot, on):
            f"frame {frame}->{nframe}" if nframe != frame else "used")
     return f"{label}{second}: {res}; now {state}."
 
-@mcp.tool()
+@hot_tool
 def u6_use(target: str, on: str = "") -> str:
     """Ultima VI: USE an object. `target` is EITHER a MAP tile -- a cardinal direction
     (n/s/e/w) or `here`/`self` for the tile you stand on (ladders) -- OR a CARRIED item
     by object slot: `inv:0x305` / `inv:773` / `0x305` / `773` (get the slot from
     u6_inventory / u6_panel_state). The tool absorbs the keyboard mechanism; the agent
     supplies a SEMANTIC choice via `on=` only when an item needs one:
-      * a LOCKED door (map target): NO `on` -- the tool auto-finds the matching owned
-        key (OBJ_040, qual match; or a lockpick on a qual-0 lock) and drives
-        U->key->door, so the door 'just opens' (or it reports no matching key).
+      * a LOCKED door OR chest (map target): NO `on` -- the tool auto-finds the matching
+        owned key (OBJ_040, qual match; or a lockpick OBJ_03F on a qual-0 lock) and drives
+        U->key->door/chest, so it 'just opens' (or it reports no matching key/pick). A
+        picked chest goes locked->closed; USE it once more to open it.
       * a potion: on=<member 1..8 or name>.  * the orb: on=<n/s/e/w> ('where').
       * pick/shovel/telescope: on=<n/s/e/w>.  * an instrument: on=<digits 0-9> (tune).
     Single-use items (food/drink/torch/gem/book) and unlocked map objects need no `on`.
@@ -516,7 +553,7 @@ def u6_use(target: str, on: str = "") -> str:
         return _blind_cursor_cmd(f"use {t}", "u", keys, self_use)
     return _use_map(b, keys, self_use, on.strip(), f"use {t}")
 
-@mcp.tool()
+@hot_tool
 def u6_ready(target: str) -> str:
     """Ultima VI: READY (equip) a carried item, or UNREADY (take off) an equipped one
     -- the inventory-panel toggle. Ready is NOT a letter command (R is Rest); it's the
@@ -700,7 +737,7 @@ def _answer_quantity(b, qty):
     inp.send_key("enter"); time.sleep(_CURSOR_STEP)
     return qty
 
-@mcp.tool()
+@hot_tool
 def u6_move_object(target: str, dest: str, amount: int = 0) -> str:
     """Ultima VI: MOVE a carried object by keyboard -- the inventory manager. Drives the
     real engine D(rop)/M(ove) commands, so Link[]/MapObjPtr/weights/stacking stay the
@@ -709,7 +746,10 @@ def u6_move_object(target: str, dest: str, amount: int = 0) -> str:
     `target` = the source object SLOT (0x.. / number / inv:..) from u6_inventory /
     u6_container / u6_panel_state.
     `dest` (one of):
-      * `ground` or `ground:<n/s/e/w>` -- DROP onto the avatar's tile (or one tile over).
+      * `ground:<n/s/e/w>[:count]` -- DROP `count` (1..8) tiles in that direction (default 1).
+                              The target tile must be PASSABLE + empty -- the engine refuses a
+                              blocked/occupied tile (furniture, a chest, an actor, or even the
+                              avatar's OWN tile), so plain `ground` in-place usually fails.
       * `member:<N>`       -- give to party member N (1-based; 1 = avatar/leader).
       * `container:<slot>` -- put INTO that container (a top-level item in the same pack).
       * `out`              -- take the source OUT of its container, to the holding member's
@@ -749,9 +789,19 @@ def u6_move_object(target: str, dest: str, amount: int = 0) -> str:
     if d in ("ground", "here", "ground:here"):
         dkind, darg = "ground", None
     elif d.startswith("ground:"):
-        darg = _U6_DIR.get(d.split(":", 1)[1])
-        if darg is None:
+        parts = d.split(":", 1)[1].split(":")            # "<dir>" or "<dir>:<count>"
+        dirkey = _U6_DIR.get(parts[0])
+        if dirkey is None:
             return f"{label}: ground direction must be n/s/e/w (or 'ground' for in place)."
+        cnt = 1
+        if len(parts) > 1:
+            try:
+                cnt = int(parts[1])
+            except ValueError:
+                return f"{label}: ground step count must be an integer, e.g. ground:e:2."
+            if not (1 <= cnt <= 8):
+                return f"{label}: ground step count must be 1..8 (the engine's drop range)."
+        darg = (dirkey, cnt)
         dkind = "ground"
     elif d.startswith("member:"):
         try:
@@ -815,7 +865,9 @@ def u6_move_object(target: str, dest: str, amount: int = 0) -> str:
     # ---- destination ----
     if dkind == "ground":
         if darg:
-            inp.send_key(darg); time.sleep(_CURSOR_STEP)
+            dirkey, cnt = darg
+            for _ in range(cnt):                         # step the drop cursor cnt tiles (engine range 8)
+                inp.send_key(dirkey); time.sleep(_CURSOR_STEP)
         inp.send_key("enter")
     elif dkind == "member":
         sd = lambda: _rd16(b + U6_StatusDisplay)
@@ -872,7 +924,7 @@ def _advance_conv_input(base_addr, max_pages=8):
         time.sleep(_PAGE_ADVANCE_SETTLE)
     return pages
 
-@mcp.tool()
+@hot_tool
 def u6_say(text: str, segment: int = -1) -> str:
     """Ultima VI: answer the current conversation prompt. First advances past any '*'
     page-pause so the leading char isn't eaten dismissing a page (a long greeting/
@@ -904,7 +956,7 @@ def u6_say(text: str, segment: int = -1) -> str:
     ent = inp.send_key("enter")
     return f"[line]{adv} {out} [{ent}]"
 
-@mcp.tool()
+@hot_tool
 def u6_key(key: str) -> str:
     """Ultima VI: send one keypress (for single-key conversation prompts, menus,
     or any raw key). `key` = a single char or a name (enter/esc/space/up/...)."""
@@ -917,7 +969,7 @@ def _talk_op_at_pc(base_addr):
     tb_lin = ((fp[2] | (fp[3] << 8)) << 4) + (fp[0] | (fp[1] << 8))
     return dm.read(S.handle, S.membase + tb_lin + pc, 1)[0]
 
-@mcp.tool()
+@hot_tool
 def u6_continue(max_pages: int = 40, segment: int = -1) -> str:
     """Ultima VI: page a conversation forward to the next DECISION POINT. Dismisses
     every '*' page-pause (one ENTER per page) and STOPS the instant the game waits for
@@ -1098,7 +1150,7 @@ def _use_result_at_tile(base_addr, tx, ty, tz, cap=12):
             break
     return out
 
-@mcp.tool()
+@hot_tool
 def u6_talk_to(npc_slot: int, max_steps: int = 60, segment: int = -1) -> str:
     """Ultima VI: the demo one-liner -- u6_goto(npc) then open the conversation
     (T + direction). On success, poll u6_conversation() and reply with u6_say().
@@ -1151,7 +1203,7 @@ def _adjacency_action(base_addr, slot):
     return ("far", (ox, oy))
 
 
-@mcp.tool()
+@hot_tool
 def u6_use_object(target: str, max_steps: int = 40, on: str = "", segment: int = -1) -> str:
     """Ultima VI: CLOSED-LOOP "go to an object and USE it" -- the one-call version of the
     lever/crank dance from the castle-escape run (find a walkable cell adjacent to the
@@ -1229,7 +1281,7 @@ def _first_closed_door_on_path(base, steps, sr, sc, ox, oy, z0, door_set):
     return None, None
 
 
-@mcp.tool()
+@hot_tool
 def u6_travel(x: int, y: int, max_legs: int = 24, segment: int = -1) -> str:
     """Ultima VI: TRAVEL to world tile (x,y) over the whole-level door-passable route,
     automatically OPENING (and unlocking with an owned key) every closed door en route --

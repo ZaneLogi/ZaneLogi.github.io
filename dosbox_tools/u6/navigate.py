@@ -185,7 +185,7 @@ def _closest_reachable(walk, start, ax, ay, tx, ty):
                     best, bestd = (nr, nc), d
     return best
 
-@mcp.tool()
+@hot_tool
 def u6_walkable(segment: int = -1) -> str:
     """Ultima VI: the local 40x40 passability grid as ASCII, faithful to the
     engine's land-walker move gate C_1E0F_000F (terrain + objects, incl. multi-tile
@@ -260,7 +260,7 @@ def u6_area_map_data(base, segment_ds):
     av = _world_to_cell(x0, y0, ax, ay)
     return x0, y0, z0, av, ax, ay, walk, amap, doorcells, doors
 
-@mcp.tool()
+@hot_tool
 def u6_area_map(segment: int = -1) -> str:
     """Ultima VI: the live 40x40 area decoded DIRECTLY from the engine's own per-cell
     object map -- AreaTiles (floor) + MapObjPtr (the TOP object slot at each cell,
@@ -308,7 +308,7 @@ def u6_area_map(segment: int = -1) -> str:
         out.append("Doors in view: none.")
     return "\n".join(out)
 
-@mcp.tool()
+@hot_tool
 def u6_pathfind(npc_slot: int, segment: int = -1) -> str:
     """Ultima VI: PLAN a route to get adjacent to an NPC. Returns the cardinal
     step list (n/s/w/e) WITHOUT sending input -- pure computation over the
@@ -349,7 +349,7 @@ def u6_pathfind(npc_slot: int, segment: int = -1) -> str:
     return (f"Path to adjacent NPC 0x{npc_slot:x}: {len(dirs)} steps -> "
             f"{' '.join(dirs)}\n(execute with u6_goto, or step via u6_move)")
 
-@mcp.tool()
+@hot_tool
 def u6_goto(npc_slot: int, max_steps: int = 60, segment: int = -1) -> str:
     """Ultima VI: walk the avatar adjacent to an NPC, CLOSED-LOOP -- plan -> one
     u6_move -> confirm via re-read -> replan on block, until adjacent or stuck.
@@ -405,7 +405,7 @@ def u6_goto(npc_slot: int, max_steps: int = 60, segment: int = -1) -> str:
             log.append(f"step {step_i}: {_STEP_NAME[mv]} -> ({x1},{y1})")
     return "\n".join(log + [f"Hit max_steps={max_steps} without arriving."])
 
-@mcp.tool()
+@hot_tool
 def u6_goto_xy(x: int, y: int, max_steps: int = 150, segment: int = -1) -> str:
     """Ultima VI: walk the controlled actor to world tile (x,y) on the current level,
     CLOSED-LOOP -- the coordinate counterpart of u6_goto. Each step: re-read the live
@@ -513,7 +513,7 @@ def _cell_diag(base_addr, wx, wy, z0, ax, ay):
         parts.append("on cell: " + ", ".join(hits[:5]))
     return "; ".join(parts) if parts else "(no terrain/obj info)"
 
-@mcp.tool()
+@hot_tool
 def u6_validate_passability(restore: bool = True, settle_ms: int = 160,
                             segment: int = -1) -> str:
     """Ultima VI: EMPIRICALLY verify the ported passability oracle (C_1E0F_000F)
