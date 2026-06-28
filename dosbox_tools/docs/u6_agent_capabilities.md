@@ -147,6 +147,14 @@ non-party NPCs**, stops adjacent to a closed door so you `u6_use` it) · `u6_tal
 · `u6_route` (whole-level planner over baked terrain) · `u6_area(radius)` (a
 **bigger** bird's-eye map than the 40×40 — baked terrain + loaded 2×2-OBJBLK objects,
 the whole building at a glance).
+**Combat-safety (manual verbs — the USER triggers these; the agent does NOT fight):**
+`u6_pacify(radius)` (set every spawned hostile in slots **0xE0–0xFF** within `radius` to alignment
+**NEUTRAL** so it stands down — the temporary spawn pool only, where eggs/slime-splits/`AddMonster`
+land; persistent/placed NPCs in 0x00–0xDF are left for the user to fight or flee) · `u6_heal_party`
+(restore LIVING members to **MaxHP** and clear poison/asleep/paralyzed; dead members skipped, never
+revived). Both are direct one-shot RAM writes grounded in `u6/combat.py`: hostility is alignment
+(`NPCStatus & 0x60`; target re-picked every turn, seg_2337.c:1538 — so NEUTRAL stops an in-progress
+attacker next tick, exactly like Charm), and `HP = MaxHP = min(255, Level*30)` is the Heal-spell write.
 **Verify:** `u6_validate_passability` (predict-vs-live passability gate).
 **Inherited:** base mem tools + input tools (escape hatches).
 
@@ -172,7 +180,10 @@ the whole building at a glance).
 | See which side panel + the inventory | — | `u6_panel_state` | ✅ live-verified |
 | Open/close door, leave gate, ladder (`U`) | `u6_use` (n/s/e/w or `here`) | door/chest frame state in return | ✅ live-verified (opened oaken doors en route to the Avatar's room, 2026-06-26) |
 | USE a carried item (drink/eat/light/play…) | `u6_use(inv:slot[, on=…])` | re-read the item (consumed / frame change) | ✅ built (live-unconfirmed) |
-| Open a *locked* door/chest (`U`) | `u6_use` (auto key flow) | finds the owned `OBJ_040` qual-match; reports a key stuck in a bag | ✅ built (live-unconfirmed) |
+| Open a *locked* door/chest (`U`) | `u6_use` (auto key flow) | finds the owned `OBJ_040` qual-match; reports a key stuck in a bag | ✅ live-verified 2026-06-29 (steel door qual-1, key 0x381, auto-unlocked via `u6_travel`) |
+| Avoid a fight (stand spawns down) | `u6_pacify(radius)` (USER-triggered) | `u6_npcs_near` (`class` enemy→npc) | ✅ live-verified 2026-06-29 (dungeon giant rat slot 0xE0 → NEUTRAL) |
+| Heal the party to full | `u6_heal_party` (USER-triggered "heal") | per-member HP before→max + ailments cleared | ✅ live-verified 2026-06-29 |
+| Leave the castle (gated exit) | `u6_use` lever/crank + `u6_travel` (auto-unlock) | drawbridge/portcullis state via `u6_at` / `u6_nearest` (affordance link) | ✅ live-verified 2026-06-29 (key→steel door → lever→portcullis → crank→drawbridge → crossed out) |
 | Tell friend from foe / spot threats | — | `u6_npcs_near` (`class`) · `u6_walkable` / `u6_area_map` (`P`=party swap-through · `E`=enemy · `a`=ally · `N`=npc, via NPCStatus alignment) | ✅ live-verified |
 | See doors on the map (a *closed* door reads as a wall on `u6_walkable`) | — | `u6_area_map` (MapObjPtr → `+`closed / `=`locked / `'`open + door list w/ key-qual + bearing) | ✅ live-verified |
 | Walk to a world coordinate | `u6_goto_xy(x,y)` | step log / `u6_avatar` | ✅ live-verified (drove across the castle to the west wing, 2026-06-26) |
@@ -206,9 +217,13 @@ explore → leave the castle. (On foot, party mode, no combat.)
 in `u6_ai_agent.md` §5 & §7** (single source — not duplicated here). Progress:
 turn gate ✅, gear perception ✅, `u6_look`/`u6_get`/`u6_ready`/`u6_panel_state` ✅
 live-verified, plus TALK/`u6_conversation`/`u6_script_disasm` ✅ live-verified;
-`u6_use` ✅ map-tile path live-verified (carried-item + locked-key flows still
-offline-only); `u6_area_map` / `u6_goto_xy` / allegiance-aware grid ✅ live-verified.
-**M1 toolset complete; remaining live gap = `u6_use` carried-item/locked-key + the full Slice-1 run.**
+`u6_use` ✅ map-tile + **locked-key flows live-verified 2026-06-29** (steel door qual-1 auto-unlocked
+en route); `u6_area_map` / `u6_goto_xy` / allegiance-aware grid ✅ live-verified.
+**★ M1 Slice-1 COMPLETE 2026-06-29 — the Avatar LEFT the castle.** Full run: surfaced from the dungeon,
+revealed a secret door (LOOK/search), then solved the gated south exit (qual-1 key → steel door; lever →
+inner portcullis; crank → drawbridge) and crossed out to Britain town. Also added the **combat-avoidance
+layer** (`u6_pacify` / `u6_heal_party`, §4) so the agent can survive/skip fights the user doesn't want to
+drive. **Remaining live gap = `u6_use` carried-item (drink/eat/light) only.** Next: virtue towns (Cove/Lycaeum).
 
 ---
 

@@ -51,6 +51,7 @@ from u6.navigate import *     # noqa: F401,F403  -- grid/area-map/nav tools
 from u6.cartography import *  # noqa: F401,F403  -- whole-level baked-terrain routing
 from u6.perceive import *     # noqa: F401,F403  -- read tools
 from u6.act import *          # noqa: F401,F403  -- action verbs
+from u6.combat import *       # noqa: F401,F403  -- combat-safety verbs (pacify / heal)
 from u6.hook import *         # noqa: F401,F403  -- u6_hook
 
 # ---------------------------------------------------------------------------
@@ -63,7 +64,7 @@ from u6.hook import *         # noqa: F401,F403  -- u6_hook
 # perceive} -> act (uses converse+navigate) -> hook.
 # ---------------------------------------------------------------------------
 _RELOAD_ORDER = ["u6.decode", "u6.converse", "u6.navigate", "u6.cartography",
-                 "u6.affordance", "u6.perceive", "u6.act", "u6.hook"]
+                 "u6.affordance", "u6.perceive", "u6.act", "u6.combat", "u6.hook"]
 _mtimes = {}
 
 def _scan_mtimes():
