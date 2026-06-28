@@ -67,6 +67,23 @@ U6_PromptCh      = 0x04D4   # int PromptCh; ==1 during a page-pause "press a key
                             #   ('*' marker / screen-full, seg_0C9C.c:1698/1830), else 5
 # (conversation state is U6_IsInConversation = 0x098B, defined in the talk section.)
 
+# ----------------------------------------------------------------------------
+# In-game clock + global state (DGROUP, DS-relative; D_2C4A.c). The U6 clock
+# advances ~1 minute per turn/step (C_0A33_1355(1) in the move scheduler,
+# seg_1E0F.c:2219); LOOK/TALK/USE pass 0 minutes (free). A month = 28 days.
+# NPCs follow daily schedules keyed off Time_H, so the time of day decides
+# where an NPC is. MapX/Y/Z = the map view centre (= the avatar's position).
+# ----------------------------------------------------------------------------
+U6_Time_M = 0x2C4C   # unsigned char; minutes (0-59)
+U6_Time_H = 0x2C4D   # unsigned char; hour of day (0-23), save starts at 8
+U6_Date_D = 0x2C4E   # unsigned char; day of month (1-28; a U6 month is 28 days)
+U6_Date_M = 0x2C4F   # unsigned char; month (1-12)
+U6_Date_Y = 0x2C50   # unsigned int (2 B); year
+U6_KARMA  = 0x2C52   # unsigned char; party karma
+U6_MapX   = 0x2C56   # int; map view centre X (= avatar world X)
+U6_MapY   = 0x2C58   # int; map view centre Y
+U6_MapZ   = 0x2C5A   # int; map view centre Z (level)
+
 
 # ----------------------------------------------------------------------------
 # Status-panel / inventory-UI state -- the "eyes" into the panel that the keyboard
@@ -242,6 +259,15 @@ __all__ = [
     "U6_MouseMode",
     "U6_LineInput",
     "U6_PromptCh",
+    "U6_Time_M",
+    "U6_Time_H",
+    "U6_Date_D",
+    "U6_Date_M",
+    "U6_Date_Y",
+    "U6_KARMA",
+    "U6_MapX",
+    "U6_MapY",
+    "U6_MapZ",
     "U6_StatusDisplay",
     "U6_PanelChar",
     "U6_PanelCol",

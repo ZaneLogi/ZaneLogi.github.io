@@ -120,7 +120,8 @@ internally, so they fire only on a real turn boundary.
 ## 4. Tool surface
 
 **Perceive:** `u6_avatar` (controlled actor pos+facing), `u6_party` (solo/party,
-combat, who's controlled), `u6_roster_status` (STR/DEX/INT/Level + load caps),
+combat, who's controlled), `u6_time` (in-game clock/date — ~0.5–1 min/step,
+look/talk/use free, NPC schedules), `u6_roster_status` (STR/DEX/INT/Level + load caps),
 `u6_input_state` (turn-readiness), `u6_object(slot)` (incl. tile/weight/equip-slot),
 `u6_inventory(npc_slot)`, `u6_panel_state` (which side panel is up + the inventory
 cursor/scroll/slots/Selection), `u6_npcs_near(radius)` (+ allegiance **`class`**:
@@ -130,11 +131,17 @@ party/enemy/ally/npc), `u6_objects_near(radius)` (map items + gear hints),
 list), `u6_conversation` (**decoded**
 dialogue + askable keywords + highlighted cues — see below), `u6_script_disasm`
 (the **whole** NPC script as an addressed assembly listing — see the rule of
-engagement above).
-**Act:** `u6_move` · `u6_talk` · `u6_say` · `u6_look` · `u6_get` · `u6_use` · `u6_ready` · `u6_key`.
+engagement above), `u6_npc_flags(npc)` (the NPC's TalkFlags byte — keyword-gated
+progression, read before/after a keyword).
+**Act:** `u6_move` · `u6_talk` · `u6_say` · `u6_continue` (page a convo to the next
+prompt / single-key menu / `LEAVE`) · `u6_look` · `u6_get` · `u6_use` · `u6_use_object`
+· `u6_travel` (door-aware: auto-opens/unlocks doors en route) · `u6_ready` · `u6_key`.
 **Navigate:** `u6_pathfind` (plan) · `u6_goto` (closed-loop, NPC target) ·
 `u6_goto_xy` (closed-loop, world `(x,y)` — re-plans each step, **routes around
-non-party NPCs**, stops adjacent to a closed door so you `u6_use` it) · `u6_talk_to`.
+non-party NPCs**, stops adjacent to a closed door so you `u6_use` it) · `u6_talk_to`
+· `u6_route` (whole-level planner over baked terrain) · `u6_area(radius)` (a
+**bigger** bird's-eye map than the 40×40 — baked terrain + loaded 2×2-OBJBLK objects,
+the whole building at a glance).
 **Verify:** `u6_validate_passability` (predict-vs-live passability gate).
 **Inherited:** base mem tools + input tools (escape hatches).
 

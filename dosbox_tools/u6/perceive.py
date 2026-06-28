@@ -168,6 +168,42 @@ def u6_avatar(segment: int = -1) -> str:
     return f"controlled: slot 0x{slot:x} ({who})  x={x} y={y} z={z}  dir(NPCFlag&7)={d}{veh}"
 
 @mcp.tool()
+def u6_time(segment: int = -1) -> str:
+    """Ultima VI: the in-game CLOCK + date. U6 is turn-based: time advances ~1 MINUTE
+    per step/turn (the move scheduler, seg_1E0F.c); LOOK / TALK / USE are FREE (0
+    minutes). NPCs follow DAILY SCHEDULES keyed off the hour -- the time of day
+    decides where an NPC is and whether a shop is open -- so check this before a long
+    detour. A U6 month is 28 days (D_2C4A.c). DS from u6_hook unless overridden."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    try:
+        mm = dm.read(S.handle, base + U6_Time_M, 1)[0]
+        hh = dm.read(S.handle, base + U6_Time_H, 1)[0]
+        dd = dm.read(S.handle, base + U6_Date_D, 1)[0]
+        mo = dm.read(S.handle, base + U6_Date_M, 1)[0]
+        yy = int.from_bytes(dm.read(S.handle, base + U6_Date_Y, 2), "little")
+        karma = dm.read(S.handle, base + U6_KARMA, 1)[0]
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    # day-phase for NPC schedules: the engine's sundial calls >20h or <5h "night"
+    # (seg_0A33.c:901).
+    if hh > 20 or hh < 5:
+        phase = "NIGHT (most NPCs asleep / shops shut)"
+    elif hh < 12:
+        phase = "morning"
+    elif hh < 17:
+        phase = "afternoon"
+    else:
+        phase = "evening"
+    return (f"In-game time: {hh:02d}:{mm:02d}  -- day {dd}, month {mo}, year {yy}  [{phase}]\n"
+            f"karma={karma}.  (a step = ~1 game minute; look/talk/use = free; "
+            f"NPCs follow daily schedules.)")
+
+@mcp.tool()
 def u6_party(segment: int = -1) -> str:
     """Ultima VI: party control state -- whether the game is in PARTY mode (the
     whole party marches together, led by the avatar) or SOLO mode (one detached
@@ -450,6 +486,7 @@ __all__ = [
     "u6_inventory",
     "u6_panel_state",
     "u6_avatar",
+    "u6_time",
     "u6_party",
     "u6_input_state",
     "u6_roster_status",

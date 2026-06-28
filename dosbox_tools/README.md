@@ -319,6 +319,8 @@ After this, the decoders work with no `segment=` argument.
 
 - `u6_avatar` / `u6_party` — the controlled actor's position+facing; solo/party
   mode, combat on/off, and who's controlled now.
+- `u6_time` — the in-game clock + date. U6 is turn-based: ~0.5–1 min per step (time
+  advances per move-round), LOOK/TALK/USE are free; NPCs run daily schedules.
 - `u6_input_state` — turn-readiness (`COMMAND_READY`/`CONVERSATION`/`SELECTING`/
   `MOUSE_MODE`/`BUSY`); poll before acting (U6 is turn-based, input is buffered).
 - `u6_roster_status` — per-member STR/DEX/INT/Level + carry/equip load vs caps.
@@ -333,6 +335,9 @@ After this, the decoders work with no `segment=` argument.
   (with gear hints), named via `LOOK.LZD` (see `docs/u6_object_naming.md`).
 - `u6_walkable` — a 40×40 ASCII passability grid (faithful `C_1E0F_000F` port;
   see `docs/dosbox_u6_passability.md`).
+- `u6_area(radius=24)` — a **bigger** bird's-eye map than the 40×40: baked terrain +
+  the loaded objects (the 2×2 OBJBLK region in RAM) over a (2·radius+1) square, so a
+  whole castle/area is one glance (`@`=you, `P`/`E`/`a`/`N` actors, `D`=door, `.`/`#`).
 - `u6_conversation()` / `u6_script_disasm()` — read the live talk VM. On talk
   start the engine loads the NPC's whole script from `converse.a` into **`TalkBuf`**
   and interprets it with **`Talk_PC`** as the program counter; it prints text then
@@ -344,6 +349,9 @@ After this, the decoders work with no `segment=` argument.
   assembly-like listing (opcodes, GOTO labels, factor exprs, side-effects,
   `??? 0xNN` for unknowns). Driving replies is `u6_say` (with a page-pause advance
   that fixes the first-char-eaten bug). **Full subsystem: `docs/u6_conversation.md`.**
+- `u6_npc_flags(npc=-1)` — the NPC's `TalkFlags` byte (keyword-gated progression: a
+  keyword's `SET self,<bit>` flips a bit; read before/after a keyword to track state;
+  `-1` = the current conversation interlocutor).
 
 ## Action verbs
 
@@ -368,6 +376,9 @@ prompt. The full per-verb source mechanism + driving model is
 - `u6_say(text)` — answer the current prompt; peeks the opcode at `Talk_PC` and
   types a line + Enter (`ASKTOP`/`GETSTR`) or sends a single key
   (`GET`/`GETCHR`/`WAIT`).
+- `u6_continue()` — page a conversation to the next **decision point**: dismiss every
+  page-pause and stop at a keyword / single-key prompt or `LEAVE`. The fluent loop is
+  `u6_talk → u6_conversation → u6_continue → u6_say → u6_continue → …`.
 - `u6_key(key)` — send one raw keypress.
 
 Navigation (closed-loop, replanning around moving NPCs):

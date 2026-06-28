@@ -68,6 +68,8 @@ class _ConverseVM:
         self.env = env
         self.pc = 0
         self.budget = 20000          # byte-read guard against runaway GOTO loops
+        self._halt = False           # set by LEAVE -> ends the whole decode (propagates
+                                     # up through nested IF branches)
 
     # --- byte readers ---
     def _u8(self):
@@ -190,39 +192,86 @@ class _ConverseVM:
 
     # --- parse_statement (seg_1703.c:945): decode a block of text + control,
     # stopping (peek, not consume) at any op in `stops` or a structural terminator.
-    def decode_block(self, stops, depth=0, follow_goto=True):
+    def decode_block(self, stops, depth=0, follow_goto=True, decoded=None, skip=False):
         if depth > 40:
             raise _DecoderStop(self.IF, self.pc)
+        if decoded is None:
+            decoded = set()              # instruction addrs decoded in this pass; a GOTO
+                                         # back to one is a VM loop the read-only decoder
+                                         # cannot iterate -- see the GOTO handler below
+        if depth == 0:
+            self._halt = False           # fresh top-level decode -> clear any prior LEAVE
         out = []
         while self.pc < self.n:
+            addr = self.pc
             op = self.d[self.pc]
             if op == 0 or op == self.ENDRES or op == self.KEY or op >= 0xf0 or op in stops:
                 break
+            decoded.add(addr)
             self.pc += 1
             if op < 0x80:                                  # raw inline ASCII text
                 out.append(chr(op))
             elif op == self.PRINTSTR:
                 out.append(self._printstr())
             elif op == self.LEAVE:
-                break
+                if not skip:                               # LEAVE ends the conversation ->
+                    self._halt = True                      # stop the whole decode. While
+                    break                                  # SKIPPING a not-taken branch it is
+                                                           # a passable no-op (keep scanning for
+                                                           # this branch's ELSE/ENDIF).
             elif op == self.GOTO:
                 tgt = self._u32()
-                if follow_goto:                            # follow for real response text;
-                    self.pc = tgt                          # don't follow when scanning the
-                                                           # keyword table (stay linear)
+                if follow_goto and not skip and tgt not in decoded:  # follow forward jumps + branches
+                    self.pc = tgt                          # to not-yet-seen text. A GOTO to an
+                                                           # ALREADY-decoded addr is a loop
+                                                           # back-edge (e.g. LB 'heal' iterates
+                                                           # the party): the read-only decoder
+                                                           # can't run the loop counter, so skip
+                                                           # it and fall through to the post-loop
+                                                           # text. (Never followed at all when
+                                                           # scanning the keyword table --
+                                                           # follow_goto=False.)
             elif op == self.IF:
                 _val, nd = self.evaluate()
-                ta = self.decode_block({self.ELSE, self.ENDIF}, depth + 1, follow_goto)
-                tb = ""
-                if self.pc < self.n and self.d[self.pc] == self.ELSE:
-                    self.pc += 1
-                    tb = self.decode_block({self.ENDIF}, depth + 1, follow_goto)
-                if self.pc < self.n and self.d[self.pc] == self.ENDIF:
-                    self.pc += 1
                 if nd:
-                    out.append(f"[either: «{ta.strip()}»" + (f" | «{tb.strip()}»]" if tb.strip() else "]"))
+                    # Nondeterministic (RND / unknown read): we can't know the live
+                    # path, so show BOTH branches as [either]. Do NOT follow GOTOs --
+                    # following a not-taken branch's GOTO desyncs the pc (Bug A).
+                    ta = self.decode_block({self.ELSE, self.ENDIF}, depth + 1, False, decoded, skip)
+                    tb = ""
+                    if self.pc < self.n and self.d[self.pc] == self.ELSE:
+                        self.pc += 1
+                        tb = self.decode_block({self.ENDIF}, depth + 1, False, decoded, skip)
+                    if self.pc < self.n and self.d[self.pc] == self.ENDIF:
+                        self.pc += 1
+                    a, b = ta.strip(), tb.strip()
+                    if a or b:                              # drop an all-empty [either]
+                        out.append(f"[either: «{a}»" + (f" | «{b}»]" if b else "]"))
+                elif _val:
+                    # Deterministic TRUE: take the true branch as REAL control flow
+                    # (follow its GOTOs); then skip the not-taken else. The idiom
+                    # `IF c GOTO L ENDIF` thus follows the jump faithfully.
+                    out.append(self.decode_block({self.ELSE, self.ENDIF}, depth + 1, follow_goto, decoded, skip))
+                    if self._halt:
+                        break
+                    if self.pc < self.n and self.d[self.pc] == self.ELSE:
+                        self.pc += 1
+                        self._skip_branch({self.ENDIF}, decoded)   # skip the not-taken else
+                    if self.pc < self.n and self.d[self.pc] == self.ENDIF:
+                        self.pc += 1
                 else:
-                    out.append(ta if _val else tb)
+                    # Deterministic FALSE: SKIP the true branch WITHOUT following its
+                    # GOTOs (this is what prevented the not-taken-GOTO desync, Bug A),
+                    # then take the else branch -- or, for `IF c GOTO L ENDIF rest`,
+                    # fall through to `rest` via the enclosing loop.
+                    self._skip_branch({self.ELSE, self.ENDIF}, decoded)
+                    if self.pc < self.n and self.d[self.pc] == self.ELSE:
+                        self.pc += 1
+                        out.append(self.decode_block({self.ENDIF}, depth + 1, follow_goto, decoded, skip))
+                        if self._halt:
+                            break
+                    if self.pc < self.n and self.d[self.pc] == self.ENDIF:
+                        self.pc += 1
             elif op in (self.ENDIF, self.ELSE):
                 pass                                        # stray (outside an IF) -> no-op
             elif op == self.LET:
@@ -237,6 +286,13 @@ class _ConverseVM:
             else:
                 raise _DecoderStop(op, self.pc - 1)
         return "".join(out)
+
+    def _skip_branch(self, stops, decoded):
+        """Step pc over a NOT-TAKEN IF branch to (peek, not consume) the next op in
+        `stops` (ELSE/ENDIF), consuming every operand correctly but producing no
+        text, never following GOTOs, and never letting an inner LEAVE halt the live
+        path (skip=True). Keeps a not-taken branch from desyncing the pc -- Bug A."""
+        self.decode_block(stops, depth=1, follow_goto=False, decoded=decoded, skip=True)
 
     def _let(self):
         di = self._u8()
@@ -447,6 +503,21 @@ def _extract_highlights(text):
     return "".join(out), words
 
 
+def _npc_name_from_script(data):
+    """The NPC's name from a loaded TalkBuf image: OP_ID (0xff), npcId, then ASCII
+    name bytes up to the first opcode/NUL (OP_DESC 0xf1 has the high bit, so the
+    `& 0x80` break stops there). Returns '' if the header doesn't parse, so the
+    caller can fall back to the live U6_NpcName buffer."""
+    if len(data) < 3 or data[0] != 0xff:
+        return ""
+    nb = bytearray()
+    for b in data[2:52]:
+        if b == 0 or (b & 0x80):
+            break
+        nb.append(b)
+    return nb.decode("latin-1", "replace").strip()
+
+
 def _decode_conversation(base_addr, keyword):
     """Read live talk state + TalkBuf and decode the greeting (or the response to
     `keyword`) + the askable keyword list. Returns a dict (or {'status':...})."""
@@ -454,16 +525,22 @@ def _decode_conversation(base_addr, keyword):
     interloc = int.from_bytes(dm.read(S.handle, base_addr + U6_TalkInterloc, 2), "little")
     pc = int.from_bytes(dm.read(S.handle, base_addr + U6_Talk_PC, 2), "little")
     inp = dm.read(S.handle, base_addr + U6_TalkInput, 0x32).split(b"\x00", 1)[0].decode("latin-1", "replace")
-    name_raw = dm.read(S.handle, base_addr + U6_NpcName, 50)
     fp = dm.read(S.handle, base_addr + U6_TalkBuf_ptr, 4)
-    name_b = bytearray()
-    for b in name_raw:
-        if b == 0 or (b & 0x80):
-            break
-        name_b.append(b)
-    name = name_b.decode("latin-1", "replace")
     tb_lin = (((fp[2] | (fp[3] << 8)) << 4) + (fp[0] | (fp[1] << 8)))
     data = dm.read(S.handle, S.membase + tb_lin, U6_TalkBuf_SIZE)
+    # NPC name: prefer the LOADED TalkBuf script header (the NPC we're talking to
+    # NOW) over the shared U6_NpcName buffer, which lags by a frame on a fresh talk
+    # and can still hold the PREVIOUS NPC's name (the old stale-name read). Fall back
+    # to the live buffer only if the header won't parse.
+    name = _npc_name_from_script(data)
+    if not name:
+        name_raw = dm.read(S.handle, base_addr + U6_NpcName, 50)
+        nb = bytearray()
+        for b in name_raw:
+            if b == 0 or (b & 0x80):
+                break
+            nb.append(b)
+        name = nb.decode("latin-1", "replace")
     env = _make_converse_env(base_addr, interloc)
     res = {"active": active, "npc": name, "npc_num": interloc, "pc": pc, "last_input": inp}
 
@@ -788,6 +865,36 @@ def u6_conversation(keyword: str = "", raw: int = 0, segment: int = -1) -> str:
     return "\n".join(out)
 
 
+@mcp.tool()
+def u6_npc_flags(npc: int = -1, segment: int = -1) -> str:
+    """Ultima VI: read an NPC's CONVERSATION flag byte (TalkFlags[npc]) -- the per-NPC
+    bits the converse VM SETs / CLRs / TSTs (OP_SET/CLR/TST). Conversation progression
+    and item-gives are gated behind these (a keyword does `SET self,<bit>`), and an
+    NPC's dialogue can change once a bit flips -- so read this BEFORE and AFTER asking
+    a keyword to SEE what changed, and cross-reference the bit's meaning in
+    u6_script_disasm. `npc` = the NPC number (the 'slot' from u6_npcs_near, or the NPC
+    you're talking to); -1 (default) uses the current conversation interlocutor. DS
+    from u6_hook unless overridden with segment=."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base_addr = S.membase + (ds << 4)
+    try:
+        if npc < 0:
+            npc = int.from_bytes(dm.read(S.handle, base_addr + U6_TalkInterloc, 2), "little")
+        b = dm.read(S.handle, base_addr + U6_TalkFlags + npc, 1)[0]
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    if not (0 <= npc < 0x400):
+        return f"NPC #{npc} out of range -- pass a valid NPC number (or talk to one for -1)."
+    setb = [str(i) for i in range(8) if (b >> i) & 1]
+    desc = ("bits set: " + ", ".join(setb)) if setb else "no bits set"
+    return (f"NPC #{npc} TalkFlags = 0x{b:02x}  (0b{b:08b}) -- {desc}.\n"
+            f"(a keyword's `SET self,<bit>` flips a bit; see u6_script_disasm for the meaning.)")
+
+
 __all__ = [
     "_DecoderStop",
     "_CV_SIDE_EFFECT",
@@ -798,6 +905,7 @@ __all__ = [
     "_cv_var_index",
     "_HL_TERMINATORS",
     "_extract_highlights",
+    "_npc_name_from_script",
     "_decode_conversation",
     "_DIS_BINOP",
     "_DIS_QUERY",
@@ -809,4 +917,5 @@ __all__ = [
     "_disassemble",
     "u6_script_disasm",
     "u6_conversation",
+    "u6_npc_flags",
 ]

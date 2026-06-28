@@ -57,14 +57,18 @@ agent should still:
 
 ## 2. Capabilities — the `dosbox-u6` tools
 
-Implemented (logic verified; **memory offsets pending live verification** — see
-§6):
+Implemented (logic verified; **memory offsets live-confirmed** on the in-castle
+save — see §6 for the verification record; only the equip/inventory-panel path
+remains live-unconfirmed):
 
 - **Boot:** `u6_hook(avatar_name)` — attach, BDA-calibrate MemBase, derive DS
   from the avatar's name.
 - **Perceive:** `u6_avatar` (pos+facing of the **controlled actor** — the
   move-confirm primitive; the avatar in party mode, the active member in solo),
   `u6_party` (solo/party mode, combat on/off, and who's controlled now),
+  `u6_time` (the in-game **CLOCK** + date — U6 is turn-based: ~0.5–1 min per step
+  (time advances per move-round, DEX/party-dependent), LOOK/TALK/USE are FREE;
+  NPCs follow daily schedules so check it before a long detour),
   `u6_input_state` (**turn-readiness** — poll for `COMMAND_READY` before acting;
   U6 is turn-based with buffered input), `u6_roster_status` (per-member
   STR/DEX/INT/Level + carry/equip load), `u6_object(slot)` (incl. tile/weight/
@@ -73,7 +77,12 @@ Implemented (logic verified; **memory offsets pending live verification** — se
   route), `u6_npcs_near(radius)`,
   `u6_objects_near(radius)` (map items + gear hints), `u6_walkable` (40×40 ASCII
   passability grid), `u6_conversation` (**decoded** dialogue + askable keywords;
-  `keyword=` previews a response; unknown opcode → `DECODER_STOP`, halt + report).
+  `keyword=` previews a response; unknown opcode → `DECODER_STOP`, halt + report —
+  the decoder now models real control flow: it follows the live-taken branch,
+  iterates loops safely, suppresses empty `[either]`, and reads the NPC name from
+  the loaded script header, not the lagging name buffer), `u6_npc_flags(npc)` (the
+  NPC's **TalkFlags** byte for keyword-gated progression — a keyword's
+  `SET self,<bit>` flips a bit; read before/after a keyword to track state).
 - **Act:** `u6_move(dir)`, `u6_talk(dir)`, `u6_say(text)`, `u6_look(dir)`,
   `u6_get(dir)`, `u6_use(target, on)` (map tile **or** carried item; auto key flow
   for a locked door), `u6_use_object(target)` (#2: resolve a map object by slot/name,
@@ -81,7 +90,10 @@ Implemented (logic verified; **memory offsets pending live verification** — se
   use-from handles), `u6_travel(x,y)` (#3.5: drive to a tile over the whole-level
   door-passable route, **auto-opening/unlocking doors** en route — the one-call
   cross-castle/escape verb that doesn't dead-end like `u6_goto_xy`), `u6_ready(slot)`
-  (equip/unequip via the panel), `u6_key(key)`.
+  (equip/unequip via the panel), `u6_continue()` (**page a conversation to the next
+  decision point** — dismiss every page-pause, STOP at a keyword / single-key prompt
+  or `LEAVE`; the fluent loop is talk → continue → read → say → continue, no
+  hand-counting page-pauses), `u6_key(key)`.
 - **Navigate:** `u6_pathfind(npc_slot)` (planner), `u6_goto(npc_slot)`
   (closed-loop), `u6_goto_xy(x,y)` (closed-loop to a tile, live 40x40 window),
   `u6_talk_to(npc_slot)` (goto + talk), and `u6_route(x,y)` — a **whole-level**
@@ -90,7 +102,10 @@ Implemented (logic verified; **memory offsets pending live verification** — se
   currently see, beyond the live window. Now object-aware (#3): doors are routable (the
   plan reports "crosses N doors -- open each with u6_use"), furniture/portcullis block, a
   lowered drawbridge is crossable -- over the loaded region (far tiles stay terrain-only);
-  see the egress finding in §2b.
+  see the egress finding in §2b. `u6_area(radius=24)` — a **bigger bird's-eye map** than
+  the live 40×40: baked terrain + the LOADED objects (the **2×2 OBJBLK** region in RAM)
+  over a (2·radius+1) square, so the whole building/area is one glance (@=you, P/E/a/N
+  actors, D=door, `.`/`#`); the 40×40 is a tool choice, not a data limit.
 - **Query (structured spatial #1 — built 2026-06-27):** `u6_at(x,y,z)` (decode one cell:
   terrain + name + passability, the top object's name/state/predicted USE effect, any
   actor + allegiance), `u6_nearest(name,radius)` (nearest named object + state + the
@@ -109,13 +124,13 @@ Planned (gaps — see the milestones for which are needed when):
   `u6_drop` / `u6_move`-object (inventory↔map / push / transfer between members —
   the two-selection idiom, and the route to extract a key stuck in a container),
   `u6_cast` (the spell subsystem), `u6_rest`, combat (`u6_attack` / begin-combat),
-  and a **durable agent journal** (the long-horizon backbone). *(Built since the
-  first draft and now under Perceive/Act above: `u6_look`, `u6_get`, `u6_use` (map
-  tiles + carried items + the **auto** locked-door key flow), `u6_ready`
-  (equip/unequip via the inventory panel), `u6_panel_state`, `u6_objects_near`,
-  `u6_roster_status`, and the `u6_conversation` decoder. The inventory-panel verbs
-  are built but **live-unconfirmed** — see §6. Full per-verb source + MCP-driving
-  model: `u6_verb_mechanism.md`.)*
+  and a **durable agent journal** (the long-horizon backbone — the agent currently
+  keeps one by hand under `C:\Z_Temp\tools\u6_oracle\`). *(Built since the first
+  draft and now under Perceive/Act/Navigate above: `u6_look`/`u6_get`/`u6_use`/
+  `u6_use_object`/`u6_travel`/`u6_ready`, the `u6_conversation` decoder +
+  `u6_continue` + `u6_npc_flags`, the structured-query trio + `u6_affordance`, and
+  the awareness tools `u6_time` + `u6_area`. Only `u6_ready`/`u6_panel_state` (equip)
+  remain live-unconfirmed — see §6. Full per-verb model: `u6_verb_mechanism.md`.)*
 
 ## 2b. Castle-escape play-test + the tool roadmap (2026-06-27)
 
@@ -294,25 +309,38 @@ independently checkable.
   carried-item + the key flow, `u6_ready` equip/unequip, the `_panel_commit` panel
   drive) — all with stub unit tests against the real functions (in
   `dosbox_tools/tests/`); pathfinding/helpers too.
-- **Live-verified on an in-castle save** (avatar "Monica"): the memory offsets +
-  the read tools (`u6_avatar`/`u6_party`/`u6_input_state` cross-consistent;
-  `u6_roster_status` caps = STR×20 / STR×10) + `u6_move` (a confirmed step) +
-  `u6_look` (drains to `COMMAND_READY` across NPC / diagonal / empty-corpse /
-  corpse-with-contents, no stray GET) + `u6_get` (a helm `LOCXYZ → INVEN`) + the
-  `LOOK.LZD` naming (cross-checked vs the game's own scroll).
-- **Still live-unconfirmed:** `u6_talk`/`u6_say` (deferred from that run); `u6_use`
-  (map-tile, carried-item, key flow); `u6_ready`; `u6_panel_state` + its offsets
-  (`StatusDisplay`/`Selection`/`D_E70F`/`Equipment`/`D_0499`-`049A`/`D_07CE`). These
-  send keys and/or read new offsets — *bindings prove out only live*; run
-  `u6_panel_state` first (confirm the inventory reads), then the inventory verbs.
+- **Live-verified on an in-castle save** (avatar "Monica", DS=0x2f27):
+  - *(earlier run)* the memory offsets + read tools (`u6_avatar`/`u6_party`/
+    `u6_input_state` cross-consistent; `u6_roster_status` caps = STR×20 / STR×10) +
+    `u6_move` + `u6_look` (drains to `COMMAND_READY` across NPC / diagonal /
+    empty-corpse / with-contents) + `u6_get` (helm `LOCXYZ → INVEN`) + `LOOK.LZD`
+    naming. *(Castle-escape play-test, §2b)* `u6_use_object` + `u6_travel` + the
+    locked-door key flow.
+  - **2026-06-28 — the conversation stack, END TO END (§6's biggest former gap):**
+    `u6_talk` → `u6_conversation` (decoded greeting + keywords, **correct NPC name**
+    from the script header) → `u6_say` → `u6_continue` (pages to the next keyword /
+    single-key `GET` / `LEAVE`) → `bye` close — proven across Lord British (keyword
+    NPC), Geoffrey & Maldric the cook (linear say-and-leave + a yes/no `GET`), Nystul.
+    Decoder fixes verified live: **loop iteration** (LB's party-heal), the
+    **`IF cond GOTO L ENDIF` control-flow desync** on linear NPCs, empty-`[either]`
+    suppression, and the **name-from-header** fix.
+  - **2026-06-28 — situational-awareness tools:** `u6_time` (clock 08:28; **a step ≈
+    0.5–1 min, measured** — time advances per move-round), `u6_area` (whole-castle
+    bird's-eye from baked terrain + loaded objects), `u6_npc_flags` (TalkFlags match
+    each NPC's `SET` ops + my keyword history). Plus the eagle-eye nav lesson: local
+    pathfind treats a closed door as a wall → use the door-aware `u6_travel`.
+- **Still live-unconfirmed:** the **equip / inventory-panel** path — `u6_ready`,
+  `u6_panel_state` + its offsets — and the gear-collection slice
+  (`u6_objects_near` → `u6_get` → `u6_ready`). These await the Slice-2/3 run.
   Re-run the §7 validation gate each session before trusting reads.
 - 4-connected movement only (cardinal arrows); diagonals (numpad + 8-connected
   search) and global chunk routing are deferred.
 
-**Next step:** live-test Milestone 1 — Slice 1 (talk to LB → explore → leave),
-then the gear slices (collect → equip). The **M1 toolset is complete**, so this is
-the live-validation pass: confirm the offsets/bindings + `u6_panel_state`, then run
-`u6_use`/`u6_ready` for the locked gate + equip.
+**Next step:** Milestone 1 **Slices 2–3 inside the castle** — collect the
+**west-wing gear** (`u6_area` to locate the room, `u6_objects_near`/`u6_get`),
+**equip** the party (`u6_ready`, the last unproven M1 path), and leave via the
+southern drawbridge. Then build the **combat** subsystem before venturing out to the
+Cove / Lycaeum leads. The conversation + perception + awareness stacks are proven.
 
 ## 7. Running the agent (per session)
 

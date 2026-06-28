@@ -1,5 +1,19 @@
 # U6 conversation subsystem — the TalkBuf VM, reading it, driving it
 
+> **Update 2026-06-28 (live-verified, end to end).** The readable-dialogue decoder
+> now models **real control flow**: a deterministic `IF` follows only the live-taken
+> branch and skips the not-taken one without following its GOTOs (fixes the
+> `IF cond GOTO L ENDIF` desync on linear say-and-leave NPCs); a GOTO back to an
+> already-decoded address is a loop back-edge and is not iterated (fixes LB's
+> party-heal loop); an all-empty `[either]` is suppressed; and the **NPC name is read
+> from the loaded TalkBuf script header** (`OP_ID`→name), not the lagging `U6_NpcName`
+> buffer. Added **`u6_continue()`** — pages a conversation to the next decision point
+> (keyword / single-key `GET` / `LEAVE`) off the engine's own flags
+> (`LineInput`/`PromptCh`/`IsInConversation`), so the fluent loop is
+> `talk → conversation → continue → say → continue`. Added **`u6_npc_flags(npc)`** to
+> read a `TalkFlags` byte (keyword-gated progression). The whole stack is now
+> live-verified across LB / Geoffrey / Maldric / Nystul.
+
 Once `TALK` opens a dialogue (`u6_verb_mechanism.md` §4), everything after is the
 **conversation subsystem**: a little bytecode VM (`TalkBuf` + `Talk_PC`) the engine
 interprets to print lines, ask keywords, branch on world state, and apply

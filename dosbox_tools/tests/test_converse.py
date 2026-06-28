@@ -134,5 +134,51 @@ vm=u6._ConverseVM(listlet, env())
 chk("list-element LET decodes, no DECODER_STOP",
     vm.find_response("x") and vm.decode_block(set())=="done.")
 
+# 11) LOOP back-edge: a GOTO to an ALREADY-decoded addr (e.g. Lord British's 'heal'
+#     keyword iterates the party with `IF(cnt<=size) GOTO L ENDIF`) must be SKIPPED,
+#     not followed -- the read-only decoder can't run the loop counter, so following
+#     the back-edge spins forever and tripped the depth guard (mis-reported as opcode
+#     0xa1=IF). Skipping it lets decode fall through to the post-loop text.
+prefix = [KEY]+T("x")+[RES]
+Loff = len(prefix)                                   # addr of the loop body start
+loopbody = (T("Heal. ") + [IF,BYTE,5,BYTE,0,TST,EOF]   # IF(flag) ...
+            + [GOTO, Loff,0,0,0]                        #   GOTO L  (back-edge, addr already seen)
+            + [ENDIF] + T("Party healed."))            # ENDIF; post-loop text
+loopbuf = bytes(prefix + loopbody + [ENDRES])
+vm=u6._ConverseVM(loopbuf, env(flag=1))
+chk("loop back-edge GOTO skipped -> post-loop text reached (no DECODER_STOP)",
+    vm.find_response("x") and vm.decode_block(set())=="Heal. Party healed.")
+
+# 11a) the same all-side-effect IF body must not leave an empty '[either: «»]' when the
+#      condition is nondeterministic (RND/Wounded): an [either] with both branches blank
+#      is suppressed (heal's `IF Wounded HEAL ENDIF` produces no readable text).
+emptyeither = bytes([IF,BYTE,1,BYTE,3,RND,EOF]+[ENDIF]+T("Done.")+[ASK])
+chk("nd IF with empty branches -> no stray [either]",
+    u6._ConverseVM(emptyeither, env()).decode_block(set())=="Done.")
+
+# 12) Bug A: `IF cond GOTO L ENDIF <fallthrough> LEAVE` -- the linear say-and-leave
+#     NPC idiom (Geoffrey). The decoder must follow REAL control flow: take the live
+#     branch, NOT decode the not-taken branch's GOTO (which jumps to another speech
+#     ending in LEAVE and left the pc in garbage past the script -> DECODER_STOP).
+#     LEAVE ends the whole decode.
+LEAVE = 0xb6
+geo = bytes([IF,BYTE,5,BYTE,0,TST,EOF, GOTO,19,0,0,0, ENDIF] + T("Main.") + [LEAVE]
+            + T("Alt.") + [LEAVE, ASK])   # L_alt = offset 19 ("Alt.")
+chk("Bug A: cond false -> fall through to 'Main.' (no not-taken-GOTO desync)",
+    u6._ConverseVM(geo, env(flag=0)).decode_block(set())=="Main.")
+chk("Bug A: cond true -> follow the GOTO to 'Alt.'",
+    u6._ConverseVM(geo, env(flag=1)).decode_block(set())=="Alt.")
+
+# 13) NPC name from the TalkBuf script header (fixes the stale U6_NpcName read):
+#     OP_ID (0xff), npcId, ASCII name up to OP_DESC (0xf1). Always the NPC actually
+#     loaded NOW -- reliable even when the shared name buffer lags to the prior NPC.
+DESC = 0xf1
+chk("npc name from header 'Geoffrey'",
+    u6._npc_name_from_script(bytes([0xff, 7] + T("Geoffrey") + [DESC] + T("a tall man."))) == "Geoffrey")
+chk("npc name with a space 'Lord British'",
+    u6._npc_name_from_script(bytes([0xff, 5] + T("Lord British") + [DESC])) == "Lord British")
+chk("npc name bad header -> '' (caller falls back to live buffer)",
+    u6._npc_name_from_script(bytes([0x00, 0x00, 0x41])) == "")
+
 print("ALL PASS" if ok else "SOME FAILED")
 sys.exit(0 if ok else 1)

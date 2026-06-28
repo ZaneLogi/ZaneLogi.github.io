@@ -510,7 +510,110 @@ def u6_interactables_near(radius: int = 6, segment: int = -1) -> str:
     return "\n".join(out)
 
 
+def _view_region_grid(base, x0, y0, radius, z):
+    """Passability + door cells for the EXACT (2*radius+1) square around (x0,y0) on
+    level z -- a VIEW box (no routing margin, unlike _baked_region_grid). Baked terrain
+    + the live object overlay. Returns (walk, ox, oy, R, C, door_cells)."""
+    terr = _static_table(base, U6_TerrainType_ptr, _TILEFLAG_N, "terr")
+    tiles, W = _level_tiles(z)
+    ox = max(0, x0 - radius)
+    oy = max(0, y0 - radius)
+    C = min(W, x0 + radius + 1) - ox
+    R = min(W, y0 + radius + 1) - oy
+    walk = [[True] * C for _ in range(R)]
+    for r in range(R):
+        rowbase = (oy + r) * W + ox
+        wr = walk[r]
+        for c in range(C):
+            if terr[tiles[rowbase + c]] & TERRAIN_IMPASS:
+                wr[c] = False
+    door_cells = _overlay_objects(base, walk, ox, oy, R, C, z)
+    return walk, ox, oy, R, C, door_cells
+
+
+def _region_actors(base, z0, ox, oy, R, C, self_slot):
+    """Actors (object slots < 0x100) on level z0 inside the region [ox,oy]+(C x R),
+    mapped to (r,c)=(wy-oy, wx-ox) and classified by allegiance. Returns
+    ({(r,c): cat}, [(cat, slot, wx, wy)]); cat is party/enemy/ally/npc."""
+    status = dm.read(S.handle, base + U6_ObjStatus, 0x100)
+    pos    = dm.read(S.handle, base + U6_ObjPos, 0x100 * 3)
+    shape  = dm.read(S.handle, base + U6_ObjShapeType, 0x100 * 2)
+    npcst  = dm.read(S.handle, base + U6_NPCStatus, 0x100)
+    cells, lst = {}, []
+    for i in range(0x100):
+        if i == self_slot or (status[i] & 0x18) != 0:           # the mover / not in world
+            continue
+        typ = (shape[i * 2] | (shape[i * 2 + 1] << 8)) & 0x3ff
+        if typ == 0 or typ in _PASSABLE_ACTOR_TYPES:
+            continue
+        v = pos[i * 3] | (pos[i * 3 + 1] << 8) | (pos[i * 3 + 2] << 16)
+        if ((v >> 20) & 0xf) != z0:
+            continue
+        wx, wy = v & 0x3ff, (v >> 10) & 0x3ff
+        r, c = wy - oy, wx - ox
+        if not (0 <= r < R and 0 <= c < C):
+            continue
+        cat = _npc_class(npcst[i])
+        cells.setdefault((r, c), cat)
+        lst.append((cat, i, wx, wy))
+    return cells, lst
+
+
+@mcp.tool()
+def u6_area(radius: int = 24, segment: int = -1) -> str:
+    """Ultima VI: a BIGGER bird's-eye map than the live 40x40 window -- a square of side
+    (2*radius+1) centred on the avatar, built from the BAKED terrain + the LOADED objects
+    (the 2x2 OBJBLK region resident in RAM), so the WHOLE building/area is one glance for
+    fluent navigation. (The 40x40 of u6_walkable/u6_area_map is a tool choice, not a data
+    limit.) Shows passability + doors + actors. Legend:
+      @=you  P=party  E=enemy  a=ally  N=npc  D=door  .=open  #=blocked
+    For ONE door's state/key-qual, or a cell's full detail, use u6_area_map (local 40x40)
+    or u6_at(x,y). radius default 24 (a castle fits); capped at 60. DS from u6_hook."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base = S.membase + (ds << 4)
+    radius = max(5, min(int(radius), 60))
+    try:
+        self_slot, _idx, _veh = _controlled_slot(base)
+        x0, y0, z0 = _controlled_xyz(base)
+        walk, ox, oy, R, C, door_cells = _view_region_grid(base, x0, y0, radius, z0)
+        cells, actors = _region_actors(base, z0, ox, oy, R, C, self_slot)
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    doorset = set(door_cells)
+    avr, avc = y0 - oy, x0 - ox
+    g = {"party": "P", "enemy": "E", "ally": "a", "npc": "N"}
+    out = [f"Area map {C}x{R} around ({x0},{y0}) z{z0}  (origin world {ox},{oy}; "
+           f"@=you P=party E=enemy a=ally N=npc D=door .=open #=blocked):"]
+    for r in range(R):
+        row = []
+        for c in range(C):
+            if (r, c) == (avr, avc):
+                row.append("@")
+            elif (r, c) in cells:
+                row.append(g[cells[(r, c)]])
+            elif (r, c) in doorset:
+                row.append("D")
+            else:
+                row.append("." if walk[r][c] else "#")
+        out.append("  " + "".join(row))
+    if actors:
+        rank = {"enemy": 0, "ally": 1, "npc": 2, "party": 3}
+        actors.sort(key=lambda a: (rank.get(a[0], 9), max(abs(a[2] - x0), abs(a[3] - y0))))
+        out.append(f"Actors in view ({len(actors)}):")
+        for cat, slot, wx, wy in actors:
+            d = max(abs(wx - x0), abs(wy - y0))
+            out.append(f"  0x{slot:02x}  {cat:<5} ({wx},{wy})  {_compass(wx - x0, wy - y0):<2} d{d}")
+    return "\n".join(out)
+
+
 __all__ = [
+    "u6_area",
+    "_view_region_grid",
+    "_region_actors",
     "_ROUTE_MARGIN",
     "_ROUTE_MAX_SPAN",
     "_level_tiles",

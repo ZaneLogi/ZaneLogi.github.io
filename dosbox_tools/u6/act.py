@@ -640,6 +640,65 @@ def u6_key(key: str) -> str:
     or any raw key). `key` = a single char or a name (enter/esc/space/up/...)."""
     return inp.send_key(key)
 
+def _talk_op_at_pc(base_addr):
+    """The live converse-VM opcode at TalkBuf[Talk_PC] (what the VM is parked on)."""
+    pc = int.from_bytes(dm.read(S.handle, base_addr + U6_Talk_PC, 2), "little")
+    fp = dm.read(S.handle, base_addr + U6_TalkBuf_ptr, 4)
+    tb_lin = ((fp[2] | (fp[3] << 8)) << 4) + (fp[0] | (fp[1] << 8))
+    return dm.read(S.handle, S.membase + tb_lin + pc, 1)[0]
+
+@mcp.tool()
+def u6_continue(max_pages: int = 40, segment: int = -1) -> str:
+    """Ultima VI: page a conversation forward to the next DECISION POINT. Dismisses
+    every '*' page-pause (one ENTER per page) and STOPS the instant the game waits for
+    a real reply -- a keyword prompt (ASKTOP) or a single-key / yes-no menu (GET) -- or
+    the conversation ends (LEAVE). So a long NPC speech is ONE call instead of
+    hand-counting page-pauses. Fluent loop:
+        u6_talk(dir) -> u6_conversation() [read the greeting] -> u6_continue()
+        -> u6_say(answer) -> u6_continue() -> ...
+    State comes from the engine's OWN flags -- LineInput (CON_gets keyword prompt),
+    PromptCh (a '*' page-pause), IsInConversation -- so it never blind-keys at a real
+    prompt (it only sends ENTER while a page-pause is confirmed showing). Read the text
+    with u6_conversation BEFORE paging when a branch may set a flag (a re-read after
+    paging can re-derive a later branch -- see the divergence note in the docs).
+    DS from u6_hook unless overridden with segment=."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    base_addr = S.membase + (ds << 4)
+    try:
+        if not _rd8(base_addr + U6_IsInConversation):
+            return "No conversation open (IsInConversation=0) -- nothing to advance."
+        pages = 0
+        for _ in range(max(1, int(max_pages))):
+            time.sleep(_PAGE_ADVANCE_SETTLE)                 # settle, then read a RESTING state
+            if not _rd8(base_addr + U6_IsInConversation):
+                return f"Conversation ended (paged through {pages} page(s)); back to COMMAND_READY."
+            if _rd8(base_addr + U6_LineInput) == 1:          # CON_gets live -> keyword/line prompt
+                try:
+                    r = _decode_conversation(base_addr, "")
+                    kws = ", ".join(r.get("keywords", []) or []) if isinstance(r, dict) else ""
+                except Exception:
+                    kws = ""
+                tail = f"  keywords: {kws}" if kws else ""
+                return (f"Keyword prompt (paged {pages} page(s)).{tail}\n"
+                        f"-> read it with u6_conversation, then answer with u6_say(<keyword>).")
+            if _rd16(base_addr + U6_PromptCh) == 1:          # '*' page-pause -> dismiss this page
+                inp.send_key("enter")
+                pages += 1
+                continue
+            # in conversation, NOT a page-pause, NOT line-input -> a single-key menu (GET/yn)
+            op = _talk_op_at_pc(base_addr)
+            name = _TALK_INPUT_OPS.get(op, f"op_0x{op:02x}")
+            return (f"Single-key prompt ({name}, paged {pages} page(s)).\n"
+                    f"-> read it with u6_conversation, then answer with u6_say('<one key, e.g. y or n>').")
+        return (f"Still paused after {max_pages} pages -- a very long speech, or a stuck "
+                f"state. Check u6_conversation / u6_input_state.")
+    except OSError as ex:
+        return f"Read failed during u6_continue (DS=0x{ds:04x}): {ex}"
+
 def _wait_state(base_addr, targets, timeout=2.5, poll=0.03):
     """Block until _input_state is one of `targets` (a str or an iterable of states),
     else return the last-seen (state, flags) on timeout. Lets a cursor-command verb
@@ -1026,6 +1085,8 @@ __all__ = [
     "_advance_conv_input",
     "u6_say",
     "u6_key",
+    "u6_continue",
+    "_talk_op_at_pc",
     "_wait_state",
     "_drain_to_ready",
     "_target_tile",
