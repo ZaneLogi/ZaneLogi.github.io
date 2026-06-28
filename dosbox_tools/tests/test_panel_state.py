@@ -35,6 +35,8 @@ def w16(a,v): MEM[a]=v&0xff; MEM[a+1]=(v>>8)&0xff
 w16(u6.U6_StatusDisplay, 0x92)      # INVENTORY
 w16(u6.U6_PanelChar, 2)
 w8 (u6.U6_PanelCol, 1); w8(u6.U6_PanelRow, 0)
+# the LIVE cursor is PointerX/Y, not PanelCol/Row: pixel of cell (row0,col1) = (264,32)
+w16(u6.U6_PointerX, 264); w16(u6.U6_PointerY, 32)
 w8 (u6.U6_InvScroll, 0)
 w16(u6.U6_VisBackpack + 0*2, 0x305) # (row0,col0)
 w16(u6.U6_VisBackpack + 1*2, 0x306) # (row0,col1) == cursor
@@ -49,7 +51,8 @@ print("u6_panel_state decode (INVENTORY view, 2 backpack items, 1 equip, a selec
 r = u6.u6_panel_state()
 chk("view=INVENTORY",                 "view=INVENTORY" in r)
 chk("char#=2",                        "char#=2" in r)
-chk("cursor=(col1,row0)",             "cursor=(col1,row0)" in r)
+chk("live cursor cell (row0,col1)",   "cell (row0,col1)" in r)
+chk("PanelCol/Row still noted",       "PanelCol/Row=(col1,row0)" in r)
 chk("scroll=0",                       "scroll=0" in r)
 chk("backpack (0,0) slot 0x305",      "(0,0) slot 0x305" in r)
 chk("backpack (0,1) slot 0x306",      "(0,1) slot 0x306" in r)
@@ -65,6 +68,18 @@ w16(u6.U6_Sel_obj, 0xFFFF)            # -1 -> none
 r = u6.u6_panel_state()
 chk("view=PARTY",                     "view=PARTY" in r)
 chk("Selection none",                 "Selection: obj=none" in r)
+
+print("u6_container decode (contents + nesting):")
+# bag 0x305 holds 0x320 (CONTAINED, assoc=0x305, quan 3); 0x320 nests 0x321
+w8 (u6.U6_ObjStatus + 0x320, 0x08); w16(u6.U6_ObjPos + 0x320*3, 0x305)
+w16(u6.U6_ObjShapeType + 0x320*2, 0x041); w16(u6.U6_Amount + 0x320*2, 0x0003)
+w8 (u6.U6_ObjStatus + 0x321, 0x08); w16(u6.U6_ObjPos + 0x321*3, 0x320)
+w16(u6.U6_ObjShapeType + 0x321*2, 0x042)
+rc = u6.u6_container(0x305)
+chk("container lists 0x320",          "0x320" in rc)
+chk("container nests 0x321",          "0x321" in rc)
+chk("contained quan=3 shown",         "quan=3" in rc)
+chk("empty container note",           "(empty)" in u6.u6_container(0x309))
 
 print("ALL PASS" if ok else "SOME FAILED")
 sys.exit(0 if ok else 1)

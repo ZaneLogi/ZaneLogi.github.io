@@ -123,8 +123,10 @@ internally, so they fire only on a real turn boundary.
 combat, who's controlled), `u6_time` (in-game clock/date — ~0.5–1 min/step,
 look/talk/use free, NPC schedules), `u6_roster_status` (STR/DEX/INT/Level + load caps),
 `u6_input_state` (turn-readiness), `u6_object(slot)` (incl. tile/weight/equip-slot),
-`u6_inventory(npc_slot)`, `u6_panel_state` (which side panel is up + the inventory
-cursor/scroll/slots/Selection), `u6_npcs_near(radius)` (+ allegiance **`class`**:
+`u6_inventory(npc_slot)`, `u6_container(slot)` (a carried **container's** contents,
+recursing nested bags — the read `u6_inventory` can't do, it lists only INVEN/EQUIP
+held directly), `u6_panel_state` (which side panel is up + the inventory cursor/scroll/
+slots/Selection; reports the live **PointerX/Y** cursor), `u6_npcs_near(radius)` (+ allegiance **`class`**:
 party/enemy/ally/npc), `u6_objects_near(radius)` (map items + gear hints),
 `u6_walkable` (40×40 passability, **allegiance overlay** `P`/`E`/`a`/`N`),
 `u6_area_map` (40×40 decoded from **MapObjPtr** — doors drawn by state + a door
@@ -135,7 +137,10 @@ engagement above), `u6_npc_flags(npc)` (the NPC's TalkFlags byte — keyword-gat
 progression, read before/after a keyword).
 **Act:** `u6_move` · `u6_talk` · `u6_say` · `u6_continue` (page a convo to the next
 prompt / single-key menu / `LEAVE`) · `u6_look` · `u6_get` · `u6_use` · `u6_use_object`
-· `u6_travel` (door-aware: auto-opens/unlocks doors en route) · `u6_ready` · `u6_key`.
+· `u6_travel` (door-aware: auto-opens/unlocks doors en route) · `u6_ready` ·
+`u6_move_object(target, dest, amount)` (drop / give to a member / into-or-out-of a
+container, with stack splitting — drives the D/M keyboard flow; see
+`u6_inventory_management.md`) · `u6_key`.
 **Navigate:** `u6_pathfind` (plan) · `u6_goto` (closed-loop, NPC target) ·
 `u6_goto_xy` (closed-loop, world `(x,y)` — re-plans each step, **routes around
 non-party NPCs**, stops adjacent to a closed door so you `u6_use` it) · `u6_talk_to`
@@ -162,6 +167,8 @@ the whole building at a glance).
 | Identify / search (`L`) | `u6_look` | re-read state (names via LOOK.LZD) | ✅ live-verified |
 | Pick up gear (`G`) | `u6_get` | `u6_inventory` / `u6_object` | ✅ live-verified |
 | Equip / unequip gear | `u6_ready(slot)` | `u6_panel_state` / `u6_inventory` (INVEN↔EQUIP flip) | ✅ live-verified |
+| Read a carried bag's contents | — | `u6_container(slot)` | ✅ live-verified |
+| Drop / give / bag items (D & M) | `u6_move_object(slot, dest[, amount])` — `ground[:dir]` / `member:N` / `container:slot` / `out` | `u6_object` / `u6_container` (CoordUse/assoc flip) | ✅ live-verified (drop, member→member, in/out container, stacked split, multi-bag consolidation, 2026-06-28) |
 | See which side panel + the inventory | — | `u6_panel_state` | ✅ live-verified |
 | Open/close door, leave gate, ladder (`U`) | `u6_use` (n/s/e/w or `here`) | door/chest frame state in return | ✅ live-verified (opened oaken doors en route to the Avatar's room, 2026-06-26) |
 | USE a carried item (drink/eat/light/play…) | `u6_use(inv:slot[, on=…])` | re-read the item (consumed / frame change) | ✅ built (live-unconfirmed) |

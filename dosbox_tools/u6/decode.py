@@ -41,6 +41,28 @@ def _visible_backpack(base_addr):
     raw = dm.read(S.handle, base_addr + U6_VisBackpack, n * 2)
     return [raw[i * 2] | (raw[i * 2 + 1] << 8) for i in range(n)]
 
+def _ptr_loc(x, y):
+    """Classify the LIVE select cursor (PointerX/Y) in the inventory panel:
+    ('owner',) on the displayed member/open-container icon; ('cell', col, row) on a
+    backpack cell; ('off', x, y) elsewhere (e.g. the map). Mirrors C_155D_1267's
+    hit-test boxes."""
+    if (U6_PANEL_OWNER_X[0] <= x < U6_PANEL_OWNER_X[1] and
+            U6_PANEL_OWNER_Y[0] <= y < U6_PANEL_OWNER_Y[1]):
+        return ("owner",)
+    if (U6_PANEL_CELL_X0 <= x < U6_PANEL_CELL_X0 + U6_BACKPACK_COLS * U6_PANEL_TILE and
+            U6_PANEL_CELL_Y0 <= y < U6_PANEL_CELL_Y0 + U6_BACKPACK_ROWS * U6_PANEL_TILE):
+        return ("cell", (x - U6_PANEL_CELL_X0) // U6_PANEL_TILE,
+                        (y - U6_PANEL_CELL_Y0) // U6_PANEL_TILE)
+    return ("off", x, y)
+
+def _cell_pixel(col, row):
+    """Screen pixel center of backpack cell (col,row)."""
+    return (U6_PANEL_CELL_X0 + col * U6_PANEL_TILE, U6_PANEL_CELL_Y0 + row * U6_PANEL_TILE)
+
+def _read_cursor(base_addr):
+    """The live select cursor (PointerX, PointerY) -- the authoritative D/M panel cursor."""
+    return (_rd16(base_addr + U6_PointerX), _rd16(base_addr + U6_PointerY))
+
 def _door_at_tile(base_addr, tx, ty, tz):
     """A door (OBJ_129..12C) on tile (tx,ty,tz) -> (slot, type, frame, qual), else None."""
     status = dm.read(S.handle, base_addr + U6_ObjStatus, U6_MAX_SLOTS)
@@ -228,6 +250,9 @@ __all__ = [
     "_actor_map",
     "_actor_cells",
     "_door_at_tile",
+    "_ptr_loc",
+    "_cell_pixel",
+    "_read_cursor",
     "_holder_party_index",
     "_party_member_slot",
     "_visible_backpack",

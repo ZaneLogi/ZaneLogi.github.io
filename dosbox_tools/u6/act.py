@@ -584,6 +584,276 @@ def u6_ready(target: str) -> str:
     return (f"unready {name} (0x{slot:03x}): NOT removed -- {err} "
             f"(a cursed/locked item can't be unreadied).")
 
+# ---------------------------------------------------------------------------
+# u6_move_object -- the keyboard DROP ('D') / MOVE ('M') inventory flows, learned
+# live 2026-06-28 and cross-checked vs C_27A1_1E8B / seg_1184.c. Drives the REAL
+# engine commands, so Link[]/MapObjPtr/weights/stacking stay the engine's job (we
+# never write the object lists). The live select cursor is PointerX/Y (NOT
+# PanelCol/Row, which goes stale here), so we arrow-walk + verify each step and
+# retry dropped keys; ESC resets on any mismatch.
+# ---------------------------------------------------------------------------
+
+def _tab_to_panel(b):
+    """Arm the panel cursor (SelectMode==2). 'D' arms it directly; 'M' starts on the map
+    cursor (1) and needs a TAB. Returns True on SelectMode==2."""
+    sm = lambda: _rd8(b + U6_SelectMode)
+    if sm() == 2:
+        return True
+    _guarded_send(b, "tab", lambda: sm() == 2)
+    return sm() == 2
+
+def _nav_panel_to(b, want, max_steps=30):
+    """Arrow-walk the live cursor (PointerX/Y) to `want` = ('owner',) or ('cell',col,row),
+    re-reading after each key (a dropped key just repeats the move next pass). UP is only
+    issued from a row BELOW the target -- never from row 0, which would jump to the
+    owner-icon. Returns True on arrival."""
+    def at(loc):
+        return loc == ("owner",) if want[0] == "owner" else \
+               (loc[0] == "cell" and loc[1] == want[1] and loc[2] == want[2])
+    for _ in range(max_steps):
+        loc = _ptr_loc(*_read_cursor(b))
+        if at(loc):
+            return True
+        if want[0] == "owner":
+            key = "up"                       # UP climbs the rows, then onto the owner-icon
+        elif loc[0] == "cell":
+            if loc[2] > want[2]:   key = "up"
+            elif loc[2] < want[2]: key = "down"
+            elif loc[1] > want[1]: key = "left"
+            else:                  key = "right"
+        else:                                # owner-icon / off-grid -> drop into the grid
+            key = "down"
+        inp.send_key(key)
+        time.sleep(_CURSOR_STEP)
+    return at(_ptr_loc(*_read_cursor(b)))
+
+def _open_member_inventory(b, mi):
+    """Open party member `mi`'s INVENTORY view (CMD_92) from a clean COMMAND_READY:
+    normalize to roster ('/'), F<mi+1>, defensive '*'. Mirrors _panel_commit's open."""
+    _abort_to_ready(b)
+    sd = lambda: _rd16(b + U6_StatusDisplay)
+    if sd() != 0x91:
+        ok, _ = _guarded_send(b, "/", lambda: sd() == 0x91)
+        if not ok:
+            _abort_to_ready(b); return False
+    _guarded_send(b, f"f{mi + 1}", lambda: sd() in (0x90, 0x92))
+    if sd() == 0x90:
+        _guarded_send(b, "*", lambda: sd() == 0x92)
+    return sd() == 0x92
+
+def _slot_cell(b, slot):
+    """(col,row) of `slot` in the CURRENT panel view (D_E70F), or None if not visible."""
+    pack = _visible_backpack(b)
+    if slot not in pack:
+        return None
+    r, c = divmod(pack.index(slot), U6_BACKPACK_COLS)
+    return (c, r)
+
+def _locate_source(b, slot):
+    """(member_index, container_slot): container_slot<0 => `slot` is a top-level pack item
+    (INVEN, or CONTAINED directly under a member); else it sits inside that container, which
+    must be opened to select it. member_index = the party member who ultimately holds it
+    (-1 if not held by the party)."""
+    assoc = _rd16(b + U6_ObjPos + slot * 3)
+    mi = _holder_party_index(b, assoc)
+    if mi >= 0:
+        return mi, -1
+    node, guard = assoc, 0
+    while guard < 16:
+        if (_rd8(b + U6_ObjStatus + node) & 0x18) == 0x00:    # container sits on the ground
+            return -1, assoc
+        pa = _rd16(b + U6_ObjPos + node * 3)
+        m = _holder_party_index(b, pa)
+        if m >= 0:
+            return m, assoc
+        node, guard = pa, guard + 1
+    return -1, assoc
+
+def _select_move_source(b, slot, cmd):
+    """Issue `cmd` ('d'/'m'), arm the panel cursor, walk to `slot`'s cell, Enter to lock it
+    as the move source. Returns (ok, err); on success Selection.obj==slot."""
+    ok, _ = _guarded_send(b, cmd, "SELECTING")
+    if not ok:
+        return False, f"'{cmd.upper()}' did not enter select mode"
+    if not _tab_to_panel(b):
+        return False, "could not arm the panel cursor (TAB)"
+    cell = _slot_cell(b, slot)
+    if cell is None:
+        return False, "source item not visible in the panel"
+    if not _nav_panel_to(b, ("cell", cell[0], cell[1])):
+        return False, "could not move the cursor onto the source item"
+    inp.send_key("enter"); time.sleep(_CURSOR_STEP)
+    for _ in range(20):
+        if _rd16s(b + U6_Sel_obj) == slot:
+            return True, ""
+        time.sleep(0.03)
+    return False, f"source-select landed on 0x{_rd16s(b + U6_Sel_obj) & 0xffff:03x}, not 0x{slot:03x}"
+
+def _answer_quantity(b, qty):
+    """If the 'How many?' line prompt is live (LineInput low byte==1), type `qty` + Enter.
+    Returns the number typed, or 0 if no prompt appeared (single / non-stackable)."""
+    time.sleep(_CURSOR_STEP)
+    if (_rd16(b + U6_LineInput) & 0xff) != 1:
+        return 0
+    for ch in str(qty):
+        inp.send_key(ch); time.sleep(_CURSOR_STEP)
+    inp.send_key("enter"); time.sleep(_CURSOR_STEP)
+    return qty
+
+@mcp.tool()
+def u6_move_object(target: str, dest: str, amount: int = 0) -> str:
+    """Ultima VI: MOVE a carried object by keyboard -- the inventory manager. Drives the
+    real engine D(rop)/M(ove) commands, so Link[]/MapObjPtr/weights/stacking stay the
+    engine's job (nothing in the object lists is written directly).
+
+    `target` = the source object SLOT (0x.. / number / inv:..) from u6_inventory /
+    u6_container / u6_panel_state.
+    `dest` (one of):
+      * `ground` or `ground:<n/s/e/w>` -- DROP onto the avatar's tile (or one tile over).
+      * `member:<N>`       -- give to party member N (1-based; 1 = avatar/leader).
+      * `container:<slot>` -- put INTO that container (a top-level item in the same pack).
+      * `out`              -- take the source OUT of its container, to the holding member's
+                              pack (source must be inside a container).
+    `amount` -- for a STACKED source (count > 1), how many to move; 0 = the whole stack.
+                Ignored for non-stackables; a single stackable never prompts.
+
+    Stacking is adaptive: after locking the source the tool watches `LineInput` for the
+    engine's "How many?" and answers only if it appears (covers single / stacked / single-
+    stackable uniformly). The select cursor is the live PointerX/Y (arrow-walked + verified,
+    dropped keys retried); ESC resets on mismatch. For container->container, compose two
+    calls (`out`, then `container:`). Verified live 2026-06-28; C_27A1_1E8B + seg_1184.c.
+    DS from u6_hook."""
+    b = _session_base()
+    if b is None:
+        return "u6_move_object: not hooked (call u6_hook first)."
+    slot = _parse_slot(target.strip().lower())
+    if slot is None:
+        return f"Invalid target {target!r}; give an object slot (0x.. / number / inv:..)."
+    try:
+        cu = _rd8(b + U6_ObjStatus + slot) & 0x18
+        typ, frame, _q = _obj_tfq(b, slot)
+        am = _rd16(b + U6_Amount + slot * 2)
+        name = _obj_name(b, slot)
+    except OSError as ex:
+        return f"u6_move_object: read failed ({ex})."
+    label = f"move {name} (0x{slot:03x})"
+    if cu == 0x00:
+        return f"{label}: on the ground (LOCXYZ), not in inventory -- use u6_get."
+    if cu == 0x18:
+        return f"{label}: EQUIPPED -- unready it first (u6_ready)."
+    src_mi, src_container = _locate_source(b, slot)
+    if src_mi < 0:
+        return f"{label}: not held by a party member."
+
+    d = dest.strip().lower()
+    if d in ("ground", "here", "ground:here"):
+        dkind, darg = "ground", None
+    elif d.startswith("ground:"):
+        darg = _U6_DIR.get(d.split(":", 1)[1])
+        if darg is None:
+            return f"{label}: ground direction must be n/s/e/w (or 'ground' for in place)."
+        dkind = "ground"
+    elif d.startswith("member:"):
+        try:
+            darg = int(d.split(":", 1)[1]) - 1
+        except ValueError:
+            return f"{label}: member must be member:<N> (1=avatar)."
+        if not (0 <= darg < 8):
+            return f"{label}: member index out of range (1..8)."
+        dkind = "member"
+    elif d.startswith("container:"):
+        darg = _parse_slot(d.split(":", 1)[1])
+        if darg is None:
+            return f"{label}: container must be container:<slot>."
+        dkind = "container"
+    elif d == "out":
+        dkind, darg = "out", None
+    else:
+        return f"{label}: invalid dest {dest!r}. Use ground[:dir] | member:N | container:slot | out."
+
+    if dkind == "out" and src_container < 0:
+        return f"{label}: 'out' needs a source that is INSIDE a container."
+    if dkind in ("ground", "member", "container") and src_container >= 0:
+        return (f"{label}: source is inside container 0x{src_container:03x} -- take it 'out' "
+                f"first (container->container is two steps: out, then container:).")
+    if dkind == "container" and darg == slot:
+        return f"{label}: can't put a container into itself."
+
+    qt = quan_type(typ)
+    full = am if qt == 4 else (am & 0xff if qt == 2 else 1)
+    full = max(full, 1)
+    qty = full if amount <= 0 or amount > full else amount
+
+    _abort_to_ready(b)
+
+    # ---- open the source's panel / container ----
+    if src_container >= 0:                          # 'out': open the holding container first
+        if not _open_member_inventory(b, src_mi):
+            return f"{label}: couldn't open member {src_mi + 1}'s panel."
+        if not _tab_to_panel(b):
+            _abort_to_ready(b); return f"{label}: couldn't arm panel to open the container."
+        ccell = _slot_cell(b, src_container)
+        if ccell is None:
+            _abort_to_ready(b); return f"{label}: holding container not visible in the pack."
+        if not _nav_panel_to(b, ("cell", ccell[0], ccell[1])):
+            _abort_to_ready(b); return f"{label}: couldn't move onto the container."
+        inp.send_key("enter"); time.sleep(_CURSOR_STEP)     # open it
+        _abort_to_ready(b)
+        if _slot_cell(b, slot) is None:
+            _abort_to_ready(b)
+            return f"{label}: opened the container but the source isn't shown inside it."
+    else:
+        if not _open_member_inventory(b, src_mi):
+            return f"{label}: couldn't open member {src_mi + 1}'s panel."
+
+    # ---- select source ----
+    ok, err = _select_move_source(b, slot, "d" if dkind == "ground" else "m")
+    if not ok:
+        _abort_to_ready(b); return f"{label}: {err}."
+    moved = _answer_quantity(b, qty) if qt else 0
+
+    # ---- destination ----
+    if dkind == "ground":
+        if darg:
+            inp.send_key(darg); time.sleep(_CURSOR_STEP)
+        inp.send_key("enter")
+    elif dkind == "member":
+        sd = lambda: _rd16(b + U6_StatusDisplay)
+        _guarded_send(b, f"f{darg + 1}", lambda: sd() in (0x90, 0x92))
+        if not _tab_to_panel(b):
+            _abort_to_ready(b); return f"{label}: couldn't arm the dest member's panel."
+        if not _nav_panel_to(b, ("owner",)):
+            _abort_to_ready(b); return f"{label}: couldn't reach the member owner-icon."
+        inp.send_key("enter")
+    elif dkind == "container":
+        if not _tab_to_panel(b):
+            _abort_to_ready(b); return f"{label}: couldn't arm the panel for the dest container."
+        dcell = _slot_cell(b, darg)
+        if dcell is None:
+            _abort_to_ready(b); return f"{label}: dest container 0x{darg:03x} not visible in the pack."
+        if not _nav_panel_to(b, ("cell", dcell[0], dcell[1])):
+            _abort_to_ready(b); return f"{label}: couldn't move onto the dest container."
+        inp.send_key("enter")
+    else:                                            # out
+        if not _tab_to_panel(b):
+            _abort_to_ready(b); return f"{label}: couldn't arm the panel for 'out'."
+        if not _nav_panel_to(b, ("owner",)):
+            _abort_to_ready(b); return f"{label}: couldn't reach the container owner-icon."
+        inp.send_key("enter")
+
+    state, _ = _drain_to_ready(b)
+    try:
+        ncu = _rd8(b + U6_ObjStatus + slot) & 0x18
+        na  = _rd16(b + U6_ObjPos + slot * 3)
+        nt  = _obj_tfq(b, slot)[0]
+        where = ("deleted/recycled" if nt != typ else
+                 "LOCXYZ" if ncu == 0 else f"{_COORDUSE.get(ncu, '?')} assoc=0x{na:03x}")
+    except OSError:
+        where = "?"
+    qnote = f" moved {moved} of {full}," if moved else ""
+    tip = " (stacked partial -- verify counts via u6_inventory/u6_container)" if moved and moved < full else ""
+    return f"{label} -> {dest}:{qnote} source slot now {where}; {state}.{tip}"
+
 def _advance_conv_input(base_addr, max_pages=8):
     """Clear any '*' page-pause(s) blocking the keyword prompt so a typed reply's
     leading char isn't eaten advancing a page. Sends ENTER only WHILE a page-pause is
@@ -1082,6 +1352,7 @@ __all__ = [
     "_use_inventory",
     "u6_use",
     "u6_ready",
+    "u6_move_object",
     "_advance_conv_input",
     "u6_say",
     "u6_key",

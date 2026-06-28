@@ -108,6 +108,23 @@ U6_Sel_obj       = 0xB6B3   # int; Selection.obj -- the committed target object 
 _PANEL_VIEW = {0x90: "PORTRAIT", 0x91: "PARTY", 0x92: "INVENTORY"}
 U6_BACKPACK_COLS = 4        # backpack grid is 4 cols x 3 visible rows (C_155D_1267);
 U6_BACKPACK_ROWS = 3        # visible index = row*4 + col, object = D_E70F[index]
+# The LIVE select cursor during a panel/map command is the MOUSE pointer PointerX/Y
+# (C_155D_1267 hit-tests these), NOT PanelCol/PanelRow (which is the USE/READY nav
+# cursor and goes stale during a Move). Read PointerX/Y to know where a D/M cursor
+# actually is. Verified live 2026-06-28 driving D (drop) and M (move) by keyboard.
+U6_PointerX = 0xB6A3        # int; live cursor screen X (panel + map select)
+U6_PointerY = 0xB6A5        # int; live cursor screen Y
+# Inventory-panel pixel geometry (C_155D_1267 hit-test). A backpack cell (col,row)
+# is at screen (X0 + col*TILE, Y0 + row*TILE); the OWNER icon (the displayed member
+# or open container = D_E709, the "give to / take out of this" target) sits one tile
+# above the grid in the X[272,288) Y[16,32) box. Reached by UP from any top-row cell;
+# DOWN from it re-enters the grid.
+U6_PANEL_CELL_X0 = 248
+U6_PANEL_CELL_Y0 = 32
+U6_PANEL_TILE    = 16
+U6_PANEL_OWNER_X = (272, 288)
+U6_PANEL_OWNER_Y = (16, 32)
+U6_LineInputFlag = U6_LineInput   # alias: low byte == 1 while a "How many?"/keyword CON_gets is live
 
 
 # ----------------------------------------------------------------------------
@@ -126,6 +143,18 @@ U6_TypeWeight_ptr = 0xB417  # far ptr -> TypeWeight[type] (unsigned char)
 U6_EquipWeaponTbl = 0x07DD  # int[33] (D_07DD) stored DIRECTLY in DGROUP; RHND weapon TILE ids
 CARRY_PER_STR = 20          # max carried weight = STR * 20
 EQUIP_PER_STR = 10          # max readied weight = STR * 10
+
+# QuanType (seg_1184.c C_1184_21C7): which object TYPES stack, deciding the move
+# "How many?" split. 4 = gold (count in the full 2-byte Amount); 2 = uses GetQuan
+# (low byte of Amount); 0 = a discrete single object (no split, no prompt). The engine
+# only pops "How many?" when a stackable's count > 1 (a single stackable skips it).
+OBJ_GOLD = 0x058
+_QUANTYPE2 = frozenset({0x05A, 0x03F, 0x04D, 0x037, 0x038, 0x041, 0x042, 0x043, 0x044,
+                        0x045, 0x046, 0x047, 0x048, 0x151, 0x080, 0x081, 0x053, 0x14F,
+                        0x059, 0x05B, 0x05C})
+
+def quan_type(typ):
+    return 4 if typ == OBJ_GOLD else (2 if typ in _QUANTYPE2 else 0)
 
 # Equip-slot index -> name (u6.h SLOT_*). STAT_GetEquipSlot returns one of these
 # or -1 (not readyable); 8/9 are input slots resolved to a free hand/finger.
@@ -281,6 +310,13 @@ __all__ = [
     "_PANEL_VIEW",
     "U6_BACKPACK_COLS",
     "U6_BACKPACK_ROWS",
+    "U6_PointerX",
+    "U6_PointerY",
+    "U6_PANEL_CELL_X0",
+    "U6_PANEL_CELL_Y0",
+    "U6_PANEL_TILE",
+    "U6_PANEL_OWNER_X",
+    "U6_PANEL_OWNER_Y",
     "U6_STREN",
     "U6_DEXTE",
     "U6_INTEL",
@@ -289,6 +325,8 @@ __all__ = [
     "U6_EquipWeaponTbl",
     "CARRY_PER_STR",
     "EQUIP_PER_STR",
+    "OBJ_GOLD",
+    "quan_type",
     "_EQUIP_SLOT_NAME",
     "U6_IsInConversation",
     "U6_TalkBuf_ptr",

@@ -71,6 +71,8 @@ def u6_inventory(npc_slot: int, segment: int = -1,
         if assoc != npc_slot:
             continue
         sh = shape[i * 2] | (shape[i * 2 + 1] << 8)
+        if (sh & 0x3ff) == 0:                                  # freed/empty slot (husk) -- no object
+            continue
         am = amount[i * 2] | (amount[i * 2 + 1] << 8)
         tile, _wt, _es = _gear_of(sh, basetile, tw, weapons)   # tile -> LOOK.LZD name
         rows.append((i, "EQUIP" if cu == 0x18 else "INVEN",
@@ -83,6 +85,53 @@ def u6_inventory(npc_slot: int, segment: int = -1,
         out.append(f"  0x{slot:03x}  {use:<5}  {typ:>4}  {frame:>5}  {quan:>4}  "
                    f"{qual:>4}  {name}")
     return "\n".join(out)
+
+@mcp.tool()
+def u6_container(slot: int, segment: int = -1, max_slots: int = U6_MAX_SLOTS) -> str:
+    """Ultima VI: list the CONTENTS of a container (bag/chest/etc.) -- every object whose
+    CoordUse is CONTAINED and whose assoc (holder) == `slot`, recursing into nested
+    containers. This is the read u6_inventory CANNOT do: u6_inventory lists only INVEN/
+    EQUIP items directly held by an NPC, so a carried bag's contents (and items left
+    CONTAINED-under-a-member by a take-out-of-bag move) are invisible to it -- this closes
+    that gap. Pure read; no keyboard. DS from u6_hook unless overridden with segment=."""
+    if S.membase is None:
+        return dm.HINT_NO_MEMBASE
+    ds, err = _ds(segment)
+    if err:
+        return err
+    b = S.membase + (ds << 4)
+    try:
+        status = dm.read(S.handle, b + U6_ObjStatus, max_slots)
+        pos    = dm.read(S.handle, b + U6_ObjPos, max_slots * 3)
+        shape  = dm.read(S.handle, b + U6_ObjShapeType, max_slots * 2)
+        amount = dm.read(S.handle, b + U6_Amount, max_slots * 2)
+        basetile, tw, weapons = _gear_tables(b)
+    except OSError as ex:
+        return f"Read failed (DS=0x{ds:04x}): {ex}"
+    n = min(max_slots, len(status))
+    def children(parent):
+        kids = []
+        for i in range(n):
+            if (status[i] & 0x18) != 0x08:                       # CONTAINED only
+                continue
+            if (pos[i * 3] | (pos[i * 3 + 1] << 8)) != parent:   # assoc (holder) == parent
+                continue
+            sh = shape[i * 2] | (shape[i * 2 + 1] << 8)
+            if (sh & 0x3ff) == 0:                                # freed/empty slot -- skip
+                continue
+            am = amount[i * 2] | (amount[i * 2 + 1] << 8)
+            tile, _w, _e = _gear_of(sh, basetile, tw, weapons)
+            kids.append((i, sh & 0x3ff, sh >> 10, am & 0xff, am >> 8, _tile_name(tile)))
+        return kids
+    lines = []
+    def walk(parent, depth):
+        for (i, typ, frame, quan, qual, name) in children(parent):
+            lines.append(f"  {'  ' * depth}0x{i:03x}  type={typ} frame={frame} "
+                         f"quan={quan} qual={qual}  {name}")
+            walk(i, depth + 1)                                   # nested container
+    walk(slot, 0)
+    head = f"Container 0x{slot:03x} '{_obj_name(b, slot)}' contents (DS=0x{ds:04x}):"
+    return head + ("\n" + "\n".join(lines) if lines else "\n  (empty)")
 
 @mcp.tool()
 def u6_panel_state(segment: int = -1) -> str:
@@ -114,11 +163,22 @@ def u6_panel_state(segment: int = -1) -> str:
         sx   = int.from_bytes(dm.read(S.handle, b + U6_Sel_x, 2), "little", signed=True)
         sy   = int.from_bytes(dm.read(S.handle, b + U6_Sel_y, 2), "little", signed=True)
         sobj = int.from_bytes(dm.read(S.handle, b + U6_Sel_obj, 2), "little", signed=True)
+        ptrx = int.from_bytes(dm.read(S.handle, b + U6_PointerX, 2), "little")
+        ptry = int.from_bytes(dm.read(S.handle, b + U6_PointerY, 2), "little")
     except OSError as ex:
         return f"Panel read failed (DS=0x{ds:04x}): {ex}"
     view = _PANEL_VIEW.get(sd, f"0x{sd:02x}")
-    out = [f"Panel (DS=0x{ds:04x}): view={view} char#={pch} "
-           f"cursor=(col{col},row{row}) scroll={scr}"]
+    # The LIVE select cursor is PointerX/Y, NOT PanelCol/Row (which is the USE/READY nav
+    # cursor and goes stale during a D/M move). Report the live one; keep Col/Row as a note.
+    loc = _ptr_loc(ptrx, ptry)
+    if loc[0] == "owner":
+        live = "owner-icon (give-to/take-out of the displayed member/container)"
+    elif loc[0] == "cell":
+        live = f"cell (row{loc[2]},col{loc[1]})"
+    else:
+        live = f"off-grid/map (x={ptrx},y={ptry})"
+    out = [f"Panel (DS=0x{ds:04x}): view={view} char#={pch} scroll={scr}",
+           f"  live cursor (PointerX/Y) = {live}   [PanelCol/Row=(col{col},row{row}), stale during a move]"]
     # visible backpack: 4 cols x 3 rows, index = row*4 + col; 0 = empty cell
     rows_seen = []
     for i in range(U6_BACKPACK_COLS * U6_BACKPACK_ROWS):
@@ -126,7 +186,7 @@ def u6_panel_state(segment: int = -1) -> str:
         if slot == 0:
             continue
         r, c = divmod(i, U6_BACKPACK_COLS)
-        mark = " <-cursor" if (c == col and r == row) else ""
+        mark = " <-cursor" if (loc[0] == "cell" and loc[1] == c and loc[2] == r) else ""
         rows_seen.append(f"  ({r},{c}) slot 0x{slot:03x} {_obj_name(b, slot)}{mark}")
     out.append(f"backpack ({len(rows_seen)} visible):" if rows_seen
                else "backpack: none visible")
@@ -484,6 +544,7 @@ def u6_objects_near(radius: int = 8, max_items: int = 30, segment: int = -1) -> 
 __all__ = [
     "u6_object",
     "u6_inventory",
+    "u6_container",
     "u6_panel_state",
     "u6_avatar",
     "u6_time",
