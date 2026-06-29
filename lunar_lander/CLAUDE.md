@@ -11,7 +11,7 @@ Asteroids. "Faithful" matters: behavior should match the original ROM.
 
 ## Status
 
-ROM-decode stage — six vector-ROM demo/survey pages, all faithful
+ROM-decode stage — seven vector-ROM demo/survey pages, all faithful
 byte-decodes. No gameplay / runtime / CPU-side port yet.
 - **Font sheet** (`demos/vector_rom.html`) — the A-Z + space glyphs from
   `034598-01.np3`.
@@ -22,12 +22,16 @@ byte-decodes. No gameplay / runtime / CPU-side port yet.
   terrain), each fit to a cell and labelled by CPU address. A survey tool
   for identifying shapes by eye; data from `discovery_rom_data.js`.
 - **`$5458` composite** (`demos/hud.html`) — the 75-JSR mega-composite
-  at `034598` `$5458`, **confirmed the in-game HUD label row**: all 75
-  JSR targets resolve to font glyphs (`$55BE-$5726`) and spell
-  `SCORE  TIME  FUEL  ALTITUDE  HORIZONTAL SPEED  VERTICAL SPEED` (the
-  inter-word gaps are space-glyph `$5726` JSRs). Static labels only; the
-  numeric values are drawn separately by the CPU at runtime. 75/75 valid
-  letters also cross-validates the `034598` font decode.
+  at `034598` `$5458`: all 75 JSR targets resolve to font glyphs
+  (`$55BE-$5726`) and spell the **six HUD label strings**
+  `SCORE  TIME  FUEL  ALTITUDE  HORIZONTAL SPEED  VERTICAL SPEED` (gaps are
+  space-glyph `$5726` JSRs); 75/75 valid letters cross-validates the font
+  decode. Its `VEC` moves position the labels as the **in-game 2×3 grid**
+  (3 baselines y=748/720/692, columns x=100/600) — so `$5458` *is* the
+  gameplay HUD layout, not just a label list. Only the numeric VALUES are
+  CPU-drawn (not in `$5458`); `hud.html` renders `$5458` byte-faithfully, and
+  `screen.html` adds sample values + arrows (see "034598 region map" +
+  "gameplay HUD" below).
 - **360° rotation** (`demos/rotation.html`) — the lander spun through a
   full circle at both ROM sizes (see "Lander rotation" below); also
   demonstrates `globalScale` resizing. Sources both banks from
@@ -37,6 +41,13 @@ byte-decodes. No gameplay / runtime / CPU-side port yet.
   visible dots). The CPU-address range is editable, so it also serves as
   a general close-up viewer for any `034598` region. Used to confirm the
   starfield and terrain-tile regions below.
+- **Screen layout** (`demos/screen.html`) — a *speculative* composite of the
+  whole gameplay screen on a faithful `1024×768` field: the `$5458` HUD with
+  formatted values (left + right columns) and speed arrows, the terrain
+  (15 tiles + an inserted flat pad, fit to the snapshot's vertical band), and
+  the zoom-out lander. Shapes are byte-decoded; the terrain scale and the
+  value/arrow/lander positions are matched to a MAME screenshot (approximate —
+  exact placement is CPU-side). Starfield deferred (rendering needs rework).
 
 (Note: a faithful byte-decode renders the lander legs correctly — earlier
 non-faithful attempts had "legs too small"; staying byte-true to the ROM
@@ -127,9 +138,9 @@ list and use whichever exists on the machine you're on:
 
 | File             | Maps at        | Holds |
 |------------------|----------------|-------|
-| `034598-01.np3`  | CPU `$5000-$57FF` | picture/glyph ROM — terrain tiles, starfield, HUD label row, and the A-Z + space font (see "034598 region map" below) |
-| `034599-01.r3`   | CPU `$4800-$4FFF` | picture ROM #2 — the lander (8 base octagons `$4800-$48F8` + 9 tilt poses `$4916-$4B64`, dispatch table `$4BA2`; a second 9-frame rotation set dispatched from `$4DF4`); terrain / flag / digits TBD |
-| `034597-01.m3`   | CPU `$5800-$5FFF` (working) | terrain ROM — `gallery.html` surveys it at `$5800` (offset-4 pointer table → `T_` polylines); earlier thought a shape-index PROM, base not hardware-confirmed |
+| `034598-01.np3`  | CPU `$5000-$57FF` | picture/glyph ROM — terrain tiles, starfield, the HUD label grid (`$5458`), the A-Z + space font, digits, colon, and arrows (see "034598 region map" below) |
+| `034599-01.r3`   | CPU `$4800-$4FFF` | picture ROM #2 — the lander (8 base octagons `$4800-$48F8` + 9 tilt poses `$4916-$4B64`, dispatch table `$4BA2`; a second 9-frame rotation set dispatched from `$4DF4`); flag still TBD (terrain + digits live in `034598`) |
+| `034597-01.m3`   | CPU `$5800-$5FFF` | third vector ROM (base **confirmed** via MAME `llander`). Its DVG decode is noise — **not** the terrain (terrain is in `034598` `$5000-$507E`); actual content/purpose still unclear. |
 
 File offset = `addr − base` (`$5000` for `034598`, `$4800` for `034599`,
 `$5800` for `034597`). The committed artifacts are the **decoded**
@@ -150,9 +161,10 @@ python lunar_lander/tools/build_discovery.py
 #   /lunar_lander/demos/vector_rom.html   (font sheet)
 #   /lunar_lander/demos/lander.html       (9 lander poses)
 #   /lunar_lander/demos/gallery.html      (full ROM shape survey)
-#   /lunar_lander/demos/hud.html          ($5458 HUD label-row composite)
+#   /lunar_lander/demos/hud.html          ($5458 HUD labels, in-game 2×3 grid)
 #   /lunar_lander/demos/rotation.html     (360° rotation, both size banks)
 #   /lunar_lander/demos/starfield.html    (034598 starfield; editable-range close-up)
+#   /lunar_lander/demos/screen.html       (speculative full-screen layout, 1024x768)
 python -m http.server -b 127.0.0.1 8080
 ```
 
@@ -162,7 +174,7 @@ config: launch.json `lunar_lander` serves this dir on port 8085.)
 
 ## 034598 region map ($5000-$57FF)
 
-The picture/glyph ROM is laid out in four decoded regions (use
+The picture/glyph ROM is laid out in these decoded regions (use
 `demos/starfield.html` to view any of them enlarged):
 
 | Range | Contents |
@@ -170,12 +182,36 @@ The picture/glyph ROM is laid out in four decoded regions (use
 | `$5000-$507E` | **Terrain tiles** — 15 fixed-width segments, each net `+256` horizontal advance, zero dark moves (one continuous polyline per tile). Net `dy` over the 15 in address order sums to **0**, so they chain left-to-right into a continuous, horizontally-wrapping surface. Flat tiles (e.g. `$506C`, `$516E`) are landing-pad pieces. The tile **sequence** is CPU-side (nothing in ROM chains them); address order already forms a valid closed profile. |
 | `$5088-$51A2` | Terrain stroke primitives — the shared left-to-right slope/flat pieces the tiles `JSR`. |
 | `$5244-$53E6` | **Starfield** — 24 subroutines, **61 bright points, zero lines** (every "stroke" is a zero-length VEC = a single dot), brightness `5-9` (star magnitudes). No routine assembles them — the CPU positions the clusters at runtime. |
-| `$5458` | **HUD label row** — 75 font-glyph JSRs spelling `SCORE  TIME  FUEL  ALTITUDE  HORIZONTAL SPEED  VERTICAL SPEED` (gaps are space-glyph `$5726` JSRs). Static labels; CPU draws the numeric values under them at runtime. |
+| `$5458` | **HUD labels — the in-game 2×3 grid** — 75 font-glyph JSRs spelling `SCORE  TIME  FUEL  ALTITUDE  HORIZONTAL SPEED  VERTICAL SPEED` (gaps are space-glyph `$5726` JSRs). Its `VEC` moves lay them out as **3 rows (y=748/720/692) × 2 columns (x=100/600)** — this *is* the gameplay HUD layout; only the numeric values are CPU-drawn separately. |
 | `$55BE-$5726` | Font — A-Z + space (see table below). |
+| `$572A-$5794` | **Digits 1-9** — 9 glyphs (`$572A=1, $5732=2, $5742=3, $5750=4, $575E=5, $576C=6, $577A=7, $5784=8, $5794=9`), same 8×12 SVEC form as the font. **`0` reuses the letter `O` (`$5688`).** |
+| `$55B2` | **Colon `:`** — two stacked dots, advance 6 (= half a digit); TIME's `MM:SS` separator. |
+| `$5566` `$5576` `$5586` `$5598` | **Arrows** — right / left / up / down. Speed-direction indicators (`$5566` right + `$5598` down used by H/V speed). |
 
 (The `$5000-$507E` terrain tiles supersede the earlier `034597`
 "pointer-table" lead, which decoded to noise — the terrain geometry is
 here in `034598`.)
+
+### Gameplay HUD (from a MAME `llander` rev2 screenshot)
+
+The in-game status display is **two columns × three rows** — the labels are
+exactly `$5458` (its `VEC` moves build the grid); the CPU adds the values:
+
+| Left column | Right column |
+|---|---|
+| `SCORE 0000` (4 digits) | `ALTITUDE 2072` (4 digits) |
+| `TIME 00:07` (`MM:SS`, colon) | `HORIZONTAL SPEED 104 →` |
+| `FUEL 0739` (4 digits) | `VERTICAL SPEED 59 ↓` |
+
+Ground-truth notes: TIME is `MM:SS`; ALTITUDE is 4 digits; the two speeds
+carry a **direction arrow** (`→` / `↓`). The colon and arrows ARE in ROM
+(not the font block): colon = `$55B2` (two dots, half-width), arrows =
+`$5566` (right) / `$5598` (down). The screenshot also confirms the terrain
+(jagged wrapping horizon with flat **2X/3X/5X** landing pads — pad
+multiplier = `1 + 64/width`: 64→2X, 32→3X, 16→5X) and the starfield
+(scattered sky dots). `demos/screen.html` draws `$5458` (the real 2×3
+labels) plus sample values + arrows; value positions are matched to the
+screenshot (exact placement is CPU-side).
 
 ## Letter address table (034598-01.np3, $5000-$57FF)
 
@@ -190,14 +226,16 @@ V $56EA  W $56F4  X $5702  Y $570C  Z $571A  space $5726
 
 ## Next steps (user will provide info)
 
-Terrain geometry and the starfield are now located in `034598` (see the
-region map above). Still open:
-- **Terrain tile sequence** — which tiles, in what order, the game lays
-  down (CPU-side; address order is a valid wrapping default but unconfirmed
-  as the real sequence).
-- **Digits** (numeric readouts) — the HUD draws values under the labels at
-  runtime; the digit glyphs are not yet positively identified (candidate
-  region `$572A+`).
-- **Flag** + any remaining picture parts; and what `034597-01.m3` actually
-  is (its vector decode is noise — likely data, not a picture-vector ROM).
+Terrain tiles, starfield, HUD labels (`$5458`), digits (`$572A-$5794`, `0`=`O`),
+colon (`$55B2`) and arrows (`$5566`/`$5598`) are all located in `034598` (see the
+region map). Still open:
+- **Terrain tile sequence + pad placement** — which tiles in what order the game
+  lays down, which flats are marked landing pads, and their multipliers/positions
+  (CPU-side). Address order is a valid wrapping default; `multiplier = 1 + 64/width`
+  (64→2X, 32→3X, 16→5X) fits the snapshot, but the real selection is unconfirmed.
+- **HUD value / arrow / pad-label positions** — drawn by the CPU at runtime;
+  `screen.html` matches them to a screenshot, but exact coords are CPU-side.
+- **`034597-01.m3`** — MAME confirms it's a vector ROM at `$5800`, but its DVG
+  decode is noise; what it actually holds (and why) is still unclear — re-decode TODO.
+- **Flag** + any remaining picture parts.
 The user supplies ROM context per shape set.

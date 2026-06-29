@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>lunar_lander — screen layout (guess)</title>
+  <style>
+    body { background:#111; color:#ccc; font-family:-apple-system,"Segoe UI",sans-serif; margin:16px; }
+    h1 { font-size:16px; margin:0 0 4px; }
+    p  { font-size:12px; color:#888; margin:4px 0; max-width:1024px; line-height:1.5; }
+    code { color:#9c9; }
+    b.f { color:#9fe6b0; }
+    b.g { color:#e6c89f; }
+    #screen { display:block; background:#000; border:1px solid #333;
+              width:100%; max-width:1024px; height:auto; aspect-ratio:1024/768; }
+  </style>
+</head>
+<body>
+  <h1>Lunar Lander — in-game screen (1024×768, WIP)</h1>
+  <p>Building the gameplay screen step by step on a faithful <code>1024×768</code> DVG field
+     (origin bottom-left, Y-up). <b>Step 1 — the HUD:</b> drawn straight from the
+     <code>$5458</code> vector composite exactly as <code>hud.html</code> does (byte-faithful,
+     at its native position <code>x[100..788] y[692..760]</code>). More components to come.</p>
+
+  <canvas id="screen" width="1024" height="768"></canvas>
+
+  <script type="module" src="./screen.js"></script>
+</body>
+</html>
