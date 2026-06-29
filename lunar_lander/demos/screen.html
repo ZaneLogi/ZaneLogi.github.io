@@ -15,11 +15,15 @@
   </style>
 </head>
 <body>
-  <h1>Lunar Lander — in-game screen (1024×768, WIP)</h1>
-  <p>Building the gameplay screen step by step on a faithful <code>1024×768</code> DVG field
-     (origin bottom-left, Y-up). <b>Step 1 — the HUD:</b> drawn straight from the
-     <code>$5458</code> vector composite exactly as <code>hud.html</code> does (byte-faithful,
-     at its native position <code>x[100..788] y[692..760]</code>). More components to come.</p>
+  <h1>Lunar Lander — in-game screen (1024×768)</h1>
+  <p>The gameplay screen composited on a faithful <code>1024×768</code> DVG field
+     (origin bottom-left, Y-up): the <code>$5458</code> HUD label grid (byte-faithful, as
+     <code>hud.html</code>) with formatted values, the terrain with multiplier-labelled landing
+     pads, and the lander. <b>HUD value layout + pad multipliers were measured from a MAME
+     gameplay frame</b> (2026-06-29): left column left-aligned at x=204, right column
+     right-aligned to x=878, and pads carry <code>1+64/width</code> multipliers (16→5X / 32→3X /
+     64→2X). The terrain tile <i>sequence</i> + on-screen scale remain the address-order
+     approximation (CPU-side). See <code>scroll_view.html</code> for the horizontal-scroll/wrap.</p>
 
   <canvas id="screen" width="1024" height="768"></canvas>
 

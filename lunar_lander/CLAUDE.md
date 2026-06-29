@@ -11,8 +11,10 @@ Asteroids. "Faithful" matters: behavior should match the original ROM.
 
 ## Status
 
-ROM-decode stage — seven vector-ROM demo/survey pages, all faithful
-byte-decodes. No gameplay / runtime / CPU-side port yet.
+ROM-decode stage — eight vector-ROM demo/survey pages, all faithful
+byte-decodes. No gameplay / runtime / CPU-side port yet. HUD value layout,
+pad multipliers, and the horizontal-scroll/wrap behaviour are now MEASURED
+against MAME (see "Gameplay HUD" + "Terrain scroll" below).
 - **Font sheet** (`demos/vector_rom.html`) — the A-Z + space glyphs from
   `034598-01.np3`.
 - **Lander poses** (`demos/lander.html`) — the 9 tilt attitudes from
@@ -41,13 +43,22 @@ byte-decodes. No gameplay / runtime / CPU-side port yet.
   visible dots). The CPU-address range is editable, so it also serves as
   a general close-up viewer for any `034598` region. Used to confirm the
   starfield and terrain-tile regions below.
-- **Screen layout** (`demos/screen.html`) — a *speculative* composite of the
-  whole gameplay screen on a faithful `1024×768` field: the `$5458` HUD with
-  formatted values (left + right columns) and speed arrows, the terrain
-  (15 tiles + an inserted flat pad, fit to the snapshot's vertical band), and
-  the zoom-out lander. Shapes are byte-decoded; the terrain scale and the
-  value/arrow/lander positions are matched to a MAME screenshot (approximate —
-  exact placement is CPU-side). Starfield deferred (rendering needs rework).
+- **Screen layout** (`demos/screen.html`) — the gameplay screen composited on a
+  faithful `1024×768` field: the `$5458` HUD with formatted values (left + right
+  columns) and speed arrows, the terrain (15 tiles + an inserted flat pad, fit to
+  the snapshot's vertical band) with multiplier-labelled pads, and the zoom-out
+  lander. Shapes are byte-decoded; **HUD value alignment + pad multipliers are now
+  MEASURED from a MAME gameplay frame** (see "Gameplay HUD" below), not guessed.
+  The terrain tile *sequence* + on-screen scale remain CPU-side approximations.
+  Starfield deferred (rendering needs rework).
+- **Scrolling terrain** (`demos/scroll_view.html`) — the **same terrain `screen.html`
+  draws** (the `$5000-$507E` tile data, same fit-to-width + band scale + pad
+  multipliers), scrolled horizontally in a **ping-pong sweep**: slides one screen-width
+  left (lander flying right, arrow `→`), then reverses and slides back (`←`). Endpoints
+  are the same view, so each turnaround is seamless (drawn as two copies; tile loop net
+  `dy=0`). HUD on top, speed slider + pause. (The real game *wraps* one way — see
+  "Terrain scroll" — the ping-pong is a demo choice, not faithful behaviour.) Tile
+  sequence is the address-order approximation, same as `screen.html` (real CPU order TBD).
 
 (Note: a faithful byte-decode renders the lander legs correctly — earlier
 non-faithful attempts had "legs too small"; staying byte-true to the ROM
@@ -89,6 +100,29 @@ point, chosen over a per-frame bounding-box centre that visibly wobbled.
 Drawing at arbitrary sizes is also possible via DVG `globalScale` (doubles
 per step; wraps at gs≥6 from the 4-bit `(localScale+globalScale) & 0x0F`
 mask).
+
+### 034599 explosion debris (`$4F1C-$4FBE`) — CONFIRMED from MAME
+
+The lander-crash debris field is drawn from **12 small fragment glyphs** at
+`$4F1C-$4FBE` (confirmed against a MAME crash snapshot, 2026-06-30 — "THERE WERE
+NO SURVIVORS" screen). The crash routine draws a **random subset** of them
+scattered at the impact point:
+
+| addr | shape | addr | shape |
+|---|---|---|---|
+| `$4F1C` | leg strut | `$4F6E` | box / square (panel) |
+| `$4F28` | stepped bracket | `$4F78` | M / trapezoid zigzag |
+| `$4F3A` | chevron (shallow V) | `$4F8E` | thin rectangle (panel) |
+| `$4F46` | triangle wedge | `$4FA0` | leg strut |
+| `$4F52` | Z-step bracket | `$4FAE` | leg strut |
+| `$4F62` | leg strut | `$4FBE` | diamond (rotated square) |
+
+The prominent **octagon** in the debris is **not** in this range — it's the
+**cabin pod** (a `$4800`-series base shape), drawn semi-intact while the struts/
+panels scatter. So: a crash = cabin octagon + N random `$4F1C-$4FBE` fragments.
+(This resolves the old survey guesses — `$4F28` "box?", `$4F78` "peak/flag?" — both
+are debris.) All 12 are JSR targets, so they're already in `discovery_rom_data.js`
+/ `gallery.html`. Not yet ported to a demo or curated runtime data.
 
 ## DVG reuse — same chip as Asteroids
 
@@ -139,7 +173,7 @@ list and use whichever exists on the machine you're on:
 | File             | Maps at        | Holds |
 |------------------|----------------|-------|
 | `034598-01.np3`  | CPU `$5000-$57FF` | picture/glyph ROM — terrain tiles, starfield, the HUD label grid (`$5458`), the A-Z + space font, digits, colon, and arrows (see "034598 region map" below) |
-| `034599-01.r3`   | CPU `$4800-$4FFF` | picture ROM #2 — the lander (8 base octagons `$4800-$48F8` + 9 tilt poses `$4916-$4B64`, dispatch table `$4BA2`; a second 9-frame rotation set dispatched from `$4DF4`); flag still TBD (terrain + digits live in `034598`) |
+| `034599-01.r3`   | CPU `$4800-$4FFF` | picture ROM #2 — the lander (8 base octagons `$4800-$48F8` + 9 tilt poses `$4916-$4B64`, dispatch table `$4BA2`; a second 9-frame rotation set dispatched from `$4DF4`); **explosion-debris glyphs `$4F1C-$4FBE`** (see "034599 explosion debris" below); flag still TBD (terrain + digits live in `034598`) |
 | `034597-01.m3`   | CPU `$5800-$5FFF` | third vector ROM (base **confirmed** via MAME `llander`). Its DVG decode is noise — **not** the terrain (terrain is in `034598` `$5000-$507E`); actual content/purpose still unclear. |
 
 File offset = `addr − base` (`$5000` for `034598`, `$4800` for `034599`,
@@ -164,7 +198,8 @@ python lunar_lander/tools/build_discovery.py
 #   /lunar_lander/demos/hud.html          ($5458 HUD labels, in-game 2×3 grid)
 #   /lunar_lander/demos/rotation.html     (360° rotation, both size banks)
 #   /lunar_lander/demos/starfield.html    (034598 starfield; editable-range close-up)
-#   /lunar_lander/demos/screen.html       (speculative full-screen layout, 1024x768)
+#   /lunar_lander/demos/screen.html       (full-screen layout, 1024x768; MAME-measured HUD/pads)
+#   /lunar_lander/demos/scroll_view.html  (screen.html terrain, ping-pong scroll: slide one screen, reverse)
 python -m http.server -b 127.0.0.1 8080
 ```
 
@@ -192,26 +227,77 @@ The picture/glyph ROM is laid out in these decoded regions (use
 "pointer-table" lead, which decoded to noise — the terrain geometry is
 here in `034598`.)
 
-### Gameplay HUD (from a MAME `llander` rev2 screenshot)
+### Gameplay HUD — MEASURED from MAME (`llander` rev2, 2026-06-29)
 
+Two 1600×1200 snapshots (idle frame `0000`, gameplay frame `0001`) were pixel-
+measured into the `1024×768` model (`rom = px ÷ 1.5625`, `y_up = 768 − px_y ÷ 1.5625`).
 The in-game status display is **two columns × three rows** — the labels are
-exactly `$5458` (its `VEC` moves build the grid); the CPU adds the values:
+exactly `$5458` (its `VEC` moves build the grid, at rows `y_up` 748/720/692,
+columns `x` 100/600); the CPU adds the values:
 
 | Left column | Right column |
 |---|---|
-| `SCORE 0000` (4 digits) | `ALTITUDE 2072` (4 digits) |
-| `TIME 00:07` (`MM:SS`, colon) | `HORIZONTAL SPEED 104 →` |
-| `FUEL 0739` (4 digits) | `VERTICAL SPEED 59 ↓` |
+| `SCORE 0000` (4 digits) | `ALTITUDE 2076` (4 digits) |
+| `TIME 00:07` (`MM:SS`, colon) | `HORIZONTAL SPEED 106 →` |
+| `FUEL 8250` (4 digits) | `VERTICAL SPEED 61 ↓` |
 
-Ground-truth notes: TIME is `MM:SS`; ALTITUDE is 4 digits; the two speeds
-carry a **direction arrow** (`→` / `↓`). The colon and arrows ARE in ROM
-(not the font block): colon = `$55B2` (two dots, half-width), arrows =
-`$5566` (right) / `$5598` (down). The screenshot also confirms the terrain
-(jagged wrapping horizon with flat **2X/3X/5X** landing pads — pad
-multiplier = `1 + 64/width`: 64→2X, 32→3X, 16→5X) and the starfield
-(scattered sky dots). `demos/screen.html` draws `$5458` (the real 2×3
-labels) plus sample values + arrows; value positions are matched to the
-screenshot (exact placement is CPU-side).
+**Value alignment (confirmed, the two columns differ):**
+- **Left column** (SCORE/TIME/FUEL) is **LEFT-aligned** — first char fixed at
+  **rom x ≈ 204**, numbers grow right.
+- **Right column** (ALTITUDE/H-SPEED/V-SPEED) is **RIGHT-aligned** — units digit
+  fixed at **rom x ≈ 878**, numbers grow left. (Proof: idle single `0` and active
+  `2076` share the same right edge, different left edge.)
+- **Digit pitch ≈ 11 rom units**; TIME is `MM:SS` (colon = `$55B2`, half-width).
+- **Speed arrows** are drawn ~20 units right of the value (**rom x ≈ 897**), rows 2/3:
+  `→` = `$5566`, `↓` = `$5598`. Colon and arrows are in ROM, not the font block.
+
+**Landing pads (confirmed by the game's own multiplier labels):** the visible
+cluster is `5X 5X 2X 2X` left-to-right, matching `multiplier = 1 + 64/width`
+(64→2X, 32→3X, 16→5X):
+
+| pad | rom x (center) | y_up | label |
+|---|---|---|---|
+| left peak-flank ledge  | ≈ 390 | ≈ 233 | **5X** (narrow, high on the slope) |
+| right peak-flank ledge | ≈ 560 | ≈ 179 | **5X** |
+| central valley floor   | ≈ 666 | ≈ 43  | **2X** (wide) |
+| right valley floor     | ≈ 848 | ≈ 47  | **2X** |
+
+So **wide valley floors = 2X (easy), narrow ledges high on the peak = 5X (hard)** —
+the inverse width↔multiplier design. (This **corrects** an earlier width-only guess
+that called the side valleys "3X" and missed the two 5X flank ledges.) Note: **not
+every flat is a scoring pad** — the wide flat at the bottom of the left-center valley
+(rom ~266–290) carries no label, so pads are specifically designated in the terrain
+data, not "any flat spot."
+
+### Terrain scroll — MEASURED from MAME (frames 0000-0003, 2026-06-29)
+
+Four frames (lander flown right; cross-correlated, RMS 0.6–1.9 px over ~870 rom of
+overlap):
+
+- **Pure horizontal scroll, fixed vertical baseline, constant scale** in the far
+  (zoomed-out) view: `dy = 0` in every pair, deepest valley fixed at `y_up ≈ 42`.
+  No vertical pan, no zoom change while high. (The zoom-IN lander bank kicks in only
+  at low altitude — scale changes there, which breaks cross-frame stitching.)
+- **The terrain wraps** — flying right, the left edge leaves and re-emerges on the
+  right (user-confirmed); one ~3840-unit loop (15 tiles × ~256, net dy=0).
+- Frame offsets vs `0001`: `0000`=0, `0002`=+147 rom, `0003`=+244 rom (additive ✓).
+- A single stitched **master profile (rom 0–1268, ~⅓ of the loop)** reproduces all
+  four frames at **< 1.2 px RMS** — proving the four windows are one continuous
+  terrain. That third contains the single `5X 5X 2X 2X` pad cluster.
+- **A screen rendered from this data alone reproduces the MAME frame** (HUD grid,
+  value alignment, arrows, terrain, pads) — i.e. the decoded layout is sufficient to
+  draw a correct game screen. (This was an offline reconstruction from the stitched
+  master profile, not committed — it only confirms the layout is correct.)
+
+The repo demos do NOT use the MAME master profile: `demos/screen.html` (static) and
+`demos/scroll_view.html` (scrolling) render the terrain from the **ROM tile data**
+(`$5000-$507E`, address order) at the fit-to-width silhouette scale, with the HUD
+value alignment + pad multipliers set to the MAME-measured values above.
+
+Still CPU-side / unconfirmed: the **full 3840-rom tile sequence** (these frames cover
+only ⅓; needs a full high-altitude pass to reconstruct + check against the address-
+order `$5000-$507E` decode), exact value/arrow/pad pixel placement, and whether
+difficulty level reshuffles the terrain segments.
 
 ## Letter address table (034598-01.np3, $5000-$57FF)
 
@@ -228,13 +314,16 @@ V $56EA  W $56F4  X $5702  Y $570C  Z $571A  space $5726
 
 Terrain tiles, starfield, HUD labels (`$5458`), digits (`$572A-$5794`, `0`=`O`),
 colon (`$55B2`) and arrows (`$5566`/`$5598`) are all located in `034598` (see the
-region map). Still open:
-- **Terrain tile sequence + pad placement** — which tiles in what order the game
-  lays down, which flats are marked landing pads, and their multipliers/positions
-  (CPU-side). Address order is a valid wrapping default; `multiplier = 1 + 64/width`
-  (64→2X, 32→3X, 16→5X) fits the snapshot, but the real selection is unconfirmed.
-- **HUD value / arrow / pad-label positions** — drawn by the CPU at runtime;
-  `screen.html` matches them to a screenshot, but exact coords are CPU-side.
+region map). **HUD value alignment, speed arrows, and pad multipliers are now
+MEASURED** (see "Gameplay HUD"); the scroll/wrap behaviour is confirmed (see
+"Terrain scroll"). Still open:
+- **Full terrain tile sequence** — the 4 captured frames reconstruct only ⅓ of the
+  3840-rom loop (rom 0–1268). To get the whole loop + check it against the
+  address-order `$5000-$507E` decode, capture a **full right-to-left pass kept at
+  high altitude** (constant far-view scale — needed for the cross-correlation
+  stitch), then reconstruct and compare.
+- **Difficulty / level variation** — whether higher levels reshuffle the terrain
+  segments or pads is unconfirmed.
 - **`034597-01.m3`** — MAME confirms it's a vector ROM at `$5800`, but its DVG
   decode is noise; what it actually holds (and why) is still unclear — re-decode TODO.
 - **Flag** + any remaining picture parts.

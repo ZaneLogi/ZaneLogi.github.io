@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>lunar_lander — scrolling terrain</title>
+  <style>
+    body { background:#111; color:#ccc; font-family:-apple-system,"Segoe UI",sans-serif; margin:16px; }
+    h1 { font-size:16px; margin:0 0 4px; }
+    p  { font-size:12px; color:#888; margin:4px 0; max-width:1024px; line-height:1.5; }
+    code { color:#9c9; }
+    .controls { margin:8px 0; font-size:12px; color:#aaa; display:flex; align-items:center; gap:14px; }
+    .controls input[type=range] { width:240px; vertical-align:middle; }
+    button { background:#222; color:#cdc; border:1px solid #3a6; border-radius:5px; padding:3px 12px; cursor:pointer; font-size:12px; }
+    button:hover { background:#1c241c; }
+    #screen { display:block; background:#000; border:1px solid #333;
+              width:100%; max-width:1024px; height:auto; aspect-ratio:1024/768; }
+  </style>
+</head>
+<body>
+  <h1>Lunar Lander — scrolling terrain</h1>
+  <p>The <b>same terrain that <code>screen.html</code> draws</b> (the <code>$5000-$507E</code> tile
+     vector data, same scale + pad multipliers), scrolled horizontally. It slides <b>one screen-width
+     left</b> (lander flying right, speed arrow <code>→</code>), then <b>reverses</b> and slides back
+     (<code>←</code>) — a back-and-forth sweep. The endpoints are the same view, so each turnaround is
+     seamless. The HUD rides on top. Tile sequence is the address-order approximation, same as
+     <code>screen.html</code> (real CPU order TBD).</p>
+
+  <div class="controls">
+    <label>scroll speed: <input type="range" id="speed" min="40" max="600" value="140"></label>
+    <span><b id="speedval">140</b> units/s</span>
+    <button id="pause">Pause</button>
+  </div>
+
+  <canvas id="screen" width="1024" height="768"></canvas>
+
+  <script type="module" src="./scroll_view.js"></script>
+</body>
+</html>

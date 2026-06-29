@@ -7,10 +7,15 @@
 // Step 1 — HUD base: the $5458 vector composite (the 2×3 in-game HUD label grid)
 //          drawn byte-faithfully at its native position, exactly as hud.html.
 // Step 2 — values, in the ROM's own glyphs, on the three row baselines
-//          (748/720/692 → canvas y 20/48/76):
-//            • left column  — left-aligned at x=184
-//            • right column — right-aligned to x=864
+//          (748/720/692 → canvas y 20/48/76). Alignment MEASURED from a MAME
+//          gameplay frame (2026-06-29), not guessed:
+//            • left column  — LEFT-aligned at x=204 (first char fixed)
+//            • right column — RIGHT-aligned, units digit at x=878 (number grows left)
 //          TIME uses the colon glyph $55B2 (two dots, half-width) between MM/SS.
+// Step 3 — pad multipliers: each marked terrain flat (width<128) carries a
+//          "NX" label, multiplier = 1 + 64/width (16→5X, 32→3X, 64→2X), as the
+//          game draws them. Confirmed against the MAME frame (5X ledges high on
+//          the peak flanks, 2X pads on the wide valley floors).
 
 import { ROM598, ROM599 } from '../discovery_rom_data.js';
 import { runList } from '../dvg.js';
@@ -32,7 +37,8 @@ const GLYPH = {
 
 // Character → glyph subroutine. Digits 1-9 follow the alphabet ($572A…$5794);
 // 0 reuses the letter O ($5688); space and colon are named above.
-const CHAR_GLYPH = { ' ': GLYPH.SPACE, ':': GLYPH.COLON, '0': 'S_5688' };
+const CHAR_GLYPH = { ' ': GLYPH.SPACE, ':': GLYPH.COLON, '0': 'S_5688', 'X': 'S_5702' };
+//                                              0 = letter-O alias ↑   X (pad labels) = $5702 ↑
 [0x572A, 0x5732, 0x5742, 0x5750, 0x575E, 0x576C, 0x577A, 0x5784, 0x5794]
   .forEach((a, i) => { CHAR_GLYPH[String(i + 1)] = 'S_' + a.toString(16).toUpperCase(); });
 
@@ -113,9 +119,10 @@ const TILE_FLATS = {
   S_507E: [[32, 96]],                      // y -32        · 2X
 };
 function drawTerrain(color) {
-  const segs = []; const c = { x: 0, y: 0 };
-  runList(ROM598, [{ op: 'LABS', x: 0, y: 0, globalScale: 0 }, ...TILES.map(k => ({ op: 'JSR', target: k }))],
-          c, 0, (fx, fy, tx, ty) => segs.push({ fx, fy, tx, ty }));
+  // Build tile-by-tile so each tile's start X is known (for pad labels).
+  const segs = []; const tileStart = []; const c = { x: 0, y: 0 };
+  runList(ROM598, [{ op: 'LABS', x: 0, y: 0, globalScale: 0 }], c, 0, () => {});
+  for (const k of TILES) { tileStart.push(c.x); runList(ROM598, [{ op: 'JSR', target: k }], c, 0, (fx, fy, tx, ty) => segs.push({ fx, fy, tx, ty })); }
   let a = 1e9, b = -1e9, e = 1e9, d = -1e9;
   for (const s of segs) { a = Math.min(a, s.fx, s.tx); b = Math.max(b, s.fx, s.tx); e = Math.min(e, s.fy, s.ty); d = Math.max(d, s.fy, s.ty); }
   const sc = W / (b - a);                 // X: fit the full wrapping profile to screen width
@@ -132,6 +139,20 @@ function drawTerrain(color) {
     ctx.lineTo(ox + s.tx * sc, yAt(s.ty));
     ctx.stroke();
   }
+  // Pad multiplier labels — each marked flat (width<128) gets "NX", multiplier =
+  // 1 + 64/width (16→5X, 32→3X, 64→2X), as the game draws above its landing pads.
+  // (Positions follow the address-order silhouette; the real CPU sequence is TBD.)
+  const fyAtX = cx => {                              // terrain fy at DVG x (for label height)
+    for (const s of segs) { const lo = Math.min(s.fx, s.tx), hi = Math.max(s.fx, s.tx);
+      if (cx >= lo && cx <= hi) { const t = hi > lo ? (cx - lo) / (hi - lo) : 0; const yA = s.fx <= s.tx ? s.fy : s.ty, yB = s.fx <= s.tx ? s.ty : s.fy; return yA + (yB - yA) * t; } }
+    return e;
+  };
+  TILES.forEach((k, i) => { for (const [s0, s1] of (TILE_FLATS[k] || [])) {
+    const w = s1 - s0; if (w >= 128) continue;
+    const lab = Math.round(1 + 64 / w) + 'X';        // 16→5X, 32→3X, 64→2X
+    const cx = tileStart[i] + (s0 + s1) / 2;
+    drawText(lab, ox + cx * sc - DIGIT_W, yAt(fyAtX(cx)) + 22, 1, color);
+  }});
 }
 
 // Draw a 034599 lander pose centered at canvas (cx, cy), Y-flipped, at `scale`.
@@ -172,17 +193,20 @@ function render() {
   }
 
   // Values. Rows: SCORE/ALTITUDE y=20, TIME/H-SPEED y=48, FUEL/V-SPEED y=76.
+  // Columns + sample values MEASURED from a MAME gameplay frame (llander rev2,
+  // 1600×1200 snapshot 0001, 2026-06-29): the left column is LEFT-aligned at
+  // x=204; the right column is RIGHT-aligned with its units digit at x=878.
   const v = 'rgba(0,255,0,0.95)';
-  const LEFT_X = 184;                  // left value column (from $5458 padding)
-  const RIGHT_X = 885;                 // right value edge — from snapshot (~13.5% right margin)
+  const LEFT_X = 204;                  // left value column — left-aligned (measured rom x≈204)
+  const RIGHT_X = 878;                 // right value edge  — right-aligned units digit (measured rom x≈878)
 
   drawText('0000', LEFT_X, 20, 1, v);   // SCORE  — 4 digits, left-aligned
   drawText('00:07', LEFT_X, 48, 1, v);  // TIME   — MM : SS (colon = $55B2)
-  drawText('0739', LEFT_X, 76, 1, v);   // FUEL   — 4 digits, left-aligned
+  drawText('8250', LEFT_X, 76, 1, v);   // FUEL   — 4 digits, left-aligned
 
-  drawTextRight('2072', RIGHT_X, 20, 1, v);   // ALTITUDE
-  drawTextRight('104', RIGHT_X, 48, 1, v);    // HORIZONTAL SPEED
-  drawTextRight('59', RIGHT_X, 76, 1, v);     // VERTICAL SPEED
+  drawTextRight('2076', RIGHT_X, 20, 1, v);   // ALTITUDE
+  drawTextRight('106', RIGHT_X, 48, 1, v);    // HORIZONTAL SPEED
+  drawTextRight('61', RIGHT_X, 76, 1, v);     // VERTICAL SPEED
 
   // Direction arrows after the two speed values (pen at the value's right edge;
   // each arrow glyph's own left margin supplies the gap), centered on the digits.
