@@ -31,12 +31,13 @@
     plus their <b>X-mirror</b> — 17 attitudes ~11.25° apart, no upside-down, no <code>yFlip</code>.
   </p>
   <p style="color:#a98">
-    The <b>flame is a CPU-side reconstruction, not ROM data</b> — no flame glyph exists in any
-    of the three vector ROMs. The original almost certainly draws it programmatically (its length
-    tracks the analog throttle, which a fixed glyph can't do); that routine lives in the un-dumped
-    CPU program ROM. This plume is modelled on Asteroids' shared-cursor thrust shape and Seb
-    Lee-Delisle's <i>Moon Lander</i>: a V off the nozzle, length = base + throttle×gain, scaled by
-    a 3-step counter flicker, with the throttle smoothed.
+    The <b>flame is drawn programmatically, not a ROM glyph</b> — no flame glyph exists in any of
+    the three vector ROMs. We build <b>our own</b> version here; the original <code>FLAME</code>
+    routine has since been located in the program source and <b>differs deliberately</b> (the arcade
+    flame <i>widens</i> with thrust at fixed length; ours <i>lengthens</i> — full comparison in
+    <code>CLAUDE.md</code> "Thrust flame"). This plume is modelled on Asteroids' shared-cursor thrust
+    shape and Seb Lee-Delisle's <i>Moon Lander</i>: a V off the nozzle, length = base + throttle×gain,
+    scaled by a counter flicker, with the throttle smoothed.
   </p>
 
   <div class="controls">

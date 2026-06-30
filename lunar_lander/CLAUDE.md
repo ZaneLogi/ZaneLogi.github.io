@@ -11,10 +11,16 @@ Asteroids. "Faithful" matters: behavior should match the original ROM.
 
 ## Status
 
-ROM-decode stage — eight vector-ROM demo/survey pages, all faithful
-byte-decodes. No gameplay / runtime / CPU-side port yet. HUD value layout,
-pad multipliers, and the horizontal-scroll/wrap behaviour are now MEASURED
-against MAME (see "Gameplay HUD" + "Terrain scroll" below).
+ROM-decode stage — ten demo pages: nine faithful vector-ROM byte-decodes
+plus a **source-faithful flight-physics demo** (`physics.html`). No full gameplay
+port yet. HUD value layout, pad multipliers, and the horizontal-scroll/wrap
+behaviour are MEASURED against MAME (see "Gameplay HUD" + "Terrain scroll" below).
+
+**The original program source has been located** (`historicalsource/lunar-lander`,
+local clone `D:\tmp\lunar_lander_source\` — main module `A34573.1A` by Rich Moore).
+So the physics/gameplay is now a **routine-level translation** target (source in hand),
+not a measure-and-reconstruct one. The physics is decoded in
+`docs/research_physics.md`; the picture ROMs (`034597/8/9`) are still our own byte-decode.
 - **Font sheet** (`demos/vector_rom.html`) — the A-Z + space glyphs from
   `034598-01.np3`.
 - **Lander poses** (`demos/lander.html`) — the 9 tilt attitudes from
@@ -64,6 +70,13 @@ against MAME (see "Gameplay HUD" + "Terrain scroll" below).
   `dy=0`). HUD on top, speed slider + pause. (The real game *wraps* one way — see
   "Terrain scroll" — the ping-pong is a demo choice, not faithful behaviour.) Tile
   sequence is the address-order approximation, same as `screen.html` (real CPU order TBD).
+- **Flight physics** (`demos/physics.html`) — fly the lander on a scrolling starfield with the
+  **source-faithful flight model** (gravity `$11`, hover at throttle 8, thrust along the ship
+  axis, inertial coasting, no drag) — a routine-level translation of the original
+  (`A34573.1A`; see `docs/research_physics.md`). Lander centred, world scrolls (the arcade
+  camera model); four difficulty modes (gravity / friction / 1.5× thrust / rotational inertia).
+  **A demo, NOT real gameplay** — e.g. starting fuel is tied to the difficulty dropdown for
+  convenience, whereas the source makes fuel-per-coin an independent operator DIP (§7.2).
 
 (Note: a faithful byte-decode renders the lander legs correctly — earlier
 non-faithful attempts had "legs too small"; staying byte-true to the ROM
@@ -97,9 +110,10 @@ version). The two banks are the same rotation set at two sizes:
 | zoom-in (close) | `$4BA2` | `$4916 $495C $49AA $49F6 $4A42 $4A80 $4AC8 $4B16 $4B64` | ~29 units | close view |
 
 `demos/rotation.html` renders the full sweep; it orders frames by each
-shape's measured orientation (the real *direction→pose+flip* fold lives
-in the un-decoded LL CPU ROM, so the ordering is geometric, not the
-original's exact thresholds). Each lander pivots about the **DVG origin
+shape's measured orientation (the real *direction→pose+flip* fold is in the
+program source — `MODULE`/`FRCMLT` in `A34573.1A`, driven by `SHIP` 0–31 =
+11.25°/step — but rotation.html still orders geometrically, not yet re-derived
+from source). Each lander pivots about the **DVG origin
 `(0,0)`** (≈ the cabin-octagon centre, shown as a red dot) — a fixed
 point, chosen over a per-frame bounding-box centre that visibly wobbled.
 Drawing at arbitrary sizes is also possible via DVG `globalScale` (doubles
@@ -231,8 +245,9 @@ Working model for the eventual render/runtime port:
   sits in y 0–767. Don't be surprised if intermediate cursor math touches
   y > 767.
 
-**How this was deduced** (we do NOT have the LL program-ROM disassembly):
-the HUD composite `$5458` is the only ROM-**absolute** anchor we have — it
+**How this was deduced** (from the picture ROMs alone — the program source is now
+in hand and can confirm it directly, e.g. the `LABS`/`VGRAM` usage in `A34573.1A`):
+the HUD composite `$5458` is the only ROM-**absolute** anchor in the picture ROMs — it
 opens with `LABS (100, 748)` and its text row spans y `692–760`. For a
 top-of-screen status line that only makes sense if the visible ceiling is
 ≈768, so the field is `[0, 768)` top-aligned. Notably LL does **not** use
@@ -257,12 +272,44 @@ list and use whichever exists on the machine you're on:
 |------------------|----------------|-------|
 | `034598-01.np3`  | CPU `$5000-$57FF` | picture/glyph ROM — terrain tiles, starfield, the HUD label grid (`$5458`), the A-Z + space font, digits, colon, and arrows (see "034598 region map" below) |
 | `034599-01.r3`   | CPU `$4800-$4FFF` | picture ROM #2 — the lander (8 base octagons `$4800-$48F8` + 9 tilt poses `$4916-$4B64`, dispatch table `$4BA2`; a second 9-frame rotation set dispatched from `$4DF4`); **explosion-debris glyphs `$4F1C-$4FBE`** (see "034599 explosion debris" below); flag still TBD (terrain + digits live in `034598`) |
-| `034597-01.m3`   | CPU `$5800-$5FFF` | third vector ROM (base **confirmed** via MAME `llander`). Its DVG decode is noise — **not** the terrain (terrain is in `034598` `$5000-$507E`); actual content/purpose still unclear. |
+| `034597-01.m3`   | CPU `$5800-$5FFF` | **Vector ROM — FOREIGN VERSION ONLY** (per `LUNAR.DOC`). Holds the foreign-language vector content: foreign character glyphs + `.ASCVG` message strings + offset tables (`FTBLNG=$5800`, `FORMSG`, `FMESSG=$5E69`, `F.MOFF=$5FA4`). Absent/unused in a US cabinet, so decoding our dump as *English shapes* gives noise — that's the foreign ROM, not a decode bug. |
 
 File offset = `addr − base` (`$5000` for `034598`, `$4800` for `034599`,
 `$5800` for `034597`). The committed artifacts are the **decoded**
 `vector_rom_data.js` (font), `lander_rom_data.js` (lander), and
 `discovery_rom_data.js` (full survey) — not the ROMs themselves.
+
+### Program source (the gameplay/physics code)
+
+The original **commented 6502 program source** is public — `historicalsource/lunar-lander`,
+cloned per-PC to `D:\tmp\lunar_lander_source\` (main module `A34573.1A` by Rich Moore;
+`.1B`/`.1C`/`.1D` are the other linked modules; `VECAN.XX` is the font source; `LUNAR.MAP`
+the hardware I/O map). This **supersedes** the earlier "un-dumped program ROM" assumption:
+the physics, scroll, flame, scoring, and collision are all readable. Decoded in
+`docs/research_physics.md`. The repo **also carries the labeled SOURCE for the three
+vector ROMs** — `A34598.1B` ("LUNMIN": terrain sections/segments, starfields, the `VECAN`
+font), `A34599.1C` ("LUNVEC": the two lander banks + explosion pieces), and `A34597.1A`
+(**foreign-version only**) — so the vector data has named definitions, not just our
+byte-decode. (The per-PC `.np3` dumps still feed the build scripts.)
+
+### How the vector data is used (display list)
+
+The CPU never draws; each frame it assembles a **VG-RAM display list** of DVG instructions
+and the hardware runs it, jumping into the picture ROMs. Two usage modes:
+- **Static shapes** (terrain, starfield, font, HUD, arrows) → `LABS` (position) + `JSRL`
+  (jump to the ROM subroutine), drawn in place — the picture ROM is a *library* the CPU
+  stitches by reference. **Terrain = 16 sections `SECT01-16`** (each 256 wide = a JSRL list
+  of segments `SEG001-024`), ordered by **`LNMIN`** (which repeats → the wrap) and
+  positioned by **`MINTBL`**. That's the real terrain sequence — it **supersedes the
+  address-order guess** in `screen.html`/`scroll_view.html`. The **far scape is built at
+  runtime** by `TRANS`, not stored.
+- **The lander** (mirrored) → `MODULE` folds `SHIP`(0-31) → 9 poses + X/Y sign masks, picks
+  the bank by zoom (`SHIPS` near / `LITTLE SHIPS` far), then **copies the pose's vectors
+  into VG RAM `EOR`-flipping the delta signs** (`SHPINV`) to mirror it (our `xFlip`/`yFlip`
+  at render time = the same thing).
+
+Full catalog (section→segment sequences, lander dispatch, starfield/font/messages) in
+**`docs/research_vector_usage.md`**.
 
 ## Build + run
 
@@ -284,6 +331,7 @@ python lunar_lander/tools/build_discovery.py
 #   /lunar_lander/demos/starfield.html    (034598 starfield; editable-range close-up)
 #   /lunar_lander/demos/screen.html       (full-screen layout, 1024x768; MAME-measured HUD/pads)
 #   /lunar_lander/demos/scroll_view.html  (screen.html terrain, ping-pong scroll: slide one screen, reverse)
+#   /lunar_lander/demos/physics.html      (source-faithful flight physics on a scrolling starfield)
 python -m http.server -b 127.0.0.1 8080
 ```
 
@@ -394,21 +442,67 @@ O $5688  P $5694  Q $56A2  R $56B4  S $56C4  T $56D2  U $56DE
 V $56EA  W $56F4  X $5702  Y $570C  Z $571A  space $5726
 ```
 
-## Next steps (user will provide info)
+## Planned gameplay module layout (when we build the runtime)
 
-Terrain tiles, starfield, HUD labels (`$5458`), digits (`$572A-$5794`, `0`=`O`),
-colon (`$55B2`) and arrows (`$5566`/`$5598`) are all located in `034598` (see the
-region map). **HUD value alignment, speed arrows, and pad multipliers are now
-MEASURED** (see "Gameplay HUD"); the scroll/wrap behaviour is confirmed (see
-"Terrain scroll"). Still open:
-- **Full terrain tile sequence** — the 4 captured frames reconstruct only ⅓ of the
-  3840-rom loop (rom 0–1268). To get the whole loop + check it against the
-  address-order `$5000-$507E` decode, capture a **full right-to-left pass kept at
-  high altitude** (constant far-view scale — needed for the cross-correlation
-  stitch), then reconstruct and compare.
-- **Difficulty / level variation** — whether higher levels reshuffle the terrain
-  segments or pads is unconfirmed.
-- **`034597-01.m3`** — MAME confirms it's a vector ROM at `$5800`, but its DVG
-  decode is noise; what it actually holds (and why) is still unclear — re-decode TODO.
-- **Flag** + any remaining picture parts.
-The user supplies ROM context per shape set.
+The eventual gameplay will be **ES6 modules split by subsystem** — Seb Lee-Delisle's
+`Lander.js`/`game.js`/… shape, and the repo's own modular exemplar `mario_physics/` — NOT
+one big file. This mirrors the original's own decomposition (`A34573.1A` links `LUNAR`/
+`LUNVCT`/`LUNCON`/`LUNINT` plus the separate vector-ROM source), so modular files and
+faithful **routine-level translation** reinforce each other: each module holds the ported
+routines with their `A34573.1A:nnnn` citations.
+
+**`index.html` migration.** Today `index.html` is the demo hub (only because there's no
+game yet). During the build, a root **`play.html` boots `main.js`** so the demo hub stays
+live at `index.html`. **On release, promote `play.html` → `index.html`** — a game project's
+root should boot the game (like the sibling clones, and so the built-in preview at the
+folder root plays the game) — and **move the current demo hub to `demos/index.html`**
+(linked from the game; the repo-root index at `:8080/` still lists everything).
+
+The demos are the **validated building blocks** to extract from (repo convention: demos
+validate techniques later reused in the games). `demos/physics.html` is already a
+single-file proto-gameplay (physics + starfield + HUD + lander + flame + input + loop).
+
+| Module | Role | Ports (source) | Leverage (demo) |
+|---|---|---|---|
+| `main.js` | boot, canvas, fixed-timestep loop, per-frame order | main loop `:409-485`, `LUNINT` | physics.js |
+| `lander.js` | flight + craft: `ACCEL`, `THRLVL`/`FRCMLT`, `ROTSHP`(+inertia), `BURN`, `MODULE` pose+flame | `LUNAR`+`LUNVEC` | thrust.js + physics.js |
+| `landscape.js` | scape assembly + scroll + zoom + collision: `SCAPE`, `LNMIN`/`MINTBL`, `SCROLL`/`SCRADD`, `SCAPCHG`/`SCAPMJR`/`SCRLUP`, `DECODE` | `LUNMIN` + scape | screen.js + scroll_view.js |
+| `starfield.js` | `STARS` (major/minor) | `STARS`, `598:306/401` | physics.js + demos/starfield.js |
+| `display_info.js` | HUD `$5458` + `DISPLY` values, digits/arrows/messages | HUD/DISPLY | screen.js + physics.js |
+| `input.js` | switches (rotate/abort/throttle), `TYPE` difficulty, `CREDIT` coin/fuel | `:687`/`:722`/`ROTCHK` | physics.js |
+| `state.js` | game-state machine (`GAMODE` attract/play/land), `PLYMOD`, scoring | `DOGAME`/`GAMODE` | — |
+| `dvg.js`, `*_rom_data.js` | renderer + decoded shapes (reused as-is) | — | (shared) |
+
+**Two seams to design first** (the source's shared structure):
+- a small **display-list / renderer** layer on `dvg.js` that each module contributes
+  `LABS`+`JSRL`/shapes to (the VG-RAM analog; cf. Seb's `game.js` owning the context);
+- a shared **`state.js`** for the cross-cutting values the source keeps in zero page
+  (`VELX`, `SHIP`, `FUEL`, `SCROLL`, `LUNARNUM`, …).
+
+**Not lift-and-drop — extract + consolidate + upgrade:**
+- demos duplicate code (attitude/flame in `thrust.js` AND `physics.js`; HUD in `screen.js`
+  AND `physics.js`) → consolidate into one module each;
+- demo simplifications → faithful (terrain address-order → real `LNMIN`/`MINTBL` sequence;
+  keep keyboard throttle / generated starfield by choice — see the demo labels);
+- viewer demos (`lander.js`, `starfield.js`, `gallery.js`, `hud.js`, `vector_rom.js`) —
+  reuse their extraction/decode logic, not the viewer shell.
+
+**Net-new (no demo has it yet, but fully documented):** the **landscape/collision** chain —
+`DECODE` (lander-corner → terrain distance), landing/crash detection, scoring, and the zoom
+transition — see `docs/research_physics.md` §9.1 + `docs/research_vector_usage.md` §3.
+`physics.html` has no terrain, so this is the main remaining build.
+
+## Next steps
+
+Having the original source resolved most of the old decode unknowns:
+- **Terrain sequence** — it's the `LNMIN` section order + `MINTBL` LABS (16 sections of
+  segments `SEG001-024`), not address order (`docs/research_vector_usage.md` §3). The
+  MAME-frame-stitch approach is moot.
+- **Difficulty / level variation** — decoded: gravity / friction / 1.5× thrust / rotational
+  inertia per `PLYMOD`, plus the operator fuel-per-coin DIP (`docs/research_physics.md` §7).
+- **`034597-01.m3`** — a **FOREIGN-VERSION-ONLY** vector ROM, not "unclear" (see the region map).
+- **"Flag"** — was the thrust flame; it's the programmatic `FLAME` routine (see "Thrust flame").
+
+The open work is now **building the gameplay runtime** (see "Planned gameplay module layout"
+above): the flight half is demo-proven (`physics.html`); the landscape / collision / landing /
+scoring / zoom half is documented but unbuilt.

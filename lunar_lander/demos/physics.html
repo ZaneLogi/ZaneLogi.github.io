@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>lunar_lander — flight physics (source-faithful) on a scrolling starfield</title>
+  <style>
+    body { background:#0c0c0c; color:#ccc; font-family:-apple-system,"Segoe UI",sans-serif; margin:16px; }
+    h1 { font-size:17px; margin:0 0 4px; }
+    p  { font-size:12px; color:#999; margin:6px 0; max-width:1000px; line-height:1.5; }
+    code { color:#9c9; } b { color:#cdc; }
+    canvas { background:#000; border:1px solid #333; width:1024px; max-width:100%; aspect-ratio:1024/768; display:block; }
+    .controls { display:flex; align-items:center; gap:18px; margin:12px 0 6px; font-size:13px; flex-wrap:wrap; }
+    .controls label { display:flex; align-items:center; gap:7px; }
+    select { background:#222; color:#cdc; border:1px solid #444; border-radius:4px; padding:3px 6px; }
+    button { background:#222; color:#cdc; border:1px solid #444; border-radius:4px; padding:4px 12px; cursor:pointer; font-size:13px; }
+    button:hover { background:#2c2c2c; }
+    #readout { font-family:monospace; font-size:12px; color:#8c8; margin-top:6px; }
+    .hint { color:#777; }
+    kbd { background:#1c1c1c; border:1px solid #3a3a3a; border-radius:3px; padding:0 5px; font-family:monospace; color:#cdc; }
+  </style>
+</head>
+<body>
+  <h1>Lunar Lander — flight physics on a scrolling starfield</h1>
+  <p>
+    Source-faithful flight model — a routine-level translation of Rich Moore's original
+    (<code>docs/research_physics.md</code>). Real constants: <b>gravity <code>$11</code> (17)</b>,
+    thrust <code>TRSTAB</code> (max <code>$1C</code>=28), so the craft <b>hovers at throttle 8/15</b>
+    (where thrust == gravity) and climbs above it. Gravity is Y-only; <b>no drag</b> (except
+    Training friction) — true inertial coasting.
+  </p>
+  <p>
+    No terrain: the <b>lander stays centred and the starfield scrolls</b> to show motion —
+    the arcade's own camera model (<code>SCROLL</code>/<code>SCRADD</code>). Horizontal drift
+    scrolls the field sideways; climbing/descending scrolls it vertically.
+    <span class="hint">(Generated even-spread starfield; the ROM's fixed 61-point field is in
+    starfield.html. Flame is our own design — see CLAUDE.md.)</span>
+  </p>
+
+  <div class="controls">
+    <label>difficulty
+      <select id="difficulty">
+        <option value="cadet">Cadet (plain)</option>
+        <option value="training">Training (friction)</option>
+        <option value="prime">Prime (2× gravity, 1.5× thrust)</option>
+        <option value="command">Command (rotational inertia)</option>
+      </select></label>
+    <label><input id="red" type="checkbox"> 🔴 red flame <span class="hint">(non-faithful)</span></label>
+    <button id="reset">Reset</button>
+  </div>
+
+  <canvas id="screen" width="1024" height="768"></canvas>
+  <div id="readout">—</div>
+  <p class="hint">Fly it: <kbd>←</kbd><kbd>→</kbd> (or <kbd>A</kbd>/<kbd>D</kbd>) rotate ·
+     <kbd>↑</kbd>/<kbd>↓</kbd> (or <kbd>W</kbd>/<kbd>S</kbd>) throttle up/down (it holds) ·
+     <kbd>Space</kbd> abort. Dial throttle to <b>8/15</b> to hover (thrust == gravity);
+     below that you fall and accelerate.</p>
+
+  <script type="module" src="./physics.js"></script>
+</body>
+</html>

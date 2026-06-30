@@ -23,11 +23,19 @@
   <h1>Lunar Lander — vector-ROM demos</h1>
   <p class="lead">
     Faithful byte-decodes of Atari <b>Lunar Lander</b> (1979), which drives the same
-    Atari DVG as Asteroids. No gameplay/runtime yet — these pages render shapes straight
-    from the picture ROMs through <code>dvg.js</code>. Pick one:
+    Atari DVG as Asteroids. Most pages render shapes straight from the picture ROMs through
+    <code>dvg.js</code>; the <b>flight-physics</b> demo is a source-faithful translation now
+    that the original program source is in hand. Pick one:
   </p>
 
   <div class="grid">
+    <a class="card" href="demos/physics.html">
+      <div class="name">Flight physics 🚀</div>
+      <p class="desc">Fly the lander on a scrolling starfield with the <b>real source physics</b>
+         (gravity <code>$11</code>, hover at throttle 8) — a routine-level translation of Rich
+         Moore's original. Four difficulty modes; the craft stays centred, the world scrolls.</p>
+      <div class="src">demos/physics.html · A34573.1A source</div>
+    </a>
     <a class="card" href="demos/rotation.html">
       <div class="name">360° rotation ↻</div>
       <p class="desc">The lander spun through a full circle (9-pose quadrant + X/Y mirror),
@@ -37,8 +45,8 @@
     <a class="card" href="demos/thrust.html">
       <div class="name">Thrust flame 🔥</div>
       <p class="desc">The lander tilted across its <b>gameplay range</b> (head left → up → right,
-         ±90°, no upside-down) with a throttle-driven <b>thrust flame</b> — a CPU-side
-         reconstruction (no flame glyph exists in ROM), modelled on Asteroids + Seb's Moon Lander.</p>
+         ±90°, no upside-down) with a throttle-driven <b>thrust flame</b> — drawn
+         programmatically (no flame glyph exists in ROM; our own design), modelled on Asteroids + Seb's Moon Lander.</p>
       <div class="src">demos/thrust.html · 034599</div>
     </a>
     <a class="card" href="demos/lander.html">

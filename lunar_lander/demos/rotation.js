@@ -8,9 +8,9 @@
 // Bank-2 (zoom-out) only exists in the exploratory discovery_rom_data.js, so we
 // source both banks from there for consistency with gallery.html.
 //
-// The direction->pose+flip fold itself lives in the (un-decoded) LL CPU ROM, so
-// frames here are ordered by each rendered shape's *actual* orientation, which
-// guarantees a smooth sweep without needing the original's exact thresholds.
+// The direction->pose+flip fold itself lives in the program source (now in hand:
+// MODULE/FRCMLT in A34573.1A, driven by SHIP 0-31); frames here are still ordered by
+// each rendered shape's *actual* orientation, for a smooth sweep without re-deriving it.
 
 import { ROM599 } from '../discovery_rom_data.js';
 import { runList } from '../dvg.js';
