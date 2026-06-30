@@ -11,13 +11,14 @@ Asteroids. "Faithful" matters: behavior should match the original ROM.
 
 ## Status
 
-ROM-decode stage — ten demo pages: nine faithful vector-ROM byte-decodes
-plus a **source-faithful flight-physics demo** (`physics.html`). No full gameplay
+ROM-decode stage — eleven demo pages: nine faithful vector-ROM byte-decodes,
+a **source-faithful flight-physics demo** (`physics.html`), and a **source-faithful
+crash-explosion demo** (`explosion.html`, the `BOOM` routine). No full gameplay
 port yet. HUD value layout, pad multipliers, and the horizontal-scroll/wrap
 behaviour are MEASURED against MAME (see "Gameplay HUD" + "Terrain scroll" below).
 
 **The original program source has been located** (`historicalsource/lunar-lander`,
-local clone `D:\tmp\lunar_lander_source\` — main module `A34573.1A` by Rich Moore).
+cloned per-PC — see "Program source" below for the paths — main module `A34573.1A` by Rich Moore).
 So the physics/gameplay is now a **routine-level translation** target (source in hand),
 not a measure-and-reconstruct one. The physics is decoded in
 `docs/research_physics.md`; the picture ROMs (`034597/8/9`) are still our own byte-decode.
@@ -49,6 +50,12 @@ not a measure-and-reconstruct one. The physics is decoded in
   throttle-driven **thrust flame**. The flame is a **CPU-side reconstruction, NOT
   ROM data** — no flame glyph exists in any of the three vector ROMs (see "Thrust
   flame" below). Based on `rotation.html`'s decode + DVG helpers.
+- **Crash explosion** (`demos/explosion.html`) — a **routine-level translation of
+  the `BOOM` routine** (`A34573.1A` + the `A34599.1C` debris pictures): the intact
+  lander at centre bursts into a tumbling cabin octagon + 6 fragments that fly out
+  and wink out over `INDEX` 1→127, then re-forms and replays with a new random
+  1-of-4 pattern. Controls: pattern picker, zoom, pause + `INDEX` scrub. See
+  "034599 explosion debris" below + `docs/research_explosion.md`.
 - **Starfield** (`demos/starfield.html`) — the `$5244-$53E6` starfield
   (61 bright points) enlarged with a focus panel (points rendered as
   visible dots). The CPU-address range is editable, so it also serves as
@@ -120,28 +127,35 @@ Drawing at arbitrary sizes is also possible via DVG `globalScale` (doubles
 per step; wraps at gs≥6 from the 4-bit `(localScale+globalScale) & 0x0F`
 mask).
 
-### 034599 explosion debris (`$4F1C-$4FBE`) — CONFIRMED from MAME
+### 034599 explosion debris (`$4F1C-$4FBE`) — DECODED from source (`BOOM`)
 
 The lander-crash debris field is drawn from **12 small fragment glyphs** at
-`$4F1C-$4FBE` (confirmed against a MAME crash snapshot, 2026-06-30 — "THERE WERE
-NO SURVIVORS" screen). The crash routine draws a **random subset** of them
-scattered at the impact point:
+`$4F1C-$4FBE`. The full mechanism is now decoded from the program source
+(`A34573.1A` routine `BOOM` + `A34599.1C` pictures) — see
+**`docs/research_explosion.md`**, ported in **`demos/explosion.html`**. The 12
+glyphs are the source's `PIECE1..PIEC12`; their names confirm the earlier
+eyeballed gallery labels:
 
-| addr | shape | addr | shape |
-|---|---|---|---|
-| `$4F1C` | leg strut | `$4F6E` | box / square (panel) |
-| `$4F28` | stepped bracket | `$4F78` | M / trapezoid zigzag |
-| `$4F3A` | chevron (shallow V) | `$4F8E` | thin rectangle (panel) |
-| `$4F46` | triangle wedge | `$4FA0` | leg strut |
-| `$4F52` | Z-step bracket | `$4FAE` | leg strut |
-| `$4F62` | leg strut | `$4FBE` | diamond (rotated square) |
+| addr | name | shape | addr | name | shape |
+|---|---|---|---|---|---|
+| `$4F1C` | PIECE1 | leg strut | `$4F6E` | PIEC7 | box / square (panel) |
+| `$4F28` | PIECE2 | stepped bracket | `$4F78` | PIEC8 | M / trapezoid zigzag |
+| `$4F3A` | PIECE3 | chevron (shallow V) | `$4F8E` | PIEC9 | thin rectangle (panel) |
+| `$4F46` | PIECE4 | triangle wedge | `$4FA0` | PIEC10 | leg strut |
+| `$4F52` | PIECE5 | Z-step bracket | `$4FAE` | PIEC11 | leg strut |
+| `$4F62` | PIECE6 | leg strut | `$4FBE` | PIEC12 | diamond (rotated square) |
 
-The prominent **octagon** in the debris is **not** in this range — it's the
-**cabin pod** (a `$4800`-series base shape), drawn semi-intact while the struts/
-panels scatter. So: a crash = cabin octagon + N random `$4F1C-$4FBE` fragments.
-(This resolves the old survey guesses — `$4F28` "box?", `$4F78` "peak/flag?" — both
-are debris.) All 12 are JSR targets, so they're already in `discovery_rom_data.js`
-/ `gallery.html`. Not yet ported to a demo or curated runtime data.
+**The mechanism (supersedes the old "random subset" read):** a crash is a fixed
+**7-piece** animation over a step counter `INDEX` (1→127, +1 every other frame,
+~4.2 s) — **1 tumbling cabin octagon** (a `$4800`-series base shape, pose =
+`INDEX & 7`, lasts the whole run) **+ 6 debris fragments**. Each piece flies out
+from the impact point at a constant velocity (offset = `delta·INDEX`) and winks
+out at its own staggered time (`BOOMC1` = `93/96/100/109/112/116/127`). The
+**"randomness" is a 1-of-4 pattern pick** (`RNDOM` 0–3 selects one of four
+hand-authored `BOOMA{n}`/`BOOMB{n}` velocity+glyph sets), **not** a random subset
+of the 12 glyphs. Positioning is a single **cumulative beam walk** (`VGVCTR` emits
+relative dark moves). All 12 glyphs + 8 octagons are JSR targets in
+`discovery_rom_data.js` / `gallery.html`.
 
 ### Thrust flame — programmatic (no ROM glyph); our design vs the original
 
@@ -149,8 +163,8 @@ There is **no thrust-flame glyph in any of the three vector ROMs** — the galle
 survey (every JSR/JMP target in 034597/8/9) turns up none. The flame is drawn
 **programmatically by CPU code** — now **confirmed**: the original commented source
 has been located, `FLAME` ("ADD FLAME TO SHIP") in `A34573.1A` of
-<https://github.com/historicalsource/lunar-lander> (local clone
-`D:\tmp\lunar_lander_source\`; full file map in the cross-PC sync memory). So it's a
+<https://github.com/historicalsource/lunar-lander> (cloned per-PC — see "Program
+source" below; full file map in the cross-PC sync memory). So it's a
 software mechanism, not a hardware-only "drop". **`demos/thrust.html` keeps our own
 flame construction by choice — it is NOT a byte-port of `FLAME`**; the original is
 recorded below so the difference is on record (revisit only if we want arcade-exact).
@@ -282,7 +296,9 @@ File offset = `addr − base` (`$5000` for `034598`, `$4800` for `034599`,
 ### Program source (the gameplay/physics code)
 
 The original **commented 6502 program source** is public — `historicalsource/lunar-lander`,
-cloned per-PC to `D:\tmp\lunar_lander_source\` (main module `A34573.1A` by Rich Moore;
+cloned per-PC (the exact path differs between machines, same convention as the ROM dumps
+above): `D:\tmp\lunar_lander_source\` or `C:\Z_Temp\lunar_lander_source\` — main module
+`A34573.1A` by Rich Moore;
 `.1B`/`.1C`/`.1D` are the other linked modules; `VECAN.XX` is the font source; `LUNAR.MAP`
 the hardware I/O map). This **supersedes** the earlier "un-dumped program ROM" assumption:
 the physics, scroll, flame, scoring, and collision are all readable. Decoded in
@@ -332,6 +348,7 @@ python lunar_lander/tools/build_discovery.py
 #   /lunar_lander/demos/screen.html       (full-screen layout, 1024x768; MAME-measured HUD/pads)
 #   /lunar_lander/demos/scroll_view.html  (screen.html terrain, ping-pong scroll: slide one screen, reverse)
 #   /lunar_lander/demos/physics.html      (source-faithful flight physics on a scrolling starfield)
+#   /lunar_lander/demos/explosion.html    (source-faithful crash explosion: BOOM routine, 1-of-4 random pattern)
 python -m http.server -b 127.0.0.1 8080
 ```
 

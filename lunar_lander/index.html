@@ -24,8 +24,8 @@
   <p class="lead">
     Faithful byte-decodes of Atari <b>Lunar Lander</b> (1979), which drives the same
     Atari DVG as Asteroids. Most pages render shapes straight from the picture ROMs through
-    <code>dvg.js</code>; the <b>flight-physics</b> demo is a source-faithful translation now
-    that the original program source is in hand. Pick one:
+    <code>dvg.js</code>; the <b>flight-physics</b> and <b>crash-explosion</b> demos are
+    source-faithful translations now that the original program source is in hand. Pick one:
   </p>
 
   <div class="grid">
@@ -35,6 +35,13 @@
          (gravity <code>$11</code>, hover at throttle 8) — a routine-level translation of Rich
          Moore's original. Four difficulty modes; the craft stays centred, the world scrolls.</p>
       <div class="src">demos/physics.html · A34573.1A source</div>
+    </a>
+    <a class="card" href="demos/explosion.html">
+      <div class="name">Crash explosion 💥</div>
+      <p class="desc">The lander blows up — a routine-level port of the <code>BOOM</code> routine:
+         a tumbling cabin octagon + 6 fragments fly out and wink out over <code>INDEX</code> 1→127,
+         then replay with a new <b>random 1-of-4 pattern</b>. Pattern picker, zoom, INDEX scrub.</p>
+      <div class="src">demos/explosion.html · A34573.1A + 034599</div>
     </a>
     <a class="card" href="demos/rotation.html">
       <div class="name">360° rotation ↻</div>
