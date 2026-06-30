@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>lunar_lander — thrust flame + gameplay rotation range</title>
+  <style>
+    body { background:#111; color:#ccc; font-family:-apple-system,"Segoe UI",sans-serif; margin:16px; }
+    h1 { font-size:17px; margin:0 0 4px; }
+    p  { font-size:12px; color:#999; margin:6px 0; max-width:980px; line-height:1.5; }
+    code { color:#9c9; }
+    b { color:#cdc; }
+    canvas { background:#000; border:1px solid #333; image-rendering:pixelated; }
+    .controls { display:flex; align-items:center; gap:18px; margin:14px 0 8px; font-size:13px; flex-wrap:wrap; }
+    .controls label { display:flex; align-items:center; gap:7px; }
+    input[type=range]{ width:230px; }
+    select { background:#222; color:#cdc; border:1px solid #444; border-radius:4px; padding:3px 6px; }
+    #readout { font-family:monospace; font-size:12px; color:#8c8; margin-top:6px; }
+    .hint { color:#777; }
+  </style>
+</head>
+<body>
+  <h1>Lunar Lander — thrust flame &amp; the gameplay rotation range</h1>
+  <p>
+    The craft tilts within <b>one half-circle only</b>: head pointing
+    <b>left → up → right</b>, so the engine always has a downward component — it can
+    never point its head below horizontal. In engine-heading terms (the direction the
+    thrust points): <code>head-left = 0°</code>, <code>standing = 270°</code>,
+    <code>head-right = 180°</code> → the valid arc <b>0 → 270 → 180</b>. Here that's
+    parametrised as <b>tilt ∈ [−90°, +90°]</b> (0 = upright). This maps to the
+    <b>9 stored poses</b> (on-side → upright, stand = <code>$4B64</code>/<code>$4DB6</code>)
+    plus their <b>X-mirror</b> — 17 attitudes ~11.25° apart, no upside-down, no <code>yFlip</code>.
+  </p>
+  <p style="color:#a98">
+    The <b>flame is a CPU-side reconstruction, not ROM data</b> — no flame glyph exists in any
+    of the three vector ROMs. The original almost certainly draws it programmatically (its length
+    tracks the analog throttle, which a fixed glyph can't do); that routine lives in the un-dumped
+    CPU program ROM. This plume is modelled on Asteroids' shared-cursor thrust shape and Seb
+    Lee-Delisle's <i>Moon Lander</i>: a V off the nozzle, length = base + throttle×gain, scaled by
+    a 3-step counter flicker, with the throttle smoothed.
+  </p>
+
+  <div class="controls">
+    <label>tilt
+      <input id="tilt" type="range" min="-90" max="90" step="0.5" value="0"></label>
+    <label>throttle
+      <input id="throttle" type="range" min="0" max="100" value="60"></label>
+    <label>bank
+      <select id="bank">
+        <option value="in">zoom-in (close, ~29u)</option>
+        <option value="out">zoom-out (far, ~15u)</option>
+      </select></label>
+    <label><input id="red" type="checkbox"> 🔴 red flame <span class="hint">(non-faithful)</span></label>
+  </div>
+
+  <canvas id="cv" width="420" height="420"></canvas>
+  <div id="readout">—</div>
+  <p class="hint">Keyboard: ← → (or A/D) tilt by one pose · hold ↑ (or W) for full throttle.
+     Red dot = the DVG origin <code>(0,0)</code>, the fixed pivot (≈ cabin centre).</p>
+
+  <script type="module" src="./thrust.js"></script>
+</body>
+</html>

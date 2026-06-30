@@ -38,6 +38,11 @@ against MAME (see "Gameplay HUD" + "Terrain scroll" below).
   full circle at both ROM sizes (see "Lander rotation" below); also
   demonstrates `globalScale` resizing. Sources both banks from
   `discovery_rom_data.js`.
+- **Thrust flame** (`demos/thrust.html`) — the lander across its **gameplay
+  rotation range** (head left → up → right, tilt ±90°, never upside-down) with a
+  throttle-driven **thrust flame**. The flame is a **CPU-side reconstruction, NOT
+  ROM data** — no flame glyph exists in any of the three vector ROMs (see "Thrust
+  flame" below). Based on `rotation.html`'s decode + DVG helpers.
 - **Starfield** (`demos/starfield.html`) — the `$5244-$53E6` starfield
   (61 bright points) enlarged with a focus panel (points rendered as
   visible dots). The CPU-address range is editable, so it also serves as
@@ -124,6 +129,84 @@ panels scatter. So: a crash = cabin octagon + N random `$4F1C-$4FBE` fragments.
 are debris.) All 12 are JSR targets, so they're already in `discovery_rom_data.js`
 / `gallery.html`. Not yet ported to a demo or curated runtime data.
 
+### Thrust flame — programmatic (no ROM glyph); our design vs the original
+
+There is **no thrust-flame glyph in any of the three vector ROMs** — the gallery
+survey (every JSR/JMP target in 034597/8/9) turns up none. The flame is drawn
+**programmatically by CPU code** — now **confirmed**: the original commented source
+has been located, `FLAME` ("ADD FLAME TO SHIP") in `A34573.1A` of
+<https://github.com/historicalsource/lunar-lander> (local clone
+`D:\tmp\lunar_lander_source\`; full file map in the cross-PC sync memory). So it's a
+software mechanism, not a hardware-only "drop". **`demos/thrust.html` keeps our own
+flame construction by choice — it is NOT a byte-port of `FLAME`**; the original is
+recorded below so the difference is on record (revisit only if we want arcade-exact).
+
+`demos/thrust.html` builds our flame, modelled on two references:
+- **Asteroids' thrust flame** (`asteroids_clone`): each `ShipDirN` pose is
+  immediately followed in ROM by a tiny `ThrustDirN` (2 strokes + RTS) emitted on
+  the **same DVG cursor** so it anchors to the ship's tail; it flickers on
+  `fastTimer & 4` while thrust is held, mirrored with the ship's flip flags
+  (`render.js` `drawShip`, source `$750B` / `$753B-$7553`).
+- **Seb Lee-Delisle's *Moon Lander*** (`Lander.js`, from-scratch canvas — technique
+  only, not a port source): a V off the nozzle, length = `base + min(throttle,1)*gain`,
+  scaled by a 3-step frame-counter flicker (`((counter>>1)%3)*0.2 + 1` = 1.0/1.2/1.4),
+  with the throttle exponentially smoothed (`thrustBuild += (target-thrustBuild)*0.2`).
+
+The demo draws the plume as **two lines starting at the nozzle mouth's two tips and
+converging to a point** `len` further along the engine direction, where `len` ∝
+nozzle-mouth width × throttle × counter-flicker (the mouth-width factor keeps the
+plume proportional across **both** size banks), in the hull phosphor colour. The nozzle mouth is found
+geometrically per-pose (`nozzleTips`): it's the pose segment that **crosses the
+engine centreline** (the axis through the DVG origin in the engine direction) and
+sits **deepest** along it — the flared bell exit edge; the legs reach deeper but
+splay off-axis so they don't cross the centreline. **An optional red-flame toggle is
+a deliberate non-faithful aesthetic** — the DVG is monochrome (intensity-only, `bri`
+0-15, no colour); the green is already a phosphor-sim choice, red is pure embellishment.
+
+**The original `FLAME` vs ours** (`lunar_lander_source/A34573.1A:1315`, data `:1430`).
+Same family — a programmatic V at the nozzle, gated on thrust ≠ 0, rotating with the
+ship — but the construction differs, and **we keep ours**:
+- **What thrust scales (inverted axis).** Original: flame **length is fixed** (per-
+  rotation table `FLAMEA`, ~7 units) and **thrust widens** it — endpoints are
+  `DEL ± THRUST'·perp(DEL)` → a *short, wide, flickering fan*. Ours: **width fixed**
+  (the nozzle mouth) and **throttle lengthens** the plume → a *narrowing jet*. Opposite axes.
+- **Nozzle direction.** Original: a hand-authored 9-entry table `FLAMEA` (rotation
+  0–8) plus a smaller `FLAMEB` for the "major"/zoomed module (≈ our two banks). Ours:
+  detected geometrically per pose (`nozzleTips`).
+- **Thrust input.** Original quantizes to `THRUST' = THRUST/4 + flick` (integer 1–4);
+  ours is continuous 0–1, smoothed.
+- **Flicker.** Original: frame-parity (every other frame `+1`). Ours: 3-step counter.
+- **Brightness.** Original scales with thrust (`VGBRIT = (THRUST/2+8)<<4`, ~`80`–`F0`;
+  abort `F0`). Ours: fixed full brightness. (Both monochrome — see the red-toggle note.)
+
+Net: the arcade flame is a short/wide/bright/thrust-flickered *fan*; ours is a longer
+cinematic *plume*. Confirmations from `FLAME` that validate our approach: the flame
+*does* rotate with attitude via a per-pose table, *is* emitted into the ship's vector
+list from the nozzle base, and *is* monochrome-intensity. (The exact rendered outline
+of `FLAME` — beam origin, whether the two `VGVCTR`s close a triangle — needs a
+`VGVCTR`/beam trace before any pixel-exact port.)
+
+**Gameplay rotation range** (also what `thrust.html` constrains to): the lander
+tilts within **one half-circle only** — head left → up → right, so the engine always
+points downward-ish; it never goes upside-down. Engine-heading convention (the
+direction the thrust points, standard math angle, +y up): head-left = `0°`, standing
+= `270°`, head-right = `180°`, i.e. the arc `0 → 270 → 180`. Parametrised in the demo
+as **tilt ∈ [−90°, +90°]** (0 = upright), with engine = `270 − tilt`. This maps to the
+**9 stored poses + their X-mirror** (`xFlip` for left/right, NO `yFlip`; stand =
+`$4B64`/`$4DB6`) — 17 attitudes ~11.25° apart. (`rotation.html` shows the *full* 360°
+via X **and** Y mirror; the gameplay range is the X-mirror-only lower half.)
+
+**Porting the flame to gameplay.** The construction is **`globalScale`-robust** because
+everything is derived from the *rendered* pose geometry, not absolute constants: the
+nozzle tips come from the decoded segments and the plume length is a multiple of the
+mouth width — both scale with the pose. So when the game zooms (bank swap and/or DVG
+`globalScale`), decode the lander at the **live gs** and compute the flame from *that
+same* decode (or apply the zoom as one uniform transform over pose+flame) — keep them
+coupled to a single decode and the plume tracks at any size. (Only gs ≥ 6, the 4-bit
+scale-wrap regime, would distort — gameplay won't use it.) In the demo the 18
+attitudes per bank are **precomputed once** (segments + direction + nozzle mouth are
+static per attitude); the frame loop only adds the throttle-driven plume.
+
 ## DVG reuse — same chip as Asteroids
 
 LL drives the identical DVG, verified by decoding glyphs straight from
@@ -197,6 +280,7 @@ python lunar_lander/tools/build_discovery.py
 #   /lunar_lander/demos/gallery.html      (full ROM shape survey)
 #   /lunar_lander/demos/hud.html          ($5458 HUD labels, in-game 2×3 grid)
 #   /lunar_lander/demos/rotation.html     (360° rotation, both size banks)
+#   /lunar_lander/demos/thrust.html       (gameplay rotation range + throttle-driven thrust flame)
 #   /lunar_lander/demos/starfield.html    (034598 starfield; editable-range close-up)
 #   /lunar_lander/demos/screen.html       (full-screen layout, 1024x768; MAME-measured HUD/pads)
 #   /lunar_lander/demos/scroll_view.html  (screen.html terrain, ping-pong scroll: slide one screen, reverse)
