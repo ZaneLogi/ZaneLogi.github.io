@@ -11,9 +11,11 @@ Asteroids. "Faithful" matters: behavior should match the original ROM.
 
 ## Status
 
-ROM-decode stage — eleven demo pages: nine faithful vector-ROM byte-decodes,
-a **source-faithful flight-physics demo** (`physics.html`), and a **source-faithful
-crash-explosion demo** (`explosion.html`, the `BOOM` routine). No full gameplay
+ROM-decode stage — twelve demo pages: nine faithful vector-ROM byte-decodes plus
+three source-faithful demos: **flight physics** (`physics.html`), **crash explosion**
+(`explosion.html`, the `BOOM` routine), and the **faithful landscape**
+(`landscape.html`, built from `LNMIN`/`MINTBL` — the terrain done right with the
+source, vs the MAME-matched `screen.html`/`scroll_view.html`). No full gameplay
 port yet. HUD value layout, pad multipliers, and the horizontal-scroll/wrap
 behaviour are MEASURED against MAME (see "Gameplay HUD" + "Terrain scroll" below).
 
@@ -56,6 +58,15 @@ not a measure-and-reconstruct one. The physics is decoded in
   and wink out over `INDEX` 1→127, then re-forms and replays with a new random
   1-of-4 pattern. Controls: pattern picker, zoom, pause + `INDEX` scrub. See
   "034599 explosion debris" below + `docs/research_explosion.md`.
+- **Faithful landscape** (`demos/landscape.html`) — the lunar surface built **the way
+  the ROM builds it**: the 16 sections `SECT01-16` (from 24 segments) in `LNMIN` order,
+  Y-placed by `MINTBL`, wrapping seamlessly (`SECT11` = the flat `SEG019`). Its wide
+  overview is the **zoom-OUT (major-scape) view** — what the MAME `0001` snapshot shows —
+  drawn from the terrain-definition tables the ROM labels *minor scape* (see §3.1 gloss). Terrain
+  ONLY (no lander/HUD); zoom (1× = whole 4096-wide loop) + scroll/auto-scroll with wrap;
+  a `faithful ✓` self-check confirms every boundary hits `MINTBL`. This is the
+  source-driven counterpart to `screen.html`/`scroll_view.html` (which matched a MAME
+  snapshot before the source was found — kept as-is). See `research_vector_usage.md` §3.
 - **Starfield** (`demos/starfield.html`) — the `$5244-$53E6` starfield
   (61 bright points) enlarged with a focus panel (points rendered as
   visible dots). The CPU-address range is editable, so it also serves as
@@ -349,6 +360,7 @@ python lunar_lander/tools/build_discovery.py
 #   /lunar_lander/demos/scroll_view.html  (screen.html terrain, ping-pong scroll: slide one screen, reverse)
 #   /lunar_lander/demos/physics.html      (source-faithful flight physics on a scrolling starfield)
 #   /lunar_lander/demos/explosion.html    (source-faithful crash explosion: BOOM routine, 1-of-4 random pattern)
+#   /lunar_lander/demos/landscape.html    (faithful landscape from LNMIN/MINTBL; terrain only, wraps)
 python -m http.server -b 127.0.0.1 8080
 ```
 
@@ -363,8 +375,8 @@ The picture/glyph ROM is laid out in these decoded regions (use
 
 | Range | Contents |
 |---|---|
-| `$5000-$507E` | **Terrain tiles** — 15 fixed-width segments, each net `+256` horizontal advance, zero dark moves (one continuous polyline per tile). Net `dy` over the 15 in address order sums to **0**, so they chain left-to-right into a continuous, horizontally-wrapping surface. Flat tiles (e.g. `$506C`, `$516E`) are landing-pad pieces. The tile **sequence** is CPU-side (nothing in ROM chains them); address order already forms a valid closed profile. |
-| `$5088-$51A2` | Terrain stroke primitives — the shared left-to-right slope/flat pieces the tiles `JSR`. |
+| `$5000-$507E` | **Terrain — 16 sections** `SECT01-16` (`A34598.1B:13`), each 256 wide and itself a **`JSRL` list** of 1–4 of the `$5088` segments (+ inline `VCTR` connectors); `SECT11` is a one-segment alias. The byte-decoder rendered each section's composite as a 256-wide polyline — the old "15 fixed-width tiles" reading. The on-screen order is the **ROM `LNMIN` table** (`SECT01..16` + a `SECT01-04` wrap tail), positioned vertically by `MINTBL` — NOT address order, and the source **chains them** (the old "nothing in ROM chains them" was wrong). One fixed surface, **not** level/difficulty-dependent. See `docs/research_vector_usage.md` §3. |
+| `$5088-$51A2` | **Terrain — 24 segments** `SEG001-024` (`A34598.1B:101`), the reusable slope/flat stroke pieces the sections `JSRL`. **All 24 are used** by the sections above (resolves "terrain glyphs whose use we hadn't found"). |
 | `$5244-$53E6` | **Starfield** — 24 subroutines, **61 bright points, zero lines** (every "stroke" is a zero-length VEC = a single dot), brightness `5-9` (star magnitudes). No routine assembles them — the CPU positions the clusters at runtime. |
 | `$5458` | **HUD labels — the in-game 2×3 grid** — 75 font-glyph JSRs spelling `SCORE  TIME  FUEL  ALTITUDE  HORIZONTAL SPEED  VERTICAL SPEED` (gaps are space-glyph `$5726` JSRs). Its `VEC` moves lay them out as **3 rows (y=748/720/692) × 2 columns (x=100/600)** — this *is* the gameplay HUD layout; only the numeric values are CPU-drawn separately. |
 | `$55BE-$5726` | Font — A-Z + space (see table below). |
@@ -443,10 +455,15 @@ The repo demos do NOT use the MAME master profile: `demos/screen.html` (static) 
 (`$5000-$507E`, address order) at the fit-to-width silhouette scale, with the HUD
 value alignment + pad multipliers set to the MAME-measured values above.
 
-Still CPU-side / unconfirmed: the **full 3840-rom tile sequence** (these frames cover
-only ⅓; needs a full high-altitude pass to reconstruct + check against the address-
-order `$5000-$507E` decode), exact value/arrow/pad pixel placement, and whether
-difficulty level reshuffles the terrain segments.
+**Now resolved by the source** (`docs/research_vector_usage.md` §3): the terrain
+**sequence is the ROM `LNMIN` table** (16 sections, fixed) — the MAME-stitch
+reconstruction is moot — and the terrain is **fixed, NOT level/difficulty-dependent**
+(difficulty `PLYMOD` changes only the physics; `SCAPE` `:1093` reads fixed
+`LNMIN`/`MINTBL` and never `PLYMOD`; `LUNARNUM` is the near/far *zoom* state, not a
+terrain index). The **`TRANS` zoom reduction is now decoded** too: the major (zoom-out)
+scape is *generated* from the minor `LNMIN` data at **¼ DVG scale, 4 minor sections packed
+into 1** (`research_vector_usage.md` §3 "The major … scape"). Still CPU-side: exact
+value/arrow/pad pixel placement.
 
 ## Letter address table (034598-01.np3, $5000-$57FF)
 
@@ -515,8 +532,11 @@ Having the original source resolved most of the old decode unknowns:
 - **Terrain sequence** — it's the `LNMIN` section order + `MINTBL` LABS (16 sections of
   segments `SEG001-024`), not address order (`docs/research_vector_usage.md` §3). The
   MAME-frame-stitch approach is moot.
-- **Difficulty / level variation** — decoded: gravity / friction / 1.5× thrust / rotational
-  inertia per `PLYMOD`, plus the operator fuel-per-coin DIP (`docs/research_physics.md` §7).
+- **Difficulty / level variation** — decoded: `PLYMOD` (0–3) changes gravity / friction /
+  1.5× thrust / rotational inertia, plus the operator fuel-per-coin DIP
+  (`docs/research_physics.md` §7) — **physics ONLY**. The terrain is one **fixed** surface,
+  unaffected by difficulty, and there is **no "level"** (`SCAPE` uses fixed `LNMIN`/`MINTBL`;
+  `LUNARNUM` is the near/far zoom state, not a terrain index). See `research_vector_usage.md` §3.
 - **`034597-01.m3`** — a **FOREIGN-VERSION-ONLY** vector ROM, not "unclear" (see the region map).
 - **"Flag"** — was the thrust flame; it's the programmatic `FLAME` routine (see "Thrust flame").
 
