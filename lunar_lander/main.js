@@ -21,7 +21,6 @@ import { DisplayInfo } from './display_info.js';
 
 const landscape = new Landscape();
 landscape.setMajorCamera(camera);   // boot/IDLE framing = the major (zoom-out) view
-const majorBaseY = camera.y;        // the major vertical baseline; SCRADD offsets it in PLAY
 const input = new Input();
 const lander = new Lander();
 const displayInfo = new DisplayInfo();
@@ -36,6 +35,7 @@ const ctx = document.getElementById('game').getContext('2d');
 // the display refresh.
 const TICK = 6 / 250;   // 0.024 s (24 ms)
 let acc = 0, last = 0;
+let paused = false;     // MAME-style pause toggle (P); freezes update(), render still draws
 
 function update(dt) {
   if (input.resetPressed()) {                  // Reset button → back to the start screen
@@ -48,14 +48,14 @@ function update(dt) {
     landscape.update(camera, dt);             // attract auto-scroll
     return;
   }
-  // PLAY: the stepper advances motion — the ship's within-window position (posX/posY) plus
-  // the scape scroll (SCROLL/SCRADD) it hands off at the window edges (§9 dead-zone). The
-  // lander draws at posX/posY (it roams the screen); the camera reads only the scroll, so the
-  // terrain holds still until an edge is hit. Descent past the bottom lowers SCRADD → ground rises.
+  // PLAY: the stepper advances motion — the ship's within-window position (posX/posY) plus the
+  // scape scroll (SCROLL/SCRADD) it hands off at the window edges (§9 dead-zone). Then landscape
+  // frames the camera from that scroll (per scape) and runs the zoom transition (§9.1): near the
+  // ground it snaps to the minor/zoom-in view, climbing clear it pops back to major.
   lander.update(state, input.read());
   tickClock();                                // advance the game clock (PLAY only; source NMI :360)
-  camera.x = ((state.SCROLL % landscape.loopW) + landscape.loopW) % landscape.loopW;
-  camera.y = majorBaseY + state.SCRADD;
+  landscape.frameCamera(state, camera);
+  landscape.updateZoom(state, camera);        // may flip the scape + re-frame; safe after frameCamera
 }
 
 function render(alpha) {
@@ -72,6 +72,7 @@ function render(alpha) {
     drawShapeScreen(ctx, ROM599, 'S_4B64', { cx: SCREEN_W / 2, cy: SCREEN_H * 0.34, pxScale: 6, width: 1.8 });
     drawText(ctx, 'PRESS SPACE TO START', { cx: SCREEN_W / 2, cy: SCREEN_H * 0.16, pxScale: 3.5, width: 2 });
   }
+  if (paused) drawText(ctx, 'PAUSED', { cx: SCREEN_W / 2, cy: SCREEN_H / 2, pxScale: 6, width: 2.5 });
   void alpha;
 }
 
@@ -79,9 +80,14 @@ function frame(ts) {
   if (!last) last = ts;
   let elapsed = (ts - last) / 1000; last = ts;
   if (elapsed > 0.25) elapsed = 0.25;         // clamp after a tab-hide stall
-  acc += elapsed;
-  while (acc >= TICK) { update(TICK); acc -= TICK; }
-  render(acc / TICK);
+  if (input.pausePressed()) paused = !paused; // MAME-style: P freezes the sim, P again resumes
+  if (paused) {
+    acc = 0;                                   // freeze: no ticks, no time carried over resume
+  } else {
+    acc += elapsed;
+    while (acc >= TICK) { update(TICK); acc -= TICK; }
+  }
+  render(acc / TICK);                           // render always (frozen frame + PAUSED overlay)
   requestAnimationFrame(frame);
 }
 render(0);                  // paint the initial IDLE screen immediately, so it shows even

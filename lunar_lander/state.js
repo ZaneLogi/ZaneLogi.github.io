@@ -56,6 +56,22 @@ export const state = {
   COLFLG: 0,          // collision flag: $80 good land / $C0 hard / $8F crash (:243)
 };
 
+// Scape / zoom geometry (research_physics.md §9/§9.1) — the single source for the
+// dead-zone window, the zoom thresholds, and the transition ship-reset positions.
+// Units are the logical/screen frame (= posX/posY, DVG Y-up). The zoom thresholds are
+// ALTITUDE in world/native units: they map the source's SCPDST gates (YMJMIN 96
+// major-units, YMISCR 520 minor-units) into one world scale — IN = 96×4, OUT = 520.
+export const GEOM = {
+  // All in LOGICAL (posX/posY) units = the source's "adjusted" figures × 4 (§9: adjusted
+  // XMIN 32 ↔ logical 128). §9.1 quotes resets as the ÷4 adjusted values; ×4 back to logical.
+  WIN_XMIN: 128, WIN_XMAX: 896,   // horizontal dead-zone (§9: XCURADJ+1∈[32,224] → logical [128,896])
+  WIN_YMIN: 256, WIN_YMAX: 660,   // vertical dead-zone (minor), §9 [YMIMIN 256, YMIMAX 660] logical
+  ZOOM_IN_ALT: 384,               // alt < this → zoom IN  (YMJMIN 96 major-units × 4)
+  ZOOM_OUT_ALT: 520,              // alt ≥ this (+ascending+high) → zoom OUT (YMISCR 520 minor-units)
+  MINSTX: 512, MINSTY: 632,       // ship SCREEN reset on zoom-IN  (§9.1 512/4·632/4 adj → ×4 logical)
+  RMJRX: 512,                     // ship SCREEN X reset on zoom-OUT (§9.1 512/4 adj → ×4 logical)
+};
+
 // Game-clock constants (A34573.1A :56/:59). One source frame = FRMECNT NMIs; one
 // game-second = SECCNT NMIs. Keeping TIMVAL in NMI units (decrement FRMECNT per
 // 24 ms tick) makes the second boundary land exactly where the hardware's does.
@@ -103,13 +119,15 @@ export const camera = {
 // The INVELX/INVELY velocity fixed-point is still finalized at the zoom step.
 const INIT_X = 64, INIT_Y = 682;    // INTXCUR/INTYCUR ÷ $40 — source start position, DVG/screen (Y-up)
 
-export function newGame(settings) {
-  state.PLYMOD = settings.plymod;
-  state.FUEL   = settings.startFuel;
-  // INVELX/INVELY (:3749-50, hex) copied into VELX/VELY by PLYINIT (:628-636); REINIT clears
-  // the sign bytes → both POSITIVE = rightward / up (SCAPCHG :2683/:2703). Source 16-bit units
-  // (screen px = velocity/16384/tick): VELX 12800 ⇒ ~0.78 px/tick rightward drift; VELY 16 is a
-  // negligible up-seed (~0.001 px/tick) that gravity (−17/tick) overtakes on the first tick.
+// Seed the FLIGHT state (position, velocity, attitude, scape) to the play-start —
+// shared by newGame (fresh game) and resetFlight (off-top-of-major restart). Does NOT
+// touch score / clock / fuel — those are the caller's to set/keep.
+//
+// INVELX/INVELY (:3749-50, hex) → VELX/VELY (PLYINIT :628-636); REINIT clears the sign
+// bytes → both POSITIVE = rightward / up (SCAPCHG :2683/:2703). Source 16-bit units
+// (screen px = velocity/16384/tick): VELX 12800 ⇒ ~0.78 px/tick rightward drift; VELY 16
+// is a negligible up-seed (~0.001 px/tick) gravity (−17/tick) overtakes on frame 1.
+function seedFlight() {
   state.VELX = 0x3200;   // INVELX = $3200 = 12800 — initial rightward drift (the ship enters and drifts in)
   state.VELY = 0x10;     // INVELY = $0010 = 16     — ~0 vertical; descent begins immediately
   state.THRUST = 0; state.throttle = 0;   // throttle level 0-15 (dialed by ↑/↓); starts at idle
@@ -121,10 +139,24 @@ export function newGame(settings) {
   state.posY = INIT_Y;
   state.SCROLL = 0; state.SCRADD = 0;  // scape scroll cleared (REINIT :657)
   state.INDEX = 0; state.COLFLG = 0;
-  state.SCORE = 0;                  // fresh score (:351-352)
-  state.GMTIME_S = 0; state.GMTIME_M = 0; state.TIMVAL = 250;  // clear mission time (:640)
   state.LUNARNUM = 0x40;            // major / zoom-out (boots high; REINIT :672)
   state.GAMODE = 0x40;             // → PLAY (PLYINIT :646)
+}
+
+export function newGame(settings) {
+  state.PLYMOD = settings.plymod;
+  state.FUEL   = settings.startFuel;
+  state.SCORE = 0;                  // fresh score (:351-352)
+  state.GMTIME_S = 0; state.GMTIME_M = 0; state.TIMVAL = 250;  // clear mission time (:640)
+  seedFlight();
+}
+
+// Off-top-of-major restart (SCAPMJR INTWAIT→DEDCTA→PLYSTRT :2837-2841): deduct fuel,
+// reseed the flight, but KEEP score + clock. (Minimal — the full PLYSTRT/GAMODE cycle
+// is the state-machine step; here it just re-drops the ship into the major view.)
+export function resetFlight(fuelPenalty = 0) {
+  state.FUEL = Math.max(0, state.FUEL - fuelPenalty);
+  seedFlight();
 }
 
 // Reset to the boot / attract stage (isPlaying() → false; SPACE re-launches). The

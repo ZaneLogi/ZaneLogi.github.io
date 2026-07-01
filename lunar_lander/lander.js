@@ -31,10 +31,13 @@ const FLAME_MIN = 0.3, FLAME_SPAN = 1.2;   // plume length as a multiple of the 
 // The craft is drawn at its screen point = POSTMOD(XCURADJ/YCURADJ) = (posX, SCREEN_H−posY):
 // the source doesn't pin the ship to centre — it moves within the SCAPCHG dead-zone window and
 // the scape scrolls at the edges (§9). So the on-screen position comes from state, per frame.
-// Pixel scale per bank, in the 1024×768 field. out (major/zoom-out) = NATIVE 1.0 to
-// match the MAME-calibrated far lander in screen.js (drawLander 'S_4DB6', scale 1);
-// in (minor/zoom-in) is a placeholder until the zoom step magnifies the near view.
-const PXU = { in: 4.0, out: 1.0 };
+// Pixel scale per bank — BOTH native (1.0). The source draws the lander (MODULE) and the
+// terrain (SCAPE) into the same VG list at the same hardware scale, so each bank renders at its
+// own authored size against the same-scale terrain: far bank 15u vs the ¼-data major section
+// (~0.23 of a section), near bank 27u vs the full minor section 256u (~0.11 of a section). The
+// lander does NOT scale 4× with the zoom — the ~1.8× far→near size change is just the bank swap
+// (15u→27u); the 4× belongs to the terrain data (minor 256u sections vs the ¼ major scape).
+const PXU = { in: 1.0, out: 1.0 };
 
 function collect(name, xf, yf) {
   const segs = [], cur = { x: 0, y: 0 };

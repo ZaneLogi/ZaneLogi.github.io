@@ -9,13 +9,15 @@
 // Keys: ←/→ rotate (held) · ↑ throttle — SPRING-LOADED: hold to ramp up, release to ramp down,
 //   step by step, from wherever it currently sits (deviation — the cabinet's pot has no ramp at
 //   all, THRLVL just reads its position verbatim, :897; a digital key can't set a pot position,
-//   so this is our choice of how to fake one) · A abort (emergency thrust) · SPACE = START.
+//   so this is our choice of how to fake one) · A abort (emergency thrust) · SPACE = START ·
+//   P = pause/resume toggle (MAME-style; a harness convenience, not a cabinet control).
 
 export class Input {
   constructor() {
     this.keys = new Set();
     this._startEdge = false;               // SPACE pressed since last poll (edge)
     this._resetEdge = false;               // Reset button clicked since last poll (edge)
+    this._pauseEdge = false;               // P pressed since last poll (edge) → toggle pause
 
     window.addEventListener('keydown', (e) => {
       if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'Space'].includes(e.code)) {
@@ -24,6 +26,7 @@ export class Input {
       if (e.repeat) return;                // ignore auto-repeat for edges
       this.keys.add(e.code);
       if (e.code === 'Space') this._startEdge = true;
+      if (e.code === 'KeyP')  this._pauseEdge = true;
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
 
@@ -55,6 +58,13 @@ export class Input {
   resetPressed() {
     const p = this._resetEdge;
     this._resetEdge = false;
+    return p;
+  }
+
+  // P edge, consumed once → the main loop toggles pause (MAME-style press-to-pause / press-again).
+  pausePressed() {
+    const p = this._pauseEdge;
+    this._pauseEdge = false;
     return p;
   }
 

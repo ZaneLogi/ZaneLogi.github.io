@@ -74,13 +74,11 @@ export class DisplayInfo {
     if (vspeed > 0) drawArrowGlyph(ctx, ROM598, state.VELY >= 0 ? ARROW.up    : ARROW.down, { x: ARROW_X, baselineY: ROW.bot });
   }
 
-  // ALTITUDE proxy (see the DEVIATIONS note): ship world Y minus the terrain surface
-  // directly below it. Ship screen (posX, posY) → world via the camera transform
-  // (render.js: screen = (world − cam)·scale ⇒ world = cam + screen/scale). Clamped ≥ 0.
+  // ALTITUDE proxy (see the DEVIATIONS note) — the shared SCPDST stand-in in
+  // landscape.altitudeAt (ship world Y − terrain below, clamped ≥ 0). Reads correctly in
+  // both scapes: DISPLY shows SCPDST×4 in major = (alt/4)×4 = alt, and SCPDST in minor = alt.
   _altitude(state, camera, landscape) {
     if (!camera || !landscape) return 0;
-    const worldX = camera.x + state.posX / camera.scale;
-    const worldY = camera.y + state.posY / camera.scale;
-    return Math.max(0, Math.round(worldY - landscape.heightAt(worldX)));
+    return Math.round(landscape.altitudeAt(state, camera));
   }
 }

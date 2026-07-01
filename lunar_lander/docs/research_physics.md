@@ -176,15 +176,17 @@ scrolling (then the velocity goes to the scroll and the ship holds). `SCAPCHG` (
 (`:3731-3737`). So the craft **drifts across the screen within the window**, and the terrain
 holds still until an edge — descent past the bottom lowers `SCRADD` → the ground rises.
 
-**Port note:** the port builds the **horizontal** dead-zone now — the lander draws at
-`(posX, SCREEN_H − posY)` (the `POSTMOD >>6` result, held un-scaled), velocity integrates into
-`posX/posY`, and the horizontal excess scrolls `SCROLL` at the `[XMIN,XMAX]` edges
-(`physics_arcade.js`, `lander.js`). This supersedes an earlier strict-centre-lock simplification
-that drew the ship centred from frame 1. **Vertically** the ship moves freely on screen (the
-whole terrain is visible in the far view), because the major/minor `SCRADD` window is entangled
-with the `SCPDST` zoom transition — so the vertical scroll, the full `LUNAROT` section stepping,
-and the faithful off-top reset are all finished with the zoom step. (A first cut that also clamped
-`posY` to a vertical window snapped the ship down when it climbed past the start height — dropped.)
+**Port note:** the lander draws at `(posX, SCREEN_H − posY)` (the `POSTMOD >>6` result, held
+un-scaled), velocity integrates into `posX/posY`, and the excess scrolls the scape at the window
+edges (`physics_arcade.js`, `lander.js`). The **horizontal** dead-zone `[XMIN,XMAX]` runs in both
+scapes. The **vertical** dead-zone is built for the **minor** scape (`[WIN_YMIN 256, WIN_YMAX 660]`,
+excess → `SCRADD`, so the ground rises as you descend / recedes as you climb); the **major** far
+view keeps free vertical movement (the whole terrain is on screen) — its ascent past the ceiling
+is the off-top reset (§9.1), and its descent triggers the zoom-in before the bottom. The
+scape-edge overflow scales by `1/camera.scale` (4 world-units/px major, 1 minor), the dual of the
+×4 minor position step — so the world scroll rate is identical in both scapes. (An earlier cut
+that clamped `posY` to a vertical window in *major* snapped the ship down when it climbed — dropped;
+the vertical window is a minor-scape concept, per the `YMI*` constant names.)
 
 ### 9.1 Zoom — the major/minor scape transition
 
@@ -224,9 +226,20 @@ approximation of this corner-distance rule.)
 **Off the top of the major scape resets the flight.** While ascending in major, if the ship
 reaches the top and `YSCPADD` can no longer scroll (`:2833-2836`), `SCAPMJR` runs
 `INTWAIT → DEDCTA → PLYSTRT` (`:2837-2841`) — the flight restarts with fuel deducted. So the
-far view has a hard ceiling, not open sky. Both transitions require `DECODE` (needs terrain),
-so faithful zoom is a later build step than the no-terrain physics demo — but the rule is now
-fully decoded.
+far view has a hard ceiling, not open sky.
+
+**Port note (built — `landscape.js` `updateZoom` / `frameCamera`, `physics_arcade.js`):** the
+transition is a **snap** (flip `LUNARNUM`, set camera scale 0.25↔1.0, reset the ship to the
+fixed screen pos MINSTX/MINSTY (512/632 logical) or RMJRX (512), zero-then-set the scroll). The
+**trigger uses the altitude proxy** `landscape.altitudeAt` (single-point `heightAt`) as the
+`SCPDST` stand-in — the faithful thresholds map to world units as **IN alt < 384** (`YMJMIN 96`
+major-units ×4) / **OUT alt ≥ 520** (`YMISCR 520` minor-units) while ascending + high in the
+window; the real 2-corner `SCPDST`/`DECODE` swaps in at the collision step. **Coordinate
+continuity** is preserved without the exact `SUMSA`/`SUMSUM` byte math: note the ship's world
+point before the snap, then set `SCROLL`/`SCRADD` so it still sits over that point at the new
+scale + reset screen pos (a labeled simplification — verified visually continuous, no altitude
+jump across the snap). The off-top reset is `state.resetFlight(fuelPenalty)` (minimal — full
+`PLYSTRT`/`GAMODE` is the state-machine step). All live-verified in `play.html`.
 
 ## 10. Starfield — `STARS` (`:1121-1150`)
 

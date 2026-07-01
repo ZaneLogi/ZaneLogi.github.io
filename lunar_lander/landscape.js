@@ -10,13 +10,17 @@
 // research_vector_usage.md §3/§3.1. So this class renders scale-agnostically; the
 // camera decides the zoom.
 //
-// STEP 1 scope: the model + render + horizontal scroll/wrap. The queries and the
-// zoom transition come later (steps 2/6). The model is built query-ready (the
-// segment list + per-section x-ranges are retained) so heightAt() is a cheap add.
+// This module is also the SCAPE authority (CLAUDE.md module table: SCAPE/SCAPCHG/
+// SCAPMJR/SCRLUP live here): it owns the per-frame camera framing (`frameCamera`) and
+// the major↔minor zoom transition (`updateZoom`) — research_physics.md §9/§9.1.
 
 import { ROM598 } from './discovery_rom_data.js';
 import { runList } from './dvg.js';
 import { SCREEN_W, drawSegmentsWorld } from './render.js';
+import { isMajor, resetFlight, GEOM } from './state.js';
+
+const OFFTOP_Y = 744;               // off-top-of-major ceiling (screen top, ~SCREEN_H); flew off → reset
+const OFFTOP_FUEL_PENALTY = 20;     // minimal DEDCTA analog charged on the off-top restart (§9.1)
 
 // LNMIN section order (play order) + MINTBL Y baselines — the terrain-DEFINITION
 // tables (A34598.1B:238 / :261), NOT vector coordinates. Segment GEOMETRY is
@@ -31,7 +35,8 @@ const LOOP_W = SECT_W * 16;         // 4096 — one full horizontal wrap
 export class Landscape {
   constructor() {
     this.loopW = LOOP_W;
-    this.majorScale = SCREEN_W / LOOP_W;      // 0.25 — fit the whole loop to the screen width
+    this.majorScale = SCREEN_W / LOOP_W;      // 0.25 — fit the whole loop (4096) to the screen width
+    this.minorScale = this.majorScale * 4;    // 1.0  — the near view is 4× the far (§9.1)
 
     // Build the surface once. This is the SCAPE `LABS(MINTBL) + JSRL(section)` weave:
     // chaining the 16 sections with a cumulative DVG cursor lands each section's start
@@ -55,14 +60,77 @@ export class Landscape {
       this.yMin = Math.min(this.yMin, s.fy, s.ty);
       this.yMax = Math.max(this.yMax, s.fy, s.ty);
     }
+    // Major camera vertical base: puts yMin ~bottomMargin px above the screen bottom.
+    // frameCamera adds SCRADD on top; the minor base is 0 (SCRADD carries it entirely).
+    this.majorBaseY = this.yMin - 24 / this.majorScale;
   }
 
   // Frame the camera for the major (zoom-out) view: ¼ scale, terrain valleys near the
-  // screen bottom. Convenience for the boot/IDLE framing; the state machine will later
-  // drive scale/y for the altitude zoom transition.
-  setMajorCamera(cam, bottomMargin = 24) {
+  // screen bottom. Used for the boot/IDLE framing (PLAY uses frameCamera each tick).
+  setMajorCamera(cam) {
     cam.scale = this.majorScale;
-    cam.y = this.yMin - bottomMargin / cam.scale;   // yMin → bottomMargin px above the bottom
+    cam.y = this.majorBaseY;
+  }
+
+  // Per-frame camera framing from the shared scape state (the SCAPE positioning): scale +
+  // scroll offsets → the camera the render layer reads. Called every PLAY tick (main.js).
+  //   scale  : major 0.25 / minor 1.0 (from LUNARNUM)
+  //   camera.x = SCROLL wrapped into the loop; camera.y = scape base + SCRADD
+  frameCamera(state, camera) {
+    const major = isMajor();
+    camera.scale = major ? this.majorScale : this.minorScale;
+    camera.x = ((state.SCROLL % this.loopW) + this.loopW) % this.loopW;
+    camera.y = (major ? this.majorBaseY : 0) + state.SCRADD;
+  }
+
+  // Ship altitude = its world Y minus the terrain surface straight below it (world units).
+  // The SCPDST proxy (single-point; DECODE's 2-corner min lands with collision). The camera
+  // transform inverts render.js: world = cam + screen/scale. Shared by display_info + zoom.
+  altitudeAt(state, camera) {
+    const worldX = camera.x + state.posX / camera.scale;
+    const worldY = camera.y + state.posY / camera.scale;
+    return Math.max(0, worldY - this.heightAt(worldX));
+  }
+
+  // The zoom transition + off-top reset (SCAPMJR/SCRLUP, research_physics.md §9.1), driven by
+  // the altitude proxy with hysteresis. Call each PLAY tick AFTER motion + frameCamera.
+  updateZoom(state, camera) {
+    const alt = this.altitudeAt(state, camera);
+    if (isMajor()) {
+      if (state.posY > OFFTOP_Y) {                 // flew off the top of the far view → restart
+        resetFlight(OFFTOP_FUEL_PENALTY);
+        this.frameCamera(state, camera);
+      } else if (alt < GEOM.ZOOM_IN_ALT) {         // dropped close to the ground → snap to near view
+        this._zoom(state, camera, true);
+      }
+    } else if (alt >= GEOM.ZOOM_OUT_ALT && state.VELY > 0 && state.posY >= GEOM.WIN_YMAX - 1) {
+      this._zoom(state, camera, false);            // climbed clear (ascending, high in window) → far view
+    }
+  }
+
+  // Snap between scapes, preserving the world point under the ship (coordinate continuity).
+  // The source does an exact SUMSA/SUMSUM conversion; we reproduce the visible result — note the
+  // ship's world point (wx = horizontal, wy = its world height = altitude), flip the scape, then
+  // place the ship + scroll so it still sits over that point at the new scale. The two scapes
+  // differ vertically: MINOR floats (no fixed base — SCRADD carries the height), MAJOR has a FIXED
+  // base (SCRLUP zeroes SCRADD :2773-7), so on zoom-OUT the terrain must return to majorBaseY and
+  // the altitude is carried by the ship's screen-Y instead. Horizontal continuity holds both ways.
+  _zoom(state, camera, toMinor) {
+    const wx = camera.x + state.posX / camera.scale;
+    const wy = camera.y + state.posY / camera.scale;
+    state.LUNARNUM = toMinor ? 0 : 0x40;
+    const newScale = toMinor ? this.minorScale : this.majorScale;
+    if (toMinor) {
+      state.posX = GEOM.MINSTX;
+      state.posY = GEOM.MINSTY;
+      state.SCRADD = wy - state.posY / newScale;        // minor base 0 → SCRADD holds the height
+    } else {
+      state.posX = GEOM.RMJRX;
+      state.posY = (wy - this.majorBaseY) * newScale;    // put the height into posY; base stays put
+      state.SCRADD = 0;                                  // restore the major terrain base (SCRLUP)
+    }
+    state.SCROLL = wx - state.posX / newScale;           // horizontal continuity (both directions)
+    this.frameCamera(state, camera);
   }
 
   // Advance horizontal scroll, wrapping at the loop. pxPerSec is SCREEN px/s (scale-

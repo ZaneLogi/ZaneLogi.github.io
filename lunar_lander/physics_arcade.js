@@ -9,18 +9,20 @@
 // with the REAL constants (target b) — ratios faithful, not bit-exact.
 //
 // Headline motion model (§9): the ship moves within a screen dead-zone window (velocity →
-// posX/posY at the faithful 1/16384 scale); at the window edge the excess scrolls the major
-// scape (SCROLL/SCRADD). DEFERRED: the DECODE-based zoom/collision (step 6); over-rotation /
-// upside-down — SHIP is clamped to the gameplay half-circle [0,16] for ALL modes (source clamps
-// only Training, ROT.NI :868; the others may over-rotate — deferred as mechanical completeness);
-// BURN's absolute rate is provisional (tuned with the HUD, step 4); the INVELX/INVELY initial
-// drift is not yet seeded (VELX/VELY start 0 — see state.newGame).
+// posX/posY at the faithful 1/16384 scale); at the window edge the excess scrolls the scape
+// (SCROLL/SCRADD). Both scapes handled — MINOR adds the ×4 position step + the vertical dead-zone;
+// the major↔minor zoom TRANSITION itself lives in landscape.updateZoom (§9.1). DEFERRED: the
+// faithful DECODE collision + landing verdict (step 6 — the zoom TRIGGER currently uses the
+// altitude proxy, landscape.altitudeAt); over-rotation — SHIP clamped to [0,16] only in Training
+// (source ROT.NI :868), others wrap the full circle.
 //
 // SHIP convention matches the SOURCE: 8 = upright (thrust straight up), 0/16 = on its
 // side, 24 = upside-down — proven by FRCMLT :1758, abort-to-vertical :994, and the
 // Training clamp ROT.NI → SHIP∈[0,16] (research_physics.md §11 SHIP-convention note).
 // So source constants compared against SHIP (e.g. the landing gate {7,8,9}) port
 // verbatim — no offset.
+
+import { GEOM, isMajor } from './state.js';
 
 // Source constants (A34573.1A). TRSTAB = thrust magnitude per level 0-15 (hover at 8).
 const TRSTAB = [0, 2, 5, 8, 11, 13, 15, 16, 17, 18, 19, 20, 22, 24, 26, 28];
@@ -33,17 +35,18 @@ const STEP = (Math.PI * 2) / 32;     // SHIP → radians (11.25°/step); SHIP 8 
 // thrust component per frame IN THESE UNITS. Position: the source adds the velocity HIGH byte
 // (VELY>>8) to YCURADJ (= screen<<6), and the on-screen point is YCURADJ>>6 (POSTMOD/ROTATE),
 // so the net screen move is velocity>>14 = velocity/16384 per frame (ACCEL :1948-1969). Gravity
-// accel is thus 17/16384 ≈ 0.001 px/frame² — a very gentle lunar descent (NOT the old 46×-too-fast
-// A_SCALE·V_SCALE guess). MINOR view multiplies velocity ×4 for position (:1953-8) — added at the zoom step.
+// accel is thus 17/16384 ≈ 0.001 px/frame² — a very gentle lunar descent. In the MINOR (zoom-in)
+// view the source multiplies velocity ×4 for the position step (ACCEL :1953-8) — the ship travels
+// 4× as many screen px for the same world motion; the edge overflow then scrolls ¼ as much world
+// per screen px, so the WORLD scroll rate is identical in both scapes (they're duals).
 const POS_SCALE = 1 / 16384;         // 16-bit velocity → screen px per tick (source >>8 then >>6)
-const WORLD_PER_SCREEN = 4;          // major ¼ scale (1/majorScale): screen-px edge overflow → world SCROLL/SCRADD
 
-// SCAPCHG dead-zone window (§9) — HORIZONTAL only for now: the ship drifts across the screen
-// within [XMIN, XMAX] (DVG units) and the excess scrolls the scape at the edges. Source values
-// are the "/4 adjusted" thresholds ×4 back to DVG (XMIN 128 / XMAX 896, :3733-3734). The VERTICAL
-// window (YMIMIN 256 / YMJMAX 660) is deferred with the zoom step (its major↔minor scroll is
-// entangled with the SCPDST zoom transition) — until then the ship moves freely up/down on screen.
-const WIN_XMIN = 128, WIN_XMAX = 896;
+// SCAPCHG dead-zone (§9): the ship drifts within a screen window; excess scrolls the scape.
+// WORLD_PER_SCREEN (world units per screen px of overflow) = 1/camera.scale → 4 major / 1 minor.
+// The window bounds (logical/posX units) are shared in state.GEOM. Vertical window is MINOR-only
+// (the far view shows the whole terrain; major vertical is free + the off-top reset in landscape).
+const WIN_XMIN = GEOM.WIN_XMIN, WIN_XMAX = GEOM.WIN_XMAX;
+const WIN_YMIN = GEOM.WIN_YMIN, WIN_YMAX = GEOM.WIN_YMAX;
 const ROT_RATE = 0.30;               // SHIP units/tick, direct rotation (smooth; float SHIP)
 const ROT_ACCEL = 0.030;             // Command angular accel per tick (SHPINE)
 const ROT_VMAX  = 0.60;              // Command max angular velocity
@@ -137,21 +140,30 @@ export class ArcadePhysics {
       if (state.FUEL < 0) state.FUEL = 0;
     }
 
-    // Motion → the ship's on-screen position (the XCURADJ/YCURADJ analog, DVG units; the lander
-    // renders at posX/posY directly, POSTMOD: screen = XCURADJ>>6).
-    const dx = state.VELX * POS_SCALE, dy = state.VELY * POS_SCALE;   // screen px this tick
-    // HORIZONTAL: the source's dead-zone window — the ship drifts across the screen and the
-    // terrain holds still until it reaches an edge, where the excess scrolls the scape (§9;
-    // ACCEL adds velocity to XCURADJ unless MJRFLG says the scape is scrolling, :1946).
+    // Motion → the ship's on-screen position (the XCURADJ/YCURADJ analog; the lander renders at
+    // posX/posY directly, POSTMOD: screen = XCURADJ>>6). MINOR travels ×4 on screen (ACCEL :1953);
+    // the edge overflow then scrolls WORLD_PER_SCREEN = 1/scale (4 major / 1 minor) world units.
+    const major = isMajor();
+    const worldPerScreen = major ? 4 : 1;
+    const posMul = major ? 1 : 4;                                     // ×4 minor position step
+    const dx = state.VELX * POS_SCALE * posMul, dy = state.VELY * POS_SCALE * posMul;   // screen px this tick
+    // HORIZONTAL dead-zone: the ship drifts across the screen and the terrain holds still until it
+    // hits an edge, where the excess scrolls the scape (§9; ACCEL adds to XCURADJ unless scrolling).
     let nx = state.posX + dx;
-    if      (dx > 0 && nx > WIN_XMAX) { state.SCROLL += (nx - WIN_XMAX) * WORLD_PER_SCREEN; nx = WIN_XMAX; }  // right edge → scroll
-    else if (dx < 0 && nx < WIN_XMIN) { state.SCROLL += (nx - WIN_XMIN) * WORLD_PER_SCREEN; nx = WIN_XMIN; }  // left  edge → scroll
+    if      (dx > 0 && nx > WIN_XMAX) { state.SCROLL += (nx - WIN_XMAX) * worldPerScreen; nx = WIN_XMAX; }  // right edge → scroll
+    else if (dx < 0 && nx < WIN_XMIN) { state.SCROLL += (nx - WIN_XMIN) * worldPerScreen; nx = WIN_XMIN; }  // left  edge → scroll
     state.posX = nx;
-    // VERTICAL: in the far/major view the WHOLE terrain is on screen, so the ship simply moves
-    // up/down within it (no vertical scroll — the major/minor SCRADD window is entangled with the
-    // zoom transition, so it lands with the zoom step; §9). Clamped to stay on-screen (the faithful
-    // off-top reset + the ground-collision floor are also deferred). This is why full throttle now
-    // visibly climbs: posY rises with +VELY instead of snapping to a window edge.
-    state.posY = Math.max(28, Math.min(744, state.posY + dy));
+    // VERTICAL: MINOR gets the faithful dead-zone (§9) — the ship stays in [WIN_YMIN, WIN_YMAX] and
+    // the excess scrolls SCRADD, so the ground rises as it descends / recedes as it climbs. MAJOR
+    // (far view, whole terrain on screen) keeps free vertical movement; its ascent past the ceiling
+    // is the off-top reset handled in landscape.updateZoom (descent triggers the zoom-in first).
+    let ny = state.posY + dy;
+    if (major) {
+      state.posY = Math.max(28, ny);                                 // free (bottom-guarded; top = off-top reset)
+    } else {
+      if      (dy < 0 && ny < WIN_YMIN) { state.SCRADD += (ny - WIN_YMIN) * worldPerScreen; ny = WIN_YMIN; }  // descend → ground rises
+      else if (dy > 0 && ny > WIN_YMAX) { state.SCRADD += (ny - WIN_YMAX) * worldPerScreen; ny = WIN_YMAX; }  // climb → ground recedes
+      state.posY = ny;
+    }
   }
 }

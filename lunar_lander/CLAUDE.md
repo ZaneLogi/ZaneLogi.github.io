@@ -21,12 +21,13 @@ three source-faithful demos: **flight physics** (`physics.html`), **crash explos
 (`explosion.html`, the `BOOM` routine), and the **faithful landscape**
 (`landscape.html`, built from `LNMIN`/`MINTBL` — the terrain done right with the
 source, vs the MAME-matched `screen.html`/`scroll_view.html`). The **gameplay runtime
-is under construction** — steps 0-3 done (seams · terrain · flight · HUD): `play.html`
-is now a flyable IDLE⇄PLAY loop with scrolling terrain, the arcade flight model, and a
-live HUD (values/speeds/arrows/clock). Still unbuilt: collision/landing verdict, scoring,
-the zoom transition, starfield (steps 4-7 — see "Gameplay runtime — build order & status"
-below). HUD value layout, pad multipliers, and the horizontal-scroll/wrap behaviour are
-MEASURED against MAME (see "Gameplay HUD" + "Terrain scroll" below).
+is under construction** — steps 0-4 done (seams · terrain · flight · HUD · zoom): `play.html`
+is now a flyable IDLE⇄PLAY loop with scrolling terrain, the arcade flight model, a live HUD
+(values/speeds/arrows/clock), and the major↔minor **zoom** (the near/zoom-in landing view +
+the faithful transition). Still unbuilt: collision/landing verdict, scoring, starfield
+(steps 5-7 — see "Gameplay runtime — build order & status" below). HUD value layout, pad
+multipliers, and the horizontal-scroll/wrap behaviour are MEASURED against MAME (see
+"Gameplay HUD" + "Terrain scroll" below).
 
 **The original program source has been located** (`historicalsource/lunar-lander`,
 cloned per-PC — see "Program source" below for the paths — main module `A34573.1A` by Rich Moore).
@@ -432,8 +433,11 @@ columns `x` 100/600); the CPU adds the values:
   `→` = `$5566`, `↓` = `$5598`. Colon and arrows are in ROM, not the font block.
 
 **Landing pads (confirmed by the game's own multiplier labels):** the visible
-cluster is `5X 5X 2X 2X` left-to-right, matching `multiplier = 1 + 64/width`
-(64→2X, 32→3X, 16→5X):
+cluster is `5X 5X 2X 2X` left-to-right. NOTE: `multiplier = 1 + 64/width` was a
+coincidental fit to these four pads — it is **NOT** the real mechanism. The ROM
+assigns the multiplier by **site index** via the fixed table `TBSTFT =
+2,2,2,2,3,3,4,4,4,4,5,5,5,5,5` (15 sites; `research_physics.md` §11 `:1921`), not
+from width. Use `TBSTFT[site]`, not the width formula, when scoring lands (step 6/7):
 
 | pad | rom x (center) | y_up | label |
 |---|---|---|---|
@@ -442,12 +446,11 @@ cluster is `5X 5X 2X 2X` left-to-right, matching `multiplier = 1 + 64/width`
 | central valley floor   | ≈ 666 | ≈ 43  | **2X** (wide) |
 | right valley floor     | ≈ 848 | ≈ 47  | **2X** |
 
-So **wide valley floors = 2X (easy), narrow ledges high on the peak = 5X (hard)** —
-the inverse width↔multiplier design. (This **corrects** an earlier width-only guess
-that called the side valleys "3X" and missed the two 5X flank ledges.) Note: **not
-every flat is a scoring pad** — the wide flat at the bottom of the left-center valley
-(rom ~266–290) carries no label, so pads are specifically designated in the terrain
-data, not "any flat spot."
+Observed here, wide valley floors read 2X and narrow peak-flank ledges read 5X — but
+that width↔multiplier correlation is incidental to these pads, not the rule (the rule is
+the `TBSTFT` per-site table above). Note: **not every flat is a scoring pad** — the wide
+flat at the bottom of the left-center valley (rom ~266–290) carries no label, so pads are
+specifically designated in the terrain data, not "any flat spot."
 
 ### Terrain scroll — MEASURED from MAME (frames 0000-0003, 2026-06-29)
 
@@ -636,9 +639,30 @@ the collision/landing kernel (`research_physics.md` §13).
   units/frame (burnFac 218, or 144 Prime), = 0.23/frame (~9.6/s) full, 0.14/frame (~5.8/s) hover;
   this replaced a provisional rate that drained ~4× too fast. `ROT.GAS` = 0.06 unit/rotating-frame
   (:882; ~per-frame under our float rotation, a small deviation).
-- **Steps 4-7:** finalize remaining feel-tuning (`THRUST_RAMP`/position scales) alongside the HUD, `starfield.js`,
-  then the net-new landscape queries (`padAt`/`slopeAt` + faithful `SCPDST`) + `collision.js`
-  (land/crash verdict) + scoring + zoom-transition, then the `GAMODE` machine (attract/play/land).
+- **[done] Step 4 — the zoom-in (minor) scape + major↔minor transition:** the near view + the
+  faithful snap (research_physics.md §9/§9.1). `landscape.js` owns it — `frameCamera` (scale
+  0.25 major / 1.0 minor, camera from SCROLL/SCRADD per scape) + `updateZoom` (the SCAPMJR/SCRLUP
+  analog): **trigger = the altitude proxy** `altitudeAt` (the `SCPDST` stand-in until `DECODE`),
+  **IN alt < 384 / OUT alt ≥ 520** (+ascending +high-in-window) — the faithful hysteresis band
+  mapped to world units. **Snap** (no tween): flip `LUNARNUM`, reset ship to MINSTX/MINSTY (512/632)
+  or RMJRX (512), set scroll for **coordinate continuity** (world-point-preserving; a labeled
+  simplification of the exact `SUMSA`/`SUMSUM`). `physics_arcade.js` adds the **×4 minor position
+  step** + the **minor vertical dead-zone** (`[256,660]` → `SCRADD`; the ground rises as you
+  descend). **Minimal off-top-of-major reset** `state.resetFlight(20)` (deduct fuel, reseed; keeps
+  score/clock). Minor lander = the big bank at **`PXU.in 1.0`** (native): the source draws lander +
+  terrain into one VG list at one scale, so each bank renders at its authored size — near bank 27u
+  vs the 256u minor section (~0.11), the ~1.8× far→near change is just the bank swap, NOT a 4× zoom.
+  **MAME-validated** against `llander` snap `0006.png` (lander ≈27.5u = 43px ÷ 1.5625; peak-summit
+  landing reproduced 1:1). Live-verified: zoom in/out snap, dead-zone scroll both ways, off-top
+  reset, no altitude jump across the snap.
+  - **Open (scoring step):** the real pad multiplier is **`TBSTFT[site]`** (`2,2,2,2,3,3,4,4,4,4,5,5,5,5,5`,
+    research_physics.md §11), a per-SITE table — NOT the `1+64/width` guess in screen.js. MAME `0006`
+    scored 50 (base) on a peak summit that is a **32u** flat in our data; our three **16u flats are
+    ledges, not summits**, and are narrower than the 27u lander. So when scoring lands (step 6/7),
+    map our flats → the 15 site indices and use `TBSTFT`, and confirm which flats are scoring pads.
+- **Steps 5-7:** finalize remaining feel-tuning (`THRUST_RAMP`/lander scales), `starfield.js`,
+  then the net-new landscape queries (`padAt`/`slopeAt` + faithful 2-corner `SCPDST`/`DECODE`) +
+  `collision.js` (land/crash verdict) + scoring, then the `GAMODE` machine (attract/play/land).
 
 `state.js` currently holds the shared zero-page values (the seam); the `GAMODE`
 attract/play/land machine + scoring (the module table's `state.js` role) lands with the
