@@ -95,6 +95,65 @@ export function drawShapeScreen(ctx, ROM, key,
   });
 }
 
+// Measure the total DVG-cursor advance of a run of glyph KEYS chained back-to-back
+// (the source's $5458 model: each glyph's trailing dark move steps to the next
+// char origin — verified in discovery_rom_data.js). Returns width in DVG units.
+function glyphRunWidth(ROM, keys, gs) {
+  const cur = { x: 0, y: 0 };
+  for (const k of keys) runList(ROM, [{ op: 'JSR', target: k }], cur, gs, () => {});
+  return cur.x;
+}
+
+// SCREEN-space run of ROM glyph shapes along a baseline (px,py), each advancing by
+// its own native width — the value renderer for the HUD (SCORE/TIME/FUEL/speeds).
+// `align`: 'left' → first char at x; 'right' → the run ends at x (units digit fixed,
+// number grows left — the MAME-measured right-column behaviour). Zero-length bright
+// vectors (the colon dots) render as dots. Baseline is Y-up (glyph rises above py).
+export function drawGlyphString(ctx, ROM, keys,
+                                { x = 0, y = 0, pxScale = 1, gs = 0, align = 'left', color = null, width = 1.6 } = {}) {
+  const x0 = align === 'right' ? x - glyphRunWidth(ROM, keys, gs) * pxScale : x;
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.lineWidth = width;
+  const cur = { x: 0, y: 0 };
+  for (const k of keys) {
+    runList(ROM, [{ op: 'JSR', target: k }], cur, gs, (fx, fy, tx, ty, bri) => {
+      const col = color || strokeFor(bri);
+      if (fx === tx && fy === ty) {                 // zero-length vector = a dot (colon)
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(x0 + fx * pxScale, y - fy * pxScale, Math.max(1, pxScale * 0.6), 0, 7);
+        ctx.fill();
+        return;
+      }
+      ctx.strokeStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(x0 + fx * pxScale, y - fy * pxScale);
+      ctx.lineTo(x0 + tx * pxScale, y - ty * pxScale);
+      ctx.stroke();
+    });
+  }
+}
+
+// SCREEN-space arrow glyph, vertically centred on a digit row. The arrow glyphs
+// ($5566/$5576/$5586/$5598) carry their own y-offset within the HUD grid; here we
+// re-centre them on the digit band (digits occupy fy 0..12, centre 6) whose baseline
+// is `baselineY`, and place the pen at `x` — the MAME-measured speed-arrow spot.
+export function drawArrowGlyph(ctx, ROM, key, { x = 0, baselineY = 0, pxScale = 1, gs = 0, color = null, width = 1.6 } = {}) {
+  const segs = []; let mn = Infinity, mx = -Infinity;
+  eachSegment(ROM, key, gs, false, false, (fx, fy, tx, ty, bri) => {
+    segs.push({ fx, fy, tx, ty, bri });
+    mn = Math.min(mn, fy, ty); mx = Math.max(mx, fy, ty);
+  });
+  const cy = baselineY - (6 - (mn + mx) / 2) * pxScale;   // align arrow's y-centre to the digit band's centre (6)
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.lineWidth = width;
+  for (const s of segs) {
+    ctx.strokeStyle = color || strokeFor(s.bri);
+    ctx.beginPath();
+    ctx.moveTo(x + s.fx * pxScale, cy - s.fy * pxScale);
+    ctx.lineTo(x + s.tx * pxScale, cy - s.ty * pxScale);
+    ctx.stroke();
+  }
+}
+
 // Ink bounding box of a font glyph at scale `gs` (shape-local DVG units).
 function glyphBBox(key, gs) {
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, any = false;

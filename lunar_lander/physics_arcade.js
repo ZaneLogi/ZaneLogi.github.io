@@ -47,8 +47,8 @@ const WIN_XMIN = 128, WIN_XMAX = 896;
 const ROT_RATE = 0.30;               // SHIP units/tick, direct rotation (smooth; float SHIP)
 const ROT_ACCEL = 0.030;             // Command angular accel per tick (SHPINE)
 const ROT_VMAX  = 0.60;              // Command max angular velocity
-const BURN_RATE = 0.9;               // fuel/tick at full throttle, Training (provisional)
-const ROT_GAS   = 0.05;              // fuel/tick while rotating (ROT.GAS ¼-unit analog)
+const ROT_GAS_FUEL = 0.06;           // fuel/frame while rotating — ROT.GAS subtracts BCD 06 from the
+                                     // fractional byte per rotation (:882); = 6 hundredths of a unit
 const THRUST_RAMP_TICKS = 2;         // ticks per THRUST level step while ↑ is held/released (provisional feel)
 
 // PLYMOD 0-3 profiles (research_physics.md §7.1). GRAVT = [17,17,34,17]; Prime doubles
@@ -125,11 +125,15 @@ export class ArcadePhysics {
       state.VELY -= state.VELY / 32;
     }
 
-    // BURN: fuel drains with throttle (× profile burn factor) + a little per rotation
-    // (ROT.GAS). Clamped at 0. Structure faithful; absolute rate provisional (§7.3).
+    // BURN (:1794) — the FAITHFUL rate: fuel used/frame = MULTPA(burnFac, TRSTAB[THRUST]) =
+    // floor(burnFac · TRSTAB[THRUST] / 256), a value in HUNDREDTHS of a unit (it's subtracted
+    // from FUEL's fractional low byte), so ÷100 → whole units. burnFac = 218 (FUELFAC) normally,
+    // 144 (FLFAC2) for Prime — Prime burns less per thrust-unit but thrusts 1.5× (ACCEL). Uses
+    // the RAW TRSTAB value (NOT ×thrustMult). Full throttle = floor(218·28/256)/100 = 0.23/frame
+    // (~9.6/s); hover (lvl 8) = 0.14/frame (~5.8/s). Plus ROT.GAS while rotating.
     if (!outOfFuel) {
-      state.FUEL -= state.throttle * BURN_RATE * (prof.burnFactor / FUELFAC);
-      if (input.rotate) state.FUEL -= ROT_GAS;
+      state.FUEL -= Math.floor(prof.burnFactor * TRSTAB[state.THRUST] / 256) / 100;
+      if (input.rotate) state.FUEL -= ROT_GAS_FUEL;   // ROT.GAS (:882); float-rotation → ~per-frame (deviation)
       if (state.FUEL < 0) state.FUEL = 0;
     }
 

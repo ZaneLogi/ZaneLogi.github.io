@@ -3,6 +3,11 @@
 Guidance for Claude Code in this directory. Read this before changing
 anything here; it overrides the repo-root CLAUDE.md.
 
+**Commit style (this project):** a **one-line title + the trailer** — no
+multi-line body (the research docs + the diff carry the detail). e.g.
+`[lunar_lander] <subject>` then `Co-Authored-By: …` (a `step N —` prefix
+on the subject is optional).
+
 ## What this is
 
 A port of Atari **Lunar Lander** (1979) — a vector-display arcade game
@@ -15,10 +20,13 @@ ROM-decode stage — twelve demo pages: nine faithful vector-ROM byte-decodes pl
 three source-faithful demos: **flight physics** (`physics.html`), **crash explosion**
 (`explosion.html`, the `BOOM` routine), and the **faithful landscape**
 (`landscape.html`, built from `LNMIN`/`MINTBL` — the terrain done right with the
-source, vs the MAME-matched `screen.html`/`scroll_view.html`). The **gameplay-runtime
-scaffold has begun** (step 0 — see "Gameplay runtime — build order & status" below);
-no playable game yet. HUD value layout, pad multipliers, and the horizontal-scroll/wrap
-behaviour are MEASURED against MAME (see "Gameplay HUD" + "Terrain scroll" below).
+source, vs the MAME-matched `screen.html`/`scroll_view.html`). The **gameplay runtime
+is under construction** — steps 0-3 done (seams · terrain · flight · HUD): `play.html`
+is now a flyable IDLE⇄PLAY loop with scrolling terrain, the arcade flight model, and a
+live HUD (values/speeds/arrows/clock). Still unbuilt: collision/landing verdict, scoring,
+the zoom transition, starfield (steps 4-7 — see "Gameplay runtime — build order & status"
+below). HUD value layout, pad multipliers, and the horizontal-scroll/wrap behaviour are
+MEASURED against MAME (see "Gameplay HUD" + "Terrain scroll" below).
 
 **The original program source has been located** (`historicalsource/lunar-lander`,
 cloned per-PC — see "Program source" below for the paths — main module `A34573.1A` by Rich Moore).
@@ -113,6 +121,15 @@ avoids it.)
   is an original-ROM artwork glitch reproduced on purpose; it stands out
   in `gallery.html`. Do **not** "fix" it — deleting the stroke would make
   the decode un-faithful.
+
+- **VERTICAL/HORIZONTAL SPEED "bounces" down periodically in Training.** In
+  Training (`PLYMOD 0`) `FRICTN` runs every 16 frames (`:1036`), subtracting
+  `VEL/32` from each velocity magnitude. At speed, that single-frame drop of
+  `|VEL|/32` can cross a display `÷64` boundary (speed = `|VEL| >> 6`), so the
+  HUD number ticks **down 1** for a frame before gravity/thrust resumes climbing
+  it — the number appears to jitter. This is **faithful** (confirmed against
+  MAME): the other modes (Cadet/Prime/Command have no friction) count perfectly
+  monotonically. Do **not** smooth or clamp the display to "fix" it.
 
 ## Lander rotation & the two size banks
 
@@ -600,12 +617,28 @@ the collision/landing kernel (`research_physics.md` §13).
   rendering the upside-down half via yFlip. **Deviations (labeled):** keyboard throttle is a
   spring-loaded ramp — hold `↑` to step THRUST up to 15, release to step it back down to 0 from
   wherever it sits (the cabinet's pot has no software ramp at all, `THRLVL` just reads its
-  position, `:897` — a key has no position to read, so this is our stand-in); `BURN_RATE` /
-  `THRUST_RAMP_TICKS` are provisional feel-tuning (finalized with the HUD, step 4); no collision
-  yet (the craft sinks through terrain until step 6). `SHIP` is float (finer angle; pose fold snaps).
-- **Steps 3-7:** `display_info.js` (HUD values/altitude/speed + finalize tuning), `starfield.js`,
-  then the net-new landscape queries + `collision.js` (land/crash verdict) + scoring +
-  zoom-transition, then the `GAMODE` machine (attract/play/land).
+  position, `:897` — a key has no position to read, so this is our stand-in); `THRUST_RAMP_TICKS`
+  is provisional ramp feel; no collision yet (the craft sinks through terrain until step 6). `SHIP`
+  is float (finer angle; pose fold snaps). (Fuel BURN rate is now FAITHFUL — see step 3.)
+- **[done] Step 3 — `display_info.js` (HUD):** the `$5458` label grid + the CPU-drawn VALUES —
+  a routine-level translation of `DISPLY` (:3258, compute the decimals) + `MESDATA` (:1453, draw).
+  `DisplayInfo.render(state, camera, landscape)` (read-only; draws via new `render.js` helpers
+  `drawGlyphString` + `drawArrowGlyph`, keeping all canvas drawing in the render seam). Faithful
+  scaling: SCORE 4-digit leading-zeros; TIME `MM:SS` from a new **game clock** (`state.tickClock`,
+  the NMI second-counter `A34573.1D:360` — `TIMVAL -= FRMECNT` per tick, PLAY only); FUEL 4-digit
+  integer part; ALTITUDE/H-SPEED/V-SPEED zero-suppressed; **speed = `|VEL| >> 6`** (DISPLY :3264);
+  **arrows** →/←/↑/↓ from velocity sign, hidden at 0 (DISPLY :3276). Layout = the MAME-measured grid
+  (screen.js). **Deviations (labeled):** velocity is sign-magnitude in source (VELX + SGNVLX, ACCEL
+  :1959) — we take `abs()`+sign from our signed floats; BCD→plain-int formatting; **ALTITUDE is a
+  HUD proxy** — `landscape.heightAt()` is a single straight-down query (clamped ≥0), where the
+  source's `SCPDST` is `min(both lower-corner clearances)` via the `DECODE` pass (lands with step 6).
+  Also landed here: the **faithful fuel `BURN`** (:1794) — `floor(burnFac·TRSTAB[THRUST]/256)/100`
+  units/frame (burnFac 218, or 144 Prime), = 0.23/frame (~9.6/s) full, 0.14/frame (~5.8/s) hover;
+  this replaced a provisional rate that drained ~4× too fast. `ROT.GAS` = 0.06 unit/rotating-frame
+  (:882; ~per-frame under our float rotation, a small deviation).
+- **Steps 4-7:** finalize remaining feel-tuning (`THRUST_RAMP`/position scales) alongside the HUD, `starfield.js`,
+  then the net-new landscape queries (`padAt`/`slopeAt` + faithful `SCPDST`) + `collision.js`
+  (land/crash verdict) + scoring + zoom-transition, then the `GAMODE` machine (attract/play/land).
 
 `state.js` currently holds the shared zero-page values (the seam); the `GAMODE`
 attract/play/land machine + scoring (the module table's `state.js` role) lands with the

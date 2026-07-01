@@ -11,18 +11,20 @@
 // lander pose) through the render layer to prove main → render.js → dvg.js →
 // *_rom_data.js is wired end-to-end. Later steps replace this test draw.
 
-import { state, camera, isPlaying, newGame, toIdle } from './state.js';
+import { state, camera, isPlaying, newGame, toIdle, tickClock } from './state.js';
 import { SCREEN_W, SCREEN_H, drawShapeScreen, drawText } from './render.js';
 import { ROM599 } from './discovery_rom_data.js';
 import { Landscape } from './landscape.js';
 import { Input } from './input.js';
 import { Lander } from './lander.js';
+import { DisplayInfo } from './display_info.js';
 
 const landscape = new Landscape();
 landscape.setMajorCamera(camera);   // boot/IDLE framing = the major (zoom-out) view
 const majorBaseY = camera.y;        // the major vertical baseline; SCRADD offsets it in PLAY
 const input = new Input();
 const lander = new Lander();
+const displayInfo = new DisplayInfo();
 
 const ctx = document.getElementById('game').getContext('2d');
 
@@ -51,6 +53,7 @@ function update(dt) {
   // lander draws at posX/posY (it roams the screen); the camera reads only the scroll, so the
   // terrain holds still until an edge is hit. Descent past the bottom lowers SCRADD → ground rises.
   lander.update(state, input.read());
+  tickClock();                                // advance the game clock (PLAY only; source NMI :360)
   camera.x = ((state.SCROLL % landscape.loopW) + landscape.loopW) % landscape.loopW;
   camera.y = majorBaseY + state.SCRADD;
 }
@@ -62,7 +65,8 @@ function render(alpha) {
   landscape.render(ctx, camera);
 
   if (isPlaying()) {
-    lander.render(ctx, state);                          // the flying craft (centred)
+    lander.render(ctx, state);                          // the flying craft
+    displayInfo.render(ctx, state, camera, landscape);  // HUD: labels + values + arrows
   } else {
     // IDLE / attract: the lander in the sky + the start prompt above the peaks.
     drawShapeScreen(ctx, ROM599, 'S_4B64', { cx: SCREEN_W / 2, cy: SCREEN_H * 0.34, pxScale: 6, width: 1.8 });

@@ -81,6 +81,21 @@ export class Landscape {
     }
   }
 
-  // heightAt(worldX) / padAt(worldX) / slopeAt(worldX) — added at step 6, computed
-  // from this.segs + this.bounds (the model is already query-ready).
+  // Terrain surface height (world DVG y) directly below worldX. Walks the segment
+  // polyline for the span containing x (wrapped into the loop) and linearly
+  // interpolates the surface y. Single-point query — enough for the HUD ALTITUDE
+  // readout now (display_info). Step 6's collision uses the faithful two-corner
+  // SCPDST (min of both lower-corner clearances) instead; padAt/slopeAt land there
+  // too, computed from this.segs + this.bounds (the model is already query-ready).
+  heightAt(worldX) {
+    const x = ((worldX % this.loopW) + this.loopW) % this.loopW;
+    let best = null;                                   // topmost surface at x (a ridge can stack segments)
+    for (const s of this.segs) {
+      const lo = Math.min(s.fx, s.tx), hi = Math.max(s.fx, s.tx);
+      if (x < lo || x > hi) continue;
+      const y = hi > lo ? s.fy + (s.ty - s.fy) * ((x - s.fx) / (s.tx - s.fx)) : Math.max(s.fy, s.ty);
+      if (best === null || y > best) best = y;         // surface = the highest stroke over x
+    }
+    return best === null ? this.yMin : best;
+  }
 }

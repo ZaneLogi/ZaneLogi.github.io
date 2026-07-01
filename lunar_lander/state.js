@@ -34,6 +34,14 @@ export const state = {
 
   // --- resources -------------------------------------------------------------
   FUEL:   0,          // remaining fuel; set from PLYMOD/coin at play start (research_physics.md §6)
+  SCORE:  0,          // game score (:296); BCD in source, plain int here. Scoring lands with collision (step 6)
+
+  // --- game clock (:271-293) -------------------------------------------------
+  // GMTIME = the MM:SS the HUD shows; TIMVAL counts NMIs down to one game-second.
+  // Ticked by tickClock() below (the source's NMI handler A34573.1D:360, PLAY only).
+  GMTIME_S: 0,        // seconds 0-59 (GMTIME, BCD in source)
+  GMTIME_M: 0,        // minutes  (GMTIME+1)
+  TIMVAL: 250,        // frame/second counter (:271) — counts SECCNT NMIs to one second
 
   // --- scape scroll & zoom (:232-236) ---------------------------------------
   SCROLL: 0,          // horizontal scroll factor (:234), DVG units
@@ -47,6 +55,21 @@ export const state = {
   INDEX:  0,          // explosion / abort sequence counter (:237)
   COLFLG: 0,          // collision flag: $80 good land / $C0 hard / $8F crash (:243)
 };
+
+// Game-clock constants (A34573.1A :56/:59). One source frame = FRMECNT NMIs; one
+// game-second = SECCNT NMIs. Keeping TIMVAL in NMI units (decrement FRMECNT per
+// 24 ms tick) makes the second boundary land exactly where the hardware's does.
+const SECCNT = 250, FRMECNT = 6;
+
+// Advance the game clock one tick, PLAY only (the source's NMI increment, D:360).
+// TIMVAL counts down SECCNT NMIs; on rollover, GMTIME seconds++ (minute carry).
+// Minutes cap at 99 to stay in the 2-digit MM field.
+export function tickClock() {
+  state.TIMVAL -= FRMECNT;
+  if (state.TIMVAL > 0) return;
+  state.TIMVAL += SECCNT;
+  if (++state.GMTIME_S >= 60) { state.GMTIME_S = 0; if (state.GMTIME_M < 99) state.GMTIME_M++; }
+}
 
 // LUNARNUM's V-bit ($40) set ⇒ MAJOR (zoom-out); clear ⇒ MINOR (zoom-in).
 // (SCAPE `BIT LUNARNUM / BVS MAJOR` :1098.)
@@ -98,6 +121,8 @@ export function newGame(settings) {
   state.posY = INIT_Y;
   state.SCROLL = 0; state.SCRADD = 0;  // scape scroll cleared (REINIT :657)
   state.INDEX = 0; state.COLFLG = 0;
+  state.SCORE = 0;                  // fresh score (:351-352)
+  state.GMTIME_S = 0; state.GMTIME_M = 0; state.TIMVAL = 250;  // clear mission time (:640)
   state.LUNARNUM = 0x40;            // major / zoom-out (boots high; REINIT :672)
   state.GAMODE = 0x40;             // → PLAY (PLYINIT :646)
 }
