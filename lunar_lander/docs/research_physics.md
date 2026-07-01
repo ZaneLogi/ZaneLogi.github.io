@@ -153,50 +153,80 @@ the upper half-circle (head left→up→right; see CLAUDE.md "Gameplay rotation 
 
 ## 9. Motion display — velocity → scroll (lander stays centred)
 
-The lander is drawn at a **fixed screen position** (`YCURR`/`XCURR` LABS, `:181-182`);
-the **world scrolls** to show motion. `ACCEL` accumulates velocity into the ship's world
-position `XCURADJ/YCURADJ`; `DECODE`/`SCAPCHG` (`:484-485`) translate that into the
-lunarscape scroll `SCROLL` (horizontal, fractional) + `SCRADD` (vertical), flagged by
-`MJRFLG`. Vertical motion (descent) is `SCRADD`; the craft does not descend on screen —
-the ground rises toward it.
+The craft is **not pinned to screen-centre** — it moves within a **screen dead-zone window**,
+and the world scrolls only at the window edges. Four coordinate frames are in play; keeping
+them straight is the whole trick:
 
-The lander is held inside a **screen window**, not pinned to a single point: `SCAPCHG`
-keeps ship X within `[XMIN=32, XMAX=224]` (adjusted units) — at an edge it scrolls the
-scape (`XSCPADD`/`XSCPSUB`, stepping `LUNAROT` through the wrapping sections) instead of
-moving the ship further (`:2682-2698`); vertical likewise (`YSCPADD`/`YSCPSUB`). So the
-craft drifts within a centred window and the world scrolls underneath it.
+| Frame | Vars | Units | Start |
+|---|---|---|---|
+| adjusted / MODULE | `XCURADJ`/`YCURADJ` (`:178`) | logical `× $40` (×64) fixed-point | `INTXCUR/INTYCUR` = `64·64`/`682·64` |
+| DVG / screen (LABS) | `XCURR`/`YCURR` (`:181`) | 10-bit DVG coord | **(64, 682)** |
+| scape scroll | `SCROLL`/`SCRADD` (`:234`) | terrain offset under the ship | 0 / 0 |
+
+`POSTMOD` (`:1295`) is the only bridge adjusted → screen: it calls `ROTATE` (`:2019`), which
+is exactly **`XCURADJ >> 6`** (the `×64` fixed-point shifted back down), then OR's the `$A0`
+LABS opcode. So **`XCURR = XCURADJ >> 6` = the logical value** — start screen point = **(64, 682)**,
+which (DVG Y-up, 1024×768) is **upper-left, near the top**, not centre.
+
+`ACCEL` (`:1946`) adds velocity to `XCURADJ`/`YCURADJ` **unless** `MJRFLG` says the scape is
+scrolling (then the velocity goes to the scroll and the ship holds). `SCAPCHG` (`:2674`) sets
+`MJRFLG` + scrolls the scape only when the ship reaches an edge — X kept within
+`XCURADJ+1 ∈ [XMIN 32, XMAX 224]` = logical **X [128, 896]** (`XSCPADD`/`XSCPSUB`, stepping
+`LUNAROT` through the wrapping sections, `:2682-2698`); vertical within `[YMIMIN 256, YMJMAX 660]`
+(`:3731-3737`). So the craft **drifts across the screen within the window**, and the terrain
+holds still until an edge — descent past the bottom lowers `SCRADD` → the ground rises.
+
+**Port note:** the port builds the **horizontal** dead-zone now — the lander draws at
+`(posX, SCREEN_H − posY)` (the `POSTMOD >>6` result, held un-scaled), velocity integrates into
+`posX/posY`, and the horizontal excess scrolls `SCROLL` at the `[XMIN,XMAX]` edges
+(`physics_arcade.js`, `lander.js`). This supersedes an earlier strict-centre-lock simplification
+that drew the ship centred from frame 1. **Vertically** the ship moves freely on screen (the
+whole terrain is visible in the far view), because the major/minor `SCRADD` window is entangled
+with the `SCPDST` zoom transition — so the vertical scroll, the full `LUNAROT` section stepping,
+and the faithful off-top reset are all finished with the zoom step. (A first cut that also clamped
+`posY` to a vertical window snapped the ship down when it climbed past the start height — dropped.)
 
 ### 9.1 Zoom — the major/minor scape transition
 
 The game runs **two terrain coordinate systems**, switched by `LUNARNUM`
 (`$40` = major, `0` = minor):
-- **MAJOR** — far view, 1×, 4 sections (section mask `$03`); the zoom-out lander bank
-  (`$4DF4`, ~15u).
-- **MINOR** — near view, **4× magnified**, 16 sections (mask `$0F`); the zoom-in lander
-  bank (`$4BA2`, ~29u). The 4× is why `ACCEL` multiplies velocity by 4 for the minor
-  position step (`:1953-1958`) — same world motion, 4× the on-screen travel.
+- **MAJOR** — far view, 1×, 4 sections (section mask `$03`, `DECODE :2144`); the zoom-out
+  lander bank (`$4DF4`, ~15u).
+- **MINOR** — near view, **4× magnified**, 16 sections (mask `$0F`, `DECODE :2140`); the
+  zoom-in lander bank (`$4BA2`, ~29u). The 4× is why `ACCEL` multiplies velocity by 4 for
+  the minor position step (`:1953-1958`) — same world motion, 4× the on-screen travel.
 
-The switch is driven by **`SCPDST`** (`:2930`) — the *minimum distance from the lander's
-corners to the terrain* (from the `DECODE` distance pass: `DISTYL`/`DISTYR`) — **not** raw
-altitude, and it uses **hysteresis**:
-- **Zoom IN (major → minor)** — `SCAPMJR` (`:2828`): while descending, once
-  `SCPDST < YMJMIN (96)` (`:2853-2857`) it converts the major position into minor
-  coordinates (`:2858-2927`), resets scroll, places the ship at `MINSTX`/`MINSTY`, and
-  sets `LUNARNUM = 0`. *Within ~96 units of the ground → snap to the near 4× view.*
+The switch is driven by **`SCPDST`** (`:2930`) — the *smaller of the two Y-axis corner
+distances* `DISTYL`/`DISTYR` (from the `DECODE` pass; `SCPDST` compares only the Y distances
+and returns the min in `A`/`X`, the other corner's low byte in `Y`) — **not** raw altitude.
+`DECODE` measures the **left** corners on even frames and the **right** on odd
+(`FRAME LSR / BCS :2092-2112`), so one of the two can be a frame stale; the min is still a
+good ground-clearance estimate. The transition uses **hysteresis**:
+- **Zoom IN (major → minor)** — `SCAPMJR` (`:2828`): once `SCPDST < YMJMIN (96)` (top byte 0
+  and low byte `< 96`, `:2853-2857`) it converts the major position into minor coordinates
+  (`:2858-2923`), zeroes scroll, sets `LUNARNUM = 0`, and resets the ship to
+  `MINSTX = 512/4 = 128` / `MINSTY = 632/4 = 158` (adjusted units, `:2924-2927`, `:3738-3739`).
+  *Within ~96 units of the ground → snap to the near 4× view.*
 - **Zoom OUT (minor → major)** — `SCRLUP` (`:2725`, "convert minor offsets into major
-  offsets"): while ascending past `YMIMAX (165)`, once `SCPDST ≥ YMISCR (520)` and not
-  colliding (`:2719-2721`), it converts minor→major, resets scroll, places the ship at
-  `RMJRX=128`, and sets `LUNARNUM = $40` (`:2725-2792`). *Climb well clear → pop to far view.*
+  offsets"): while ascending with the ship high in its window (`YCURADJ ≥ YMIMAX = 660/4 = 165`,
+  `:2709`), once `SCPDST ≥ YMISCR (520)` and `COLFLG` clear (`:2711-2720`), it converts
+  minor→major, zeroes scroll, sets `LUNARNUM = $40`, and resets the ship X to
+  `RMJRX = 512/4 = 128` (`:2789-2792`). If `COLFLG` is set at that point it is a `COLLIDE`
+  (crash) instead (`:2721`). *Climb well clear → pop to far view.*
 
-The asymmetric thresholds (in ≈96, out 520-minor ≈130 major-equivalent) are deliberate
-hysteresis so the view doesn't flap at the boundary. Each transition recomputes the ship's
-position between the two systems and zeroes `SCROLL`/`SCRADD`. (Seb's altitude<70-in /
->160-out is his approximation of this; the source keys on lander-to-terrain distance.)
+The thresholds are asymmetric on purpose (in `96` **major** units; out `520` **minor** units
+≈ `130` major-equivalent after the ÷4) so the view doesn't flap at the boundary. Each is
+compared in the *current* scape's own units — major for the zoom-in test, minor for the
+zoom-out test — which is what makes the ÷4 the right way to relate them (this resolves the
+earlier open question about `SCPDST` units). (Seb's altitude<70-in / >160-out is his
+approximation of this corner-distance rule.)
 
-Confirm before a pixel-exact port: whether `SCPDST` is reported in minor (4×) units while
-in minor (the `YMISCR=520` reads as minor-scaled ≈130 major). Both transitions require
-`DECODE` (lander-corner → terrain distance), which needs terrain — so faithful zoom is a
-later step than the no-terrain physics demo, but the **rule is now known**.
+**Off the top of the major scape resets the flight.** While ascending in major, if the ship
+reaches the top and `YSCPADD` can no longer scroll (`:2833-2836`), `SCAPMJR` runs
+`INTWAIT → DEDCTA → PLYSTRT` (`:2837-2841`) — the flight restarts with fuel deducted. So the
+far view has a hard ceiling, not open sky. Both transitions require `DECODE` (needs terrain),
+so faithful zoom is a later build step than the no-terrain physics demo — but the rule is now
+fully decoded.
 
 ## 10. Starfield — `STARS` (`:1121-1150`)
 
@@ -209,14 +239,72 @@ Drawn every frame after `SCAPE` (`:389-390`). Two sets matching the two zoom lev
 Star point data itself is the 61-point field in `034598` `$5244-$53E6` (already decoded;
 see CLAUDE.md region map) — single-dot VECs, brightness 5–9.
 
-## 11. Landing / collision (brief — demo has no terrain)
+## 11. Landing / collision — `DECODE` + `SCAPLND` verdict
 
-`ACCEL` clears `COLFLG` each frame; collision is detected against the scape distances
-(`DECODE`/`DISTXL…`). Outcome in `COLFLG`: `80` good (`VELY` small), `C0` hard
-(`VELY < M.HRDY=10`, triggers a bounce with `GRAVITY=M.HRDG=65`), `8F` crash. Score uses
-the per-site bonus multipliers (`TBSTFT: .BYTE 2,2,2,2,3,3,4,4,4,4,5,5,5,5,5` — 15
-entries = the 15 terrain tiles): 50/15/5 base × site multiplier; +`BNFUEL=50` on a good
-landing. Full landing model belongs in a later research doc when terrain is in scope.
+Two routines: `DECODE` measures how far the ship is from the scape; `SCAPLND` turns that
+(plus velocity + attitude) into the `COLFLG` verdict. Both need terrain in scope (the physics
+demo has none).
+
+**`DECODE` (`:2087`) — corner-to-terrain distances.** It walks the scape's VG display list
+segment by segment and, for the ship's four corners `SHPUPL`/`SHPUPR`/`SHPLWL`/`SHPLWR`,
+computes the X- and Y-axis gaps to the surface into `DISTXL`/`DISTXR` (X) and
+`DISTYL`/`DISTYR` (Y). To halve per-frame cost it does the **left** corners on even frames,
+the **right** on odd (`FRAME LSR / BCS :2092`). `ACCEL` clears `COLFLG` to `0` each frame
+(`:1943`) before `DECODE` runs.
+
+**Crash by penetration.** If a corner's distance comes back **negative** — the corner is at
+or below the surface — `DECODE` sets `COLFLG = 8F` (crash) immediately (`:2350-2352`,
+`:2396-2399`, and `DSTNCY :2547-2549`). This is the "flew into a slope" crash, independent
+of velocity.
+
+**Landing verdict — `SCAPLND` (`:2794`).** Called from `SCAPCHG` every frame in minor mode.
+It reads `SCPDST` (the smaller Y corner-distance) and grants a **successful landing** only
+when *all* of:
+1. **Both corners touching** — `SCPDST` **and** the other corner's Y distance are both `< 2`
+   (≈ within 1 unit; `:2795-2800`). A tilted ship touches one corner first → the other is
+   far → fails this → falls through to the impact check.
+2. **Near-upright** — `SHIP ∈ {7,8,9}` (`SHIP−7 < 3`, `:2801-2805`): within ±1 step
+   (±11.25°) of vertical **`SHIP = 8`** (see the SHIP-convention note below).
+3. **Descent speed** — high byte of `|VELY|`: `< 4` → **good**, `4–7` → **hard**, `≥ 8` →
+   **crash** (`:2806-2811`).
+4. **Lateral speed** — high byte of `|VELX|` `< 4`, else crash (`:2813-2815`).
+
+Result in `COLFLG`: `80` good / `C0` hard / `8F` crash (`:2816-2823`). (`M.HRDY = 10` is
+**not** the good/hard threshold — it is the post-verdict bounce seed below; the real gate is
+the `<4 / 4–7 / ≥8` split on the velocity high byte.)
+
+**Outcome — `PLYCHK` (`:531`) / `MOTCHK` (`:514`).** Once `COLFLG` bit 7 is set the game
+scores (`LNDADR`), copies `COLFLG → M.CLFL`, and:
+- **Bonus fuel** `BNFUEL = 50` **only** on a good landing (`COLFLG = 80`; `:554-558`).
+- `DEDUCT` subtracts impact fuel loss (`:559`); `GAMODE` advances to land/crash and
+  `INDEX = 1` starts the animation (`:574-576`).
+- **Hard-landing bounce:** the outcome seeds `VELY+1 = M.HRDY (10)` and
+  `GRAVITY = M.HRDG (65)` (`:577-580`); `MOTCHK` keeps `ACCEL`+`DECODE` running so the module
+  bounces and re-settles (`:514-521`). A crash instead plays `BOOM` (see
+  `research_explosion.md`); a good landing settles.
+
+**Scoring — `POINTS` (`:3311`) × site factor `TBSTFT` (`:1921`).** Base points per outcome:
+**good `50`**, **hard `15`**, **crash `5`** (`:3311-3318`). `LNDGD` (`:1900`) reads the
+site's multiplier from `TBSTFT = 2,2,2,2,3,3,4,4,4,4,5,5,5,5,5` (15 entries = 15 terrain
+sites) and calls `POINTS` that many times, so the award is `base × site-multiplier` (decimal
+`SED` add). This matches the game's own `5X 5X 2X 2X` pad labels (CLAUDE.md "Gameplay HUD").
+
+**SHIP convention — the port matches the source (upright `= 8`).** The source's
+vertical/upright is **`SHIP = 8`**: `ATRINIT` seeds `8` (`:589`), the abort auto-rotate homes
+to `#8` (`:994-1013`), and `FRCMLT` puts full thrust along `+Y` at `SHIP = 8` with zero X
+(`:1758-1789`); the Training clamp keeps `ROT+1 ≤ 0x40` → `SHIP ∈ [0,16]` (`ROT.NI :868-877`).
+So `0`/`16` are on-side, `24` upside-down. **The port uses this same convention**
+(`physics_arcade.js` `tilt = SHIP−8`, Training clamp `[0,16]`; `lander.js` pose fold about `8`)
+so every source constant compared against `SHIP` ports **verbatim** — this landing gate stays
+`SHIP ∈ {7,8,9}` with no offset.
+
+`PLYINIT` seeds `SHIP = 16` at play-start (`:650-651`) — the source's **sideways** value, not
+upright: **MAME confirms the lander enters lying on its side, head to the right / legs to the
+left**, and the player rotates it upright. So the port keeps the faithful `newGame SHIP = 16`
+seed (it now renders sideways, as the cabinet does), and upright stays tied to the thrust
+formula, never to that seed. (An earlier build treated `16` as upright with a `tilt = SHIP−16`
+axis — a self-consistent `+8` shift that flew fine but rendered the start upright instead of
+on-side and would have needed `{15,16,17}` here; realigned to `8` so the source ports 1:1.)
 
 ## 12. Implications for the physics demo
 
@@ -264,3 +352,33 @@ architecture that consumes it lives in CLAUDE.md "Flight-model architecture"):
   + render interpolation makes the ~41.7 Hz sim smooth on any display refresh, so there
   is no visual cost. Input is **sampled once per tick** (as the source reads switches
   per frame), so control latency matches the cabinet regardless of monitor rate.
+
+## 14. Start state — `PLYINIT` (`:609-673`)
+
+New Game seeds these (ported in `state.newGame`); all values are the source's own:
+
+- **`SHIP = 16.`** (decimal, `:651`) — **on its side, heading right** (legs to the left),
+  NOT upright. Upright is `SHIP = 8` (§11 SHIP-convention note), so the ship **enters
+  sideways** and the player rotates it upright — MAME-confirmed at the play-start frame. The
+  ship enters upper-left (below) drifting right, lying on its side. ATRINIT uses `SHIP = 8`
+  (upright) for the attract pose (`:588`); don't confuse the two seeds.
+- **Position** ← `INTXCUR`/`INTYCUR` (`:3747-8`): `.WORD 64.*40` / `682.*40`. The `*40`
+  (= `*$40` = ×64) is the **adjusted-window (MODULE)** fixed-point, so the logical position is
+  **(64, 682)**; the on-screen draw point is the same value (`POSTMOD` = `XCURADJ >> 6`, §9).
+  That is **upper-left, near the top** of the 1024×768 field — the ship enters top-left and
+  drifts *within its dead-zone window* (NOT centred). Copied into `XCURADJ`/`YCURADJ` (`:631-632`).
+- **Velocity** ← `INVELX`/`INVELY` (`:3749-50`, hex): `$3200` (12800) / `$10` (16), copied into
+  `VELX`/`VELY` by `PLYINIT` (`:628-636`); `REINIT` clears the sign bytes → both **positive** =
+  rightward / up (`SCAPCHG :2683/:2703`). In source velocity units (screen px = velocity/16384 per
+  frame): `VELX` = **~0.78 px/frame rightward drift** (the ship enters and drifts in); `VELY` = 16
+  is a **negligible up-seed** (~0.001 px/frame) that gravity (−17/frame) overtakes on the first
+  frame. **Wired** in `state.newGame`.
+- **`GRAVITY = $11`** (17, `:596`); **`GAMODE = $40`** = PLAY (`:646`); **`LUNARNUM = $40`**
+  = major/zoom-out (REINIT `:672`); `LUNAROT`/`SCROLL`/`SCRADD` cleared to 0 (REINIT `:657`).
+
+**Frame note:** `XCURADJ`/`YCURADJ` is the ship's adjusted-window position, converted to the
+DVG `LABS` by `POSTMOD` (`:1295`) = `>> 6` (§9); the scape's position relative to the ship is
+`SCROLL`/`SCRADD`. The port now seeds the position (`posX/posY`) and the velocity (`VELX/VELY` = `INVELX/INVELY`)
+and draws the ship inside the dead-zone window (§9 "Port note"), so the `(64,682)` upper-left
+start renders faithfully and the ship drifts in. **Still deferred:** the minor-view `×4`
+position step and the minor edge-scroll scale, finalized alongside the zoom step.

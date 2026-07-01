@@ -67,6 +67,20 @@ export function drawSegmentsWorld(ctx, cam, segs, { color = 'rgba(150,255,170,0.
   ctx.stroke();
 }
 
+// SCREEN-space draw of a PRE-COMPUTED segment list (shape-local DVG coords),
+// centred at pixel (cx,cy). For the lander pose + flame (precomputed with flips /
+// synthesized). Per-segment bri unless `color` overrides.
+export function drawSegmentsScreen(ctx, segs, { cx = 0, cy = 0, pxScale = 1, color = null, width = 1.6 } = {}) {
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.lineWidth = width;
+  for (const s of segs) {
+    ctx.strokeStyle = color || strokeFor(s.bri == null ? 12 : s.bri);
+    ctx.beginPath();
+    ctx.moveTo(cx + s.fx * pxScale, cy - s.fy * pxScale);
+    ctx.lineTo(cx + s.tx * pxScale, cy - s.ty * pxScale);
+    ctx.stroke();
+  }
+}
+
 // SCREEN-space draw: shape centred at pixel (cx,cy), fixed pixel scale — no
 // camera. Used by display_info.js (HUD glyph grid) and the step-0 seam test.
 export function drawShapeScreen(ctx, ROM, key,

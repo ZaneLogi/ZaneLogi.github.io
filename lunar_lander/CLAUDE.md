@@ -585,11 +585,27 @@ the collision/landing kernel (`research_physics.md` §13).
   (`faithful ✓`) rendered scale-agnostically via the camera (scroll + 3-copy wrap, major ¼)
   with `drawSegmentsWorld` in render.js; built query-ready (segment list + per-section
   x-ranges) for step-6 `heightAt`/`padAt`. IDLE shows the major scape behind the start screen.
-- **Step 2 — `lander.js`:** the `physics_arcade` stepper + `PLYMOD` table + HTML mode
-  control + `MODULE` pose/flame.
-- **Steps 3-7:** `input.js`, `display_info.js` (HUD), `starfield.js`, then the net-new
-  landscape queries + `collision.js` (land/crash verdict) + scoring + zoom-transition, then
-  the `GAMODE` machine.
+- **[done] Step 2 — flight (`input.js` + `physics_arcade.js` + `lander.js`):** the full
+  IDLE⇄PLAY loop. `Input` (only DOM reader) → normalized intent + `startPressed`/`resetPressed`
+  + `settings`; `state.newGame`/`toIdle` lifecycle transitions (+ SPACE-start / Reset button);
+  `ArcadePhysics.step` (sole motion owner): ROTSHP, THRLVL/FRCMLT (float trig), ACCEL, FRICTN,
+  BURN, the **PLYMOD 0-3 profiles** (gravity/friction/thrust×1.5/inertia, research_physics.md §7);
+  `Lander` delegates motion + renders the pose (SHIP→9-pose+flip fold, **little bank in PLAY /
+  big in IDLE**) + throttle flame. Motion via the §9 **screen dead-zone-window** model — the
+  lander draws at its live `posX`/`posY` (NOT centred); only the horizontal excess past
+  `[128,896]` DVG units at a window edge scrolls `SCROLL` (vertical dead-zone deferred to the
+  zoom step). Source-faithful start (§14; `SHIP 8 = upright`, and the play-start `SHIP 16` enters the ship
+  **on its side** heading right, as MAME shows); **rotation is Training-only clamp** `[0,16]`
+  (faithful, `ROT.NI :868`) — Cadet/Prime/Command wrap the full circle 0-31, the pose fold
+  rendering the upside-down half via yFlip. **Deviations (labeled):** keyboard throttle is a
+  spring-loaded ramp — hold `↑` to step THRUST up to 15, release to step it back down to 0 from
+  wherever it sits (the cabinet's pot has no software ramp at all, `THRLVL` just reads its
+  position, `:897` — a key has no position to read, so this is our stand-in); `BURN_RATE` /
+  `THRUST_RAMP_TICKS` are provisional feel-tuning (finalized with the HUD, step 4); no collision
+  yet (the craft sinks through terrain until step 6). `SHIP` is float (finer angle; pose fold snaps).
+- **Steps 3-7:** `display_info.js` (HUD values/altitude/speed + finalize tuning), `starfield.js`,
+  then the net-new landscape queries + `collision.js` (land/crash verdict) + scoring +
+  zoom-transition, then the `GAMODE` machine (attract/play/land).
 
 `state.js` currently holds the shared zero-page values (the seam); the `GAMODE`
 attract/play/land machine + scoring (the module table's `state.js` role) lands with the

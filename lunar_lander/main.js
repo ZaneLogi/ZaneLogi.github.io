@@ -11,13 +11,18 @@
 // lander pose) through the render layer to prove main → render.js → dvg.js →
 // *_rom_data.js is wired end-to-end. Later steps replace this test draw.
 
-import { state, camera } from './state.js';
+import { state, camera, isPlaying, newGame, toIdle } from './state.js';
 import { SCREEN_W, SCREEN_H, drawShapeScreen, drawText } from './render.js';
 import { ROM599 } from './discovery_rom_data.js';
 import { Landscape } from './landscape.js';
+import { Input } from './input.js';
+import { Lander } from './lander.js';
 
 const landscape = new Landscape();
 landscape.setMajorCamera(camera);   // boot/IDLE framing = the major (zoom-out) view
+const majorBaseY = camera.y;        // the major vertical baseline; SCRADD offsets it in PLAY
+const input = new Input();
+const lander = new Lander();
 
 const ctx = document.getElementById('game').getContext('2d');
 
@@ -31,8 +36,23 @@ const TICK = 6 / 250;   // 0.024 s (24 ms)
 let acc = 0, last = 0;
 
 function update(dt) {
-  landscape.update(camera, dt);     // scroll the surface (IDLE auto-scroll; PLAY: VELX later)
-  // lander / input / state machine hook in here in later steps.
+  if (input.resetPressed()) {                  // Reset button → back to the start screen
+    toIdle();
+    landscape.setMajorCamera(camera);          // re-frame major; camera.x reset for a clean attract
+    camera.x = 0;
+  }
+  if (!isPlaying()) {                          // IDLE / attract
+    if (input.startPressed()) newGame(input.settings());
+    landscape.update(camera, dt);             // attract auto-scroll
+    return;
+  }
+  // PLAY: the stepper advances motion — the ship's within-window position (posX/posY) plus
+  // the scape scroll (SCROLL/SCRADD) it hands off at the window edges (§9 dead-zone). The
+  // lander draws at posX/posY (it roams the screen); the camera reads only the scroll, so the
+  // terrain holds still until an edge is hit. Descent past the bottom lowers SCRADD → ground rises.
+  lander.update(state, input.read());
+  camera.x = ((state.SCROLL % landscape.loopW) + landscape.loopW) % landscape.loopW;
+  camera.y = majorBaseY + state.SCRADD;
 }
 
 function render(alpha) {
@@ -41,11 +61,11 @@ function render(alpha) {
   // Terrain (behind everything) — the major (zoom-out) scape, scrolling + wrapping.
   landscape.render(ctx, camera);
 
-  // IDLE / attract screen (GAMODE 0): the lander in the sky + the start prompt above
-  // the terrain peaks. Step 2 wires SPACE → GAMODE=$40 (PLAY), starting the sim and
-  // hiding the prompt. For now GAMODE stays 0, so this is the start screen.
-  drawShapeScreen(ctx, ROM599, 'S_4B64', { cx: SCREEN_W / 2, cy: SCREEN_H * 0.34, pxScale: 6, width: 1.8 });
-  if ((state.GAMODE & 0x40) === 0) {                    // not PLAYING → show the start prompt
+  if (isPlaying()) {
+    lander.render(ctx, state);                          // the flying craft (centred)
+  } else {
+    // IDLE / attract: the lander in the sky + the start prompt above the peaks.
+    drawShapeScreen(ctx, ROM599, 'S_4B64', { cx: SCREEN_W / 2, cy: SCREEN_H * 0.34, pxScale: 6, width: 1.8 });
     drawText(ctx, 'PRESS SPACE TO START', { cx: SCREEN_W / 2, cy: SCREEN_H * 0.16, pxScale: 3.5, width: 2 });
   }
   void alpha;
