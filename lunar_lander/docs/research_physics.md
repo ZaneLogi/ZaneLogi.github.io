@@ -236,3 +236,31 @@ Faithful pieces to implement (no terrain, starfield = the motion cue):
 Demo choices to label as non-faithful (not in source): any global drag, the green/red
 flame colour (DVG is monochrome), and our flame's lengthen-with-throttle (the source
 widens — see CLAUDE.md "Thrust flame").
+
+## 13. Port fidelity — arithmetic & clock (gameplay build)
+
+How faithfully the gameplay runtime reproduces the decoded physics above (the
+architecture that consumes it lives in CLAUDE.md "Flight-model architecture"):
+
+- **Arithmetic = floating point, not the source's integer fixed-point.** The source
+  keeps velocity/position as multi-byte fixed-point (`VELX .BLKB 4` = int+fraction),
+  sign-magnitude sign bytes (`SGNVLX`/`SGNVLY`), an integer `SINES` table + `MULTR`/
+  `MULTC`→`PROD` multiply in `FRCMLT`, and truncating `LSR` shifts. The port uses the
+  real **constants** (`GRAVITY=$11`, `TRSTAB`, `FUELFAC`, `GRAVT[PLYMOD]`) and the real
+  **routine structure**, but integrates in JS floats. This is faithful in feel/ratios,
+  **not bit-exact** (float rounding ≠ byte-carry). Acceptable for the educational goal.
+  - **Exception — the collision / landing kernel is ported as faithful integer math.**
+    Landing-vs-crash hinges on exact distances/shifts, and the sibling asteroids_clone
+    post-mortem (repo CLAUDE.md) shows a misread 16-bit shift makes collision feel
+    half-size. So `DECODE`/`COLFLG` distance math uses the source's integer widths and
+    shift semantics, even though motion uses floats.
+
+- **Clock = one fixed tick per source frame: `TICK = 6/250 s` (24 ms, ~41.7 Hz).**
+  `FRMECNT=6` NMIs × 4 ms; `SECCNT=250` NMIs/s (`:56`,`:59`). Keeping **1 tick == 1
+  frame** ports both the per-frame constants (`VELY += YTHRUST−GRAVITY`) and the
+  frame-*counted* logic (`FRICTN` every 16 frames, `INDEX` every other, the `TIME`
+  display, `ROT` debounce) with **no rate conversion**. Not 1/60: rerating would turn
+  those integer frame counts into fractional tick counts. A fixed-timestep accumulator
+  + render interpolation makes the ~41.7 Hz sim smooth on any display refresh, so there
+  is no visual cost. Input is **sampled once per tick** (as the source reads switches
+  per frame), so control latency matches the cabinet regardless of monitor rate.

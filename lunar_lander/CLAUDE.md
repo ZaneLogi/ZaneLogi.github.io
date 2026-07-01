@@ -15,8 +15,9 @@ ROM-decode stage — twelve demo pages: nine faithful vector-ROM byte-decodes pl
 three source-faithful demos: **flight physics** (`physics.html`), **crash explosion**
 (`explosion.html`, the `BOOM` routine), and the **faithful landscape**
 (`landscape.html`, built from `LNMIN`/`MINTBL` — the terrain done right with the
-source, vs the MAME-matched `screen.html`/`scroll_view.html`). No full gameplay
-port yet. HUD value layout, pad multipliers, and the horizontal-scroll/wrap
+source, vs the MAME-matched `screen.html`/`scroll_view.html`). The **gameplay-runtime
+scaffold has begun** (step 0 — see "Gameplay runtime — build order & status" below);
+no playable game yet. HUD value layout, pad multipliers, and the horizontal-scroll/wrap
 behaviour are MEASURED against MAME (see "Gameplay HUD" + "Terrain scroll" below).
 
 **The original program source has been located** (`historicalsource/lunar-lander`,
@@ -336,7 +337,8 @@ and the hardware runs it, jumping into the picture ROMs. Two usage modes:
   at render time = the same thing).
 
 Full catalog (section→segment sequences, lander dispatch, starfield/font/messages) in
-**`docs/research_vector_usage.md`**.
+**`docs/research_vector_usage.md`**. Expansions for the terse labels (`LNMIN`,
+`MJRVG`, `SCAPE`, `SHPINV`, `BOOM`, DVG mnemonics, …) are in **`docs/glossary.md`**.
 
 ## Build + run
 
@@ -507,11 +509,15 @@ single-file proto-gameplay (physics + starfield + HUD + lander + flame + input +
 | `state.js` | game-state machine (`GAMODE` attract/play/land), `PLYMOD`, scoring | `DOGAME`/`GAMODE` | — |
 | `dvg.js`, `*_rom_data.js` | renderer + decoded shapes (reused as-is) | — | (shared) |
 
-**Two seams to design first** (the source's shared structure):
-- a small **display-list / renderer** layer on `dvg.js` that each module contributes
-  `LABS`+`JSRL`/shapes to (the VG-RAM analog; cf. Seb's `game.js` owning the context);
-- a shared **`state.js`** for the cross-cutting values the source keeps in zero page
-  (`VELX`, `SHIP`, `FUEL`, `SCROLL`, `LUNARNUM`, …).
+**Two seams (built — step 0):**
+- **`render.js`** — a **direct-draw** render layer over `dvg.js`: modules draw by shape
+  KEY (`drawShapeWorld` = camera-space for scape/lander; `drawShapeScreen` = fixed-space
+  for HUD), so vector data stays single-sourced in `*_rom_data.js` and the camera
+  transform lives in one place. We chose direct dvg draw **over** a VG-RAM display-list
+  analog — simpler; the single-sourcing a display list would enforce is instead enforced
+  by the rule **"no vector-coordinate literals in any module."**
+- **`state.js`** — the shared zero-page values (`SHIP`, `VELX/Y`, `FUEL`, `SCROLL`,
+  `LUNARNUM`, …) + the `camera`, at the source's boot defaults.
 
 **Not lift-and-drop — extract + consolidate + upgrade:**
 - demos duplicate code (attitude/flame in `thrust.js` AND `physics.js`; HUD in `screen.js`
@@ -525,6 +531,57 @@ single-file proto-gameplay (physics + starfield + HUD + lander + flame + input +
 `DECODE` (lander-corner → terrain distance), landing/crash detection, scoring, and the zoom
 transition — see `docs/research_physics.md` §9.1 + `docs/research_vector_usage.md` §3.
 `physics.html` has no terrain, so this is the main remaining build.
+
+### Flight-model architecture — stepper + profiles
+
+The flight model is pluggable behind a thin **stepper contract** so motion can be
+swapped without touching anything downstream (collision, scoring, camera, render all
+read the shared `state`):
+
+```
+step(state, input, dt)   // advance the canonical state one 24 ms tick
+```
+
+Two independent axes:
+- **Model / architecture** — which `step()` runs. **`physics_arcade` first** (the faithful
+  routines `ACCEL`/`FRCMLT`+`SINES`/`ROTSHP`/`BURN`; float math, real constants — see
+  `docs/research_physics.md` §13). A second **Seb-style** model (`physics_seb`, tuned
+  floats) is **deferred**: the `step()` seam makes it a drop-in later, so keeping the door
+  open costs ~nothing — building it is the only cost, and it's put aside for now.
+- **Profile within a model** — for the arcade stepper this is the authentic **`PLYMOD` 0-3**
+  table (Training/Cadet/Prime/Command; gravity/friction/thrust/inertia per
+  `research_physics.md` §7). A new profile = one more constant tuple; a new architecture =
+  a new `step()` module.
+
+**Selection = an HTML control in the HUD, NOT the cabinet mechanisms** — two labeled
+deviations; the physics/profiles stay faithful:
+- `PLYMOD` is chosen via an on-page control that sets `state.PLYMOD`, **not** the
+  SELECT-button cycle (`TYPE`/`TYPESW` `:687`) — so `input.js` skips the button debounce.
+- the current mode is shown **on-screen**; the cabinet used a physical lamp (`MODLMP`),
+  not the HUD.
+
+(The operator **fuel-per-coin** DIP, `research_physics.md` §7.2, is the natural other
+entry in that HTML settings area — fuel budget, kept visually separate from control feel.)
+
+### Gameplay runtime — build order & status
+
+Built one sub-step at a time, each browser-verified (repo "sub-step + save-point" pattern).
+`play.html` boots `main.js`; served by the `lunar_lander` launch config (port 8085) at
+`/play.html`. Clock: `TICK = 6/250` s (24 ms) — one source frame; float arithmetic except
+the collision/landing kernel (`research_physics.md` §13).
+
+- **[done] Step 0 — seams + skeleton:** `state.js`, `render.js`, `main.js`, `play.html`.
+  Draws one lander pose to prove `main → render → dvg → *_rom_data` end-to-end.
+- **Step 1 — `landscape.js`:** `LNMIN`/`MINTBL` terrain via the camera (scale+scroll+wrap),
+  major ¼ scale (`research_vector_usage.md` §3).
+- **Step 2 — `lander.js`:** the `physics_arcade` stepper + `PLYMOD` table + HTML mode
+  control + `MODULE` pose/flame.
+- **Steps 3-7:** `input.js`, `display_info.js` (HUD), `starfield.js`, then the net-new
+  collision/landing/scoring/zoom-transition, then the `GAMODE` machine.
+
+`state.js` currently holds the shared zero-page values (the seam); the `GAMODE`
+attract/play/land machine + scoring (the module table's `state.js` role) lands with the
+final step and may live in `state.js` or a small sibling module.
 
 ## Next steps
 
