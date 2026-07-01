@@ -53,6 +53,20 @@ export function drawShapeWorld(ctx, cam, ROM, key,
   });
 }
 
+// WORLD-space draw of a PRE-COMPUTED segment list (world DVG coords) through the
+// camera. For terrain: landscape.js owns the geometry (and the future height/pad
+// queries) and hands the segments here; render.js owns the canvas + transform.
+// One beginPath (terrain strokes are uniform brightness), so it's cheap per frame.
+export function drawSegmentsWorld(ctx, cam, segs, { color = 'rgba(150,255,170,0.92)', width = 1.6 } = {}) {
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.beginPath();
+  for (const s of segs) {
+    ctx.moveTo((s.fx - cam.x) * cam.scale, SCREEN_H - (s.fy - cam.y) * cam.scale);
+    ctx.lineTo((s.tx - cam.x) * cam.scale, SCREEN_H - (s.ty - cam.y) * cam.scale);
+  }
+  ctx.stroke();
+}
+
 // SCREEN-space draw: shape centred at pixel (cx,cy), fixed pixel scale — no
 // camera. Used by display_info.js (HUD glyph grid) and the step-0 seam test.
 export function drawShapeScreen(ctx, ROM, key,

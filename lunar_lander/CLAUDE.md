@@ -487,6 +487,12 @@ one big file. This mirrors the original's own decomposition (`A34573.1A` links `
 faithful **routine-level translation** reinforce each other: each module holds the ported
 routines with their `A34573.1A:nnnn` citations.
 
+**Module style:** stateful subsystems are **ES6 classes** (`export class`, plain `this.`
+fields — matching `mario_physics/`, e.g. `camera.js`): `Landscape`, `Lander`, the physics
+steppers, `Starfield`, `Input`, the state machine. `render.js` stays **stateless functions**
+(it's the drawing utility over a passed `ctx`, not a subsystem); `state.js` is a **shared
+data object** (the zero-page bag). No `#private` fields (mario_physics doesn't use them).
+
 **`index.html` migration.** Today `index.html` is the demo hub (only because there's no
 game yet). During the build, a root **`play.html` boots `main.js`** so the demo hub stays
 live at `index.html`. **On release, promote `play.html` → `index.html`** — a game project's
@@ -502,7 +508,8 @@ single-file proto-gameplay (physics + starfield + HUD + lander + flame + input +
 |---|---|---|---|
 | `main.js` | boot, canvas, fixed-timestep loop, per-frame order | main loop `:409-485`, `LUNINT` | physics.js |
 | `lander.js` | flight + craft: `ACCEL`, `THRLVL`/`FRCMLT`, `ROTSHP`(+inertia), `BURN`, `MODULE` pose+flame | `LUNAR`+`LUNVEC` | thrust.js + physics.js |
-| `landscape.js` | scape assembly + scroll + zoom + collision: `SCAPE`, `LNMIN`/`MINTBL`, `SCROLL`/`SCRADD`, `SCAPCHG`/`SCAPMJR`/`SCRLUP`, `DECODE` | `LUNMIN` + scape | screen.js + scroll_view.js |
+| `landscape.js` | **terrain authority**: assembly + scroll + zoom + terrain **queries** (`heightAt`/`padAt`/`slopeAt`): `SCAPE`, `LNMIN`/`MINTBL`, `SCROLL`/`SCRADD`, `SCAPCHG`/`SCAPMJR`/`SCRLUP`. Terrain facts only — **no land/crash verdict**. | `LUNMIN` + scape | screen.js + scroll_view.js |
+| `collision.js` | **land/crash verdict**: `DECODE` distances (via landscape queries) + lander footprint + `VELY` vs `M.HRDY` → `COLFLG` (good/hard/crash) → outcome (bounce/explosion/score). Called by the state machine. | `DECODE`/`COLFLG` | — |
 | `starfield.js` | `STARS` (major/minor) | `STARS`, `598:306/401` | physics.js + demos/starfield.js |
 | `display_info.js` | HUD `$5458` + `DISPLY` values, digits/arrows/messages | HUD/DISPLY | screen.js + physics.js |
 | `input.js` | switches (rotate/abort/throttle), `TYPE` difficulty, `CREDIT` coin/fuel | `:687`/`:722`/`ROTCHK` | physics.js |
@@ -527,10 +534,12 @@ single-file proto-gameplay (physics + starfield + HUD + lander + flame + input +
 - viewer demos (`lander.js`, `starfield.js`, `gallery.js`, `hud.js`, `vector_rom.js`) —
   reuse their extraction/decode logic, not the viewer shell.
 
-**Net-new (no demo has it yet, but fully documented):** the **landscape/collision** chain —
-`DECODE` (lander-corner → terrain distance), landing/crash detection, scoring, and the zoom
-transition — see `docs/research_physics.md` §9.1 + `docs/research_vector_usage.md` §3.
-`physics.html` has no terrain, so this is the main remaining build.
+**Net-new (no demo has it yet, but fully documented):** the **landscape → collision** chain —
+`landscape.js` exposes terrain queries (`heightAt`/`padAt`/`slopeAt`); a separate
+`collision.js` runs the `DECODE` verdict (lander footprint vs terrain → landing/crash →
+`COLFLG` → scoring); plus the zoom transition — see `docs/research_physics.md` §9.1 +
+`docs/research_vector_usage.md` §3. `physics.html` has no terrain, so this is the main
+remaining build.
 
 ### Flight-model architecture — stepper + profiles
 
@@ -572,12 +581,15 @@ the collision/landing kernel (`research_physics.md` §13).
 
 - **[done] Step 0 — seams + skeleton:** `state.js`, `render.js`, `main.js`, `play.html`.
   Draws one lander pose to prove `main → render → dvg → *_rom_data` end-to-end.
-- **Step 1 — `landscape.js`:** `LNMIN`/`MINTBL` terrain via the camera (scale+scroll+wrap),
-  major ¼ scale (`research_vector_usage.md` §3).
+- **[done] Step 1 — `landscape.js`:** the terrain authority — `LNMIN`/`MINTBL` surface
+  (`faithful ✓`) rendered scale-agnostically via the camera (scroll + 3-copy wrap, major ¼)
+  with `drawSegmentsWorld` in render.js; built query-ready (segment list + per-section
+  x-ranges) for step-6 `heightAt`/`padAt`. IDLE shows the major scape behind the start screen.
 - **Step 2 — `lander.js`:** the `physics_arcade` stepper + `PLYMOD` table + HTML mode
   control + `MODULE` pose/flame.
 - **Steps 3-7:** `input.js`, `display_info.js` (HUD), `starfield.js`, then the net-new
-  collision/landing/scoring/zoom-transition, then the `GAMODE` machine.
+  landscape queries + `collision.js` (land/crash verdict) + scoring + zoom-transition, then
+  the `GAMODE` machine.
 
 `state.js` currently holds the shared zero-page values (the seam); the `GAMODE`
 attract/play/land machine + scoring (the module table's `state.js` role) lands with the

@@ -14,6 +14,10 @@
 import { state, camera } from './state.js';
 import { SCREEN_W, SCREEN_H, drawShapeScreen, drawText } from './render.js';
 import { ROM599 } from './discovery_rom_data.js';
+import { Landscape } from './landscape.js';
+
+const landscape = new Landscape();
+landscape.setMajorCamera(camera);   // boot/IDLE framing = the major (zoom-out) view
 
 const ctx = document.getElementById('game').getContext('2d');
 
@@ -27,21 +31,24 @@ const TICK = 6 / 250;   // 0.024 s (24 ms)
 let acc = 0, last = 0;
 
 function update(dt) {
-  // step 0: no subsystems yet. lander / landscape / input / state hook in here.
-  void dt;
+  landscape.update(camera, dt);     // scroll the surface (IDLE auto-scroll; PLAY: VELX later)
+  // lander / input / state machine hook in here in later steps.
 }
 
 function render(alpha) {
   ctx.clearRect(0, 0, SCREEN_W, SCREEN_H);
 
-  // IDLE / attract screen (GAMODE 0). Step 1 draws the terrain here; step 2 wires
-  // SPACE → GAMODE=$40 (PLAY), which starts the sim and hides the prompt. For now
-  // GAMODE stays 0, so this is exactly what the start screen looks like.
-  drawShapeScreen(ctx, ROM599, 'S_4B64', { cx: SCREEN_W / 2, cy: SCREEN_H * 0.44, pxScale: 7, width: 1.8 });
+  // Terrain (behind everything) — the major (zoom-out) scape, scrolling + wrapping.
+  landscape.render(ctx, camera);
+
+  // IDLE / attract screen (GAMODE 0): the lander in the sky + the start prompt above
+  // the terrain peaks. Step 2 wires SPACE → GAMODE=$40 (PLAY), starting the sim and
+  // hiding the prompt. For now GAMODE stays 0, so this is the start screen.
+  drawShapeScreen(ctx, ROM599, 'S_4B64', { cx: SCREEN_W / 2, cy: SCREEN_H * 0.34, pxScale: 6, width: 1.8 });
   if ((state.GAMODE & 0x40) === 0) {                    // not PLAYING → show the start prompt
-    drawText(ctx, 'PRESS SPACE TO START', { cx: SCREEN_W / 2, cy: SCREEN_H * 0.72, pxScale: 4, width: 2 });
+    drawText(ctx, 'PRESS SPACE TO START', { cx: SCREEN_W / 2, cy: SCREEN_H * 0.16, pxScale: 3.5, width: 2 });
   }
-  void alpha; void camera;
+  void alpha;
 }
 
 function frame(ts) {
