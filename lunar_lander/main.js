@@ -21,6 +21,7 @@ import { Input } from './input.js';
 import { Lander } from './lander.js';
 import { DisplayInfo } from './display_info.js';
 import { Collision } from './collision.js';
+import { Starfield } from './starfield.js';
 import { boomSegs, BOOM_MAX_INDEX } from './boom.js';
 import { POS_SCALE } from './physics_arcade.js';
 
@@ -30,6 +31,7 @@ const input = new Input();
 const lander = new Lander();
 const displayInfo = new DisplayInfo();
 const collision = new Collision();
+const starfield = new Starfield();
 
 // Dev/verification hook: poke at the live modules from the console / preview eval.
 window.LL = { state, camera, landscape, collision, lander };
@@ -120,7 +122,10 @@ function update(dt) {
 function render(alpha) {
   ctx.clearRect(0, 0, SCREEN_W, SCREEN_H);
 
-  // Terrain (behind everything) — the major (zoom-out) scape, scrolling + wrapping.
+  // Starfield (behind everything — STARS, drawn before the scape :389-391), scrolling with the world.
+  starfield.render(ctx, camera);
+
+  // Terrain — the major (zoom-out) scape, scrolling + wrapping.
   landscape.render(ctx, camera);
 
   if (isOutcome()) {

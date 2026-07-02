@@ -21,14 +21,15 @@ three source-faithful demos: **flight physics** (`physics.html`), **crash explos
 (`explosion.html`, the `BOOM` routine), and the **faithful landscape**
 (`landscape.html`, built from `LNMIN`/`MINTBL` — the terrain done right with the
 source, vs the MAME-matched `screen.html`/`scroll_view.html`). The **gameplay runtime
-is under construction** — steps 0-7 done (seams · terrain · flight · HUD · zoom ·
-collision/landing · out-of-fuel · scoring): `play.html` is now a full mission loop — fly, land or
-crash (the `DECODE`/`SCAPLND` verdict → good/hard/crash outcomes with the bounce, the `BOOM`
-explosion, and the source's status messages), score by `TBSTFT` bonus site (4 flashing `NX` pads
-per drop), burn fuel down to the `DEDUCT`/`OUT OF FUEL` end-game, and re-drop until the tank runs
-dry. Still unbuilt: the starfield + feel-tuning polish (step 8) — see "Gameplay runtime — build
-order & status" below. HUD value layout, pad multipliers, and the horizontal-scroll/wrap behaviour
-are MEASURED against MAME (see "Gameplay HUD" + "Terrain scroll" below).
+is feature-complete** — steps 0-8 done (seams · terrain · flight · HUD · zoom ·
+collision/landing · out-of-fuel · scoring · starfield): `play.html` is a full mission loop — fly,
+land or crash (the `DECODE`/`SCAPLND` verdict → good/hard/crash outcomes with the bounce, the
+`BOOM` explosion, and the source's status messages), score by `TBSTFT` bonus site (4 flashing `NX`
+pads per drop), burn fuel down to the `DEDUCT`/`OUT OF FUEL` end-game, and re-drop until the tank
+runs dry — over a scrolling `STARS` backdrop. Remaining: only the **release promotion** (`play.html`
+→ root `index.html`, demo hub → `demos/index.html`) — see "index.html migration" below. HUD value
+layout, pad multipliers, and the horizontal-scroll/wrap behaviour are MEASURED against MAME (see
+"Gameplay HUD" + "Terrain scroll" below).
 
 **The original program source has been located** (`historicalsource/lunar-lander`,
 cloned per-PC — see "Program source" below for the paths — main module `A34573.1A` by Rich Moore).
@@ -735,9 +736,17 @@ the collision/landing kernel (`research_physics.md` §13).
   active pads with their `NX` labels during PLAY (`SITES :1511`, blink on `FRAME&10`), wrapped like
   the terrain. Verified: the 15-site pool distribution, the 2-low + 2-high `TABSIT` pick, good-on-2X
   = 100, good off-site = 50, crash off-site = 5, the `NX` flash on all 4 active pads.
-- **Step 8 — polish:** feel-tuning (`THRUST_RAMP`/lander scales) + `starfield.js`. (The remaining
-  `DOGAME`/`GAMODE` attract-machine pieces are largely N/A — the HTML panel replaces coin/SELECT —
-  and the mission cycle finish/re-drop is already built.)
+- **[done] Step 8 — polish (`starfield.js` + feel-tuning):** the `STARS` backdrop (research_physics.md
+  §10). `starfield.js` (`class Starfield`) extracts the ROM's real **61-point star field** (the 24
+  cluster subroutines `$5244-$53E6` in ROM598, magnitudes 5-9 → dot brightness) and lays them across
+  a screen-space wrap-tile in the sky band, scrolling horizontally with the world (`camera.x·scale`),
+  drawn behind the terrain in every mode (main.js `render`, before `landscape.render` — the source's
+  STARS-before-SCAPE order :389-391). Faithful = the real ROM points + magnitudes; **labeled
+  derivation** = the cluster LAYOUT (the source's `MJSTRA`/`MJSTRB`/`MINSTR` display-list positions
+  are VG-RAM, same as the site `TBMNA`), so it's the real-ROM-data counterpart to the physics demo's
+  generated field. **Feel-tuning = no-op:** the provisional `THRUST_RAMP_TICKS` (2) + lander scales
+  were validated by playtest (LGTM), not changed. (The `DOGAME`/`GAMODE` attract-machine pieces are
+  N/A — the HTML panel replaces coin/SELECT — and the mission cycle finish/re-drop is already built.)
 
 `state.js` holds the shared zero-page values (the seam) plus the lifecycle + scoring
 (`newGame`/`beginOutcome`/`deductFuel`/`pickBonusSites` — the module table's `state.js`
@@ -745,10 +754,12 @@ role); the full `GAMODE` attract-machine is largely N/A (the HTML panel replaces
 
 ## Next steps
 
-The open work is the final polish — **step 8** of "Gameplay runtime — build order & status"
-above: feel-tuning (`THRUST_RAMP`/lander scales) + `starfield.js`. (Steps 0-7 are done: the
-mission loop flies, lands/crashes, scores by `TBSTFT` bonus site, and burns fuel to the
-`DEDUCT`/out-of-fuel end-game.)
+The gameplay runtime is **feature-complete** (steps 0-8 done). The only remaining action is the
+**release promotion** — promote `play.html` → root `index.html` and move the demo hub to
+`demos/index.html` (with the cross-links + the `lunar_lander` preview root updated), per
+"index.html migration" above. After that, the small deferred items: octagon crash-drift (`DELTA`),
+the off-top reset using the faithful `DEDCTA` `FLMIN−FLUSE` (not a flat penalty), and the optional
+Seb-style physics model behind the existing `step()` seam.
 
 ### Settled decode questions — don't re-investigate
 

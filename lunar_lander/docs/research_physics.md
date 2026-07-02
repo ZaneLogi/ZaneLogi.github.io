@@ -285,6 +285,15 @@ Drawn every frame after `SCAPE` (`:389-390`). Two sets matching the two zoom lev
 Star point data itself is the 61-point field in `034598` `$5244-$53E6` (already decoded;
 see CLAUDE.md region map) — single-dot VECs, brightness 5–9.
 
+**Port note (built — `starfield.js`, step 8):** `class Starfield` pulls the real 61 star points
+from the ROM cluster subroutines (`$5244-$53E6`, ROM598 — the decoded single-dot VECs + magnitudes)
+and lays them across a screen-space wrap-tile in the sky band, scrolling horizontally with the
+camera (the `SCRLDO` behaviour), drawn behind the terrain in every mode (STARS-before-SCAPE `:389`).
+**Labeled derivation:** the cluster LAYOUT — the source positions them via the `MJSTRA`/`MJSTRB`/
+`MINSTR` display lists (`STRINIT` LABS + VEC moves, VG-RAM, not extractable, like the site `TBMNA`)
+— so we spread the 24 clusters evenly and collapse the two-band major/minor split to one scrolling
+field. This is the real-ROM-data counterpart to the physics demo's generated field (a labeled choice).
+
 ## 11. Landing / collision — `DECODE` + `SCAPLND` verdict
 
 Two routines: `DECODE` measures how far the ship is from the scape; `SCAPLND` turns that
