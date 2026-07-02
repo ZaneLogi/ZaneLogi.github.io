@@ -95,6 +95,14 @@ export class DisplayInfo {
     // Direction arrows (none when the speed reads 0; DISPLY :3276-3288).
     if (hspeed > 0) drawArrowGlyph(ctx, ROM598, state.velX >= 0 ? ARROW.right : ARROW.left, { x: ARROW_X, baselineY: ROW.mid });
     if (vspeed > 0) drawArrowGlyph(ctx, ROM598, state.velY >= 0 ? ARROW.up    : ARROW.down, { x: ARROW_X, baselineY: ROW.bot });
+
+    // Fuel-status warnings (STATUS :1605-1631) — PLAY only, so they live here (renderOutcome owns
+    // the land/crash mode). Priority mirrors the source: the post-crash "FUEL UNITS LOST" message
+    // (while MSCNT1 counts) preempts OUT/LOW; OUT OF FUEL when the tank is empty; else LOW ON FUEL
+    // under 100 units, blinking on FRAME&10 (:1618-1624).
+    if (state.fuelLostTimer > 0)  this._centreLine(ctx, `${state.fuelLost} FUEL UNITS LOST`, 132);
+    else if (state.fuel <= 0)     this._centreLine(ctx, 'OUT OF FUEL', 132);
+    else if (state.fuel < 100 && (state.frame & 0x10) === 0) this._centreLine(ctx, 'LOW ON FUEL', 132);
   }
 
   // The land/crash status display (:1655-1675): header + a random 1-of-4 status

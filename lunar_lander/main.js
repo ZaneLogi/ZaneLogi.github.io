@@ -82,6 +82,7 @@ function outcomeTick() {
 }
 
 function update(dt) {
+  state.frame++;                               // FRAME — free-running per-tick counter (source INC FRAME :443)
   if (input.resetPressed()) {                  // Reset button → back to the start screen
     toIdle();
     idleFraming();
@@ -102,6 +103,7 @@ function update(dt) {
   // otherwise the zoom transition runs on the measured SCPDST (§9.1).
   lander.update(state, input.read());
   tickClock();                                // advance the game clock (PLAY only; source NMI :360)
+  if (state.fuelLostTimer > 0) state.fuelLostTimer--;   // MSCNT1 countdown for the fuel-lost message (STATUS :1607)
   landscape.frameCamera(state, camera);
   collision.update(state, camera, landscape); // clearances + the verdict (research_physics.md §11)
   if (state.collisionStatus !== CollisionStatus.SAFE_FLY) {  // touched down or crashed (PLYCHK BMI :531-532)

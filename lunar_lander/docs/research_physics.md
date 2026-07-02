@@ -141,7 +141,39 @@ Fuel is the real clock:
 - **Thrust** burns `THRSTLV × FUELFAC` per frame (`BURN`; Prime uses `FLFAC2`).
 - **Rotation also burns fuel** — `ROT.GAS` (`:882`): "one ship rotation costs ¼ fuel
   unit," so Command's inertia makes it easy to waste fuel spinning.
-- **Good landing** refunds `BNFUEL = 50` (`:556`); a **crash** deducts a random chunk (`DEDUCT`).
+- **Good landing** refunds `BNFUEL = 50` (`:556`); a **crash** runs `DEDUCT` — which destroys the
+  fuel you were HOARDING below par (`FLMIN − FLUSE`), not a random chunk (see §7.4).
+
+### 7.4 The fuel end-game — `FLMIN`/`FLUSE`/`DEDUCT` + `STATUS` messages (built, step 6)
+
+Two accumulators run every drop and only ever meet at a crash:
+- **`FLUSE`** (`:295`, "fuel used") — the cumulative fuel the player has BURNED this drop. Every
+  subtraction in `GAS` — thrust `BURN` and rotation `ROT.GAS` both route through it — adds the same
+  delta to `FLUSE` (`:972-981`), so it mirrors real consumption.
+- **`FLMIN`** (`:294`, "min fuel that should be used") — a time-based PAR: the NMI handler adds
+  `FLFACT = 8` to `FLMIN` every game-second (`A34573.1D:366-375`). So `FLMIN = 8 × drop-seconds`.
+
+**`DEDUCT`** (`:1816-1859`) is called on every land/crash but no-ops unless it is a CRASH
+(`COLFLG & 0F ≠ 0`: crash `8F` has low nibble `F`; landings `80`/`C0` have `0`, `:1817-1818`). On a
+crash it takes `FLMIN − FLUSE` — how far UNDER the 8/sec par you flew — and destroys that shortfall
+(capped at `99`, `:1832`, and at the fuel present, `:1849-1852`), storing it in `FLDED` and lighting
+`MSCNT1 = DEDCNT (127)` for the message. So it is an **anti-hoarding penalty**, not a flat cost: fly
+economically (burn < par) then crash → you lose your reserve (thematised as the `AUXILIARY FUEL
+TANKS DESTROYED` message, `:1729`); fly at/over par → nothing lost. `PLYINIT` clears
+`GMTIME`/`FLMIN`/`FLUSE` every drop (`:640-644`), so par and usage restart each mission.
+
+**`STATUS`** (`:1605-1631`) draws the fuel condition during PLAY only (the land/crash mode shows
+`DSPMOT` instead): `LOW ON FUEL` (< 100 units, flashing on `FRAME & 10`, `:1618-1624`), `OUT OF
+FUEL` (empty), and the post-crash `NN FUEL UNITS LOST` (while `MSCNT1` counts, `:1605-1612`) — the
+last preempts the other two.
+
+**Port** (`state.js` / `physics_arcade.js` / `display_info.js` / `main.js`): `fuelPar` (FLMIN)
+grows 8 per game-second in `tickClock`; `fuelUsed` (FLUSE) accumulates each burn in the stepper;
+`deductFuel` runs in `beginOutcome` with the `& 0x0F` crash gate and the 99/present caps; the three
+`STATUS` messages draw in the ROM glyph font, gated on `fuel`/`fuelLostTimer`, with a free-running
+`state.frame` (INC FRAME `:443`) driving the blink. Faithful in feel; both accumulators are float
+units, not the source's BCD. (The off-top-of-major reset still uses a flat `resetFlight` fuel
+penalty, not the `DEDCTA` `FLMIN − FLUSE` path — a labeled simplification, §9.1.)
 
 ## 8. Rotation — `ROTSHP` (`:773-`)
 
@@ -342,8 +374,8 @@ kernel in **integer** source units (§13). Labeled deviations/simplifications:
   four corners vertically (`cornerY < heightAt(cornerX)` → `8F`) catches every case the separate
   `DISTX*` upper-corner pass can flag.
 - **Scoring is a STUB** — `POINTS` base 50/15/5 × **factor 1**, the `LNDADR` default for a
-  non-designated site (`:1898`); the real `TBSTFT[site]` factor + the flats→15-sites mapping +
-  `DEDUCT` crash fuel-loss (`:1816`) land with the GAMODE step.
+  non-designated site (`:1898`); the real `TBSTFT[site]` factor + the flats→15-sites mapping land
+  with the scoring step (7). (`DEDUCT` crash fuel-loss now landed in step 6 — see §7.4.)
 - **Outcome sequence** (main.js `outcomeTick` = `MOTCHK :514-529`): `INDEX` steps every other
   tick to 127 (≈ 6.1 s at the 24 ms frame); hard landings integrate the `M.HRDY`/`M.HRDG`
   bounce until re-contact; crashes draw the `BOOM` debris (boom.js, from demos/explosion.js —
@@ -353,8 +385,9 @@ kernel in **integer** source units (§13). Labeled deviations/simplifications:
 - **Status messages** (`:1655-1746`) render with the real ROM glyph set and the source's
   header + RNDOM 1-of-4 pick; line **placement** is approximate centred (the `MESSLAB` LABS
   grid is not decoded) at a readable 2× scale.
-- **Interim mission cycle** (`finishOutcome`): fuel left → a fresh drop (score/clock/fuel
-  kept); tank empty → attract. The full `DOGAME`/`GAMODE` machine is the last step.
+- **Interim mission cycle** (`finishOutcome`): fuel left → a fresh drop (score + fuel kept; the
+  clock + fuel par/used reset per drop — PLYINIT `:640`, step 6); tank empty → attract. The full
+  `DOGAME`/`GAMODE` machine is the scoring step (7).
 
 ## 12. Implications for the physics demo
 

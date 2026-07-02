@@ -138,8 +138,12 @@ export class ArcadePhysics {
     // table value (NOT ×thrustMult). Full throttle = floor(218·28/256)/100 = 0.23/frame
     // (~9.6/s); hover (lvl 8) = 0.14/frame (~5.8/s). Plus ROT.GAS while rotating.
     if (!outOfFuel) {
-      state.fuel -= Math.floor(prof.burnFactor * THRUST_TABLE[state.thrustLevel] / 256) / 100;
-      if (input.rotate) state.fuel -= ROT_GAS_FUEL;   // ROT.GAS (:882); float-rotation → ~per-frame (deviation)
+      // Every fuel subtraction also accumulates into fuelUsed: the source routes both thrust BURN
+      // and ROT.GAS through GAS, which adds the same delta to FLUSE (:972-981). FLUSE vs the
+      // per-second par FLMIN is what DEDUCT reads to size a crash's fuel loss (state.deductFuel).
+      const burn = Math.floor(prof.burnFactor * THRUST_TABLE[state.thrustLevel] / 256) / 100;
+      state.fuel -= burn; state.fuelUsed += burn;
+      if (input.rotate) { state.fuel -= ROT_GAS_FUEL; state.fuelUsed += ROT_GAS_FUEL; }   // ROT.GAS (:882)
       if (state.fuel < 0) state.fuel = 0;
     }
 

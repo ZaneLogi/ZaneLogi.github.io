@@ -56,6 +56,11 @@ export const state = {
 
   // --- resources -------------------------------------------------------------
   fuel: 0,            // FUEL — remaining fuel; set from the start-fuel picker (research_physics.md §7.2)
+  fuelUsed: 0,        // FLUSE (:295) — cumulative fuel BURNED this drop (thrust + rotation); vs the
+                      //   par below, DEDUCT destroys the shortfall on a crash (the anti-hoarding rule)
+  fuelPar: 0,         // FLMIN (:294) — "min fuel that should be used" = FLFACT(8) per game-second (A34573.1D:366)
+  fuelLost: 0,        // FLDED (:284) — fuel the last crash destroyed (the "NN FUEL UNITS LOST" value)
+  fuelLostTimer: 0,   // MSCNT1 — frames the fuel-lost message stays up after a crash (DEDCNT 127, :57)
   score: 0,           // SCORE (:296) — BCD in source, plain int here. STUB scoring: base
                       // POINTS × factor 1 (see beginOutcome); real TBSTFT[site] = GAMODE step
 
@@ -78,6 +83,8 @@ export const state = {
   difficulty: 0,      // PLYMOD (:201) — 0 Training … 3 Command (indexes the physics profiles)
   sequenceStep: 0,    // INDEX (:237) — the land/crash (later abort) sequence counter, 1→127
   collisionStatus: CollisionStatus.SAFE_FLY,  // this frame's verdict (COLFLG :243)
+  frame: 0,           // FRAME (:443) — free-running per-tick counter (source INC FRAME each main loop);
+                      //   drives the LOW-ON-FUEL blink (FRAME&10). NOT reset per drop.
 
   // --- land/crash outcome (set by beginOutcome, read by the sequence + display) --
   outcomeStatus: CollisionStatus.SAFE_FLY,  // the latched verdict the sequence animates (M.CLFL :553)
@@ -107,14 +114,18 @@ export const GEOM = {
 // game-second = SECCNT NMIs. Keeping the countdown in NMI units (decrement FRMECNT
 // per 24 ms tick) makes the second boundary land exactly where the hardware's does.
 const SECCNT = 250, FRMECNT = 6;
+const FUEL_PAR_RATE = 8;   // FLFACT (:58) — the par fuel a mission "should" burn per game-second
+const DEDCNT = 127;        // DEDCNT (:57) — frames the crash "FUEL UNITS LOST" message stays up
 
 // Advance the game clock one tick, PLAY only (the source's NMI increment, D:360).
 // nmiCountdown counts down SECCNT NMIs; on rollover, seconds++ (minute carry).
-// Minutes cap at 99 to stay in the 2-digit MM field.
+// Minutes cap at 99 to stay in the 2-digit MM field. Each whole game-second also grows
+// the fuel par FLMIN by FLFACT (A34573.1D:366) — the baseline DEDUCT measures hoarding against.
 export function tickClock() {
   state.nmiCountdown -= FRMECNT;
   if (state.nmiCountdown > 0) return;
   state.nmiCountdown += SECCNT;
+  state.fuelPar += FUEL_PAR_RATE;   // FLMIN += FLFACT per game-second (A34573.1D:366-375)
   if (++state.clockSeconds >= 60) { state.clockSeconds = 0; if (state.clockMinutes < 99) state.clockMinutes++; }
 }
 
@@ -172,15 +183,20 @@ function seedFlight() {
   state.scrollX = 0; state.scrollY = 0;  // scape scroll cleared (REINIT :657)
   state.sequenceStep = 0; state.collisionStatus = CollisionStatus.SAFE_FLY;
   state.zoomedOut = true;            // major / zoom-out (boots high; REINIT :672)
+  // PLYINIT clears the mission clock + fuel accounting every drop (:640-644, the Y=7 clear loop
+  // over GMTIME + FLMIN + FLUSE). So each drop is timed and fuel-scored on its own; the re-drop
+  // path (finishOutcome / off-top) runs through PLYINIT too, so it resets here, not just at newGame.
+  state.clockSeconds = 0; state.clockMinutes = 0; state.nmiCountdown = 250;
+  state.fuelUsed = 0; state.fuelPar = 0;
   state.gameMode = GameMode.PLAY;    // (PLYINIT :646)
 }
 
 export function newGame(settings) {
   state.difficulty = settings.difficulty;
   state.fuel = settings.startFuel;
-  state.score = 0;                  // fresh score (:351-352)
-  state.clockSeconds = 0; state.clockMinutes = 0; state.nmiCountdown = 250;  // clear mission time (:640)
-  seedFlight();
+  state.score = 0;                  // fresh score (DOGAME RTP-init :351-352; PLYINIT itself keeps it)
+  state.fuelLost = 0; state.fuelLostTimer = 0;   // no stale fuel-loss message on a brand-new game
+  seedFlight();                     // PLYINIT also clears the clock + fuel par/used (see above)
 }
 
 // Off-top-of-major restart (SCAPMJR INTWAIT→DEDCTA→PLYSTRT :2837-2841): deduct fuel,
@@ -203,6 +219,23 @@ export function toIdle() {
 // the ground; BOUNCE_GRAVITY (main.js, M.HRDG) then pulls it back down.
 const BOUNCE_VELOCITY = 10 * 256;
 
+// DEDUCT (:1816-1859) — a CRASH destroys the fuel you were hoarding below par. Only crashes
+// deduct: COLFLG's low nibble is 0 on a landing (80 good / C0 hard) and F on a crash (8F), so
+// `& 0x0F` gates it (:1817-1818). Loss = fuelPar − fuelUsed (how far under the 8/sec par you
+// flew this drop), capped at 99 (:1832) and at the fuel actually present (:1849-1852); it feeds
+// the "NN FUEL UNITS LOST" message (FLDED/MSCNT1). Fly economically then crash → you lose your
+// reserve; fly at/over par → nothing lost. (Source keeps FLMIN/FLUSE in BCD; we hold both float.)
+function deductFuel(status) {
+  if ((status & 0x0F) === 0) { state.fuelLost = 0; return; }   // no deduct on a landing (:1817-1818)
+  let lost = Math.floor(state.fuelPar - state.fuelUsed);
+  if (lost <= 0) { state.fuelLost = 0; return; }               // used ≥ par → nothing destroyed (:1830)
+  lost = Math.min(lost, 99);                                   // MAX FUEL LOST = 99 (:1832-1833)
+  lost = Math.min(lost, Math.floor(Math.max(0, state.fuel)));  // can't lose more than present (:1849-1852)
+  state.fuel = Math.max(0, state.fuel - lost);
+  state.fuelLost = lost;                                       // FLDED — the message quantity (:1853)
+  state.fuelLostTimer = DEDCNT;                                // MSCNT1 — show it for 127 frames (:1857)
+}
+
 // The verdict fired — enter the LAND/CRASH outcome mode (the PLYCHK collision
 // path, :551-581): score, bonus fuel, sequence setup. main.js then runs the
 // MOTCHK sequence (INDEX clock + hard bounce) each tick until finishOutcome.
@@ -216,6 +249,7 @@ export function beginOutcome(status) {
   state.lastPoints = base;
   state.score += base;
   if (good) state.fuel += 50;              // BNFUEL — good landings only (:554-558)
+  deductFuel(status);                      // DEDUCT — a crash destroys hoarded fuel (:559)
   state.outcomeStatus = status;            // keep the verdict for the sequence (M.CLFL :552-553)
   state.messagePick = Math.floor(Math.random() * 4);       // RNDOM message pick (:1670-1672)
   state.explosionPattern = Math.floor(Math.random() * 4);  // RNDOM explosion pattern (BOOM setup)
