@@ -293,6 +293,17 @@ Working model for the render/runtime port (built):
   sits in y 0–767. Don't be surprised if intermediate cursor math touches
   y > 767.
 
+**Responsive presentation (2026-07-02, asteroids_clone-style).** 1024×768 is the
+fixed *logical* space; the on-screen canvas is scaled to fit the viewport at a locked
+4:3. `main.js` `fitCanvas()` sizes the canvas to the largest 4:3 box that fits its
+`#stage`, makes the backing store DPR-aware, and sets `ctx.setTransform(w/1024, 0, 0,
+h/768, …)` — so every module keeps drawing in 1024×768 units and `render.js` / the
+coordinate math are untouched (only the on-screen size changes). `index.html` is a
+viewport-height CSS grid: the settings panel is a **right-side pane** on wide viewports
+(≥1024px — the 4:3 canvas then uses the full height; PLAY MODE stacked vertically) and
+a **stacked bottom panel** on narrow/portrait. Same mechanism as `asteroids_clone`
+(`main.js` `applyCanvasSize`/`syncBackingStore`), minus its size-preset buttons.
+
 **How this was deduced** (from the picture ROMs alone — the program source is now
 in hand and can confirm it directly, e.g. the `LABS`/`VGRAM` usage in `A34573.1A`):
 the HUD composite `$5458` is the only ROM-**absolute** anchor in the picture ROMs — it

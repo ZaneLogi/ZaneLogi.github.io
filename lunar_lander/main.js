@@ -36,7 +36,9 @@ const starfield = new Starfield();
 // Dev/verification hook: poke at the live modules from the console / preview eval.
 window.LL = { state, camera, landscape, collision, lander };
 
-const ctx = document.getElementById('game').getContext('2d');
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const stage = document.getElementById('stage');
 
 // Fixed timestep = ONE source frame: FRMECNT(6) NMIs × 4 ms = 24 ms
 // (SECCNT=250 NMIs/s ⇒ 6/250 s). Keeping 1 tick == 1 source frame lets the ROM's
@@ -169,3 +171,26 @@ function frame(ts) {
 render(0);                  // paint the initial IDLE screen immediately, so it shows even
                            // before the first animation frame (rAF is paused in hidden tabs)
 requestAnimationFrame(frame);
+
+// --- Responsive 4:3 fit (mirrors asteroids_clone/main.js applyCanvasSize + syncBackingStore) ---
+// The backing store is always the 1024×768 DVG field; the CSS display size is the
+// largest 4:3 rectangle that fits #stage. A DPR-aware backing store + a setTransform
+// scale keep every draw call in 1024×768 LOGICAL units, so render.js and all the ROM
+// coordinate math are untouched — only the on-screen size changes. Pure-CSS can't do
+// this: aspect-ratio under simultaneous width+height clamps breaks the ratio, so JS
+// owns the sizing (same reason as asteroids_clone).
+function fitCanvas() {
+  const availW = stage.clientWidth, availH = stage.clientHeight;
+  if (availW <= 0 || availH <= 0) return;              // layout not settled yet
+  let w = availW, h = w * SCREEN_H / SCREEN_W;         // try full width at 4:3…
+  if (h > availH) { h = availH; w = h * SCREEN_W / SCREEN_H; }  // …else clamp to height
+  canvas.style.width  = Math.floor(w) + 'px';
+  canvas.style.height = Math.floor(h) + 'px';
+  const dpr = window.devicePixelRatio || 1;            // backing store = CSS px × DPR → crisp strokes
+  canvas.width  = Math.max(1, Math.round(w * dpr));
+  canvas.height = Math.max(1, Math.round(h * dpr));
+  ctx.setTransform(canvas.width / SCREEN_W, 0, 0, canvas.height / SCREEN_H, 0, 0);  // draw in 1024×768 units
+  render(acc / TICK);                                  // repaint now so a resize never blanks the frame
+}
+window.addEventListener('resize', fitCanvas);
+requestAnimationFrame(fitCanvas);   // fit once initial layout has real dimensions

@@ -5,18 +5,50 @@
   <title>Lunar Lander — Atari 1979 (JS port)</title>
   <style>
     :root { --green:#8fffa8; --dim:#6a9; --panel:#0d0f0d; }
-    html, body { margin:0; background:#000; color:#cde;
+    html, body { margin:0; height:100%; background:#000; color:#cde;
                  font-family:-apple-system,"Segoe UI",sans-serif; }
-    body { display:flex; flex-direction:column; align-items:center; gap:14px; padding:16px; }
-    #game { background:#000; border:1px solid #2a3; max-width:100%; height:auto;
+    /* Fit the arcade screen to the viewport at a fixed 4:3, asteroids_clone-style:
+       a flexible #stage holds the canvas — JS sizes it (see main.js fitCanvas).
+       DEFAULT (narrow / portrait): stage on top, settings panel below. On a wide
+       landscape viewport the panel becomes a RIGHT-SIDE pane (media query below)
+       so the 4:3 canvas can use the full viewport HEIGHT — a widescreen has
+       horizontal slack to spare, not vertical. DOM order (stage, then panel)
+       already maps to left-column / right-column, so no markup change is needed. */
+    body { display:grid; grid-template-rows:minmax(0,1fr) auto; grid-template-columns:1fr;
+           height:100vh; gap:12px; padding:12px; box-sizing:border-box; }
+    #stage { display:flex; align-items:center; justify-content:center;
+             min-width:0; min-height:0; }
+    /* Backing store stays 1024×768 (the DVG field); the CSS width/height are set
+       by JS to the largest 4:3 box that fits #stage — no max-width/height here,
+       JS owns the on-screen size. */
+    #game { display:block; background:#000; border:1px solid #2a3;
             box-shadow:0 0 24px rgba(120,255,160,.12); }
-    .panel { width:min(1024px,100%); background:var(--panel); border:1px solid #223;
-             border-radius:8px; padding:12px 16px; box-sizing:border-box; }
+    .panel { width:min(1024px,100%); justify-self:center; background:var(--panel);
+             border:1px solid #223; border-radius:8px; padding:12px 16px; box-sizing:border-box; }
+
+    /* Wide landscape → right-side pane. #stage = left 1fr column (fills the
+       height), .panel = auto right column. Threshold ~1024px: below it the
+       320px pane would eat too much width and the stacked layout gives a bigger
+       screen, so it falls back to the default above. */
+    @media (min-width:1024px) {
+      body { grid-template-rows:1fr; grid-template-columns:minmax(0,1fr) auto; }
+      .panel { width:clamp(260px,24vw,360px); justify-self:end; align-self:stretch;
+               max-height:100%; overflow-y:auto; }
+      /* The wide-layout indents/pitches don't fit the narrow column — flush-left
+         them. Scoped under .panel to out-specify the base .trait/.label rules,
+         which come later in source order (equal-specificity would lose to them). */
+      .panel .trait { margin-left:0; }
+      .panel .label { min-width:0; }
+      /* In the side pane the four PLAY MODE choices stack vertically (label on
+         its own line, one mode per line); the bottom-panel layout keeps them in
+         a horizontal row (the base .row default). */
+      .panel .modes { flex-direction:column; align-items:flex-start; gap:6px; }
+    }
     .row { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin:6px 0; }
     .label { font-family:monospace; font-size:12px; letter-spacing:.14em; color:var(--dim);
              min-width:92px; }
     label.opt { display:inline-flex; align-items:center; gap:5px; font-size:14px; cursor:pointer; }
-    input[type=range] { width:340px; accent-color:var(--green); }
+    input[type=range] { flex:1 1 140px; min-width:0; max-width:340px; accent-color:var(--green); }
     #fuelval { font-family:monospace; color:var(--green); min-width:46px; text-align:right; }
     .marks { font-family:monospace; font-size:11px; color:#567; }
     .trait { font-family:monospace; font-size:12px; color:var(--green);
@@ -33,7 +65,9 @@
        root plays the game, like the sibling clones). The CANVAS is the faithful arcade
        screen; everything BELOW it is modern HTML chrome (settings + start hint) — NOT how
        the cabinet did it. The vector-ROM decode demos live at demos/ (linked below). -->
-  <canvas id="game" width="1024" height="768"></canvas>
+  <div id="stage">
+    <canvas id="game" width="1024" height="768"></canvas>
+  </div>
 
   <!-- Settings panel. Wiring to the game is at step 2; for now only the visual
        echo (fuel value, mode trait line) is live. -->
@@ -42,7 +76,7 @@
       <button id="reset" class="btn">Reset</button>
       <span class="marks">↩ back to the start screen (then SPACE to launch)</span>
     </div>
-    <div class="row">
+    <div class="row modes">
       <span class="label">PLAY MODE</span>
       <label class="opt"><input type="radio" name="mode" value="0" checked> Training</label>
       <label class="opt"><input type="radio" name="mode" value="1"> Cadet</label>
