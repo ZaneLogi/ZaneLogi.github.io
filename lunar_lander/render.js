@@ -25,6 +25,14 @@ import { VROM } from './vector_rom_data.js';
 
 export const SCREEN_W = 1024, SCREEN_H = 768;
 
+// Inverse of the world→screen camera transform for a POINT — (sx, sy) in
+// screen-space Y-up units (= posX/posY) → world DVG units. The forward transform
+// lives in drawShapeWorld/drawSegmentsWorld below; keep the two in step. Used by
+// collision.js to place the ship and its corner probes in terrain space.
+export function screenToWorld(cam, sx, sy) {
+  return { x: cam.x + sx / cam.scale, y: cam.y + sy / cam.scale };
+}
+
 // DVG intensity (bri 0-15) → phosphor-green stroke. Per-segment so the beam
 // brightness is faithful (the DVG sets intensity per vector).
 function strokeFor(bri) {
@@ -98,7 +106,8 @@ export function drawShapeScreen(ctx, ROM, key,
 // Measure the total DVG-cursor advance of a run of glyph KEYS chained back-to-back
 // (the source's $5458 model: each glyph's trailing dark move steps to the next
 // char origin — verified in discovery_rom_data.js). Returns width in DVG units.
-function glyphRunWidth(ROM, keys, gs) {
+// Exported for centring glyph-string lines (display_info outcome messages).
+export function glyphRunWidth(ROM, keys, gs = 0) {
   const cur = { x: 0, y: 0 };
   for (const k of keys) runList(ROM, [{ op: 'JSR', target: k }], cur, gs, () => {});
   return cur.x;

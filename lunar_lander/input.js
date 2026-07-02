@@ -68,14 +68,14 @@ export class Input {
     return p;
   }
 
-  // Settings from the HTML panel, read at New Game (not per frame): the PLYMOD
-  // radio + the start-fuel slider. This is the "select mode/fuel via HTML, not the
-  // SELECT button" deviation (physics/profiles stay faithful — CLAUDE.md).
+  // Settings from the HTML panel, read at New Game (not per frame): the difficulty
+  // (the source's PLYMOD) radio + the start-fuel slider. This is the "select mode/fuel
+  // via HTML, not the SELECT button" deviation (physics/profiles stay faithful — CLAUDE.md).
   settings() {
     const mode = document.querySelector('input[name=mode]:checked');
     const fuel = document.getElementById('fuel');
     return {
-      plymod: mode ? Number(mode.value) : 0,
+      difficulty: mode ? Number(mode.value) : 0,
       startFuel: fuel ? Number(fuel.value) : 750,
     };
   }

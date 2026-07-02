@@ -21,13 +21,14 @@ three source-faithful demos: **flight physics** (`physics.html`), **crash explos
 (`explosion.html`, the `BOOM` routine), and the **faithful landscape**
 (`landscape.html`, built from `LNMIN`/`MINTBL` — the terrain done right with the
 source, vs the MAME-matched `screen.html`/`scroll_view.html`). The **gameplay runtime
-is under construction** — steps 0-4 done (seams · terrain · flight · HUD · zoom): `play.html`
-is now a flyable IDLE⇄PLAY loop with scrolling terrain, the arcade flight model, a live HUD
-(values/speeds/arrows/clock), and the major↔minor **zoom** (the near/zoom-in landing view +
-the faithful transition). Still unbuilt: collision/landing verdict, scoring, starfield
-(steps 5-7 — see "Gameplay runtime — build order & status" below). HUD value layout, pad
-multipliers, and the horizontal-scroll/wrap behaviour are MEASURED against MAME (see
-"Gameplay HUD" + "Terrain scroll" below).
+is under construction** — steps 0-5 done (seams · terrain · flight · HUD · zoom ·
+collision/landing): `play.html` is now a full mission loop — fly, land or crash
+(the `DECODE`/`SCAPLND` verdict → good/hard/crash outcomes with the bounce, the `BOOM`
+explosion, and the source's status messages), stub-score, and re-drop until the tank
+runs dry. Still unbuilt: real per-site scoring (`TBSTFT`), starfield, the `GAMODE`
+machine (steps 6-7 — see "Gameplay runtime — build order & status" below). HUD value
+layout, pad multipliers, and the horizontal-scroll/wrap behaviour are MEASURED against
+MAME (see "Gameplay HUD" + "Terrain scroll" below).
 
 **The original program source has been located** (`historicalsource/lunar-lander`,
 cloned per-PC — see "Program source" below for the paths — main module `A34573.1A` by Rich Moore).
@@ -513,6 +514,30 @@ steppers, `Starfield`, `Input`, the state machine. `render.js` stays **stateless
 (it's the drawing utility over a passed `ctx`, not a subsystem); `state.js` is a **shared
 data object** (the zero-page bag). No `#private` fields (mario_physics doesn't use them).
 
+**Naming style (decided 2026-07-02): readable names over source mnemonics.** The terse
+1970s abbreviations (`COLFLG`, `SHPINE`, …) stay in the SOURCE and in citations only —
+runtime code uses descriptive names, with the source label kept in a comment at the
+declaration (e.g. `collisionStatus, // the source's COLFLG (:243)`). Enumerated source
+values become a named enum whose values KEEP the source's own bytes, so bit-level source
+logic still ports 1:1 (e.g. `CollisionStatus.GOOD_LAND = 0x80`, state.js). The runtime
+modules are fully renamed (2026-07-02); the demos keep their original mnemonic copies.
+The applied map (source label → runtime name — research docs & source cite the LEFT
+column, code uses the RIGHT):
+
+| source | runtime | source | runtime |
+|---|---|---|---|
+| `COLFLG` | `collisionStatus` + `CollisionStatus` enum | `M.CLFL` | `outcomeStatus` |
+| `GAMODE` | `gameMode` + `GameMode` enum | `PLYMOD` | `difficulty` |
+| `SHIP` | `shipRotation` | `SHPINE` | `angularVelocity` |
+| `THRUST` | `thrustLevel` | `VELX`/`VELY` | `velX`/`velY` |
+| `SCROLL`/`SCRADD` | `scrollX`/`scrollY` | `LUNARNUM` V-bit | boolean `zoomedOut` |
+| `INDEX` | `sequenceStep` | `FUEL`/`SCORE` | `fuel`/`score` |
+| `GMTIME`/`TIMVAL` | `clockMinutes`+`clockSeconds`/`nmiCountdown` | RNDOM picks | `messagePick`/`explosionPattern` |
+| `SHPUPL/LWL/LWR/UPR` | `CORNER_UPPER_LEFT`/`_LOWER_LEFT`/`_LOWER_RIGHT`/`_UPPER_RIGHT` | `DISTYL/DISTYR`+`SCPDST` | `clearanceLeft`/`clearanceRight`+`clearance` |
+| `TRSTAB` | `THRUST_TABLE` | `FUELFAC`/`FLFAC2` | `BURN_FACTOR`/`BURN_FACTOR_PRIME` |
+| `M.HRDY`/`M.HRDG` | `BOUNCE_VELOCITY`/`BOUNCE_GRAVITY` | `LNMIN`/`MINTBL` tables | `SECTION_ORDER`/`SECTION_BASELINES` |
+| `MINSTX`/`MINSTY`/`RMJRX` | `ZOOM_IN_SHIP_X`/`ZOOM_IN_SHIP_Y`/`ZOOM_OUT_SHIP_X` | | |
+
 **`index.html` migration.** Today `index.html` is the demo hub (only because there's no
 game yet). During the build, a root **`play.html` boots `main.js`** so the demo hub stays
 live at `index.html`. **On release, promote `play.html` → `index.html`** — a game project's
@@ -529,7 +554,7 @@ single-file proto-gameplay (physics + starfield + HUD + lander + flame + input +
 | `main.js` | boot, canvas, fixed-timestep loop, per-frame order | main loop `:409-485`, `LUNINT` | physics.js |
 | `lander.js` | flight + craft: `ACCEL`, `THRLVL`/`FRCMLT`, `ROTSHP`(+inertia), `BURN`, `MODULE` pose+flame | `LUNAR`+`LUNVEC` | thrust.js + physics.js |
 | `landscape.js` | **terrain authority**: assembly + scroll + zoom + terrain **queries** (`heightAt`/`padAt`/`slopeAt`): `SCAPE`, `LNMIN`/`MINTBL`, `SCROLL`/`SCRADD`, `SCAPCHG`/`SCAPMJR`/`SCRLUP`. Terrain facts only — **no land/crash verdict**. | `LUNMIN` + scape | screen.js + scroll_view.js |
-| `collision.js` | **land/crash verdict**: `DECODE` distances (via landscape queries) + lander footprint + `VELY` vs `M.HRDY` → `COLFLG` (good/hard/crash) → outcome (bounce/explosion/score). Called by the state machine. | `DECODE`/`COLFLG` | — |
+| `collision.js` | **land/crash verdict**: the per-rotation corner tables (`SHPUPL`… `:3592`) probed through `landscape.heightAt` → `DISTY*`/`SCPDST` clearances + the `SCAPLND` integer gate → `COLFLG` (good/hard/crash). Outcomes (bounce/`BOOM`/messages) run in main.js's `MOTCHK` sequence; `boom.js` holds the explosion data. | `DECODE`/`SCPDST`/`SCAPLND` | explosion.js |
 | `starfield.js` | `STARS` (major/minor) | `STARS`, `598:306/401` | physics.js + demos/starfield.js |
 | `display_info.js` | HUD `$5458` + `DISPLY` values, digits/arrows/messages | HUD/DISPLY | screen.js + physics.js |
 | `input.js` | switches (rotate/abort/throttle), `TYPE` difficulty, `CREDIT` coin/fuel | `:687`/`:722`/`ROTCHK` | physics.js |
@@ -543,8 +568,9 @@ single-file proto-gameplay (physics + starfield + HUD + lander + flame + input +
   transform lives in one place. We chose direct dvg draw **over** a VG-RAM display-list
   analog — simpler; the single-sourcing a display list would enforce is instead enforced
   by the rule **"no vector-coordinate literals in any module."**
-- **`state.js`** — the shared zero-page values (`SHIP`, `VELX/Y`, `FUEL`, `SCROLL`,
-  `LUNARNUM`, …) + the `camera`, at the source's boot defaults.
+- **`state.js`** — the shared zero-page values (`shipRotation`, `velX/velY`, `fuel`,
+  `scrollX/scrollY`, `zoomedOut`, … — see the "Naming style" map above) + the `camera`,
+  at the source's boot defaults.
 
 **Not lift-and-drop — extract + consolidate + upgrade:**
 - demos duplicate code (attitude/flame in `thrust.js` AND `physics.js`; HUD in `screen.js`
@@ -554,12 +580,11 @@ single-file proto-gameplay (physics + starfield + HUD + lander + flame + input +
 - viewer demos (`lander.js`, `starfield.js`, `gallery.js`, `hud.js`, `vector_rom.js`) —
   reuse their extraction/decode logic, not the viewer shell.
 
-**Net-new (no demo has it yet, but fully documented):** the **landscape → collision** chain —
-`landscape.js` exposes terrain queries (`heightAt`/`padAt`/`slopeAt`); a separate
-`collision.js` runs the `DECODE` verdict (lander footprint vs terrain → landing/crash →
-`COLFLG` → scoring); plus the zoom transition — see `docs/research_physics.md` §9.1 +
-`docs/research_vector_usage.md` §3. `physics.html` has no terrain, so this is the main
-remaining build.
+**Net-new (built without a demo ancestor):** the **landscape → collision** chain —
+`landscape.heightAt` terrain queries feeding `collision.js`'s `DECODE`/`SCAPLND` verdict —
+and the zoom transition, both now in the runtime (`docs/research_physics.md` §9.1 + §11).
+Still net-new to build: `padAt`/`slopeAt` + the `TBSTFT` per-site scoring, and the `GAMODE`
+machine.
 
 ### Flight-model architecture — stepper + profiles
 
@@ -584,7 +609,8 @@ Two independent axes:
 
 **Selection = an HTML control in the HUD, NOT the cabinet mechanisms** — two labeled
 deviations; the physics/profiles stay faithful:
-- `PLYMOD` is chosen via an on-page control that sets `state.PLYMOD`, **not** the
+- the difficulty is chosen via an on-page control that sets `state.difficulty` (the
+  source's `PLYMOD`), **not** the
   SELECT-button cycle (`TYPE`/`TYPESW` `:687`) — so `input.js` skips the button debounce.
 - the current mode is shown **on-screen**; the cabinet used a physical lamp (`MODLMP`),
   not the HUD.
@@ -632,9 +658,9 @@ the collision/landing kernel (`research_physics.md` §13).
   integer part; ALTITUDE/H-SPEED/V-SPEED zero-suppressed; **speed = `|VEL| >> 6`** (DISPLY :3264);
   **arrows** →/←/↑/↓ from velocity sign, hidden at 0 (DISPLY :3276). Layout = the MAME-measured grid
   (screen.js). **Deviations (labeled):** velocity is sign-magnitude in source (VELX + SGNVLX, ACCEL
-  :1959) — we take `abs()`+sign from our signed floats; BCD→plain-int formatting; **ALTITUDE is a
-  HUD proxy** — `landscape.heightAt()` is a single straight-down query (clamped ≥0), where the
-  source's `SCPDST` is `min(both lower-corner clearances)` via the `DECODE` pass (lands with step 6).
+  :1959) — we take `abs()`+sign from our signed floats; BCD→plain-int formatting; **ALTITUDE =
+  the real `SCPDST`** since step 5 (collision.js's min lower-corner clearance in minor / bare-point
+  probe in major, passed in by main.js; reads 0 during the outcome — ALTITD cleared, `:562`).
   Also landed here: the **faithful fuel `BURN`** (:1794) — `floor(burnFac·TRSTAB[THRUST]/256)/100`
   units/frame (burnFac 218, or 144 Prime), = 0.23/frame (~9.6/s) full, 0.14/frame (~5.8/s) hover;
   this replaced a provisional rate that drained ~4× too fast. `ROT.GAS` = 0.06 unit/rotating-frame
@@ -642,9 +668,9 @@ the collision/landing kernel (`research_physics.md` §13).
 - **[done] Step 4 — the zoom-in (minor) scape + major↔minor transition:** the near view + the
   faithful snap (research_physics.md §9/§9.1). `landscape.js` owns it — `frameCamera` (scale
   0.25 major / 1.0 minor, camera from SCROLL/SCRADD per scape) + `updateZoom` (the SCAPMJR/SCRLUP
-  analog): **trigger = the altitude proxy** `altitudeAt` (the `SCPDST` stand-in until `DECODE`),
-  **IN alt < 384 / OUT alt ≥ 520** (+ascending +high-in-window) — the faithful hysteresis band
-  mapped to world units. **Snap** (no tween): flip `LUNARNUM`, reset ship to MINSTX/MINSTY (512/632)
+  analog): **trigger = the real `SCPDST`** (collision.js's measured clearance, passed in by
+  main.js since step 5), **IN alt < 384 / OUT alt ≥ 520** (+ascending +high-in-window) — the
+  faithful hysteresis band mapped to world units. **Snap** (no tween): flip `LUNARNUM`, reset ship to MINSTX/MINSTY (512/632)
   or RMJRX (512), set scroll for **coordinate continuity** (world-point-preserving; a labeled
   simplification of the exact `SUMSA`/`SUMSUM`). `physics_arcade.js` adds the **×4 minor position
   step** + the **minor vertical dead-zone** (`[256,660]` → `SCRADD`; the ground rises as you
@@ -660,9 +686,31 @@ the collision/landing kernel (`research_physics.md` §13).
     scored 50 (base) on a peak summit that is a **32u** flat in our data; our three **16u flats are
     ledges, not summits**, and are narrower than the 27u lander. So when scoring lands (step 6/7),
     map our flats → the 15 site indices and use `TBSTFT`, and confirm which flats are scoring pads.
-- **Steps 5-7:** finalize remaining feel-tuning (`THRUST_RAMP`/lander scales), `starfield.js`,
-  then the net-new landscape queries (`padAt`/`slopeAt` + faithful 2-corner `SCPDST`/`DECODE`) +
-  `collision.js` (land/crash verdict) + scoring, then the `GAMODE` machine (attract/play/land).
+- **[done] Step 5 — collision + landing (`collision.js` + `boom.js` + outcomes):** the
+  land/crash chain (research_physics.md §11/§11.1/§11.2). `collision.js` = the per-rotation
+  corner tables (`SHPUPL`/`SHPLWL`/`SHPLWR`/`SHPUPR` `:3592-3722`, verbatim; minor view only,
+  major = bare-point probe per `CNVRT :2442`) probed through `landscape.heightAt` →
+  `DISTYL`/`DISTYR`/`SCPDST` clearances + penetration → the `SCAPLND` verdict (INTEGER kernel:
+  both lower corners < 2, `SHIP ∈ {7,8,9}`, `|VELY|`hi <4/<8, `|VELX|`hi <4 → `COLFLG`
+  80/C0/8F). The measured `SCPDST` replaced BOTH proxies (HUD ALTITUDE + the zoom trigger —
+  `landscape.updateZoom(state, cam, alt)` now takes it; `landscape.altitudeAt` removed).
+  Outcomes = main.js's `MOTCHK` sequence (`INDEX` every other tick to 127): good settles,
+  hard runs the `M.HRDY`/`M.HRDG` bounce to re-contact, crash draws `boom.js` (the BOOM port
+  from demos/explosion.js) at the impact point; the source status messages + "NN POINTS"
+  render in the ROM glyph set (display_info `renderOutcome`); then fuel left → re-drop
+  (score/clock kept), dry → attract. **Deviations (labeled, §11.2):** both corner pairs every
+  tick (source alternates L/R per frame); X-axis distance pass subsumed by 4-corner vertical
+  probes (heightfield, no overhangs); **scoring STUB = base 50/15/5 × factor 1** (the LNDADR
+  non-designated-site default — real `TBSTFT[site]` + flats→sites mapping + `DEDUCT` fuel-loss
+  land with GAMODE); message placement approximate-centred at 2×; octagon crash-drift
+  (`DELTA`) not ported; bounce seed applied only on hard. Verified live: good (+50, BNFUEL
+  +50), hard (C0 bounce rise→settle), tilted crash (8F + debris + "THERE WERE NO SURVIVORS"),
+  out-of-fuel → attract; each verdict scores exactly once. Dev hook: `window.LL` exposes
+  state/camera/landscape/collision for console/eval verification.
+- **Steps 6-7:** feel-tuning (`THRUST_RAMP`/lander scales) + `starfield.js`, then the `GAMODE`
+  machine (attract/play/land) with the real scoring — `padAt`/`slopeAt` queries, the
+  `TBSTFT[site]` multiplier (+ map our flats → the 15 site indices), `DEDUCT`, and the full
+  `DOGAME` mission cycle.
 
 `state.js` currently holds the shared zero-page values (the seam); the `GAMODE`
 attract/play/land machine + scoring (the module table's `state.js` role) lands with the
@@ -670,18 +718,23 @@ final step and may live in `state.js` or a small sibling module.
 
 ## Next steps
 
-Having the original source resolved most of the old decode unknowns:
+The open work is finishing the gameplay runtime — **steps 6-7** of "Gameplay runtime —
+build order & status" above: feel-tuning (`THRUST_RAMP`/lander scales) + `starfield.js`,
+then the `GAMODE` attract/play/land machine with the real scoring (`padAt`/`slopeAt`
+queries, the `TBSTFT[site]` multiplier + flats→site mapping, `DEDUCT`, the full `DOGAME`
+mission cycle).
+
+### Settled decode questions — don't re-investigate
+
+Finding the original program source answered the ROM-decode stage's open questions:
+
 - **Terrain sequence** — it's the `LNMIN` section order + `MINTBL` LABS (16 sections of
   segments `SEG001-024`), not address order (`docs/research_vector_usage.md` §3). The
   MAME-frame-stitch approach is moot.
-- **Difficulty / level variation** — decoded: `PLYMOD` (0–3) changes gravity / friction /
+- **Difficulty / level variation** — `PLYMOD` (0–3) changes gravity / friction /
   1.5× thrust / rotational inertia, plus the operator fuel-per-coin DIP
   (`docs/research_physics.md` §7) — **physics ONLY**. The terrain is one **fixed** surface,
   unaffected by difficulty, and there is **no "level"** (`SCAPE` uses fixed `LNMIN`/`MINTBL`;
   `LUNARNUM` is the near/far zoom state, not a terrain index). See `research_vector_usage.md` §3.
 - **`034597-01.m3`** — a **FOREIGN-VERSION-ONLY** vector ROM, not "unclear" (see the region map).
 - **"Flag"** — was the thrust flame; it's the programmatic `FLAME` routine (see "Thrust flame").
-
-The open work is now **building the gameplay runtime** (see "Planned gameplay module layout"
-above): the flight half is demo-proven (`physics.html`); the landscape / collision / landing /
-scoring / zoom half is documented but unbuilt.

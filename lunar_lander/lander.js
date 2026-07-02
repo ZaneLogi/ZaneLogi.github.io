@@ -132,7 +132,7 @@ export class Lander {
   // SHIP, bank from zoom, flame from the smoothed throttle.
   render(ctx, state) {
     const bank = isMajor() ? 'out' : 'in';                 // major/zoom-out → little; minor → big
-    const att = attitudeForShip(bank, state.SHIP);
+    const att = attitudeForShip(bank, state.shipRotation);
     const pxu = PXU[bank];
     this.flick++;
     const flick = 1 + ((this.flick >> 1) % 3) * 0.2;       // 1.0 / 1.2 / 1.4 every 2 frames

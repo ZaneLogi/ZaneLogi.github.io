@@ -231,10 +231,11 @@ far view has a hard ceiling, not open sky.
 **Port note (built — `landscape.js` `updateZoom` / `frameCamera`, `physics_arcade.js`):** the
 transition is a **snap** (flip `LUNARNUM`, set camera scale 0.25↔1.0, reset the ship to the
 fixed screen pos MINSTX/MINSTY (512/632 logical) or RMJRX (512), zero-then-set the scroll). The
-**trigger uses the altitude proxy** `landscape.altitudeAt` (single-point `heightAt`) as the
-`SCPDST` stand-in — the faithful thresholds map to world units as **IN alt < 384** (`YMJMIN 96`
+**trigger is the real `SCPDST`** (collision.js's measured clearance — min lower-corner in
+minor, bare-point probe in major — passed into `updateZoom` by main.js since the collision
+step); the faithful thresholds map to world units as **IN alt < 384** (`YMJMIN 96`
 major-units ×4) / **OUT alt ≥ 520** (`YMISCR 520` minor-units) while ascending + high in the
-window; the real 2-corner `SCPDST`/`DECODE` swaps in at the collision step. **Coordinate
+window, and the zoom only runs while `COLFLG` is clear (SCAPCHG `:2719-2721`). **Coordinate
 continuity** is preserved without the exact `SUMSA`/`SUMSUM` byte math: note the ship's world
 point before the snap, then set `SCROLL`/`SCRADD` so it still sits over that point at the new
 scale + reset screen pos (a labeled simplification — verified visually continuous, no altitude
@@ -318,6 +319,42 @@ seed (it now renders sideways, as the cabinet does), and upright stays tied to t
 formula, never to that seed. (An earlier build treated `16` as upright with a `tilt = SHIP−16`
 axis — a self-consistent `+8` shift that flew fine but rendered the start upright instead of
 on-side and would have needed `{15,16,17}` here; realigned to `8` so the source ports 1:1.)
+
+### 11.1 Corner probe points — `SHPUPL`/`SHPLWL`/`SHPLWR`/`SHPUPR` (`:3592-3722`)
+
+"Corner" is the source's own term: **four probe points on the lander's silhouette** (upper-left,
+lower-left, lower-right, upper-right), each stored as **32 hand-authored (x,y) offsets — one per
+`SHIP` rotation** — from the ship's position reference (`CNVRT :2444-2446` indexes pair `SHIP*2`).
+Not a bounding box: at upright (`SHIP 8`) all four hug the two **leg tips** (≈ `(−9,−18)`/
+`(12,−18)`); on-side they hug the tall hull side. The **lower** corners feed the vertical
+clearances `DISTYL`/`DISTYR` (→ `SCPDST`, the landing gate); the **upper** corners feed the
+sideways gaps `DISTXL`/`DISTXR` (cliff-approach penetration). Corners exist in the **minor view
+only** — in major, `CNVRT` probes the bare ship point with no offsets (`:2442-2443`).
+
+### 11.2 Port notes — `collision.js` (built 2026-07-02)
+
+The verdict is a routine-level translation with the corner tables extracted verbatim and the
+kernel in **integer** source units (§13). Labeled deviations/simplifications:
+
+- **Both corner pairs every tick** — the source measures the left pair on even frames, the
+  right on odd (`DECODE :2092-2113`), a CPU-budget hack; ours is one frame more responsive.
+- **X-axis pass subsumed** — the terrain is a strict heightfield (no overhangs), so probing all
+  four corners vertically (`cornerY < heightAt(cornerX)` → `8F`) catches every case the separate
+  `DISTX*` upper-corner pass can flag.
+- **Scoring is a STUB** — `POINTS` base 50/15/5 × **factor 1**, the `LNDADR` default for a
+  non-designated site (`:1898`); the real `TBSTFT[site]` factor + the flats→15-sites mapping +
+  `DEDUCT` crash fuel-loss (`:1816`) land with the GAMODE step.
+- **Outcome sequence** (main.js `outcomeTick` = `MOTCHK :514-529`): `INDEX` steps every other
+  tick to 127 (≈ 6.1 s at the 24 ms frame); hard landings integrate the `M.HRDY`/`M.HRDG`
+  bounce until re-contact; crashes draw the `BOOM` debris (boom.js, from demos/explosion.js —
+  octagon crash-drift `DELTA :560` not ported). The bounce seed is applied **only** on hard
+  (source seeds unconditionally, `:577-580`, but only the hard path consumes it — ours keeps
+  the HUD speeds reading live zeros on good/crash).
+- **Status messages** (`:1655-1746`) render with the real ROM glyph set and the source's
+  header + RNDOM 1-of-4 pick; line **placement** is approximate centred (the `MESSLAB` LABS
+  grid is not decoded) at a readable 2× scale.
+- **Interim mission cycle** (`finishOutcome`): fuel left → a fresh drop (score/clock/fuel
+  kept); tank empty → attract. The full `DOGAME`/`GAMODE` machine is the last step.
 
 ## 12. Implications for the physics demo
 

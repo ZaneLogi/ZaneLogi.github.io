@@ -2,58 +2,88 @@
 //
 // Shared mutable game state — the software analog of the source's ZERO PAGE
 // (A34573.1A :173-260). One place for the cross-cutting values every module
-// reads/writes (SHIP, VELX/Y, FUEL, SCROLL, LUNARNUM, GAMODE, …), the same role
-// the 6502's zero page plays. This is the first of the two "seams" the port is
-// built on (CLAUDE.md "Planned gameplay module layout": a shared state for the
-// zero-page values; the render layer is the other seam — render.js).
+// reads/writes, the same role the 6502's zero page plays. This is the first of
+// the two "seams" the port is built on (CLAUDE.md "Planned gameplay module
+// layout": a shared state for the zero-page values; the render layer is the
+// other seam — render.js).
 //
 // Values are the source's own BOOT defaults — no invented numbers (CLAUDE.md
-// "no fakes; port the real data flow"). Fields grow as modules need them; this
-// is the step-0 core set.
+// "no fakes; port the real data flow"). Naming: descriptive names; the source's
+// mnemonic is kept in the comment at each declaration (CLAUDE.md "Naming style").
 //
 // WHO WRITES WHAT (shared mutable state needs this — keep it current):
-//   • lifecycle transitions (newGame; later land/crash/game-over) → the named
+//   • lifecycle transitions (newGame; land/crash/game-over) → the named
 //     functions in THIS file — grep here for the "big" changes.
-//   • per-frame motion (SHIP, THRUST, VELX/VELY, posX/posY, FUEL) → the physics
-//     stepper ONLY (one hot-path owner).
-//   • SCROLL/SCRADD/camera + LUNARNUM → landscape + the zoom transition.
-//   • COLFLG → the collision verdict (collision.js).
+//   • per-frame motion (shipRotation, thrustLevel, velX/velY, posX/posY, fuel)
+//     → the physics stepper ONLY (one hot-path owner).
+//   • scrollX/scrollY/camera + zoomedOut → landscape + the zoom transition.
+//   • collisionStatus → the collision verdict (collision.js, cleared+set per tick);
+//     outcomeStatus/lastPoints/messagePick/explosionPattern/sequenceStep → the
+//     outcome lifecycle here (beginOutcome/finishOutcome) + main.js's MOTCHK tick.
 //   Reads are free anywhere; writes stay with their owner above.
+
+// Collision / landing status — the source's COLFLG values (:243). The enum keeps
+// the source's OWN bytes ($80/$C0/$8F; bit 7 = "in contact", low nibble = crash)
+// so any bit-level source logic still ports 1:1, but code reads by name.
+export const CollisionStatus = {
+  SAFE_FLY:  0x00,    // no contact this frame
+  GOOD_LAND: 0x80,    // successful landing
+  HARD_LAND: 0xC0,    // hard landing → the bounce
+  CRASH:     0x8F,    // collision / crash
+};
+
+// Game mode — the source's GAMODE values (:196), kept as the source's own bytes.
+// (The source also has $10 free-play and $20 ready-to-play — those arrive with
+// the GAMODE state-machine step.)
+export const GameMode = {
+  IDLE:    0x00,      // attract / start screen
+  PLAY:    0x40,      // mission in flight
+  OUTCOME: 0x80,      // land/crash sequence running (PLYCHK `ASL GAMODE` :574)
+};
 
 export const state = {
   // --- craft attitude & motion (zero page :174-248) --------------------------
-  SHIP:   8,          // ship rotation (float; 0-31 = 11.25°/step, :175; 8 = upright); ATRINIT sets 8 (attract)
-  SHPINE: 0,          // rotational-inertia angular velocity, Command mode (:176)
-  THRUST: 0,          // rocket thrust ×.05 (:174)
-  throttle: 0,        // smoothed throttle 0..1 (physics owns it; drives thrust magnitude + flame)
-  VELX:   0, VELY: 0, // velocity X/Y (:247-248), DVG units/tick
-  posX:   0, posY: 0, // ship position WITHIN its screen window (XCURADJ/YCURADJ analog, :178),
+  shipRotation: 8,    // SHIP (:175) — rotation step 0-31 (11.25°/step), 8 = upright.
+                      // Float here (finer thrust angle; the pose fold snaps). ATRINIT seeds 8.
+  angularVelocity: 0, // SHPINE (:176) — rotational-inertia spin, Command mode only
+  thrustLevel: 0,     // THRUST (:174, "ROCKET THRUST X.05") — the dialed throttle level 0-15
+  throttle: 0,        // ACTUAL thrust output 0..1 (0 when the tank is empty) — drives the flame
+  velX: 0, velY: 0,   // VELX/VELY (:247-248) — velocity, 16-bit source units
+  posX: 0, posY: 0,   // ship position WITHIN its screen window (XCURADJ/YCURADJ analog, :178),
                       // DVG units, Y-up; the on-screen draw point = this directly (POSTMOD does
                       // XCURADJ>>6, and we hold posX/posY already un-scaled). NOT a world/terrain
-                      // position and NOT the scape scroll — the scape offset is SCROLL/SCRADD.
+                      // position and NOT the scape scroll — that offset is scrollX/scrollY.
 
   // --- resources -------------------------------------------------------------
-  FUEL:   0,          // remaining fuel; set from PLYMOD/coin at play start (research_physics.md §6)
-  SCORE:  0,          // game score (:296); BCD in source, plain int here. Scoring lands with collision (step 6)
+  fuel: 0,            // FUEL — remaining fuel; set from the start-fuel picker (research_physics.md §7.2)
+  score: 0,           // SCORE (:296) — BCD in source, plain int here. STUB scoring: base
+                      // POINTS × factor 1 (see beginOutcome); real TBSTFT[site] = GAMODE step
 
   // --- game clock (:271-293) -------------------------------------------------
   // GMTIME = the MM:SS the HUD shows; TIMVAL counts NMIs down to one game-second.
   // Ticked by tickClock() below (the source's NMI handler A34573.1D:360, PLAY only).
-  GMTIME_S: 0,        // seconds 0-59 (GMTIME, BCD in source)
-  GMTIME_M: 0,        // minutes  (GMTIME+1)
-  TIMVAL: 250,        // frame/second counter (:271) — counts SECCNT NMIs to one second
+  clockSeconds: 0,    // GMTIME — seconds 0-59 (BCD in source)
+  clockMinutes: 0,    // GMTIME+1 — minutes
+  nmiCountdown: 250,  // TIMVAL (:271) — counts SECCNT NMIs down to the next second
 
-  // --- scape scroll & zoom (:232-236) ---------------------------------------
-  SCROLL: 0,          // horizontal scroll factor (:234), DVG units
-  SCRADD: 0,          // vertical scroll factor (:235)
-  LUNARNUM: 0x40,     // lunarscape number; V-bit (bit 6) = zoom state.
-                      //   boot = $40 ⇒ MAJOR / zoom-out (ATRINIT path :671-672)
+  // --- scape scroll & zoom (:232-236) ----------------------------------------
+  scrollX: 0,         // SCROLL (:234) — horizontal scape scroll, world DVG units
+  scrollY: 0,         // SCRADD (:235) — vertical scape scroll (minor-view dead-zone)
+  zoomedOut: true,    // LUNARNUM's V-bit (`SCAPE BIT LUNARNUM/BVS MAJOR` :1098):
+                      // true = MAJOR (far/zoom-out), false = MINOR (near/zoom-in).
+                      // Boots major (ATRINIT/REINIT :671-672).
 
-  // --- game / difficulty / sequence -----------------------------------------
-  GAMODE: 0,          // 0=attract,10=free-play,20=RTP,40=play,80=land (:196)
-  PLYMOD: 0,          // difficulty 0=easy(training) … 3=hard(command) (:201)
-  INDEX:  0,          // explosion / abort sequence counter (:237)
-  COLFLG: 0,          // collision flag: $80 good land / $C0 hard / $8F crash (:243)
+  // --- game / difficulty / sequence -------------------------------------------
+  gameMode: GameMode.IDLE,  // GAMODE (:196)
+  difficulty: 0,      // PLYMOD (:201) — 0 Training … 3 Command (indexes the physics profiles)
+  sequenceStep: 0,    // INDEX (:237) — the land/crash (later abort) sequence counter, 1→127
+  collisionStatus: CollisionStatus.SAFE_FLY,  // this frame's verdict (COLFLG :243)
+
+  // --- land/crash outcome (set by beginOutcome, read by the sequence + display) --
+  outcomeStatus: CollisionStatus.SAFE_FLY,  // the latched verdict the sequence animates (M.CLFL :553)
+  lastPoints: 0,      // points awarded by the last verdict (NUMB1 analog) — the "NN POINTS" line
+  messagePick: 0,     // 0-3 outcome-message pick (RNDOM :1671)
+  explosionPattern: 0,// 0-3 BOOM pattern pick (RNDOM at the BOOM setup)
 };
 
 // Scape / zoom geometry (research_physics.md §9/§9.1) — the single source for the
@@ -68,35 +98,38 @@ export const GEOM = {
   WIN_YMIN: 256, WIN_YMAX: 660,   // vertical dead-zone (minor), §9 [YMIMIN 256, YMIMAX 660] logical
   ZOOM_IN_ALT: 384,               // alt < this → zoom IN  (YMJMIN 96 major-units × 4)
   ZOOM_OUT_ALT: 520,              // alt ≥ this (+ascending+high) → zoom OUT (YMISCR 520 minor-units)
-  MINSTX: 512, MINSTY: 632,       // ship SCREEN reset on zoom-IN  (§9.1 512/4·632/4 adj → ×4 logical)
-  RMJRX: 512,                     // ship SCREEN X reset on zoom-OUT (§9.1 512/4 adj → ×4 logical)
+  ZOOM_IN_SHIP_X: 512,            // ship SCREEN pos after the zoom-IN snap (MINSTX/MINSTY,
+  ZOOM_IN_SHIP_Y: 632,            //   §9.1 512/4·632/4 adjusted → ×4 logical)
+  ZOOM_OUT_SHIP_X: 512,           // ship SCREEN X after the zoom-OUT snap (RMJRX, §9.1; Y is computed)
 };
 
 // Game-clock constants (A34573.1A :56/:59). One source frame = FRMECNT NMIs; one
-// game-second = SECCNT NMIs. Keeping TIMVAL in NMI units (decrement FRMECNT per
-// 24 ms tick) makes the second boundary land exactly where the hardware's does.
+// game-second = SECCNT NMIs. Keeping the countdown in NMI units (decrement FRMECNT
+// per 24 ms tick) makes the second boundary land exactly where the hardware's does.
 const SECCNT = 250, FRMECNT = 6;
 
 // Advance the game clock one tick, PLAY only (the source's NMI increment, D:360).
-// TIMVAL counts down SECCNT NMIs; on rollover, GMTIME seconds++ (minute carry).
+// nmiCountdown counts down SECCNT NMIs; on rollover, seconds++ (minute carry).
 // Minutes cap at 99 to stay in the 2-digit MM field.
 export function tickClock() {
-  state.TIMVAL -= FRMECNT;
-  if (state.TIMVAL > 0) return;
-  state.TIMVAL += SECCNT;
-  if (++state.GMTIME_S >= 60) { state.GMTIME_S = 0; if (state.GMTIME_M < 99) state.GMTIME_M++; }
+  state.nmiCountdown -= FRMECNT;
+  if (state.nmiCountdown > 0) return;
+  state.nmiCountdown += SECCNT;
+  if (++state.clockSeconds >= 60) { state.clockSeconds = 0; if (state.clockMinutes < 99) state.clockMinutes++; }
 }
 
-// LUNARNUM's V-bit ($40) set ⇒ MAJOR (zoom-out); clear ⇒ MINOR (zoom-in).
-// (SCAPE `BIT LUNARNUM / BVS MAJOR` :1098.)
-export const isMajor = () => (state.LUNARNUM & 0x40) !== 0;
+// The zoom state (LUNARNUM V-bit): true ⇒ MAJOR (zoom-out) scape is displayed.
+export const isMajor = () => state.zoomedOut;
 
-// GAMODE bit $40 set ⇒ PLAY (vs attract/idle). (:196; DOGAME.)
-export const isPlaying = () => (state.GAMODE & 0x40) !== 0;
+// PLAY = a mission in flight (vs attract/idle/outcome).
+export const isPlaying = () => state.gameMode === GameMode.PLAY;
 
-// The camera. Atari model: the lander stays CENTRED and the WORLD SCROLLS
-// (physics.js header; SCROLL/SCRADD). These are the shared camera *values*; the
-// DVG→screen transform math lives in render.js (the render seam).
+// The LAND/CRASH outcome sequence is running.
+export const isOutcome = () => state.gameMode === GameMode.OUTCOME;
+
+// The camera. Atari model: the lander moves within its screen window and the WORLD
+// SCROLLS (scrollX/scrollY). These are the shared camera *values*; the DVG→screen
+// transform math lives in render.js (the render seam).
 //   scale = DVG units → screen px. Major/zoom-out ≈ 0.25 (fits the 4096-wide
 //   loop into the 1024 screen); minor/zoom-in ≈ 1 (close-up). See
 //   research_vector_usage.md §3.1 and the landscape.js ¼ derivation.
@@ -116,38 +149,37 @@ export const camera = {
 // so our un-scaled posX/posY ARE the screen point. (64, 682) is upper-LEFT, near the top of the
 // 768 field: the ship enters top-left (lying on its side, §14) and drifts in — it is NOT centred
 // (SCAPCHG dead-zone window, physics_arcade). The renderer flips Y→canvas at draw (SCREEN_H − y).
-// The INVELX/INVELY velocity fixed-point is still finalized at the zoom step.
 const INIT_X = 64, INIT_Y = 682;    // INTXCUR/INTYCUR ÷ $40 — source start position, DVG/screen (Y-up)
 
 // Seed the FLIGHT state (position, velocity, attitude, scape) to the play-start —
 // shared by newGame (fresh game) and resetFlight (off-top-of-major restart). Does NOT
 // touch score / clock / fuel — those are the caller's to set/keep.
 //
-// INVELX/INVELY (:3749-50, hex) → VELX/VELY (PLYINIT :628-636); REINIT clears the sign
+// INVELX/INVELY (:3749-50, hex) → velX/velY (PLYINIT :628-636); REINIT clears the sign
 // bytes → both POSITIVE = rightward / up (SCAPCHG :2683/:2703). Source 16-bit units
-// (screen px = velocity/16384/tick): VELX 12800 ⇒ ~0.78 px/tick rightward drift; VELY 16
+// (screen px = velocity/16384/tick): velX 12800 ⇒ ~0.78 px/tick rightward drift; velY 16
 // is a negligible up-seed (~0.001 px/tick) gravity (−17/tick) overtakes on frame 1.
 function seedFlight() {
-  state.VELX = 0x3200;   // INVELX = $3200 = 12800 — initial rightward drift (the ship enters and drifts in)
-  state.VELY = 0x10;     // INVELY = $0010 = 16     — ~0 vertical; descent begins immediately
-  state.THRUST = 0; state.throttle = 0;   // throttle level 0-15 (dialed by ↑/↓); starts at idle
-  state.SHIP = 16;                   // ON ITS SIDE, heading right (PLYINIT :651, decimal 16);
-                                     // upright is SHIP 8 — the ship enters sideways and the
+  state.velX = 0x3200;   // INVELX = $3200 = 12800 — initial rightward drift (the ship enters and drifts in)
+  state.velY = 0x10;     // INVELY = $0010 = 16     — ~0 vertical; descent begins immediately
+  state.thrustLevel = 0; state.throttle = 0;   // throttle level 0-15 (dialed by ↑/↓); starts at idle
+  state.shipRotation = 16;           // ON ITS SIDE, heading right (PLYINIT :651, decimal 16);
+                                     // upright is 8 — the ship enters sideways and the
                                      // player rotates it upright (MAME-confirmed; §14).
-  state.SHPINE = 0;                  // no rotational momentum at start
+  state.angularVelocity = 0;         // no rotational momentum at start
   state.posX = INIT_X;
   state.posY = INIT_Y;
-  state.SCROLL = 0; state.SCRADD = 0;  // scape scroll cleared (REINIT :657)
-  state.INDEX = 0; state.COLFLG = 0;
-  state.LUNARNUM = 0x40;            // major / zoom-out (boots high; REINIT :672)
-  state.GAMODE = 0x40;             // → PLAY (PLYINIT :646)
+  state.scrollX = 0; state.scrollY = 0;  // scape scroll cleared (REINIT :657)
+  state.sequenceStep = 0; state.collisionStatus = CollisionStatus.SAFE_FLY;
+  state.zoomedOut = true;            // major / zoom-out (boots high; REINIT :672)
+  state.gameMode = GameMode.PLAY;    // (PLYINIT :646)
 }
 
 export function newGame(settings) {
-  state.PLYMOD = settings.plymod;
-  state.FUEL   = settings.startFuel;
-  state.SCORE = 0;                  // fresh score (:351-352)
-  state.GMTIME_S = 0; state.GMTIME_M = 0; state.TIMVAL = 250;  // clear mission time (:640)
+  state.difficulty = settings.difficulty;
+  state.fuel = settings.startFuel;
+  state.score = 0;                  // fresh score (:351-352)
+  state.clockSeconds = 0; state.clockMinutes = 0; state.nmiCountdown = 250;  // clear mission time (:640)
   seedFlight();
 }
 
@@ -155,13 +187,56 @@ export function newGame(settings) {
 // reseed the flight, but KEEP score + clock. (Minimal — the full PLYSTRT/GAMODE cycle
 // is the state-machine step; here it just re-drops the ship into the major view.)
 export function resetFlight(fuelPenalty = 0) {
-  state.FUEL = Math.max(0, state.FUEL - fuelPenalty);
+  state.fuel = Math.max(0, state.fuel - fuelPenalty);
   seedFlight();
 }
 
 // Reset to the boot / attract stage (isPlaying() → false; SPACE re-launches). The
 // PLAY→IDLE lifecycle transition; the caller (main.js) re-frames the camera to major.
 export function toIdle() {
-  state.GAMODE = 0;                 // attract / idle
-  state.SCROLL = 0; state.SCRADD = 0;
+  state.gameMode = GameMode.IDLE;
+  state.scrollX = 0; state.scrollY = 0;
+}
+
+// Hard-landing bounce seed (:577-578): the source stores M.HRDY = 10 into the
+// velocity HIGH byte → 10·256 in our 16-bit units. Upward — the craft pops off
+// the ground; BOUNCE_GRAVITY (main.js, M.HRDG) then pulls it back down.
+const BOUNCE_VELOCITY = 10 * 256;
+
+// The verdict fired — enter the LAND/CRASH outcome mode (the PLYCHK collision
+// path, :551-581): score, bonus fuel, sequence setup. main.js then runs the
+// MOTCHK sequence (INDEX clock + hard bounce) each tick until finishOutcome.
+export function beginOutcome(status) {
+  const good = status === CollisionStatus.GOOD_LAND;
+  // Scoring STUB (decided 2026-07-02): POINTS base 50 good / 15 hard / 5 crash
+  // (:3311-3318) × site factor 1 — the LNDADR default for a NON-designated site
+  // (:1898). The real per-site TBSTFT factor (+ our-flats→15-sites mapping, and
+  // the DEDUCT crash fuel-loss :559/:1816) land with the GAMODE step.
+  const base = good ? 50 : (status === CollisionStatus.HARD_LAND ? 15 : 5);
+  state.lastPoints = base;
+  state.score += base;
+  if (good) state.fuel += 50;              // BNFUEL — good landings only (:554-558)
+  state.outcomeStatus = status;            // keep the verdict for the sequence (M.CLFL :552-553)
+  state.messagePick = Math.floor(Math.random() * 4);       // RNDOM message pick (:1670-1672)
+  state.explosionPattern = Math.floor(Math.random() * 4);  // RNDOM explosion pattern (BOOM setup)
+  // The :561-571 zero loop — velocities, thrust, collision flag:
+  state.velX = 0; state.velY = 0; state.thrustLevel = 0; state.throttle = 0;
+  state.collisionStatus = CollisionStatus.SAFE_FLY;
+  // The source seeds the bounce velocity unconditionally (:577-578) but only the
+  // hard path consumes it (MOTCHK gates on M.CLFL bit 6); we seed only then so
+  // the HUD speed reads live 0s otherwise.
+  if (status === CollisionStatus.HARD_LAND) state.velY = BOUNCE_VELOCITY;
+  state.gameMode = GameMode.OUTCOME;       // ASL GAMODE: play → land/crash (:574)
+  state.sequenceStep = 1;                  // sequence counter start (INDEX :575-576)
+}
+
+// Sequence end — the step counter ran past 127 (MOTCHK :525-529). Interim mission
+// cycle (the full DOGAME machine is the GAMODE step): fuel left → a fresh drop into
+// the major view (fuel/score/clock kept — the real game's continuing mission);
+// tank empty → attract (the OUT OF FUEL → attract path).
+export function finishOutcome() {
+  state.outcomeStatus = CollisionStatus.SAFE_FLY;
+  state.sequenceStep = 0;
+  if (state.fuel >= 1) seedFlight();
+  else toIdle();
 }
