@@ -406,7 +406,7 @@ The picture/glyph ROM is laid out in these decoded regions (use
 |---|---|
 | `$5000-$507E` | **Terrain — 16 sections** `SECT01-16` (`A34598.1B:13`), each 256 wide and itself a **`JSRL` list** of 1–4 of the `$5088` segments (+ inline `VCTR` connectors); `SECT11` is a one-segment alias. The byte-decoder rendered each section's composite as a 256-wide polyline — the old "15 fixed-width tiles" reading. The on-screen order is the **ROM `LNMIN` table** (`SECT01..16` + a `SECT01-04` wrap tail), positioned vertically by `MINTBL` — NOT address order, and the source **chains them** (the old "nothing in ROM chains them" was wrong). One fixed surface, **not** level/difficulty-dependent. See `docs/research_vector_usage.md` §3. |
 | `$5088-$51A2` | **Terrain — 24 segments** `SEG001-024` (`A34598.1B:101`), the reusable slope/flat stroke pieces the sections `JSRL`. **All 24 are used** by the sections above (resolves "terrain glyphs whose use we hadn't found"). |
-| `$5244-$53E6` | **Starfield** — 24 subroutines, **61 bright points, zero lines** (every "stroke" is a zero-length VEC = a single dot), brightness `5-9` (star magnitudes). No routine assembles them — the CPU positions the clusters at runtime. |
+| `$5244-$53E6` | **Starfield** — 24 subroutines, **61 bright points, zero lines** (every "stroke" is a zero-length VEC = a single dot), brightness `5-9` (star magnitudes). The **JSRL index tables `MJSTRA` (`$52FE`) / `MJSTRB` (`$530E`) / `MINSTR` (`$53EE`)** (anchored off `LNMIN`=`$51BA`) select + order these clusters into the major-lower / major-top / minor fields — assembled by `STARS` (:1121) with `STRINIT` LABS origins. So the layout **is** in ROM (see `starfield.js` / `build_discovery.py` `STARTABLES`); an earlier note that "no routine assembles them" was wrong. |
 | `$5458` | **HUD labels — the in-game 2×3 grid** — 75 font-glyph JSRs spelling `SCORE  TIME  FUEL  ALTITUDE  HORIZONTAL SPEED  VERTICAL SPEED` (gaps are space-glyph `$5726` JSRs). Its `VEC` moves lay them out as **3 rows (y=748/720/692) × 2 columns (x=100/600)** — this *is* the gameplay HUD layout; only the numeric values are CPU-drawn separately. |
 | `$55BE-$5726` | Font — A-Z + space (see table below). |
 | `$572A-$5794` | **Digits 1-9** — 9 glyphs (`$572A=1, $5732=2, $5742=3, $5750=4, $575E=5, $576C=6, $577A=7, $5784=8, $5794=9`), same 8×12 SVEC form as the font. **`0` reuses the letter `O` (`$5688`).** |
@@ -746,14 +746,22 @@ temporary `play.html`; the release promotion renamed it to `index.html` — see 
   the terrain. Verified: the 15-site pool distribution, the 2-low + 2-high `TABSIT` pick, good-on-2X
   = 100, good off-site = 50, crash off-site = 5, the `NX` flash on all 4 active pads.
 - **[done] Step 8 — polish (`starfield.js` + feel-tuning):** the `STARS` backdrop (research_physics.md
-  §10). `starfield.js` (`class Starfield`) extracts the ROM's real **61-point star field** (the 24
-  cluster subroutines `$5244-$53E6` in ROM598, magnitudes 5-9 → dot brightness) and lays them across
-  a screen-space wrap-tile in the sky band, scrolling horizontally with the world (`camera.x·scale`),
-  drawn behind the terrain in every mode (main.js `render`, before `landscape.render` — the source's
-  STARS-before-SCAPE order :389-391). Faithful = the real ROM points + magnitudes; **labeled
-  derivation** = the cluster LAYOUT (the source's `MJSTRA`/`MJSTRB`/`MINSTR` display-list positions
-  are VG-RAM, same as the site `TBMNA`), so it's the real-ROM-data counterpart to the physics demo's
-  generated field. **Feel-tuning = no-op:** the provisional `THRUST_RAMP_TICKS` (2) + lander scales
+  §10). `starfield.js` (`class Starfield`) is a **faithful** port of `STARS` (:1121): the three ROM JSRL
+  index tables `MJSTRA`/`MJSTRB`/`MINSTR` (`build_discovery.py` → `STARTABLES`) select + order the
+  `$5244-$53E6` cluster subroutines, and `STRINIT` (:1152) sets each field's LABS origin; chaining the
+  clusters (globalScale 0) from the origin lays the field, so positions + magnitudes come straight from
+  ROM. It scrolls horizontally 1:1 with the world (`camera.x·scale`), drawn behind the terrain in every
+  mode (main.js `render`, before `landscape.render` — STARS-before-SCAPE order :389-391). The far/near
+  field pick mirrors `LUNARNUM` major/minor. **MAME-matched** (snap/llander 0000-0003): major-lower
+  (`MJSTRA`, LABS(0,256)) = **15 dots over a 1024 tile spanning the FULL height y 192-768** (repeats per
+  screen — the ROM lists the 4 clusters twice as a scroll buffer); stars translate 1:1 with the terrain.
+  The `MJSTRB` top field (LABS(0,768)) sits above the visible 0-767 window (never rendered — attract vs
+  play snapshots show the same stars). **One labeled simplification:** the minor (zoom-in) field
+  (`MINSTR`) is chained from LABS(0,256) instead of the exact `MINSVG`/`SCRLDO` per-section LABS (:1138) —
+  only ~a handful land in the close-up window either way (snap 0006 ≈ 4). *(This step originally shipped a
+  DERIVATION — all 24 subs at even X in a top band — under the wrong belief that the cluster LAYOUT lived
+  in VG-RAM like the site `TBMNA`; the tables are in fact plain ROM off `LNMIN`=$51BA, and the field was
+  re-decoded faithfully 2026-07-02 after a density mismatch vs MAME surfaced it.)* **Feel-tuning = no-op:** the provisional `THRUST_RAMP_TICKS` (2) + lander scales
   were validated by playtest (LGTM), not changed. (The `DOGAME`/`GAMODE` attract-machine pieces are
   N/A — the HTML panel replaces coin/SELECT — and the mission cycle finish/re-drop is already built.)
 

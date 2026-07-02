@@ -34,7 +34,7 @@ const collision = new Collision();
 const starfield = new Starfield();
 
 // Dev/verification hook: poke at the live modules from the console / preview eval.
-window.LL = { state, camera, landscape, collision, lander };
+window.LL = { state, camera, landscape, collision, lander, starfield };
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -125,7 +125,8 @@ function render(alpha) {
   ctx.clearRect(0, 0, SCREEN_W, SCREEN_H);
 
   // Starfield (behind everything — STARS, drawn before the scape :389-391), scrolling with the world.
-  starfield.render(ctx, camera);
+  // The far/near field pick mirrors the source's LUNARNUM major/minor split (STARS :1121).
+  starfield.render(ctx, camera, state.zoomedOut);
 
   // Terrain — the major (zoom-out) scape, scrolling + wrapping.
   landscape.render(ctx, camera);

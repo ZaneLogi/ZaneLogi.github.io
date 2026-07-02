@@ -77,6 +77,36 @@ def jsr_targets(b: bytes, base: int) -> list[int]:
     return sorted(targets)
 
 
+# The starfield JSRL index tables (034598), anchored off LNMIN=$51BA in the
+# program source (A34573.1A:124-129): MINTBL=LNMIN+$28, MINTAB=+$40, then
+#   MJSTRA = MINTAB+$DC = $52FE  — major (zoom-out) LOWER field  (STARS :1126)
+#   MJSTRB = MJSTRA+$10 = $530E  — major TOP field (play-mode only; y 768-1279)
+#   MINSTR = MJSTRB+$E0 = $53EE  — minor (zoom-in) field
+# Each entry is a DVG JSRL word into a $5244-$53E6 star-cluster subroutine
+# (target = (word & $FFF)*2 + $4000). LOADRAM copies a byte window each frame
+# (STRLD :1144), so the tables carry a scroll-buffer tail (major = 4 clusters
+# listed x2; minor = 16 distinct + a 4-cluster repeat). We emit ONE tile's worth
+# of distinct clusters — the field wraps on that period. This SUPERSEDES the old
+# "starfield positions live in VG-RAM, not extractable" claim: the layout is
+# fully in ROM (STRINIT LABS origins are the only program-side constants — major
+# lower = (0,256), top = (0,768), both globalScale 0; A34573.1A STRINIT :1152).
+STAR_TABLES = [  # (js-key, cpu addr, distinct-cluster count = one tile)
+    ("majorLower", 0x52FE, 4),   # MJSTRA — listed x2 in ROM (scroll buffer)
+    ("majorTop",   0x530E, 4),   # MJSTRB — listed x2; off the visible top in-game
+    ("minor",      0x53EE, 16),  # MINSTR — 16 distinct + a 4-cluster repeat tail
+]
+
+
+def star_tables(b: bytes) -> dict[str, list[str]]:
+    """Decode the MJSTRA/MJSTRB/MINSTR JSRL tables to ordered S_<cpu> key lists."""
+    base = 0x5000
+    out: dict[str, list[str]] = {}
+    for name, addr, n in STAR_TABLES:
+        out[name] = [f"S_{(word(b, addr - base + 2 * i) & 0xFFF) * 2 + 0x4000:04X}"
+                     for i in range(n)]
+    return out
+
+
 def terrain_pointers(b: bytes, base: int) -> list[int]:
     """034597: raw address-word table starting at offset 4 (after the 0x3000/0x0060
     header), taken while words stay inside the ROM range."""
@@ -100,8 +130,11 @@ def emit() -> str:
         "// terrain polyline entry points named T_<cpuaddr>. For demos/gallery.html.",
         "",
     ]
+    rom598: bytes | None = None
     for var, fname, base in ROMS:
         b = load(fname)
+        if var == "ROM598":
+            rom598 = b
         subs: dict[str, list[dict]] = {}
         for a in jsr_targets(b, base):
             subs[f"S_{a:04X}"] = decode_tolerant(b, base, a)
@@ -115,6 +148,16 @@ def emit() -> str:
         lines.append("};")
         lines.append("")
         print(f"{fname}: {len(subs)} subs")
+
+    # Starfield JSRL index tables (into ROM598's S_ cluster subs) — see STAR_TABLES.
+    st = star_tables(rom598)
+    lines.append("// ----- starfield JSRL tables (034598 MJSTRA/MJSTRB/MINSTR) — one tile each -----")
+    lines.append("export const STARTABLES = {")
+    for name, keys in st.items():
+        lines.append(f"  {name}: [{', '.join(repr(k) for k in keys)}],")
+    lines.append("};")
+    lines.append("")
+    print("starfield tables:", {k: len(v) for k, v in st.items()})
     return "\n".join(lines)
 
 

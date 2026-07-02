@@ -302,14 +302,25 @@ Drawn every frame after `SCAPE` (`:389-390`). Two sets matching the two zoom lev
 Star point data itself is the 61-point field in `034598` `$5244-$53E6` (already decoded;
 see CLAUDE.md region map) — single-dot VECs, brightness 5–9.
 
-**Port note (built — `starfield.js`, step 8):** `class Starfield` pulls the real 61 star points
-from the ROM cluster subroutines (`$5244-$53E6`, ROM598 — the decoded single-dot VECs + magnitudes)
-and lays them across a screen-space wrap-tile in the sky band, scrolling horizontally with the
-camera (the `SCRLDO` behaviour), drawn behind the terrain in every mode (STARS-before-SCAPE `:389`).
-**Labeled derivation:** the cluster LAYOUT — the source positions them via the `MJSTRA`/`MJSTRB`/
-`MINSTR` display lists (`STRINIT` LABS + VEC moves, VG-RAM, not extractable, like the site `TBMNA`)
-— so we spread the 24 clusters evenly and collapse the two-band major/minor split to one scrolling
-field. This is the real-ROM-data counterpart to the physics demo's generated field (a labeled choice).
+The three JSRL index tables are **in ROM** (034598), anchored off `LNMIN`=`$51BA`
+(`A34573.1A:124-129`): `MJSTRA`=`$52FE`, `MJSTRB`=`$530E`, `MINSTR`=`$53EE`. Each entry is a
+DVG JSRL word into a `$5244-$53E6` cluster (target = `(word & $FFF)*2 + $4000`); `LOADRAM` copies a
+byte window per frame (`STRLD`), so the tables carry a scroll-buffer tail (major = 4 clusters listed
+×2; minor = 16 distinct + a repeat). `STRINIT` (`:1152`) builds the LABS origin `(0, (X&$0F)·256)`,
+globalScale 0 — X=`$A1`→y=256 (major lower), `$A3`→y=768 (major top).
+
+**Port note (FAITHFUL rewrite 2026-07-02 — `starfield.js`, was a derivation):** `class Starfield`
+decodes those tables (`build_discovery.py` → `STARTABLES`) and **chains the clusters from the LABS
+origin** (globalScale 0), so the dot positions + magnitudes come straight from ROM. Scrolls 1:1 with
+the world (`camera.x·scale`), drawn behind the terrain in every mode (STARS-before-SCAPE `:389`);
+`state.zoomedOut` picks the major/minor field (`LUNARNUM`). **MAME-matched** (snap/llander 0000-0003):
+major-lower = **15 dots over a 1024 tile, y 192-768 (full height)**, repeating per screen; stars
+translate 1:1 with the terrain. `MJSTRB` (y 768-1279) is above the visible window, so it never renders
+(attract vs play snapshots show the same stars). **One labeled simplification:** the minor field is
+chained from LABS(0,256) rather than the exact `MINSVG`/`SCRLDO` per-section LABS — only ~a handful
+show in the close-up window either way (snap 0006 ≈ 4). *(The original step-8 build spread all 24
+clusters evenly in a top band under the wrong belief the layout was VG-RAM-only like the site `TBMNA`;
+a density mismatch vs the MAME snapshots surfaced that the tables are plain ROM — re-decoded faithfully.)*
 
 ## 11. Landing / collision — `DECODE` + `SCAPLND` verdict
 

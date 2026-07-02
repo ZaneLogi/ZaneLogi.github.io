@@ -1,64 +1,80 @@
 // lunar_lander/starfield.js
 //
-// The STARS backdrop (CLAUDE.md module table; A34573.1A `STARS` :1121-1150) — the ROM's real
-// 61-point star field ($5244-$53E6 in ROM598: single-dot bright VECs, brightness 5-9 = star
-// magnitudes, CLAUDE.md "034598 region map"), drawn behind the terrain and scrolling with the world.
+// The STARS backdrop — a FAITHFUL port of the ROM's star display lists (A34573.1A
+// `STARS` :1121). The layout is NOT a derivation: three JSRL index tables in ROM598
+// — `MJSTRA`/`MJSTRB`/`MINSTR` (decoded in discovery_rom_data.js `STARTABLES`) —
+// select and order the $5244-$53E6 cluster subroutines, and `STRINIT` (:1152) sets
+// each field's LABS origin. Every cluster is a chain of dark VEC move → bright SVEC
+// dot; chaining the clusters from the origin lays the field across the screen, so the
+// dot positions + magnitudes come straight from the ROM (globalScale 0).
 //
-// FAITHFUL: the real ROM star POINTS + magnitudes (the 24 decoded cluster subroutines). LABELED
-// derivation: the field LAYOUT — the source positions the clusters via the `MJSTRA`/`MJSTRB`/`MINSTR`
-// display lists (`STRINIT` LABS + per-cluster VEC moves, :1124-1150), which live in VG-RAM and aren't
-// extractable (the same situation as the bonus-site `TBMNA` positions), so we spread the 24 clusters
-// across a horizontal wrap-tile in a sky band. Source behavior kept: the field scrolls horizontally
-// with the world (`SCRLDO`, the minor path :1141) — here the tile scrolls with the camera. This is the
-// real-ROM-data counterpart to the physics demo's generated field (demos/physics.js, labeled a choice).
+// (This SUPERSEDES the old "the cluster LAYOUT lives in VG-RAM and isn't extractable"
+// claim — the tables are plain ROM, anchored off `LNMIN`=$51BA; see build_discovery.py
+// `STAR_TABLES`. The layout was measured against the MAME `llander` snapshots.)
+//
+//   major (zoom-out) LOWER  MJSTRA  LABS(0,256)  ~15 dots, y 192-768 (FULL screen
+//                           height); the field is 4 clusters = 1024 wide and repeats
+//                           every screen (the ROM lists them twice as a scroll
+//                           buffer). Used in IDLE + PLAY zoom-out. MAME-matched
+//                           (snap/llander 0000-0003: ~15-17 dots, image y 20-883,
+//                           translating 1:1 with the terrain).
+//   major TOP               MJSTRB  LABS(0,768)  drawn in play mode by the source, but
+//                           it sits at y 768-1279 — above the visible 0-767 window, so
+//                           it never appears on screen (confirmed: attract vs play
+//                           snapshots show the same stars). We don't render it.
+//   minor (zoom-in)         MINSTR  16 clusters over the world width; only a few land
+//                           in the close-up window (snap 0006 shows ~4). LABELED
+//                           SIMPLIFICATION: the source positions minor stars via
+//                           MINSVG/SCRLDO per-section LABS (:1138), coupled to the
+//                           minor-scape sections; we chain from LABS(0,256) and let the
+//                           visible subset show. (The scroll stays world-1:1 — correct.)
+//
+// SCROLL: faithful in effect — the field moves with the world (screen displacement =
+// camera.x·scale, same as the terrain), wrapping at its tile; MAME confirms every star
+// translates 1:1 with the terrain.
 
-import { ROM598 } from './discovery_rom_data.js';
+import { ROM598, STARTABLES } from './discovery_rom_data.js';
 import { runList } from './dvg.js';
 import { SCREEN_W, SCREEN_H } from './render.js';
 
-const STAR_LO = 0x5244, STAR_HI = 0x53E6;   // the starfield region (034598 region map)
-const TILE_W = SCREEN_W;                     // horizontal wrap tile (one screen wide)
-const SKY_H = SCREEN_H * 0.55;               // stars live in the top band (sky, above the terrain)
+// STRINIT LABS origins (A34573.1A :1124/:1133/:1152) — the ONLY program-side constants;
+// the rest is ROM cluster geometry. X=$A1 → LABS y=256 (lower), X=$A3 → y=768 (top).
+const MAJOR_ORIGIN_Y = 256;
+const MINOR_ORIGIN_Y = 256;   // simplification — real minor uses MINSVG per-section LABS
 
 export class Starfield {
   constructor() {
-    this.stars = this._build();              // {x (0..TILE_W), y (canvas px), bri} — the real ROM points
+    this.major = this._buildField(STARTABLES.majorLower, MAJOR_ORIGIN_Y);
+    this.minor = this._buildField(STARTABLES.minor, MINOR_ORIGIN_Y);
   }
 
-  // Pull the 61 bright points from the ROM cluster subroutines and spread them across the tile:
-  // each cluster is placed at an even base-X, then its own point offsets fan out from there; the
-  // whole set's Y range is normalised into the sky band. Deterministic (no RNG) → a stable field.
-  _build() {
-    const keys = Object.keys(ROM598)
-      .filter(k => { const a = parseInt(k.slice(2), 16); return a >= STAR_LO && a <= STAR_HI; })
-      .sort();
-    const raw = [];
-    keys.forEach((k, i) => {
-      const baseX = (i / keys.length) * TILE_W;                  // cluster i's slot across the tile
-      runList(ROM598, ROM598[k], { x: 0, y: 0 }, 0, (fx, fy, tx, ty, bri) => {
-        if (fx === tx && fy === ty) raw.push({ x: baseX + fx * 0.4, y: fy, bri });   // zero-length VEC = a star
+  // Chain the cluster subroutines from the LABS origin (globalScale 0), collecting each
+  // bright SVEC as a dot. cursor.x after the whole run = the horizontal wrap period.
+  _buildField(keys, originY) {
+    const dots = [];
+    const cursor = { x: 0, y: originY };
+    for (const k of keys) {
+      runList(ROM598, ROM598[k], cursor, 0, (fx, fy, tx, ty, bri) => {
+        if (bri > 0) dots.push({ x: tx, y: ty, bri });   // dots are zero-length: from==to
       });
-    });
-    let yMin = Infinity, yMax = -Infinity;
-    for (const s of raw) { yMin = Math.min(yMin, s.y); yMax = Math.max(yMax, s.y); }
-    const ySpan = Math.max(1, yMax - yMin);
-    return raw.map(s => ({
-      x: ((s.x % TILE_W) + TILE_W) % TILE_W,
-      y: 8 + ((s.y - yMin) / ySpan) * (SKY_H - 16),             // canvas Y-down, into the sky band
-      bri: s.bri,
-    }));
+    }
+    return { dots, tileW: cursor.x || SCREEN_W };
   }
 
-  // Draw the field behind the terrain, scrolling horizontally with the camera (the world scroll →
-  // the same screen displacement the terrain gets), wrapped at the tile. Points are single dots
-  // whose brightness follows the ROM magnitude (5-9). Runs in every mode (attract + play + outcome).
-  render(ctx, camera) {
-    const off = (((camera.x * camera.scale) % TILE_W) + TILE_W) % TILE_W;   // scroll with the world
-    for (const s of this.stars) {
-      const sx = (((s.x - off) % TILE_W) + TILE_W) % TILE_W;                // wrap into [0, TILE_W)
-      const a = 0.28 + 0.62 * ((s.bri - 5) / 4);                           // magnitude → alpha
+  // Draw the field behind the terrain, scrolling with the world (the terrain's screen
+  // displacement) and wrapped at the tile. `zoomedOut` picks the major (far) field; the
+  // near view uses the sparse minor field. Runs in every mode (attract + play + outcome).
+  render(ctx, camera, zoomedOut = true) {
+    const { dots, tileW } = zoomedOut ? this.major : this.minor;
+    const off = (((camera.x * camera.scale) % tileW) + tileW) % tileW;   // scroll with the world
+    for (const s of dots) {
+      const sx = (((s.x - off) % tileW) + tileW) % tileW;                // wrap into [0, tileW)
+      if (sx >= SCREEN_W) continue;                                      // off the visible width
+      const cy = SCREEN_H - s.y;                                         // DVG y-up → canvas y-down
+      if (cy < 0 || cy > SCREEN_H) continue;                            // off top/bottom (minor field)
+      const a = 0.28 + 0.62 * ((s.bri - 5) / 4);                        // magnitude 5-9 → alpha
       ctx.fillStyle = `rgba(200,255,215,${a.toFixed(2)})`;
-      ctx.fillRect(sx, s.y, 1.6, 1.6);
+      ctx.fillRect(sx, cy, 1.6, 1.6);
     }
   }
 }
