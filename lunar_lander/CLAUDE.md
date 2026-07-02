@@ -3,10 +3,10 @@
 Guidance for Claude Code in this directory. Read this before changing
 anything here; it overrides the repo-root CLAUDE.md.
 
-**Commit style (this project):** a **one-line title + the trailer** — no
-multi-line body (the research docs + the diff carry the detail). e.g.
-`[lunar_lander] <subject>` then `Co-Authored-By: …` (a `step N —` prefix
-on the subject is optional).
+**Commit style:** the repo-wide convention (root `CLAUDE.md` → "Commit conventions",
+promoted from here) — a **one-line title + the trailer**, no multi-line body when the
+change is documented (the docs + the diff carry the detail). e.g. `[lunar_lander]
+<subject>` then `Co-Authored-By: …` (a `step N —` prefix on the subject is optional).
 
 ## What this is
 
@@ -814,6 +814,12 @@ context (the step entries + "Flight-model architecture"); this is the canonical 
 - **Seb-style physics model.** A second, tuned-float flight model (`physics_seb`) behind the existing
   `step(state, input)` seam — a drop-in if ever wanted (see "Flight-model architecture — stepper +
   profiles").
+- **Minor-view (zoom-in) starfield.** `starfield.js` chains the `MINSTR` clusters from a fixed
+  `LABS(0,256)` rather than the source's per-section `MINSVG` (`$5416`) LABS + `SCRLDO` section-scroll
+  (`docs/research_physics.md` §10). The data IS in ROM (not the old "not extractable" trap — see the
+  §10 note), but a faithful port needs the `SCRLDO` routine, and the close-up view shows only ~4 faint
+  stars, so the visible difference is negligible. **Accepted as a permanent simplification 2026-07-03**
+  (minor visual only) — do not reopen. (The major/zoom-out starfield IS faithful, step 8.)
 
 Broader arcade-completeness (the full `GAMODE` attract machine, coin/`SELECT` switches, 2-player, the
 attract-mode auto-demo, and sound) is **out of scope** for the educational port — the HTML settings

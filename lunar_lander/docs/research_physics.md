@@ -316,9 +316,10 @@ the world (`camera.x·scale`), drawn behind the terrain in every mode (STARS-bef
 `state.zoomedOut` picks the major/minor field (`LUNARNUM`). **MAME-matched** (snap/llander 0000-0003):
 major-lower = **15 dots over a 1024 tile, y 192-768 (full height)**, repeating per screen; stars
 translate 1:1 with the terrain. `MJSTRB` (y 768-1279) is above the visible window, so it never renders
-(attract vs play snapshots show the same stars). **One labeled simplification:** the minor field is
-chained from LABS(0,256) rather than the exact `MINSVG`/`SCRLDO` per-section LABS — only ~a handful
-show in the close-up window either way (snap 0006 ≈ 4). *(The original step-8 build spread all 24
+(attract vs play snapshots show the same stars). **One simplification, ACCEPTED 2026-07-03 (do not
+reopen — see CLAUDE.md "Deferred (by choice)"):** the minor field is chained from LABS(0,256) rather
+than the exact `MINSVG` (`$5416`, in ROM) per-section LABS + `SCRLDO` section-scroll — only ~a handful
+show in the close-up window either way (snap 0006 ≈ 4), so the faithful `SCRLDO` port isn't worth it. *(The original step-8 build spread all 24
 clusters evenly in a top band under the wrong belief the layout was VG-RAM-only; a density mismatch vs
 the MAME snapshots surfaced that the tables are plain ROM — re-decoded faithfully. The bonus-site
 `TBLABS`/`TBMNA` positions (§11.3) were the SAME wrong "VG-RAM" claim, also corrected 2026-07-02.)*

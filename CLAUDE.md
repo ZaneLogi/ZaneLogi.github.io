@@ -34,6 +34,7 @@ the browser.
 |--------------------|------------------------------------------------------|
 | `galaga/`          | Earlier Galaga port                                  |
 | `galaga_clone/`    | Faithful Z80-source port — see its own `CLAUDE.md`   |
+| `lunar_lander/`    | Faithful Atari **DVG** vector-display port (1979) — see its own `CLAUDE.md` |
 | `mario/`           | Original full-game implementation (legacy reference) |
 | `mario_physics/`   | Mini Mario physics-engine rewrite (fixed-timestep)   |
 | `pacman/`          |                                                      |
@@ -69,9 +70,10 @@ Claude session needs to discover what the other PC did from git itself.
   linear). Confirm with the user first. The other PC, after pulling,
   will need `git reset --hard origin/<branch>` for any rebased branch —
   which is acceptable *only because* of the one-PC-at-a-time rule.
-- **Write rich commit messages.** They are the cross-PC communication
-  channel — anything you'd want the other-PC me to know belongs there
-  (or in a research doc / CLAUDE.md update committed in the same change).
+- **Write rich commit messages** *(but see "Commit conventions" below)*.
+  They are the cross-PC communication channel — anything you'd want the
+  other-PC me to know belongs there (or in a research doc / CLAUDE.md
+  update committed in the same change).
 - **Cross-cutting cleanup → choose branch by target activity, not
   current location.** Repo-wide infra cleanup (tools/, root
   `CLAUDE.md`, build scripts, .gitignore) goes on `main` when the
@@ -95,6 +97,26 @@ If you don't have a sync-state memory file yet (first session on this
 PC after this convention is added), bootstrap one by recording the
 current HEAD of each branch you work on, and start the protocol from
 there.
+
+## Commit conventions
+
+Promoted repo-wide from `lunar_lander/CLAUDE.md`, where this style was
+first used consistently. It refines the cross-PC "rich commit messages"
+rule above: the richness lives in the **doc**, not the commit body.
+
+- **One-line title + the trailer, no body — when a doc reveals the
+  change.** If the change updates a doc that explains what changed and
+  why (a `CLAUDE.md`, a `docs/research_*.md`, the living per-step
+  tracker, …), the commit is just a one-line subject plus the
+  `Co-Authored-By` trailer. The doc + the diff already carry the detail,
+  so a multi-line body would only duplicate them. *(When there is no doc
+  to point at, fall back to the cross-PC rule above and put the detail in
+  the body.)*
+- **The commit contains the implementation together with its doc
+  update.** When a change has a doc home, the code and the doc change go
+  in the **same** commit — never "code now, docs later." This is what
+  makes the one-line title safe: the committed doc is where the reader
+  goes for the detail, so it must land with the code it describes.
 
 ## Per-project conventions
 
