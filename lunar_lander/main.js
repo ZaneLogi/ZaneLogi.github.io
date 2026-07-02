@@ -34,7 +34,7 @@ const collision = new Collision();
 const starfield = new Starfield();
 
 // Dev/verification hook: poke at the live modules from the console / preview eval.
-window.LL = { state, camera, landscape, collision, lander, starfield };
+window.LL = { state, camera, landscape, collision, lander, starfield, displayInfo };
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');

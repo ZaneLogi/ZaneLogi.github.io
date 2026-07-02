@@ -714,7 +714,7 @@ temporary `play.html`; the release promotion renamed it to `index.html` — see 
   tick (source alternates L/R per frame); X-axis distance pass subsumed by 4-corner vertical
   probes (heightfield, no overhangs); **scoring STUB = base 50/15/5 × factor 1** (the LNDADR
   non-designated-site default — real `TBSTFT[site]` + flats→sites mapping land with the scoring
-  step 7; `DEDUCT` crash fuel-loss now landed in step 6); message placement approximate-centred at 2×; octagon crash-drift
+  step 7; `DEDUCT` crash fuel-loss now landed in step 6); message placement is the real `MSSGLBS`+`E.MOFF` grid (decoded, §11.1); octagon crash-drift
   (`DELTA`) not ported; bounce seed applied only on hard. Verified live: good (+50, BNFUEL
   +50), hard (C0 bounce rise→settle), tilted crash (8F + debris + "THERE WERE NO SURVIVORS"),
   out-of-fuel → attract; each verdict scores exactly once. Dev hook: `window.LL` exposes

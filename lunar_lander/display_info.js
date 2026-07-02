@@ -29,8 +29,8 @@
 //     probe), passed in by main.js; 0 during the outcome (ALTITD cleared, :562-563).
 //   • Layout is the MAME-MEASURED grid (screen.js / CLAUDE.md "Gameplay HUD"), not the
 //     source's DATAVG offset vectors — same on-screen result, calibrated to a real frame.
-//   • Outcome-message PLACEMENT is approximate (centred lines, readable 2× scale) — the
-//     exact MESSLAB LABS grid is not decoded. The strings + pick logic are the source's.
+//   • Outcome-message PLACEMENT is the real MESSLAB grid (MSSGLBS $550C + E.MOFF, decoded — see
+//     renderOutcome / MSG_POS), native 1× scale. The strings + pick logic are the source's.
 
 import { SCREEN_W, SCREEN_H, drawShapeScreen, drawGlyphString, drawArrowGlyph, glyphRunWidth, worldToScreen } from './render.js';
 import { ROM598 } from './discovery_rom_data.js';
@@ -63,6 +63,16 @@ const HARDMSG = ['LIFE SUPPORT IS GONE', 'YOUR TRIP IS ONE WAY',
                  'YOU ARE HOPELESSLY MAROONED', 'COMMUNICATION SYSTEM DESTROYED'];
 const BADMSG  = ['DESTROYED', 'YOU CREATED A TWO MILE CRATER',
                  'YOU JUST DESTROYED A 100 MEGABUCK LANDER', 'THERE WERE NO SURVIVORS'];
+
+// Outcome-message PLACEMENT — the real ROM grid (was "approximate centred"). `MSSGLBS` ($550C in
+// 034598, the message-LABS table indexed by DSPMOT's LDX values :1638) gives each line's DVG LABS
+// (y-up; canvas baseline = SCREEN_H − y), decoded from the ROM. Header (CONG/SATIRE) = idx20, the
+// good/hard/crash status = idx40/44/36, POINTS = idx24. The status line adds the `E.MOFF` X-offset
+// (A34573.1A:1709, indexed by the RNDOM pick) which — with the base X — centres each different-width
+// line on the screen. Drawn 1× (native, matching the source), left-aligned from the (x + E.MOFF) anchor.
+const MSG_POS = { header: { x: 422, y: 544 }, good: { x: 368, y: 512 }, hard: { x: 332, y: 512 },
+                  crash: { x: 272, y: 544 }, points: { x: 446, y: 464 } };
+const E_MOFF = { good: [0, 24, 6, 54], hard: [60, 60, 18, 0], crash: [186, 60, 0, 102] };  // :1709
 
 const ARROW = { right: 'S_5566', left: 'S_5576', up: 'S_5586', down: 'S_5598' };
 
@@ -142,25 +152,33 @@ export class DisplayInfo {
     }
   }
 
-  // The land/crash status display (:1655-1675): header + a random 1-of-4 status
-  // line + the "NN POINTS" score line, all in the ROM glyph set. Drawn by main.js
-  // while the outcome sequence runs (GAMODE $80).
+  // The land/crash status display (DSPMOT :1638): header + a random 1-of-4 status line + the
+  // "NN POINTS" score line, all in the ROM glyph set, at the real MSSGLBS positions (see MSG_POS).
+  // Drawn by main.js while the outcome sequence runs (GAMODE $80).
   renderOutcome(ctx, state) {
-    const st = state.outcomeStatus;
-    const lines =
-      st === CollisionStatus.CRASH     ? [BADMSG[state.messagePick]] :
-      st === CollisionStatus.HARD_LAND ? ['YOU LANDED HARD', HARDMSG[state.messagePick]] :  // SATIRE (#8) + HARD0-3
-                                         ['CONGRATULATIONS', GOODMSG[state.messagePick]];   // CONG (#7) + GOOD0-3
-    lines.push(`${state.lastPoints} POINTS`);
-    lines.forEach((s, i) => this._centreLine(ctx, s, 290 + i * 34));
+    const st = state.outcomeStatus, pick = state.messagePick;
+    // draw one line left-aligned at DVG (x, y) — native 1× (canvas baseline = SCREEN_H − y)
+    const put = (str, x, dvgY) => drawGlyphString(ctx, ROM598, keysFor(str),
+      { x, y: SCREEN_H - dvgY, pxScale: 1, align: 'left' });
+    if (st === CollisionStatus.CRASH) {                          // no header (DSPMOT 40$)
+      put(BADMSG[pick], MSG_POS.crash.x + E_MOFF.crash[pick], MSG_POS.crash.y);
+    } else if (st === CollisionStatus.HARD_LAND) {
+      put('YOU LANDED HARD', MSG_POS.header.x, MSG_POS.header.y);              // SATIRE #8
+      put(HARDMSG[pick], MSG_POS.hard.x + E_MOFF.hard[pick], MSG_POS.hard.y);  // HARD0-3 #13+R
+    } else {
+      put('CONGRATULATIONS', MSG_POS.header.x, MSG_POS.header.y);             // CONG #7
+      put(GOODMSG[pick], MSG_POS.good.x + E_MOFF.good[pick], MSG_POS.good.y);  // GOOD0-3 #9+R
+    }
+    put(`${state.lastPoints} POINTS`, MSG_POS.points.x, MSG_POS.points.y);     // DIGT2S + HTPNTS, idx24
   }
 
-  // One glyph-string line centred on the screen's vertical axis (canvas y-down
-  // baseline). 2× scale is a readability choice over the original's native size.
+  // One glyph-string line centred on the screen's vertical axis (canvas y-down baseline), 2× scale.
+  // Used by the fuel-status warnings (LOW/OUT OF FUEL, NN FUEL UNITS LOST) in render() above — those
+  // stay a simple centred readout (unlike the outcome messages, which use the real MSSGLBS grid).
   _centreLine(ctx, str, y) {
     const keys = keysFor(str);
     const px = 2;
-    const x = (1024 - glyphRunWidth(ROM598, keys) * px) / 2;
+    const x = (SCREEN_W - glyphRunWidth(ROM598, keys) * px) / 2;
     drawGlyphString(ctx, ROM598, keys, { x, y, pxScale: px, align: 'left' });
   }
 }

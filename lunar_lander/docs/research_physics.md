@@ -420,9 +420,13 @@ kernel in **integer** source units (§13). Labeled deviations/simplifications:
   octagon crash-drift `DELTA :560` not ported). The bounce seed is applied **only** on hard
   (source seeds unconditionally, `:577-580`, but only the hard path consumes it — ours keeps
   the HUD speeds reading live zeros on good/crash).
-- **Status messages** (`:1655-1746`) render with the real ROM glyph set and the source's
-  header + RNDOM 1-of-4 pick; line **placement** is approximate centred (the `MESSLAB` LABS
-  grid is not decoded) at a readable 2× scale.
+- **Status messages** (`DSPMOT :1638`) render with the real ROM glyph set + the source's header +
+  RNDOM 1-of-4 pick, at the **real ROM positions** (was "approximate centred"): the `MSSGLBS` LABS grid
+  (`$550C`, 034598 — decoded) gives each line's DVG position — header (CONG/SATIRE) idx20, good/hard/crash
+  status idx40/44/36, POINTS idx24 — and the status line adds the `E.MOFF` X-offset (`:1709`, per RNDOM
+  pick) which centres each different-width line. Drawn 1× (native). MAME-matched (snap 0006:
+  CONGRATULATIONS/YOU HAVE LANDED/NN POINTS). *(Corrected the old "`MESSLAB` LABS grid is not decoded" note
+  — it's plain ROM at `$550C`, `MSSGLBS`.)*
 - **Interim mission cycle** (`finishOutcome`): fuel left → a fresh drop (score + fuel kept; the
   clock + fuel par/used reset per drop — PLYINIT `:640`, step 6); tank empty → attract. The full
   `DOGAME`/`GAMODE` attract-machine is largely N/A — the HTML panel replaces coin-in/SELECT.
