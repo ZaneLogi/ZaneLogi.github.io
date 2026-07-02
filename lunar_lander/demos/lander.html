@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>lunar_lander — lander pose demo</title>
+  <style>
+    body {
+      background: #111;
+      color: #ccc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 16px;
+    }
+    h1 { font-size: 16px; margin: 0 0 4px; }
+    p  { font-size: 12px; color: #888; margin: 4px 0 12px; max-width: 900px; }
+    code { color: #9c9; }
+    canvas {
+      display: block;
+      background: #000;
+      border: 1px solid #333;
+      image-rendering: pixelated;
+    }
+    .controls {
+      display: flex; align-items: center; gap: 16px;
+      margin-bottom: 8px; font-size: 13px;
+    }
+    .slider-group { display: flex; align-items: center; gap: 8px; }
+    input[type=range] { width: 180px; }
+    label { user-select: none; }
+    #info { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>Lunar Lander — 9 tilt poses</h1>
+  <p>
+    The 9 lander attitudes from <code>034599-01.r3</code> (CPU <code>$4800–$4FFF</code>):
+    each pose <code>JSR</code>s a base octagon shape then adds that angle's legs +
+    thruster SVECs. Rendered through the shared DVG interpreter (<code>dvg.js</code>).
+    Pose 8 (<code>$4B64</code>) is the upright/standing attitude. Each pose is
+    uniformly scaled to its cell so proportions are preserved.
+  </p>
+  <div class="controls">
+    <span class="slider-group">
+      <label for="gs-slider">globalScale:</label>
+      <input id="gs-slider" type="range" min="0" max="9" step="1" value="0">
+      <span id="gs-value">0</span>
+    </span>
+    <label><input type="checkbox" id="fit-toggle" checked> fit each to cell</label>
+    <span id="info">—</span>
+  </div>
+  <canvas id="demo" width="900" height="700"></canvas>
+  <script type="module" src="./lander.js"></script>
+</body>
+</html>

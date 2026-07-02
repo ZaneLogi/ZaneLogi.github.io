@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>lunar_lander — faithful landscape (LNMIN / MINTBL)</title>
+  <style>
+    body { background:#111; color:#ccc; font-family:-apple-system,"Segoe UI",sans-serif; margin:16px; }
+    h1 { font-size:17px; margin:0 0 4px; }
+    p  { font-size:12px; color:#999; margin:6px 0; max-width:1000px; line-height:1.5; }
+    code { color:#9c9; }
+    b { color:#cdc; }
+    canvas { background:#000; border:1px solid #333; }
+    .controls { display:flex; align-items:center; gap:18px; margin:14px 0 8px; font-size:13px; flex-wrap:wrap; }
+    .controls label { display:flex; align-items:center; gap:7px; }
+    input[type=range]{ width:220px; }
+    #readout { font-family:monospace; font-size:12px; color:#8c8; margin-top:6px; }
+    .hint { color:#777; }
+  </style>
+</head>
+<body>
+  <h1>Lunar Lander — the faithful landscape, built from the source</h1>
+  <p>
+    The lunar surface drawn <b>exactly the way the ROM builds it</b> (not matched from a MAME
+    snapshot like <code>screen.html</code>/<code>scroll_view.html</code>): 24 segment-glyphs
+    <code>SEG001-024</code> compose into <b>16 sections</b> <code>SECT01-16</code>, ordered by
+    the <code>LNMIN</code> table and vertically placed by <code>MINTBL</code>. <code>SECT11</code>
+    is the flat <code>SEG019</code> pad. The surface <b>wraps</b> — section 16 ends exactly where
+    section 01 began (blue dots) — so it loops seamlessly as you scroll. Full decode in
+    <code>docs/research_vector_usage.md</code> §3. <b>Terrain only — no lander, no HUD.</b>
+    This wide overview is the <b>zoom-out (major-scape) view</b> — the small-lander view you
+    fly in most of the time; the close-up landing terrain is the same surface zoomed in.
+  </p>
+
+  <div class="controls">
+    <label>zoom <input id="zoom" type="range" min="1" max="6" step="0.1" value="1"></label>
+    <label>scroll <input id="scroll" type="range" min="0" max="4096" step="1" value="0"></label>
+    <label><input id="auto" type="checkbox"> auto-scroll →</label>
+    <label><input id="bounds" type="checkbox" checked> section boundaries</label>
+  </div>
+
+  <canvas id="cv" width="1024" height="440"></canvas>
+  <div id="readout">—</div>
+  <p class="hint">
+    <b>zoom 1×</b> shows the whole 4096-wide loop at once; zoom in and <b>scroll</b> (or
+    <b>auto-scroll</b>) to traverse it — past the right edge the surface wraps back to the start.
+    The <code>faithful ✓</code> flag means every section boundary landed on its <code>MINTBL</code>
+    value and the loop closed.
+  </p>
+
+  <script type="module" src="./landscape.js"></script>
+</body>
+</html>

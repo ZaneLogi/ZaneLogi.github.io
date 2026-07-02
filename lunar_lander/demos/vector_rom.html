@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>lunar_lander — vector ROM font sheet</title>
+  <style>
+    body {
+      background: #111;
+      color: #ccc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 16px;
+    }
+    h1 { font-size: 16px; margin: 0 0 4px; }
+    p  { font-size: 12px; color: #888; margin: 4px 0 12px; max-width: 980px; }
+    code { color: #9c9; }
+    canvas {
+      display: block;
+      background: #000;
+      border: 1px solid #333;
+      image-rendering: pixelated;
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .slider-group { display: flex; align-items: center; gap: 8px; }
+    input[type=range] { width: 180px; }
+    label { user-select: none; }
+    #info { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>Lunar Lander — vector ROM font sheet</h1>
+  <p>
+    All 26 letters + space, decoded from <code>034598-01.np3</code>
+    (CPU <code>$5000–$57FF</code>) and rendered through the shared Atari DVG
+    interpreter (<code>dvg.js</code> — the same chip as Asteroids). Each cell is
+    one glyph subroutine (SVEC strokes ending in RTS), centered and uniformly
+    scaled. The <code>globalScale</code> slider feeds the additive scale model
+    (<code>research_dvg.md §4</code>); glyphs stay fit to their cells until SVEC
+    saturation (<code>scaleMode + 2 + gs &gt; 9</code>) starts dropping strokes.
+  </p>
+  <div class="controls">
+    <span class="slider-group">
+      <label for="gs-slider">globalScale:</label>
+      <input id="gs-slider" type="range" min="0" max="9" step="1" value="0">
+      <span id="gs-value">0</span>
+    </span>
+    <span id="info">—</span>
+  </div>
+  <canvas id="demo" width="980" height="620"></canvas>
+  <script type="module" src="./vector_rom.js"></script>
+</body>
+</html>

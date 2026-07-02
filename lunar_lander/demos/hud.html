@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>lunar_lander — HUD label row</title>
+  <style>
+    body { background:#111; color:#ccc; font-family:-apple-system,"Segoe UI",sans-serif; margin:16px; }
+    h1 { font-size:16px; margin:0 0 4px; }
+    p  { font-size:12px; color:#888; margin:4px 0 12px; max-width:1100px; }
+    code { color:#9c9; }
+    canvas { display:block; background:#000; border:1px solid #333; image-rendering:pixelated; }
+    .decoded { font-family:monospace; font-size:13px; color:#9fe6b0; white-space:pre-wrap;
+               margin:10px 0 0; max-width:1120px; letter-spacing:1px; }
+    .decoded b { color:#6f7f6f; font-weight:normal; letter-spacing:0; }
+    .controls { display:flex; align-items:center; gap:14px; margin-bottom:8px; font-size:13px; }
+    input[type=range]{ width:160px; }
+    label{ user-select:none; }
+  </style>
+</head>
+<body>
+  <h1>Lunar Lander — <code>$5458</code> mega-composite (75 JSRs) — the HUD label row</h1>
+  <p>
+    The big assembled image from <code>034598</code> at <code>$5458</code>: 75 JSRs to
+    glyph parts, native bounding box <code>x[100..788] y[692..760]</code> — a wide,
+    short banner near the top of the 1024×768 vector field. <b>Confirmed the in-game
+    HUD label row:</b> every JSR target is a font glyph, and in order they spell the
+    status-line headers (decoded below). The labels are static; the CPU draws the
+    numeric values under them at runtime. Rendered byte-faithfully through
+    <code>dvg.js</code>. Toggle native-position vs fit-to-canvas below.
+  </p>
+  <div class="controls">
+    <label><input type="checkbox" id="fit-toggle" checked> fit to canvas (else native $1024×768 position)</label>
+    <span id="info">—</span>
+  </div>
+  <canvas id="demo" width="1120" height="260"></canvas>
+  <p id="decoded" class="decoded">—</p>
+  <script type="module" src="./hud.js"></script>
+</body>
+</html>

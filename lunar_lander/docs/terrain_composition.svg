@@ -1,0 +1,94 @@
+<svg width="100%" viewBox="0 0 680 728" role="img" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,sans-serif">
+<title>How Lunar Lander builds its terrain from segment glyphs</title>
+<desc>24 segment glyphs compose into 16 sections, tiled left-to-right by the LNMIN table into one seamless wrapping lunar surface.</desc>
+<style>
+  svg{--text-primary:#1b1b1b;--text-secondary:#555;--text-muted:#8a8a8a;--text-accent:#2b6cb0;--text-success:#2f855a;--text-warning:#b7791f;--text-danger:#c53030;--border:#cfcfcf;--bg-accent:#e7f0fb;}
+  @media (prefers-color-scheme:dark){svg{--text-primary:#eaeaea;--text-secondary:#b4b4b4;--text-muted:#8a8a8a;--text-accent:#7cb6ff;--text-success:#68d391;--text-warning:#f6ad55;--text-danger:#fc8181;--border:#444;--bg-accent:#1d3450;}}
+</style>
+<text x="40" y="30" font-size="22" font-weight="500" fill="var(--text-primary)">How the terrain is built from its glyphs</text>
+<text x="40" y="54" font-size="15" fill="var(--text-secondary)">24 segment-glyphs → 16 sections → one seamless wrapping surface</text>
+<text x="40" y="92" font-size="16" font-weight="500" fill="var(--text-primary)">1 · The glyphs — 24 segments, each a tiny list of vector strokes</text>
+<path d="M44.0,110.3 L70.7,110.3 L77.3,137.0 L104.0,137.0 L110.7,163.7 L124.0,163.7" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="84" y="188" font-size="12" text-anchor="middle" fill="var(--text-muted)">SEG001</text>
+<text x="84" y="203" font-size="11" text-anchor="middle" fill="var(--text-muted)">5 strokes</text>
+<path d="M175.3,104.0 L177.6,132.3 L184.7,160.6 L184.7,170.0" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="180" y="188" font-size="12" text-anchor="middle" fill="var(--text-muted)">SEG002</text>
+<text x="180" y="203" font-size="11" text-anchor="middle" fill="var(--text-muted)">3 strokes</text>
+<path d="M243.0,170.0 L259.5,170.0 L276.0,153.5 L292.5,124.6 L309.0,104.0" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="276" y="188" font-size="12" text-anchor="middle" fill="var(--text-muted)">SEG005</text>
+<text x="276" y="203" font-size="11" text-anchor="middle" fill="var(--text-muted)">4 strokes</text>
+<path d="M367.3,170.0 L372.0,151.1 L376.7,122.9 L376.7,104.0" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="372" y="188" font-size="12" text-anchor="middle" fill="var(--text-muted)">SEG016</text>
+<text x="372" y="203" font-size="11" text-anchor="middle" fill="var(--text-muted)">3 strokes</text>
+<path d="M428.0,137.0 L468.0,137.0 L508.0,137.0" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="468" y="188" font-size="12" text-anchor="middle" fill="var(--text-muted)">SEG019</text>
+<text x="468" y="203" font-size="11" text-anchor="middle" fill="var(--text-muted)">2 strokes</text>
+<path d="M550.8,170.0 L554.1,143.6 L564.0,110.6 L577.2,104.0" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="564" y="188" font-size="12" text-anchor="middle" fill="var(--text-muted)">SEG024</text>
+<text x="564" y="203" font-size="11" text-anchor="middle" fill="var(--text-muted)">3 strokes</text>
+<text x="40" y="246" font-size="16" font-weight="500" fill="var(--text-primary)">2 · A section = a few segments end-to-end (SECT01 = SEG001+002+003+004)</text>
+<path d="M102.5,260.0 L111.9,260.0 L114.2,269.4 L123.6,269.4 L125.9,278.8 L130.6,278.8" fill="none" stroke="var(--text-accent)" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M130.6,278.8 L133.0,306.9 L140.0,335.0 L140.0,344.4" fill="none" stroke="var(--text-success)" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M140.0,344.4 L144.7,363.1 L158.8,372.5" fill="none" stroke="var(--text-warning)" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M158.8,372.5 L163.4,391.2 L168.1,400.6 L177.5,410.0" fill="none" stroke="var(--text-danger)" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="102.5" cy="260.0" r="3" fill="var(--text-muted)"/>
+<text x="108" y="264" font-size="11" fill="var(--text-muted)">start</text>
+<rect x="262" y="276" width="18" height="3" rx="1.5" fill="var(--text-accent)"/>
+<text x="290" y="280" font-size="13" fill="var(--text-secondary)">SEG001  (5 strokes)</text>
+<rect x="262" y="304" width="18" height="3" rx="1.5" fill="var(--text-success)"/>
+<text x="290" y="308" font-size="13" fill="var(--text-secondary)">SEG002  (3 strokes)</text>
+<rect x="262" y="332" width="18" height="3" rx="1.5" fill="var(--text-warning)"/>
+<text x="290" y="336" font-size="13" fill="var(--text-secondary)">SEG003  (2 strokes)</text>
+<rect x="262" y="360" width="18" height="3" rx="1.5" fill="var(--text-danger)"/>
+<text x="290" y="364" font-size="13" fill="var(--text-secondary)">SEG004  (3 strokes)</text>
+<text x="262" y="406" font-size="13" fill="var(--text-muted)">The beam draws the glyphs nose-to-tail, so the four</text>
+<text x="262" y="422" font-size="13" fill="var(--text-muted)">glyphs become one 256-wide chunk of relief — and</text>
+<text x="262" y="438" font-size="13" fill="var(--text-muted)">96+32+64+64 = exactly 256, every section.</text>
+<text x="40" y="474" font-size="16" font-weight="500" fill="var(--text-primary)">3 · The surface = 16 sections tiled left-to-right in LNMIN order</text>
+<line x1="90.0" y1="490" x2="90.0" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<rect x="90.0" y="490" width="31.3" height="168" fill="var(--bg-accent)" opacity="0.5"/>
+<text x="105.6" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">01</text>
+<line x1="121.2" y1="490" x2="121.2" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<text x="136.8" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">02</text>
+<line x1="152.5" y1="490" x2="152.5" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<rect x="152.5" y="490" width="31.3" height="168" fill="var(--bg-accent)" opacity="0.5"/>
+<text x="168.1" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">03</text>
+<line x1="183.7" y1="490" x2="183.7" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<text x="199.3" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">04</text>
+<line x1="215.0" y1="490" x2="215.0" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<rect x="215.0" y="490" width="31.3" height="168" fill="var(--bg-accent)" opacity="0.5"/>
+<text x="230.6" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">05</text>
+<line x1="246.2" y1="490" x2="246.2" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<text x="261.9" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">06</text>
+<line x1="277.5" y1="490" x2="277.5" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<rect x="277.5" y="490" width="31.3" height="168" fill="var(--bg-accent)" opacity="0.5"/>
+<text x="293.1" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">07</text>
+<line x1="308.7" y1="490" x2="308.7" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<text x="324.4" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">08</text>
+<line x1="340.0" y1="490" x2="340.0" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<rect x="340.0" y="490" width="31.3" height="168" fill="var(--bg-accent)" opacity="0.5"/>
+<text x="355.6" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">09</text>
+<line x1="371.3" y1="490" x2="371.3" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<text x="386.9" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">10</text>
+<line x1="402.5" y1="490" x2="402.5" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<rect x="402.5" y="490" width="31.3" height="168" fill="var(--bg-accent)" opacity="0.5"/>
+<text x="418.1" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">11</text>
+<line x1="433.8" y1="490" x2="433.8" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<text x="449.4" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">12</text>
+<line x1="465.0" y1="490" x2="465.0" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<rect x="465.0" y="490" width="31.3" height="168" fill="var(--bg-accent)" opacity="0.5"/>
+<text x="480.7" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">13</text>
+<line x1="496.3" y1="490" x2="496.3" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<text x="511.9" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">14</text>
+<line x1="527.5" y1="490" x2="527.5" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<rect x="527.5" y="490" width="31.3" height="168" fill="var(--bg-accent)" opacity="0.5"/>
+<text x="543.2" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">15</text>
+<line x1="558.8" y1="490" x2="558.8" y2="658" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+<text x="574.4" y="672" font-size="9.5" text-anchor="middle" fill="var(--text-muted)">16</text>
+<path d="M90.0,556.4 L93.9,556.4 L94.8,560.3 L98.7,560.3 L99.7,564.2 L101.7,564.2 L102.7,576.0 L105.6,587.7 L105.6,591.6 L107.5,599.4 L113.4,603.3 L115.3,611.1 L117.3,615.0 L121.2,618.9 L125.1,618.9 L129.0,615.0 L132.9,608.2 L136.8,603.3 L140.7,599.4 L142.7,595.5 L146.6,591.6 L148.6,587.7 L152.5,585.7 L156.4,579.9 L160.3,578.9 L164.2,576.0 L168.1,576.0 L172.0,576.9 L175.9,579.9 L176.9,583.8 L179.8,587.7 L180.8,591.6 L183.7,595.5 L184.7,599.4 L187.6,603.3 L191.5,603.3 L194.5,595.5 L197.4,593.5 L200.3,595.5 L203.3,599.4 L205.2,607.2 L211.1,611.1 L212.0,622.8 L215.0,634.6 L215.0,638.5 L218.9,642.4 L226.7,642.4 L230.6,638.5 L234.5,634.6 L236.5,630.7 L240.4,626.7 L242.3,622.8 L246.2,620.9 L248.2,611.1 L250.1,603.3 L254.0,601.3 L258.0,597.4 L261.9,591.6 L265.8,583.8 L267.7,576.0 L271.6,572.0 L273.6,568.1 L274.6,564.2 L277.5,560.3 L281.4,560.3 L285.3,556.4 L289.2,549.6 L293.1,544.7 L295.1,536.9 L297.0,525.2 L297.0,517.3 L298.0,509.5 L300.9,499.8 L304.8,497.8 L305.8,493.9 L308.7,490.0 L312.7,490.0 L313.6,493.9 L317.5,493.9 L318.5,497.8 L320.5,497.8 L323.4,499.8 L326.3,503.7 L328.3,511.5 L334.1,515.4 L335.1,519.3 L340.0,533.0 L343.9,534.0 L347.8,536.9 L348.8,540.8 L351.7,544.7 L352.7,548.6 L355.6,552.5 L359.5,552.5 L360.5,564.2 L363.4,576.0 L363.4,579.9 L367.3,579.9 L368.3,583.8 L371.3,587.7 L373.2,595.5 L375.2,599.4 L379.1,603.3 L380.0,615.0 L383.0,626.7 L383.0,630.7 L384.0,634.6 L386.9,638.5 L390.8,638.5 L392.7,646.3 L394.7,650.2 L398.6,654.1 L402.5,658.0 L418.1,658.0 L433.8,658.0 L435.7,646.3 L439.6,638.5 L441.6,630.7 L443.5,630.7 L446.5,622.8 L449.4,620.9 L453.3,615.0 L457.2,614.0 L461.1,611.1 L465.0,611.1 L466.0,615.0 L470.9,628.7 L471.9,632.6 L474.8,636.5 L477.7,638.5 L480.7,642.4 L482.6,650.2 L488.5,654.1 L496.3,654.1 L504.1,655.1 L511.9,658.0 L527.5,658.0 L529.5,650.2 L531.4,638.5 L531.4,630.7 L535.3,630.7 L537.3,622.8 L541.2,618.9 L543.2,615.0 L544.1,611.1 L547.1,607.2 L551.0,607.2 L552.9,597.4 L554.9,589.6 L558.8,587.7 L562.7,591.6 L570.5,591.6 L574.4,587.7 L575.4,579.9 L578.3,570.1 L582.2,568.1 L583.2,564.2 L586.1,560.3 L590.0,556.4" fill="none" stroke="var(--text-primary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="90.0" cy="556.4" r="3.5" fill="var(--text-accent)"/><circle cx="590.0" cy="556.4" r="3.5" fill="var(--text-accent)"/>
+<text x="95" y="549" font-size="11" fill="var(--text-accent)">start</text>
+<text x="587" y="549" font-size="11" text-anchor="end" fill="var(--text-accent)">…ends here → wraps</text>
+<text x="40" y="700" font-size="13" fill="var(--text-muted)">Each section is 256 wide and begins at its MINTBL height. Section 16 ends exactly where section 01</text>
+<text x="40" y="716" font-size="13" fill="var(--text-muted)">began (both dots, same height) — so the surface loops seamlessly as the world scrolls past.</text>
+</svg>

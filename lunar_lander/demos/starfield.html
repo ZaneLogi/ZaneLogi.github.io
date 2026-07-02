@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>lunar_lander — starfield</title>
+  <style>
+    body { background:#111; color:#ccc; font-family:-apple-system,"Segoe UI",sans-serif; margin:16px; }
+    h1 { font-size:16px; margin:0 0 4px; }
+    p  { font-size:12px; color:#888; margin:4px 0; max-width:1000px; line-height:1.5; }
+    code { color:#9c9; }
+    .controls { display:flex; align-items:center; gap:10px; margin:12px 0; font-size:13px; }
+    .controls input { width:70px; background:#1a1a1a; color:#9fe6b0; border:1px solid #333;
+                      font-family:monospace; font-size:13px; padding:3px 6px; }
+    .controls .prefix { color:#777; font-family:monospace; }
+    #range-info { color:#888; }
+    .focus-wrap { display:flex; align-items:center; gap:18px; margin:12px 0 18px; }
+    #focus { background:#000; border:1px solid #3a6; image-rendering:pixelated; }
+    #focus-info { font-family:monospace; font-size:15px; color:#9fe6b0; }
+    .hint { font-size:11px; color:#777; margin-top:6px; }
+    #grid { display:block; background:#000; border:1px solid #333; image-rendering:pixelated; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <h1>Lunar Lander — starfield (<code>034598 $5244–$53E6</code>)</h1>
+  <p>The starfield decoded from <code>034598</code>: 24 subroutines of <b>bright points,
+     no lines</b> (each star is a zero-length bright vector), brightness 5–9 = star
+     magnitudes, positioned by the CPU at runtime. Each shape is enlarged with points
+     drawn as visible dots (they're invisible in <code>gallery.html</code>).
+     <b>Click any grid cell</b> to enlarge it. The range is editable, so this doubles as
+     a close-up viewer for any <code>034598</code> region (e.g. <code>$5000–$507E</code>
+     terrain tiles, <code>$5458</code> HUD).</p>
+
+  <div class="controls">
+    <span class="prefix">$</span><input id="from" value="5244">
+    <span>to</span>
+    <span class="prefix">$</span><input id="to" value="53E6">
+    <span id="range-info">—</span>
+  </div>
+
+  <div class="focus-wrap">
+    <canvas id="focus" width="460" height="420"></canvas>
+    <div>
+      <div id="focus-info">—</div>
+      <div class="hint">green = a drawn stroke or point (brightness → opacity); fit to box, aspect preserved</div>
+    </div>
+  </div>
+
+  <canvas id="grid"></canvas>
+
+  <script type="module" src="./starfield.js"></script>
+</body>
+</html>

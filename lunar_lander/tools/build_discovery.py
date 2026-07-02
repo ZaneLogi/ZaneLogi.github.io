@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""Exploratory: decode EVERY JSR/JMP-target subroutine in all three Lunar
+Lander vector ROMs into one JS module (discovery_rom_data.js) so demos/gallery
+can render the whole ROM contents for visual identification.
+
+This is a survey tool, NOT the curated runtime data (that's build_vector_rom.py).
+Subroutines are named `S_<cpuaddr>`; terrain polyline entry points (from the
+034597 pointer table) are named `T_<cpuaddr>`. Reuses decode_opcode/format_op
+from build_vector_rom.py (same dir).
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from build_vector_rom import decode_opcode, format_op  # noqa: E402
+
+ROM_DIRS = [Path("C:/Z_Temp/lunar_lander"), Path("D:/tmp/lunar_lander")]
+OUT = Path(__file__).resolve().parents[1] / "discovery_rom_data.js"
+
+# (js-var, filename, cpu base)
+ROMS = [
+    ("ROM599", "034599-01.r3", 0x4800),
+    ("ROM598", "034598-01.np3", 0x5000),
+    ("ROM597", "034597-01.m3", 0x5800),
+]
+
+
+def load(name: str) -> bytes:
+    for d in ROM_DIRS:
+        if (d / name).exists():
+            return (d / name).read_bytes()
+    raise SystemExit(f"{name} not found in {ROM_DIRS}")
+
+
+def word(b: bytes, o: int) -> int:
+    return b[o] | (b[o + 1] << 8)
+
+
+def decode_tolerant(b: bytes, base: int, start_cpu: int) -> list[dict]:
+    """Walk from start_cpu until RTS or HALT (tolerant — no exceptions)."""
+    ops: list[dict] = []
+    pc = start_cpu - base
+    while pc + 2 <= len(b):
+        op = (word(b, pc) >> 12) & 0xF
+        width = 4 if op <= 0xA else 2
+        if pc + width > len(b):
+            break
+        oc = decode_opcode(base + pc, list(b[pc:pc + width]))
+        ops.append(oc)
+        pc += width
+        if oc["op"] in ("RTS", "HALT"):
+            break
+    # resolve JSR/JMP targets to S_<cpu> names
+    for oc in ops:
+        if "_target_word" in oc:
+            cpu = oc["_target_word"] * 2 + 0x4000
+            oc["target"] = f"S_{cpu:04X}"
+            del oc["_target_word"]
+    return ops
+
+
+def jsr_targets(b: bytes, base: int) -> list[int]:
+    """Walk the instruction stream from offset 0, collect in-range JSR/JMP targets."""
+    targets: set[int] = set()
+    pc = 0
+    while pc + 2 <= len(b):
+        w = word(b, pc)
+        op = (w >> 12) & 0xF
+        if op in (0xC, 0xE):
+            cpu = (w & 0xFFF) * 2 + 0x4000
+            if base <= cpu < base + len(b):
+                targets.add(cpu)
+        pc += 4 if op <= 0xA else 2
+    return sorted(targets)
+
+
+# The starfield JSRL index tables (034598), anchored off LNMIN=$51BA in the
+# program source (A34573.1A:124-129): MINTBL=LNMIN+$28, MINTAB=+$40, then
+#   MJSTRA = MINTAB+$DC = $52FE  — major (zoom-out) LOWER field  (STARS :1126)
+#   MJSTRB = MJSTRA+$10 = $530E  — major TOP field (play-mode only; y 768-1279)
+#   MINSTR = MJSTRB+$E0 = $53EE  — minor (zoom-in) field
+# Each entry is a DVG JSRL word into a $5244-$53E6 star-cluster subroutine
+# (target = (word & $FFF)*2 + $4000). LOADRAM copies a byte window each frame
+# (STRLD :1144), so the tables carry a scroll-buffer tail (major = 4 clusters
+# listed x2; minor = 16 distinct + a 4-cluster repeat). We emit ONE tile's worth
+# of distinct clusters — the field wraps on that period. This SUPERSEDES the old
+# "starfield positions live in VG-RAM, not extractable" claim: the layout is
+# fully in ROM (STRINIT LABS origins are the only program-side constants — major
+# lower = (0,256), top = (0,768), both globalScale 0; A34573.1A STRINIT :1152).
+STAR_TABLES = [  # (js-key, cpu addr, distinct-cluster count = one tile)
+    ("majorLower", 0x52FE, 4),   # MJSTRA — listed x2 in ROM (scroll buffer)
+    ("majorTop",   0x530E, 4),   # MJSTRB — listed x2; off the visible top in-game
+    ("minor",      0x53EE, 16),  # MINSTR — 16 distinct + a 4-cluster repeat tail
+]
+
+
+def star_tables(b: bytes) -> dict[str, list[str]]:
+    """Decode the MJSTRA/MJSTRB/MINSTR JSRL tables to ordered S_<cpu> key lists."""
+    base = 0x5000
+    out: dict[str, list[str]] = {}
+    for name, addr, n in STAR_TABLES:
+        out[name] = [f"S_{(word(b, addr - base + 2 * i) & 0xFFF) * 2 + 0x4000:04X}"
+                     for i in range(n)]
+    return out
+
+
+# The bonus-landing-site DISPLAY positions (major/zoom-out scape): `TBLABS` @ $4E06 in
+# ROM599, resolved off `SHIPS`=$4BA2 in the program source (A34573.1A:105-113 —
+# SHIPS→ATRMOD(+$12)→LUNMJ0(+8)→LNMJR(+$12)→FINI(+$10)→LTLMOD(+$216)→TBLABS(+$12)).
+# 15 LABS (op A, 4 bytes each); each entry's X = word2 & $3FF is the site's major-scape X
+# (world_x = major_x / majorScale = ×4). The per-index multiplier is the fixed `TBSTFT`
+# table (2,2,2,2,3,3,4,4,4,4,5,5,5,5,5; A34573.1A:1921). This SUPERSEDES the old "TBMNA
+# site positions are runtime VG-RAM, not extractable" claim — the layout is plain ROM.
+TBLABS_ADDR = 0x4E06   # ROM599 (034599, base $4800)
+
+
+def bonus_site_x(b: bytes) -> list[int]:
+    """Decode the 15 TBLABS major-scape bonus-site X positions from 034599."""
+    base = 0x4800
+    return [word(b, TBLABS_ADDR - base + 4 * i + 2) & 0x3FF for i in range(15)]
+
+
+def terrain_pointers(b: bytes, base: int) -> list[int]:
+    """034597: raw address-word table starting at offset 4 (after the 0x3000/0x0060
+    header), taken while words stay inside the ROM range."""
+    ptrs: list[int] = []
+    o = 4
+    while o + 2 <= len(b):
+        v = word(b, o)
+        if base <= v < base + len(b):
+            ptrs.append(v)
+            o += 2
+        else:
+            break
+    return ptrs
+
+
+def emit() -> str:
+    lines = [
+        "// lunar_lander/discovery_rom_data.js",
+        "// GENERATED by tools/build_discovery.py — EXPLORATORY ROM survey, not curated.",
+        "// Every JSR/JMP-target subroutine in each ROM, named S_<cpuaddr>; 034597",
+        "// terrain polyline entry points named T_<cpuaddr>. For demos/gallery.html.",
+        "",
+    ]
+    rom598: bytes | None = None
+    rom599: bytes | None = None
+    for var, fname, base in ROMS:
+        b = load(fname)
+        if var == "ROM598":
+            rom598 = b
+        if var == "ROM599":
+            rom599 = b
+        subs: dict[str, list[dict]] = {}
+        for a in jsr_targets(b, base):
+            subs[f"S_{a:04X}"] = decode_tolerant(b, base, a)
+        if var == "ROM597":
+            for a in terrain_pointers(b, base):
+                subs[f"T_{a:04X}"] = decode_tolerant(b, base, a)
+        lines.append(f"// ----- {fname} (CPU ${base:04X}-${base+len(b)-1:04X}) — {len(subs)} subs -----")
+        lines.append(f"export const {var} = {{")
+        for name, ops in subs.items():
+            lines.append(f"  {name}: [{', '.join(format_op(o) for o in ops)}],")
+        lines.append("};")
+        lines.append("")
+        print(f"{fname}: {len(subs)} subs")
+
+    # Starfield JSRL index tables (into ROM598's S_ cluster subs) — see STAR_TABLES.
+    st = star_tables(rom598)
+    lines.append("// ----- starfield JSRL tables (034598 MJSTRA/MJSTRB/MINSTR) — one tile each -----")
+    lines.append("export const STARTABLES = {")
+    for name, keys in st.items():
+        lines.append(f"  {name}: [{', '.join(repr(k) for k in keys)}],")
+    lines.append("};")
+    lines.append("")
+    print("starfield tables:", {k: len(v) for k, v in st.items()})
+
+    # Bonus-landing-site major-scape X positions (TBLABS @ $4E06, ROM599) — see bonus_site_x.
+    bx = bonus_site_x(rom599)
+    lines.append("// ----- bonus landing-site positions (034599 TBLABS $4E06, major-scape X) -----")
+    lines.append("// index-aligned with TBSTFT [2,2,2,2,3,3,4,4,4,4,5,5,5,5,5]; world_x = x / majorScale.")
+    lines.append(f"export const BONUS_SITE_X = [{', '.join(str(x) for x in bx)}];")
+    lines.append("")
+    print("bonus site X:", bx)
+    return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    OUT.write_text(emit(), encoding="utf-8")
+    print(f"wrote: {OUT}")

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>lunar_lander — ROM shape gallery</title>
+  <style>
+    body { background:#111; color:#ccc; font-family:-apple-system,"Segoe UI",sans-serif; margin:16px; }
+    h1 { font-size:16px; margin:0 0 4px; }
+    h2 { font-size:13px; margin:18px 0 6px; color:#9c9; }
+    p  { font-size:12px; color:#888; margin:4px 0; max-width:1100px; }
+    canvas { display:block; background:#000; border:1px solid #333; image-rendering:pixelated; }
+    .controls { display:flex; align-items:center; gap:12px; margin:8px 0; font-size:13px; position:sticky; top:0; background:#111; padding:6px 0; }
+    input[type=range]{ width:160px; }
+  </style>
+</head>
+<body>
+  <h1>Lunar Lander — full ROM shape gallery</h1>
+  <p>Every JSR/JMP-target subroutine in the three vector ROMs, each fit to its cell
+     and labelled by CPU address. Composites render with their sub-parts resolved.
+     Use this to identify shapes by eye; the address is the entry point.</p>
+  <div class="controls">
+    <label for="gs-slider">globalScale:</label>
+    <input id="gs-slider" type="range" min="0" max="9" step="1" value="0">
+    <span id="gs-value">0</span>
+  </div>
+
+  <h2 id="h599">034599 — lander ROM ($4800–$4FFF): bases $4800-$4916, poses $4916-$4BA2, thrust? $4BE4-$4DF4, debris/misc $4EAE+</h2>
+  <canvas id="rom599"></canvas>
+
+  <h2 id="h598">034598 — font + pictures ($5000–$57FF): composites/parts $5000-$53EE, mega-composite $5458, font $55BE-$5726, digits? $572A+</h2>
+  <canvas id="rom598"></canvas>
+
+  <h2 id="h597">034597 — terrain ($5800–$5FFF): polyline entry points (T_) + parts</h2>
+  <canvas id="rom597"></canvas>
+
+  <script type="module" src="./gallery.js"></script>
+</body>
+</html>
