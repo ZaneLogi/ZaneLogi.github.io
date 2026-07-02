@@ -14,7 +14,7 @@
 // SCAPMJR/SCRLUP live here): it owns the per-frame camera framing (`frameCamera`) and
 // the major↔minor zoom transition (`updateZoom`) — research_physics.md §9/§9.1.
 
-import { ROM598 } from './discovery_rom_data.js';
+import { ROM598, BONUS_SITE_X } from './discovery_rom_data.js';
 import { runList } from './dvg.js';
 import { SCREEN_W, drawSegmentsWorld } from './render.js';
 import { isMajor, resetFlight, GEOM } from './state.js';
@@ -33,16 +33,23 @@ const SECTION_BASELINES = [896, 384, 656, 576, 224, 368, 864, 1440, 1088, 640, 6
 const SECT_W = 256;                 // every section is 256 units wide
 const LOOP_W = SECT_W * 16;         // 4096 — one full horizontal wrap
 
-// Bonus landing SITES (A34573.1A `LNDADR`/`TBSTFT`, research_physics.md §11 / step 7). The source
-// designates 15 flat sites and reads each one's score multiplier from TBSTFT; PLYINIT picks 4 per
-// drop (TABSIT) to flash + score. Its site X-positions (TBMNA) are runtime-built VG-RAM — not a
-// static table and not in the vector source — so we DERIVE the 15 sites from our own terrain flats
-// (same LNMIN data): take the 15 widest landable flats and assign the multiplier by WIDTH RANK
-// (widest = index 0 = 2X … narrowest = index 14 = 5X). That reproduces the source's exact economy
-// (four 2X, two 3X, four 4X, five 5X) AND the MAME `5X 5X 2X 2X` calibration (wide valley floors
-// pay 2X, narrow ledges 5X). Labeled deviation: derived positions, not the byte-exact TBMNA table.
+// Bonus landing SITES (A34573.1A `LNDADR` :1863 / `TBSTFT` :1921, research_physics.md §11.3) — the
+// source's REAL ROM positions. The 15 site display LABS live in the 034599 ROM at `TBLABS`=$4E06
+// (resolved off `SHIPS`=$4BA2; see build_discovery.py); `BONUS_SITE_X` carries each site's major-
+// scape X. `world_x = major_x / majorScale` (×4) lands every one exactly on a terrain flat (all 15
+// verified on-flat — same `LNMIN` surface); the landing zone is `[world_x, world_x + TSTLNG]` (the
+// source's `MNVAL`/`TSTLNG` width class, below) and the multiplier is `TBSTFT[index]` (four 2X, two
+// 3X, four 4X, five 5X).
+// This SUPERSEDES the old width-ranked DERIVATION + its "TBMNA positions are runtime VG-RAM, not
+// extractable" premise — the layout is plain ROM (like the starfield tables), and it reproduces the
+// MAME `5X 5X 2X 2X` cluster byte-for-byte. `PLYINIT` picks 4 per drop (`TABSIT`, state.js).
 const TBSTFT = [2, 2, 2, 2, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 5];   // :1921 — bonus factor per site index
-const SITE_MIN_WIDTH = 24;          // narrowest flat we'll designate (a bit under the ~24u lander span)
+// Landing-zone WIDTH per site — the source draws a bright bar this long over each active pad
+// (`TBMNV`/`TBVCTR`, decoded to 256/128/64/32) and `LNDADR` accepts a landing within it. `MNVAL`
+// (:1922) picks the class per site; `TSTLNG` (:1923) is the length table. Wider = easier (the 2X
+// pads), 32 = the unforgiving 5X ledges. The zone is `[site_X, site_X + ZONE_LEN]` (LNDADR :1876).
+const MNVAL = [0, 8, 16, 16, 24, 16, 24, 24, 24, 24, 24, 24, 24, 24, 24];   // :1922 — length class per site
+const ZONE_LEN = [256, 128, 64, 32];                                        // :1923 TSTLNG (rendered), index = MNVAL>>3
 
 export class Landscape {
   constructor() {
@@ -79,21 +86,17 @@ export class Landscape {
     this.sites = this._buildSites();           // the 15 designated bonus landing sites (see below)
   }
 
-  // Designate the bonus landing sites from the terrain flats (see the SITES note above). The 15
-  // widest horizontal segments become sites; the TBSTFT multiplier is assigned by width rank.
-  // Indexed by rank (0 = widest = 2X … 14 = narrowest = 5X) so `TABSIT` = index and the source's
-  // "two low-band + two high-band" pick maps straight onto our index ranges.
+  // Designate the 15 bonus sites from the ROM's real positions (see the SITES note above): each
+  // site index i sits at world_x = BONUS_SITE_X[i] / majorScale (the major-scape LABS scaled up to
+  // the world loop), on the terrain flat there — that flat is the landing zone. Indexed by the
+  // source's site number (0-3 = 2X band … 10-14 = 5X band) so `TABSIT` (state.js) indexes it directly.
   _buildSites() {
-    const flats = [];
-    for (const s of this.segs) {
-      if (Math.abs(s.fy - s.ty) >= 0.5) continue;             // horizontal strokes only
-      const x0 = Math.min(s.fx, s.tx), x1 = Math.max(s.fx, s.tx);
-      if (x1 - x0 < SITE_MIN_WIDTH) continue;                 // too narrow to land the lander on
-      flats.push({ x0, x1, y: s.fy, w: x1 - x0 });
-    }
-    return flats.sort((a, b) => b.w - a.w || a.x0 - b.x0)     // widest first (ties by x, stable)
-      .slice(0, TBSTFT.length)
-      .map((f, rank) => ({ rank, mult: TBSTFT[rank], x0: f.x0, x1: f.x1, cx: (f.x0 + f.x1) / 2, y: f.y, w: f.w }));
+    return BONUS_SITE_X.map((mx, i) => {
+      const x0 = ((mx / this.majorScale) % this.loopW + this.loopW) % this.loopW;   // ROM site X = the flat's LEFT edge
+      const len = ZONE_LEN[MNVAL[i] >> 3];                                          // the landing-zone width (TSTLNG class)
+      return { rank: i, mult: TBSTFT[i], zoneLen: len, x0, x1: x0 + len,            // zone = [site_X, site_X + len]
+               cx: x0 + len / 2, y: this.heightAt(x0 + 1), w: len };               // y = the flat's surface height
+    });
   }
 
   // Which designated site (if any) sits under worldX — the source's `LNDADR` X-match (:1863),

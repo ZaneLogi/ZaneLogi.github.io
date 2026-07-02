@@ -245,3 +245,7 @@ export const STARTABLES = {
   majorTop: ['S_5262', 'S_528A', 'S_52C2', 'S_52EC'],
   minor: ['S_531E', 'S_5330', 'S_533C', 'S_534E', 'S_5362', 'S_5376', 'S_5384', 'S_5392', 'S_53A6', 'S_53AE', 'S_53B6', 'S_53C2', 'S_53CA', 'S_53D2', 'S_53DE', 'S_53E6'],
 };
+
+// ----- bonus landing-site positions (034599 TBLABS $4E06, major-scape X) -----
+// index-aligned with TBSTFT [2,2,2,2,3,3,4,4,4,4,5,5,5,5,5]; world_x = x / majorScale.
+export const BONUS_SITE_X = [640, 864, 264, 816, 64, 968, 0, 152, 200, 448, 760, 384, 544, 560, 608];

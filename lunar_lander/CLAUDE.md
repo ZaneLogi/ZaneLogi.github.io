@@ -691,11 +691,12 @@ temporary `play.html`; the release promotion renamed it to `index.html` — see 
   **MAME-validated** against `llander` snap `0006.png` (lander ≈27.5u = 43px ÷ 1.5625; peak-summit
   landing reproduced 1:1). Live-verified: zoom in/out snap, dead-zone scroll both ways, off-top
   reset, no altitude jump across the snap.
-  - **Resolved in step 7:** the pad multiplier is **`TBSTFT[site]`** (`2,2,2,2,3,3,4,4,4,4,5,5,5,5,5`,
-    research_physics.md §11.3), a per-SITE table — NOT the `1+64/width` guess in screen.js. Since the
-    `TBMNA` site positions are runtime VG-RAM, landscape now DERIVES the 15 sites from our terrain
-    flats (15 widest, `TBSTFT` by width rank) — reproducing the source's distribution + the MAME
-    `5X 5X 2X 2X` cluster (wide floors 2X, narrow ledges 5X).
+  - **Resolved in step 7 (positions later corrected 2026-07-02):** the pad multiplier is
+    **`TBSTFT[site]`** (`2,2,2,2,3,3,4,4,4,4,5,5,5,5,5`, research_physics.md §11.3), a per-SITE table
+    — NOT the `1+64/width` guess in screen.js. The 15 site POSITIONS are the ROM's real ones —
+    `TBLABS`=$4E06 (034599), `world_x = major_x/majorScale` lands all 15 on terrain flats and
+    reproduces the MAME `5X 5X 2X 2X` cluster byte-for-byte (see the step-7 entry — this replaced an
+    earlier width-ranked derivation once the "TBMNA is VG-RAM" belief proved wrong).
 - **[done] Step 5 — collision + landing (`collision.js` + `boom.js` + outcomes):** the
   land/crash chain (research_physics.md §11/§11.1/§11.2). `collision.js` = the per-rotation
   corner tables (`SHPUPL`/`SHPLWL`/`SHPLWR`/`SHPUPR` `:3592-3722`, verbatim; minor view only,
@@ -733,18 +734,28 @@ temporary `play.html`; the release promotion renamed it to `index.html` — see 
   (required — the par must restart per drop). Live-verified: par/used growth (fuel + used = start),
   the exact 50-unit DEDUCT on a forced crash, all three messages in the ROM font.
 - **[done] Step 7 — scoring (`TBSTFT` per-site + `TABSIT` pick + `SITES` flash):** the real bonus
-  scoring (research_physics.md §11.3). `landscape` derives 15 bonus SITES from our terrain flats
-  (the source's `TBMNA` positions are runtime VG-RAM, so DERIVED instead: the 15 widest landable
-  flats, `TBSTFT` multiplier by width rank — widest = index 0 = 2X … narrowest = index 14 = 5X; the
-  pool reproduces the source's exact `[2,2,2,2,3,3,4,4,4,4,5,5,5,5,5]` distribution AND the MAME
-  `5X 5X 2X 2X` calibration) + `siteAt(worldX)` (the `LNDADR` X-match, `:1863`). `state` picks 4
-  sites per drop (`TABSIT` — two low-band 2X + two high-band 3X-5X, `PLYINIT :609`) into
-  `activeSites`; `beginOutcome` scores base 50/15/5 × the active-site `TBSTFT` factor (`POINTS
+  scoring (research_physics.md §11.3). The 15 bonus SITES are the ROM's **real positions** —
+  `TBLABS`=$4E06 (034599), decoded to `BONUS_SITE_X` (build_discovery.py); `landscape` places each at
+  `world_x = major_x/majorScale` (×4), which lands **all 15 on terrain flats** (the flat = the landing
+  zone), with the multiplier `TBSTFT[index]` (four 2X, two 3X, four 4X, five 5X). *(Faithful rewrite
+  2026-07-02: the site positions turned out to be plain ROM, not "runtime VG-RAM" — same wrong claim
+  as the starfield; this replaced an earlier width-ranked DERIVATION that could bunch two pads together.
+  The ROM positions reproduce the MAME `5X 5X 2X 2X` cluster byte-for-byte.)* + `siteAt(worldX)` (the
+  `LNDADR` X-match, `:1863`). `state.pickBonusSites` picks 4 per drop **faithfully** (`TABSIT`, `PLYINIT
+  :609`): `INTCNT`-seeded (our `state.frame`) — `TABSIT[0]=INTCNT&3`, `[1]=(+1)&3` (two ADJACENT low
+  2X pads), `[2]=BNSITE((INTCNT>>2)&F)`, `[3]=BNSITE([2]^0F)` (two COMPLEMENTARY high 3X-5X pads) —
+  reproducing MAME 0001's `TABSIT=[0,1,13,11]` exactly (was a "2 random-distinct per band" deviation).
+  `beginOutcome` scores base 50/15/5 × the active-site `TBSTFT` factor (`POINTS
   :3311`; factor 1 off an active site, `:1898`; applies to crashes too) — main.js computes the
   factor from `siteAt` + `activeSites` at the landing X. `display_info.renderSites` flashes the 4
-  active pads with their `NX` labels during PLAY (`SITES :1511`, blink on `FRAME&10`), wrapped like
-  the terrain. Verified: the 15-site pool distribution, the 2-low + 2-high `TABSIT` pick, good-on-2X
-  = 100, good off-site = 50, crash off-site = 5, the `NX` flash on all 4 active pads.
+  active pads during PLAY (`SITES :1511`, blink on `FRAME&10` — source phase, shown when the bit is
+  SET): the **landing-zone BAR** (`TBMNV`/`TBVCTR` :1533 — a bright line the width of the valid zone,
+  `TSTLNG` = 256/128/64/32 by the `MNVAL` class, so wide = the easy 2X pads, a 32 stub = the 5X ledges)
+  + the `NX` label centred on it, hanging just below; wrapped like the terrain. The zone `[site_X,
+  site_X+TSTLNG]` also feeds `siteAt`, so the bar shows the exact scoring zone. *(The bar colour is a
+  labeled embellishment — the DVG is monochrome; `ZONE_BAR_COLOR` in display_info.js, amber by default.)*
+  Verified: the 15-site pool distribution, the `TABSIT` pick, good-on-2X = 100, good off-site = 50,
+  crash off-site = 5, the bar + `NX` flash on all 4 active pads (MAME-matched positions + widths).
 - **[done] Step 8 — polish (`starfield.js` + feel-tuning):** the `STARS` backdrop (research_physics.md
   §10). `starfield.js` (`class Starfield`) is a **faithful** port of `STARS` (:1121): the three ROM JSRL
   index tables `MJSTRA`/`MJSTRB`/`MINSTR` (`build_discovery.py` → `STARTABLES`) select + order the
@@ -760,8 +771,9 @@ temporary `play.html`; the release promotion renamed it to `index.html` — see 
   (`MINSTR`) is chained from LABS(0,256) instead of the exact `MINSVG`/`SCRLDO` per-section LABS (:1138) —
   only ~a handful land in the close-up window either way (snap 0006 ≈ 4). *(This step originally shipped a
   DERIVATION — all 24 subs at even X in a top band — under the wrong belief that the cluster LAYOUT lived
-  in VG-RAM like the site `TBMNA`; the tables are in fact plain ROM off `LNMIN`=$51BA, and the field was
-  re-decoded faithfully 2026-07-02 after a density mismatch vs MAME surfaced it.)* **Feel-tuning = no-op:** the provisional `THRUST_RAMP_TICKS` (2) + lander scales
+  in VG-RAM; the tables are in fact plain ROM off `LNMIN`=$51BA, and the field was re-decoded faithfully
+  2026-07-02 after a density mismatch vs MAME surfaced it. The bonus-site `TBLABS`/`TBMNA` positions —
+  step 7 — turned out to be the SAME wrong "VG-RAM" claim, also corrected 2026-07-02.)* **Feel-tuning = no-op:** the provisional `THRUST_RAMP_TICKS` (2) + lander scales
   were validated by playtest (LGTM), not changed. (The `DOGAME`/`GAMODE` attract-machine pieces are
   N/A — the HTML panel replaces coin/SELECT — and the mission cycle finish/re-drop is already built.)
 

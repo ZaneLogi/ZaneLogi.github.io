@@ -319,8 +319,9 @@ translate 1:1 with the terrain. `MJSTRB` (y 768-1279) is above the visible windo
 (attract vs play snapshots show the same stars). **One labeled simplification:** the minor field is
 chained from LABS(0,256) rather than the exact `MINSVG`/`SCRLDO` per-section LABS — only ~a handful
 show in the close-up window either way (snap 0006 ≈ 4). *(The original step-8 build spread all 24
-clusters evenly in a top band under the wrong belief the layout was VG-RAM-only like the site `TBMNA`;
-a density mismatch vs the MAME snapshots surfaced that the tables are plain ROM — re-decoded faithfully.)*
+clusters evenly in a top band under the wrong belief the layout was VG-RAM-only; a density mismatch vs
+the MAME snapshots surfaced that the tables are plain ROM — re-decoded faithfully. The bonus-site
+`TBLABS`/`TBMNA` positions (§11.3) were the SAME wrong "VG-RAM" claim, also corrected 2026-07-02.)*
 
 ## 11. Landing / collision — `DECODE` + `SCAPLND` verdict
 
@@ -410,9 +411,9 @@ kernel in **integer** source units (§13). Labeled deviations/simplifications:
 - **X-axis pass subsumed** — the terrain is a strict heightfield (no overhangs), so probing all
   four corners vertically (`cornerY < heightAt(cornerX)` → `8F`) catches every case the separate
   `DISTX*` upper-corner pass can flag.
-- **Scoring** — `POINTS` base 50/15/5 × the active-site `TBSTFT` factor (built step 7 — the derived
-  15-site pool + the `TABSIT` pick + the `SITES` flash, §11.3); factor 1 off an active bonus site
-  (the `LNDADR` default, `:1898`). (`DEDUCT` crash fuel-loss landed in step 6 — §7.4.)
+- **Scoring** — `POINTS` base 50/15/5 × the active-site `TBSTFT` factor (built step 7, faithful — the
+  ROM `TBLABS` 15-site positions + the `TABSIT` pick + the `SITES` flash, §11.3); factor 1 off an active
+  bonus site (the `LNDADR` default, `:1898`). (`DEDUCT` crash fuel-loss landed in step 6 — §7.4.)
 - **Outcome sequence** (main.js `outcomeTick` = `MOTCHK :514-529`): `INDEX` steps every other
   tick to 127 (≈ 6.1 s at the 24 ms frame); hard landings integrate the `M.HRDY`/`M.HRDG`
   bounce until re-contact; crashes draw the `BOOM` debris (boom.js, from demos/explosion.js —
@@ -431,25 +432,36 @@ kernel in **integer** source units (§13). Labeled deviations/simplifications:
 `POINTS` (`:3311`) picks the base by `COLFLG` — good 50 / hard 15 / crash 5 — and `LNDADR`
 (`:1863`) multiplies it by the landing site's `TBSTFT` factor (2-5). `LNDADR` runs on ANY `COLFLG`
 bit-7 (`PLYCHK :551`), so a crash over a bonus site also scores base × factor. `PLYINIT`
-(`:609-627`) picks 4 of the 15 designated sites per drop (`TABSIT`): two from the low-index band
-(0-3 = the wide 2X pads) + two from the high band (4-14 = 3X-5X). `SITES` (`:1511`) flashes those 4
-with their `#X` labels. The multiplier table is `TBSTFT = 2,2,2,2,3,3,4,4,4,4,5,5,5,5,5` (`:1921`);
-site LENGTH classes are `MNVAL`/`TSTLNG` (`:1922-1923`).
+(`:609-627`) picks 4 of the 15 designated sites per drop into `TABSIT`, seeded by the free-running
+`INTCNT` (`:257/:339`) with a FIXED structure: `TABSIT[0]=INTCNT&3` and `TABSIT[1]=(TABSIT[0]+1)&3`
+— **two ADJACENT low-band 2X pads**; `TABSIT[2]=BNSITE((INTCNT>>2)&F)` (15→4 clamp) and
+`TABSIT[3]=BNSITE(TABSIT[2]^0F)` — **two COMPLEMENTARY high-band 3X-5X pads**, where `BNSITE`
+(`:675`) maps a `<4` value up via `(v+1)|0A`. `SITES` (`:1511`) flashes those 4 with their `#X`
+labels. The site positions are `TBLABS` (major scape) / `TBMNA` (minor); the multiplier table is
+`TBSTFT = 2,2,2,2,3,3,4,4,4,4,5,5,5,5,5` (`:1921`); landing-zone LENGTH classes are `MNVAL`/`TSTLNG`
+(`:1922-1923`, `TSTLNG = 255/128/64/32`).
 
-**Port** (landscape.js / state.js / display_info.js / main.js). The source's site X-positions
-(`TBMNA`) are **runtime-built VG-RAM** — not a static ROM table and not in the vector-ROM source —
-so we DERIVE the 15 sites from our own terrain flats (the same `LNMIN` geometry): take the 15
-widest landable flats and assign the `TBSTFT` multiplier by width RANK (widest = index 0 = 2X …
-narrowest = index 14 = 5X). Our terrain yields exactly the source's distribution — four 2X (the
-128u valley floors), two 3X, four 4X, five 5X (the 32u ledges) — matching the MAME `5X 5X 2X 2X`
-cluster (wide = 2X, narrow = 5X). `landscape.siteAt(worldX)` is the `LNDADR` X-match;
-`state.pickBonusSites` is the `TABSIT` pick (kept as 2-low + 2-high — the source's exact `BNSITE`
-bit-map is just its PRNG detail); `beginOutcome(status, siteFactor)` applies base × factor, with
-main.js computing the factor from `siteAt` + `state.activeSites` at the landing X (1 off an active
-site); `display_info.renderSites` draws the blinking `NX` labels (`FRAME&10`), wrapped like the
-terrain. **Labeled deviations:** derived site positions (not the byte-exact `TBMNA` table); a
-site's landable zone is the flat's own width, not the source's `MNVAL`/`TSTLNG` length classes; the
-heat-score / `AUXILIARY FUEL TANKS` message lines aren't drawn.
+**Port** (landscape.js / state.js / display_info.js / main.js). **FAITHFUL rewrite 2026-07-02**
+(was a derivation): the 15 site positions are the ROM's real ones. `TBLABS`=$4E06 (034599, resolved
+off `SHIPS`=$4BA2 — A34573.1A:105-113) holds the major-scape site LABS; `build_discovery.py` decodes
+their X into `BONUS_SITE_X`, and `landscape` places each at `world_x = major_x / majorScale` (×4) —
+which lands **all 15 on terrain flats** (same `LNMIN` surface). Each site's landing zone is
+`[site_X, site_X + TSTLNG]` — the faithful `MNVAL`/`TSTLNG` width class (256/128/64/32; `state.frame`-
+independent), used for BOTH `siteAt` and the drawn bar. Multiplier = `TBSTFT[index]`.
+`state.pickBonusSites` ports the exact `TABSIT` pick — adjacent-low + complementary-high (above),
+seeded by `state.frame` as the `INTCNT` analog — reproducing MAME 0001's `TABSIT=[0,1,13,11]` and the
+`5X 5X 2X 2X` layout byte-for-byte. `landscape.siteAt(worldX)` is the `LNDADR` X-match;
+`beginOutcome(status, siteFactor)` applies base × factor (main.js computes the factor from `siteAt` +
+`state.activeSites` at the landing X, 1 off an active site). `display_info.renderSites` draws, per
+active site, the **landing-zone bar** (`TBMNV`/`TBVCTR` :1533 — a bright line the width of the zone,
+decoded to 256/128/64/32) + the `NX` label centred on it and hanging below, blinking on `FRAME&10`
+(source phase — shown when the bit is SET, :1544), wrapped like the terrain. *(This corrected the old
+"`TBMNA` positions are runtime VG-RAM, not extractable" claim + the "2 random-distinct per band" pick —
+the same wrong "VG-RAM" belief as the starfield; the earlier width-ranked derivation could bunch two
+pads together.)* **Labeled deviations:** `state.frame` (41.7 Hz) seeds the pick vs `INTCNT` (250 Hz) —
+pick cadence only, not structure; the bar COLOUR is a non-faithful embellishment (the DVG is
+monochrome — `ZONE_BAR_COLOR`, amber by default); the heat-score / `AUXILIARY FUEL TANKS` message
+lines aren't drawn.
 
 ## 12. Implications for the physics demo
 

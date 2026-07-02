@@ -119,21 +119,30 @@ const SECCNT = 250, FRMECNT = 6;
 const FUEL_PAR_RATE = 8;   // FLFACT (:58) — the par fuel a mission "should" burn per game-second
 const DEDCNT = 127;        // DEDCNT (:57) — frames the crash "FUEL UNITS LOST" message stays up
 
-// PLYINIT bonus-site pick (:609-627). Each drop flashes + scores 4 of the 15 designated sites
-// (TABSIT): the source picks TWO from the low-index band (ranks 0-3 = the wide 2X pads) and TWO
-// from the high band (4-14 = the 3X-5X pads), so every drop offers two easy + two hard bonuses. We
-// keep that 2-low + 2-high structure (the source's exact BNSITE bit-map is just its PRNG detail).
-// The counts mirror landscape's site pool: TBSTFT.length = 15, low band = 4. `MAXSITE=4` (:1925).
-const BONUS_SITE_COUNT = 15, BONUS_LOW_BAND = 4;
-function pickTwoDistinct(lo, hi) {                 // two distinct ints in [lo, hi)
-  const a = lo + Math.floor(Math.random() * (hi - lo));
-  let b = lo + Math.floor(Math.random() * (hi - lo));
-  if (b === a) b = lo + ((a - lo + 1) % (hi - lo));
-  return [a, b];
+// PLYINIT bonus-site pick (:609-627) — ported faithfully. `INTCNT` (the free-running interrupt
+// counter, :257/:339) seeds a deterministic-but-timing-varied pick with a FIXED structure that
+// gives every drop two easy + two hard bonuses AND a stable geometry (this is what makes the MAME
+// `5X 5X 2X 2X` layout):
+//   TABSIT[0] = INTCNT & 3               — a low-band 2X site (0-3)
+//   TABSIT[1] = (TABSIT[0] + 1) & 3      — the NEXT low index: two ADJACENT 2X pads
+//   TABSIT[2] = BNSITE((INTCNT>>2)&F)    — a high-band site (4-14), 15→4 clamp (:617-621)
+//   TABSIT[3] = BNSITE(TABSIT[2] ^ 0x0F) — the COMPLEMENT: the two high pads land spread apart
+// We use `state.frame` (our free-running per-tick counter, source INC FRAME :443) as the INTCNT
+// analog — timing-varied, faithful in effect (labeled: FRAME ticks at 41.7 Hz vs INTCNT's 250 Hz;
+// only the seed cadence differs, not the pick structure). `MAXSITE=4` (:1925). This REPLACES an
+// earlier "2 random-distinct per band" pick, which dropped the adjacent-low + complementary-high
+// structure (so its pads clustered wrong — see research_physics.md §11.3).
+function bnsite(v) {                                // BNSITE :675 — map a <4 value up into the high band
+  return v >= 4 ? v : ((v + 1) | 0x0A);            //   (ADC I,1 ; ORA I,0A)
 }
 function pickBonusSites() {
-  state.activeSites = [...pickTwoDistinct(0, BONUS_LOW_BAND),
-                       ...pickTwoDistinct(BONUS_LOW_BAND, BONUS_SITE_COUNT)];
+  const seed = state.frame;                         // INTCNT analog (free-running, timing-varied)
+  const s0 = seed & 3;
+  const s1 = (s0 + 1) & 3;
+  let hi = (seed >> 2) & 0x0F;
+  if (hi === 0x0F) hi = 4;                           // PLYINIT :617-621 — 15 maps to 4
+  const s2 = bnsite(hi);
+  state.activeSites = [s0, s1, s2, bnsite(s2 ^ 0x0F)];
 }
 
 // Advance the game clock one tick, PLAY only (the source's NMI increment, D:360).

@@ -40,6 +40,11 @@ import { CollisionStatus } from './state.js';
 // O ($5688); colon is $55B2; space is $5726; A-Z are the $55BE font block (CLAUDE.md
 // letter table) — the outcome messages need the full set.
 const CHAR_KEY = { ' ': 'S_5726', ':': 'S_55B2', '0': 'S_5688' };
+
+// The landing-zone bar colour (renderSites). The DVG is monochrome (the source's bar is just a
+// bright green VEC), so a colour here is a DELIBERATE non-faithful embellishment — an amber "landing
+// light" that reads as a target. Swap for a green like 'rgba(150,255,170,0.95)' to stay arcade-faithful.
+const ZONE_BAR_COLOR = 'rgba(255, 200, 80, 0.95)';
 [0x572A, 0x5732, 0x5742, 0x5750, 0x575E, 0x576C, 0x577A, 0x5784, 0x5794]
   .forEach((a, i) => { CHAR_KEY[String(i + 1)] = 'S_' + a.toString(16).toUpperCase(); });
 [0x55BE, 0x55CE, 0x55E8, 0x55F4, 0x5604, 0x5614, 0x5622, 0x5634, 0x5642, 0x5650,
@@ -106,24 +111,33 @@ export class DisplayInfo {
   }
 
   // The bonus-site flash (SITES :1511-1573) — during PLAY, the 4 active bonus pads
-  // (state.activeSites → landscape.sites) blink with their "NX" multiplier label. The source
-  // centres the label on the site horizontally (B.XOFF = -6, :1556/:1597); its exact VERTICAL
-  // placement lives in the TBMNA/TBMNV VG-RAM (runtime-built, not extractable) — arcade footage
-  // shows the "NX" sitting just BELOW the pad line (the text hangs under the pad), so we anchor it
-  // there: baseline dropped below site.y by the glyph height + a small gap, centred. Flash on
-  // FRAME&10 (:1548). Rendered in both scapes, wrapped like the terrain (off-screen copies clip).
+  // (state.activeSites → landscape.sites, at the ROM TBLABS positions) blink together with, per site,
+  // the landing-zone BAR (TBMNV/TBVCTR :1533 — a bright line the width of the valid zone) + the "NX"
+  // multiplier label centred on it. The source centres the label horizontally (B.XOFF = -6,
+  // :1556/:1597) and hangs it just below the bar; we drop the baseline below site.y by DROP, centred.
+  // Blink on FRAME&10 (source phase: shown when the bit is SET, :1544). Rendered in both scapes,
+  // wrapped like the terrain (off-screen copies clip). Bar colour = a labeled embellishment (see
+  // ZONE_BAR_COLOR — the DVG is monochrome).
   renderSites(ctx, state, camera, landscape) {
-    if ((state.frame & 0x10) !== 0) return;               // blink: shown only when FRAME&10 is clear
-    const loopW = landscape.loopW, DROP = 15;             // baseline below the pad line so the text hangs under it
+    if ((state.frame & 0x10) === 0) return;               // blink WITH the source's pad marker (shown when FRAME&10 set, :1544)
+    const loopW = landscape.loopW, DROP = 15;             // baseline below the bar so the text hangs under it
+    ctx.lineCap = 'round';
     for (const rank of state.activeSites) {
       const site = landscape.sites[rank];
       if (!site) continue;
       const label = keysFor(`${site.mult}X`);
-      const w = glyphRunWidth(ROM598, label);             // centre the 2-glyph "NX" over the pad (B.XOFF)
+      const w = glyphRunWidth(ROM598, label);             // centre the 2-glyph "NX" over the zone (B.XOFF)
       for (const copy of [-1, 0, 1]) {                    // 3 loop-copies; off-screen ones clip out
-        const { px, py } = worldToScreen(camera, site.cx + copy * loopW, site.y);
-        if (px < -40 || px > SCREEN_W + 40 || py < -20 || py > SCREEN_H + 40) continue;
-        drawGlyphString(ctx, ROM598, label, { x: px - w / 2, y: py + DROP, pxScale: 1, color: 'rgba(150,255,170,0.95)' });
+        const shift = copy * loopW;
+        // the landing-zone BAR (TBMNV/TBVCTR :1533) — a bright line the width of the valid landing zone,
+        // sitting on the pad; long = the easy 2X pads, a short stub = the unforgiving 5X ledges.
+        const a = worldToScreen(camera, site.x0 + shift, site.y);
+        const b = worldToScreen(camera, site.x1 + shift, site.y);
+        if (b.px < -40 || a.px > SCREEN_W + 40 || a.py < -20 || a.py > SCREEN_H + 40) continue;
+        ctx.strokeStyle = ZONE_BAR_COLOR; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke();
+        // the "NX" multiplier label, centred on the zone, hanging just below the bar
+        drawGlyphString(ctx, ROM598, label, { x: (a.px + b.px) / 2 - w / 2, y: a.py + DROP, pxScale: 1, color: 'rgba(150,255,170,0.95)' });
       }
     }
   }

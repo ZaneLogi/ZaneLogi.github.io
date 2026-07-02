@@ -107,6 +107,22 @@ def star_tables(b: bytes) -> dict[str, list[str]]:
     return out
 
 
+# The bonus-landing-site DISPLAY positions (major/zoom-out scape): `TBLABS` @ $4E06 in
+# ROM599, resolved off `SHIPS`=$4BA2 in the program source (A34573.1A:105-113 —
+# SHIPS→ATRMOD(+$12)→LUNMJ0(+8)→LNMJR(+$12)→FINI(+$10)→LTLMOD(+$216)→TBLABS(+$12)).
+# 15 LABS (op A, 4 bytes each); each entry's X = word2 & $3FF is the site's major-scape X
+# (world_x = major_x / majorScale = ×4). The per-index multiplier is the fixed `TBSTFT`
+# table (2,2,2,2,3,3,4,4,4,4,5,5,5,5,5; A34573.1A:1921). This SUPERSEDES the old "TBMNA
+# site positions are runtime VG-RAM, not extractable" claim — the layout is plain ROM.
+TBLABS_ADDR = 0x4E06   # ROM599 (034599, base $4800)
+
+
+def bonus_site_x(b: bytes) -> list[int]:
+    """Decode the 15 TBLABS major-scape bonus-site X positions from 034599."""
+    base = 0x4800
+    return [word(b, TBLABS_ADDR - base + 4 * i + 2) & 0x3FF for i in range(15)]
+
+
 def terrain_pointers(b: bytes, base: int) -> list[int]:
     """034597: raw address-word table starting at offset 4 (after the 0x3000/0x0060
     header), taken while words stay inside the ROM range."""
@@ -131,10 +147,13 @@ def emit() -> str:
         "",
     ]
     rom598: bytes | None = None
+    rom599: bytes | None = None
     for var, fname, base in ROMS:
         b = load(fname)
         if var == "ROM598":
             rom598 = b
+        if var == "ROM599":
+            rom599 = b
         subs: dict[str, list[dict]] = {}
         for a in jsr_targets(b, base):
             subs[f"S_{a:04X}"] = decode_tolerant(b, base, a)
@@ -158,6 +177,14 @@ def emit() -> str:
     lines.append("};")
     lines.append("")
     print("starfield tables:", {k: len(v) for k, v in st.items()})
+
+    # Bonus-landing-site major-scape X positions (TBLABS @ $4E06, ROM599) — see bonus_site_x.
+    bx = bonus_site_x(rom599)
+    lines.append("// ----- bonus landing-site positions (034599 TBLABS $4E06, major-scape X) -----")
+    lines.append("// index-aligned with TBSTFT [2,2,2,2,3,3,4,4,4,4,5,5,5,5,5]; world_x = x / majorScale.")
+    lines.append(f"export const BONUS_SITE_X = [{', '.join(str(x) for x in bx)}];")
+    lines.append("")
+    print("bonus site X:", bx)
     return "\n".join(lines)
 
 
