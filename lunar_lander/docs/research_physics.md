@@ -373,9 +373,9 @@ kernel in **integer** source units (§13). Labeled deviations/simplifications:
 - **X-axis pass subsumed** — the terrain is a strict heightfield (no overhangs), so probing all
   four corners vertically (`cornerY < heightAt(cornerX)` → `8F`) catches every case the separate
   `DISTX*` upper-corner pass can flag.
-- **Scoring is a STUB** — `POINTS` base 50/15/5 × **factor 1**, the `LNDADR` default for a
-  non-designated site (`:1898`); the real `TBSTFT[site]` factor + the flats→15-sites mapping land
-  with the scoring step (7). (`DEDUCT` crash fuel-loss now landed in step 6 — see §7.4.)
+- **Scoring** — `POINTS` base 50/15/5 × the active-site `TBSTFT` factor (built step 7 — the derived
+  15-site pool + the `TABSIT` pick + the `SITES` flash, §11.3); factor 1 off an active bonus site
+  (the `LNDADR` default, `:1898`). (`DEDUCT` crash fuel-loss landed in step 6 — §7.4.)
 - **Outcome sequence** (main.js `outcomeTick` = `MOTCHK :514-529`): `INDEX` steps every other
   tick to 127 (≈ 6.1 s at the 24 ms frame); hard landings integrate the `M.HRDY`/`M.HRDG`
   bounce until re-contact; crashes draw the `BOOM` debris (boom.js, from demos/explosion.js —
@@ -387,7 +387,32 @@ kernel in **integer** source units (§13). Labeled deviations/simplifications:
   grid is not decoded) at a readable 2× scale.
 - **Interim mission cycle** (`finishOutcome`): fuel left → a fresh drop (score + fuel kept; the
   clock + fuel par/used reset per drop — PLYINIT `:640`, step 6); tank empty → attract. The full
-  `DOGAME`/`GAMODE` machine is the scoring step (7).
+  `DOGAME`/`GAMODE` attract-machine is largely N/A — the HTML panel replaces coin-in/SELECT.
+
+### 11.3 Scoring port notes — sites + `TBSTFT` (built, step 7)
+
+`POINTS` (`:3311`) picks the base by `COLFLG` — good 50 / hard 15 / crash 5 — and `LNDADR`
+(`:1863`) multiplies it by the landing site's `TBSTFT` factor (2-5). `LNDADR` runs on ANY `COLFLG`
+bit-7 (`PLYCHK :551`), so a crash over a bonus site also scores base × factor. `PLYINIT`
+(`:609-627`) picks 4 of the 15 designated sites per drop (`TABSIT`): two from the low-index band
+(0-3 = the wide 2X pads) + two from the high band (4-14 = 3X-5X). `SITES` (`:1511`) flashes those 4
+with their `#X` labels. The multiplier table is `TBSTFT = 2,2,2,2,3,3,4,4,4,4,5,5,5,5,5` (`:1921`);
+site LENGTH classes are `MNVAL`/`TSTLNG` (`:1922-1923`).
+
+**Port** (landscape.js / state.js / display_info.js / main.js). The source's site X-positions
+(`TBMNA`) are **runtime-built VG-RAM** — not a static ROM table and not in the vector-ROM source —
+so we DERIVE the 15 sites from our own terrain flats (the same `LNMIN` geometry): take the 15
+widest landable flats and assign the `TBSTFT` multiplier by width RANK (widest = index 0 = 2X …
+narrowest = index 14 = 5X). Our terrain yields exactly the source's distribution — four 2X (the
+128u valley floors), two 3X, four 4X, five 5X (the 32u ledges) — matching the MAME `5X 5X 2X 2X`
+cluster (wide = 2X, narrow = 5X). `landscape.siteAt(worldX)` is the `LNDADR` X-match;
+`state.pickBonusSites` is the `TABSIT` pick (kept as 2-low + 2-high — the source's exact `BNSITE`
+bit-map is just its PRNG detail); `beginOutcome(status, siteFactor)` applies base × factor, with
+main.js computing the factor from `siteAt` + `state.activeSites` at the landing X (1 off an active
+site); `display_info.renderSites` draws the blinking `NX` labels (`FRAME&10`), wrapped like the
+terrain. **Labeled deviations:** derived site positions (not the byte-exact `TBMNA` table); a
+site's landable zone is the flat's own width, not the source's `MNVAL`/`TSTLNG` length classes; the
+heat-score / `AUXILIARY FUEL TANKS` message lines aren't drawn.
 
 ## 12. Implications for the physics demo
 

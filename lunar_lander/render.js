@@ -33,6 +33,13 @@ export function screenToWorld(cam, sx, sy) {
   return { x: cam.x + sx / cam.scale, y: cam.y + sy / cam.scale };
 }
 
+// Forward world→canvas-pixel transform (matches drawSegmentsWorld's per-vertex math, incl. the
+// Y-flip). Returns CANVAS pixels (Y-down). Used to place the bonus-site flash labels (display_info)
+// at a terrain point through the live camera.
+export function worldToScreen(cam, wx, wy) {
+  return { px: (wx - cam.x) * cam.scale, py: SCREEN_H - (wy - cam.y) * cam.scale };
+}
+
 // DVG intensity (bri 0-15) → phosphor-green stroke. Per-segment so the beam
 // brightness is faithful (the DVG sets intensity per vector).
 function strokeFor(bri) {

@@ -21,15 +21,14 @@ three source-faithful demos: **flight physics** (`physics.html`), **crash explos
 (`explosion.html`, the `BOOM` routine), and the **faithful landscape**
 (`landscape.html`, built from `LNMIN`/`MINTBL` — the terrain done right with the
 source, vs the MAME-matched `screen.html`/`scroll_view.html`). The **gameplay runtime
-is under construction** — steps 0-6 done (seams · terrain · flight · HUD · zoom ·
-collision/landing · out-of-fuel): `play.html` is now a full mission loop — fly, land or crash
-(the `DECODE`/`SCAPLND` verdict → good/hard/crash outcomes with the bounce, the `BOOM`
-explosion, and the source's status messages), stub-score, burn fuel down to the
-`DEDUCT`/`OUT OF FUEL` end-game, and re-drop until the tank runs dry. Still unbuilt: real
-per-site scoring (`TBSTFT`, step 7) and the starfield + feel-tuning polish (step 8) — see
-"Gameplay runtime — build order & status" below. HUD value layout, pad multipliers, and the
-horizontal-scroll/wrap behaviour are MEASURED against MAME (see "Gameplay HUD" + "Terrain
-scroll" below).
+is under construction** — steps 0-7 done (seams · terrain · flight · HUD · zoom ·
+collision/landing · out-of-fuel · scoring): `play.html` is now a full mission loop — fly, land or
+crash (the `DECODE`/`SCAPLND` verdict → good/hard/crash outcomes with the bounce, the `BOOM`
+explosion, and the source's status messages), score by `TBSTFT` bonus site (4 flashing `NX` pads
+per drop), burn fuel down to the `DEDUCT`/`OUT OF FUEL` end-game, and re-drop until the tank runs
+dry. Still unbuilt: the starfield + feel-tuning polish (step 8) — see "Gameplay runtime — build
+order & status" below. HUD value layout, pad multipliers, and the horizontal-scroll/wrap behaviour
+are MEASURED against MAME (see "Gameplay HUD" + "Terrain scroll" below).
 
 **The original program source has been located** (`historicalsource/lunar-lander`,
 cloned per-PC — see "Program source" below for the paths — main module `A34573.1A` by Rich Moore).
@@ -439,7 +438,7 @@ cluster is `5X 5X 2X 2X` left-to-right. NOTE: `multiplier = 1 + 64/width` was a
 coincidental fit to these four pads — it is **NOT** the real mechanism. The ROM
 assigns the multiplier by **site index** via the fixed table `TBSTFT =
 2,2,2,2,3,3,4,4,4,4,5,5,5,5,5` (15 sites; `research_physics.md` §11 `:1921`), not
-from width. Use `TBSTFT[site]`, not the width formula, when scoring lands (step 7):
+from width. Scoring (built step 7) uses `TBSTFT[site]` — a per-SITE table, NOT the width formula:
 
 | pad | rom x (center) | y_up | label |
 |---|---|---|---|
@@ -554,7 +553,7 @@ single-file proto-gameplay (physics + starfield + HUD + lander + flame + input +
 |---|---|---|---|
 | `main.js` | boot, canvas, fixed-timestep loop, per-frame order | main loop `:409-485`, `LUNINT` | physics.js |
 | `lander.js` | flight + craft: `ACCEL`, `THRLVL`/`FRCMLT`, `ROTSHP`(+inertia), `BURN`, `MODULE` pose+flame | `LUNAR`+`LUNVEC` | thrust.js + physics.js |
-| `landscape.js` | **terrain authority**: assembly + scroll + zoom + terrain **queries** (`heightAt`/`padAt`/`slopeAt`): `SCAPE`, `LNMIN`/`MINTBL`, `SCROLL`/`SCRADD`, `SCAPCHG`/`SCAPMJR`/`SCRLUP`. Terrain facts only — **no land/crash verdict**. | `LUNMIN` + scape | screen.js + scroll_view.js |
+| `landscape.js` | **terrain authority**: assembly + scroll + zoom + terrain **queries** (`heightAt` + the bonus-site `siteAt`): `SCAPE`, `LNMIN`/`MINTBL`, `SCROLL`/`SCRADD`, `SCAPCHG`/`SCAPMJR`/`SCRLUP`. Terrain facts only — **no land/crash verdict**. | `LUNMIN` + scape | screen.js + scroll_view.js |
 | `collision.js` | **land/crash verdict**: the per-rotation corner tables (`SHPUPL`… `:3592`) probed through `landscape.heightAt` → `DISTY*`/`SCPDST` clearances + the `SCAPLND` integer gate → `COLFLG` (good/hard/crash). Outcomes (bounce/`BOOM`/messages) run in main.js's `MOTCHK` sequence; `boom.js` holds the explosion data. | `DECODE`/`SCPDST`/`SCAPLND` | explosion.js |
 | `starfield.js` | `STARS` (major/minor) | `STARS`, `598:306/401` | physics.js + demos/starfield.js |
 | `display_info.js` | HUD `$5458` + `DISPLY` values, digits/arrows/messages | HUD/DISPLY | screen.js + physics.js |
@@ -583,9 +582,9 @@ single-file proto-gameplay (physics + starfield + HUD + lander + flame + input +
 
 **Net-new (built without a demo ancestor):** the **landscape → collision** chain —
 `landscape.heightAt` terrain queries feeding `collision.js`'s `DECODE`/`SCAPLND` verdict —
-and the zoom transition, both now in the runtime (`docs/research_physics.md` §9.1 + §11).
-Still net-new to build: `padAt`/`slopeAt` + the `TBSTFT` per-site scoring, and the `GAMODE`
-machine.
+the zoom transition, and the **bonus-site scoring** (`landscape.siteAt` + the derived 15-site
+`TBSTFT` pool feeding `beginOutcome`), all now in the runtime (`docs/research_physics.md`
+§9.1 + §11 + §11.3). Still net-new to build: only the step-8 polish (starfield + feel-tuning).
 
 ### Flight-model architecture — stepper + profiles
 
@@ -631,7 +630,7 @@ the collision/landing kernel (`research_physics.md` §13).
 - **[done] Step 1 — `landscape.js`:** the terrain authority — `LNMIN`/`MINTBL` surface
   (`faithful ✓`) rendered scale-agnostically via the camera (scroll + 3-copy wrap, major ¼)
   with `drawSegmentsWorld` in render.js; built query-ready (segment list + per-section
-  x-ranges) for step-6 `heightAt`/`padAt`. IDLE shows the major scape behind the start screen.
+  x-ranges) for the later `heightAt` (step 5) / `siteAt` (step 7) queries. IDLE shows the major scape behind the start screen.
 - **[done] Step 2 — flight (`input.js` + `physics_arcade.js` + `lander.js`):** the full
   IDLE⇄PLAY loop. `Input` (only DOM reader) → normalized intent + `startPressed`/`resetPressed`
   + `settings`; `state.newGame`/`toIdle` lifecycle transitions (+ SPACE-start / Reset button);
@@ -682,11 +681,11 @@ the collision/landing kernel (`research_physics.md` §13).
   **MAME-validated** against `llander` snap `0006.png` (lander ≈27.5u = 43px ÷ 1.5625; peak-summit
   landing reproduced 1:1). Live-verified: zoom in/out snap, dead-zone scroll both ways, off-top
   reset, no altitude jump across the snap.
-  - **Open (scoring step):** the real pad multiplier is **`TBSTFT[site]`** (`2,2,2,2,3,3,4,4,4,4,5,5,5,5,5`,
-    research_physics.md §11), a per-SITE table — NOT the `1+64/width` guess in screen.js. MAME `0006`
-    scored 50 (base) on a peak summit that is a **32u** flat in our data; our three **16u flats are
-    ledges, not summits**, and are narrower than the 27u lander. So when scoring lands (step 7),
-    map our flats → the 15 site indices and use `TBSTFT`, and confirm which flats are scoring pads.
+  - **Resolved in step 7:** the pad multiplier is **`TBSTFT[site]`** (`2,2,2,2,3,3,4,4,4,4,5,5,5,5,5`,
+    research_physics.md §11.3), a per-SITE table — NOT the `1+64/width` guess in screen.js. Since the
+    `TBMNA` site positions are runtime VG-RAM, landscape now DERIVES the 15 sites from our terrain
+    flats (15 widest, `TBSTFT` by width rank) — reproducing the source's distribution + the MAME
+    `5X 5X 2X 2X` cluster (wide floors 2X, narrow ledges 5X).
 - **[done] Step 5 — collision + landing (`collision.js` + `boom.js` + outcomes):** the
   land/crash chain (research_physics.md §11/§11.1/§11.2). `collision.js` = the per-rotation
   corner tables (`SHPUPL`/`SHPLWL`/`SHPLWR`/`SHPUPR` `:3592-3722`, verbatim; minor view only,
@@ -723,26 +722,33 @@ the collision/landing kernel (`research_physics.md` §13).
   par/used every drop, so the off-top reset and the post-outcome re-drop reset the clock too
   (required — the par must restart per drop). Live-verified: par/used growth (fuel + used = start),
   the exact 50-unit DEDUCT on a forced crash, all three messages in the ROM font.
-- **Step 7 — scoring + the `GAMODE`/`DOGAME` cycle:** the real per-site scoring — `padAt`/`slopeAt`
-  queries, the `TBSTFT[site]` multiplier (map our terrain flats → the 15 site indices; the `TBMNA`
-  site positions are runtime VG-RAM, so DERIVE the sites from our own flat geometry by the source's
-  `TSTLNG`/`MNVAL` width classes — widest = 2X … narrowest = 5X — calibrated to the MAME `5X 5X 2X 2X`
-  cluster), the 4-random-sites `TABSIT` pick (`PLYINIT :609`), the `SITES` flash with `NX` labels
-  (`:1511`), and `LNDADR` (`:1863`) replacing the base-×1 stub — plus any remaining `DOGAME`
-  mission-cycle pieces.
-- **Step 8 — polish:** feel-tuning (`THRUST_RAMP`/lander scales) + `starfield.js`.
+- **[done] Step 7 — scoring (`TBSTFT` per-site + `TABSIT` pick + `SITES` flash):** the real bonus
+  scoring (research_physics.md §11.3). `landscape` derives 15 bonus SITES from our terrain flats
+  (the source's `TBMNA` positions are runtime VG-RAM, so DERIVED instead: the 15 widest landable
+  flats, `TBSTFT` multiplier by width rank — widest = index 0 = 2X … narrowest = index 14 = 5X; the
+  pool reproduces the source's exact `[2,2,2,2,3,3,4,4,4,4,5,5,5,5,5]` distribution AND the MAME
+  `5X 5X 2X 2X` calibration) + `siteAt(worldX)` (the `LNDADR` X-match, `:1863`). `state` picks 4
+  sites per drop (`TABSIT` — two low-band 2X + two high-band 3X-5X, `PLYINIT :609`) into
+  `activeSites`; `beginOutcome` scores base 50/15/5 × the active-site `TBSTFT` factor (`POINTS
+  :3311`; factor 1 off an active site, `:1898`; applies to crashes too) — main.js computes the
+  factor from `siteAt` + `activeSites` at the landing X. `display_info.renderSites` flashes the 4
+  active pads with their `NX` labels during PLAY (`SITES :1511`, blink on `FRAME&10`), wrapped like
+  the terrain. Verified: the 15-site pool distribution, the 2-low + 2-high `TABSIT` pick, good-on-2X
+  = 100, good off-site = 50, crash off-site = 5, the `NX` flash on all 4 active pads.
+- **Step 8 — polish:** feel-tuning (`THRUST_RAMP`/lander scales) + `starfield.js`. (The remaining
+  `DOGAME`/`GAMODE` attract-machine pieces are largely N/A — the HTML panel replaces coin/SELECT —
+  and the mission cycle finish/re-drop is already built.)
 
-`state.js` currently holds the shared zero-page values (the seam); the `GAMODE`
-attract/play/land machine + scoring (the module table's `state.js` role) lands with the
-scoring step (7) and may live in `state.js` or a small sibling module.
+`state.js` holds the shared zero-page values (the seam) plus the lifecycle + scoring
+(`newGame`/`beginOutcome`/`deductFuel`/`pickBonusSites` — the module table's `state.js`
+role); the full `GAMODE` attract-machine is largely N/A (the HTML panel replaces coin/SELECT).
 
 ## Next steps
 
-The open work is finishing the gameplay runtime — **steps 7-8** of "Gameplay runtime —
-build order & status" above: the real per-site scoring (`padAt`/`slopeAt` queries, the
-`TBSTFT[site]` multiplier + flats→15-site mapping, the `TABSIT` random-4 pick, the `SITES`
-flash, `LNDADR` replacing the base-×1 stub) plus any remaining `DOGAME` cycle, then the
-feel-tuning + `starfield.js` polish. (`DEDUCT` + the out-of-fuel end-game landed in step 6.)
+The open work is the final polish — **step 8** of "Gameplay runtime — build order & status"
+above: feel-tuning (`THRUST_RAMP`/lander scales) + `starfield.js`. (Steps 0-7 are done: the
+mission loop flies, lands/crashes, scores by `TBSTFT` bonus site, and burns fuel to the
+`DEDUCT`/out-of-fuel end-game.)
 
 ### Settled decode questions — don't re-investigate
 

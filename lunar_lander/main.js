@@ -14,7 +14,7 @@
 
 import { state, camera, isPlaying, isOutcome, newGame, toIdle, tickClock,
          beginOutcome, finishOutcome, CollisionStatus } from './state.js';
-import { SCREEN_W, SCREEN_H, drawShapeScreen, drawSegmentsScreen, drawText } from './render.js';
+import { SCREEN_W, SCREEN_H, drawShapeScreen, drawSegmentsScreen, drawText, screenToWorld } from './render.js';
 import { ROM599 } from './discovery_rom_data.js';
 import { Landscape } from './landscape.js';
 import { Input } from './input.js';
@@ -107,7 +107,10 @@ function update(dt) {
   landscape.frameCamera(state, camera);
   collision.update(state, camera, landscape); // clearances + the verdict (research_physics.md §11)
   if (state.collisionStatus !== CollisionStatus.SAFE_FLY) {  // touched down or crashed (PLYCHK BMI :531-532)
-    beginOutcome(state.collisionStatus);
+    const wx = screenToWorld(camera, state.posX, state.posY).x;          // landing world X (LNDADR :1863)
+    const site = landscape.siteAt(wx);                                   // the designated site under it, if any
+    const siteFactor = site && state.activeSites.includes(site.rank) ? site.mult : 1;  // active bonus → TBSTFT, else 1
+    beginOutcome(state.collisionStatus, siteFactor);
     outFrame = 0; bounceDone = false;
     return;
   }
@@ -132,6 +135,7 @@ function render(alpha) {
     displayInfo.render(ctx, state, 0);
     displayInfo.renderOutcome(ctx, state);
   } else if (isPlaying()) {
+    displayInfo.renderSites(ctx, state, camera, landscape);   // bonus-pad NX flash (on the terrain)
     lander.render(ctx, state);                          // the flying craft
     displayInfo.render(ctx, state, collision.clearance);   // HUD: labels + values + arrows
   } else {

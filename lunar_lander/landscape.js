@@ -33,6 +33,17 @@ const SECTION_BASELINES = [896, 384, 656, 576, 224, 368, 864, 1440, 1088, 640, 6
 const SECT_W = 256;                 // every section is 256 units wide
 const LOOP_W = SECT_W * 16;         // 4096 — one full horizontal wrap
 
+// Bonus landing SITES (A34573.1A `LNDADR`/`TBSTFT`, research_physics.md §11 / step 7). The source
+// designates 15 flat sites and reads each one's score multiplier from TBSTFT; PLYINIT picks 4 per
+// drop (TABSIT) to flash + score. Its site X-positions (TBMNA) are runtime-built VG-RAM — not a
+// static table and not in the vector source — so we DERIVE the 15 sites from our own terrain flats
+// (same LNMIN data): take the 15 widest landable flats and assign the multiplier by WIDTH RANK
+// (widest = index 0 = 2X … narrowest = index 14 = 5X). That reproduces the source's exact economy
+// (four 2X, two 3X, four 4X, five 5X) AND the MAME `5X 5X 2X 2X` calibration (wide valley floors
+// pay 2X, narrow ledges 5X). Labeled deviation: derived positions, not the byte-exact TBMNA table.
+const TBSTFT = [2, 2, 2, 2, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 5];   // :1921 — bonus factor per site index
+const SITE_MIN_WIDTH = 24;          // narrowest flat we'll designate (a bit under the ~24u lander span)
+
 export class Landscape {
   constructor() {
     this.loopW = LOOP_W;
@@ -64,6 +75,35 @@ export class Landscape {
     // Major camera vertical base: puts yMin ~bottomMargin px above the screen bottom.
     // frameCamera adds SCRADD on top; the minor base is 0 (SCRADD carries it entirely).
     this.majorBaseY = this.yMin - 24 / this.majorScale;
+
+    this.sites = this._buildSites();           // the 15 designated bonus landing sites (see below)
+  }
+
+  // Designate the bonus landing sites from the terrain flats (see the SITES note above). The 15
+  // widest horizontal segments become sites; the TBSTFT multiplier is assigned by width rank.
+  // Indexed by rank (0 = widest = 2X … 14 = narrowest = 5X) so `TABSIT` = index and the source's
+  // "two low-band + two high-band" pick maps straight onto our index ranges.
+  _buildSites() {
+    const flats = [];
+    for (const s of this.segs) {
+      if (Math.abs(s.fy - s.ty) >= 0.5) continue;             // horizontal strokes only
+      const x0 = Math.min(s.fx, s.tx), x1 = Math.max(s.fx, s.tx);
+      if (x1 - x0 < SITE_MIN_WIDTH) continue;                 // too narrow to land the lander on
+      flats.push({ x0, x1, y: s.fy, w: x1 - x0 });
+    }
+    return flats.sort((a, b) => b.w - a.w || a.x0 - b.x0)     // widest first (ties by x, stable)
+      .slice(0, TBSTFT.length)
+      .map((f, rank) => ({ rank, mult: TBSTFT[rank], x0: f.x0, x1: f.x1, cx: (f.x0 + f.x1) / 2, y: f.y, w: f.w }));
+  }
+
+  // Which designated site (if any) sits under worldX — the source's `LNDADR` X-match (:1863),
+  // used by the scorer + the SITES flash. Returns the site {rank, mult, x0, x1, cx, y, w} or null.
+  // FACTS only: whether a landing here PAYS the bonus depends on the site being one of the drop's
+  // active TABSIT picks (`state.activeSites`) — that gate lives with the scorer (facts vs verdict).
+  siteAt(worldX) {
+    const x = ((worldX % this.loopW) + this.loopW) % this.loopW;
+    for (const s of this.sites) if (x >= s.x0 && x <= s.x1) return s;
+    return null;
   }
 
   // Frame the camera for the major (zoom-out) view: ¼ scale, terrain valleys near the

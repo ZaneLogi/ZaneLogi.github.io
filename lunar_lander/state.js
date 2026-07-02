@@ -85,6 +85,8 @@ export const state = {
   collisionStatus: CollisionStatus.SAFE_FLY,  // this frame's verdict (COLFLG :243)
   frame: 0,           // FRAME (:443) — free-running per-tick counter (source INC FRAME each main loop);
                       //   drives the LOW-ON-FUEL blink (FRAME&10). NOT reset per drop.
+  activeSites: [],    // TABSIT (:213) — the 4 designated site ranks that flash + pay a bonus this
+                      //   drop (indices into landscape.sites); picked per drop by pickBonusSites (:609)
 
   // --- land/crash outcome (set by beginOutcome, read by the sequence + display) --
   outcomeStatus: CollisionStatus.SAFE_FLY,  // the latched verdict the sequence animates (M.CLFL :553)
@@ -116,6 +118,23 @@ export const GEOM = {
 const SECCNT = 250, FRMECNT = 6;
 const FUEL_PAR_RATE = 8;   // FLFACT (:58) — the par fuel a mission "should" burn per game-second
 const DEDCNT = 127;        // DEDCNT (:57) — frames the crash "FUEL UNITS LOST" message stays up
+
+// PLYINIT bonus-site pick (:609-627). Each drop flashes + scores 4 of the 15 designated sites
+// (TABSIT): the source picks TWO from the low-index band (ranks 0-3 = the wide 2X pads) and TWO
+// from the high band (4-14 = the 3X-5X pads), so every drop offers two easy + two hard bonuses. We
+// keep that 2-low + 2-high structure (the source's exact BNSITE bit-map is just its PRNG detail).
+// The counts mirror landscape's site pool: TBSTFT.length = 15, low band = 4. `MAXSITE=4` (:1925).
+const BONUS_SITE_COUNT = 15, BONUS_LOW_BAND = 4;
+function pickTwoDistinct(lo, hi) {                 // two distinct ints in [lo, hi)
+  const a = lo + Math.floor(Math.random() * (hi - lo));
+  let b = lo + Math.floor(Math.random() * (hi - lo));
+  if (b === a) b = lo + ((a - lo + 1) % (hi - lo));
+  return [a, b];
+}
+function pickBonusSites() {
+  state.activeSites = [...pickTwoDistinct(0, BONUS_LOW_BAND),
+                       ...pickTwoDistinct(BONUS_LOW_BAND, BONUS_SITE_COUNT)];
+}
 
 // Advance the game clock one tick, PLAY only (the source's NMI increment, D:360).
 // nmiCountdown counts down SECCNT NMIs; on rollover, seconds++ (minute carry).
@@ -188,6 +207,7 @@ function seedFlight() {
   // path (finishOutcome / off-top) runs through PLYINIT too, so it resets here, not just at newGame.
   state.clockSeconds = 0; state.clockMinutes = 0; state.nmiCountdown = 250;
   state.fuelUsed = 0; state.fuelPar = 0;
+  pickBonusSites();                  // fresh 4 bonus sites this drop (PLYINIT :609-627)
   state.gameMode = GameMode.PLAY;    // (PLYINIT :646)
 }
 
@@ -239,15 +259,17 @@ function deductFuel(status) {
 // The verdict fired — enter the LAND/CRASH outcome mode (the PLYCHK collision
 // path, :551-581): score, bonus fuel, sequence setup. main.js then runs the
 // MOTCHK sequence (INDEX clock + hard bounce) each tick until finishOutcome.
-export function beginOutcome(status) {
+export function beginOutcome(status, siteFactor = 1) {
   const good = status === CollisionStatus.GOOD_LAND;
-  // Scoring STUB (decided 2026-07-02): POINTS base 50 good / 15 hard / 5 crash
-  // (:3311-3318) × site factor 1 — the LNDADR default for a NON-designated site
-  // (:1898). The real per-site TBSTFT factor (+ our-flats→15-sites mapping, and
-  // the DEDUCT crash fuel-loss :559/:1816) land with the GAMODE step.
+  // Scoring (LNDADR :1863 + POINTS :3311): base 50 good / 15 hard / 5 crash × the site's TBSTFT
+  // factor. `siteFactor` (1..5) is the multiplier of the ACTIVE bonus site under the landing X,
+  // computed by main.js from landscape.siteAt + state.activeSites (1 = not on an active site, the
+  // LNDADR default :1898). Applies to every outcome — the source scores base×factor for crashes
+  // too (POINTS reads COLFLG for the base; LNDADR runs on any COLFLG bit-7).
   const base = good ? 50 : (status === CollisionStatus.HARD_LAND ? 15 : 5);
-  state.lastPoints = base;
-  state.score += base;
+  const points = base * siteFactor;
+  state.lastPoints = points;
+  state.score += points;
   if (good) state.fuel += 50;              // BNFUEL — good landings only (:554-558)
   deductFuel(status);                      // DEDUCT — a crash destroys hoarded fuel (:559)
   state.outcomeStatus = status;            // keep the verdict for the sequence (M.CLFL :552-553)

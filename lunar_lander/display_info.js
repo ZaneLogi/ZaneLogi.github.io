@@ -32,7 +32,7 @@
 //   • Outcome-message PLACEMENT is approximate (centred lines, readable 2× scale) — the
 //     exact MESSLAB LABS grid is not decoded. The strings + pick logic are the source's.
 
-import { SCREEN_H, drawShapeScreen, drawGlyphString, drawArrowGlyph, glyphRunWidth } from './render.js';
+import { SCREEN_W, SCREEN_H, drawShapeScreen, drawGlyphString, drawArrowGlyph, glyphRunWidth, worldToScreen } from './render.js';
 import { ROM598 } from './discovery_rom_data.js';
 import { CollisionStatus } from './state.js';
 
@@ -103,6 +103,29 @@ export class DisplayInfo {
     if (state.fuelLostTimer > 0)  this._centreLine(ctx, `${state.fuelLost} FUEL UNITS LOST`, 132);
     else if (state.fuel <= 0)     this._centreLine(ctx, 'OUT OF FUEL', 132);
     else if (state.fuel < 100 && (state.frame & 0x10) === 0) this._centreLine(ctx, 'LOW ON FUEL', 132);
+  }
+
+  // The bonus-site flash (SITES :1511-1573) — during PLAY, the 4 active bonus pads
+  // (state.activeSites → landscape.sites) blink with their "NX" multiplier label. The source
+  // centres the label on the site horizontally (B.XOFF = -6, :1556/:1597); its exact VERTICAL
+  // placement lives in the TBMNA/TBMNV VG-RAM (runtime-built, not extractable) — arcade footage
+  // shows the "NX" sitting just BELOW the pad line (the text hangs under the pad), so we anchor it
+  // there: baseline dropped below site.y by the glyph height + a small gap, centred. Flash on
+  // FRAME&10 (:1548). Rendered in both scapes, wrapped like the terrain (off-screen copies clip).
+  renderSites(ctx, state, camera, landscape) {
+    if ((state.frame & 0x10) !== 0) return;               // blink: shown only when FRAME&10 is clear
+    const loopW = landscape.loopW, DROP = 15;             // baseline below the pad line so the text hangs under it
+    for (const rank of state.activeSites) {
+      const site = landscape.sites[rank];
+      if (!site) continue;
+      const label = keysFor(`${site.mult}X`);
+      const w = glyphRunWidth(ROM598, label);             // centre the 2-glyph "NX" over the pad (B.XOFF)
+      for (const copy of [-1, 0, 1]) {                    // 3 loop-copies; off-screen ones clip out
+        const { px, py } = worldToScreen(camera, site.cx + copy * loopW, site.y);
+        if (px < -40 || px > SCREEN_W + 40 || py < -20 || py > SCREEN_H + 40) continue;
+        drawGlyphString(ctx, ROM598, label, { x: px - w / 2, y: py + DROP, pxScale: 1, color: 'rgba(150,255,170,0.95)' });
+      }
+    }
   }
 
   // The land/crash status display (:1655-1675): header + a random 1-of-4 status
