@@ -2,117 +2,81 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>lunar_lander — demo index</title>
+  <title>Lunar Lander — Atari 1979 (JS port)</title>
   <style>
-    body { background:#0e0e0e; color:#ccc; font-family:-apple-system,"Segoe UI",sans-serif; margin:0; padding:28px; }
-    h1 { font-size:20px; margin:0 0 4px; color:#cdc; }
-    p.lead { font-size:13px; color:#999; margin:4px 0 22px; max-width:760px; line-height:1.5; }
-    code { color:#9c9; }
-    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:14px; max-width:960px; }
-    a.card { display:block; text-decoration:none; background:#161616; border:1px solid #2c2c2c; border-radius:8px;
-             padding:14px 16px; color:inherit; transition:border-color .15s, background .15s; }
-    a.card:hover { border-color:#3a6; background:#191c19; }
-    a.card .name { font-size:15px; color:#9fe6b0; margin:0 0 4px; }
-    a.card .desc { font-size:12px; color:#9a9a9a; line-height:1.45; margin:0; }
-    a.card .src  { font-size:11px; color:#6f7f6f; font-family:monospace; margin-top:6px; }
-    footer { margin-top:26px; font-size:11px; color:#666; max-width:760px; line-height:1.5; }
+    :root { --green:#8fffa8; --dim:#6a9; --panel:#0d0f0d; }
+    html, body { margin:0; background:#000; color:#cde;
+                 font-family:-apple-system,"Segoe UI",sans-serif; }
+    body { display:flex; flex-direction:column; align-items:center; gap:14px; padding:16px; }
+    #game { background:#000; border:1px solid #2a3; max-width:100%; height:auto;
+            box-shadow:0 0 24px rgba(120,255,160,.12); }
+    .panel { width:min(1024px,100%); background:var(--panel); border:1px solid #223;
+             border-radius:8px; padding:12px 16px; box-sizing:border-box; }
+    .row { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin:6px 0; }
+    .label { font-family:monospace; font-size:12px; letter-spacing:.14em; color:var(--dim);
+             min-width:92px; }
+    label.opt { display:inline-flex; align-items:center; gap:5px; font-size:14px; cursor:pointer; }
+    input[type=range] { width:340px; accent-color:var(--green); }
+    #fuelval { font-family:monospace; color:var(--green); min-width:46px; text-align:right; }
+    .marks { font-family:monospace; font-size:11px; color:#567; }
+    .trait { font-family:monospace; font-size:12px; color:var(--green);
+             margin:0 0 8px 108px; min-height:15px; }
+    .hint { font-size:12px; color:#789; margin-top:8px; }
+    .hint b { color:var(--green); }
+    .btn { font:inherit; font-size:13px; color:var(--green); background:#0a140d;
+           border:1px solid #2a5; border-radius:6px; padding:5px 14px; cursor:pointer; }
+    .btn:hover { background:#0f1f14; }
   </style>
 </head>
 <body>
-  <h1>Lunar Lander — vector-ROM demos</h1>
-  <p class="lead">
-    Faithful byte-decodes of Atari <b>Lunar Lander</b> (1979), which drives the same
-    Atari DVG as Asteroids. Most pages render shapes straight from the picture ROMs through
-    <code>dvg.js</code>; the <b>flight-physics</b> and <b>crash-explosion</b> demos are
-    source-faithful translations now that the original program source is in hand. Pick one:
-  </p>
+  <!-- The gameplay runtime (this IS the project root — it boots main.js so the folder
+       root plays the game, like the sibling clones). The CANVAS is the faithful arcade
+       screen; everything BELOW it is modern HTML chrome (settings + start hint) — NOT how
+       the cabinet did it. The vector-ROM decode demos live at demos/ (linked below). -->
+  <canvas id="game" width="1024" height="768"></canvas>
 
-  <div class="grid">
-    <a class="card" href="demos/physics.html">
-      <div class="name">Flight physics 🚀</div>
-      <p class="desc">Fly the lander on a scrolling starfield with the <b>real source physics</b>
-         (gravity <code>$11</code>, hover at throttle 8) — a routine-level translation of Rich
-         Moore's original. Four difficulty modes; the craft stays centred, the world scrolls.</p>
-      <div class="src">demos/physics.html · A34573.1A source</div>
-    </a>
-    <a class="card" href="demos/explosion.html">
-      <div class="name">Crash explosion 💥</div>
-      <p class="desc">The lander blows up — a routine-level port of the <code>BOOM</code> routine:
-         a tumbling cabin octagon + 6 fragments fly out and wink out over <code>INDEX</code> 1→127,
-         then replay with a new <b>random 1-of-4 pattern</b>. Pattern picker, zoom, INDEX scrub.</p>
-      <div class="src">demos/explosion.html · A34573.1A + 034599</div>
-    </a>
-    <a class="card" href="demos/landscape.html">
-      <div class="name">Faithful landscape ⛰️</div>
-      <p class="desc">The lunar surface built <b>the way the ROM builds it</b> — 16 sections in
-         <code>LNMIN</code> order, placed by <code>MINTBL</code>, wrapping seamlessly. Terrain only,
-         no lander/HUD. The source-driven counterpart to the MAME-matched screen demos.</p>
-      <div class="src">demos/landscape.html · 034598 + LNMIN/MINTBL</div>
-    </a>
-    <a class="card" href="demos/rotation.html">
-      <div class="name">360° rotation ↻</div>
-      <p class="desc">The lander spun through a full circle (9-pose quadrant + X/Y mirror),
-         shown at both ROM sizes, plus a <code>globalScale</code> size demo.</p>
-      <div class="src">demos/rotation.html · 034599</div>
-    </a>
-    <a class="card" href="demos/thrust.html">
-      <div class="name">Thrust flame 🔥</div>
-      <p class="desc">The lander tilted across its <b>gameplay range</b> (head left → up → right,
-         ±90°, no upside-down) with a throttle-driven <b>thrust flame</b> — drawn
-         programmatically (no flame glyph exists in ROM; our own design), modelled on Asteroids + Seb's Moon Lander.</p>
-      <div class="src">demos/thrust.html · 034599</div>
-    </a>
-    <a class="card" href="demos/lander.html">
-      <div class="name">Lander poses</div>
-      <p class="desc">The 9 tilt attitudes — 8 shared base octagons + per-angle
-         leg/thruster SVECs.</p>
-      <div class="src">demos/lander.html · 034599</div>
-    </a>
-    <a class="card" href="demos/gallery.html">
-      <div class="name">Shape gallery</div>
-      <p class="desc">Every JSR/JMP-target subroutine across all three ROMs, fit to a cell
-         and labelled by CPU address. A survey tool.</p>
-      <div class="src">demos/gallery.html · 034597/8/9</div>
-    </a>
-    <a class="card" href="demos/vector_rom.html">
-      <div class="name">Font sheet</div>
-      <p class="desc">The A–Z + space glyphs decoded from the picture/glyph ROM.</p>
-      <div class="src">demos/vector_rom.html · 034598</div>
-    </a>
-    <a class="card" href="demos/hud.html">
-      <div class="name">HUD label row</div>
-      <p class="desc">The 75-JSR mega-composite — the in-game HUD label row;
-         its glyphs spell SCORE / TIME / FUEL / ALTITUDE / HORIZONTAL SPEED /
-         VERTICAL SPEED.</p>
-      <div class="src">demos/hud.html · 034598</div>
-    </a>
-    <a class="card" href="demos/starfield.html">
-      <div class="name">Starfield</div>
-      <p class="desc">The 61-point starfield ($5244–$53E6) enlarged with a focus panel.
-         Editable range, so it also closes in on any other 034598 region.</p>
-      <div class="src">demos/starfield.html · 034598</div>
-    </a>
-    <a class="card" href="demos/screen.html">
-      <div class="name">Screen layout</div>
-      <p class="desc">All decoded pieces composited on a faithful 1024×768 field — the 2×3 HUD
-         with formatted values, the terrain with multiplier-labelled landing pads, and the lander.
-         HUD layout + pad multipliers measured from a MAME gameplay frame.</p>
-      <div class="src">demos/screen.html · 034598/9</div>
-    </a>
-    <a class="card" href="demos/scroll_view.html">
-      <div class="name">Scrolling terrain →</div>
-      <p class="desc">The terrain auto-scrolls left (lander flying right) and wraps — pure
-         horizontal scroll over a fixed baseline, as confirmed in MAME. Native-scale loop with
-         the HUD and pad multipliers on top. Speed slider + pause.</p>
-      <div class="src">demos/scroll_view.html · 034598/9</div>
-    </a>
+  <!-- Settings panel. Wiring to the game is at step 2; for now only the visual
+       echo (fuel value, mode trait line) is live. -->
+  <div class="panel">
+    <div class="row">
+      <button id="reset" class="btn">Reset</button>
+      <span class="marks">↩ back to the start screen (then SPACE to launch)</span>
+    </div>
+    <div class="row">
+      <span class="label">PLAY MODE</span>
+      <label class="opt"><input type="radio" name="mode" value="0" checked> Training</label>
+      <label class="opt"><input type="radio" name="mode" value="1"> Cadet</label>
+      <label class="opt"><input type="radio" name="mode" value="2"> Prime</label>
+      <label class="opt"><input type="radio" name="mode" value="3"> Command</label>
+    </div>
+    <div class="trait" id="trait">Training — gravity 17, friction + rotation clamp</div>
+
+    <div class="row">
+      <span class="label">START FUEL</span>
+      <input type="range" id="fuel" min="100" max="10000" step="50" value="750">
+      <span id="fuelval">750</span>
+      <span class="marks">coin&nbsp;DIP: 450 · 600 · 750 · 900 &nbsp;·&nbsp; max 10000</span>
+    </div>
+
+    <div class="hint">Set options, then press <b>SPACE</b> to start (= the cabinet START switch).
+      In flight: <b>←/→</b> rotate · <b>↑</b> throttle — hold to increase, release to decrease (0–15, hover ≈ 8) · <b>A</b> abort · <b>P</b> pause.</div>
+    <div class="hint" style="margin-top:6px;">The vector-ROM decode demos live at <a href="demos/index.html" style="color:var(--green);text-decoration:none;">demos/</a>.</div>
   </div>
 
-  <footer>
-    Served by <code>tools/devserver.py</code> (no-cache) via <code>.claude/launch.json</code>
-    <code>lunar_lander</code> on port 8085. See <code>CLAUDE.md</code> for the ROM map and
-    decode details.
-  </footer>
+  <script type="module" src="./main.js"></script>
+  <script>
+    // PREVIEW-ONLY UI echo (presentational; the real read lands in input.js at step 2).
+    const TRAITS = {
+      '0': 'Training — gravity 17, friction + rotation clamp',
+      '1': 'Cadet — gravity 17, pure inertia (safety net removed)',
+      '2': 'Prime — gravity 34 (2×), thrust ×1.5',
+      '3': 'Command — gravity 17, rotational inertia',
+    };
+    const fuel = document.getElementById('fuel');
+    const fuelval = document.getElementById('fuelval');
+    fuel.addEventListener('input', () => (fuelval.textContent = fuel.value));
+    for (const r of document.querySelectorAll('input[name=mode]'))
+      r.addEventListener('change', () => (document.getElementById('trait').textContent = TRAITS[r.value]));
+  </script>
 </body>
 </html>

@@ -16,20 +16,22 @@ Asteroids. "Faithful" matters: behavior should match the original ROM.
 
 ## Status
 
-ROM-decode stage — twelve demo pages: nine faithful vector-ROM byte-decodes plus
-three source-faithful demos: **flight physics** (`physics.html`), **crash explosion**
-(`explosion.html`, the `BOOM` routine), and the **faithful landscape**
-(`landscape.html`, built from `LNMIN`/`MINTBL` — the terrain done right with the
-source, vs the MAME-matched `screen.html`/`scroll_view.html`). The **gameplay runtime
-is feature-complete** — steps 0-8 done (seams · terrain · flight · HUD · zoom ·
-collision/landing · out-of-fuel · scoring · starfield): `play.html` is a full mission loop — fly,
-land or crash (the `DECODE`/`SCAPLND` verdict → good/hard/crash outcomes with the bounce, the
-`BOOM` explosion, and the source's status messages), score by `TBSTFT` bonus site (4 flashing `NX`
-pads per drop), burn fuel down to the `DEDUCT`/`OUT OF FUEL` end-game, and re-drop until the tank
-runs dry — over a scrolling `STARS` backdrop. Remaining: only the **release promotion** (`play.html`
-→ root `index.html`, demo hub → `demos/index.html`) — see "index.html migration" below. HUD value
-layout, pad multipliers, and the horizontal-scroll/wrap behaviour are MEASURED against MAME (see
-"Gameplay HUD" + "Terrain scroll" below).
+**Complete** — a faithful JS port of Atari **Lunar Lander** (1979). The **gameplay runtime is
+done and released** (steps 0-8): seams · terrain · flight · HUD · zoom · collision/landing ·
+out-of-fuel · scoring · starfield. It was assembled from a **ROM-decode stage** — twelve demo pages
+(nine vector-ROM byte-decodes + three source-faithful demos: **flight physics** `physics.html`,
+**crash explosion** `explosion.html` the `BOOM` routine, **faithful landscape** `landscape.html`
+from `LNMIN`/`MINTBL`, plus the MAME-matched `screen.html`/`scroll_view.html`) — the validated
+building blocks the runtime was extracted from; those demos now live at `demos/`. The **project root
+`index.html` boots the game**: a full mission loop — fly, land or crash (the `DECODE`/`SCAPLND` verdict → good/hard/crash
+outcomes with the bounce, the `BOOM` explosion, and the source's status messages), score by `TBSTFT`
+bonus site (4 flashing `NX` pads per drop), burn fuel down to the `DEDUCT`/`OUT OF FUEL` end-game,
+and re-drop until the tank runs dry — over a scrolling `STARS` backdrop. The vector-ROM decode demos
+live at `demos/` (`demos/index.html` hub). HUD value layout, pad multipliers, and the
+horizontal-scroll/wrap behaviour are MEASURED against MAME (see "Gameplay HUD" + "Terrain scroll" below).
+
+**Deferred by choice** — a few deliberate omissions (not bugs; the educational goal is met) are
+listed once in [Deferred (by choice)](#deferred-by-choice) at the end of this file.
 
 **The original program source has been located** (`historicalsource/lunar-lander`,
 cloned per-PC — see "Program source" below for the paths — main module `A34573.1A` by Rich Moore).
@@ -91,7 +93,7 @@ not a measure-and-reconstruct one. The physics is decoded in
   lander. Shapes are byte-decoded; **HUD value alignment + pad multipliers are now
   MEASURED from a MAME gameplay frame** (see "Gameplay HUD" below), not guessed.
   The terrain tile *sequence* + on-screen scale remain CPU-side approximations.
-  Starfield deferred (rendering needs rework).
+  (This static decode demo omits the starfield — the game renders it via `starfield.js`, step 8.)
 - **Scrolling terrain** (`demos/scroll_view.html`) — the **same terrain `screen.html`
   draws** (the `$5000-$507E` tile data, same fit-to-width + band scale + pad
   multipliers), scrolled horizontally in a **ping-pong sweep**: slides one screen-width
@@ -282,7 +284,7 @@ byte-for-byte the same opcode encoding as Asteroids. So:
 
 ## Screen / coordinate space (conclusion so far)
 
-Working model for the eventual render/runtime port:
+Working model for the render/runtime port (built):
 
 - **Playfield 1024 × 768**, **origin (0,0) bottom-left**, **Y-up**;
   on-screen content lives in **x 0–1023, y 0–767**.
@@ -370,19 +372,13 @@ python lunar_lander/tools/build_vector_rom.py
 #   discovery_rom_data.js  (feeds gallery.html)
 python lunar_lander/tools/build_discovery.py
 
-# serve from the repo root, then open a demo:
-#   /lunar_lander/demos/vector_rom.html   (font sheet)
-#   /lunar_lander/demos/lander.html       (9 lander poses)
-#   /lunar_lander/demos/gallery.html      (full ROM shape survey)
-#   /lunar_lander/demos/hud.html          ($5458 HUD labels, in-game 2×3 grid)
-#   /lunar_lander/demos/rotation.html     (360° rotation, both size banks)
-#   /lunar_lander/demos/thrust.html       (gameplay rotation range + throttle-driven thrust flame)
-#   /lunar_lander/demos/starfield.html    (034598 starfield; editable-range close-up)
-#   /lunar_lander/demos/screen.html       (full-screen layout, 1024x768; MAME-measured HUD/pads)
-#   /lunar_lander/demos/scroll_view.html  (screen.html terrain, ping-pong scroll: slide one screen, reverse)
-#   /lunar_lander/demos/physics.html      (source-faithful flight physics on a scrolling starfield)
-#   /lunar_lander/demos/explosion.html    (source-faithful crash explosion: BOOM routine, 1-of-4 random pattern)
-#   /lunar_lander/demos/landscape.html    (faithful landscape from LNMIN/MINTBL; terrain only, wraps)
+# serve from the repo root, then:
+#   /lunar_lander/                        THE GAME (index.html boots main.js)
+#   /lunar_lander/demos/                  the vector-ROM decode demos (demos/index.html hub), incl.:
+#     vector_rom.html (font) · lander.html (9 poses) · gallery.html (ROM survey) · hud.html ($5458
+#     labels) · rotation.html (360°) · thrust.html (flame) · starfield.html (034598 close-up) ·
+#     screen.html + scroll_view.html (MAME-matched layout) · physics.html (flight) ·
+#     explosion.html (BOOM) · landscape.html (LNMIN/MINTBL terrain)
 python -m http.server -b 127.0.0.1 8080
 ```
 
@@ -500,9 +496,9 @@ O $5688  P $5694  Q $56A2  R $56B4  S $56C4  T $56D2  U $56DE
 V $56EA  W $56F4  X $5702  Y $570C  Z $571A  space $5726
 ```
 
-## Planned gameplay module layout (when we build the runtime)
+## Gameplay module layout
 
-The eventual gameplay will be **ES6 modules split by subsystem** — Seb Lee-Delisle's
+The gameplay is **ES6 modules split by subsystem** — Seb Lee-Delisle's
 `Lander.js`/`game.js`/… shape, and the repo's own modular exemplar `mario_physics/` — NOT
 one big file. This mirrors the original's own decomposition (`A34573.1A` links `LUNAR`/
 `LUNVCT`/`LUNCON`/`LUNINT` plus the separate vector-ROM source), so modular files and
@@ -539,12 +535,13 @@ column, code uses the RIGHT):
 | `M.HRDY`/`M.HRDG` | `BOUNCE_VELOCITY`/`BOUNCE_GRAVITY` | `LNMIN`/`MINTBL` tables | `SECTION_ORDER`/`SECTION_BASELINES` |
 | `MINSTX`/`MINSTY`/`RMJRX` | `ZOOM_IN_SHIP_X`/`ZOOM_IN_SHIP_Y`/`ZOOM_OUT_SHIP_X` | | |
 
-**`index.html` migration.** Today `index.html` is the demo hub (only because there's no
-game yet). During the build, a root **`play.html` boots `main.js`** so the demo hub stays
-live at `index.html`. **On release, promote `play.html` → `index.html`** — a game project's
-root should boot the game (like the sibling clones, and so the built-in preview at the
-folder root plays the game) — and **move the current demo hub to `demos/index.html`**
-(linked from the game; the repo-root index at `:8080/` still lists everything).
+**`index.html` = the game (promoted on release).** The project root **`index.html` boots
+`main.js`** — the folder root plays the game, like the sibling clones (and so the built-in
+preview at the folder root plays it). The vector-ROM decode **demo hub moved to
+`demos/index.html`** (cross-linked with the game; each is one click from the other). During the
+build this was inverted (`index.html` = the demo hub, the game booted from a temporary
+`play.html`); the release promotion swapped them (`play.html → index.html`, old hub →
+`demos/index.html`). The repo-root index at `:8080/` still lists everything.
 
 The demos are the **validated building blocks** to extract from (repo convention: demos
 validate techniques later reused in the games). `demos/physics.html` is already a
@@ -584,8 +581,8 @@ single-file proto-gameplay (physics + starfield + HUD + lander + flame + input +
 **Net-new (built without a demo ancestor):** the **landscape → collision** chain —
 `landscape.heightAt` terrain queries feeding `collision.js`'s `DECODE`/`SCAPLND` verdict —
 the zoom transition, and the **bonus-site scoring** (`landscape.siteAt` + the derived 15-site
-`TBSTFT` pool feeding `beginOutcome`), all now in the runtime (`docs/research_physics.md`
-§9.1 + §11 + §11.3). Still net-new to build: only the step-8 polish (starfield + feel-tuning).
+`TBSTFT` pool feeding `beginOutcome`), all in the runtime (`docs/research_physics.md`
+§9.1 + §11 + §11.3).
 
 ### Flight-model architecture — stepper + profiles
 
@@ -622,12 +619,13 @@ entry in that HTML settings area — fuel budget, kept visually separate from co
 ### Gameplay runtime — build order & status
 
 Built one sub-step at a time, each browser-verified (repo "sub-step + save-point" pattern).
-`play.html` boots `main.js`; served by the `lunar_lander` launch config (port 8085) at
-`/play.html`. Clock: `TICK = 6/250` s (24 ms) — one source frame; float arithmetic except
-the collision/landing kernel (`research_physics.md` §13).
+The root `index.html` boots `main.js`; served by the `lunar_lander` launch config (port 8085) at
+`/`. Clock: `TICK = 6/250` s (24 ms) — one source frame; float arithmetic except
+the collision/landing kernel (`research_physics.md` §13). (During the build the boot page was a
+temporary `play.html`; the release promotion renamed it to `index.html` — see "index.html migration".)
 
-- **[done] Step 0 — seams + skeleton:** `state.js`, `render.js`, `main.js`, `play.html`.
-  Draws one lander pose to prove `main → render → dvg → *_rom_data` end-to-end.
+- **[done] Step 0 — seams + skeleton:** `state.js`, `render.js`, `main.js`, the boot page (`play.html`
+  during the build, now the root `index.html`). Draws one lander pose to prove `main → render → dvg → *_rom_data` end-to-end.
 - **[done] Step 1 — `landscape.js`:** the terrain authority — `LNMIN`/`MINTBL` surface
   (`faithful ✓`) rendered scale-agnostically via the camera (scroll + 3-copy wrap, major ¼)
   with `drawSegmentsWorld` in render.js; built query-ready (segment list + per-section
@@ -752,16 +750,7 @@ the collision/landing kernel (`research_physics.md` §13).
 (`newGame`/`beginOutcome`/`deductFuel`/`pickBonusSites` — the module table's `state.js`
 role); the full `GAMODE` attract-machine is largely N/A (the HTML panel replaces coin/SELECT).
 
-## Next steps
-
-The gameplay runtime is **feature-complete** (steps 0-8 done). The only remaining action is the
-**release promotion** — promote `play.html` → root `index.html` and move the demo hub to
-`demos/index.html` (with the cross-links + the `lunar_lander` preview root updated), per
-"index.html migration" above. After that, the small deferred items: octagon crash-drift (`DELTA`),
-the off-top reset using the faithful `DEDCTA` `FLMIN−FLUSE` (not a flat penalty), and the optional
-Seb-style physics model behind the existing `step()` seam.
-
-### Settled decode questions — don't re-investigate
+## Settled decode questions — don't re-investigate
 
 Finding the original program source answered the ROM-decode stage's open questions:
 
@@ -775,3 +764,26 @@ Finding the original program source answered the ROM-decode stage's open questio
   `LUNARNUM` is the near/far zoom state, not a terrain index). See `research_vector_usage.md` §3.
 - **`034597-01.m3`** — a **FOREIGN-VERSION-ONLY** vector ROM, not "unclear" (see the region map).
 - **"Flag"** — was the thrust flame; it's the programmatic `FLAME` routine (see "Thrust flame").
+
+## Deferred (by choice)
+
+Deliberate omissions, not bugs — small polish / completeness items put aside because the port already
+meets its educational goal (arcade-*faithful*, not a mechanically-complete reproduction). Listed here
+once, so a future session doesn't rediscover them as defects. Local sections still note each in
+context (the step entries + "Flight-model architecture"); this is the canonical list.
+
+- **Octagon crash-drift (`DELTA`).** On a crash, the `BOOM` cabin octagon + debris should inherit the
+  lander's residual velocity at impact (`DELX`/`DELY` from `VELX`/`VELY`, `A34573.1A:3488`/`:3353`),
+  so the whole field coasts with the crash momentum; ours detonates in place at the impact point. To
+  port: capture the impact velocity before `beginOutcome` zeroes it (`:561-571`), then offset the
+  `boom.js` draw by `drift · sequenceStep`. Detail in `docs/research_explosion.md` + the step-5 entry.
+- **Off-top-of-major reset penalty.** The off-top reset (`landscape.updateZoom` → `state.resetFlight`)
+  charges a flat fuel penalty instead of the faithful `DEDCTA` `FLMIN − FLUSE` accounting
+  (`docs/research_physics.md` §7.4 / §9.1).
+- **Seb-style physics model.** A second, tuned-float flight model (`physics_seb`) behind the existing
+  `step(state, input)` seam — a drop-in if ever wanted (see "Flight-model architecture — stepper +
+  profiles").
+
+Broader arcade-completeness (the full `GAMODE` attract machine, coin/`SELECT` switches, 2-player, the
+attract-mode auto-demo, and sound) is **out of scope** for the educational port — the HTML settings
+panel replaces coin/`SELECT`, and the rest isn't needed to demonstrate the ported mechanics.
