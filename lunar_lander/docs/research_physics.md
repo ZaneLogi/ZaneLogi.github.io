@@ -183,6 +183,23 @@ accumulator is integrated into `ROT`, with min/max clamps — the craft keeps sp
 after you let go. Other modes rotate directly (`ROT.NI`). Gameplay limits attitude to
 the upper half-circle (head left→up→right; see CLAUDE.md "Gameplay rotation range").
 
+### 8.1 Abort — the panic assist (`ABORT` :987-1032, built)
+
+The abort switch is a bail-out. Each frame it: auto-rotates the ship to **vertical (`SHIP` = 8)** +
+clears inertia (`TYPLPA`, :994-1006); decays horizontal velocity toward 0 (`DEC VELX+1`, :1007-1011);
+and **once upright** fires an **emergency thrust** at `TRSTAB[16] = $FF` (~9× the normal max 28) until
+the craft is rising clear — a `VELY` cap stops the blast once the upward-velocity high byte reaches
+`$10` (:1020-1023). It needs fuel (`CRDTFLG`, :989-990) and burns it fast. In source it's a **timed
+`ABTCNT` burst** armed on the switch press (`INDEX` counts it down).
+
+**Port** (`physics_arcade.js`): the `A` key runs it **while held** (a key has no press-latch for a
+timed burst — same recovery behaviour, the player controls the duration; labeled deviation). While
+held with fuel, `aborting` overrides manual rotation + throttle: it homes `shipRotation` to 8, decays
+`velX` by one high-byte/frame (`ABORT_VX_DECAY`), and — once upright — routes `ABORT_THRUST (0xFF)`
+through the normal `FRCMLT`/`ACCEL`/`BURN` path (so it points up, `throttle = 1` drives the flame, and
+the emergency burn is ~2.2 units/frame) until `velY ≥ ABORT_VY_CAP (16·256)`. Browser-verified: a
+tilted, drifting descent snaps upright, drift → 0, and the blast reverses `velY` and caps.
+
 ## 9. Motion display — velocity → scroll (lander stays centred)
 
 The craft is **not pinned to screen-centre** — it moves within a **screen dead-zone window**,

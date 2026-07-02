@@ -6,8 +6,8 @@
 // velX/velY, thrustLevel, throttle, fuel, scrollX/scrollY, posX/posY) — the
 // mutation discipline in state.js. Routine-level
 // translation of the source (A34573.1A; research_physics.md): ROTSHP, THRLVL/FRCMLT
-// thrust, ACCEL integration, FRICTN, BURN, and the PLYMOD profiles (§7). FLOAT math
-// with the REAL constants (target b) — ratios faithful, not bit-exact.
+// thrust, ACCEL integration, FRICTN, BURN, the ABORT panic assist, and the PLYMOD profiles
+// (§7). FLOAT math with the REAL constants (target b) — ratios faithful, not bit-exact.
 //
 // Headline motion model (§9): the ship moves within a screen dead-zone window (velocity →
 // posX/posY at the faithful 1/16384 scale); at the window edge the excess scrolls the scape
@@ -56,6 +56,12 @@ const ROT_GAS_FUEL = 0.06;           // fuel/frame while rotating — ROT.GAS su
                                      // fractional byte per rotation (:882); = 6 hundredths of a unit
 const THRUST_RAMP_TICKS = 2;         // ticks per THRUST level step while ↑ is held/released (provisional feel)
 
+// ABORT panic assist (A34573.1A `ABORT` :987-1032): hold A → auto-rotate to upright, kill sideways
+// drift, and fire an emergency thrust blast until rising clear, burning fuel fast. Needs fuel (:989).
+const ABORT_THRUST = 0xFF;           // TRSTAB[16] (:1025 abort level) — the emergency blast, ~9× the normal max (28)
+const ABORT_VY_CAP = 16 * 256;       // stop the blast once rising fast enough (VELY high byte ≥ $10, :1020-1023)
+const ABORT_VX_DECAY = 256;          // kill sideways drift while aborting — one velocity high-byte/frame (DEC VELX+1 :1011)
+
 // PLYMOD 0-3 profiles (research_physics.md §7.1). GRAVT = [17,17,34,17]; Prime doubles
 // gravity + 1.5× thrust + lower burn; Training has friction; Command has rotational inertia.
 const PROFILES = [
@@ -73,10 +79,20 @@ export class ArcadePhysics {
     const prof = PROFILES[state.difficulty] || PROFILES[0];
     this.frame++;
 
-    // ROTSHP: Command carries rotational inertia (SHPINE momentum — keeps turning after
-    // release, §8); other modes rotate directly. shipRotation is FLOAT (finer thrust
-    // angle; the pose fold snaps to the 9 stored poses).
-    if (prof.inertia) {
+    // ABORT (:987-1032) — the panic assist, active while A is held with fuel (no-op empty, :989).
+    // It overrides manual rotation + throttle: homes the ship upright, kills drift, blasts up.
+    // (Deviation: the source arms a timed ABTCNT burst on the switch press; a key has no latch, so
+    // we run it while held — same recovery behaviour, the player controls the duration.)
+    const aborting = input.abort && state.fuel > 0;
+
+    // ROTSHP: while aborting, auto-rotate to vertical #8 + clear inertia (:994-1006, TYPLPA).
+    // Otherwise: Command carries rotational inertia (SHPINE momentum, §8); other modes rotate
+    // directly. shipRotation is FLOAT (finer thrust angle; the pose fold snaps to the 9 poses).
+    if (aborting) {
+      state.angularVelocity = 0;
+      const toUpright = 8 - state.shipRotation;                 // home toward upright, capped at the rotate rate
+      state.shipRotation += Math.max(-ROT_RATE, Math.min(ROT_RATE, toUpright));
+    } else if (prof.inertia) {
       state.angularVelocity += input.rotate * ROT_ACCEL;
       state.angularVelocity = Math.max(-ROT_VMAX, Math.min(ROT_VMAX, state.angularVelocity));
       state.shipRotation += state.angularVelocity;
@@ -104,14 +120,19 @@ export class ArcadePhysics {
     // gravity; full 15 = 28). Out of fuel → no force AND no flame (the level is kept, but nothing
     // fires); state.throttle is the ACTUAL output (0..1) that drives the flame, so it goes to 0
     // when the tank is empty.
-    if (++this.thrTimer >= THRUST_RAMP_TICKS) {
+    if (!aborting && ++this.thrTimer >= THRUST_RAMP_TICKS) {   // abort commands its own thrust → skip the ramp
       this.thrTimer = 0;
       if (input.thrHeld) { if (state.thrustLevel < 15) state.thrustLevel++; }
       else                { if (state.thrustLevel > 0)  state.thrustLevel--; }
     }
     const outOfFuel = state.fuel <= 0;
-    const mag = outOfFuel ? 0 : THRUST_TABLE[state.thrustLevel] * prof.thrustMult;
-    state.throttle = outOfFuel ? 0 : state.thrustLevel / 15;   // ACTUAL output → drives the flame; 0 (no flame) when empty
+    // ABORT emergency thrust fires only once the ship is upright (:1013) and until it is rising clear
+    // (the VELY cap :1020-1023). rawThrust = the TRSTAB magnitude (pre-profile-mult) that drives both
+    // ACCEL and the fuel BURN; abort blasts at TRSTAB[16] regardless of the dialed level.
+    const abortBlast = aborting && Math.abs(state.shipRotation - 8) < 0.5 && state.velY < ABORT_VY_CAP;
+    const rawThrust = outOfFuel ? 0 : (aborting ? (abortBlast ? ABORT_THRUST : 0) : THRUST_TABLE[state.thrustLevel]);
+    const mag = rawThrust * (aborting ? 1 : prof.thrustMult);   // abort is a fixed blast (ignores Prime's ×1.5)
+    state.throttle = outOfFuel ? 0 : (aborting ? (abortBlast ? 1 : 0) : state.thrustLevel / 15);   // ACTUAL output → flame
 
     // FRCMLT: decompose thrust along the ship's up-axis (rotation 8 = up → +Y).
     const tilt = (state.shipRotation - 8) * STEP;
@@ -123,6 +144,12 @@ export class ArcadePhysics {
     // velocity each frame (:1985-2010). No A_SCALE: the ratio thrust:gravity is already faithful.
     state.velX += xThrust;
     state.velY += yThrust - prof.gravity;
+
+    // ABORT kills sideways drift so you come straight up (DEC VELX toward 0, :1007-1011).
+    if (aborting) {
+      if (state.velX > 0)      state.velX = Math.max(0, state.velX - ABORT_VX_DECAY);
+      else if (state.velX < 0) state.velX = Math.min(0, state.velX + ABORT_VX_DECAY);
+    }
 
     // FRICTN (Training only): every 16 frames, velocity drag VEL −= VEL/32 (:414-418).
     if (prof.friction && this.frame % 16 === 0) {
@@ -141,9 +168,10 @@ export class ArcadePhysics {
       // Every fuel subtraction also accumulates into fuelUsed: the source routes both thrust BURN
       // and ROT.GAS through GAS, which adds the same delta to FLUSE (:972-981). FLUSE vs the
       // per-second par FLMIN is what DEDUCT reads to size a crash's fuel loss (state.deductFuel).
-      const burn = Math.floor(prof.burnFactor * THRUST_TABLE[state.thrustLevel] / 256) / 100;
+      // rawThrust carries the abort blast (TRSTAB[16]) when aborting → the emergency burn is fast.
+      const burn = Math.floor(prof.burnFactor * rawThrust / 256) / 100;
       state.fuel -= burn; state.fuelUsed += burn;
-      if (input.rotate) { state.fuel -= ROT_GAS_FUEL; state.fuelUsed += ROT_GAS_FUEL; }   // ROT.GAS (:882)
+      if (input.rotate && !aborting) { state.fuel -= ROT_GAS_FUEL; state.fuelUsed += ROT_GAS_FUEL; }   // ROT.GAS (:882)
       if (state.fuel < 0) state.fuel = 0;
     }
 
