@@ -518,20 +518,26 @@ export const PATH_INDEX = [
 // (variants 4 and 5 happened to differ in X). Fixed by expanding to 12
 // entries (matching db_2A6C) + reading via resolveWaveByte().
 //
-// X is ROM sprite coords (canvas_X = X − 10).
+// COORDINATES BELOW ARE INTERNAL (rawX/rawY), NOT canvas pixels. The renderer
+// INVERTS Y — canvas_Y ≈ ~(y + 0x4F) & 0xFF … (the cpl at gg1-5.s:2314) — so
+// internal Y is UP-POSITIVE: a LARGER y sits HIGHER on screen (nearer the TOP).
+//   y = 0x9B → canvas_Y ≈ 11  (top)       y = 0x23 → canvas_Y ≈ 251 (bottom)
+//   x → canvas_X = x*2 − 9   (left-positive: small x = left edge, big x = right)
+// The (…) note on each entry is its resulting ON-SCREEN position — so don't read
+// a big raw y as "low"; after the flip it's high up.
 export const VARIANTS = [
-    { y: 0x9B, x: 0x34, rotHi: 0x03 },  // 0  — pair 0 member 0 (low-bottom-left)
-    { y: 0x9B, x: 0x44, rotHi: 0x03 },  // 1  — pair 0 member 1 (low-bottom-right)
-    { y: 0x23, x: 0x00, rotHi: 0x00 },  // 2  — pair 1 member 0 (top-left edge)
-    { y: 0x23, x: 0x78, rotHi: 0x02 },  // 3  — pair 1 member 1 (top-right edge)
-    { y: 0x9B, x: 0x2C, rotHi: 0x03 },  // 4  — pair 2 member 0 (low-bottom, wider)
-    { y: 0x9B, x: 0x4C, rotHi: 0x03 },  // 5  — pair 2 member 1
-    { y: 0x2B, x: 0x00, rotHi: 0x00 },  // 6  — pair 3 member 0 (mid-top edges)
-    { y: 0x2B, x: 0x78, rotHi: 0x02 },  // 7  — pair 3 member 1
-    { y: 0x9B, x: 0x34, rotHi: 0x03 },  // 8  — pair 4 member 0 (== pair 0 member 0)
-    { y: 0x9B, x: 0x34, rotHi: 0x03 },  // 9  — pair 4 member 1 (== pair 0 member 0; both same)
-    { y: 0x9B, x: 0x44, rotHi: 0x03 },  // 10 — pair 5 member 0 (== pair 0 member 1)
-    { y: 0x9B, x: 0x44, rotHi: 0x03 },  // 11 — pair 5 member 1 (== pair 0 member 1; both same)
+    { y: 0x9B, x: 0x34, rotHi: 0x03 },  // 0  — pair 0 member 0 (top, mid-left)
+    { y: 0x9B, x: 0x44, rotHi: 0x03 },  // 1  — pair 0 member 1 (top, mid-right)
+    { y: 0x23, x: 0x00, rotHi: 0x00 },  // 2  — pair 1 member 0 (bottom, left edge)
+    { y: 0x23, x: 0x78, rotHi: 0x02 },  // 3  — pair 1 member 1 (bottom, right edge)
+    { y: 0x9B, x: 0x2C, rotHi: 0x03 },  // 4  — pair 2 member 0 (top, mid-left, wider)
+    { y: 0x9B, x: 0x4C, rotHi: 0x03 },  // 5  — pair 2 member 1 (top, mid-right, wider)
+    { y: 0x2B, x: 0x00, rotHi: 0x00 },  // 6  — pair 3 member 0 (low, left edge)
+    { y: 0x2B, x: 0x78, rotHi: 0x02 },  // 7  — pair 3 member 1 (low, right edge)
+    { y: 0x9B, x: 0x34, rotHi: 0x03 },  // 8  — pair 4 member 0 (== entry 0: top, mid-left)
+    { y: 0x9B, x: 0x34, rotHi: 0x03 },  // 9  — pair 4 member 1 (== entry 0; both same)
+    { y: 0x9B, x: 0x44, rotHi: 0x03 },  // 10 — pair 5 member 0 (== entry 1: top, mid-right)
+    { y: 0x9B, x: 0x44, rotHi: 0x03 },  // 11 — pair 5 member 1 (== entry 1; both same)
 ];
 
 // ── sprt_fmtn_hpos — formation slot lookup ────────────────────────────
@@ -638,7 +644,7 @@ export const ATTK_WAV_IDS = new Uint8Array([
 //   [2..16] 5 wave triplets [byte0, byte1, byte2]
 //   [17]    0xFF terminator
 // Per triplet: byte0 — transient-attack control (ignored); byte1/byte2 — the
-// path-byte for member 1 / member 2 of every pair in that wave.
+// wave-byte for member 0 / member 1 (the 1st / 2nd bug) of every pair in that wave.
 // Wave-byte bit layout (per gg1-3.s:1450-1458):
 //   bits 0-5  index into PATH_INDEX (db_2A3C)
 //   bit 6     pair-member selector AND negate-rotation flag — picks
@@ -646,10 +652,20 @@ export const ATTK_WAV_IDS = new Uint8Array([
 //             path's per-segment rotRate so partners fly mirrored arcs.
 //   bit 7     per-byte launch gate. CLEAR → waits for frame_cnt & 0x07 == 0
 //             before firing. SET → fires the frame the launcher reads it.
-//   bit 0     bomb-counter init (0 → 0x08, 1 → 0x44).
+//   bit 0     OVERLOADED — this is the LOW bit of the 0-5 index above, read a
+//             SECOND time as the bomb-counter init: 0 → 0x08 (top entrant),
+//             1 → 0x44 (side entrant). Even path index = top-entry bug, odd =
+//             side-entry bug, so the same bit serves both. gg1-3.s:1826-1834.
 // Transcribed VERBATIM from the .db lines — the `+0x80`/`+0x00` are evaluated
 // by JS exactly as the assembler does, keeping this a 1:1 copy. Row 0 (stage 1)
 // expands to the same triplets the old STAGE_WAVES[1] carried. Row stride = 18.
+
+// take the first line as example:
+// header 0x14, 0x00 (currently unused)
+// the first triplet 0x00, 0x00, 0x40+0x80
+//      0x00: transient-attack control (ignored)
+//      0x00: wave-byte for member 0 of wave 1 (index=0, pair-member=0, launch-gate=0 → waits for frame&7==0, bomb-counter=0)
+//      0x40+0x80 (=0xC0): wave-byte for member 1 of wave 1 (index=0, pair-member=1, launch-gate=1 → fires immediately, bomb-counter=0)
 const D_COMBAT_STG_DAT = new Uint8Array([
     0x14,0x00, 0x00,0x00,0x40+0x80, 0x00,0x01,0x01+0x00, 0x00,0x41,0x41+0x00, 0x00,0x40,0x40+0x00, 0x00,0x00,0x00+0x00, 0xFF,
     0x14,0x01, 0x00,0x42,0x02+0x80, 0x00,0x03,0x05+0x80, 0x00,0x43,0x45+0x80, 0x00,0x42,0x44+0x80, 0x00,0x02,0x04+0x80, 0xFF,
