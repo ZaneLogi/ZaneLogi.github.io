@@ -1,0 +1,61 @@
+// playseq.js — the PoP animation *interpreter* (logic): a faithful JS port of
+// SDLPoP's play_seq (seg006.c:570), plus the small Character API it drives.
+// play_seq() executes a sequence's opcodes — advancing Char.x/y, action,
+// direction, curr_seq — until it hits a frame byte, which it stores in Char.frame
+// and returns. That single frame emit == one animation tick.
+//
+// The opcode set + the assembler live in seqbuilder.js; the run/stand byte table
+// in seqtbl.js. This file just runs the bytes. GPLv3 (see NOTICE).
+import { SEQ } from './seqbuilder.js';
+import { SEQTBL, SEQ_OFFSETS } from './seqtbl.js';
+
+export { SEQ_OFFSETS };                         // re-export (name -> byte offset, like seqtbl_offsets)
+
+export const DIR_RIGHT = 0, DIR_LEFT = -1;      // dir_0_right / dir_FF_left
+
+const s8 = (b) => (b < 0x80 ? b : b - 0x100);   // signed 8-bit
+
+// char_dx_forward (seg006.c:553): apply a delta in the character's facing direction.
+export function charDxForward(ch, delta) {
+  return ch.x + (ch.direction < DIR_RIGHT ? -delta : delta);
+}
+
+export function makeCharacter(opts = {}) {
+  return {
+    charid: 0, frame: 0, action: 0, curr_seq: 0, curr_row: 0,
+    x: opts.x ?? 0, y: opts.y ?? 0, direction: opts.direction ?? DIR_RIGHT,
+    fall_x: 0, fall_y: 0,
+  };
+}
+
+export function startSeq(ch, name) {
+  const off = SEQ_OFFSETS[name];
+  if (off === undefined) throw new Error(`startSeq: unknown sequence "${name}"`);
+  ch.curr_seq = off;
+}
+
+// One animation tick — faithful port of play_seq (seg006.c:570). Runs opcodes
+// until a frame byte, which becomes Char.frame. Opcodes for subsystems we don't
+// model (sound, chompers, level, items, knockback) consume their operands but
+// are otherwise no-ops.
+export function playSeq(ch) {
+  for (let guard = 0; ; ++guard) {
+    if (guard > 10000) throw new Error('playSeq: runaway (no frame emitted)');
+    const cmd = SEQTBL[ch.curr_seq++];
+    switch (cmd) {
+      case SEQ.DX: ch.x = charDxForward(ch, s8(SEQTBL[ch.curr_seq++])); break;
+      case SEQ.DY: ch.y += s8(SEQTBL[ch.curr_seq++]); break;
+      case SEQ.FLIP: ch.direction = ~ch.direction; break;
+      case SEQ.JMP_IF_FEATHER: ch.curr_seq += 2; break;          // no feather-fall -> skip target
+      case SEQ.JMP: ch.curr_seq = SEQTBL[ch.curr_seq] | (SEQTBL[ch.curr_seq + 1] << 8); break;
+      case SEQ.ACTION: ch.action = SEQTBL[ch.curr_seq++]; break;
+      case SEQ.SET_FALL: ch.fall_x = s8(SEQTBL[ch.curr_seq++]); ch.fall_y = s8(SEQTBL[ch.curr_seq++]); break;
+      case SEQ.SOUND: ch.curr_seq++; break;                      // audio not modeled
+      case SEQ.UP: ch.curr_row--; break;
+      case SEQ.DOWN: ch.curr_row++; break;
+      case SEQ.GET_ITEM: ch.curr_seq++; break;
+      case SEQ.KNOCK_UP: case SEQ.KNOCK_DOWN: case SEQ.DIE: case SEQ.END_LEVEL: break;
+      default: ch.frame = cmd; return;                           // a frame number -> emit + stop
+    }
+  }
+}

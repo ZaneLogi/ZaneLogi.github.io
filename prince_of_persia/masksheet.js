@@ -33,6 +33,16 @@ export class MaskSprite {
     this.h = h;
     this.bits = bits;                 // Uint8Array, 1-bpp MSB-first, rows byte-aligned
     this.rowbytes = (w + 7) >> 3;
+    // Content bounding box of the opaque pixels. The DAT frames aren't centered in
+    // their image (varying left/right padding), so facing-by-mirroring must mirror
+    // around the CONTENT centre (this.cx) — mirroring around the image box instead
+    // shifts the figure per-frame (a left/right asymmetry).
+    let cminx = w, cmaxx = -1, cminy = h, cmaxy = -1;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++)
+      if (this.bit(x, y)) { if (x<cminx)cminx=x; if(x>cmaxx)cmaxx=x; if(y<cminy)cminy=y; if(y>cmaxy)cmaxy=y; }
+    this.content = cmaxx < 0 ? { minx: 0, maxx: w - 1, miny: 0, maxy: h - 1 }
+                             : { minx: cminx, maxx: cmaxx, miny: cminy, maxy: cmaxy };
+    this.cx = (this.content.minx + this.content.maxx + 1) / 2;   // content centre x (px)
     // Frame draw-origin. Filled in later from frame_table_kid (seg006.c) so an
     // animation doesn't jitter; 0,0 = draw at top-left for now.
     this.ox = 0;

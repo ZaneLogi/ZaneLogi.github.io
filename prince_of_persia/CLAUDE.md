@@ -119,20 +119,111 @@ four decompressors + `conv_to_8bpp` ported verbatim; we stop at the 8-bpp index
 buffer and threshold to a 1-bit mask. The single non-image resource (the `shpl`
 palette — id 400 in `KID.DAT`) is auto-skipped by a dims sanity check.
 
+## Sprite registration (drawing the character)
+
+Each frame is positioned by a **registration point** (`obj_x`), *not* by its
+bounding box. The KID frames are **right-aligned with varying left padding** —
+that padding is **not noise, it IS the registration**: draw the image's left edge
+at `obj_x` and the character lands correctly. (`obj_x = (char_dx_forward(cur_frame.dx)
+<< 1) - 116`, `seg008.c:1736`; per-frame `dx/dy` come from `frame_table_kid`.)
+KID sprites natively face **LEFT**.
+
+- **Flipping to the other facing mirrors about the registration point**, per PoP's
+  `draw_mid` (`seg008.c:1022`: `xpos -= w; hflip`). Facing left = draw native at
+  the reg point (box `[x, x+w]`); facing right = `translate(x); scale(-1)` (box
+  `[x-w, x]`).
+- **Do NOT mirror about the image-box centre** (shifts the figure by the padding
+  each frame) **nor the content centre** (`MaskSprite.cx` — *amplifies* the
+  per-frame content-centre swing ~3× and jitters the gait). Both were tried and
+  rejected; the correctness test is that the **feet are mirror-symmetric about the
+  reg point** (pixel-measured).
+- `demos/motion.js` uses a **simplified reg-point model** (the run cycle has
+  `dx=dy=0`, so `obj_x` reduces to the accumulated position). The **full** port
+  applies `frame_table_kid`'s `dx/dy`, so every move — jumps/turns, where `dx≠0`
+  and the reg point moves per frame — registers automatically.
+
 ## Status / roadmap
 
 - **[done] Sprite extraction.** `KID.DAT` → 219 silhouette frames (ids 401–619)
-  in `gfx/kid_masks.json`; verified by eye (the run cycle is unmistakable).
-  `masksheet.js` loads + rasterizes (`MaskSheet.load` → `MaskSprite.draw`);
-  `demos/actor_frames.html` is the inspector.
-- **[next] Motion.** Pull `frame_table_kid` (per-frame draw offsets) out of
-  `seg006.c` into `MaskSprite.ox/oy` so a flipbook doesn't jitter, then port
-  `play_seq` (the `seqtbl` bytecode interpreter) + a minimal driver. First moving
-  proof: the run cycle (frames ~408–412).
+  in `gfx/kid_masks.json`. `masksheet.js` loads + rasterizes; `demos/actor_frames.html`
+  is the inspector.
+- **[done] Motion — the `play_seq` engine.** Split by responsibility across three
+  files: **`seqbuilder.js`** (logic) — the opcode set + a `SeqBuilder` assembler
+  mirroring `seqtbl.c`'s `act/dx/jmp` macros, PoP-agnostic; **`seqtbl.js`** (data) —
+  the run/startrun/stand table transcribed via that builder into `SEQTBL` bytes +
+  `SEQ_OFFSETS` (the file that grows as moves are added); **`playseq.js`** (logic) —
+  a faithful `play_seq` interpreter (`seg006.c:570`) + the Character API. Dependency
+  arrow is one-way: `seqbuilder → seqtbl → playseq` (assemble → data → run). Plus
+  `res/frame_table_kid.js` (via `tools/extract_frametable.py`); `demos/motion.html`
+  runs the run cycle — symmetric both facings, pacing a fixed view. See **Sprite
+  registration** above for how facing/flip is drawn.
+- **[next] More moves.** Transcribe `standjump` / `runjump` / `turn` from
+  `seqtbl.c` (or write a full `seqtbl` parser like `extract_frametable.py`) — the
+  engine is done, so a new move is mostly data. Jumps pull in `SEQ_SET_FALL` + gravity.
 - **[later] The player (`index.html`).** Drive the actor with the keyboard
   (walk / run / jump / turn) via `control_kid`'s state machine.
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
+
+## UI conventions — HUD / on-screen readouts
+
+> **Promote to the repo-root `CLAUDE.md` on merge** (same as the lessons below).
+> This is a general UI rule, not PoP-specific — it applies to every game's HUD;
+> it just stays local until the project lands so it rides in with the merge.
+
+**Live readouts use fixed-width fields — pad each value to its domain's maximum
+width so the text never bounces.** A HUD that updates every frame shifts every
+field to the right of any value whose *digit / character count* changes
+(`frame=7` → `frame=11`, `dir=left` → `dir=right`). That horizontal jitter is
+noisy and hard to read. A monospace font alone does **not** fix it — `1` and
+`11` are still one cell vs two; the *field width itself* must be held constant.
+
+The rule, in three parts:
+
+1. **Monospace + `white-space: pre`** on the container, so the pad spaces render
+   at a fixed cell width (a proportional font defeats padding).
+2. **Pad every variable field to the max width its value can reach** — numbers
+   right-aligned (`padStart`), state words left-aligned (`padEnd`). Size to the
+   domain maximum: a coordinate bounded `0..640` → 3 digits; a `left`/`right`
+   state → 5. Constant fields (e.g. `[bounds 0..640]`) need no padding.
+3. **The test is one constant string length.** Sample the rendered readout over
+   many ticks across all states; if the set of distinct lengths is > 1, a field
+   is still bouncing. (Measure the string, not a screenshot — same discipline as
+   the pixel-measure lesson below.)
+
+Reference implementation: `demos/motion.js` — the `padN` / `padW` helpers and the
+HUD line that uses them.
+
+## Lessons learned — debugging the run cycle
+
+> **Promote this list to the repo-root `CLAUDE.md` once `prince_of_persia` is
+> completed and merged to `main`.** These generalise well past this project (they
+> belong with the retro-port lessons at the root), but stay local until the
+> project lands so they ride in with its merge.
+
+Getting the run cycle right — facing → anchor → step distance — took several wrong
+turns. Each lesson was paid for in bugs:
+
+1. **Source data that looks "weird" is usually load-bearing.** The frames' asymmetric
+   padding looked like sloppiness; it was the per-frame registration. Suspect
+   *meaning* before normalising it away. (= the root rule *"deviations are
+   load-bearing"*, applied to art assets.)
+2. **In a faithful port, find the transform in the source — don't invent it.** The
+   flip's mirror axis was guessed twice (box centre, content centre) before reading
+   `draw_mid`, where PoP's exact rule (`xpos -= w; hflip`) was waiting. The draw/blit
+   routine — flip, clip included — is part of the mechanism; read it, don't reconstruct it.
+3. **Static correctness ≠ dynamic correctness.** A fix that passes a single-frame
+   symmetry test can still be wrong in motion. When the symptom is animation, measure
+   the animation over time (the failing feature — the feet), not a static proxy.
+4. **Measure canvas pixels, not screenshots.** The preview screenshot rasterises at a
+   non-1:1 scale — it invented an offset that wasn't there and could equally hide a
+   real one. Every correct conclusion came from `getImageData` via `preview_eval`.
+   Eyeballing precise position / facing / symmetry is actively misleading.
+5. **Suspect your own last fix; trust the observer's "this looks off."** The step
+   asymmetry was *caused by* the previous fix — a new symptom right after a change
+   makes the change the prime suspect. When the user reports a mismatch and your
+   reasoning "proves" it's fine, **measure** — the observer watching the real output
+   beats reasoning from assumptions.
 
 ## Commit style
 
