@@ -1,0 +1,55 @@
+<svg width="100%" viewBox="0 0 680 470" role="img" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,sans-serif">
+<title>path_001D — one bytecode, three routes</title>
+<style>
+ /* Unconditional dark theme (see gen_path_svg.py note). */
+ svg{background:#141518;--tp:#eaeaea;--ts:#b4b4b4;--tm:#8a8a8a;--acc:#7cb6ff;--warn:#fb923c;--trans:#c084fc;--grey:#6b7280;--border:#444;--pf:#161616;}
+ .mono{font-family:ui-monospace,Menlo,Consolas,monospace;}
+</style>
+<text x="34" y="30" font-size="21" font-weight="500" fill="var(--tp)">One bytecode, three flights — the two gates that fork it</text>
+<text x="34" y="52" font-size="14" fill="var(--ts)">Path <tspan class="mono">001D</tspan> carries <tspan class="mono" fill="var(--tp)">F7</tspan> (transient) then <tspan class="mono" fill="var(--tp)">F0</tspan> (stage-8) — a bug runs exactly one route</text>
+<text x="34" y="86" font-size="13" font-weight="500" fill="var(--tp)">The bytecode — two branch tokens</text>
+<text x="34" y="106" font-size="12.5" class="mono" fill="var(--grey)">23 06 16</text>
+<text x="113.6" y="106" font-size="12.5" class="mono" fill="var(--grey)">23 00 19</text>
+<text x="193.2" y="106" font-size="12.5" class="mono" fill="var(--trans)">F7</text>
+<text x="223.6" y="106" font-size="12.5" class="mono" fill="var(--grey)">23 F0 02</text>
+<text x="303.2" y="106" font-size="12.5" class="mono" fill="var(--warn)">F0</text>
+<text x="333.59999999999997" y="106" font-size="12.5" class="mono" fill="var(--acc)">23 F0 24</text>
+<text x="413.19999999999993" y="106" font-size="12.5" class="mono" fill="var(--grey)">FB</text>
+<text x="34" y="138" font-size="12" fill="var(--grey)">■ shared trunk (segments A · B · C · D)</text>
+<text x="34" y="158" font-size="12" fill="var(--trans)">■ transient: <tspan class="mono">F7</tspan> → sub-path <tspan class="mono">004B</tspan></text>
+<text x="46" y="174" font-size="11" fill="var(--tm)">swoop, target player (FE), leave (FF)</text>
+<text x="34" y="196" font-size="12" fill="var(--acc)">■ stages 1–7: skip both gates → <tspan class="mono">FB</tspan> home</text>
+<text x="34" y="216" font-size="12" fill="var(--warn)">■ stages 8+: <tspan class="mono">F0</tspan> → sub-path <tspan class="mono">005E</tspan> → <tspan class="mono">FB</tspan> home</text>
+<text x="34" y="248" font-size="11.5" fill="var(--tm)">The two formation routes peel apart only</text>
+<text x="34" y="264" font-size="11.5" fill="var(--tm)">at F0; the transient peels off earlier, at</text>
+<text x="34" y="280" font-size="11.5" fill="var(--tm)">F7, and never comes back.</text>
+<rect x="300" y="96" width="212.8" height="273.6" fill="var(--pf)" stroke="var(--border)" stroke-width="1"/>
+<line x1="338.0" y1="122.6" x2="474.8" y2="122.6" stroke="var(--border)" stroke-width="0.5" opacity="0.5"/>
+<line x1="338.0" y1="137.8" x2="474.8" y2="137.8" stroke="var(--border)" stroke-width="0.5" opacity="0.5"/>
+<line x1="338.0" y1="153.0" x2="474.8" y2="153.0" stroke="var(--border)" stroke-width="0.5" opacity="0.5"/>
+<line x1="338.0" y1="168.2" x2="474.8" y2="168.2" stroke="var(--border)" stroke-width="0.5" opacity="0.5"/>
+<line x1="338.0" y1="183.4" x2="474.8" y2="183.4" stroke="var(--border)" stroke-width="0.5" opacity="0.5"/>
+<line x1="338.0" y1="198.6" x2="474.8" y2="198.6" stroke="var(--border)" stroke-width="0.5" opacity="0.5"/>
+<path d="M454.0,193.3 L455.8,195.5 L456.9,197.0 L458.3,199.5 L459.1,201.3 L460.0,204.0 L460.4,205.8 L460.8,208.7 L460.8,210.6 L460.6,213.4 L460.3,215.3 L459.5,218.0 L458.8,219.8 L457.5,222.3 L456.5,223.9 L454.8,226.2 L453.5,227.6 L451.3,229.4 L449.7,230.5 L447.3,231.9 L445.5,232.7 L442.8,233.6 L441.0,234.0 L438.1,234.3 L436.2,234.4 L433.4,234.2 L431.5,233.9 L428.8,233.1 L427.0,232.4 L424.5,231.1 L422.9,230.1 L420.6,228.4 L419.2,227.1 L417.4,224.9 L416.3,223.3 L414.9,220.9 L414.1,219.1 L413.2,216.4 L412.8,214.6 L411.8,211.9 L411.0,210.2 L409.4,207.8 L408.2,206.4 L406.0,204.5 L404.5,203.4 L402.0,202.0 L400.2,201.3 L397.4,200.6 L395.6,200.4 L392.7,200.4 L390.8,200.6 L388.1,201.3 L386.3,202.0 L383.8,203.4 L382.2,204.5 L380.1,206.4 L378.9,207.8 L377.3,210.2 L376.4,211.9 L375.5,214.6 L375.0,216.4 L374.8,219.3 L374.8,221.2 L375.2,224.0 L375.7,225.8 L376.8,228.4 L377.5,230.2 L378.6,232.8 L379.3,234.6 L380.3,237.3 L381.0,239.0 L382.0,241.7 L382.6,243.5 L383.6,246.2 L384.2,248.0 L385.2,250.7 L385.8,252.5 L386.7,255.2 L387.2,257.0 L388.1,259.7 L388.7,261.5 L389.5,264.3 L390.0,266.1 L390.8,268.8 L391.3,270.6 L392.1,273.4 L392.6,275.2 L393.3,278.0 L393.8,279.8 L394.5,282.6 L394.9,284.4 L395.6,287.2 L396.0,289.0 L396.7,291.8 L397.1,293.7 L397.7,296.5 L398.0,298.3 L398.6,301.1 L399.0,303.0 L399.5,305.8 L399.8,307.7 L400.3,310.5 L400.6,312.4 L401.1,315.2 L401.4,317.0 L401.8,319.9 L402.0,321.7 L402.4,324.6 L402.7,326.5 L403.0,329.3 L403.2,331.2 L403.5,334.0 L403.7,335.9 L404.0,338.7 L404.2,340.6 L404.4,343.5 L404.6,345.4 L404.8,348.2 L404.9,350.1 L405.1,352.9 L405.2,354.8 L405.4,357.7 L405.4,359.6 L405.5,362.4 L405.6,364.3 L405.7,367.2 L405.7,369.1 L405.7,371.9 L405.8,373.8 L405.8,376.7 L405.7,378.6 L405.7,381.4 L405.7,383.3" fill="none" stroke="var(--trans)" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M456.9,197.0 L458.3,199.5 L459.1,201.3 L460.0,204.0 L460.4,205.8 L460.8,208.7 L460.8,210.6 L460.6,213.4 L460.3,215.3 L459.5,218.0 L458.8,219.8 L457.5,222.3 L456.5,223.9 L454.8,226.2 L453.5,227.6 L451.3,229.4 L449.7,230.5 L447.3,231.9 L445.5,232.7 L442.8,233.6 L441.0,234.0 L438.1,234.3 L436.2,234.4 L433.4,234.2 L431.5,233.9 L428.8,233.1 L427.0,232.4 L424.5,231.1 L422.9,230.1 L420.6,228.4 L419.2,227.1 L417.4,224.9 L416.3,223.3 L414.9,220.9 L414.1,219.1 L413.2,216.4 L412.8,214.6 L412.2,211.8 L411.8,209.9 L411.1,207.2 L410.7,205.3 L410.1,202.5 L409.7,200.7 L409.0,197.9 L408.6,196.0 L408.0,193.2 L407.6,191.4 L407.0,188.6 L406.6,186.8 L405.9,184.0 L405.5,182.1 L404.9,179.3 L404.5,177.5 L403.8,174.7 L403.4,172.9 L402.8,170.1 L402.4,168.2 L401.8,165.4 L401.3,163.6 L400.7,160.8 L400.3,159.0 L399.7,156.2 L399.3,154.3" fill="none" stroke="var(--acc)" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M456.9,197.0 L458.5,200.5 L459.6,204.1 L459.9,207.9 L459.7,211.7 L458.7,215.4 L457.2,218.9 L455.1,222.0 L452.5,224.8 L449.4,227.1 L446.0,228.8 L442.4,229.9 L438.6,230.3 L434.8,230.1 L431.1,229.3 L427.6,227.9 L424.4,225.8 L421.6,223.3 L419.2,220.3 L417.4,216.9 L416.2,213.3 L415.7,209.6 L415.8,205.8 L416.5,202.0 L417.9,198.5 L416.4,195.0 L414.9,191.5 L413.5,188.0 L412.0,184.5 L410.5,181.0 L409.0,177.5 L407.6,174.0 L406.1,170.5 L404.6,167.0 L403.1,163.5 L401.7,160.0 L400.2,156.5 L398.7,153.0" fill="none" stroke="var(--warn)" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 3"/>
+<path d="M390.2,106.5 L390.3,108.3 L390.5,111.2 L390.7,113.1 L391.2,115.9 L391.5,117.8 L392.1,120.5 L392.6,122.4 L393.4,125.1 L394.1,126.9 L395.1,129.6 L395.8,131.3 L397.1,133.9 L397.9,135.6 L399.3,138.1 L400.3,139.7 L401.9,142.0 L403.0,143.6 L404.8,145.8 L406.0,147.3 L407.9,149.4 L409.2,150.8 L411.3,152.7 L412.7,154.0 L414.7,156.0 L416.1,157.3 L418.2,159.3 L419.6,160.6 L421.6,162.5 L423.0,163.9 L425.1,165.8 L426.4,167.1 L428.5,169.1 L429.9,170.4 L431.9,172.4 L433.3,173.7 L435.4,175.6 L436.8,177.0 L438.8,178.9 L440.2,180.2 L442.3,182.2 L443.6,183.5 L445.7,185.5 L447.1,186.8 L449.1,188.7 L450.5,190.1 L452.6,192.0 L454.0,193.3" fill="none" stroke="var(--grey)" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M454.0,193.3 L455.8,195.5 L456.9,197.0" fill="none" stroke="var(--grey)" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="390.2" cy="106.5" r="3.5" fill="var(--tp)"/>
+<text x="397.2" y="102.5" font-size="10" fill="var(--tm)">start</text>
+<rect x="450.0" y="189.3" width="8" height="8" fill="var(--trans)" transform="rotate(45 454.0 193.3)"/>
+<text x="440.0" y="184.3" font-size="10.5" class="mono" text-anchor="end" fill="var(--trans)">F7</text>
+<rect x="452.9" y="193.0" width="8" height="8" fill="var(--tp)" transform="rotate(45 456.9 197.0)"/>
+<text x="466.9" y="208.0" font-size="10.5" class="mono" text-anchor="start" fill="var(--tp)">F0</text>
+<circle cx="398.8" cy="153.0" r="4" fill="none" stroke="var(--tp)" stroke-width="1.5"/>
+<text x="406.8" y="156.0" font-size="10" fill="var(--tm)">home slot</text>
+<text x="403.7" y="377.3" font-size="10" class="mono" fill="var(--trans)">leaves ↓</text>
+<rect x="300" y="383" width="18" height="3" rx="1.5" fill="var(--grey)"/>
+<text x="326" y="387" font-size="11" fill="var(--ts)">shared trunk (all routes)</text>
+<rect x="300" y="400" width="18" height="3" rx="1.5" fill="var(--acc)"/>
+<text x="326" y="404" font-size="11" fill="var(--ts)">stages 1–7 → home</text>
+<rect x="300" y="417" width="18" height="3" rx="1.5" fill="var(--warn)"/>
+<text x="326" y="421" font-size="11" fill="var(--ts)">stages 8+ (F0 → 005E) → home</text>
+<rect x="300" y="434" width="18" height="3" rx="1.5" fill="var(--trans)"/>
+<text x="326" y="438" font-size="11" fill="var(--ts)">transient (F7 → 004B) → leaves</text>
+</svg>
