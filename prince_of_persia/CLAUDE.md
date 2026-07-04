@@ -137,10 +137,13 @@ KID sprites natively face **LEFT**.
   per-frame content-centre swing ~3× and jitters the gait). Both were tried and
   rejected; the correctness test is that the **feet are mirror-symmetric about the
   reg point** (pixel-measured).
-- `demos/motion.js` uses a **simplified reg-point model** (the run cycle has
-  `dx=dy=0`, so `obj_x` reduces to the accumulated position). The **full** port
-  applies `frame_table_kid`'s `dx/dy`, so every move — jumps/turns, where `dx≠0`
-  and the reg point moves per frame — registers automatically.
+- `demos/motion.js` uses a **simplified reg-point model**: `actorX` accumulates only
+  the *seqtbl* `dx`; the per-frame *`frame_table_kid`* `dx/dy` is **not** applied. Exact
+  for the run cycle (its frame-table `dx=dy=0`), but the sandbox's turn/step frames carry
+  small nonzero frame-table `dx` (e.g. turn frames 50–52 = 4/3/1), so those get a minor
+  per-frame registration error — a subtle nudge, accepted for v1. The **full** port applies
+  `frame_table_kid`'s `dx/dy` (the `obj_x` formula above), which sharpens turn/step and is
+  *required* for jumps (their large `dy` moves the reg point per frame).
 
 ## Status / roadmap
 
@@ -155,13 +158,28 @@ KID sprites natively face **LEFT**.
   a faithful `play_seq` interpreter (`seg006.c:570`) + the Character API. Dependency
   arrow is one-way: `seqbuilder → seqtbl → playseq` (assemble → data → run). Plus
   `res/frame_table_kid.js` (via `tools/extract_frametable.py`); `demos/motion.html`
-  runs the run cycle — symmetric both facings, pacing a fixed view. See **Sprite
-  registration** above for how facing/flip is drawn.
-- **[next] More moves.** Transcribe `standjump` / `runjump` / `turn` from
-  `seqtbl.c` (or write a full `seqtbl` parser like `extract_frametable.py`) — the
-  engine is done, so a new move is mostly data. Jumps pull in `SEQ_SET_FALL` + gravity.
-- **[later] The player (`index.html`).** Drive the actor with the keyboard
-  (walk / run / jump / turn) via `control_kid`'s state machine.
+  is a **move sandbox** — a `<select>` picks stand / crouch / walk / run / turn; each
+  `startSeq`s a sequence in `seqtbl.js` and the engine's own `jmp`s chain the transitions
+  (startrun→runcyc, runturn→runcyc7, step/turn→stand). The driver only decides *when* to
+  fire a wall-turn (the `control_kid` stand-in): **run** reverses with the faithful
+  `runturn` skid; **walk** (careful step `step11`) does a standing `turn` at the wall;
+  poses hold in place. Symmetric both facings, fixed [0,640] view. See **Sprite
+  registration** above for facing/flip and the reg-point simplification.
+- **[next] Jumps + full frame-registration.** `standjump` / `runjump` pull in
+  `SEQ_SET_FALL` + gravity — a new *mechanism*, so they get their own `demos/jump.html`
+  (the "new demo per new subsystem" rule). Jumps also force the **full `frame_table_kid`
+  dx/dy** application (their large `dy` moves the reg point per frame), which also sharpens
+  the sandbox's turn/step registration (see **Sprite registration**).
+- **[later] The player (`index.html`).** Drive the actor with keyboard/gamepad via the
+  input→transition layer — **scaffolded in `control.js`** (a port of `control_kid`,
+  `seg005.c`). The model (no separate FSM — the seqtbl sequences ARE the states; this
+  layer only picks the next sequence at decision frames): input is made **facing-relative**
+  (absolute L/R + `ch.direction` → forward/backward, so *reverse* = BACKWARD), dispatched by
+  **current frame** (`seg005.c:262`). The two signature behaviours live in `controlRunning`
+  (`seg005.c:588`): **frame-gated stop** (release only skids at run frame 7/11 → `runstop`)
+  and **reverse** (BACKWARD → `runturn`). `control.js` is a reserved, not-yet-wired scaffold
+  (handlers stubbed with citations) until this step; wiring it needs a keyboard/gamepad read
+  layer + `runstop` transcribed into `seqtbl.js`.
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Prince of Persia — motion (play_seq run cycle)</title>
+<title>Prince of Persia — motion (play_seq move sandbox)</title>
 <style>
   :root { color-scheme: dark; }
   body { margin: 0; font: 13px/1.4 system-ui, sans-serif; background: #1b1d22; color: #d7d9de; }
@@ -16,14 +16,21 @@
   #wrap { padding: 16px; }
   #stage { display: block; border-radius: 4px; }
   #hud { margin-top: 10px; font: 11px/1.5 ui-monospace, monospace; color: #8a8f99; white-space: pre; }
-  button { background: #2a2e36; color: #d7d9de; border: 1px solid #3a3f49; border-radius: 4px;
+  button, select { background: #2a2e36; color: #d7d9de; border: 1px solid #3a3f49; border-radius: 4px;
            padding: 3px 10px; cursor: pointer; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Prince of Persia — motion <small>play_seq · run cycle</small></h1>
+  <h1>Prince of Persia — motion <small>play_seq · move sandbox</small></h1>
   <button id="pause">pause</button>
+  <label>move <select id="move">
+    <option value="stand">stand</option>
+    <option value="crouch">crouch</option>
+    <option value="walk">walk</option>
+    <option value="run" selected>run</option>
+    <option value="turn">turn</option>
+  </select></label>
   <label>speed <input type="range" id="tick" min="30" max="160" step="5" value="70"><span id="tickval">70ms</span></label>
   <label>scale <input type="range" id="scale" min="1" max="6" step="1" value="3"><span id="scaleval">3×</span></label>
   <label>tint <input type="color" id="tint" value="#111318"></label>
