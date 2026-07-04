@@ -13,6 +13,13 @@ export { SEQ_OFFSETS };                         // re-export (name -> byte offse
 
 export const DIR_RIGHT = 0, DIR_LEFT = -1;      // dir_0_right / dir_FF_left
 
+// Character actions (types.h enum). We only need the ones the fall touches; the
+// freefall action gates gravity (fallAccel/fallSpeed run only in it).
+export const ACT_IN_MIDAIR = 3, ACT_IN_FREEFALL = 4;   // actions_3_in_midair / _4_in_freefall
+
+// Gravity constants (types.h:1435-1436).
+const FALLING_SPEED_ACCEL = 3, FALLING_SPEED_MAX = 33;
+
 const s8 = (b) => (b < 0x80 ? b : b - 0x100);   // signed 8-bit
 
 // char_dx_forward (seg006.c:553): apply a delta in the character's facing direction.
@@ -58,4 +65,24 @@ export function playSeq(ch) {
       default: ch.frame = cmd; return;                           // a frame number -> emit + stop
     }
   }
+}
+
+// Gravity, applied AFTER playSeq each tick (see the play_kid_frame order,
+// seg000.c:1205-1207): playSeq -> fallAccel -> fallSpeed. Both are no-ops unless
+// the character is in freefall, so ground moves and jump arcs are unaffected
+// (a jump's vertical comes from its own dy opcodes inside playSeq, not from here).
+
+// fall_accel (seg006.c:0577) — accelerate the fall while in freefall.
+export function fallAccel(ch) {
+  if (ch.action === ACT_IN_FREEFALL) {
+    ch.fall_y += FALLING_SPEED_ACCEL;
+    if (ch.fall_y > FALLING_SPEED_MAX) ch.fall_y = FALLING_SPEED_MAX;
+  }
+}
+
+// fall_speed (seg006.c:05AE) — apply the fall velocity to position. y always moves
+// by fall_y (0 when not falling); in freefall the actor also drifts by fall_x.
+export function fallSpeed(ch) {
+  ch.y += ch.fall_y;
+  if (ch.action === ACT_IN_FREEFALL) ch.x = charDxForward(ch, ch.fall_x);
 }

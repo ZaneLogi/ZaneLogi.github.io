@@ -24,6 +24,8 @@ export class SeqBuilder {
   dx(n) { return this._b(SEQ.DX, n & 0xFF); }
   dy(n) { return this._b(SEQ.DY, n & 0xFF); }
   flip() { return this._b(SEQ.FLIP); }
+  knockDown() { return this._b(SEQ.KNOCK_DOWN); }   // SEQ_KNOCK_DOWN (landings)
+  die() { return this._b(SEQ.DIE); }                // SEQ_DIE (hard land)
   snd(s) { return this._b(SEQ.SOUND, s); }
   setFall(x, y) { return this._b(SEQ.SET_FALL, x & 0xFF, y & 0xFF); }
   jmp(n) { this.toks.push({ t: 'jmp', n }); return this; }

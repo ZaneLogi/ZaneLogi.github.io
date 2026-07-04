@@ -137,13 +137,34 @@ KID sprites natively face **LEFT**.
   per-frame content-centre swing ~3× and jitters the gait). Both were tried and
   rejected; the correctness test is that the **feet are mirror-symmetric about the
   reg point** (pixel-measured).
-- `demos/motion.js` uses a **simplified reg-point model**: `actorX` accumulates only
-  the *seqtbl* `dx`; the per-frame *`frame_table_kid`* `dx/dy` is **not** applied. Exact
-  for the run cycle (its frame-table `dx=dy=0`), but the sandbox's turn/step frames carry
-  small nonzero frame-table `dx` (e.g. turn frames 50–52 = 4/3/1), so those get a minor
-  per-frame registration error — a subtle nudge, accepted for v1. The **full** port applies
-  `frame_table_kid`'s `dx/dy` (the `obj_x` formula above), which sharpens turn/step and is
-  *required* for jumps (their large `dy` moves the reg point per frame).
+- `demos/motion.js`'s reg-point model applies the **per-frame `frame_table_kid` `dx`/`dy`
+  faithfully** (`load_frame_to_obj`, seg008.c:1736-1737), as **draw-time offsets** on top of the
+  position:
+  - **`frame.dy`** shifts the feet baseline: `feetY = GROUND_Y + (Char.y + frame.dy)*scale`. Note
+    `obj_y` is the sprite **bottom** in source (`add_midtable` blits at `obj_y - h + 1`,
+    seg008.c:863), which our feet-pin (`content.maxy`) matches. `frame.dy ≠ 0` for **exactly one**
+    used frame — 185 (hard-land dead splat, `dy = 7`); it seats the corpse *below* the feet line
+    just as the source does. The source's floor tile has depth so that reads as "lying on the
+    ground"; our thin ground line doesn't, so here the corpse sinks below the line (and clips at the
+    canvas edge) — faithful, if odd for this demo (accepted 2026-07-04, user confirmed vs a DOS
+    snapshot). Every other used frame is `dy = 0`.
+  - **`frame.dx`** shifts the reg point in the facing direction (`char_dx_forward`):
+    `regX = actorX + (facing? -dx : +dx)*2*scale`, then the flip mirrors about `regX`.
+    `frame.dx ≠ 0` on run/startrun accel 1–4 (1/1/3/4), turn 50–52 (4/3/1), standup 117–118 (2/2),
+    dead 185 (4); all other used frames (walk `step11`, run-cycle loop 7–14, jump arcs, `freefall`,
+    landings) are `dx = 0`.
+  - **These are per-frame DRAW offsets, never accumulated** — exactly as the source (seqtbl `dx`
+    modifies `Char.x`; `frame.dx` feeds only `obj_x`, never `Char.x`). So `actorX` still accumulates
+    only the seqtbl `dx` delta (`actorX += ΔCharx·2·scale`) and the fixed-view **wall-pacing is
+    untouched**; `frame.dx` is just a render nudge. This is why applying it needed no camera/room work.
+  - **The still-deferred piece is the horizontal *position* model, not these offsets.** Our `actorX`
+    is a delta-accumulator over an invented wide 640px flat strip (~2 rooms) with wall-bounce. PoP is
+    room-by-room (**no scroll**): on a boundary it does `drawn_room = next_room; redraw_screen(1)`
+    (`draw_game_frame`, seg000.c:918), `Char.x` is a **bounded byte** (`types.h:304`, room-relative;
+    a room = `SCREEN_TILECOUNTX·TILE_SIZEX = 10·14 = 140` x-units), and a cross-boundary actor is
+    drawn by offsetting x one room-width (`xpos_in_drawn_room`, seg004.c:254). So the faithful `obj_x`
+    is *bounded* — no "runs off to infinity". Modelling x room-relative + bounded (and room-swap at the
+    edge) is **deferred to the `index.html` player work**.
 
 ## Status / roadmap
 
@@ -165,11 +186,30 @@ KID sprites natively face **LEFT**.
   `runturn` skid; **walk** (careful step `step11`) does a standing `turn` at the wall;
   poses hold in place. Symmetric both facings, fixed [0,640] view. See **Sprite
   registration** above for facing/flip and the reg-point simplification.
-- **[next] Jumps + full frame-registration.** `standjump` / `runjump` pull in
-  `SEQ_SET_FALL` + gravity — a new *mechanism*, so they get their own `demos/jump.html`
-  (the "new demo per new subsystem" rule). Jumps also force the **full `frame_table_kid`
-  dx/dy** application (their large `dy` moves the reg point per frame), which also sharpens
-  the sandbox's turn/step registration (see **Sprite registration**).
+- **[done] Jumps + fall (folded into `motion.html`).** All added to the same move
+  `<select>` — no separate demo. **Jumps** (`standjump` seqtbl.c:381, `runjump` :402) are
+  self-contained rotoscoped arcs: their `dy` opcodes lift+drop `Char.y` (net ~0), so a
+  *successful* jump needs **no gravity** — just the `Char.y` vertical (verified: standjump
+  dips `y=-6`, runjump apexes `y=-14`, matching the source `dy`). **Gravity** is the new
+  mechanism, and it lives only in the **fall**: `playseq.js` gained `fallAccel`/`fallSpeed`
+  (`seg006.c:0577`/`05AE`, `fall_y += 3` cap 33, `y += fall_y`), run every tick in the
+  faithful order `playSeq → fallAccel → fallSpeed` (`seg000.c:1205-1207`) but gated to
+  `action == in_freefall`, so ground moves are untouched. The **fall** pick auto-cycles
+  three drops → soft / medium / hard by impact speed (`seg005.c:174`: `fall_y` 21/27/33 →
+  `softland`/`medland`/`hardland`), starting the actor at **negative `Char.y`** (above the
+  screen) so any drop fits the fixed 640×300 view — you see the *end* of the fall + the
+  landing (`stepfall`/`stepfloat` entry frames are out of scope; the actor starts directly
+  in `freefall`). Ground line at **y=280** (fall room above + 20px below so the dead splat's
+  `frame.dy=7` sink stays visible within the 300px canvas). New sequences in
+  `seqtbl.js`: `freefall`, `softland`, `medland`, `hardland`, `standup`, `standjump`,
+  `runjump` (each cited). The per-frame `frame_table` `dx`/`dy` are now **applied faithfully** as
+  draw offsets (`obj_x`/`obj_y`, seg008.c:1736-1737) on top of the position — nonzero on only a
+  handful of frames (dead splat 185 `dy=7`; `dx` on run-accel 1–4 / turn 50–52 / standup 117–118 /
+  185). The dead splat therefore seats *below* the ground line as in the source (our thin line lets
+  it sink/clip — accepted). These offsets are per-frame and never accumulated, so wall-pacing is
+  untouched; the horizontal *position* stays a seqtbl-`dx` delta-accumulator (the room-relative
+  bounded-`obj_x` model is the deferred `index.html` piece). See **Sprite registration** for the
+  exact `dx≠0`/`dy≠0` frame list.
 - **[later] The player (`index.html`).** Drive the actor with keyboard/gamepad via the
   input→transition layer — **scaffolded in `control.js`** (a port of `control_kid`,
   `seg005.c`). The model (no separate FSM — the seqtbl sequences ARE the states; this
