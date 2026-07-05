@@ -4,10 +4,11 @@
 // reads input at decision-point frames and picks which sequence to START next — exactly
 // what control_kid does. GPLv3 (see NOTICE).
 //
-// The wall check (forward_pressed) needs to consult the world, so controlKid takes a
-// `world` object providing world.blockedForward() -> bool (is a wall right at the reg point
-// in the facing direction — a simplified get_edge_distance, seg004.c:378). player.js binds it.
+// The wall/edge checks (forward_pressed, safe_step) need to consult the world, so controlKid takes
+// a `world` object providing world.edgeDistance() -> { edgeType, distance } (a port of
+// get_edge_distance, seg004.c:378 — the tile ahead + sub-tile distance to it). player.js binds it.
 import { startSeq, ACT_BUMPED, ACT_IN_FREEFALL } from './playseq.js';
+import { EDGE_WALL } from './collision.js';
 
 export const HELD = 1, RELEASED = 0, IGNORE = -1;   // CONTROL_HELD / _RELEASED / _IGNORE
 export const FWD = 1, NONE = 0, BACK = -1;          // control_x, facing-relative
@@ -38,14 +39,13 @@ export function controlKid(ch, c, world) {
   else if (f === 109)                  controlCrouched(ch, c);         // crouch
 }
 
-// control_standing (seg005.c:343): Shift+forward = careful step; forward = run (or blocked
-// at a wall); backward = turn. (Up/Down jumps + crouch are later additions.)
+// control_standing (seg005.c:343): Shift+forward = careful step (safe_step); forward = run, or a
+// step if near a wall (forward_pressed); backward = turn. (Up/Down jumps + crouch are later.)
 function controlStanding(ch, c, world) {
+  ch.testing = 0;                     // reaching a stand decision ends any prior test-foot lean
   if (c.shift === HELD) {
     if (c.backward === HELD) backPressed(ch);
-    else if (c.x === FWD && c.forward === HELD) {                      // shift+forward -> careful step
-      if (!wallClose(world)) safeStep(ch);                            //   ...unless blocked by a wall
-    }
+    else if (c.x === FWD && c.forward === HELD) safeStep(ch, world);   // shift+forward -> safe_step (seg005.c:383)
   } else if (c.forward === HELD) {
     forwardPressed(ch, c, world);
   } else if (c.backward === HELD) {
@@ -53,27 +53,32 @@ function controlStanding(ch, c, world) {
   }
 }
 
-// Blocked from advancing = a wall is right at the reg point in the facing direction
-// (world.blockedForward, player.js). The char can still walk the gap up to a wall a tile
-// away; only STARTING a move when already against the wall is gated — which prevents an
-// oscillation and lets him approach walls (incl. across a room edge, e.g. room 1 col 0 left).
-const wallClose = (world) => world.blockedForward();
-
-// forward_pressed (seg005.c:566): if a wall is right ahead, don't run into it — stay stand
-// (blocked). Source inches to the exact wall edge via a step-to-edge sequence (safe_step
-// 29..42); the clone just stops, and blockAtWall snaps a run to the wall face.
+// forward_pressed (seg005.c:566): if a WALL is within `distance < 8`, step to it instead of running
+// (the source's exact rule); otherwise start a run. `world.edgeDistance()` = get_edge_distance
+// (player.js). This is the run-gate that used to be `blockedForward` — now the near-wall case
+// safe_steps flush to the wall (no bump, no parking back) instead of just standing.
 function forwardPressed(ch, c, world) {
-  if (wallClose(world)) return;                          // blocked -> stay stand
-  startSeq(ch, 'startrun');                              // seq_1_start_run
+  const { edgeType, distance } = world.edgeDistance();
+  if (edgeType === EDGE_WALL && distance < 8) safeStep(ch, world);   // near a wall -> step, don't run
+  else startSeq(ch, 'startrun');                                     // seq_1_start_run
 }
 
 // back_pressed (seg005.c): turn to face the other way (the standing about-face).
 function backPressed(ch) { startSeq(ch, 'turn'); }        // seq_5_turn
 
-// safe_step (seg005.c:604): a careful, measured step. The source picks an exact
-// step-to-edge sequence (29..42) by sub-tile distance; the clone approximates with the
-// generic careful step (step11) — the wall-eject keeps him out of a wall regardless.
-function safeStep(ch) { startSeq(ch, 'step11'); }
+// safe_step (seg005.c:604): a careful, measured step that lands EXACTLY at the edge ahead. Pick
+// step<distance> (step1..step14, seq_29..42) from get_edge_distance so the step's dx sum equals the
+// sub-tile gap — flush to a wall face, or right at a ledge's drop; each step sets Char.repeat=1.
+// At distance 0 on a LEDGE (edge != WALL) with repeat set, play `testfoot` — the "peer over the
+// edge + bounce back" (seq_44_step_on_edge, seg005.c:611-613) — then clear repeat. Otherwise (flush
+// at a wall, or repeat already spent) stand. (The source's distance-0/repeat-0 case step11s OFF the
+// ledge — an "unsafe step"; the clone stays put instead, so a careful step never walks him off.)
+function safeStep(ch, world) {
+  const { edgeType, distance } = world.edgeDistance();
+  if (distance > 0 && distance <= 14) { startSeq(ch, 'step' + distance); ch.repeat = 1; }
+  else if (edgeType !== EDGE_WALL && ch.repeat) { ch.repeat = 0; ch.testing = 1; startSeq(ch, 'testfoot'); }
+  else startSeq(ch, 'stand');
+}
 
 // control_running (seg005.c:588): the two signature behaviours.
 function controlRunning(ch, c) {

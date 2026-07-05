@@ -24,11 +24,56 @@ _b.label('stand').act(ACT_STAND).frame(15).jmp('stand');
 // stoop (seqtbl.c:865): duck down, then hold the crouch frame in a self-loop.
 _b.label('stoop').act(ACT_RUN_JUMP).dx(1).frame(107).dx(2).frame(108)
   .label('stoop_crouch').frame(109).jmp('stoop_crouch');
-// step11 — the "normal" careful step (seqtbl.c:773): one measured step -> jmp(stand).
+// step1..step14 — safe_step-to-edge (seqtbl.c:737-863): "step forward N pixels". safe_step
+// (control.js) picks step<distance> from get_edge_distance so the careful step lands the char
+// EXACTLY at the wall face / tile edge ahead (flush, no bump; stops right at a ledge). Each
+// sequence's dx opcodes sum to N. step9 shares step10's tail via the step10a label; step11 is the
+// "normal" step. All use frames 121-132 (the stepping cycle).
+_b.label('step14').act(ACT_RUN_JUMP).frame(121)
+  .dx(1).frame(122).dx(1).frame(123).dx(3).frame(124).dx(4).frame(125).dx(3).frame(126)
+  .dx(-1).dx(3).frame(127).frame(128).frame(129).frame(130).frame(131).frame(132).jmp('stand');
+_b.label('step13').act(ACT_RUN_JUMP).frame(121)
+  .dx(1).frame(122).dx(1).frame(123).dx(3).frame(124).dx(4).frame(125).dx(3).frame(126)
+  .dx(-1).dx(2).frame(127).frame(128).frame(129).frame(130).frame(131).frame(132).jmp('stand');
+_b.label('step12').act(ACT_RUN_JUMP).frame(121)
+  .dx(1).frame(122).dx(1).frame(123).dx(3).frame(124).dx(4).frame(125).dx(3).frame(126)
+  .dx(-1).dx(1).frame(127).frame(128).frame(129).frame(130).frame(131).frame(132).jmp('stand');
 _b.label('step11').act(ACT_RUN_JUMP).frame(121)
+  .dx(1).frame(122).dx(1).frame(123).dx(3).frame(124).dx(4).frame(125).dx(3).frame(126)
+  .dx(-1).frame(127).frame(128).frame(129).frame(130).frame(131).frame(132).jmp('stand');
+_b.label('step10').act(ACT_RUN_JUMP).frame(121)
+  .dx(1).label('step10a').frame(122).dx(1).frame(123).dx(3).frame(124).dx(4).frame(125).dx(3).frame(126)
+  .dx(-2).frame(128).frame(129).frame(130).frame(131).frame(132).jmp('stand');
+_b.label('step9').act(ACT_RUN_JUMP).frame(121).jmp('step10a');    // 121 then step10's tail (sum = 10-1 = 9)
+_b.label('step8').act(ACT_RUN_JUMP).frame(121)
   .dx(1).frame(122).dx(1).frame(123).dx(3).frame(124).dx(4).frame(125)
-  .dx(3).frame(126).dx(-1).frame(127)
-  .frame(128).frame(129).frame(130).frame(131).frame(132).jmp('stand');
+  .dx(-1).frame(127).frame(128).frame(129).frame(130).frame(131).frame(132).jmp('stand');
+_b.label('step7').act(ACT_RUN_JUMP).frame(121)
+  .dx(1).frame(122).dx(1).frame(123).dx(3).frame(124).dx(2).frame(129)
+  .frame(130).frame(131).frame(132).jmp('stand');
+_b.label('step6').act(ACT_RUN_JUMP).frame(121)
+  .dx(1).frame(122).dx(1).frame(123).dx(2).frame(124).dx(2).frame(129)
+  .frame(130).frame(131).frame(132).jmp('stand');
+_b.label('step5').act(ACT_RUN_JUMP).frame(121)
+  .dx(1).frame(122).dx(1).frame(123).dx(2).frame(124).dx(1).frame(129)
+  .frame(130).frame(131).frame(132).jmp('stand');
+_b.label('step4').act(ACT_RUN_JUMP).frame(121)
+  .dx(1).frame(122).dx(1).frame(123).dx(2).frame(131).frame(132).jmp('stand');
+_b.label('step3').act(ACT_RUN_JUMP).frame(121)
+  .dx(1).frame(122).dx(1).frame(123).dx(1).frame(131).frame(132).jmp('stand');
+_b.label('step2').act(ACT_RUN_JUMP).frame(121)
+  .dx(1).frame(122).dx(1).frame(132).jmp('stand');
+_b.label('step1').act(ACT_RUN_JUMP).frame(121)
+  .dx(1).frame(132).jmp('stand');
+// testfoot (seqtbl.c:720, = seq_44_step_on_edge): "peer over the edge" — step forward, test the
+// ground with a foot (frame 86), then BOUNCE BACK (net dx 0) and stand. safe_step plays this at a
+// ledge brink (distance 0, not a wall, first time via the Char.repeat gate), so a careful step
+// toward a drop tests + retreats instead of walking off. No act() — it inherits stand (action 0).
+_b.label('testfoot').frame(121)
+  .dx(1).frame(122).frame(123).dx(2).frame(124).dx(4).frame(125).dx(3).frame(126)
+  .dx(-4).frame(86)
+  .snd(SND_FOOTSTEP).knockDown().dx(-4).frame(116)
+  .dx(-2).frame(117).frame(118).frame(119).jmp('stand');
 // turn — standing about-face (seqtbl.c:440): SEQ_FLIP up front, then settle to stand.
 _b.label('turn').act(ACT_TURN).flip().dx(6).frame(45)
   .dx(1).frame(46).dx(2).frame(47).dx(-1).frame(48).dx(1).frame(49)
@@ -91,6 +136,31 @@ _b.label('standup').act(ACT_BUMPED).dx(1).frame(110).frame(111)
   .dx(2).frame(112).frame(113)
   .dx(1).frame(114).frame(115).frame(116)
   .dx(-4).frame(117).frame(118).frame(119).jmp('stand');
+
+// --- wall-bump recoils (§5b): the three bump sequences the bumped/bumped_floor/bumped_fall
+// dispatch (player.js, ported seg004.c:266/311/298) picks by the character's state. ---
+// bump (seq_47_bump, seqtbl.c:691): the common grounded recoil — skid back off the wall (dx -4)
+// and settle with the turn-tail frames 50-52, then stand. control() is gated during act 5 so the
+// recoil isn't interrupted (control.js).
+_b.label('bump').act(ACT_BUMPED).dx(-4).frame(50)
+  .frame(51).frame(52).jmp('stand');
+// bumpfall (seq_45_bumpfall, seqtbl.c:696): bumped a wall with no floor below -> tip into a fall
+// (the start-fall frames 102-105) and hand off to freefall. The source's jmp_if_feather(bumpfloat)
+// branch is DROPPED — the clone has no feather-fall (playSeq skips JMP_IF_FEATHER anyway).
+_b.label('bumpfall').act(ACT_BUMPED).dx(1).dy(3).frame(102)
+  .dx(2).dy(6).frame(103)
+  .dx(-1).dy(9).frame(104)
+  .dy(12).frame(105)
+  .dx(-2).setFall(0, 15).jmp('freefall');
+// hardbump (seq_46_hardbump, seqtbl.c:712): the hard recoil after a run-jump/fall onset — a small
+// lift, knock-down, then the land frames into a crouch -> standup. Only reached from jump/fall-onset
+// frames {24,25,40-42,102-106}; dormant until jumps are wired (verify then).
+_b.label('hardbump').act(ACT_BUMPED).dx(-1).dy(-4).frame(102)
+  .dx(-1).dy(3).dx(-3).dy(1).knockDown()
+  .dx(1).snd(SND_FOOTSTEP).frame(107)
+  .dx(2).frame(108)
+  .snd(SND_FOOTSTEP).frame(109)
+  .jmp('standup');
 
 const built = _b.build();
 

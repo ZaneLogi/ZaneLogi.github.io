@@ -213,26 +213,99 @@ ahead via `get_tile_infrontof_char`; a wall ahead makes the actor **stop / step
 instead of run** — e.g. `forward_pressed` (`seg005.c:577`): *"If char is near a
 wall, step instead of run."* For "get blocked by walls," this layer is enough.
 
-### 5b. Fine: sub-tile x, the bump system (faithful polish, optional)
+### 5b. Fine: sub-tile x, the bump system — IMPLEMENTED (box + animation on a substitute)
 
-For pixel-precise "I hit the wall at exactly this x," PoP keeps per-column
-collision buffers (`data.h:655-674`): `curr/above/below/prev _row_coll_room[10]`
-+ `_flags[10]`. Each frame:
+**Status (2026-07-05):** the bump is in the player — a wall hit plays the faithful **recoil
+animation** (`seq_47_bump`) instead of a dead stop, on top of a **collision box**
+(`setCharCollision`). But the *detection* is the clone's `Char.x`-clamp substitute, **not** the
+source's per-column collision-buffer scan. This section is the durable record of exactly what was
+substituted, why, and where a bug would surface if the substitute is ever the cause.
 
-- `check_collisions` (`seg004.c:42`) → `get_row_collision_data` (`seg004.c:111`)
-  computes each column's wall **left/right face x** (`get_left/right_wall_xpos`,
-  `seg004.c:131/141`) using per-type offsets `wall_dist_from_left[] =
-  {0,10,0,-1,0,0}` / `wall_dist_from_right[] = {0,0,10,13,0,0}` (`seg004.c:37-39`),
-  and compares them to the char's collision box (`char_x_left/right_coll`).
-- A column that flips clear→overlapping *this frame* becomes
-  `bump_col_left/right_of_wall`.
-- `check_bumped` (`seg004.c:151`) → `bumped` (`seg004.c:266`): push `Char.x` back
-  by the overlap and play a bump sequence (`seq_47_bump` / `seq_46_hardbump` /
-  `seq_45_bumpfall`).
+**What the source does (the mechanism we did NOT port).** For pixel-precise "I hit the wall at
+exactly this x, on this side," PoP keeps per-column collision buffers (`data.h:655-674`:
+`curr/above/below/prev _row_coll_room[10]` + `_flags[10]`). Each frame:
+- `check_collisions` (`seg004.c:42`) → `get_row_collision_data` (`seg004.c:111`) scans the columns
+  `left_checked_col-1 .. right_checked_col+2` across **three rows** (curr/above/below), computing
+  each column's wall **left/right face x** (`get_left/right_wall_xpos`, `seg004.c:131/141`) from the
+  per-type offsets `wall_dist_from_left[] = {0,10,0,-1,0,0}` / `wall_dist_from_right[] =
+  {0,0,10,13,0,0}` (`seg004.c:37-39`), and compares them to the char's collision box
+  (`char_x_left/right_coll`).
+- A column that flips clear→overlapping **this frame** (prev vs curr `_flags`) becomes
+  `bump_col_left/right_of_wall` — detection on **both** sides (forward *and* the trailing edge).
+- `check_bumped` (`seg004.c:151`) → `bumped` (`seg004.c:266`): step `tile_col` off the wall to the
+  char's side, push `Char.x` back by the overlap, and play `seq_47_bump` / `seq_46_hardbump` /
+  `seq_45_bumpfall` (chosen by `bumped_floor`/`bumped_fall`, seg004.c:311/298).
 
-> This buffer system is *also* character-vs-character (sword-fight) collision. For
-> a single actor walking a room, **5a suffices**; 5b is the faithful upgrade
-> (bump-back + bump animation) — defer unless we want it.
+**What the clone does instead (`player.js`).** `setCharCollision` (port of `seg006.c:1012`) builds
+the box `char_x_left/right_coll` (width `char_width_half = (sprite.w+1)/2`). `checkBumped` reuses the
+existing `wallAheadFace` **`Char.x`-clamp** to detect the forward edge passing the wall face, pins
+`Char.x` there (= `bumped()`'s push-back), steps off the wall to the char's standing column exactly
+as `bumped()` does (seg004.c:270-288 — needed, or a bump where `curr_col` lands on the wall wrongly
+reads `tile_is_floor(wall)=false` and plays bumpfall), then runs the faithful
+`bumpedFloor`/`bumpedFall` dispatch to pick the sequence. `blockedForward` widened to the source's
+`distance < 8` run-gate (seg005.c:577) so the `dx(-4)` recoil doesn't trigger a re-run (no bump
+oscillation).
+
+**Correction to an earlier claim.** A prior note here said "this buffer system is *also*
+character-vs-character collision." **That is wrong** — verified: the buffers are read only by
+`check_collisions`/`check_bumped` (wall collision) and the per-char save/restore (`seg000.c:313`).
+Kid-vs-guard collision is a **separate** mechanism: `bump_into_opponent` (`seg003.c:622`) uses
+`char_opp_dist()` (distance ≤ 15) and plays `seq_47_bump`; it never touches these buffers. So the
+buffers are **wall-collision only**, and deferring them does *not* affect future char-vs-char work.
+
+**What the substitute loses, and where a bug would surface (the "where the bodies are buried" map).**
+For the current single-actor walk/run/turn/fall scope this loses **nothing visible**. Deferred:
+1. **Multi-row wall bumps.** The buffers scan curr/above/below rows; the clamp checks only the char's
+   **current row** (`wallAheadFace` reads `getTile(room, col, Char.curr_row)`). *If you ever see the
+   char clip a wall segment that is above/below his standing row* (e.g. a head-height wall while his
+   feet are at a floor edge), the cause is the missing above/below scan — port
+   `get_row_collision_data`'s 3-row loop (`seg004.c:50-52`).
+2. **Trailing-edge / knockback-into-a-wall.** The clamp only stops **forward** motion
+   (`bump_col_left_of_wall` equivalent). The source also fires `bump_col_right_of_wall` — a wall
+   hitting the char's **back** edge. *If a future knockback/explosion push drives the char backward
+   through a wall*, the cause is the missing trailing-edge test (`get_row_collision_data`'s
+   `right_wall_xpos > char_x_left_coll`, `seg004.c:123`); the box (`char_x_left_coll`) is already
+   computed, so this is the natural next step.
+3. **Exact multi-column bump-column selection** — invisible for a single-column contact; matters only
+   with wide/compound obstacles.
+
+**Bump-sequence verify status.**
+- `seq_47_bump` — **VERIFIED** (run into a wall both facings: recoil `dx(-4)`, frames 50-52, no
+  penetration/oscillation/fall, stays in room; then `safe_step` walks him flush — see below).
+- `seq_45_bumpfall` — **bytes verified** (frames 102-105 render with the falling `dy`), but the
+  natural trigger + freefall handoff needs airborne geometry (bumping a wall over a gap / while
+  falling); not reachable in the current move set (jumps not wired). Re-verify end-to-end with jumps.
+- `seq_46_hardbump` — **ported, unverified**: only reached from jump/fall-onset frames
+  `{24,25,40-42,102-106}` the current player can't produce. Verify when jumps land.
+
+**`safe_step`-to-edge — IMPLEMENTED (the recoil no longer leaves him parked back).** `get_edge_distance`
+(seg004.c:378, `player.js` — walls / floor edges / ledges only) + the 14 `step1..step14` sequences
+(seqtbl.c:737-863) + `safe_step` (seg005.c:604) wired into `control.js`. `forward_pressed`'s
+`distance < 8` rule now **steps flush** to a wall (the recoil's ~4-unit gap → `step4` → flush) instead
+of parking back, **Shift+forward** lands the careful step exactly at the wall face or the ledge's
+drop. **`getEdgeDistance` must decide on the tile *directly in front* (`curr_col + facing`), NOT the
+leading edge** — the leading-edge approach (`wallAheadFace`) has two failure modes, both fixed by
+computing the front column's near face directly: (1) it finds a wall *across* an empty tile and steps
+the char off a **ledge** toward it; (2) it only scans the leading-edge column ±1, so it **misses** a
+wall a full tile away or **across a room boundary** — which falsely *blocked* a left-facing char at a
+room edge (he had ~14 units of floor to step but `distance` defaulted to 0). VERIFIED: Shift-step→wall
+flush (both facings, incl. a left-facing char stepping to a room-edge wall); run→bump→step flush;
+forward (no Shift)→ledge still runs off.
+
+**At a ledge brink, Shift+forward plays `testfoot` (the "peer over the edge + bounce back").** This
+is `seq_44_step_on_edge` (`seqtbl.c:720`, frame `86_test_foot`), fired by `safe_step`'s distance-0 /
+`edge != WALL` / `Char.repeat` branch (seg005.c:611): so a careful step at a drop is step-to-brink →
+lean out + retreat (net dx 0) → stand, gated by `Char.repeat` so it happens once. `testfoot` leans
++10 **past** the edge, which — unlike the plain steps that stop *at* the edge — reaches into whatever
+is beyond (a hole, or at a 1-tile pit a wall on the far side), and would otherwise `check_on_floor`-
+fall or `check_bumped`-bump mid-lean (observed cascade at room 1 col 3: lean → col-5 wall bump →
+recoil into the col-4 pit → fall). Fix: a clone-only `ch.testing` flag (set when `testfoot` starts,
+cleared at the next stand) makes `checkBumped` and `checkOnFloor` **skip** during the lean — correct
+because `testfoot` is self-contained (always returns to the floor). Deferred: `safe_step`'s
+distance-0 / `repeat==0` `unsafe-step`-off-ledge branch (persisting walks you off) → the clone stands.
+
+Other deferred: sword bump sequences (`seq_64/65`), `is_obstacle` gate/chomper/mirror cases
+(`seg004.c:231` — gates static, chompers/mirrors not modelled), feather-fall (`bumpfloat`).
 
 ---
 
@@ -351,39 +424,36 @@ link-hop) running *before* `crossRooms` — pin `Char.x` at the face, then decid
 clone's *earlier* bug was the exact failure this ordering prevents: keying the wall check off the
 lagging `curr_col` let it go phantom on a fast overshoot, so the "bump" missed and the "leave"
 fired. Fixing it (Char.x-based clamp + unconditional `curr_col` clamp) made the clone
-position-based and boundary-aware like `check_collisions`. Not modelled: the box *width*
-(`char_width_half`) and the bump *animation* (`seq_45`/`bumped_floor`) — the clone contacts at the
-reg point and settles to `stand`.
+position-based and boundary-aware like `check_collisions`. (The bump *animation* + collision *box*
+are now modelled too — see §5b; the one remaining substitute is the per-column buffer *scan*.)
 
 **Deviations (honest):**
-- **Wall block is the §5b substitute, not the bump buffers — but it IS sub-tile.** We don't
-  port `check_collisions`/`check_bumped` (the per-column `curr_row_coll_*` buffers, which also do
-  sword-fight collision). Instead we work in **`Char.x`, the leading edge** (`set_char_collision`,
+- **Wall block — the box + recoil animation ARE modelled (§5b); the per-column buffer *scan* is
+  the substitute.** Detection works in **`Char.x`, the leading edge** (`set_char_collision`,
   `seg006.c:1021`: `char_x_right = Char.x` facing right, `char_x_left = Char.x` facing left):
-  `wallAheadFace`/`clampToWall` find the blocking wall by the **leading edge's column**,
-  `tileDivMod(Char.x)` — the edge's own column if a fast frame overshot it into the wall, else
-  the next column ahead — and pin `Char.x` to that column's near face. The char walks *up to* a
-  wall within a tile in either direction and stops flush (mid-row *or* across a room edge, e.g.
-  left at the level-1 start up to room 5's col-9 wall), with **no penetration** (Char.x never
-  exceeds the face → no bounce-back). Three subtleties, all learned from bugs:
+  `wallAheadFace` finds the blocking wall by the **leading edge's column** `tileDivMod(Char.x)` —
+  the edge's own column if a fast frame overshot it into the wall, else the next column ahead — and
+  `checkBumped` pins `Char.x` to that column's near face (no penetration), then runs the faithful
+  `bumped`/`bumped_floor`/`bumped_fall` dispatch (recoil `seq_47` / bumpfall `seq_45` / hardbump
+  `seq_46`). Three subtleties, all learned from bugs:
   - **Key off the leading edge, never `curr_col`.** The weight point lags `Char.x` by ~10 units
     and can sit *in* a wall while the edge is safely past it (facing away) — a `curr_col`-based
     test then pushes the char the wrong way. `tileDivMod(Char.x)` is the actual edge.
   - **A wall isn't a hole.** `check_on_floor` must not fall when the tile under the char is a
     wall (a fast frame can leave the weight-point `curr_col` in a wall for a tick). The source
     ejects (`in_wall`) before its floor test; the clone just skips the fall (`wallType != 0`).
-  - **Skip the clamp during a turn** (`action==7`), as `check_collisions` does (`seg004.c:44`) —
+  - **Skip the bump during a turn** (`action==7`), as `check_collisions` does (`seg004.c:44`) —
     the turn's own `dx` carries the char off the wall.
-  What's *not* modelled: the char's collision **width** (`char_width_half`) — contact is to the
-  reg point, not the sprite edge (imperceptible for one walking actor) — and the bump *animation*
-  (`seq_47_bump`): a run into a wall settles straight to `stand` (a deferred follow-on).
-- **`safe_step` (the step-to-edge sequences 29..42) isn't transcribed;** Shift-step uses the
-  generic careful step (`step11`). Walking up to a wall is handled by the `Char.x`-clamp above,
-  not by a dedicated step-to-edge sequence.
+  The remaining substitute is the per-column buffer **scan** (`check_collisions`/
+  `get_row_collision_data`) — see **§5b** for exactly what that defers (multi-row + trailing-edge
+  bumps) and where a bug would surface.
+- **`safe_step`-to-edge IS implemented** (§5b): `step1..step14` + `get_edge_distance` wired through
+  `control.js`, so Shift-step and the post-bump forward both land the char *exactly* at the wall face
+  (flush) or a ledge's brink. Only `safe_step`'s distance-0 climb branches are deferred.
 - **`start_fall`'s run-frame variants** (frame 9 → `seq_7`, frame 13 → `seq_19`) collapse to
   the general `seq_7_fall` (`freefall`); visually identical for a single actor.
-- Gates/doors (drawn but static), spikes, and the sub-tile bump animation are out of scope
-  for the collision substrate. **Loose-floor collapse IS now implemented** — see §9.
+- Gates/doors (drawn but static) and spikes are out of scope for the collision substrate.
+  **Loose-floor collapse IS implemented** (§9); **the sub-tile bump system IS implemented** (§5b).
 
 ---
 

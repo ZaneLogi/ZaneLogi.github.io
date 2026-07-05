@@ -287,14 +287,14 @@ KID sprites natively face **LEFT**.
     recovers the falling entry). Input is made **facing-relative** upstream (absolute L/R +
     `ch.direction` → FWD/BACK). Keys: **←/→ run · Shift+dir careful step · release = stop · R
     restart**. `runstop` (`seq_13_stop_run`) transcribed into `seqtbl.js`.
-  - **Deviations (documented in `docs/research_collision.md §8`):** wall-block is a sub-tile
-    `Char.x`-clamp to the wall face (the §5b bump-buffer substitute — `Char.x` is the leading
-    edge, so he walks up to a wall in either direction and stops flush, no penetration/bounce;
-    collision *width* and the bump *animation* are the parts not modelled); `safe_step` uses the
-    generic `step11`; gates (drawn but static) / spikes are out of scope for the collision
-    substrate (**loose floors are now implemented — see the next roadmap entry**).
-    `index.html#debug` exposes a console handle (`POP.step`/`place`/`restart`, plus
-    `tile`/`modif`/`trobs` for the loose-floor state) for deterministic testing.
+  - **Deviations (documented in `docs/research_collision.md §8`):** wall-block detection is a
+    sub-tile `Char.x`-clamp to the wall face (`Char.x` is the leading edge, so he walks up to a
+    wall in either direction, no penetration) — but the collision *box* and the bump *animation*
+    are now modelled (see the **[done] Wall bump** roadmap entry); the remaining substitute is the
+    per-column buffer *scan* (§5b). `safe_step`-to-edge is now implemented (Shift-step + post-bump
+    land flush; stop-at-a-ledge — see the **[done] Wall bump** entry); gates (drawn but static) /
+    spikes are out of scope for the collision substrate. `index.html#debug` exposes a console handle
+    (`POP.step`/`place`/`restart`, plus `tile`/`modif`/`trobs`) for testing.
   - **Verified** vs SDLPoP semantics by single-stepping: falling entry (fall→soft-land→stand),
     run/runstop/runturn/turn/careful-step, wall-block both directions (stable, no jitter/
     creep/fall-through), ledge-fall→land, and multi-room horizontal crossing (2→3→9 with
@@ -313,6 +313,27 @@ KID sprites natively face **LEFT**.
   **through the room boundary** into room 2 — a multi-room fall. **Deferred (agreed):** the
   falling-debris chunk (`add_mob`) and the shake visual (`loose_shake`). Full mechanism +
   verification in `docs/research_collision.md §9`.
+- **[done] Wall bump — §5b, the box + recoil animation.** A run/walk into a wall now plays the
+  faithful **recoil** (`seq_47_bump`: skid back `dx(-4)` + settle) instead of a dead stop, on top
+  of a **collision box** (`setCharCollision`, port of `seg006.c:1012`). `checkBumped` replaces
+  `clampToWall`: the same `Char.x`-clamp *detects* the wall hit, then the ported
+  `bumped`/`bumped_floor`/`bumped_fall` dispatch (`seg004.c:266/311/298) picks the sequence —
+  `seq_47_bump` (grounded, verified) / `seq_45_bumpfall` (over a gap, bytes-verified) /
+  `seq_46_hardbump` (jump/fall-onset, dormant until jumps). **The substitute is only the per-column
+  collision-buffer *scan*** — what that defers (multi-row + trailing-edge/knockback bumps) and where
+  a bug would surface is written up durably in `docs/research_collision.md §5b`. (Correction recorded
+  there: those buffers are wall-collision only; char-vs-char is the separate `bump_into_opponent`/
+  `char_opp_dist`.) **Follow-on — `safe_step`-to-edge (also §5b):** the 14 `step1..step14` sequences
+  (seqtbl.c) + `getEdgeDistance` (port of `get_edge_distance`) + `safe_step` wired through
+  `control.js` replace the old `step11`/`blockedForward` stand-ins — so Shift-step and the post-bump
+  forward land the char *flush* at a wall (`step<gap>`), and a Shift-step toward a **ledge** stops at
+  the brink and then plays **`testfoot`** (`seq_44_step_on_edge` — the "peer over + bounce back",
+  gated once by `Char.repeat`; a clone `ch.testing` flag makes the lean skip `checkBumped`/
+  `checkOnFloor` so it can't fall/bump). `getEdgeDistance` decides on the tile *directly in front*
+  (not the leading edge) — fixing two bugs: a wall across an empty tile walking him off a ledge, and
+  a wall across a room boundary being missed (which had falsely *blocked* a left-facing char at a
+  room edge). Forward without Shift still runs off a ledge. (Render tweak: the neighbour-room
+  **slivers** in the side margins are dimmed with a translucent wash so they read as adjacent rooms.)
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
 
