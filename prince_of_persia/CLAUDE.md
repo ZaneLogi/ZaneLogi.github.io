@@ -210,6 +210,45 @@ KID sprites natively face **LEFT**.
   untouched; the horizontal *position* stays a seqtbl-`dx` delta-accumulator (the room-relative
   bounded-`obj_x` model is the deferred `index.html` piece). See **Sprite registration** for the
   exact `dx≠0`/`dy≠0` frame list.
+- **[done] Level decode + collision block map.** The world half of the toy: give the actor a
+  real room. **`tools/extract_level.py`** decodes a level from `LEVELS.DAT` into a JS data
+  module (`res/level<N>.js`; level 1 committed as `res/level1.js`). Level N is resource
+  **2000+N** (`load_level`, seg000.c:1152) stored as a **verbatim 2305-byte `level_type`**
+  (types.h:228, `sizeof`==2305 compile-assert) — the **same DAT container as `extract_masks.py`**,
+  but the payload is a raw struct so there is **no image decode**. We emit only the fields the
+  engine actually reads and drop the rest — **collision, not graphics** (the map is the goal;
+  art is explicitly out of scope):
+  - **kept:** `fg` tile **TYPE** (`byte & 0x1F`, seg006.c:37) · `bg` modifier byte · `roomlinks`
+    `{left,right,up,down}` (0 = void → reads as `tiles_20_wall`, seg006.c:40) · `used_rooms` ·
+    `start{room,pos,dir}` · **doorLinks** (button→gate chain, seg007.c:720-746; trimmed to the
+    indices reachable from a button — the engine only ever indexes via a button's `bg` modifier,
+    so the 256-entry file tail is never read) · **guards** `{tile,dir,skill,color}` for rooms with
+    `guards_tile < 30` (seg002.c / pos_guards seg003.c:661).
+  - **dropped:** `roomxs/roomys` (Mechner editor grid) + `fill_*` (unused) · the **`fg` high 3
+    bits** (engine masks `&0x1F` *everywhere*, incl. drawing seg008.c:246 — inert) · `guards_x` /
+    `guards_seq_*` (`0xFF` in the file; the engine derives them at spawn).
+  - **format decisions (settled with user):** a **`.js` module** (loads natively via `import`, no
+    fetch/parse; mirrors `res/frame_table_kid.js`) holding an **expanded readable object** — *not*
+    base64. Base64 is right for the masks (bulk binary pixel data) and wrong here (a ~1.5 KB
+    structured table you want to read/diff). The generator emits `// room N` index comments and is
+    **generic** (arg = level number). Raw `LEVELS.DAT` stays `.gitignore`d (Ubisoft IP); the derived
+    `level1.js` is committed like the masks; `extract_level.py` is another **GPLv3** SDLPoP
+    derivative (see `NOTICE`).
+  - **`demos/blockmap.{html,js}`** renders the **solid geometry only** from `level1.js`, via the two
+    ported collision predicates: `wall_type==4` (seg006.c:1626) → **full block**, `tile_is_floor`
+    (seg006.c:951) → **bottom ledge** (you stand *on* floors, are blocked *by* walls), else open.
+    Interactive tiles (gate/exit/button/potion/spike) get semantic accent marks from the
+    `tiles_N_*` enum; start + guards flagged. Rooms are laid out by **flood-filling `roomlinks`**
+    from the start room. Level 1 flood-fills to a clean **9×3 grid of 21 rooms**; the 3 unreachable
+    ones (**13/18/24** — one-way links, nobody links back) are **map-editor leftovers**, kept
+    visible as evidence and stacked below (13↔18 leftmost column, orphan 24 two columns over).
+    **Colors are designed-by-eye** (dark UI + warm/cool floor-vs-wall split + conventional
+    accents), not sampled from the PoP palette — that convergence is intuition, not a lookup.
+    **User verified the map against a real level-1 playthrough** — which validates *both* the
+    byte-exact decode *and* the faithful predicate port (the map traces the walkable geometry
+    because it computes the engine's own collision from the engine's own data + functions).
+  - **feeds next:** this is the collision substrate for the deferred **room-relative bounded
+    `obj_x`** model (below) — the actor-in-a-room experiment.
 - **[later] The player (`index.html`).** Drive the actor with keyboard/gamepad via the
   input→transition layer — **scaffolded in `control.js`** (a port of `control_kid`,
   `seg005.c`). The model (no separate FSM — the seqtbl sequences ARE the states; this

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PoP — level 1 block map</title>
+<style>
+  body { margin: 0; background: #0a0c11; color: #b9c4d4;
+         font: 13px/1.5 system-ui, sans-serif; padding: 16px; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  #info { color: #7d8aa0; margin: 0 0 12px; font: 12px monospace; }
+  .wrap { overflow-x: auto; border: 1px solid #1c2430; border-radius: 4px; }
+  canvas { display: block; image-rendering: pixelated; }
+  .legend { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 14px; height: 14px; border-radius: 2px; display: inline-block; }
+</style>
+</head>
+<body>
+  <h1>Prince of Persia — level 1 collision block map</h1>
+  <p id="info">loading…</p>
+  <div class="wrap"><canvas id="map"></canvas></div>
+  <div class="legend">
+    <span><i class="sw" style="background:#5b6b82"></i>wall (solid block)</span>
+    <span><i class="sw" style="background:#7f8c5a"></i>floor (ledge)</span>
+    <span><i class="sw" style="background:#8a7048"></i>loose floor</span>
+    <span><i class="sw" style="background:#c9a13b"></i>gate</span>
+    <span><i class="sw" style="background:#c98a3b"></i>exit door</span>
+    <span><i class="sw" style="background:#4a90d0"></i>raise btn</span>
+    <span><i class="sw" style="background:#d07a4a"></i>drop btn</span>
+    <span><i class="sw" style="background:#c65ad0"></i>potion</span>
+    <span><i class="sw" style="background:#54e0a0"></i>start</span>
+    <span><i class="sw" style="background:#e05a5a"></i>guard</span>
+  </div>
+  <script type="module" src="./blockmap.js"></script>
+</body>
+</html>
