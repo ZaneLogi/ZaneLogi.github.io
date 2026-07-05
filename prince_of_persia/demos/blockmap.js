@@ -3,26 +3,16 @@
 // tiles -> a ledge at the cell bottom (in PoP you stand ON floors, are blocked BY
 // walls), everything else open. Rooms are laid out by following roomlinks.
 //
-// Solid classification ports the two collision predicates from SDLPoP seg006.c:
+// Solid classification uses the two collision predicates ported in collision.js:
 //   tile_is_floor (seg006.c:951) -- has a floor to stand on
 //   wall_type     (seg006.c:1626) -- is a vertical obstacle
 import { LEVEL1 } from '../res/level1.js';
+import { tileIsFloor, wallType } from '../collision.js';
 
 const COLS = 10, ROWS = 3;      // tiles per room
 const CELL = 18;                // px per tile
 const LEDGE = 5;                // floor-ledge thickness (px)
 const RW = COLS * CELL, RH = ROWS * CELL;   // room px size
-
-// --- collision predicates (ported seg006.c) ---
-const NOT_FLOOR = new Set([0, 9, 12, 20, 26, 27, 28, 29]); // seg006.c:951 exclusions
-const tileIsFloor = t => !NOT_FLOOR.has(t);
-function wallType(t) {                                       // seg006.c:1626
-  if (t === 4 || t === 7 || t === 12) return 1;   // wall at right
-  if (t === 13) return 2;                          // wall at left (mirror)
-  if (t === 18) return 3;                          // chomper
-  if (t === 20) return 4;                          // wall both sides
-  return 0;
-}
 
 // --- lay out rooms on a grid by flood-filling roomlinks from the start room ---
 function layout(level) {

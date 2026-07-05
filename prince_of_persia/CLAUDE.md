@@ -76,18 +76,25 @@ not a formal license); our silhouettes are a heavier reduction still.
 
 ```
 prince_of_persia/
-├─ index.html          # THE PLAYER (the toy) — boots the engine. NOT YET BUILT (reserved).
+├─ index.html          # THE PLAYER (the toy) — the prince in level 1 with real tile collision.
+├─ player.js           # the player: per-tick engine order + render + keyboard (boots the engine)
 ├─ masksheet.js        # shared module: load + rasterize 1-bpp mask sheets
+├─ playseq.js/seqtbl.js/seqbuilder.js   # animation engine (play_seq interpreter + sequence data)
+├─ collision.js        # tile-collision substrate: getTile + floor/wall predicates + coord helpers
+├─ trob.js             # transient-object animator (ported seg007.c) — loose floors only, so far
+├─ control.js          # input→transition layer (ported control_kid) — wired by the player
 ├─ demos/              # one <name>.html + <name>.js per demo (lunar_lander pattern)
-│  └─ actor_frames.html / .js   # dev inspector: contact sheet of every KID.DAT silhouette
+│  ├─ actor_frames.html / .js   # dev inspector: contact sheet of every KID.DAT silhouette
+│  ├─ motion.html / .js          # move sandbox (stand/walk/run/turn/jump/fall)
+│  └─ blockmap.html / .js         # level-1 solid-geometry map (imports collision.js predicates)
+├─ res/                # generated JS data: frame_table_kid.js, level1.js
 ├─ gfx/                # extracted assets, flat: <datname>_masks.json (no per-char subdir)
 │  └─ kid_masks.json
-└─ tools/
-   └─ extract_masks.py # generic DAT → masks JSON (faithful seg009.c port)
+└─ tools/              # extract_masks.py, extract_frametable.py, extract_level.py (seg009.c ports)
 ```
 
-- `index.html` at root = the player (like lunar_lander's game). **Reserved** until
-  the engine exists; the sprite inspector deliberately lives under `demos/`.
+- `index.html` at root = the player (like lunar_lander's game) — **built** (see the roadmap
+  entry); the sprite inspector + building-block demos live under `demos/`.
 - `demos/` = validated building blocks (repo convention). Add a `demos/index.html`
   hub once there are ≥2 demos.
 - Modules flat at the project root; demos import shared modules via `../masksheet.js`.
@@ -248,17 +255,64 @@ KID sprites natively face **LEFT**.
     byte-exact decode *and* the faithful predicate port (the map traces the walkable geometry
     because it computes the engine's own collision from the engine's own data + functions).
   - **feeds next:** this is the collision substrate for the deferred **room-relative bounded
-    `obj_x`** model (below) — the actor-in-a-room experiment.
-- **[later] The player (`index.html`).** Drive the actor with keyboard/gamepad via the
-  input→transition layer — **scaffolded in `control.js`** (a port of `control_kid`,
-  `seg005.c`). The model (no separate FSM — the seqtbl sequences ARE the states; this
-  layer only picks the next sequence at decision frames): input is made **facing-relative**
-  (absolute L/R + `ch.direction` → forward/backward, so *reverse* = BACKWARD), dispatched by
-  **current frame** (`seg005.c:262`). The two signature behaviours live in `controlRunning`
-  (`seg005.c:588`): **frame-gated stop** (release only skids at run frame 7/11 → `runstop`)
-  and **reverse** (BACKWARD → `runturn`). `control.js` is a reserved, not-yet-wired scaffold
-  (handlers stubbed with citations) until this step; wiring it needs a keyboard/gamepad read
-  layer + `runstop` transcribed into `seqtbl.js`.
+    `obj_x`** model (below) — the actor-in-a-room experiment. The full tile-collision mechanism
+    (position→tile mapping, `get_tile` room-crossing, floor/wall predicates, the sub-tile bump
+    system, and the room-relative `Char.x` model) is written up in **`docs/research_collision.md`**
+    — read that first when building the actor-in-a-room step.
+- **[done] The player (`index.html`) — the actor in a room, real tile collision.** The
+  prince dropped into level 1 with PoP's **room-relative bounded `Char.x` model**: he stands
+  on ledges, is blocked by walls, and falls when unsupported — driven by a ported collision
+  substrate + the animation engine. The world half of the toy, now playable.
+  - **`collision.js`** (new, project root) — the ported substrate, PoP-agnostic over a
+    decoded level: `tile_is_floor`/`wall_type` (moved from `blockmap.js` — single source of
+    truth, `blockmap.js` now imports them), **`getTile(level,room,col,row)`** with
+    `find_room_of_tile` link-crossing + `0 → wall`, and the coord helpers (`X_BUMP`, `Y_LAND`,
+    `standX`, `tileDivModM7`, `distanceToEdge`, `yToRowMod4`, the char-relative tile
+    accessors). Every collision query goes through it.
+  - **`player.js`** (new) — the faithful `play_kid_frame` per-tick order (`seg000.c:1192`):
+    `controlKid` → `playSeq` → `fallAccel`/`fallSpeed` → `determineCol` → `crossRooms` →
+    `checkAction`. `checkAction` (`seg006.c:909`) is the hub: freefall → `do_fall` (land
+    soft/med/hard, else `inc_curr_row`), grounded → `check_on_floor` (`FRAME_NEEDS_FLOOR` +
+    no floor → `start_fall`). **Level-1 opens with the real falling entry** (`do_startpos`
+    → `seq_7_fall`; start tile (0,0) is empty by design — he drops one row and soft-lands on
+    the torch-floor). Room crossing = `leave_room` trigger + `goto_other_room` (`±140`/`±189`
+    rebase + `drawn_room` swap). Rendering reuses the motion-sandbox registration, on a
+    **320×200 DOS frame at integer zoom** (`sx=2` → 28 px/tile, `sy=1` = obj_y 1:1). The room
+    (280 px) is centred with **20 px side margins that show neighbour-room SLIVERS** (`drawRoom`
+    draws cols −1..10 via `getTile`'s link-hop; a void link → solid cap) — so an across-the-edge
+    wall (e.g. room 5 at the level-1 start) is visible. Coord pipeline: `docs/research_collision.md §2.1`.
+  - **`control.js`** — now **wired** (was a scaffold): `control_standing` (`forward_pressed`
+    → run, blocked at a wall; Shift → `safe_step`; back → `turn`), `control_running`
+    (frame-gated `runstop` on release, `runturn` on reverse), `control_crouched` (stand up —
+    recovers the falling entry). Input is made **facing-relative** upstream (absolute L/R +
+    `ch.direction` → FWD/BACK). Keys: **←/→ run · Shift+dir careful step · release = stop · R
+    restart**. `runstop` (`seq_13_stop_run`) transcribed into `seqtbl.js`.
+  - **Deviations (documented in `docs/research_collision.md §8`):** wall-block is a sub-tile
+    `Char.x`-clamp to the wall face (the §5b bump-buffer substitute — `Char.x` is the leading
+    edge, so he walks up to a wall in either direction and stops flush, no penetration/bounce;
+    collision *width* and the bump *animation* are the parts not modelled); `safe_step` uses the
+    generic `step11`; gates (drawn but static) / spikes are out of scope for the collision
+    substrate (**loose floors are now implemented — see the next roadmap entry**).
+    `index.html#debug` exposes a console handle (`POP.step`/`place`/`restart`, plus
+    `tile`/`modif`/`trobs` for the loose-floor state) for deterministic testing.
+  - **Verified** vs SDLPoP semantics by single-stepping: falling entry (fall→soft-land→stand),
+    run/runstop/runturn/turn/careful-step, wall-block both directions (stable, no jitter/
+    creep/fall-through), ledge-fall→land, and multi-room horizontal crossing (2→3→9 with
+    `drawn_room` swap + `Char.x` rebase). **Open UX call:** the black-silhouette default tint
+    is low-contrast on the dark room in open areas (adjustable via the tint control).
+- **[done] Loose floors — the first *trob* (transient object).** A loose tile (type 11) you
+  stand on shakes for `loose_floor_delay = 11` frames, then collapses to empty and drops you
+  through — via the existing fall engine, no new fall code. **`trob.js`** (new) is a minimal,
+  loose-only slice of SDLPoP's whole trob system (`seg007.c`): `makeLooseFall` (arm) +
+  `processTrobs` (tick → `remove_loose`). **`player.js`** wires it faithfully to the source
+  frame order — `processTrobs` at the top of the tick (like `process_trobs` at the top of
+  `play_frame`), `checkPress` after `checkAction` (the trigger: a grounded actor on a loose tile
+  → `make_loose_fall`). The collapse countdown is the tile's own `bg` byte (`curr_room_modif`),
+  so the player mutates a **`structuredClone` of the level** and a restart re-clones it (the
+  shared `LEVEL1` const is never touched). Level-1's loose tile (room 1, col 6, row 2) drops him
+  **through the room boundary** into room 2 — a multi-room fall. **Deferred (agreed):** the
+  falling-debris chunk (`add_mob`) and the shake visual (`loose_shake`). Full mechanism +
+  verification in `docs/research_collision.md §9`.
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
 

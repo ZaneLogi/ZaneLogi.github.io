@@ -40,6 +40,12 @@ _b.label('runturn').act(ACT_RUN_JUMP).dx(1).frame(53)
   .dx(7).frame(57).dx(3).frame(58).dx(1).frame(59).frame(60)
   .dx(2).frame(61).dx(-1).frame(62).frame(63).frame(64).dx(-1).frame(65)
   .dx(-14).flip().jmp('runcyc7');
+// runstop — skid to a halt (seq_13_stop_run, seqtbl.c:619): decelerate on momentum
+// (runturn frames 53-56) then settle to stand (turn frames 49-52). No SEQ_FLIP — he
+// stops facing the SAME way (unlike runturn). control_running fires this on release.
+_b.label('runstop').act(ACT_RUN_JUMP).frame(53)
+  .dx(2).snd(SND_FOOTSTEP).frame(54).dx(7).frame(55).snd(SND_FOOTSTEP).frame(56)
+  .dx(2).frame(49).dx(-2).frame(50).frame(51).frame(52).jmp('stand');
 
 // --- jumps + fall: standjump, runjump, freefall + soft/med/hard landings ---
 // standjump (seqtbl.c:381): standing jump — a self-contained rotoscoped arc (the dy at

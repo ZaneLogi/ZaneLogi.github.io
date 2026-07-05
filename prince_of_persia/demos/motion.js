@@ -28,7 +28,7 @@ const $ = (id) => document.getElementById(id);
 const padN = (v, n) => String(v).padStart(n);
 const padW = (v, n) => String(v).padEnd(n);
 
-let scale = 3, tickMs = 70, tint = '#111318', bg = '#b7b1a3', paused = false;
+let scale = 3, tickMs = 83, tint = '#111318', bg = '#b7b1a3', paused = false;  // 83ms default = DOS base speed (12 fps); slider adjusts
 $('tick').oninput = () => { tickMs = +$('tick').value; $('tickval').textContent = tickMs + 'ms'; };
 $('scale').oninput = () => { scale = +$('scale').value; $('scaleval').textContent = scale + '×'; };
 $('tint').oninput = () => { tint = $('tint').value; };
