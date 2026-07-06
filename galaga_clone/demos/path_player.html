@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>galaga_clone — path player (01E8)</title>
+  <style>
+    body { background:#141518; color:#eaeaea; font-family:-apple-system,"Segoe UI",sans-serif; margin:0; padding:24px; }
+    h1 { font-size:19px; font-weight:500; margin:0 0 4px; }
+    p.lead { font-size:13px; color:#b4b4b4; margin:4px 0 18px; max-width:820px; line-height:1.5; }
+    code, .mono { font-family:ui-monospace,Menlo,Consolas,monospace; }
+    a { color:#7cb6ff; }
+    .stage { display:flex; gap:28px; align-items:flex-start; flex-wrap:wrap; }
+    .panel { min-width:320px; max-width:380px; }
+    canvas { background:#161616; border:1px solid #444; image-rendering:pixelated; }
+
+    .controls { display:flex; align-items:center; gap:14px; margin:0 0 14px; font-size:13px; flex-wrap:wrap; }
+    button { background:#20242b; color:#eaeaea; border:1px solid #3a4048; border-radius:5px; padding:5px 13px; cursor:pointer; font-size:13px; }
+    button:hover { background:#2a2f38; }
+    input[type=range] { width:130px; vertical-align:middle; }
+    label { color:#b4b4b4; }
+
+    h2 { font-size:13px; font-weight:500; color:#eaeaea; margin:0 0 8px; }
+    .rows { display:flex; flex-direction:column; gap:2px; }
+    .row { display:grid; grid-template-columns:16px 78px 1fr auto; align-items:center; gap:9px;
+           padding:5px 8px; border-radius:5px; border:1px solid transparent; }
+    .row.active { background:#1d2430; border-color:#33415a; }
+    .row.end { opacity:0.6; }
+    .chip { width:12px; height:12px; border-radius:3px; }
+    .bytes { color:#cdd3da; font-size:13px; letter-spacing:0.5px; }
+    .decode { color:#8a8a8a; font-size:12px; }
+    .tag { color:#b4b4b4; font-size:12px; }
+
+    .badge { display:inline-block; font-size:12px; padding:3px 9px; border-radius:20px; margin:14px 0 6px; }
+    .badge.ok  { background:#173a26; color:#68d391; border:1px solid #2b5e40; }
+    .badge.bad { background:#3a1717; color:#fc8181; border:1px solid #5e2b2b; }
+    #bytes-line { color:#6f7680; font-size:11px; word-break:break-all; margin:2px 0 0; }
+    #readout { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; color:#8fd6a8; margin:12px 0 0; min-height:16px; }
+    .legend { font-size:11px; color:#8a8a8a; margin-top:10px; line-height:1.6; }
+    .swatch { display:inline-block; width:14px; height:3px; border-radius:2px; vertical-align:middle; margin-right:5px; }
+  </style>
+</head>
+<body>
+  <h1>A Galaga fly-in path, played from its bytecode</h1>
+  <p class="lead">
+    Path <span class="mono">01E8</span> — four 3-byte steering segments — <b>assembled by
+    <code>pathbuilder.js</code></b> and run live through the motion interpreter
+    (<code>bugMotion.js</code>). This is the animated counterpart to
+    <a href="../SVG/path_01E8.svg">SVG/path_01E8.svg</a>: watch the swoop build segment by
+    segment. Solid = member 0; dashed = member 1, running the <i>same</i> bytes with rotation
+    negated — the mirrored "wishbone". <a href="index.html">← all demos</a>
+  </p>
+
+  <div class="controls">
+    <button id="play">⏸ Pause</button>
+    <button id="restart">↻ Restart</button>
+    <label>speed <input id="speed" type="range" min="0" max="8" value="1"><span id="speedval" class="mono">1×</span></label>
+    <label><input id="pair" type="checkbox" checked> show pair (member 1)</label>
+  </div>
+
+  <div class="stage">
+    <canvas id="pf" width="448" height="576"></canvas>
+
+    <div class="panel">
+      <h2>The data — four steering segments</h2>
+      <div id="rows" class="rows"></div>
+
+      <div id="badge" class="badge">…</div>
+      <div id="bytes-line" class="mono"></div>
+      <div id="readout">—</div>
+
+      <div class="legend">
+        <span class="swatch" style="background:#7cb6ff"></span>seg 1 · descend<br>
+        <span class="swatch" style="background:#68d391"></span>seg 2 · gentle bend<br>
+        <span class="swatch" style="background:#f6ad55"></span>seg 3 · hard hook<br>
+        <span class="swatch" style="background:#fc8181"></span>seg 4 · long tail<br>
+        <span style="color:#6f7680">224 × 288 playfield · grid = formation rows</span>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./path_player.js"></script>
+</body>
+</html>

@@ -86,10 +86,10 @@ ld 0x0D(ix), a
 | 0xFC | `case_0B4E` | DIVE — set dive origin Y | 1 (origin Y) | Stores at 0x06(ix), sets bit 5 of 0x13(ix), break |
 | 0xFB | `case_0AA0` | **TURN_HOME — REDIRECT toward formation slot** | 0 | See §6 below |
 | 0xFA | `case_0BD1` | LOOP_TOP — conditional reload | 2 (alt addr) | If `cont_bmb && !task_actv[0x1D]`: skip; else load new ptr |
-| 0xF9 | `case_0B5F` | Loop-back from below screen | 0 | Updates 0x03(ix) X coord toward home column |
-| 0xF8 | `case_0B87` | BEAM_ON — initialize tractor beam | 0 | Sets 0x01(ix) = 0x9C |
+| 0xF9 | `case_0B5F` | REENTER_COLUMN — re-enter at home column | 0 | Sets 0x03(ix) X to the home-column coord |
+| 0xF8 | `case_0B87` | REENTER_TOP — re-enter at top (NOT a tractor beam; the `.dw` "tractor beam reaches ship" comment is a mislabel — the code only sets Y) | 0 | Sets 0x01(ix) = 0x9C (rawY → canvas top edge) |
 | 0xF7 | `case_0B98` | ATTACK_TURN — conditional jump if transient | 2 (sub addr) | If `obj_id & 0x38 == 0x38`: jump to addr; else skip |
-| 0xF6 | `case_0BA8` | FREE_FLIGHT — arm bombing | 1 (vel hint) | Sets bombing state |
+| 0xF6 | `case_0BA8` | FREE_FLIGHT — enter free-flight | 1 (heading angle) | Sets angle 0x04/0x05 = arg<<2 (10-bit heading) + arms bomb-drop |
 | 0xF5 | `case_0942` | Set status to 3, advance to next | 0 | Continue path |
 | 0xF4 | `case_0A53` | Capture-boss diving | 0+ | Special handling |
 | 0xF3 | `case_0A01` | BREAK_TARGETED — pick sub-path by ship deltaX | 2 (LUT addr) + 6-byte LUT | Computes target index 0-5, picks sub-path |
