@@ -333,6 +333,14 @@ slivers of its neighbors (`room_L/R/A/BL/BR`).
 
 ## 7. What the clone already has vs. still needs
 
+> **Superseded in part (2026-07-07): the position/room/edge substrate is now FAITHFUL.**
+> The `curr_col` clamp, the front-only `getEdgeDistance`, the room-cross-before-`check_action`
+> order, and the `curr_row`-based vertical cross described in §7/§8 were all **removed** in the
+> substrate rework (W1+W1b+W2+W3). Stale claims below are corrected inline. The authoritative,
+> fully-mapped source model now lives in the dedicated research set —
+> `research_frame_loop.md`, `research_position_room.md`, `research_collision_detection.md`,
+> and the clone-vs-source classification in `research_deviation_ledger.md`.
+
 **Already ported / available:**
 - Animation + gravity engine: `playSeq`, `fallAccel`/`fallSpeed`, fall + land
   sequences — `playseq.js` / `seqtbl.js`.
@@ -344,6 +352,8 @@ slivers of its neighbors (`room_L/R/A/BL/BR`).
 `collision.js`, wired `control.js`, `runstop` added to `seqtbl.js`):
 1. ✅ **Position as `(room, x-byte, curr_col/curr_row)`** with the full `determine_col`
    mapping (§2, `dxWeight` incl. the per-frame weight offset), replacing the flat `actorX`.
+   `curr_col` is **unclamped** (faithful, seg006.c:122) — at a room edge it is legitimately
+   −1/10 and `getTile` link-hops (research_position_room.md §3).
 2. ✅ **`getTile(level,room,col,row)`** with `find_room_of_tile` link-crossing + `0 → wall`
    (§3) — `collision.js`, drives every query.
 3. ✅ **Floor-support → fall** (§4): `check_on_floor` (see §8) + the existing gravity/land
@@ -369,34 +379,35 @@ The three open items above were all traced end-to-end while building the player:
   side is `do_fall` (`seg005.c:37`): when `Char.y` reaches `y_land[curr_row+1]`, `land()`
   (floor) or `inc_curr_row` (descend). Ported verbatim in `player.js`.
 - **The per-tick order is `play_kid_frame` (`seg000.c:1192`):** `control` → `play_seq` →
-  `fall_accel` → `fall_speed` → `determine_col` → (room cross) → `check_action`. The player
-  follows it exactly; `check_action` is the collision hub.
+  `fall_accel` → `fall_speed` → `determine_col` → `set_char_collision` → `check_bumped` →
+  `check_action` → `check_press` → **(then, after the whole kid frame, `exit_room`)**. The player
+  now follows this exactly — the room cross runs **after** `check_action`, matching `exit_room`'s
+  place in `play_frame` (`seg000.c:881`). *(Corrected: the earlier draft ran the room cross before
+  `check_action`; that was the W2 deviation — see `research_frame_loop.md §2.4` and
+  `research_deviation_ledger.md`.)*
 - **Room crossing = `leave_room` (`seg002.c:423`) trigger + `goto_other_room`
   (`seg002.c:390`) rebase:** left `Char.x += 140` / right `-= 140` / up `Char.y += 189` /
   down `-= 189` (`+ curr_row = y_to_row_mod4`, `seg006.c:804`), then hop the roomlink and
-  swap `drawn_room`. Horizontally the clone triggers on the leading edge `Char.x`, with the
-  source's **direction-dependent thresholds** (`seg002.c:462-483`; the leading edge is
-  `char_x_right` facing right / `char_x_left` facing left, both `== Char.x`): facing **right**
-  → cross right at `Char.x >= 201`, left at `<= 57`; facing **left** → cross left at
-  `Char.x <= 54`, right at `>= 198`. Vertically on `curr_row` leaving `[0,2]` (falls). A `0`
-  link is the void (no cross). **Two guards, ported from `leave_room` (`seg002.c:440/459`):
-  no cross during a TURN (`action 7`) or while STANDING UP from a crouch (frames 110-119).**
-  These matter because both sequences shove `Char.x` around with their own `dx` while the
-  character is stationary — and `clampToWall` *skips the turn* (`action 7`, §5b), so during a
-  turn nothing pins `Char.x` at a wall face. Without the turn guard, turning at a room edge let
-  the turn's `dx` push `Char.x` past the threshold and cross into the neighbour — *even a walled
-  one* (observed: standing at room 2's left edge facing right, pressing back teleported the kid
-  into room 6's col-9 wall). So the earlier "no wall-guard needed — `clampToWall` pins `Char.x`
-  first" reasoning holds **only for non-turn motion**; the turn is exactly the case it doesn't
-  cover, and the `action 7` guard is what closes it (matching the source, which returns −1 from
-  `leave_room` for a turn).
+  swap `drawn_room`. The clone's `leaveRoom` is now the **faithful `leave_room` order**
+  (research_position_room.md §5): **(1) UP** and **(2) DOWN** are **`Char.y`-based** (up when
+  `Char.y ∈ (−16,10)` and the action is grounded/climbing — this is what crosses a two-floor
+  climb into the room above; down when `Char.y ≥ 211`); **(3)** a **climb frame (135–149)**,
+  **stand-up-from-crouch (110–119)**, or **turn (`action 7`)** blocks *horizontal* leave only;
+  **(4)** horizontal on the leading edge `Char.x` with the direction-dependent thresholds
+  (`seg002.c:462-483`; facing **right** → right at `>=201`, left at `<=57`; facing **left** →
+  left at `<=54`, right at `>=198`). A `0` link is the void. *(Corrected: the earlier draft used
+  `curr_row` leaving `[0,2]` for the vertical cross and lacked the climb-frame block — the W3
+  deviation; the turn/stand-up guards were already present. The turn-teleport bug they fixed is
+  still real: turning at a room edge, the turn's own `dx` would push `Char.x` past the threshold
+  and cross into a walled neighbour, so the `action 7` guard on horizontal leave stays.)*
 - **`dx_weight`'s per-frame weight offset (§2) IS implemented** (`determineCol` uses
   `char_dx_forward(frame.dx - (flags & 0x1F))`), not the first-cut `Char.x` approximation. And
-  **`curr_col` is clamped to `[0,9]` ALWAYS** — the weight point lags `Char.x` by ~10 units and
-  reads a phantom neighbour column at a tile/room edge (or when a fast run frame overshoots the
-  boundary), which would make `clampToWall` compute the wrong wall face and let the char slip
-  into the next room. Clamping is the clone's stand-in for the bump system keeping the char
-  valid; crossing is decided by `Char.x`, so it never blocks a legitimate cross.
+  **`curr_col` is UNCLAMPED** (faithful, `determine_col` seg006.c:122), so at a room edge it is
+  legitimately −1/10 and every `getTileAtChar` link-hops to read the neighbour tile. *(Corrected:
+  the earlier draft clamped `curr_col` to `[0,9]` — the W1 deviation. It only "worked" because the
+  front-only `getEdgeDistance` was co-designed with it; both were removed together, and
+  `getEdgeDistance` is now the source's own-tile-first `get_edge_distance`, seg004.c:383. Full
+  account: `research_deviation_ledger.md §1`.)*
 
 ### How the source blocks at a room-edge wall (cross-check)
 
@@ -419,13 +430,15 @@ boundary first.** The design that makes this work, and which the clone mirrors:
   `Char.x += (wall_face − char_edge)`. Then `leave_room` reads the *pushed-back* position, its
   `char_x_left/right` threshold isn't met, it returns −1, and no room flip happens.
 
-**The clone mirrors this** with `clampToWall` (position-based, boundary-aware via `getTile`'s
-link-hop) running *before* `crossRooms` — pin `Char.x` at the face, then decide the cross. The
-clone's *earlier* bug was the exact failure this ordering prevents: keying the wall check off the
-lagging `curr_col` let it go phantom on a fast overshoot, so the "bump" missed and the "leave"
-fired. Fixing it (Char.x-based clamp + unconditional `curr_col` clamp) made the clone
-position-based and boundary-aware like `check_collisions`. (The bump *animation* + collision *box*
-are now modelled too — see §5b; the one remaining substitute is the per-column buffer *scan*.)
+**The clone mirrors this faithfully.** The wall bump (`checkBumped`, position-based on `Char.x`
+and boundary-aware via `getTile`'s link-hop) runs *inside* the tick and pins `Char.x` at the wall
+face; the room cross (`leaveRoom`) runs *after* `checkAction` (matching `exit_room`'s place after
+the kid frame). So the bump pushes `Char.x` back before `leaveRoom` reads it, its `Char.x`
+threshold isn't met, and no flip happens — exactly as the source's `check_bumped`-then-`exit_room`
+order does. *(This ordering is the W2 fix; the earlier draft ran the cross before `check_action`
+and relied on the now-removed `curr_col` clamp — see the §7 banner + `research_deviation_ledger.md`.)*
+The bump *animation* + collision *box* are modelled (§5b); the one remaining substitute is the
+per-column buffer *scan*.
 
 **Deviations (honest):**
 - **Wall block — the box + recoil animation ARE modelled (§5b); the per-column buffer *scan* is
@@ -546,3 +559,95 @@ soft-land falling entry still stands up as before.
   object that tumbles down and can hurt whoever's below. Its own subsystem (`do_mobs`).
 - **The shake visual** (`loose_shake`, `seg007.c:870`) — the tile just renders as its normal
   (brown) floor ledge until it vanishes. The collapse is still legible (floor disappears → fall).
+
+## 10. Vertical jump-up + climb (Up → jump / grab a ledge / climb up)
+
+The first move that carries the prince *between* rows under player control. Pressing **Up** while
+standing jumps straight up; if a ledge is within reach above, he **grabs it and hangs**; pressing
+**Up** again **climbs him onto** it. The striking thing about the port: it needed **no new engine
+mechanism** — the row change, the hang render, and "don't fall while hanging" all fall out of
+machinery that was already there (`§2.1`, `§4`, the `play_seq` opcodes). It is transcription +
+control/collision wiring.
+
+### The control paths (ported `seg005.c`)
+
+`control_standing` (`seg005.c:393`) routes a standing **Up** to `up_pressed` → `check_jump_up`
+(`seg005.c:693`), which tries three things in order:
+
+1. **Grab a ledge in front & above** — `can_grab(through = tile directly above, target = tile
+   front-above)`. Success → `grab_up_with_floor_behind` (`seg005.c:871`): close to the edge and not
+   against a wall → `jumphangMed` (seq_8, dx 0), else `jumphangLong` (seq_24, reach forward dx +4).
+2. **Grab a ledge straight above** — `can_grab(through = behind-above, target = above)`. Success →
+   `jump_up_or_grab` (`seg005.c:711`): too close (<6) just jumps; no floor behind → `jumpbackhang`
+   (seq_16); else step back a tile and `grab_up_with_floor_behind`.
+3. **Neither** → `jump_up` (`seg005.c:734`): read the tile one row above at the weight column —
+   neither wall nor floor → open air → `highjump` (seq_28); a wall/floor above → `jumpup` (seq_14,
+   touch the ceiling with `SEQ_KNOCK_UP`). Both self-contained arcs ending in `hangdrop` → stand.
+
+`can_grab` (`seg006.c:1606`, ported to `collision.js canGrab(through, target, mod, facingRight)`):
+grab is allowed only when the *through* tile is passable (not wall / not a floor / not a
+right-facing doortop) and the *target* is a floor (with the doortop-with-floor and shaking-loose
+exclusions). Our `loose_floor_delay == 11`, so a shaking loose target (modifier ≠ 0) is not
+grabbable — matching source.
+
+Once hanging (frames 87–99, action `2_hang_climb`), `control_hanging` (`seg005.c:791`, our
+`controlHanging`) decides each frame: **Up** (once `grab_timer` has counted down) → `can_climb_up`
+→ `climbup` (seq_10); **Shift** against a wall/doortop → `hangstraight` (seq_25, action
+`6_hang_straight`); **anything else** → `hang_fall` (`seg005.c:846`) → `hangdrop` (seq_11, land on
+the floor below) or `hangfall` (seq_23, release over a pit → `freefall`). Because control interrupts
+on the *first* hang frame, the long `hang` swing loop (`seqtbl.c:554`, 42 frames) rarely plays under
+player control — you climb or drop almost immediately.
+
+### Why the row change / render / no-fall are free
+
+- **Row change:** `climbup` is `… dx(5) dy(-63) SEQ_UP frame_141 …`. `SEQ_UP` decrements `curr_row`
+  and `dy(-63)` lifts the feet exactly one tile (`y_land`: 118→55, `§2`), so he ends standing on the
+  ledge one row up. `play_seq` already executes `SEQ_UP/DOWN/KNOCK_UP` (`playseq.js`) — the only new
+  builder work was the `up()`/`down()`/`knockUp()` helpers in `seqbuilder.js`.
+- **Hang render:** the rise-and-hang is entirely the per-frame `frame_table_kid` **draw-offset dy**
+  (already applied in `player.js draw()`, `§2.1`). `Char.y` barely moves while hanging (the feet of
+  a char hanging from the row-above ledge sit ≈ where they'd stand in the current row), so hanging
+  keeps `curr_row` unchanged and the sprite is drawn up by the frame dy.
+- **No spurious fall:** `check_action` (`seg006.c:909`) does nothing for actions `2_hang_climb` /
+  `6_hang_straight`, so a hanging char never falls via the floor check. During the jump-up *rise*
+  `curr_row` is unchanged, so `check_on_floor` keeps finding the take-off floor.
+
+### `grab_timer`
+
+Set to 12 only when grabbing a ledge **mid-fall** (`check_grab`, `seg006.c:1217`) — that path is
+deferred (below) — and counted down each tick (`process(grab_timer)`, `seg006.c:1405`; our tick
+top). So in this step it is always 0 and the climb starts immediately; the field + countdown are in
+place so the deferred mid-fall grab works when added.
+
+### Sequences transcribed (`seqtbl.js`, from `seqtbl.c`)
+
+`jumpup` (629), `highjump` (637), `hangdrop` (602), `jumphangMed` (526), `jumphangLong` (534),
+`jumpbackhang` (544), `hang`+`hang1` (554), `hangstraight`+loop (569), `climbup` (590), `hangfall`
+(609). `climbfail` (575) is **not** transcribed — it is reached only from `seq_9_grab_while_jumping`
+(the deferred `USE_JUMP_GRAB` path), so it would be dead code here.
+
+### Verified (deterministic single-stepping, `index.html#debug`)
+
+- **Jump up in place:** `POP.place(2,6,1,0)` + Up → `highjump` (open air above; apex-hold), ends
+  standing at the **same** row. `POP.place(2,3,1,0)` + Up → `jumpup` (wall above; single apex +
+  `KNOCK_UP`). Both drop via `hangdrop` and never fall.
+- **Grab front-above + climb:** `POP.place(7,5,2,-1)` (facing left; above = empty, front-above col 4
+  = floor) + Up held → `67…80,91,135…149,118,119,15`: rise → grab → one hang frame → `climbup` →
+  ends standing **row 2→1** on the col-4 floor, `Char.y` 181→118. Screenshot confirms the hang pose.
+- **Grab straight-above + climb:** `POP.place(5,6,2,-1)` + Up → `jump_up_or_grab` path → climb
+  (row 2→1, uses `climbup` frame 141).
+- **Release while hanging:** grab then release → `…,91,81,82,83,84,85,15` (`hangdrop`) back to row 2.
+- **Regressions:** run/stop/turn/careful-step, wall-bump, loose-floor fall, room crossings, the
+  falling entry — all still pass; no console errors.
+
+### Deferred (each a clean follow-on that reuses this hang machinery)
+
+- **Grab a ledge while falling** — Shift held during a fall → `check_grab` (`seg006.c:1177`) →
+  `fallhang` (seq_15); this is what sets `grab_timer = 12`.
+- **Climb down** — Down at a ledge edge with an edge behind → `down_pressed` grab path
+  (`seg005.c:472`) → `climbdown` (seq_68).
+- **Climb onto a closed gate/mirror/chomper** — `can_climb_up`'s `seq_73` variant
+  (`seg005.c:835`); gates are drawn but static here, so `can_climb_up` always uses the general
+  `climbup`.
+- **The horizontal jumps** (standing jump / running jump) — the other branch of the jump family;
+  `control_jumpup`'s forward→standing-jump conversion (`seg005.c:680`) is a no-op until then.

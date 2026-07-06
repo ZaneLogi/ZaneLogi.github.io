@@ -24,6 +24,9 @@ export class SeqBuilder {
   dx(n) { return this._b(SEQ.DX, n & 0xFF); }
   dy(n) { return this._b(SEQ.DY, n & 0xFF); }
   flip() { return this._b(SEQ.FLIP); }
+  up() { return this._b(SEQ.UP); }                  // SEQ_UP — curr_row-- (climb up a row)
+  down() { return this._b(SEQ.DOWN); }              // SEQ_DOWN — curr_row++ (climb down a row)
+  knockUp() { return this._b(SEQ.KNOCK_UP); }       // SEQ_KNOCK_UP (jump into ceiling)
   knockDown() { return this._b(SEQ.KNOCK_DOWN); }   // SEQ_KNOCK_DOWN (landings)
   die() { return this._b(SEQ.DIE); }                // SEQ_DIE (hard land)
   snd(s) { return this._b(SEQ.SOUND, s); }

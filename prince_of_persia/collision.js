@@ -45,6 +45,20 @@ export function wallType(t) {
   return 0;
 }
 
+// can_grab (seg006.c:1606): can the char grab the `target` tile THROUGH the `through` tile? The
+// through-tile is the one the hands pass in front of; the target is the ledge they land on. Ported
+// with our loose_floor_delay == 11, so `!(delay > 11)` is true and a shaking loose target (modifier
+// != 0) is not grabbable. Tile types: 7 doortop+floor, 11 loose, 12 doortop, 20 wall.
+export function canGrab(through, target, targetModifier, facingRight) {
+  if (through === 20) return 0;                            // can't grab through a wall
+  if (through === 12 && facingRight) return 0;             // can't grab through a doortop facing right
+  if (tileIsFloor(through)) return 0;                      // can't grab through a floor
+  if (target === 11 && targetModifier !== 0) return 0;     // can't grab a shaking loose floor
+  if (target === 7 && !facingRight) return 0;              // doortop+floor grabbable only from the left
+  if (!tileIsFloor(target)) return 0;                      // must have a floor to grab onto
+  return 1;
+}
+
 // --- get_tile: the universal accessor with auto room-crossing (seg006.c:28/46) ---
 // Mirrors find_room_of_tile: an out-of-range col/row hops the matching roomlink; a
 // missing neighbour is room 0 = the void, which reads as tiles_20_wall. Pure over
@@ -61,6 +75,19 @@ export function getTile(level, room, col, row) {
   }
   if (room > 0) return level.rooms[room - 1].fg[row][col] & 0x1F;  // low 5 bits = type (seg006.c:37)
   return 20;                                                        // room 0 -> tiles_20_wall (seg006.c:40)
+}
+
+// getTileModif: the bg MODIFIER byte at a tile (curr_room_modif in source), with the same
+// room-crossing as getTile. can_grab reads it to reject grabbing a shaking loose floor.
+export function getTileModif(level, room, col, row) {
+  for (;;) {
+    if (col < 0)  { col += 10; room = room ? level.rooms[room - 1].links.left  : 0; continue; }
+    if (col >= 10){ col -= 10; room = room ? level.rooms[room - 1].links.right : 0; continue; }
+    if (row < 0)  { row += 3;  room = room ? level.rooms[room - 1].links.up    : 0; continue; }
+    if (row >= 3) { row -= 3;  room = room ? level.rooms[room - 1].links.down  : 0; continue; }
+    break;
+  }
+  return room > 0 ? level.rooms[room - 1].bg[row][col] : 0;
 }
 
 // --- x <-> column (get_tile_div_mod / _m7, seg006.c:697/750) ---
@@ -96,6 +123,13 @@ export const getTileInFrontOfChar = (level, ch) =>
   getTile(level, ch.room, ch.curr_col + DIR_FRONT[ch.direction + 1], ch.curr_row);     // seg006.c:1305
 export const getTileBehindChar = (level, ch) =>
   getTile(level, ch.room, ch.curr_col + DIR_BEHIND[ch.direction + 1], ch.curr_row);    // seg006.c:1318
+// the row-above variants (curr_row - 1), used by the jump-up / grab tests.
+export const getTileAboveChar = (level, ch) =>
+  getTile(level, ch.room, ch.curr_col, ch.curr_row - 1);                               // seg006.c:1644
+export const getTileFrontAboveChar = (level, ch) =>
+  getTile(level, ch.room, ch.curr_col + DIR_FRONT[ch.direction + 1], ch.curr_row - 1); // seg006.c:1654
+export const getTileBehindAboveChar = (level, ch) =>
+  getTile(level, ch.room, ch.curr_col + DIR_BEHIND[ch.direction + 1], ch.curr_row - 1);// seg006.c:1649
 
 // distance_to_edge (seg006.c:1328): the sub-tile distance from `xpos` to the edge of its
 // tile in the char's facing direction (0..13). The caller passes dx_weight() as xpos.

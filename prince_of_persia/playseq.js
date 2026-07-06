@@ -16,7 +16,8 @@ export const DIR_RIGHT = 0, DIR_LEFT = -1;      // dir_0_right / dir_FF_left
 // Character actions (types.h enum). We only need the ones the fall touches; the
 // freefall action gates gravity (fallAccel/fallSpeed run only in it), and bumped +
 // freefall are the two "not controllable" actions (control() gate, seg005.c:264).
-export const ACT_IN_MIDAIR = 3, ACT_IN_FREEFALL = 4, ACT_BUMPED = 5;   // actions_3_in_midair / _4_in_freefall / _5_bumped
+export const ACT_HANG_CLIMB = 2, ACT_IN_MIDAIR = 3, ACT_IN_FREEFALL = 4;  // actions_2_hang_climb / _3_in_midair / _4_in_freefall
+export const ACT_BUMPED = 5, ACT_HANG_STRAIGHT = 6;                       // actions_5_bumped / _6_hang_straight
 
 // Gravity constants (types.h:1435-1436).
 const FALLING_SPEED_ACCEL = 3, FALLING_SPEED_MAX = 33;
@@ -33,6 +34,7 @@ export function makeCharacter(opts = {}) {
     charid: 0, frame: 0, action: 0, curr_seq: 0, curr_row: 0,
     x: opts.x ?? 0, y: opts.y ?? 0, direction: opts.direction ?? DIR_RIGHT,
     fall_x: 0, fall_y: 0, repeat: 0,   // Char.repeat — gates the ledge test-foot (safe_step, seg005.c:609)
+    grab_timer: 0,                     // set to 12 when grabbing a ledge mid-fall; blocks climb-up until it counts down (seg006.c:1405)
     testing: 0,                        // clone-only: true during `testfoot` (the peer-over lean must not fall/bump)
   };
 }

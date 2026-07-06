@@ -285,8 +285,9 @@ KID sprites natively face **LEFT**.
     → run, blocked at a wall; Shift → `safe_step`; back → `turn`), `control_running`
     (frame-gated `runstop` on release, `runturn` on reverse), `control_crouched` (stand up —
     recovers the falling entry). Input is made **facing-relative** upstream (absolute L/R +
-    `ch.direction` → FWD/BACK). Keys: **←/→ run · Shift+dir careful step · release = stop · R
-    restart**. `runstop` (`seq_13_stop_run`) transcribed into `seqtbl.js`.
+    `ch.direction` → FWD/BACK). Keys: **←/→ run · Shift+dir careful step · ↑ jump up / grab &
+    climb a ledge · release = stop · R restart**. `runstop` (`seq_13_stop_run`) transcribed into
+    `seqtbl.js`.
   - **Deviations (documented in `docs/research_collision.md §8`):** wall-block detection is a
     sub-tile `Char.x`-clamp to the wall face (`Char.x` is the leading edge, so he walks up to a
     wall in either direction, no penetration) — but the collision *box* and the bump *animation*
@@ -334,6 +335,40 @@ KID sprites natively face **LEFT**.
   a wall across a room boundary being missed (which had falsely *blocked* a left-facing char at a
   room edge). Forward without Shift still runs off a ledge. (Render tweak: the neighbour-room
   **slivers** in the side margins are dimmed with a translucent wash so they read as adjacent rooms.)
+- **[done] Vertical jump-up + climb.** Pressing **Up** jumps straight up; a ledge within reach
+  above is **grabbed** (hang), and Up again **climbs onto** it — the first player-controlled move
+  *between* rows. This is the grab/hang/climb subsystem of `control_kid`, ported from `seg005.c`:
+  `up_pressed` → `check_jump_up` (`seg005.c:693`) picks grab-front-above / grab-straight-above /
+  plain-jump-up via `can_grab` (`seg006.c:1606` → `collision.js canGrab`); `control_hanging`
+  (`seg005.c:791`) then climbs (Up → `climbup`/seq_10), hangs against a wall (Shift → `hangstraight`),
+  or lets go (`hangdrop`/`hangfall`). **No new engine mechanism was needed** — `climbup`'s
+  `dx(5) dy(-63) SEQ_UP` moves him up exactly one row using opcodes `play_seq` already ran; the hang
+  render is the frame-table draw-offset dy; `check_action` already no-ops for the hang actions. New
+  sequences transcribed in `seqtbl.js` (jumpup / highjump / hangdrop / jumphangMed·Long·backhang /
+  hang / hangstraight / climbup / hangfall); `seqbuilder.js` gained `up()`/`down()`/`knockUp()`;
+  `collision.js` gained `getTileModif` + the row-above accessors + `canGrab`; `player.js` the
+  jump-up/grab/hang logic (through the `world` object) + a `grab_timer` countdown. Full port map +
+  verification in `docs/research_collision.md §10`. **Deferred (each reuses this hang machinery):**
+  grab-a-ledge-while-falling (Shift, sets `grab_timer`), climb-down (Down → `climbdown`/seq_68),
+  and the horizontal standing/running jumps.
+- **[done] Position/room substrate — faithful (W1+W1b+W2+W3).** A ground-up alignment of the
+  position/edge pipeline to SDLPoP, prompted by cross-room climbing (grab a ledge in the next room →
+  climb → *fell*). The whole `docs/research_*.md` set (frame_loop / position_room /
+  collision_detection / actions / environment / deviation_ledger) maps the source; the ledger
+  classifies every clone deviation. The fix removed two **entangled** shortcuts (not new code):
+  **W1** `determineCol` no longer clamps `curr_col` (seg006.c:122 is unclamped; only the collision-
+  *scan* bounds clamp) so `check_action` link-hops across a boundary via `getTile`; **W1b**
+  `getEdgeDistance` restored to `get_edge_distance`'s **own-tile-first** structure (seg004.c:383 —
+  check `get_tile_at_char` before the front tile) so a boundary wall safe-steps flush instead of
+  oscillating (the front-only shortcut only worked *because* of the clamp — each propped up the
+  other); **W2** the room cross moved to a post-`checkAction` `leaveRoom()` step (source runs
+  `exit_room` after the kid frame, seg000.c:881); **W3** `leaveRoom` is now faithful `leave_room`
+  (seg002.c:423) — `Char.y`-based UP/DOWN leave + the climb-frame (135–149) block on horizontal.
+  Verified: cross-room climb succeeds (straddle → resolves on the next step), boundary-wall bump
+  flush, vertical up/down + horizontal crosses, all prior regressions; no console errors; the
+  straddle renders faithfully (character drawn room-relative, no extra draw). **Lesson (promoted to
+  a feedback memory): with a faithful RE source, follow it — don't simplify away without a strong
+  reason; entangled shortcuts cost more later than the faithful port.**
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
 
@@ -396,6 +431,20 @@ turns. Each lesson was paid for in bugs:
    makes the change the prime suspect. When the user reports a mismatch and your
    reasoning "proves" it's fine, **measure** — the observer watching the real output
    beats reasoning from assumptions.
+6. **With a faithful RE source, follow it — don't simplify away without a strong
+   reason.** Deviating needs a *load-bearing* justification (a hardware-only mechanism,
+   §"When a subsystem has no software counterpart" in the root doc), never "this is
+   simpler / enough for now." The trap is that **shortcuts entangle**: the position
+   substrate accumulated a `curr_col` clamp *and* a front-only `getEdgeDistance` — each
+   existed only because the other did, so each looked individually harmless while
+   together they produced a wrong-direction bug (climbing into a wall at room edges).
+   Unwinding them later cost a full research pass + rework; the faithful port up front
+   would have been cheaper. Two corollaries: **(a)** prove the entanglement before
+   ripping it out — a quick A/B toggle (clamp on/off) both *confirmed* the fix and
+   *surfaced* the companion shortcut before the rework, not mid-way; **(b)** don't offer
+   the user short-term "let's stop here / make it work for now" off-ramps on substrate
+   code — take the long-term view and port the whole coherent mechanism, deferring only
+   separable *features*, never the substrate.
 
 ## Commit style
 

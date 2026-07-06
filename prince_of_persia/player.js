@@ -7,8 +7,11 @@
 //
 // Per-tick order follows play_frame / play_kid_frame (seg000.c:869/1192):
 //   process_trobs (loose floors) -> control -> play_seq -> fall_accel -> fall_speed
-//   -> determine_col -> set_char_collision -> check_bumped (wall recoil) -> (room cross)
+//   -> determine_col (UNCLAMPED) -> set_char_collision -> check_bumped (wall recoil)
 //   -> check_action (freefall: do_fall / grounded: check_on_floor) -> check_press (loose-floor)
+//   -> leave_room (the room CROSS is LAST, matching exit_room's place after the kid frame,
+//      seg000.c:881). curr_col is unclamped so check_action reads across a boundary via get_tile's
+//      link-hop; the cross is applied after. Substrate faithfulness: research_position_room.md.
 //
 // Rendering reuses the motion-sandbox registration exactly (reg-point flip, content.maxy
 // feet); the only new part is the room-relative coordinate maps below. GPLv3 (see NOTICE).
@@ -17,9 +20,10 @@ import { FRAME_TABLE_KID } from './res/frame_table_kid.js';
 import { LEVEL1 } from './res/level1.js';
 import { makeCharacter, startSeq, playSeq, fallAccel, fallSpeed, charDxForward,
          DIR_RIGHT, DIR_LEFT, ACT_IN_MIDAIR, ACT_IN_FREEFALL } from './playseq.js';
-import { getTile, tileIsFloor, wallType, tileDivMod, tileDivModM7, standX,
-         Y_LAND, SCREENSPACE_X, TILE_SIZEX, TILE_RIGHTX, ROOM_XSPAN, ROOM_YSPAN,
-         getTileAtChar, distanceToEdge, yToRowMod4,
+import { getTile, getTileModif, tileIsFloor, wallType, tileDivMod, tileDivModM7, standX,
+         Y_LAND, SCREENSPACE_X, TILE_SIZEX, TILE_RIGHTX, ROOM_XSPAN, ROOM_YSPAN, TILE_WALL,
+         DIR_FRONT, getTileAtChar, getTileAboveChar, getTileFrontAboveChar, getTileBehindAboveChar,
+         getTileBehindChar, canGrab, distanceToEdge, yToRowMod4,
          EDGE_WALL, EDGE_FLOOR, EDGE_CLOSER } from './collision.js';
 import { controlKid, makeControl, HELD, RELEASED, FWD, NONE, BACK } from './control.js';
 import { makeTrobs, processTrobs, makeLooseFall, TILE_LOOSE } from './trob.js';
@@ -28,7 +32,9 @@ import { makeTrobs, processTrobs, makeLooseFall, TILE_LOOSE } from './trob.js';
 const FRAME_WEIGHT_X = 0x1F, FRAME_NEEDS_FLOOR = 0x40;
 const frameFlags = (f) => FRAME_TABLE_KID[f][4];
 // Character actions used by check_press's gate (types.h:407-414).
-const ACT_HANG_CLIMB = 2, ACT_BUMPED = 5, ACT_TURN = 7;
+const ACT_HANG_CLIMB = 2, ACT_BUMPED = 5, ACT_HANG_STRAIGHT = 6, ACT_TURN = 7;
+// Tile types the grab/hang tests special-case (types.h): doortop-with-floor and plain doortop.
+const TILE_DOORTOP_FLOOR = 7, TILE_DOORTOP = 12;
 
 // A MUTABLE working copy of the level: loose floors collapse into it (fg 11 -> 0), so the
 // tile data itself changes just as the source's curr_room_tiles does. LEVEL1 (the shared
@@ -105,14 +111,13 @@ function dxWeight(ch) {
   return charDxForward(ch, frameDx - (flags & FRAME_WEIGHT_X));
 }
 function determineCol(ch) {
+  // FAITHFUL (seg006.c:122): curr_col is UNCLAMPED. At/across a room edge it is legitimately -1 or
+  // 10, and every get_tile_at_char / get_tile_infrontof_char link-hops into the neighbour room to
+  // read the correct tile (collision.js getTile). The source clamps only the collision-SCAN bounds
+  // (char_col_left/right in set_char_collision), never curr_col — the two are distinct
+  // (research_position_room.md §3). Consumers that needed the old clamp were themselves shortcuts
+  // (the front-only getEdgeDistance); those are ported faithfully so the unclamped col is correct.
   ch.curr_col = tileDivModM7(dxWeight(ch));
-  // Keep the char's own-tile column in [0,9] of his current room, ALWAYS. determine_col samples
-  // ~10 units behind Char.x (the weight point), which at a tile/room edge — or when a fast run
-  // frame overshoots the boundary — reads a phantom neighbour column (e.g. -1). That would make
-  // clampToWall compute the wrong wall face and let the char slip through into the next room.
-  // Room crossing is decided by Char.x (crossRooms), not curr_col, so clamping never blocks a
-  // legitimate crossing; it's the clone's stand-in for the bump system keeping the char valid.
-  ch.curr_col = Math.max(0, Math.min(9, ch.curr_col));
 }
 
 // Does a wall of this wall_type block the char's facing direction?
@@ -145,24 +150,30 @@ function wallAheadFace(ch) {
 }
 
 // get_edge_distance (seg004.c:378): the sub-tile distance to the edge ahead + its type — the input
-// to the safe-step decision (control.js). Ported for the cases the player reaches: a WALL ahead
-// (distance to its near face, keyed off the leading edge like `wallAheadFace`), a FLOOR ahead (a
-// full careful step, 11), or an empty tile ahead = a LEDGE (distance to the current tile's forward
-// edge, so a step stops right at the drop). The gate/doortop/loose/closer/sword/potion branches
-// (seg004.c:401-431) are out of scope. The char is standing when this is read, so curr_col/curr_row
-// are current. Returns { edgeType, distance }. This replaces the old `blockedForward` run-gate: the
-// wall case with `distance < 8` IS forward_pressed's "step instead of run" rule (seg005.c:577), and
-// the step now lands the char FLUSH (no more parking ~4 back after a bump).
+// to the safe-step decision (control.js). FAITHFUL structure: check the char's OWN tile FIRST
+// (get_tile_at_char, seg004.c:383), then the tile in FRONT (get_tile_infrontof_char, seg004.c:400).
+// The own-tile-first check is load-bearing with the unclamped curr_col: flush against a boundary
+// wall the char's own column IS -1/10, and get_tile link-hops it to the ADJACENT wall — so the
+// distance is 0 and forward_pressed safe-steps flush. (The old front-only shortcut read curr_col+
+// facing = -2 at a boundary → the wrong wall → run → re-bump oscillation. research_deviation_ledger
+// W1b.) A wall gives distance-to-its-near-face; a floor gives a full step (11); an empty tile ahead
+// = a LEDGE (distance to the drop). Gate/doortop/loose/closer/sword/potion branches out of scope.
 function getEdgeDistance(ch) {
-  // Decide by the tile DIRECTLY in front (curr_col + facing), as the source does (seg004.c:400).
-  // Keying off the leading edge (wallAheadFace) would (a) find a wall ACROSS an empty tile and step
-  // the char off a ledge toward it, and (b) MISS a wall a tile away or across a room boundary (it
-  // only scans the leading-edge column ±1) — which falsely "blocked" a left-facing char at a room
-  // edge. So compute the front column's near face directly, in the char's own room coordinates.
+  determineCol(ch);                                     // seg004.c:380: fresh (unclamped) curr_col
   const facingRight = ch.direction >= DIR_RIGHT;
+  // seg004.c:383-397 — the char's OWN tile first (its column is -1/10 when flush at a room edge).
+  const own = getTile(level, ch.room, ch.curr_col, ch.curr_row);
+  if (wallType(own) !== 0) {
+    const face = facingRight ? (SCREENSPACE_X + ch.curr_col * TILE_SIZEX)          // wall's LEFT edge
+                             : (SCREENSPACE_X + (ch.curr_col + 1) * TILE_SIZEX);   // wall's RIGHT edge
+    const distance = Math.abs(face - ch.x);
+    return distance <= TILE_RIGHTX ? { edgeType: EDGE_WALL, distance }
+                                   : { edgeType: EDGE_FLOOR, distance: 11 };
+  }
+  // seg004.c:400 — else the tile directly in front.
   const frontCol = ch.curr_col + (facingRight ? 1 : -1);
   const front = getTile(level, ch.room, frontCol, ch.curr_row);          // hops the room link if off-room
-  if (wallType(front) !== 0) {                          // a wall directly in front -> distance to its near face
+  if (wallType(front) !== 0) {                          // a wall in front -> distance to its near face
     const face = facingRight ? (SCREENSPACE_X + frontCol * TILE_SIZEX)          // wall's LEFT edge
                              : (SCREENSPACE_X + (frontCol + 1) * TILE_SIZEX);   // wall's RIGHT edge
     const distance = Math.abs(face - ch.x);
@@ -171,6 +182,101 @@ function getEdgeDistance(ch) {
   }
   if (tileIsFloor(front)) return { edgeType: EDGE_FLOOR, distance: 11 };      // floor in front -> full step
   return { edgeType: EDGE_CLOSER, distance: distanceToEdge(ch, dxWeight(ch)) }; // empty in front = a ledge
+}
+
+// --- vertical jump-up (ported seg005.c): pressing Up while standing -----------------------
+// These run in the CONTROL phase (called from controlKid via the world object), so they only
+// startSeq — the tick's own playSeq (right after control) emits the new sequence's first frame.
+//
+// check_jump_up (seg005.c:693): choose between grabbing a ledge above and a plain jump up. First
+// try to grab a ledge in FRONT and above (through the tile directly above); else a ledge STRAIGHT
+// above (through the tile behind-above); else just jump up. `through` is the tile the hands pass
+// in front of, the second arg is the ledge they'd land on.
+function checkJumpUp(ch) {
+  const facingRight = ch.direction >= DIR_RIGHT;
+  const aboveRow = ch.curr_row - 1;
+  const frontCol = ch.curr_col + DIR_FRONT[ch.direction + 1];
+  if (canGrab(getTileAboveChar(level, ch), getTileFrontAboveChar(level, ch),
+              getTileModif(level, ch.room, frontCol, aboveRow), facingRight)) {
+    grabUpWithFloorBehind(ch); return;                                    // grab a ledge in front & above
+  }
+  if (canGrab(getTileBehindAboveChar(level, ch), getTileAboveChar(level, ch),
+              getTileModif(level, ch.room, ch.curr_col, aboveRow), facingRight)) {
+    jumpUpOrGrab(ch); return;                                             // grab a ledge straight above
+  }
+  jumpUp(ch);                                                            // nothing to grab -> jump up
+}
+
+// jump_up (seg005.c:734): jump straight up. First nudge back off a wall that's right in front
+// (distance < 4), then read the tile one row above at the weight column: neither wall nor floor
+// there -> open air above -> highjump; a wall or floor above -> jump into the ceiling -> jumpup.
+function jumpUp(ch) {
+  const { edgeType, distance } = getEdgeDistance(ch);
+  if (distance < 4 && edgeType === EDGE_WALL) ch.x = charDxForward(ch, distance - 3);  // seg005.c:738
+  const col = tileDivMod(dxWeight(ch) - 6);            // back_delta_x(0)=0 -> dx_weight()-6 (seg005.c:781)
+  const above = getTile(level, ch.room, col, ch.curr_row - 1);
+  startSeq(ch, (above !== TILE_WALL && !tileIsFloor(above)) ? 'highjump' : 'jumpup');   // seq_28 / seq_14
+}
+
+// grab_up_with_floor_behind (seg005.c:871): grab a ledge in front & above. Close to the edge and
+// not against a wall -> grab straight (jumphangMed); else reach forward (jumphangLong). Both
+// pre-position Char.x by the distance to the ledge's near edge.
+function grabUpWithFloorBehind(ch) {
+  const distance = distanceToEdge(ch, dxWeight(ch));            // distance_to_edge_weight
+  const { edgeType, distance: edgeDist } = getEdgeDistance(ch);
+  if (distance < 4 && edgeDist < 4 && edgeType !== EDGE_WALL) {
+    ch.x = charDxForward(ch, distance);
+    startSeq(ch, 'jumphangMed');                                // seq_8
+  } else {
+    ch.x = charDxForward(ch, distance - 4);
+    startSeq(ch, 'jumphangLong');                               // seq_24
+  }
+}
+
+// grab_up_no_floor_behind (seg005.c:727): grab a ledge straight above with no floor behind -> the
+// backward-lean grab (jumpbackhang).
+function grabUpNoFloorBehind(ch) {
+  ch.x = charDxForward(ch, distanceToEdge(ch, dxWeight(ch)) - 10);
+  startSeq(ch, 'jumpbackhang');                                 // seq_16
+}
+
+// jump_up_or_grab (seg005.c:711): grabbing straight above — too close to the edge (<6) just jumps;
+// no floor behind -> jumpbackhang; else step back a tile and grab with floor behind.
+function jumpUpOrGrab(ch) {
+  const distance = distanceToEdge(ch, dxWeight(ch));
+  if (distance < 6) { jumpUp(ch); return; }
+  if (!tileIsFloor(getTileBehindChar(level, ch))) { grabUpNoFloorBehind(ch); return; }
+  ch.x = charDxForward(ch, distance - TILE_SIZEX);              // go back a bit (seg005.c:720)
+  determineCol(ch);                                             // load_fram_det_col: re-derive curr_col
+  grabUpWithFloorBehind(ch);
+}
+
+// can_climb_up (seg005.c:826): climb from a hang onto the ledge above. (The seq_73 variant for
+// climbing onto a closed gate / mirror / chomper is deferred — gates are drawn but static here —
+// so this is always the general climb-up.)
+function canClimbUp(ch) { startSeq(ch, 'climbup'); }            // seq_10
+
+// hang_fall (seg005.c:846): let go of the ledge. No floor behind AND none underfoot -> release and
+// fall (hangfall); otherwise release and drop-land onto the floor below (hangdrop), nudging back
+// off a wall/doortop first.
+function hangFall(ch) {
+  const at = getTileAtChar(level, ch);
+  if (!tileIsFloor(getTileBehindChar(level, ch)) && !tileIsFloor(at)) {
+    startSeq(ch, 'hangfall'); return;                           // seq_23
+  }
+  if (at === TILE_WALL || (ch.direction < DIR_RIGHT && (at === TILE_DOORTOP_FLOOR || at === TILE_DOORTOP)))
+    ch.x = charDxForward(ch, -7);                               // seg005.c:864
+  startSeq(ch, 'hangdrop');                                     // seq_11
+}
+
+// control_hanging's Shift branch (seg005.c:798): hang flat against a wall/doortop (hangstraight),
+// else — if there is no floor above to climb onto — let go (hang_fall).
+function hangAgainstWall(ch) {
+  const at = getTileAtChar(level, ch);
+  const againstWall = at === TILE_WALL ||
+    (ch.direction < DIR_RIGHT && (at === TILE_DOORTOP_FLOOR || at === TILE_DOORTOP));
+  if (ch.action !== ACT_HANG_STRAIGHT && againstWall) { startSeq(ch, 'hangstraight'); return; }
+  if (!tileIsFloor(getTileAboveChar(level, ch))) hangFall(ch);
 }
 
 // set_char_collision (seg006.c:1012): the character's collision box in internal-x. The FORWARD
@@ -319,31 +425,41 @@ function gotoRoom(nextRoom, dir) {
   drawnRoom = ch.room;                           // redraw_screen(1) — the room on screen swaps
 }
 
-// leave_room (seg002.c:423) trigger, Char.x-based (the leading edge). Two guards + a
-// direction-dependent threshold, ported from the source:
-//   - NO leave during a TURN (action 7) or while STANDING UP from a crouch (frames 110-119)
-//     (seg002.c:440/459). Both wiggle Char.x with their own dx while stationary; without
-//     the turn guard the turn's dx shoves Char.x past the edge and crosses into the
-//     neighbour — even a WALLED one, because clampToWall also skips the turn so nothing
-//     pins Char.x at the wall face first (this was the "turn-at-the-left-edge teleports you
-//     into the next room" bug).
-//   - the horizontal threshold is on the LEADING EDGE and differs by facing (seg002.c:462-483;
-//     leading edge = char_x_right facing right / char_x_left facing left, both == Char.x):
-//     facing right -> cross right at Char.x >= 201, left at Char.x <= 57; facing left ->
-//     cross left at Char.x <= 54, right at Char.x >= 198. (A standing turn nets only ~7 units,
-//     so it can't reach these from a legitimate standing column — the guard is belt-and-braces.)
-// Vertical stays curr_row-driven (the clone's fall/climb model). A 0 link is the void (no cross).
-function crossRooms() {
-  if (ch.action === ACT_TURN) return;                        // seg002.c:459
-  if (ch.frame >= 110 && ch.frame < 120) return;             // seg002.c:440 (stand up from crouch)
+// leave_room (seg002.c:423). FAITHFUL order, run AFTER the kid frame (exit_room in play_frame,
+// seg000.c:881 — see tick()). The tests, in the source's order:
+//   1. UP — Char.y-based (seg002.c:428): only while NOT bumped/freefall/midair, when the feet reach
+//      the row above the room (Char.y in (-16,10) ~ y_land[0]=-8). This is what lets a two-floor
+//      climb cross UP into the room above (the climb-frame block below only stops HORIZONTAL leave).
+//   2. DOWN — Char.y-based (seg002.c:434): the feet fell below the room (Char.y >= 211 ~ y_land[4]=244).
+//   3. Blocked frames -> NO horizontal leave (seg002.c:436-461): climb-up 135-149, stand-up-from-
+//      crouch 110-119, and a turn (action 7). (The turn/stand-up wiggle Char.x with their own dx
+//      while stationary; the climb straddles a boundary on purpose.)
+//   4. HORIZONTAL by facing, on the LEADING EDGE Char.x (seg002.c:462-483; char_x_right facing right /
+//      char_x_left facing left, both == Char.x): facing right -> right at >=201, left at <=57; facing
+//      left -> left at <=54, right at >=198.
+// goto_other_room rebases (±140 / ±189). A 0 link is the void (no cross).
+function leaveRoom() {
   const links = level.rooms[ch.room - 1].links;
-  const facingRight = ch.direction >= DIR_RIGHT;
-  const crossRightAt = facingRight ? 201 : 198;              // char_x_right>=201 / char_x_left>=198
-  const crossLeftAt  = facingRight ? 57  : 54;               // char_x_right<=57  / char_x_left<=54
-  if (ch.x >= crossRightAt && links.right)     gotoRoom(links.right, 'right');
-  else if (ch.x <= crossLeftAt && links.left)  gotoRoom(links.left, 'left');
-  else if (ch.curr_row >= 3 && links.down)     gotoRoom(links.down, 'down');
-  else if (ch.curr_row < 0 && links.up)        gotoRoom(links.up, 'up');
+  const a = ch.action;
+  if (a !== ACT_BUMPED && a !== ACT_IN_FREEFALL && a !== ACT_IN_MIDAIR && ch.y > -16 && ch.y < 10) {
+    if (links.up) gotoRoom(links.up, 'up');                  // 1. UP (seg002.c:428)
+    return;
+  }
+  if (ch.y >= 211) {
+    if (links.down) gotoRoom(links.down, 'down');            // 2. DOWN (seg002.c:434)
+    return;
+  }
+  if (ch.frame >= 135 && ch.frame < 150) return;             // 3. no horizontal during climb-up (seg002.c:438)
+  if (ch.frame >= 110 && ch.frame < 120) return;             //    ... nor stand-up-from-crouch (seg002.c:440)
+  if (a === ACT_TURN) return;                                //    ... nor a turn (seg002.c:459)
+  const facingRight = ch.direction >= DIR_RIGHT;             // 4. HORIZONTAL, leading-edge Char.x
+  if (facingRight) {
+    if (ch.x >= 201 && links.right)     gotoRoom(links.right, 'right');
+    else if (ch.x <= 57 && links.left)  gotoRoom(links.left, 'left');
+  } else {
+    if (ch.x <= 54 && links.left)       gotoRoom(links.left, 'left');
+    else if (ch.x >= 198 && links.right) gotoRoom(links.right, 'right');
+  }
 }
 
 // --- keyboard -> facing-relative control (read_user_control + the control_x mapping) --
@@ -375,21 +491,28 @@ function buildControl() {
   control.x = fwdKey ? FWD : (backKey ? BACK : NONE);          // control_x, facing-relative
 }
 
-const world = { edgeDistance: () => getEdgeDistance(ch) };
+const world = {
+  edgeDistance: () => getEdgeDistance(ch),
+  jumpUp: () => checkJumpUp(ch),            // up while standing -> jump / grab a ledge above
+  climbUp: () => canClimbUp(ch),            // up while hanging -> climb onto the ledge
+  hangFall: () => hangFall(ch),             // release a hang -> drop / fall
+  hangAgainstWall: () => hangAgainstWall(ch),  // shift while hanging -> hang flat / let go
+};
 
 // --- one engine tick — faithful play_kid_frame order (seg000.c:1192) --------------
 function tick() {
+  if (ch.grab_timer > 0) ch.grab_timer--;  // process(grab_timer): counts down a mid-fall grab (seg006.c:1405)
   processTrobs(trobs, level);              // top of play_frame: advance + collapse loose floors
   buildControl();
   controlKid(ch, control, world);          // play_kid/control: pick the next sequence
   playSeq(ch);                             // run it -> new frame + Char.x/y
   fallAccel(ch); fallSpeed(ch);            // gravity (freefall only)
-  determineCol(ch);                        // recompute curr_col from Char.x (clamped in-room)
+  determineCol(ch);                        // recompute curr_col from Char.x (UNCLAMPED — seg006.c:122)
   setCharCollision(ch);                    // the collision box (char_x_left/right_coll)
   checkBumped(ch);                         // wall bump: pin Char.x to the face + recoil (seq_47/46/45)
-  crossRooms();                            // swap the room at an open edge (rebase Char.x/y)
-  checkAction(ch);                         // do_fall / check_on_floor
+  checkAction(ch);                         // do_fall / check_on_floor — reads across a boundary via the unclamped col
   checkPress(ch);                          // loose-floor trigger (grounded on tile 11 -> make_loose_fall)
+  leaveRoom();                             // exit_room: the room cross, AFTER the kid frame (seg000.c:881)
 }
 
 // --- render the on-screen room (blocks/ledges) + the prince -----------------------

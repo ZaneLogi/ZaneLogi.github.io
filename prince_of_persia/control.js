@@ -35,7 +35,9 @@ export function controlKid(ch, c, world) {
   if (f === 15 || (f >= 50 && f < 53)) controlStanding(ch, c, world);  // stand / end-of-turn
   else if (f === 48)                   controlTurning(ch, c);          // mid-turn (frame 48)
   else if (f < 4)                      controlStartrun(ch, c);         // startrun accel 1-3
+  else if (f >= 67 && f < 70)          controlJumpup(ch, c);           // start jump up (frames 67-69)
   else if (f < 15)                     controlRunning(ch, c);          // run cycle 4-14
+  else if (f >= 87 && f < 100)         controlHanging(ch, c, world);   // hanging from a ledge (87-99)
   else if (f === 109)                  controlCrouched(ch, c);         // crouch
 }
 
@@ -45,11 +47,14 @@ function controlStanding(ch, c, world) {
   ch.testing = 0;                     // reaching a stand decision ends any prior test-foot lean
   if (c.shift === HELD) {
     if (c.backward === HELD) backPressed(ch);
+    else if (c.up === HELD) world.jumpUp();                            // shift+up -> up_pressed (seg005.c:378)
     else if (c.x === FWD && c.forward === HELD) safeStep(ch, world);   // shift+forward -> safe_step (seg005.c:383)
   } else if (c.forward === HELD) {
-    forwardPressed(ch, c, world);
+    forwardPressed(ch, c, world);     // (source: up+forward -> standing_jump; the horizontal jump is deferred, so this just runs)
   } else if (c.backward === HELD) {
     backPressed(ch);
+  } else if (c.up === HELD) {
+    world.jumpUp();                   // up alone -> up_pressed -> check_jump_up (seg005.c:393): the vertical jump / climb
   }
 }
 
@@ -90,6 +95,17 @@ function controlRunning(ch, c) {
   // else if (c.down === HELD)                     startSeq(ch, 'crouchrun');  // TODO
 }
 
+// control_hanging (seg005.c:791): while hanging from a ledge (frames 87-99). Up — once the grab
+// timer has counted down (only set by the deferred mid-fall grab, so 0 here) — climbs onto the
+// ledge; Shift hangs flat against a wall (or lets go if there's nothing above to climb); anything
+// else lets go and drops or falls. (The kid is alive throughout, so source's Char.alive<0 guard is
+// implicit.) All three are control-phase, so they only startSeq via the world helpers.
+function controlHanging(ch, c, world) {
+  if (ch.grab_timer === 0 && c.up === HELD) world.climbUp();       // can_climb_up -> climbup
+  else if (c.shift === HELD)                world.hangAgainstWall();// hangstraight / let go
+  else                                      world.hangFall();      // release -> hangdrop / hangfall
+}
+
 // controlCrouched (seg005.c:313): release Down -> stand up from the crouch (seq_49).
 // This is what recovers the prince to standing after a soft landing (the falling entry
 // ends here). Forward-held crouch-hop is a later addition.
@@ -97,6 +113,12 @@ function controlCrouched(ch, c) {
   if (c.down !== HELD) startSeq(ch, 'standup');       // stand up from crouch (seq_49)
   // else if (c.forward === HELD) startSeq(ch, 'crouchhop');   // TODO
 }
+
+// control_jumpup (seg005.c:680): during the start-of-jump-up frames (67-69), forward held would
+// convert the jump-up into a standing (horizontal) jump. That horizontal jump is deferred, so this
+// is a no-op for now — the jumpup/highjump sequence self-drives the rise. (Port the standing_jump
+// conversion when the horizontal jumps land.)
+function controlJumpup(ch, c) {}
 
 // --- stubs: same frame-dispatched shape; port each when the player needs it ---
 function controlStartrun(ch, c) {}  // seg005.c:673 — up+forward->standingjump; else commit to the run cycle
