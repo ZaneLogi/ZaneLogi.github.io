@@ -293,6 +293,18 @@ A bug at `FB`/`TURN_HOME` (`case_0AA0`, gg1-5.s:1768) enters disposition
 Net: a homing bug **tracks the oscillating formation every frame** and
 glides onto it wherever it has drifted.
 
+### The glide speed — the segment after FB (verified)
+
+Steps 1–4 are the *steering*. The *speed* comes from a detail that's easy
+to miss: `case_0AA0` doesn't stop at FB — it `inc`s past the FB byte and
+re-enters the loader (`j_090E_flite_path_init` → `l_0BDC_flite_pth_load`,
+gg1-5.s:1844 / 1470 / 1996), which **loads the segment AFTER FB as the
+homing-glide segment** (`0x0A/0x0B` ← vx/vy, `0x0C` ← rot, `0x0D` ← dur).
+So the fly-in leaders' `23 00 FF` tail is **not dead data** — it sets the
+return glide to **vx3/vy2**, **rot 0** (no spin), **dur 255** (an "until
+home" ceiling reached long before it counts down). `case_0AA0` itself
+never touches `0x0A/0x0B`; the loader it falls into does.
+
 ### What our clone does (`bugMotion.js`, INT-7)
 
 At `FB`, `bugMotion` aims at the **live** slot (`homeX + oscillateX +
@@ -302,6 +314,14 @@ it adds the offset **delta** (`ox − homeOscX`) to `e.x/e.y` — the
 slot. So `e.x` carries the drift and the bug lands on the moving slot.
 `objectStates` is unchanged: `'homing'` still renders at `e.x`, which now
 tracks the formation. `state.js` adds the `homeOscX/homeOscY` fields.
+
+At FB the clone also **loads the segment after FB as the glide speed**
+(mirror `l_0BDC`) instead of keeping the dive velocity. This matters
+wherever the tail's vx/vy differs from the pre-FB segment's: among the
+fly-in leaders that's **`db_flv 00D4`/`017B`** — they run vx4/vy4 into FB
+but their `23 00 FF` tail is vx3/vy2, so they settle at the ROM's slower
+return glide; the other four fly-in tails already matched the pre-FB
+velocity.
 
 ### Measured (stage 1, no shooting; headless replay of the clone's own tasks)
 

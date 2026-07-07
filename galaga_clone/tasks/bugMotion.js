@@ -296,13 +296,25 @@ function loadSegment(e, state) {
                 const angleRad = Math.atan2(-dy, dx);
                 const norm     = (angleRad + 2 * Math.PI) % (2 * Math.PI);
                 e.angle    = Math.round(norm / (2 * Math.PI) * 1024) & 0x3FF;
-                e.rotRate  = 0;          // fixed direction during homing
-                e.pathBase = null;       // no more segments
+                // Homing glide speed = the SEGMENT AFTER FB, loaded as the Z80 does: case_0AA0
+                // sets the home flag then FALLS THROUGH — inc past FB → j_090E_flite_path_init
+                // → l_0BDC_flite_pth_load (gg1-5.s:1844/1470/1996) — loading the next segment
+                // (FB is 0-arg, so the next 3 bytes) into 0x0A/0x0B (vx/vy), 0x0C (rot), 0x0D
+                // (dur). We take its vx/vy for the glide. This is a no-op where the tail's
+                // speed equals the pre-FB segment's — the fly-in tails are `23 00 FF` (vx3/vy2),
+                // already the pre-FB speed on 001D/0067/009F/01B0 — but a real drop on 00D4/
+                // 017B (which run vx4/vy4 into FB) and on the F0 stage-8 sub-tails, so the bug
+                // settles at the ROM's slower glide there instead of keeping its dive speed.
+                const tb0 = e.pathBase[e.pathOffset + 1];
+                if (tb0 !== undefined && tb0 < 0xEF) {   // FB is always followed by a data segment
+                    e.vx = tb0 & 0x0F;
+                    e.vy = (tb0 >> 4) & 0x0F;
+                }
+                e.rotRate  = 0;          // homing holds a fixed heading (the tail's rot is 0)
+                e.pathBase = null;       // tail consumed above; no more path reads
                 e.state    = 'homing';
                 e.homeOscX = ox;         // track the slot's per-frame drift
                 e.homeOscY = oy;         //   (case_2422 re-sync) in update()
-                // Keep current vx/vy from last segment so motion continues
-                // (mirrors Z80 — 0x0A/0x0B are not modified by case_0AA0).
                 return;
             }
 
