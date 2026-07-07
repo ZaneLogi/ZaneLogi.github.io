@@ -1294,3 +1294,46 @@ export function getPathByIndex(idx, member = 0) {
         startAngle: v.rotHi << 8,        // high byte of 10-bit angle
     };
 }
+
+// ── Bonus/challenge-stage accessor (demos/challenge_player) ────────────────
+// The 8 challenge rounds are game stages 3, 7, 11, … 31 (round r → stage 4r+3); each
+// maps to ONE d_challg_stg_dat row (r → D_CHALLG_STG_DATA_IDX[r], the same lookup
+// stageCaravanRow does). A row is 5 waves; every wave fires a LEFTY (byte1) and a
+// RIGHTY (byte2) wave-byte, and each resolves — through the SAME PATH_INDEX/VARIANTS
+// join the launcher uses — to a token-free path block + a start position. getChallengeWave
+// returns both members fully resolved so a demo can fly the real thing, one wave at a time.
+export const CHALLENGE_ROUND_STAGES = [3, 7, 11, 15, 19, 23, 27, 31];
+
+function decodeChallengeMember(byte) {
+    const idx    = byte & 0x3F;                       // bits 0-5 → PATH_INDEX entry
+    const member = (byte & 0x40) ? 1 : 0;             // bit 6 → pair-member selector
+    const entry  = PATH_INDEX[idx];
+    const start  = VARIANTS[entry.variant * 2 + member];   // raw {y,x,rotHi} — PathRunner input
+    return {
+        waveByte:       byte,
+        pathIndex:      idx,
+        pathAddr:       entry.addr,
+        variant:        entry.variant,
+        member,
+        negateRotation: (byte & 0x40) !== 0,          // bit 6 also mirrors per-seg rotation
+        launchGated:    (byte & 0x80) === 0,          // bit 7 clear → waits for frame&7==0
+        start,                                        // raw VARIANTS row (pass to PathRunner)
+        bytes:          PATH_BY_ADDR[entry.addr],     // the token-free path block
+        canvasX:        rawXToCanvasX(start.x),       // resolved on-screen launch position
+        canvasY:        rawYToCanvasY(start.y),
+    };
+}
+
+export function getChallengeWave(round, wave) {
+    const r   = round & 0x07;                         // 0-7 (8 challenge rounds)
+    const w   = ((wave % 5) + 5) % 5;                 // 0-4 (5 waves per row)
+    const off = D_CHALLG_STG_DATA_IDX[r];             // row base into D_CHALLG_STG_DAT
+    const t   = off + 2 + w * 3;                      // skip 2-byte header, 3 bytes/wave
+    return {
+        round:  r,
+        stage:  CHALLENGE_ROUND_STAGES[r],
+        wave:   w,
+        lefty:  decodeChallengeMember(D_CHALLG_STG_DAT[t + 1]),
+        righty: decodeChallengeMember(D_CHALLG_STG_DAT[t + 2]),
+    };
+}

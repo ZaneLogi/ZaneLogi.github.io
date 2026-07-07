@@ -6,11 +6,12 @@
 // advances ONE enemy by one 60 Hz frame and records a canvas-space position trail.
 // Pure motion: no rendering, no DOM.
 //
-// SCOPE: this models segments + END (0xFF) — enough for the raw-END fly-off paths the
-// player demo shows (e.g. 01E8). It does NOT dispatch the ≥0xEF control tokens
-// (TURN_HOME, JUMP, …); a token-bearing path would need bugMotion.js's full jump-table
-// (research_path_data.md §2.2). The byte-level round-trip (pathbuilder.js) is what
-// proves those tokens' encoding; this runner is the motion half for the simple case.
+// SCOPE: this models segments + END (0xFF) — enough for the raw-END fly-off/through paths
+// the player demos show (01E8's fly-in, and the token-free bonus-stage fly-throughs, all
+// PATH_INDEX 6-23). It does NOT dispatch the ≥0xEF control tokens (TURN_HOME, JUMP, …); a
+// token-bearing path would need bugMotion.js's full jump-table (research_path_data.md §2.2).
+// The byte-level round-trip (pathbuilder.js) is what proves those tokens' encoding; this
+// runner is the motion half for the simple case.
 
 const rawXToCanvasX = (rawX) => rawX * 2 - 9;                          // paths.js §5.1
 const rawYToCanvasY = (rawY) => ((~(rawY + 0x4F)) & 0xFF) * 2 + 1 - 32; // §5.2 (Y inverted)
@@ -27,7 +28,13 @@ export class PathRunner {
     this.vx = this.vy = this.rot = 0;
     this.segTimer = 0; this.off = 0; this.segIdx = -1; this.frame = 0; this.done = false;
     this.trail = [{ x: this.x, y: this.y, seg: 0 }];
+    this.enteredScreen = this._onScreen();          // false if it launches off-screen
   }
+  // Off-screen test — the SAME margins bugMotion.js:911 despawns challenge/fly-through
+  // bugs at (canvas y>304, x<-24, x>248), so the demo trims a fly-off trail at exactly
+  // the point the game would. (The game keeps these generous so a path that dips near an
+  // edge mid-pattern isn't clipped; verified none of the bonus paths reach even y=264.)
+  _onScreen() { return this.x >= -24 && this.x <= 248 && this.y <= 304; }
   step() {
     if (this.done) return;
     // steps 1-2: segment timer / load next 3-byte segment (bugMotion loadSegment)
@@ -48,7 +55,13 @@ export class PathRunner {
     this.y -= A * Math.sin(ang);                    // canvas-Y inverted vs Z80 internal Y
     this.frame++;
     this.trail.push({ x: this.x, y: this.y, seg: this.segIdx });
-    // 01E8's 255-frame tail flies off-screen (raw-END test path, not an FB turn-home)
-    if (this.x < -15 || this.x > 226 || this.y > 292) this.done = true;
+    // Off-screen despawn (01E8's 255-frame tail, and the bonus-stage fly-throughs, exit
+    // this way — none is an FB turn-home). Only despawn once the bug has actually BEEN
+    // on-screen, so a member that launches outside the margins flies IN rather than dying
+    // at spawn (defensive: under the game-matched margins every real bonus/01E8 launch is
+    // already in-bounds, so enteredScreen is true from frame 0 and the guard never fires —
+    // but it keeps the runner correct for any start beyond the edges).
+    if (this._onScreen()) this.enteredScreen = true;
+    else if (this.enteredScreen) this.done = true;
   }
 }

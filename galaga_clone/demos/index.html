@@ -31,11 +31,22 @@
   <div class="grid">
     <a class="card" href="path_player.html">
       <div class="name">Path player ↝</div>
-      <p class="desc">A fly-in path <b>assembled from its bytecode</b> by <code>pathbuilder.js</code>
-         and flown live through the motion interpreter — the animated counterpart to
+      <p class="desc">Shows the <b>path builder</b>: readable <code>pathbuilder.js</code> calls
+         assembled to bytecode, proven <b>byte-identical to the ROM</b> by a live round-trip, then
+         flown through the motion interpreter — the animated counterpart to
          <code>SVG/path_01E8.svg</code>. Watch the swoop build segment by segment; the mirrored
-         "wishbone" pair; a live byte-for-byte round-trip against the ROM path data.</p>
+         "wishbone" pair.</p>
       <div class="src">demos/path_player.html · path 01E8 · gg1-5.s:229</div>
+    </a>
+
+    <a class="card" href="challenge_player.html">
+      <div class="name">Bonus-stage path player ↝↝</div>
+      <p class="desc">Shows the <b>paths the challenging (bonus) stages use</b>, one wave at a time.
+         Pick a bonus stage (round 1-8) and a wave (1-5); the launcher join resolves each
+         <span style="color:#7cb6ff">lefty</span>/<span style="color:#f6ad55">righty</span> member —
+         through the real <code>PATH_INDEX</code>/<code>VARIANTS</code> tables — to a ROM path block
+         <i>plus</i> its start position, and flies both.</p>
+      <div class="src">demos/challenge_player.html · d_challg_stg_dat · gg1-3.s:1477</div>
     </a>
   </div>
 
