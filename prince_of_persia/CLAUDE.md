@@ -156,7 +156,10 @@ KID sprites natively face **LEFT**.
     canvas edge) — faithful, if odd for this demo (accepted 2026-07-04, user confirmed vs a DOS
     snapshot). Every other used frame is `dy = 0`.
   - **`frame.dx`** shifts the reg point in the facing direction (`char_dx_forward`):
-    `regX = actorX + (facing? -dx : +dx)*2*scale`, then the flip mirrors about `regX`.
+    `regX = actorX + (facing? -dx : +dx)*2*scale`, then the flip mirrors about `regX`. *(This is the
+    `demos/motion.js` sandbox, which stays at the `×2` / 28-px scale. The `index.html` **player** uses
+    the same reg-point model but applies `frame.dx` at `·sx` with the faithful `sx = 32/14` — 32 px/tile;
+    see the player roadmap entry.)*
     `frame.dx ≠ 0` on run/startrun accel 1–4 (1/1/3/4), turn 50–52 (4/3/1), standup 117–118 (2/2),
     dead 185 (4); all other used frames (walk `step11`, run-cycle loop 7–14, jump arcs, `freefall`,
     landings) are `dx = 0`.
@@ -276,11 +279,17 @@ KID sprites natively face **LEFT**.
     no floor → `start_fall`). **Level-1 opens with the real falling entry** (`do_startpos`
     → `seq_7_fall`; start tile (0,0) is empty by design — he drops one row and soft-lands on
     the torch-floor). Room crossing = `leave_room` trigger + `goto_other_room` (`±140`/`±189`
-    rebase + `drawn_room` swap). Rendering reuses the motion-sandbox registration, on a
-    **320×200 DOS frame at integer zoom** (`sx=2` → 28 px/tile, `sy=1` = obj_y 1:1). The room
-    (280 px) is centred with **20 px side margins that show neighbour-room SLIVERS** (`drawRoom`
-    draws cols −1..10 via `getTile`'s link-hop; a void link → solid cap) — so an across-the-edge
-    wall (e.g. room 5 at the level-1 start) is visible. Coord pipeline: `docs/research_collision.md §2.1`.
+    rebase + `drawn_room` swap). Rendering reuses the motion-sandbox registration, on a **384×200
+    frame at integer zoom** (default **1×**): **`sx = 32/14` → 32 px/tile** — the faithful DOS scale
+    (`obj_x = 2·internal` then `calc_screen_x_coord ×320/280`, seg008.c:1736/1850; `types.h:1427`
+    "a tile is 32 pixels wide in screen space") — and `sy = 1` (obj_y 1:1, `TILE_SIZEY = 63`). The
+    room is the full **320 px** (10·32) width; a **full extra tile (32 px) each side shows a
+    neighbour-room SLIVER** (`drawRoom` draws cols −1..10 via `getTile`'s link-hop; a void link →
+    solid cap), darkened — so an across-the-edge wall/portcullis/passage (e.g. room 5's col 9 gate at
+    the level-1 start) is visible. Canvas = 32 + 320 + 32 = 384. **(Was `sx = 2` → 28 px/tile /
+    280 px room / 20 px margins; corrected 2026-07-07 — the 28 px omitted the `×320/280` stretch, so
+    the room was 7/8-compressed and the sprite ~8/7 too wide. Vertical/collision were always right.)**
+    Coord pipeline: `docs/research_collision.md §2.1`.
   - **`control.js`** — now **wired** (was a scaffold): `control_standing` (`forward_pressed`
     → run, blocked at a wall; Shift → `safe_step`; back → `turn`), `control_running`
     (frame-gated `runstop` on release, `runturn` on reverse), `control_crouched` (stand up —

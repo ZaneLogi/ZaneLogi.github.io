@@ -52,20 +52,28 @@ const padN = (v, n) => String(v).padStart(n);
 const padW = (v, n) => String(v).padEnd(n);
 
 // --- view / render mapping ---------------------------------------------------------
-// A 320x200 DOS frame at an integer zoom, mapped with the DOS obj_x/obj_y convention:
-// internal-x -> 2 px/unit (obj_x = 2*internal, so a tile is 28 px), internal-y -> 1 px/unit.
-// A room (140 x-units) = 280 px; that leaves 40 px in the 320 frame, split into a 20 px
-// margin each side. Those margins show SLIVERS of the neighbour rooms (the DOS layout):
-// drawRoom draws cols -1..10, so col -1 = the left room's col 9 and col 10 = the right
-// room's col 0 (getTile hops the link; a void link reads as a wall = a solid cap). Internal-y
-// stays 1:1, so the sprite registration is untouched. Coord pipeline: research_collision.md §2.1.
-const BASE_W = 320, BASE_H = 200;
-let zoom = 2;
+// FAITHFUL horizontal scale: a tile is 32 px on screen. types.h:1427 spells the split out —
+// TILE_SIZEX=14 in the internal coord system, but "a tile is 32 pixels wide in screen space".
+// PoP converts internal-x -> screen in TWO steps: obj_x = internal*2 - 116 (28 px/tile logical,
+// seg008.c:1736), THEN calc_screen_x_coord = *320/280 (seg008.c:1850) -> 32 px/tile (applied to the
+// kid via chtab_flip_clip, NOT to tiles which are native 32). Net factor = 32/14 = 16/7 per
+// internal-x unit = `sx` below. Internal-y is 1:1 (TILE_SIZEY=63 == the screen pixel height), so
+// `sy` = 1 and the sprite registration is untouched.
+// A room (10 tiles) = 320 px = the full DOS screen width. To keep this flat 2D view legible we add
+// ONE extra tile (32 px) of margin each side as a SLIVER of the neighbour room — drawRoom draws cols
+// -1..10, so col -1 = the left room's col 9 and col 10 = the right room's col 0 (getTile hops the
+// link; a void link reads as a wall = a solid cap), darkened so they read as adjacent. These slivers
+// are how the 2D view conveys what the source's pseudo-3D draw shows in-frame (a wall / portcullis /
+// a passage to the next room). Canvas = 32 + 320 + 32 = 384 px wide. Coords: research_collision.md §2.1.
+const TILE_PX = 32, MARGIN_PX = TILE_PX;               // 32 px/tile (faithful); a 1-tile sliver each side
+const BASE_W = 10 * TILE_PX + 2 * MARGIN_PX, BASE_H = 200;   // 320 room + 2*32 margins = 384
+let zoom = 1;                                          // default 1x: a native 384x200 frame (32 px tiles)
 let sx, sy, spriteScale, ROOM_X0, ROOM_Y0;              // set by applyZoom()
 function applyZoom() {
   cv.width = BASE_W * zoom; cv.height = BASE_H * zoom;
-  sx = 2 * zoom; sy = 1 * zoom; spriteScale = zoom;     // 2 px/internal-x (28 px tile), 1 px/internal-y
-  ROOM_X0 = 20 * zoom; ROOM_Y0 = 6 * zoom;              // 20 px side margins (neighbour slivers); small top margin
+  sx = (TILE_PX / TILE_SIZEX) * zoom;                  // 32/14 per internal-x = the *320/280 stretch -> 32 px tile
+  sy = 1 * zoom; spriteScale = zoom;                    // internal-y 1:1 (63 px row); sprite at native px * zoom
+  ROOM_X0 = MARGIN_PX * zoom; ROOM_Y0 = 6 * zoom;       // one-tile (32 px) sliver margin each side
 }
 // internal (room-relative) -> screen px. x measured from the room's col-0 left edge (58);
 // y measured from the room's top (y_land[0] = -8), so y_land[r+1] lands on row r's floor.

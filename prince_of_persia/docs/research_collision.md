@@ -96,16 +96,26 @@ resolution.** There are three coordinate spaces, and the physics lives entirely 
                              surface)
 ```
 
-**1. Internal → screen pixels (`obj_x`/`obj_y`).** A fixed, *non-uniform* map
-(from `set_char_collision`, `seg006.c:1021`: `char_x_left = obj_x/2 + 58`):
-- **x:** `obj_x = 2 × (internal_x − 58)` → **2 px per internal-x unit** (the `<<1`). A tile is
-  `14 × 2 = 28` px wide; a room is `140 × 2 = 280` px.
-- **y:** `obj_y = internal_y` → **1 px per internal-y unit** (1:1). A tile is `63` px tall.
+**1. Internal → screen pixels (`obj_x`/`obj_y`).** A fixed map — and horizontally it is a
+**two-step** conversion (the subtlety, spelled out at `types.h:1427`: "TILE_SIZEX=14 … a tile is
+32 pixels wide in screen space"):
+- **x, step 1:** `obj_x = (char_dx_forward(dx) << 1) − 116` (`seg008.c:1736`) → 2 px per
+  internal-x unit; a tile is `14 × 2 = 28` px in this **logical** space, a room `140 × 2 = 280`.
+- **x, step 2:** `calc_screen_x_coord(x) = x × 320/280` (`seg008.c:1850`) stretches that 280
+  logical → 320 screen, so a tile is **`28 × 320/280 = 32` px on screen**. Net factor = `32/14
+  = 16/7` per internal-x unit. The stretch is applied to the **kid** (`chtab_flip_clip[2] = 1`,
+  `data.h:196`, in the `add_midtable` draw path `seg008.c:1019`) but **not** to tiles — tiles are
+  drawn natively at `col_xh[c]·8 = c·32` (`seg008.c:346`). Both therefore land on the same 32 px grid.
+- **y:** `obj_y = cur_frame.dy + internal_y` → **1 px per internal-y unit** (1:1). A tile is
+  `63` px tall (`TILE_SIZEY = 63` == the screen height, `types.h:1430`).
 
-The 2:1 vs 1:1 asymmetry is because **DOS PoP's pixels were not square.** SDLPoP corrects for
-it by scaling to 4:3 (`seg009.c:2485`: `SDL_RenderSetLogicalSize(320*5, 200*6)`), or leaves it
-16:10 at `320×200` (`:2487`). (The tile *positioning* grid is 28 px/tile; the tile *art*
-bitmaps are ~32 px and overlap slightly for seamless walls — irrelevant to a collision port.)
+So the on-screen tile grid is **32 × 63**, and the `frame_table` `dx`/`dy` are in **internal
+units** (14/63 per tile), fed *before* the conversion — never in screen pixels. **(Correction: an
+earlier draft of this doc claimed "the positioning grid is 28 px and the art bitmaps are ~32 px
+and overlap slightly" — that is WRONG; it missed `calc_screen_x_coord`. The `×320/280` stretch
+makes the positioning grid exactly 32 px, matching the 32 px art with no overlap.)** The
+DOS-pixels-are-not-square note still holds only for the final *window* stretch (`seg009.c:2485`
+`SDL_RenderSetLogicalSize(320*5, 200*6)` for 4:3, or 16:10 at `320×200`, `:2487`).
 
 **2. The fixed frame → the window.** Everything is drawn into one **320×200 offscreen
 surface** (`screen_rect = {0,0,200,320}`, `data.h:62`), uploaded to a texture, and blitted to
@@ -115,18 +125,20 @@ fill the whole window with `SDL_RenderCopy(renderer, texture, NULL, NULL)` (`seg
 rendering dimensions, but only by stretching the finished fixed-size frame; the game logic
 never changes.** That separation is what keeps the physics deterministic across displays.
 
-**3. How the clone player maps it** (`player.js`). Same structure, mirrored:
-- Base frame = **320×200** (as DOS). `screenX(ix) = ROOM_X0 + (ix−58)·sx`,
-  `screenY(iy) = ROOM_Y0 + (iy+8)·sy`, with **`sx = 2`** (the DOS `obj_x = 2·internal`, so a
-  tile is 28 px) and `sy = 1` (the `obj_y` 1:1). A room = `140·2 = 280` px; `ROOM_X0 = 20`
-  centres it, leaving a **20 px margin each side**.
-- **The side margins show neighbour SLIVERS (the DOS layout).** `drawRoom` draws cols
+**3. How the clone player maps it** (`player.js`). Same structure, now with the faithful 32 px tile:
+- `screenX(ix) = ROOM_X0 + (ix−58)·sx`, `screenY(iy) = ROOM_Y0 + (iy+8)·sy`, with **`sx = 32/14`**
+  (= the DOS `×2` then `×320/280`, so a tile is **32 px**) and `sy = 1` (`obj_y` 1:1). A room =
+  `140 · 32/14 = 320` px = the full DOS screen width. Sprites draw at native px · `spriteScale`,
+  which now matches the 32 px grid (at the old `sx = 2` / 28 px they were ~`8/7` too wide).
+- **A full extra tile (32 px) each side shows a neighbour SLIVER.** `drawRoom` draws cols
   **−1..10**: `getTile(room, −1, row)` hops the left link to that room's col 9, `getTile(room,
-  10, row)` hops right to col 0, and a `0`/void link reads as a wall = a solid cap. The
-  slivers land in the 20 px margins and the canvas clips them — so the wall the char is blocked
-  by across a room edge (e.g. room 5's col 9 at the level-1 start) is visible, not off-screen.
+  10, row)` hops right to col 0, and a `0`/void link reads as a wall = a solid cap. `ROOM_X0 = 32`
+  places col 0 at x=32, so col −1 fills `[0,32)` and col 10 fills `[352,384)`, each darkened by a
+  translucent wash so they read as adjacent rooms. The wall/portcullis/passage across a room edge
+  (e.g. room 5's col 9 gate at the level-1 start) is thus visible — the flat 2D view's stand-in for
+  what the source's pseudo-3D draw shows in-frame. **Canvas = 32 + 320 + 32 = 384 px wide.**
 - The **`zoom` control is the equivalent of the final `RenderCopy` scale:** the canvas is
-  `320·zoom × 200·zoom` and every coordinate is drawn `×zoom` (integer, `image-rendering:
+  `384·zoom × 200·zoom` (default **1×** = a native 384×200 frame) and every coordinate is drawn `×zoom` (integer, `image-rendering:
   pixelated`). The collision/logic in `collision.js` is in internal units and is **untouched
   by zoom or `sx`** — only `draw()` multiplies. Same decoupling as the source. The clone also
   rasterizes the silhouette masks itself at `spriteScale = zoom`, so it isn't bound to DOS's
