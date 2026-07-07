@@ -1337,3 +1337,34 @@ export function getChallengeWave(round, wave) {
         righty: decodeChallengeMember(D_CHALLG_STG_DAT[t + 2]),
     };
 }
+
+// ── Combat fly-in accessor (demos/flyin_player) ────────────────────────────
+// The 6 TOKEN-BEARING fly-in leaders — PATH_INDEX 0-5, the only entries the combat
+// caravan (D_COMBAT_STG_DAT) launches; challenge stages use 6-23 instead. Each carries
+// an F7 (ATTACK_TURN, transient) + F0 (ATTACK_WAVE, stage 8+) sub-path jump and an FB
+// turn-home tail. getFlyInPath resolves one leader + pair-member to its path block (with
+// its `.subPaths` map for the F7/F0 jumps) and its VARIANTS start position — same variant
+// join getChallengeWave uses. member 1 (bit 6) launches from the paired position AND flies
+// with rotation negated (the wishbone mirror). Feed the result to a PathRunner opened with
+// `{ tokens: true, mode, subPaths }`.
+export const FLYIN_COUNT = 6;                         // PATH_INDEX 0-5
+
+export function getFlyInPath(idx, member = 0) {
+    if (idx < 0 || idx >= FLYIN_COUNT) return null;   // only the 6 token-bearing leaders
+    const entry = PATH_INDEX[idx];
+    const bytes = PATH_BY_ADDR[entry.addr];
+    const v     = VARIANTS[entry.variant * 2 + member];
+    return {
+        pathIndex: idx,
+        pathAddr:  entry.addr,
+        variant:   entry.variant,
+        member,
+        bytes,                                        // token-bearing block; carries .subPaths
+        subPaths:  bytes.subPaths,                    // F0 + F7 jump targets (Z80 addr → array)
+        start:     v,                                 // raw VARIANTS row (pass to PathRunner)
+        negate:    member === 1,                      // bit 6 = pair member AND rotation mirror
+        canvasX:   rawXToCanvasX(v.x),                // resolved on-screen launch position
+        canvasY:   rawYToCanvasY(v.y),
+        startAngle: v.rotHi << 8,
+    };
+}
