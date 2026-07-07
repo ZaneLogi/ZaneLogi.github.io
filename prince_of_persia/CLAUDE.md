@@ -293,8 +293,9 @@ KID sprites natively face **LEFT**.
     wall in either direction, no penetration) — but the collision *box* and the bump *animation*
     are now modelled (see the **[done] Wall bump** roadmap entry); the remaining substitute is the
     per-column buffer *scan* (§5b). `safe_step`-to-edge is now implemented (Shift-step + post-bump
-    land flush; stop-at-a-ledge — see the **[done] Wall bump** entry); gates (drawn but static) /
-    spikes are out of scope for the collision substrate. `index.html#debug` exposes a console handle
+    land flush; stop-at-a-ledge — see the **[done] Wall bump** entry); gate *collision* + the
+    climb-into-a-closed-gate are now modelled (see the **[done] Gate collision** entry), while gate
+    open/close (animate/button) and spikes stay out of scope. `index.html#debug` exposes a console handle
     (`POP.step`/`place`/`restart`, plus `tile`/`modif`/`trobs`) for testing.
   - **Verified** vs SDLPoP semantics by single-stepping: falling entry (fall→soft-land→stand),
     run/runstop/runturn/turn/careful-step, wall-block both directions (stable, no jitter/
@@ -369,6 +370,21 @@ KID sprites natively face **LEFT**.
   straddle renders faithfully (character drawn room-relative, no extra draw). **Lesson (promoted to
   a feedback memory): with a faithful RE source, follow it — don't simplify away without a strong
   reason; entangled shortcuts cost more later than the faithful port.**
+- **[done] Gate collision + climb-into-a-closed-gate.** The portcullis's *collision* half (the
+  animate/button open-close subsystem stays deferred): a **closed gate blocks** and an **open gate is
+  passable** — `can_bump_into_gate` (`(modif>>2)+6 < char_height`, char_height = the frame's sprite
+  height / `MaskSprite.h`) folded into a `wallTypeAt` helper feeding `getEdgeDistance`/`wallAheadFace`
+  (the clone's `is_obstacle`/`dist_from_wall_forward` equivalents). And climbing up into a **closed
+  gate above** now plays **`climbfail`** (`seq_73`, transcribed into `seqtbl.js`: reach up 135→138,
+  reverse, `dx(-7)`+`hangdrop` — **no `dy`, never changes row**) via `canClimbUp`'s ported
+  `can_climb_up` branch (closed gate facing left, or mirror/chomper facing right). Prompted by the
+  room-1 left-edge portcullis, which is actually **room 5's col 9 gate** drawn into room 1's edge
+  (`get_tile_to_draw(room_L, 9, …)`, seg008.c:363) — a *visual* borrow that does NOT make room 1
+  (0,0) solid; the collision lives on room 5's tile, read across the boundary by `getTile`'s link-hop.
+  **Verified** by single-stepping (`#debug`): held-Up loops jump→grab→climbfail→drop then parks below
+  the gate; a closed gate pins `Char.x` at its face (x=184); normal climb (→row 0) + normal wall both
+  unaffected. Rendering (flat 2D tiles vs the source's pseudo-3D, and the neighbour-sliver draw) is
+  deliberately untouched. Full map + verification in `docs/research_environment.md §1d/§1e`.
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
 

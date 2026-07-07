@@ -107,13 +107,41 @@ So the life of a raise-button gate: **rise `+4`/frame to 188 → hold at 238 →
   `can_bump_into_gate()` shoves `Char.x` ±5 out of the tile — so a gate closing on
   you ejects you sideways rather than trapping you.
 
-**Clone status:** the gate is *drawn* (portcullis bars) but **static** — no
-button trigger (`check_press` button branch deferred), no `animate_door`, no
-`can_bump_into_gate`/`check_gate_push`. Modeling it = wire the button branch of
-`check_press` → a `trigger_gate`/`animate_door` port (the modifier already lives in
-the mutable `bg` byte, same as loose floors) → teach `wallType`/floor checks to
-consult `can_bump_into_gate` for tile 4. Bounded and self-contained; the door-link
-data is already decoded.
+### 1e. Climbing UP into a closed gate — `climbfail` (seg005.c:826)
+`can_climb_up` reads the tile **above** the char (`get_tile_above_char`, which
+link-hops a room boundary). If it is a **gate**, the char faces **left**, and the
+gate is closed (`modifier>>2 < 6` — a fixed threshold, *not* `can_bump_into_gate`'s
+char-height compare), it runs **`seq_73_climb_up_to_closed_gate`** (`climbfail`,
+seqtbl.c:575) instead of the normal `climbup`: reach up (frames 135→138), hold,
+reverse (138→135) with **no `dy` — he never changes row** — then `dx(-7)` +
+`jmp(hangdrop)` to drop back down. (The same `climbfail` also fires for a
+mirror/chomper above while facing **right**.) So a closed portcullis lets the
+prince *begin* a pull-up but bounces him off — held Up loops jump→grab→climbfail→
+drop. This is exactly what surfaces at the **left edge of room 1**: its climbable
+ledge one row up is **room 5's col 9 gate**, so the link-hop makes the neighbour
+gate the tile-above.
+
+**Clone status (updated 2026-07-07 — collision ported, animate/button deferred):**
+the *collision* half is now implemented and verified:
+- **`can_bump_into_gate`** (`(modif>>2)+6 < char_height`, char_height = the current
+  frame's sprite height / `MaskSprite.h`) folded into a `wallTypeAt` helper so an
+  **open** gate reads as no-wall and a **closed** gate blocks — wired into
+  `getEdgeDistance` and `wallAheadFace` (the clone's `is_obstacle` /
+  `dist_from_wall_forward` equivalents). Verified: running into room 5's closed gate
+  pins `Char.x` at the gate face.
+- **`climbfail` (seq_73)** + `can_climb_up`'s gate/mirror/chomper branch (§1e).
+  Verified by single-stepping: at room 5's col 9 closed gate the prince plays
+  `135→138→135` **without changing row**, then drops — looping while Up is held.
+
+Still deferred (the **animate/button** subsystem — out of scope by request): the
+button trigger (`check_press` button branch), `animate_door` (open/close over time),
+and `check_gate_push` (a closing gate ejecting you). Gates therefore hold their
+**static** initial modifier; every level-1 gate is closed, so `can_bump_into_gate`
+always blocks *today*, but the open-state path is faithful and future-proof for when
+`animate_door` lands. Rendering is untouched: the gate is still flat 2D portcullis
+bars (not the source's pseudo-3D draw), shown only as a dim neighbour-sliver at a
+room edge — the faithful straddle/overlay draw (`research_position_room.md §6`) is a
+separate, rendering-only concern deliberately left alone.
 
 ---
 
@@ -155,3 +183,41 @@ deferred.
   loose branch, and the button branch is the portcullis's on-ramp.
 
 Deviation classification: `research_deviation_ledger.md`.
+
+---
+
+## 5. Drawn position ≠ data position (torch flame, wall right-face)
+
+A tile's **data cell is the collision truth; its sprite draws *outward* from that
+cell** — so what you see on screen can sit a full column away from the byte in
+`fg`. Surfaced by overlaying the level-1 `fg` grid on a DOSBox capture of rooms
+1–2 (2026-07-07): the two `19 torch` tiles read as col 0/col 3, but the *flames*
+appear in col 1/col 4.
+
+The room-draw geometry (`draw_rooms`, seg008.c:129–133): columns are `col_xh[] =
+{0,4,…,36}×8` → **32 px each, left edge at `col·32`**; rows are `draw_bottom_y =
+63·row + 65` → **floor lines at y = 65/128/191**, 63 px tall. The DOS 320×200
+screen; a column boundary repeats every 32 px, so masonry seams alone can't
+detect a whole-tile x-error — a distinctive sprite (the flame) is the only check.
+
+Two tiles draw offset from their cell:
+
+- **Torch flame** (seg008.c:544–561): the flame is emitted while drawing the tile
+  *to the torch's right* (`tile_left == tiles_19_torch`), at `draw_xh + 1`. So a
+  torch in data col `k` renders its flame at screen-x `k·32 + 40` — **inside col
+  `k+1`.** (Confirmed by pixel-measuring the DOSBox flames: col 0 → x≈45, col 3 →
+  x≈145.) The torch is logically mounted on the wall's *right face*, so the flame
+  belongs visually to the neighbouring cell. The torch *base* (image 146) likewise
+  draws at the right neighbour's `draw_xh` (seg008.c:488–489).
+- **Wall right-face** (`draw_tile_floorright`/`draw_tile_right`, seg008.c:392/456):
+  a wall/pillar draws a 3-D right face + shadow that spills ~½ tile into the column
+  to its right — which is why an empty cell abutting a wall's right side still
+  looks partly bricked (measured: room 2's cols 2–5 wall block, whose data ends at
+  game-x 192, drew masonry out to ~game-x 217 — ~25 px into the data-empty col 6).
+
+**Port implication:** a renderer that centres the torch flame (or a wall's face)
+in its *own* cell looks subtly wrong. The clone's fixed-grid draw already places
+each tile at `col·TILE`; when torch/gate/wall art is added, emit the flame and the
+right-face into the **next** column (source offsets above), not the tile's own —
+same "the data grid is collision, the sprite decorates outward from it" rule as
+the floor plate sitting at the *bottom* of its cell (§1d, `draw_bottom_y`).

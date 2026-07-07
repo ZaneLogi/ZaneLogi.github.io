@@ -304,8 +304,9 @@ cleared at the next stand) makes `checkBumped` and `checkOnFloor` **skip** durin
 because `testfoot` is self-contained (always returns to the floor). Deferred: `safe_step`'s
 distance-0 / `repeat==0` `unsafe-step`-off-ledge branch (persisting walks you off) → the clone stands.
 
-Other deferred: sword bump sequences (`seq_64/65`), `is_obstacle` gate/chomper/mirror cases
-(`seg004.c:231` — gates static, chompers/mirrors not modelled), feather-fall (`bumpfloat`).
+Other deferred: sword bump sequences (`seq_64/65`), `is_obstacle`'s chomper/mirror cases
+(`seg004.c:231` — not modelled; **the gate case IS now modelled** — `can_bump_into_gate` via
+`wallTypeAt`, 2026-07-07), feather-fall (`bumpfloat`).
 
 ---
 
@@ -465,7 +466,9 @@ per-column buffer *scan*.
   (flush) or a ledge's brink. Only `safe_step`'s distance-0 climb branches are deferred.
 - **`start_fall`'s run-frame variants** (frame 9 → `seq_7`, frame 13 → `seq_19`) collapse to
   the general `seq_7_fall` (`freefall`); visually identical for a single actor.
-- Gates/doors (drawn but static) and spikes are out of scope for the collision substrate.
+- **Gate collision IS implemented** (2026-07-07): `can_bump_into_gate` (open/closed-aware wall) +
+  the climb-into-a-closed-gate `climbfail` (`research_environment.md §1e`). The *animate/button*
+  subsystem (open/close over time) and spikes stay out of scope for the collision substrate.
   **Loose-floor collapse IS implemented** (§9); **the sub-tile bump system IS implemented** (§5b).
 
 ---
@@ -623,8 +626,10 @@ place so the deferred mid-fall grab works when added.
 
 `jumpup` (629), `highjump` (637), `hangdrop` (602), `jumphangMed` (526), `jumphangLong` (534),
 `jumpbackhang` (544), `hang`+`hang1` (554), `hangstraight`+loop (569), `climbup` (590), `hangfall`
-(609). `climbfail` (575) is **not** transcribed — it is reached only from `seq_9_grab_while_jumping`
-(the deferred `USE_JUMP_GRAB` path), so it would be dead code here.
+(609), and `climbfail` (575, = `seq_73_climb_up_to_closed_gate`, **transcribed 2026-07-07**).
+`climbfail` is reached from `can_climb_up` (`seg005.c:840`) — the closed-gate / mirror / chomper
+climb-up — **not** "only from `seq_9_grab_while_jumping`" as an earlier draft of this doc claimed
+(`seq_73` is referenced at that one site only). See `research_environment.md §1e`.
 
 ### Verified (deterministic single-stepping, `index.html#debug`)
 
@@ -646,8 +651,8 @@ place so the deferred mid-fall grab works when added.
   `fallhang` (seq_15); this is what sets `grab_timer = 12`.
 - **Climb down** — Down at a ledge edge with an edge behind → `down_pressed` grab path
   (`seg005.c:472`) → `climbdown` (seq_68).
-- **Climb onto a closed gate/mirror/chomper** — `can_climb_up`'s `seq_73` variant
-  (`seg005.c:835`); gates are drawn but static here, so `can_climb_up` always uses the general
-  `climbup`.
+- ~~Climb onto a closed gate/mirror/chomper~~ — **DONE 2026-07-07:** `can_climb_up`'s `seq_73`
+  (`climbfail`) variant (`seg005.c:840`) is ported — a closed gate/mirror/chomper above now bounces
+  the pull-up back down (`climbfail`) instead of climbing through. See `research_environment.md §1e`.
 - **The horizontal jumps** (standing jump / running jump) — the other branch of the jump family;
   `control_jumpup`'s forward→standing-jump conversion (`seg005.c:680`) is a no-op until then.

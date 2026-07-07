@@ -127,6 +127,24 @@ function wallBlocksFacing(wt, facingRight) {
   return facingRight ? (wt === 1) : (wt === 2 || wt === 3);
 }
 
+// can_bump_into_gate (seg004.c:373): a gate obstructs only while its collision height (modifier>>2)+6
+// is below the character — a closed/low gate blocks, a RAISED gate (high modifier) lets him walk
+// under. char_height is the current frame's sprite height (image->h, seg006.c:1019 = MaskSprite.h).
+function canBumpIntoGate(ch, modif) {
+  const sp = spriteOf(ch.frame);
+  return ((modif >> 2) + 6) < (sp ? sp.h : 0);
+}
+
+// wallTypeAt: wall_type at (room,col,row) — but an OPEN gate reads as NO wall (0). The source folds
+// this into is_obstacle (seg004.c:234) and dist_from_wall_forward (seg004.c:589), which short-circuit
+// an open gate to passable; centralized here so wallAheadFace + getEdgeDistance stay in agreement. A
+// CLOSED gate keeps wall_type 1, so for level 1 (all gates static/closed) this leaves behaviour intact.
+function wallTypeAt(ch, room, col, row) {
+  const t = getTile(level, room, col, row);
+  if (t === 4 /*gate*/ && !canBumpIntoGate(ch, getTileModif(level, room, col, row))) return 0;
+  return wallType(t);
+}
+
 // --- sub-tile wall collision, Char.x-based (§5b: Char.x detection feeds the bump below) --------
 // Char.x IS the char's leading edge in the facing direction (set_char_collision, seg006.c:1021:
 // char_x_right = Char.x facing right, char_x_left = Char.x facing left). So working in Char.x
@@ -140,7 +158,7 @@ function wallBlocksFacing(wt, facingRight) {
 // overshot the edge into it, else the next column ahead; the limit is that column's near edge.
 function wallAheadFace(ch) {
   const facingRight = ch.direction >= DIR_RIGHT;
-  const isWall = (col) => wallBlocksFacing(wallType(getTile(level, ch.room, col, ch.curr_row)), facingRight);
+  const isWall = (col) => wallBlocksFacing(wallTypeAt(ch, ch.room, col, ch.curr_row), facingRight);
   const edgeCol = tileDivMod(ch.x);                       // column of the leading edge (Char.x)
   let wallCol;
   if (isWall(edgeCol)) wallCol = edgeCol;                 // edge overshot INTO the wall
@@ -162,8 +180,7 @@ function getEdgeDistance(ch) {
   determineCol(ch);                                     // seg004.c:380: fresh (unclamped) curr_col
   const facingRight = ch.direction >= DIR_RIGHT;
   // seg004.c:383-397 — the char's OWN tile first (its column is -1/10 when flush at a room edge).
-  const own = getTile(level, ch.room, ch.curr_col, ch.curr_row);
-  if (wallType(own) !== 0) {
+  if (wallTypeAt(ch, ch.room, ch.curr_col, ch.curr_row) !== 0) {   // gate-aware: an OPEN gate is no wall
     const face = facingRight ? (SCREENSPACE_X + ch.curr_col * TILE_SIZEX)          // wall's LEFT edge
                              : (SCREENSPACE_X + (ch.curr_col + 1) * TILE_SIZEX);   // wall's RIGHT edge
     const distance = Math.abs(face - ch.x);
@@ -173,7 +190,7 @@ function getEdgeDistance(ch) {
   // seg004.c:400 — else the tile directly in front.
   const frontCol = ch.curr_col + (facingRight ? 1 : -1);
   const front = getTile(level, ch.room, frontCol, ch.curr_row);          // hops the room link if off-room
-  if (wallType(front) !== 0) {                          // a wall in front -> distance to its near face
+  if (wallTypeAt(ch, ch.room, frontCol, ch.curr_row) !== 0) {            // gate-aware (front): open gate -> passable
     const face = facingRight ? (SCREENSPACE_X + frontCol * TILE_SIZEX)          // wall's LEFT edge
                              : (SCREENSPACE_X + (frontCol + 1) * TILE_SIZEX);   // wall's RIGHT edge
     const distance = Math.abs(face - ch.x);
@@ -251,10 +268,22 @@ function jumpUpOrGrab(ch) {
   grabUpWithFloorBehind(ch);
 }
 
-// can_climb_up (seg005.c:826): climb from a hang onto the ledge above. (The seq_73 variant for
-// climbing onto a closed gate / mirror / chomper is deferred — gates are drawn but static here —
-// so this is always the general climb-up.)
-function canClimbUp(ch) { startSeq(ch, 'climbup'); }            // seq_10
+// can_climb_up (seg005.c:826): climb from a hang onto the ledge above — UNLESS the tile above blocks
+// the pull-up, in which case play climbfail (seq_73): reach up, hit it, and drop back down. Blocked-
+// above cases (seg005.c:834-841): a mirror/chomper while facing RIGHT, or a CLOSED gate while facing
+// LEFT. "Closed" is the gate's own test `(modifier>>2) < 6` (a fixed threshold, distinct from
+// can_bump_into_gate's char_height compare). The modifier is read at the tile-above position, which
+// getTile/getTileModif link-hop across a room boundary — so a gate in the NEIGHBOUR room (e.g. room 5
+// col 9 above room 1's edge) is detected correctly.
+function canClimbUp(ch) {
+  const above = getTileAboveChar(level, ch);                    // curr_tile2 (seg005.c:833)
+  const facingRight = ch.direction >= DIR_RIGHT;
+  const blockedAbove =
+    ((above === 13 /*mirror*/ || above === 18 /*chomper*/) && facingRight) ||
+    (above === 4 /*gate*/ && !facingRight &&
+     (getTileModif(level, ch.room, ch.curr_col, ch.curr_row - 1) >> 2) < 6);   // closed gate
+  startSeq(ch, blockedAbove ? 'climbfail' : 'climbup');         // seq_73 : seq_10
+}
 
 // hang_fall (seg005.c:846): let go of the ledge. No floor behind AND none underfoot -> release and
 // fall (hangfall); otherwise release and drop-land onto the floor below (hangdrop), nudging back

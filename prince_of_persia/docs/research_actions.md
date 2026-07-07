@@ -134,7 +134,8 @@ The path: `up_pressed` (seg005.c:411) → `check_jump_up` (693) chooses:
 accessors — done (`collision.js`); (b) **`get_tile` link-hop on an unclamped
 `curr_col`** for grabbing/climbing across a room boundary — *this is the
 substrate gap* (cross-room climb, `research_position_room.md §3`).
-`gate`-tile climb (`seq_73`) and the `seq_73`-to-closed-gate variant are deferred.
+The closed-gate climb-up variant (`seq_73` = `climbfail`) is now **ported** (2026-07-07,
+`research_environment.md §1e`) — a closed gate above bounces the pull-up back down.
 
 ---
 

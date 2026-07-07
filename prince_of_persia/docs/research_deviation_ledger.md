@@ -125,9 +125,9 @@ crossings, the falling entry.
 | D1 | `check_collisions`/`get_row_collision_data` (buffer scan) | multi-row bumps, char-vs-char (guards), chomper | `bumped*` dispatch is faithful; only the *scan* is stubbed |
 | D2 | `check_grab` (Shift fall-grab, seq_15) | grab-a-ledge-while-falling | `grab_timer` field + countdown wired; `canGrab` ported |
 | D3 | `down_pressed` climb-down path (seq_68) | climb down | reuses the whole hang machinery from this session |
-| D4 | `can_climb_up`'s `seq_73` (climb onto a closed gate) | gate climb | `canClimbUp` is a one-line fallback today |
+| ~~D4~~ ✅ | `can_climb_up`'s `seq_73` (`climbfail`, climb onto a closed gate/mirror/chomper) | gate climb | **PORTED 2026-07-07** — `climbfail` transcribed; `canClimbUp` picks it per `seg005.c:840` |
 | D5 | horizontal `standing_jump`/`run_jump` control wiring | horizontal jumps | `standjump`/`runjump` sequences transcribed; `control_jumpup` conversion is a documented no-op |
-| D6 | `check_gate_push` + `animate_door` + `trigger_gate` + `can_bump_into_gate` | **portcullis open/close** | gate *drawn*; `doorLinks` decoded in `level1.js`; modifier lives in the mutable `bg` byte (like loose); `check_press` has the loose branch — add the button branch |
+| D6 | `check_gate_push` + `animate_door` + `trigger_gate` (**button/animate subsystem**) | **portcullis open/close** | `can_bump_into_gate` collision + `climbfail` now **PORTED 2026-07-07** (D4); gate *drawn*; `doorLinks` decoded in `level1.js`; modifier in the mutable `bg` byte (like loose); `check_press` has the loose branch — add the button branch |
 | D7 | `add_mob` debris chunk + `loose_shake` visual | loose-floor polish | loose collapse + fall already work |
 | D8 | spikes / chompers / potions / mirror / level-door interactions | hazards & items | tile predicates + `wall_type` already classify them statically |
 
@@ -191,6 +191,8 @@ Everything else is either faithful, a keeper substitute, or a feature-scoped
 defer. The rework is bounded to the layer that `research_position_room.md` maps,
 and its acceptance test is §1.
 
-**Next feature after the rework** (independent): the **portcullis** (D6) — the
-one deferred item that's a whole visible mechanic and whose data + trob machinery
-are already in place.
+**Portcullis progress:** the **collision half is done** (2026-07-07) —
+`can_bump_into_gate` (open/closed-aware block) + the climb-into-a-closed-gate
+`climbfail` (D4). What remains for the full mechanic (D6) is the **button/animate
+subsystem** — `trigger_gate` + `animate_door` (open/close over time) +
+`check_gate_push` — whose data + trob machinery are already in place.

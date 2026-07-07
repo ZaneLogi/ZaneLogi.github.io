@@ -207,6 +207,17 @@ _b.label('climbup').act(ACT_RUN_JUMP).frame(135)
   .act(ACT_BUMPED).frame(149)                         // to clear flags (seqtbl.c:597)
   .act(ACT_RUN_JUMP).frame(118).frame(119)
   .dx(1).jmp('stand');
+// climbfail (seqtbl.c:575, = seq_73_climb_up_to_closed_gate): climb toward a CLOSED gate above and
+// drop back down. Reach up (135->138), hold on 138, reverse (138->135) — there is NO dy, so he never
+// changes row — then dx(-7) and hand off to hangdrop. can_climb_up (player.js) picks this over
+// climbup when the tile above is a closed gate and the char faces left (seg005.c:840). The action
+// stays hang_climb (2) through the reach (no act() opcode here), so check_action no-ops until the
+// hangdrop tail flips it to bumped/run_jump.
+_b.label('climbfail').frame(135)
+  .frame(136).frame(137).frame(137)
+  .frame(138).frame(138).frame(138).frame(138)
+  .frame(137).frame(136).frame(135)
+  .dx(-7).jmp('hangdrop');
 // hangfall (seqtbl.c:609, = seq_23_release_ledge_and_fall): let go over a pit — a short midair
 // drop (action 3) that accelerates, then set_fall + hand off to freefall. control_hanging picks
 // this (via hang_fall) when there is no floor to land on below.
