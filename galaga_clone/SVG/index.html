@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Galaga path-data visualizations</title>
+<style>
+  /* Unconditional dark theme — these are arcade visualizations and the
+     embedded SVGs are dark-only, so the page is always dark too (no
+     prefers-color-scheme media query, which an <img>-embedded SVG ignores
+     anyway). */
+  :root{
+    --bg:#121316; --panel:#1a1b1e; --text:#eaeaea; --text2:#b4b4b4; --muted:#8a8a8a;
+    --border:#2c2e33; --accent:#7cb6ff; --code-bg:#23252a;
+    --trans:#c084fc; --warn:#fb923c;
+  }
+  html{color-scheme:dark;}
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    line-height:1.55; font-size:16px;
+  }
+  .wrap{max-width:820px; margin:0 auto; padding:40px 24px 80px;}
+  code,.mono{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:0.92em;}
+  code{background:var(--code-bg); padding:1px 5px; border-radius:4px;}
+  h1{font-size:28px; font-weight:600; margin:0 0 6px; letter-spacing:-0.01em;}
+  .sub{color:var(--text2); font-size:16px; margin:0 0 8px;}
+  .lead{color:var(--text2); font-size:15px; margin:18px 0 0;}
+  .note{
+    font-size:13.5px; color:var(--text2); background:var(--code-bg);
+    border:1px solid var(--border); border-radius:8px; padding:12px 16px; margin:26px 0;
+  }
+  section{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:24px 26px 28px; margin:30px 0;
+  }
+  section h2{font-size:20px; font-weight:600; margin:0 0 2px;}
+  .file{font-size:13px; color:var(--muted);}
+  section img{
+    display:block; width:100%; height:auto; margin:20px 0 4px;
+    background:transparent;
+  }
+  .grid{display:grid; grid-template-columns:88px 1fr; gap:6px 14px; margin:14px 0 0; font-size:14.5px;}
+  .grid dt{color:var(--muted); font-weight:500;}
+  .grid dd{margin:0; color:var(--text2);}
+  .grid dd b{color:var(--text); font-weight:600;}
+  a{color:var(--accent);}
+  hr{border:none; border-top:1px solid var(--border); margin:34px 0;}
+  .footer{color:var(--muted); font-size:13.5px;}
+  .tok-t{color:var(--trans); font-weight:600;}
+  .tok-w{color:var(--warn); font-weight:600;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Galaga path-data, drawn from its bytecode</h1>
+  <p class="sub">Three SVGs that turn the encoded fly-in / attack path data into pictures.</p>
+
+  <p class="lead">
+    A Galaga enemy's flight isn't a stored curve — it's a tiny <b>steering program</b>:
+    a list of 3-byte segments (<code>vx · vy · rotRate · duration</code>) and control
+    tokens. Each frame the interpreter does <code>angle += rotRate</code>, then moves by
+    <code>A·cos(angle)</code> / <code>−A·sin(angle)</code>. So to <em>see</em> a path you
+    must <b>run</b> it, not plot it. Each picture below was produced by feeding a real path
+    through a faithful port of the arcade's motion model
+    (<code>tasks/bugMotion.js</code> ← Z80 <code>gg1-5.s</code>) and recording every point.
+    Their companion generators live beside them (<code>gen_*.py</code>).
+  </p>
+
+  <div class="note">
+    <b>Status:</b> exploratory / proof-of-concept artifacts. They currently
+    <em>re-implement</em> the motion model inline; the intended real version has the
+    generator <code>import</code> <code>bugMotion.js</code> directly so the atlas can never
+    drift from the game — and so it doubles as before/after proof for the pending
+    octagonal-motion rewrite. Coordinates: 224 × 288 playfield, matching the arcade.
+  </div>
+
+  <!-- ───────────────────────── #1 ───────────────────────── -->
+  <section>
+    <h2>1 · A single fly-in path unfolds</h2>
+    <div class="file">path_01E8.svg &nbsp;·&nbsp; generator: gen_path_svg.py</div>
+    <img src="path_01E8.svg" alt="Path 01E8 trajectory: four coloured segments composing one swoop, plus a mirrored dashed pair.">
+    <dl class="grid">
+      <dt>What</dt><dd><code>path_01E8</code> — the codebase's own token-free reference fly-in (<code>PATH_INDEX</code> entry 6, variant 0). Just four segments and an <code>FF</code> END.</dd>
+      <dt>Shows</dt><dd>How the four 3-byte segments compose <b>nose-to-tail into one swoop</b> — descend, gentle bend, hard hook, long tail — each coloured separately. The loop is drawn <em>by the numbers</em>, not by hand.</dd>
+      <dt>Also</dt><dd>The <b>mirrored pair</b> (dashed): member 1 runs the <em>same bytes</em> with rotation negated (the pair-member bit-7 flag) — Galaga's iconic symmetric "wishbone" entry, from one shared program.</dd>
+      <dt>Caveat</dt><dd><code>01E8</code> ends in a raw <code>END</code> (it's a test path), so its long tail flies off-screen; the trajectory is clipped at the playfield edge.</dd>
+    </dl>
+  </section>
+
+  <!-- ───────────────────────── #3 ───────────────────────── -->
+  <section>
+    <h2>2 · One bytecode, three routes</h2>
+    <div class="file">three_routes_001D.svg &nbsp;·&nbsp; generator: gen_three_routes.py</div>
+    <img src="three_routes_001D.svg" alt="Path 001D: a shared grey trunk that forks at F7 (transient leaves) and again at F0 (stage split), producing three routes.">
+    <dl class="grid">
+      <dt>What</dt><dd><code>path_001D</code> — a Type-2 fly-in carrying <span class="tok-t">two conditional branch tokens</span>, so the same bytes encode <b>three mutually-exclusive flights</b>.</dd>
+      <dt>Shows</dt><dd>A shared grey <b>trunk</b>, then <b>two forks back-to-back</b>: at <span class="tok-t"><code>F7</code></span> a <b>transient</b> bug peels off (swoops, targets the player, and leaves off-screen); ~2 frames later at <span class="tok-w"><code>F0</code></span> the formation bugs split by <b>stage</b> — 1–7 vs 8+ — both homing into the same slot.</dd>
+      <dt>Why</dt><dd>This is the galaga-only richness a static format can't express: a path is <em>control flow</em>. Gates: <code>F7</code> = <code>(objId&amp;0x38)==0x38</code>; <code>F0</code> = <code>stage ≥ 8</code>. (It mirrors the 3-route table in <code>research_flyin_dataflow.md</code>.)</dd>
+      <dt>Caveat</dt><dd>The two forks sit ~4 px apart because segment C is a 2-frame burst; the transient's player-targeting used a fixed player X, and both formation routes home to one example slot.</dd>
+    </dl>
+  </section>
+
+  <!-- ───────────────────────── #4 ───────────────────────── -->
+  <section>
+    <h2>3 · The F3 player-targeting fan</h2>
+    <div class="file">f3_fan.svg &nbsp;·&nbsp; generator: gen_f3_fan.py</div>
+    <img src="f3_fan.svg" alt="ATTACK_PATH_RED dive run seven times, one per player position, fanning out so each dive bends toward that column.">
+    <dl class="grid">
+      <dt>What</dt><dd><code>ATTACK_PATH_RED</code> — the red-moth attack dive, driven by the <code>F3</code> (BREAK_TARGETED) token. The <b>continuous</b> axis, vs. the discrete branches above.</dd>
+      <dt>Shows</dt><dd>The same dive run for <b>seven player positions</b>. <code>F3</code> reads your X, buckets <code>(playerX − mothX)/4</code> into 0–7, and picks a <b>turn-hold duration</b> from an 8-byte LUT (63 → 34 frames). A longer hold runs the <code>rot −6</code> turn longer → the dive <b>hooks harder toward your column</b>. The dives fan out tracking the player.</dd>
+      <dt>Key</dt><dd><code>F3</code> sets the turn's <b>duration, not its heading</b> — so the dive <em>biases</em> toward you rather than homing exactly, and the aim cone <b>saturates</b> (the LUT clamps) at the screen edges.</dd>
+      <dt>Caveat</dt><dd>Launched from a central slot so the fan spreads symmetrically; the player marker colours match each dive.</dd>
+    </dl>
+  </section>
+
+  <hr>
+  <p class="footer">
+    Regenerate any picture with <code>python gen_&lt;name&gt;.py</code> from this folder — each
+    script writes its <code>.svg</code> in place. Source of truth for the motion model and
+    tokens: <code>galaga_clone/tasks/bugMotion.js</code>, <code>paths.js</code>,
+    <code>research_path_data.md</code>, <code>research_flyin_dataflow.md</code> · Z80
+    <code>gg1-5.s</code>.
+  </p>
+
+</div>
+</body>
+</html>

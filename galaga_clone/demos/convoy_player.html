@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>galaga_clone — bonus-bee X3 convoy test bench</title>
+  <style>
+    body { background:#141518; color:#eaeaea; font-family:-apple-system,"Segoe UI",sans-serif; margin:0; padding:24px; }
+    h1 { font-size:19px; font-weight:500; margin:0 0 4px; }
+    p.lead { font-size:13px; color:#b4b4b4; margin:4px 0 18px; max-width:900px; line-height:1.5; }
+    code, .mono { font-family:ui-monospace,Menlo,Consolas,monospace; }
+    a { color:#7cb6ff; }
+    .stage { display:flex; gap:28px; align-items:flex-start; flex-wrap:wrap; }
+    .panel { min-width:340px; max-width:470px; }
+    canvas { background:#161616; border:1px solid #444; image-rendering:pixelated; }
+
+    .controls { display:flex; align-items:center; gap:16px; margin:0 0 10px; font-size:13px; flex-wrap:wrap; }
+    button { background:#20242b; color:#eaeaea; border:1px solid #3a4048; border-radius:5px; padding:5px 13px; cursor:pointer; font-size:13px; }
+    button:hover { background:#2a2f38; }
+    input[type=range] { width:150px; vertical-align:middle; }
+    label { color:#b4b4b4; }
+    .seg { display:inline-flex; gap:2px; border:1px solid #3a4048; border-radius:6px; overflow:hidden; }
+    .seg label { padding:5px 12px; cursor:pointer; color:#b4b4b4; }
+    .seg label.on { background:#243044; color:#eaeaea; }
+    .seg input { display:none; }
+    .ctl.off { opacity:0.35; pointer-events:none; }
+
+    h2 { font-size:13px; font-weight:500; color:#eaeaea; margin:0 0 8px; }
+
+    .grid { display:grid; grid-template-columns:repeat(10, 22px); gap:3px; margin:0 0 6px; }
+    .cell { width:22px; height:16px; border-radius:3px; border:1px solid #2c3038; cursor:pointer;
+            font-size:9px; color:#8a8a8a; display:flex; align-items:center; justify-content:center; }
+    .cell.left  { background:#161c26; }
+    .cell.right { background:#241a16; }
+    .cell.sel   { border-color:#eaeaea; color:#eaeaea; }
+    .grid-lbl { font-size:10px; color:#6f7680; margin:0 0 2px; }
+
+    .kv { display:grid; grid-template-columns:auto 1fr; gap:3px 10px; font-size:12px; margin:8px 0 0; }
+    .kv .k { color:#8a8a8a; }
+    .kv .v { color:#cdd3da; font-family:ui-monospace,Menlo,Consolas,monospace; }
+
+    .badge { display:inline-block; font-size:11px; padding:2px 9px; border-radius:20px; margin-top:8px; }
+    .badge.homing { background:#173a26; color:#68d391; border:1px solid #2b5e40; }
+    .badge.loop   { background:#2a2410; color:#f7cc5f; border:1px solid #5e4f1f; }
+    .badge.flying { background:#1d2430; color:#9ab4d8; border:1px solid #33415a; }
+    .badge.gone   { background:#3a1717; color:#fc8181; border:1px solid #5e2b2b; }
+
+    #readout { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; color:#8fd6a8; margin:12px 0 0; min-height:16px; }
+    .note { font-size:11px; color:#8a8a8a; margin:10px 0 0; line-height:1.55; }
+    .hint { color:#6f7680; }
+    .sw { display:inline-block; width:9px; height:9px; border-radius:2px; vertical-align:middle; margin-right:3px; }
+  </style>
+</head>
+<body>
+  <h1>Galaga bonus-bee bench — the X3 convoy</h1>
+  <p class="lead">
+    A deterministic harness over the <b>real interpreter</b> (<code>bugMotion.js</code>) for the
+    bonus-bee <b>"clone-attack"</b>. One wasp is launched as the <b>leader</b> of a triple dive;
+    the 2 <b>clones</b> aren't launched separately — they <b>split off the leader's own path</b> at
+    its two <code>F2</code> SPAWN tokens (<code>case_097B</code>). The <b>color</b> (0/1/2) picks the
+    whole convoy: leader path, clone sub-path(s), and sprite base. Color <b>2</b>'s two clones fly
+    <i>different</i> sub-paths; color <b>0</b>'s clones aim at the ship (<code>F3</code>).
+    <a href="boss_player.html">← boss bench</a> · <a href="index.html">all demos</a>
+  </p>
+
+  <div class="controls">
+    <span class="seg" id="color">
+      <label data-color="0"><input type="radio" name="color" value="0">Color 0 · 0x50</label>
+      <label data-color="1" class="on"><input type="radio" name="color" value="1" checked>Color 1 · 0x58</label>
+      <label data-color="2"><input type="radio" name="color" value="2">Color 2 · 0x60</label>
+    </span>
+    <button id="play">⏸ Pause</button>
+    <button id="restart">↻ Restart</button>
+    <label>speed <input id="speed" type="range" min="0" max="8" value="1"><span id="speedval" class="mono">1×</span></label>
+  </div>
+
+  <div class="controls">
+    <span class="ctl" id="playerCtl"><label>player X <input id="player" type="range" min="9" max="216" value="112"><span id="playerval" class="mono">112</span></label></span>
+  </div>
+
+  <div class="stage">
+    <canvas id="pf" width="448" height="576"></canvas>
+
+    <div class="panel">
+      <h2>Leader slot <span class="hint">(wasp rows 4–5 — the bonus-bee source)</span></h2>
+      <div class="grid-lbl">click a slot · <span style="color:#5a7">left = lefty (no negate)</span> · <span style="color:#c85">right = righty (negate)</span></div>
+      <div id="grid" class="grid"></div>
+
+      <div class="kv" id="info"></div>
+      <div id="badge" class="badge flying">…</div>
+      <div id="readout">—</div>
+
+      <p class="note" id="gate-note"></p>
+      <p class="note">
+        <span class="sw" style="background:#7cb6ff"></span>leader ·
+        <span class="sw" style="background:#68d391"></span>clone 1 ·
+        <span class="sw" style="background:#f6ad55"></span>clone 2 ·
+        <span class="hint">amber ring = the <code>F2</code> split-off point</span> ·
+        the green ship is the color-0 <code>F3</code> aim target.
+      </p>
+    </div>
+  </div>
+
+  <script type="module" src="./convoy_player.js"></script>
+</body>
+</html>

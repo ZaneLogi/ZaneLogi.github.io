@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Galaga Clone — Progress</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0e0e0e;
+    color: #ccc;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 24px;
+    line-height: 1.6;
+  }
+
+  h1 { color: #fff; font-size: 16px; margin-bottom: 4px; }
+  h2 { color: #555; font-size: 11px; font-weight: normal; margin-bottom: 32px; }
+
+  /* ── Step card ── */
+  .step {
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    gap: 0 16px;
+    margin-bottom: 2px;
+    align-items: stretch;
+  }
+
+  /* Left gutter: number + connector line */
+  .step-gutter {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .step-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: bold;
+    flex-shrink: 0;
+    border: 1px solid #333;
+    background: #151515;
+    color: #555;
+  }
+  .step.done   .step-num { background: #0d1f0d; border-color: #3a6; color: #5d9; }
+  .step.active .step-num { background: #1a150a; border-color: #a80; color: #fc6; }
+  .step.todo   .step-num { background: #151515; border-color: #333; color: #444; }
+
+  .step-line {
+    flex: 1;
+    width: 1px;
+    background: #222;
+    margin: 4px 0;
+    min-height: 12px;
+  }
+  .step:last-child .step-line { display: none; }
+
+  /* Right body */
+  .step-body {
+    padding: 6px 0 20px;
+  }
+
+  .step-title {
+    font-size: 13px;
+    font-weight: bold;
+    margin-bottom: 6px;
+  }
+  .step.done   .step-title { color: #5d9; }
+  .step.active .step-title { color: #fc6; }
+  .step.todo   .step-title { color: #555; }
+
+  .step-desc {
+    color: #777;
+    margin-bottom: 8px;
+    max-width: 680px;
+  }
+  .step.todo .step-desc { color: #3a3a3a; }
+
+  /* File list */
+  .files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+  .file {
+    padding: 1px 8px;
+    border-radius: 2px;
+    font-size: 11px;
+    border: 1px solid #2a2a2a;
+    background: #141414;
+    color: #555;
+  }
+  .file.new      { border-color: #264; color: #4a8; }
+  .file.modified { border-color: #443; color: #aa7; }
+  .file.ref      { border-color: #334; color: #669; font-style: italic; }
+
+  /* Notes / log entries */
+  .notes {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 4px;
+  }
+  .note {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+  .note-tag {
+    font-size: 10px;
+    padding: 0 5px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .note-tag.fix    { background: #2a1010; color: #f88; border: 1px solid #633; }
+  .note-tag.decide { background: #101828; color: #7af; border: 1px solid #346; }
+  .note-tag.verify { background: #121a12; color: #6a9; border: 1px solid #264; }
+  .note-tag.note   { background: #1a1a1a; color: #777; border: 1px solid #333; }
+  .note-text { color: #666; }
+  .step.todo .note-text { color: #2a2a2a; }
+
+  /* Status badge */
+  .badge {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 7px;
+    border-radius: 2px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  .badge.done   { background: #0d2a0d; color: #5d9; border: 1px solid #3a6; }
+  .badge.active { background: #2a1a00; color: #fc6; border: 1px solid #a80; }
+  .badge.todo   { background: #1a1a1a; color: #444; border: 1px solid #2a2a2a; }
+
+  /* Summary bar */
+  .summary {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 32px;
+    padding: 10px 14px;
+    border: 1px solid #222;
+    background: #111;
+    border-radius: 2px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .summary-item { font-size: 11px; color: #555; }
+  .summary-item span { font-size: 13px; font-weight: bold; }
+  .summary-item .done-count   { color: #5d9; }
+  .summary-item .active-count { color: #fc6; }
+  .summary-item .todo-count   { color: #444; }
+
+  .progress-bar {
+    flex: 1;
+    min-width: 120px;
+    height: 6px;
+    background: #1e1e1e;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: #3a6;
+    border-radius: 3px;
+    transition: width 0.3s;
+  }
+
+  a { color: #446; text-decoration: none; }
+  a:hover { color: #7af; }
+</style>
+</head>
+<body>
+
+<h1>Galaga Clone — Implementation Progress</h1>
+<h2>Branch: galaga_clone &nbsp;·&nbsp; Ref: <a href="architecture.html">architecture.html</a> &nbsp;·&nbsp; Z80: C:\Z_Temp\hackbar_galaga\rom0\</h2>
+
+<div class="summary">
+  <div class="summary-item"><span class="done-count">10</span> done</div>
+  <div class="summary-item"><span class="active-count">0</span> in progress</div>
+  <div class="summary-item"><span class="todo-count">2</span> todo</div>
+  <div class="progress-bar"><div class="progress-fill" style="width: 83%"></div></div>
+  <div class="summary-item" style="color:#333">10 / 12 steps &nbsp;<span style="color:#555">(plan resequenced — integration moved before boss capture)</span></div>
+</div>
+
+<div class="summary" style="border-color:#3a6; background:#0d1a0d;">
+  <div class="summary-item" style="font-size:12px; line-height:1.6;">
+    <span style="color:#5d9; font-weight:bold;">✦ PROJECT WOUND DOWN — 2026-07-08 · educational goal met</span><br>
+    <span style="color:#888;">A playable Z80-faithful Galaga (all core mechanics) plus a
+    six-demo path-motion family under <a href="demos/index.html">demos/</a>
+    (path · challenge · flyin · attack · boss · convoy). The remaining work below —
+    step&nbsp;9's HUD / life-loss / attack-path integration loose ends (e.g. FD&nbsp;JUMP,
+    the stage-8+ bombing loop) and step&nbsp;11 HUD polish, plus sound, attract-mode demo,
+    2-player, bonus-life DIPs, and capture edge cases G20/G21 — is
+    <b style="color:#aa7;">deferred mechanical completeness, not active work</b>.
+    See <code>CLAUDE.md</code> §Project status.</span>
+  </div>
+</div>
+
+
+<!-- ── Step 0 ── -->
+<div class="step done">
+  <div class="step-gutter">
+    <div class="step-num">0</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Project foundation — skeleton + tooling <span class="badge done">done</span></div>
+    <div class="step-desc">CLAUDE.md repo guidance. Fixed-timestep runloop (1/60 s physics ticks) with 32-slot task scheduler mirroring the Z80 task_man.s. Shared mutable state, Proxy-based dev panel overlay with always-on toggle protection. Working parallax starfield (32 slow + 31 fast stars). Stubs for all major task modules. Code-flow analysis page.</div>
+    <div class="files">
+      <span class="file new">CLAUDE.md</span>
+      <span class="file new">index.html</span>
+      <span class="file new">main.js</span>
+      <span class="file new">state.js</span>
+      <span class="file new">devPanel.js</span>
+      <span class="file new">tasks/starfield.js</span>
+      <span class="file new">tasks/formationOscillate.js</span>
+      <span class="file new">tasks/formationPulse.js</span>
+      <span class="file new">tasks/objectStates.js</span>
+      <span class="file new">tasks/enemyStatus.js</span>
+      <span class="file new">tasks/bombUpdate.js</span>
+      <span class="file new">tasks/launchAttackWave.js</span>
+      <span class="file new">tasks/playerMove.js</span>
+      <span class="file new">tasks/playerFire.js</span>
+      <span class="file new">tasks/captorDive.js</span>
+      <span class="file new">tasks/tractorBeam.js</span>
+      <span class="file new">tasks/pullShip.js</span>
+      <span class="file new">architecture.html</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Fixed-timestep accumulator (1/60 s) — physics is frame-rate independent, render interpolates between ticks.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Task table ordered to match Z80 d_cpu0_task_table slot numbering; f_1DD2 (timer decrement) runs unconditionally outside the panel as tickGameTimers().</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Dev panel uses Proxy-based reactivity; always-on tasks are checkbox-disabled so they can't be toggled off.</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 1 ── -->
+<div class="step done">
+  <div class="step-gutter">
+    <div class="step-num">1</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">ROM data files <span class="badge done">done</span></div>
+    <div class="step-desc">Port all ROM data from galaga/ to ES6 export const modules under galaga_clone/gfx/. One file per ROM region.</div>
+    <div class="files">
+      <span class="file new">gfx/dat_colors.js</span>
+      <span class="file new">gfx/dat_paletteSprite.js</span>
+      <span class="file new">gfx/dat_paletteChar.js</span>
+      <span class="file new">gfx/dat_sprite1.js</span>
+      <span class="file new">gfx/dat_sprite2.js</span>
+      <span class="file new">gfx/dat_character.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">All ROM data in gfx/ subdirectory — mirrors hardware boundary (ROM data + GFX chip).</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Each file uses <code>export const</code> (no wrapper object) for clean ES6 module imports.</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 2 ── -->
+<div class="step done">
+  <div class="step-gutter">
+    <div class="step-num">2</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">gfx/resource.js — sprite decoder <span class="badge done">done</span></div>
+    <div class="step-desc">ES6 decoder module: decodes color PROM → RGBA, builds 16-entry sprite palettes, decodes 16×16 tiles from both sprite ROMs, exports named sprite groups (ship, boss, butterfly, wasp) as HTMLCanvasElement arrays. Runs once at import time — no init() call needed.</div>
+    <div class="files">
+      <span class="file new">gfx/resource.js</span>
+      <span class="file new">gfx/sprite_viewer.html</span>
+      <span class="file modified">galaga/resource.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text">Blue channel decode bug in galaga/resource.js: <code>(c>>5)&0x6/7</code> (max 219) → <code>(c>>6)&0x3/3</code> (max 255). Applied to both galaga/ and galaga_clone/.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Palette indices verified against Z80 source (gg1-2_fx.s): ship=9, boss=0, butterfly=2, wasp=3.</span></div>
+      <div class="note"><span class="note-tag verify">verify</span><span class="note-text">Visual check via sprite_viewer.html confirmed correct colors and shapes for all four groups.</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 3 ── -->
+<div class="step done">
+  <div class="step-gutter">
+    <div class="step-num">3</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Formation rendering <span class="badge done">done</span></div>
+    <div class="step-desc">48 enemy objects in state.js (8 boss + 20 butterfly + 20 wasp). Rendered each frame by objectStates.js using the correct formation-idle sprite frame and a 6↔7 animation at ~2 Hz.</div>
+    <div class="files">
+      <span class="file modified">state.js</span>
+      <span class="file modified">tasks/objectStates.js</span>
+      <span class="file ref">gfx/resource.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">48 slots (not 40): boss rows only fill cols 3–6 (4 enemies each); butterfly and wasp rows fill all 10 cols. Source: db_obj_home_posn_rc in task_man.s.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Column X from db_fmtn_hpos_orig (gg1-2.s:949): [49,65,81,97,113,129,145,161,177,193]. Row pixel Y via formula: pixel_Y = 2×(~(rawY+0x4F)&0xFF) → boss 60/76, butterfly 92/104, wasp 116/128.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text">Initial render used sprites[type][0] (facing left). Z80 case_245F/case_2488 (gg1-3.s) shows home pose is sprite code 6, alternating 6↔7 in formation. Corrected to frame = 6 + ((frameCount >> 5) &amp; 1).</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 4 ── -->
+<div class="step done">
+  <div class="step-gutter">
+    <div class="step-num">4</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Formation movement — oscillate + pulse <span class="badge done">done</span></div>
+    <div class="step-desc">Faithful ports of both Z80 formation movement tasks. f_2A90: whole formation drifts ±32 px L/R at 15 Hz (1 px/4 frames). f_1DE6: per-column and per-row pixel offsets driven by d_1E64 bitmap table; rrc rotation; expand/contract counter gives ~4.2 s full cycle.</div>
+    <div class="files">
+      <span class="file modified">tasks/formationOscillate.js</span>
+      <span class="file modified">tasks/formationPulse.js</span>
+      <span class="file modified">state.js</span>
+      <span class="file modified">tasks/starfield.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">f_2A90 and f_1DE6 are mutually exclusive: f_2A90 runs during fly-in and attack; f_1DE6 takes over at steady state (all enemies homed, launchAttackWave off). Hand-off not yet wired — toggled manually via dev panel for now.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">f_1DE6 bitmap (d_1E64_bitmap_tables, gg1-2_fx.s:1721): 4 rows × 16 bytes. rrc each byte each tick; carry → update offset. Left cols 0–4 invert direction (expand leftward); right cols 5–9 and all 6 rows use positive direction. Counter: 0x00→0x1F expanding, jumps to 0xA0; 0xA0→0x81 contracting, jumps to 0x00.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text">Starfield invisible despite task being enabled: main.js never calls task init(). Fixed by lazy-calling init() at top of starfield.update() when !ready. scrollEnable=true set there is a dev scaffold — in the real game flow game_ctrl.s sets it when the ship enters the playfield.</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 5 ── -->
+<div class="step done">
+  <div class="step-gutter">
+    <div class="step-num">5</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Player ship <span class="badge done">done</span></div>
+    <div class="step-desc">Faithful port of f_1F85 / c_1F92. Ship rendered at bottom-center using sprite code 6 (wings-open upright pose). Arrow-key left/right movement with Z80-accurate bounds and dxFlag-toggled 1/2 px alternating speed. Keyboard sampling in main.js feeds state.input each tick.</div>
+    <div class="files">
+      <span class="file modified">tasks/playerMove.js</span>
+      <span class="file modified">state.js</span>
+      <span class="file modified">main.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag verify">verify</span><span class="note-text">Z80 ref: f_1F85 (gg1-2_fx.s:2071) → c_1F92 reads io_input, branches to add/sub on right/left, with pre-move <code>cp limit / ret c</code> bounds check. b_92A0[3] toggles each held frame to alternate 1/2 px steps.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text">Right boundary exceeded the 224 px canvas. Root cause: Z80 sprite hardware adds a 10 px X offset when drawing — ROM sprite-X is 10 greater than canvas-X. Fixed globally: <code>canvas_X = sprite_X − 10</code>. Player spawn 0x7A=122 → 112; limits 0x12/0xE1=18/225 → 8/215. Same offset re-applied to formation column X table (now [39..183]).</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Pre-move check, not post-move clamp — mirrors Z80 exactly. Right: move only when canvas_X &lt; 215. Left: move only when canvas_X ≥ 8. Means the ship may stop one step short of the wall depending on dxFlag phase. Don't refactor to a clamp.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">dxFlag persists in state.player and clears to 0 on key release, so the next press starts at dx=1 (slow first step). Mirrors b_92A0[3] reset behaviour.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Ship Y fixed at canvas 208 (no Y offset). Render uses <code>drawImage(sprites.ship[6], p.x − 8, p.y − 8)</code> to centre the 16×16 sprite on (p.x, p.y).</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Tooling: added <code>galaga_clone/CLAUDE.md</code> capturing Z80 source path, task-table architecture, the 10 px offset rule, and the fidelity patterns to preserve. Root <code>CLAUDE.md</code> reframed as a multi-project retro-game repo.</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 6 ── -->
+<div class="step done">
+  <div class="step-gutter">
+    <div class="step-num">6</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Player bullets + collision <span class="badge done">done</span></div>
+    <div class="step-desc">Faithful port of the Galaga bullet system. Space fires (max 2 bullets, edge-triggered — no auto-repeat). Bullets travel up at dY=6 px/frame, despawn at canvas Y &lt; 40. AABB collision (|dY| ≤ 3, |dX| &lt; 6) marks enemy hit; enemyStatus reads the flag next tick and removes the enemy.</div>
+    <div class="files">
+      <span class="file modified">tasks/playerFire.js</span>
+      <span class="file new">tasks/bulletUpdate.js</span>
+      <span class="file modified">tasks/enemyStatus.js</span>
+      <span class="file modified">state.js</span>
+      <span class="file modified">main.js</span>
+      <span class="file modified">devPanel.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag verify">verify</span><span class="note-text">Z80 sources: <code>f_1F04 / c_1F0F</code> (gg1-2_fx.s:1850) for fire + slot scan · <code>rckt_man / hitd_det_rckt</code> (gg1-5.s:917, 1094) on CPU1 for movement + AABB · <code>f_1DB3</code> (gg1-2_fx.s:1500) for hit → dead transition. Constants confirmed: max 2 bullets, dY=6, despawn Y&lt;40, AABB ±3 Y / &lt;6 X (1-ship mode).</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">New <code>bulletUpdate</code> task — no Z80 task counterpart. Stands in for CPU1's <code>rckt_man + hitd_det_rckt</code>, which ran in parallel on a second processor. Slotted right after <code>playerFire</code> so a freshly spawned bullet does not move on the same tick — preserves the natural CPU0/CPU1 1-frame lag.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Hit signalling kept indirect: <code>bulletUpdate</code> sets <code>enemy.hitFlag</code>; <code>enemyStatus</code> (slot 4, runs before <code>bulletUpdate</code> at slot 9) reads it the following tick. Mirrors the CPU0 polling CPU1's collision flag with ~1 frame latency. Don't refactor to direct kill.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text">Step description had said "original allows 1" — wrong. Z80 hardcodes 2 slots: <code>sprite_posn[0x64]</code> and <code>sprite_posn[0x66]</code>; if both X coords are nonzero the fire returns without spawning (gg1-2_fx.s:1873–1884).</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text">Fire button in JS needs a software edge: keyboard <code>keydown</code> stays "down" until release, which would auto-repeat every frame. Added <code>state.input.fireEdge</code> in main.js (rising edge of <code>state.input.fire</code>) — reproduces the Z80 IO chip's hardware debounce.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Bullet sprite is a placeholder 2 × 6 white <code>fillRect</code>. Galaga's actual rocket sprite is code 0x30 (gg1-2_fx.s:1941–1951); wire it up when the resource decoder exposes the missile / explosion tile groups (~step 8).</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Explosion + scoring deferred. <code>enemyStatus</code> currently jumps straight from alive → dead (no exploding state, no 0x40 → 0x45 counter). Score wiring belongs in step 10 (HUD).</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Collision recomputes enemy live position inline (homeX + oscillateX + pulseOffsets[colIdx]) — same formula as <code>objectStates.render</code>. Extract to a shared helper when fly-in / attack states give enemies their own <code>x,y</code> fields (steps 7–8).</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 7 ── -->
+<div class="step done">
+  <div class="step-gutter">
+    <div class="step-num">7</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Fly-in sequence <span class="badge done">done</span></div>
+    <div class="step-desc">Real Galaga ROM path bytecode now drives enemy fly-ins. Pull-based wave launcher (f_2916 stand-in) walks a hardcoded test wave; per-tick interpreter (CPU1 f_08D3 stand-in) reads 3-byte segments from real db_flv_XXXX blocks; enemies launch in mirror-paired groups, follow the path, and return to formation on END or TURN_HOME. Did this in 7 phases, each its own commit, with up-front Z80 research before any code.</div>
+    <div class="files">
+      <span class="file new">paths.js</span>
+      <span class="file new">tasks/bugMotion.js</span>
+      <span class="file modified">tasks/launchAttackWave.js</span>
+      <span class="file modified">tasks/objectStates.js</span>
+      <span class="file modified">state.js</span>
+      <span class="file modified">main.js</span>
+      <span class="file modified">devPanel.js</span>
+      <span class="file modified">architecture.html</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag verify">verify</span><span class="note-text">Z80 sources: <code>db_2A3C</code> (gg1-3.s:1918) — 24-entry pointer index · <code>db_2A6C</code> (gg1-3.s:1928) — variant table · <code>db_flv_XXXX</code> (gg1-5.s:82+) — 22 path-data blocks · <code>sprt_fmtn_hpos</code> (gg1-5.s:185) — 96-byte ID→slot lookup · <code>f_08D3</code> (gg1-5.s:1422) — per-tick interpreter · <code>f_2916</code> (gg1-3.s:1658) — wave launcher · <code>c_25A2</code> (gg1-3.s:1168) — wave builder. All findings captured in §5 of architecture.html.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>Major correction</b> caught in research before porting: dispatch threshold is 0xEF, not 0xE0. Real tokens are 0xEF–0xFF (17 of them), not the 10 0xE0+ entries the diagram had. Earlier list had wrong values (0xE1 HOME etc.) that would have caused the interpreter to mis-treat normal segment data as commands.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Rotation is <b>decoupled</b> from velocity in Galaga — segment XY nibbles are direct pixel deltas, not "speed in heading direction". Means our JS port doesn't need any sin/cos / lookup table; just <code>e.x += e.vx</code>. X and Y applied on alternate frames (matching Z80 frame-parity trick), giving effective ½-rate per axis.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Wave timing is <b>pull-based</b>, not scripted — next pair only launches when no enemies are still flying. Mirrors Z80 <code>b_bugs_flying_nbr == 0</code> check. New <code>bugMotion</code> task (CPU1 stand-in) sits between <code>objectStates</code> and <code>enemyStatus</code> in TASK_TABLE; <code>launchAttackWave</code> later, giving newly-spawned enemies a 1-tick lag (same pattern as <code>playerFire</code> → <code>bulletUpdate</code>).</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Object IDs match Z80 byte-offset scheme — each formation enemy gets an <code>objectId</code> from the 96-byte <code>SPRT_FMTN_HPOS</code> table (range 0x00–0x5E, all even). Inlined verbatim instead of computed from row/col, since the Z80 ordering is scattered for fly-in pairing optimisation.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Token handling now covers 14 of 17 (0xEF–0xFF): END, TURN_HOME (smoothed homing), the JUMP family (FD / FA / EF / and F0's stage-8 JUMP-to-sub-path, 2026-06-22), plus the attack-dive + bonus-bee tokens (F1–F4, F6, F8, F9, FC, F2). Remaining: <b>F5</b> (benign no-op), <b>FE</b> (unreached today), and <b>F7</b> — deferred, not a standalone token (its gate fires only for transient caravan members the clone never launches; a faithful F7 needs the transient-launch layer + the FE token — research_attack_paths.md §8). All unhandled tokens still skip their args correctly so .dw addresses aren't mis-read as segments.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Phased delivery: 1 (interpreter) → 2 (real data) → 3a (END→formation) → 3b (object IDs) → 3c (launcher) → 3d-A (variant pair) → 3d-B (port all paths) → 3e (token handling). Each phase its own commit; if implementation later corrects research, the affected architecture.html block is updated to show before/after.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Known limitations: TEST_WAVE is hardcoded (real <code>c_25A2</code> stage-data builder is deferred — phase 4 territory); cursor lives in module-scope (not <code>state.*</code>); paths with long final-segment durations (~0xFF) still run for a few seconds before END since natural HOME-proximity termination isn't wired. Visually fine; documented for future polish.</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 8 ── -->
+<div class="step done">
+  <div class="step-gutter">
+    <div class="step-num">8</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Attack waves + bombs <span class="badge done">done</span></div>
+    <div class="step-desc">Continuous attack-dive combat with bombs raining down. Built on step 7's path interpreter — yellow / red / boss enemies break formation per timer dispatch, run real Z80 attack bytecode (db_flv_atk_yllw / _red), drop bombs vector-aimed at the player, and snap back to formation. Same pattern as step 7: research first, phased implementation, integration deferred. 6 phases over 7 commits.</div>
+    <div class="files">
+      <span class="file new">paths.js (attack tables)</span>
+      <span class="file new">tasks/bombUpdate.js</span>
+      <span class="file modified">tasks/bugMotion.js (F6 + FA fix)</span>
+      <span class="file modified">tasks/launchAttackWave.js (continuous mode)</span>
+      <span class="file modified">state.js (bombs[8] + bombCounter / bombEnable)</span>
+      <span class="file modified">architecture.html §5b</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag verify">verify</span><span class="note-text">Z80 sources: <code>db_flv_atk_yllw</code> (gg1-5.s:285, 90 B) and <code>db_flv_atk_red</code> (311, 104 B) — flat single blocks, not pointer indices · <code>f_1B65</code> (gg1-2_fx.s:857) bomber-attack manager · <code>f_1EA4</code> (gg1-2_fx.s:1729) bomb update · <code>case_0DF5</code> (gg1-5.s:2343) drop logic · token handlers in <code>d_0920_jp_tbl</code> (gg1-5.s:1494). 4/5 research items verified; item [5] (convoy / capture squad) deliberately deferred to step 9. Full findings in §5b.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>Latent bugfix during 8a:</b> bugMotion's <code>TOKEN_ARG_BYTES</code> map was missing arg counts for FC, F8, F6, F3, EF — fly-in paths didn't use them so the bug was latent until step 8 attack paths exercised them. Caught in research item [2].</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>Research correction during 8c:</b> token <code>0xFA LOOP_TOP</code> documented as "0-byte / conditional" — wrong. Path bytes always have 2 args after FA. Caught when phase 8c attack-path test mis-read the .dw address as a segment opcode and flew the test enemy off-screen instead of snapping home at FB. Architecture.html §5b updated with before/after.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Attack-dive launcher uses <b>timer-based</b> per-type dispatch (yellow / red / boss timers in module-scope <code>_attackTimers</code>), <b>not</b> pull-based like fly-in. Mirrors Z80 <code>b_92C0[0..2]</code>. Selection is slot-position priority (first STAND_BY in formation order). Reuses existing <code>launchEnemy</code> / new <code>launchEnemyAttack</code> APIs — same path interpreter handles both fly-in and attack bytecode.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">Bomb subsystem: 8 slots in <code>state.bombs[]</code>, vector frozen at drop (NOT homing), Y velocity constant 2/3 px/frame, X velocity from snapshot of player position. AABB collision sets <code>state.player.alive = false</code> on hit. F6 FREE_FLIGHT token arms the bomb counter; <code>launchEnemyAttack</code> also arms at spawn as a phase 8e simplification (because FD JUMP isn't yet implemented, F6 fires too late in the path otherwise).</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Phased delivery (mirrors step 7): 8a (TOKEN_ARG_BYTES gap fix) → 8b (port attack tables) → 8c (hardcoded test + FA fix) → 8d/e (bombs + F6, combined) → 8f (continuous attack launcher). Each phase its own commit.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Known gaps for integration (all in architecture.html §5b callouts): (1) ✅ RESOLVED (2026-06-21, §6.2): c_0EAA decoded — vx = clamp(±3.0, 5.0·dx/dy); bombUpdate VX_GAIN/VX_CAP now 5.0/3.0 (was placeholder 0.5/1.0) · (2) F6 spawn-arming workaround for FD JUMP not yet implemented · (3) bullet→enemy collision uses formation position not <code>e.x/e.y</code> — flying enemies immune to bullets · (4) ✅ RESOLVED (INT-5, 2026-06-20): stage-clear → next-stage advancement wired (was: formation depletion terminal) · (5) per-type reload values hardcoded — Z80 reads from ds_new_stage_parms · (6) boss escort orchestration deferred to step 9 with item [5].</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 9 ── -->
+<div class="step active">
+  <div class="step-gutter">
+    <div class="step-num">9</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Game integration — turn the machinery into a runnable game <span class="badge active">active</span></div>
+    <div class="step-desc">Wires steps 7+8 machinery into a real Galaga game loop: state machine (attract → ready → playing → gameover), per-stage data driving fly-in waves and attack timing, stage cycling, player respawn / lives, basic HUD (score / lives / stage), and the latent-bug fixes captured during step 8 (bullet→flying-enemy collision, formation depletion handling, etc.). After this step the game is <i>actually playable</i>; step 10 (boss capture) becomes a feature commit on top.</div>
+    <div class="files">
+      <span class="file new">tasks/gameController.js</span>
+      <span class="file modified">tasks/launchAttackWave.js (Z80 byte-stream walker)</span>
+      <span class="file modified">tasks/bugMotion.js (pair-mirror + both-axes motion)</span>
+      <span class="file modified">tasks/bulletUpdate.js (collide vs flying enemies)</span>
+      <span class="file modified">tasks/playerMove.js (respawn + corrected limits)</span>
+      <span class="file modified">state.js (gameState transitions, lives, score, stage)</span>
+      <span class="file modified">paths.js (byte-stream wave table + verifier)</span>
+      <span class="file modified">main.js (state-driven task enables + dump helpers)</span>
+      <span class="file new">research_stage_init.md</span>
+      <span class="file new">research_path_data.md</span>
+      <span class="file new">research_coordinate_system.md</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text"><b>Resequenced 2026-04-26:</b> originally step 9 was boss-capture and integration was implicit / "later". Reordered to make integration the explicit next step. Boss capture (now step 10) is a feature on top of a working game, not foundational. Reasoning: getting a runnable game sooner gives a baseline to dogfood and iterate; step 9 (boss capture) integrates cleanly as additive feature rather than mid-flight integration concern.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Z80 ref for integration backbone: <code>game_ctrl.s</code> (game state transitions, stage flow), <code>new_stage.s</code> (per-stage init), <code>c_25A2</code> (gg1-3.s:1168, wave builder from stage data), <code>d_combat_stg_dat</code> (gg1-3.s:1461, 13 combat stage configs), <code>d_challg_stg_data</code> (8 challenge stage configs).</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Known gaps to fix during this step (all listed in architecture.html §5b callouts): F6 spawn-arming workaround can be removed once FD JUMP is wired · per-type attack reload values currently hardcoded · sprite frame still from frameCount instead of angle. (TURN_HOME teleport snap fixed in INT-7; bullet→flying-enemy collision fixed in INT-4.) Each gap has a TODO comment in the code pointing back here.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Same up-front-research pattern as steps 7 & 8 — start with focused Explore agents on game_ctrl.s and stage data layouts, capture findings as a §6 (or §5c) block in architecture.html, then phased implementation (INT-1 game state, INT-2 stage data, INT-3 cursors-into-state, INT-4 lifecycle bug fixes, INT-5 stage cycling, INT-6 basic HUD, INT-7 polish). Each phase its own commit.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text"><b>Phase progress (as of INT-7 partial):</b> INT-1 ✓ (gameController state machine, c334d6f) · INT-2a ✓ (buildWaveTable seam, d6c2dc2) · INT-2b ✓ (stageStart state, 6534f74) · INT-2c ✓ (real Z80 byte-stream wave table + launcher rewrite + motion + coord-system overhaul; 6 commits 00cd2ab → c189372) · INT-3a ✓ (pending enemy state, e6304fd) · INT-3b ✓ (cursors → state.*, a323723) · INT-4 partial (bullet→flying collision, e2ea061; general respawn landed with step 10; real life-loss / game-over still pending) · <b>INT-5 ✓ stage advancement (2026-06-20):</b> clear detect (<code>gctl_supv_stage</code>) → "STAGE n" splash + 90-frame pause (<code>stg_init_splash</code>) → <code>state.stage++</code> → re-init; per-stage AND per-rank fly-in caravans (full <code>d_combat_stg_dat</code> + idx, <code>buildWaveStream(stage, rank)</code>, stage 1 a byte-exact regression); twoShip persists across stages; challenge stages deferred (combat fallback, max_bombers=0 → no attacks). INT-6 (HUD) not started · INT-7 partial (FB TURN_HOME guided homing landed; sprite-frame-from-angle and FD JUMP / sub-paths still pending).</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text"><b>INT-2c research artefacts:</b> Three living docs in galaga_clone/ capture the full Z80 specs and the journey behind the implementation: <code>research_stage_init.md</code> (stage data + wave-byte decoder + state-layer mapping), <code>research_path_data.md</code> (bug_motion_que struct + bytecode tokens + motion equation), <code>research_coordinate_system.md</code> (sprite-chip pixel mapping investigation, with sources + lessons). Future contributors should read these before extending coord-system or wave-launcher code.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>INT-2c paths.js correction:</b> VARIANTS table was 8 entries; verified Z80 <code>db_2A6C</code> (gg1-3.s:1928-1941) has 12 entries with pair-pair indexing. The earlier 8-entry mapping happened to work for variant 0/1 by coincidence (variants 4/5 differed in X) but gave wrong start positions for any other variant_bits. Expanded to 12 entries; replaced pair-shape <code>buildWaveTable</code> with Z80-faithful <code>buildWaveStream</code> (Uint8Array matching <code>ds_8920</code> layout). Added <code>dumpStageLaunches(stage)</code> verifier exposed on <code>window.dumpStage</code> — returns the 40 expected launches with hand-derived values for browser-console verification.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text"><b>INT-2c state layer:</b> Replaced legacy pair-shape state (<code>waveTable</code>, <code>flyInCursor</code>, <code>flyInCooldown</code>, <code>pendingMember2</code>, <code>trailTimer</code>) with Z80-faithful naming: <code>waveStream</code> ⇔ ds_8920, <code>waveStreamCursor</code> ⇔ _p_atkwav_tbl, <code>atkWvEnbl</code> ⇔ _b_atk_wv_enbl, <code>attkwvCtr</code> ⇔ _b_attkwv_ctr, <code>bugsFlying</code> ⇔ b_bugs_flying_nbr. New <code>stgInitEnv()</code> in gameController mirrors Z80 stg_init_env (task_man.s:256). c_2896 / c_12C3 / c_2C00 documented as JS-port workarounds (sprite codes, formation positions, difficulty params hardcoded).</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>INT-2c launcher rewrite:</b> <code>launchAttackWave.runFlyInWave</code> rewritten as a true byte-stream walker matching Z80 <code>f_2916</code> (gg1-3.s:1658) line-by-line. The bogus <code>pendingMember2</code> / <code>trailTimer</code> hold-slot mechanism is dropped — Z80 has no such timer; pair members are just two consecutive bytes, each gated independently by <code>frame_cnt &amp; 0x07 == 0</code> when bit 7 is clear. Inter-wave pacing now uses <code>bugsFlying == 0</code> + <code>game_tmrs[0]</code> gate at the 0x7E marker.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>INT-2c pair-mirror:</b> Wave-byte bit 6 has TWO effects (per gg1-3.s:1892-1894 + gg1-5.s:2014-2018) — pair-member selector AND a negate-rotation flag stored at 0x13(ix) bit 7. The negate-rotation was missing, causing both pair members to curve the same direction. With it wired up, pair partners sweep mirrored arcs — Galaga's iconic wishbone "X" entry pattern in wave 1.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>INT-2c motion model:</b> bugMotion was updating ONE axis per frame; Z80 (gg1-5.s:2150-2270) updates BOTH axes every frame with the velocity magnitude alternating between vx and vy by frame parity. Net effect: roughly 2× the motion per frame, fixing the "small curves" complaint. Also: vx/vy nibbles are UNSIGNED magnitudes 0-15 (Z80 <code>and 0x0F</code>) — direction comes from angle, not from a sign bit. Latent <code>nibSigned</code> bug for nibbles ≥ 8 fixed.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>INT-2c coordinate-system overhaul:</b> Major correction. Canvas extended 224×256 → 224×288 (real Galaga hardware). Verified sprite-chip formulas (vs harbaum/galagino ESP32 emulator + MAME + Paolo Severini's emulator): <code>canvas_X = sprite_X − 16</code> (was −10 — CLAUDE.md-era visual approximation), <code>canvas_Y = sprite_Y_byte + 256 × bit_8 − 40</code> (was treating sprite_Y as canvas_Y directly). Player Y was hardcoded approximation 208; now Z80-derived 257 (sprite_Y full = 297 from gg1-2.s:1051-1062, minus 40). Wave 2/3 entries no longer overlap the lives-icon area; player ship sits exactly 7 px above (would-be) lives at Y 272-288. CLAUDE.md coordinate section rewritten with both verified formulas + sources.</span></div>
+      <div class="note"><span class="note-tag verify">verify</span><span class="note-text"><b>INT-2c end-to-end visual check:</b> Wave 1 enters top-center with mirrored pair arcs · Waves 2/3 enter from bottom-left/bottom-right edges · Wave 4/5 enter top-center with trailing-string pattern · Formation rows in upper third · Player ship just above lives area — all matching real Galaga gameplay (compared against an online port). <code>dumpStage(1)</code> returns the verified 40-launch table with hand-computed values.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>INT-7 FB TURN_HOME guided homing:</b> Fly-in enemies no longer teleport into formation on the FB token; they now glide. Implementation matches Z80 case_0AA0 (gg1-5.s:1768-1846): on FB, compute angle from current position to home formation slot via <code>Math.atan2(-(homeY−y), homeX−x)</code> (mathematically equivalent to Z80 c_0E5B fixed-point atan2), enter new <code>'homing'</code> state with fixed angle, continue motion with last vx/vy until within <code>HOME_THRESHOLD = 2</code> canvas px of home (= ±1 in Z80 raw high byte after the rendering pipeline's ×2). Updated <code>bulletUpdate</code> + <code>launchAttackWave.bugsFlying</code> to treat homing the same as flying (visible / vulnerable / counts toward inter-wave gate). bugMotion file header formalises the project arithmetic policy: faithful Z80 BEHAVIOR + bit-exact CONTRACTS, JS-native arithmetic (Math.sin/cos/atan2) where the FPU gives better precision and simpler code.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>INT-4 killed-diver leaves the in-flight state (2026-06-21):</b> a bug shot MID-DIVE kept <code>state='flying'</code> (the kill set only <code>alive=false</code>), so <code>bugMotion</code> kept running its (cont_bmb-looping) path AND <code>launchAttackWave</code>'s <code>bugsFlying</code> recount counted it as a live diver — pinning the simultaneous-diver cap so <b>no new bug could ever dive</b> ("no bee dives" endgame symptom). Fix: <code>enemyStatus</code> now sets <code>state='dead'</code> on the killing hit, mirroring the Z80 (a dead bug's <code>b_8800</code> disposition leaves 9 = "flying/diving"); also completes the contract <code>fighterCaptured.js</code> already assumed (it checks <code>boss.state==='dead'</code>) and tightens the <code>5958c98</code> capture-boss teardown. Verified live: killing a diver drops the flying-count to 0, dives resume.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>INT-2c fly-in pair interleaving (2026-06-21, MAME-confirmed):</b> <code>buildWaveStream</code> paired <em>consecutive</em> IDs <code>(i, i+1)</code> as a launch pair, so each wave entered GROUPED — wave 2 = boss×4 then moth×4. The Z80 <code>c_25A2</code> (gg1-3.s:1357-1383) splits the 8 IDs into a lefty half + a righty half and pairs <code>lefty[i]</code> with the CORRESPONDING <code>righty[i]</code> (temp-buf slot i with i+8). <code>ATTK_WAV_IDS</code> already stores them as <code>[L0..L3,R0..R3]</code> (Z80 source order — data was correct), so the fix is the builder: pair <code>(i, i+4)</code>. Now every wave enters as interleaved lefty/righty pairs — wave 2 = <b>boss,moth,boss,moth</b> (each boss with its butterfly escort), matching MAME. Spec: research_stage_init.md §5.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>Projectile + explosion sprites (2026-06-21, #4):</b> wired the real Galaga sprites that steps 6/8 deferred as placeholder rects. Player missile + enemy bomb = tile <code>0x30</code> at palettes <code>0x09</code>/<code>0x0B</code> (gg1-2.s c_game_or_demo_init:761-782); the bomb is flipped vertically (Z80 ctrl bit0 = flipX/up-down) so its head points DOWN at the player. Bug explosion = tiles <code>0x41-0x43</code> (16×16) then a 32×32 2×2 final frame <code>0x44-0x47</code> at pal <code>0x0A</code> (case_24B2 sets dblh|dblw on the last frame; f_1DB3:1517 sets the color). Player-ship explosion = base tile <code>0x20</code> at pal <code>0x0B</code>, a 4-frame 32×32 2×2 burst <code>0x20/24/28/2C</code> (hitd_fghtr_hit gg1-5.s:744-754 + case_243C). <b>The 2×2 doubled-sprite quadrant order is the Namco layout ROTATED 90° CW</b> — TL=+2, TR=+0, BL=+3, BR=+1 — the same rotation the cabinet/char-decoder uses; confirmed visually. New <code>tasks/explosions.js</code> + <code>state.explosions[]</code> (animator, drawn last); bursts spawned by <code>enemyStatus</code> (bug) and <code>bombUpdate</code> (ship). Resolves the step-6 "explosion + bullet sprite deferred" notes.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>X coordinate drift — corner-vs-center (2026-06-21):</b> the verified harbaum/galagino formula <code>spr.x = sprite_X − 16</code> is the sprite's TOP-LEFT CORNER (its visible-range check <code>spr.x > −16</code> is the corner-visibility test), but the renderer draws sprites CENTERED (<code>drawImage(img, x−8)</code>) — so every sprite sat 8px too far left: the ship clipped at the left limit, gapped at the right, and the formation centered on x≈105 not 112. Fixed by making <code>rawXToCanvasX</code> return the sprite CENTER: <code>−16 → −9</code> (galagino corner −16, +8 for the 16px half-width = center, −1 visual nudge so the ship's left edge seats on the first column and the formation centers exactly on 112). Also +shifted the derived hardcoded X: <code>_COL_X</code> ([41..185]→[40..184]), <code>X_MIN/X_MAX</code> (→9/216), player spawn x (→113), capture-aim lane clamp ([33,193]→[32,192]).</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>Y coordinate drift — corner-vs-center (2026-06-21, MAME-confirmed):</b> the symmetric twin of the X fix above. <code>canvas_Y = sprite_Y − 40</code> is galagino's TOP-LEFT CORNER (the <code>spr.y &gt; −16</code> visible check is a corner test) but the renderer draws CENTERED (<code>drawImage(img, y−8)</code>), so every sprite sat 8px too HIGH. Confirmed by pixel-measuring a MAME snapshot: the resting ship's base sits flush on the life-icon row, not ~7px above it as the clone drew it. Fixed by making both <code>rawYToCanvasY</code> copies (paths.js + bugMotion.js) return the sprite CENTER: <code>−40 → −32</code> (corner + 8). +shifted the derived hardcoded Y: <code>_ROWS</code> ([20..88]→[28..96]), player spawn/respawn y (257→265), F8 top-reentry <code>e.y</code> (1→9), and the two sprite-Y-derived gates <code>DROP_Y_THRESHOLD</code> (112→120) and bullet <code>Y_OFFSCREEN</code> (0→8). Screen-edge gates (288 despawn, starfield wrap) and tile-plane text Y left unchanged — they don't carry the sprite-chip offset. <b>Note:</b> the standalone coordinate docs (CLAUDE.md §Coordinate, research_coordinate_system.md §5) still print the raw corner formulas <code>−16</code>/<code>−40</code> for BOTH axes — stale since the X fix; pending a docs-only follow-up.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>"READY" respawn splash (2026-06-21):</b> the Z80 shows "READY" centered (tile-RAM 0x8270, string idx 3) during the post-death respawn wait, before the new ship is live — <code>c_player_respawn</code> (gg1-2.s:1019), SKIPPED on a new stage where "STAGE n" occupies that center slot (gg1-2.s:1013-1017). The clone's respawn (<code>handleRespawn</code>) had the wait but drew no text. Added: <code>gameController.render</code> draws "READY" while <code>player.respawnTimer > 0</code> mid-stage ('playing'); the existing 'stageClear' branch already covers stage-begin with "STAGE n" — so the source's "no READY at stage start" falls out for free. Bumped <code>RESPAWN_DELAY</code> 72→120 (~2 s, toward the Z80's ~2.1 s bug-nest-retreat wait) so the text is readable.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>Source-faithful splash-text positions (2026-06-21):</b> all clone text drew at a hardcoded canvas <code>y=128</code> — 2-3 tile rows too high. Decoded the real tile positions via the <code>_dea R C</code> macro (gg1-2.s:1257) + the tile-RAM layout diagram (mrw.s:63-79): tile→canvas is <code>x = C*8</code>, <code>y = (R+2)*8</code>. READY / STAGE n = <code>_dea 16 10</code> → (80, <b>144</b>); FIGHTER CAPTURED = <code>_dea 17 6</code> → (48, <b>152</b>). <code>gameController.drawSplash</code> + <code>fighterCaptured.TEXT_Y</code> updated; verified by pixel-sampling (STAGE text top-row 144, left-col 81).</span></div>
+      <div class="note"><span class="note-tag wip">stub</span><span class="note-text"><b>Faked HUD landmark stub (2026-06-21):</b> new <code>tasks/hud.js</code> (dev-panel "Debug" toggle, default on) — a DIAGNOSTIC layer drawing the screen furniture MAME shows so the sprite playfield can be eyeballed against a cabinet. FAKED values, SOURCE-FAITHFUL positions: "HIGH SCORE" (row 0) + "9999" (row 1, the 6-digit field at tile 0x83ED-0x83F2, gg1-4.s:34); reserve-ship icons lower-left = the real 2×2 tiles <code>0x4A-0x4D</code> from <code>draw_resv_ships</code> (gg1-2.s:1083) at canvas (0,272)+16px; stage-flag badge lower-right = positional stand-in (Z80 flag-draw routine not yet located). NOT a faithful score/lives port — that's roadmap step 11. Confirms the Y fix: ship base (272) sits flush on the lives row (273).</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>Fly-in bombing — stage 2+ (2026-06-22):</b> fly-in bugs now drop bombs on the way in for later stages — a real Galaga behavior the clone missed (stage 1 has none). The Z80 arms this on a path SEPARATE from attack dives: the fly-in object setup (gg1-3.s:1796-1834) loads the per-stage mask <code>b_92E2[1]</code> (<code>d_combat_stg_dat</code> header byte 1 — <code>0x00</code> stage 1, <code>0x01</code> stage 2+) into <code>0x0F(ix)</code>, gated per-object by a sprite-code bit-7 packed from <code>d_2908</code> via <code>c_2896</code> (gg1-3.s:1523). Ported: <code>FLYIN_BOMB_CAPABLE</code> (replays c_2896/c_28E9 → 20 objectIds) + <code>getFlyInBombFlags</code> (paths.js); <code>state.flyInBombFlags</code> + per-enemy <code>bombCapable</code> (state.js); <code>stgInitEnv</code> latches the mask; <code>runFlyInWave</code> arms <code>e.bombEnable</code> (the counter <code>0x0E</code> was already wired). Also turned <code>bombUpdate</code> ON during <code>stageStart</code> — it was off under the §6-corrected "no F6 → no bombs" myth, but the drop check (<code>case_0DF5</code>) runs during fly-in in the Z80. <b>Challenge-stage gate:</b> challenge stages (3/7/11/15) fall through to the combat caravan, so <code>getFlyInBombFlags</code> returns 0 for them (real <code>d_challg_stg_dat</code> header[1]=0 — bonus rounds don't bomb). Verified live: stage 1 fly-in = 0 bombs; stage 2 = ~20 drops, armed set = exactly the 20 capable IDs, no non-capable armed. Spec + as-built: <code>research_stage_init.md</code> §6.2.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text"><b>Challenge (bonus) stages (2026-06-22):</b> stages 3/7/11/… (<code>(stage+1)%4==0</code>) are now real bonus rounds instead of the combat-fallback "sit-and-shoot". 40 bugs fly the genuine challenge patterns and <b>fly through / exit off-screen</b> — they never form up, drop no bombs, and the stage ends when all are gone (whether shot or escaped): a no-danger shooting gallery. Z80 mechanism ported: a SEPARATE <code>d_challg_stg_dat</code> (8 rows) + <code>d_challg_stg_data_idx</code> (no rank) selected via <code>idx=(stgctr&gt;&gt;2)&amp;7</code> (<code>c_25A2</code>); challenge path bytes index the higher <code>db_2A3C</code> blocks (6–0x17) that end with <b>FF, no FB</b> → <code>case_0E49</code> makes the bug inactive (gone) rather than homing. Files: <code>paths.js</code> (challenge tables + a shared <code>stageCaravanRow</code> selector for <code>buildWaveStream</code>/<code>getFlyInBombFlags</code> — the §6.2 fly-in-bomb gate is now natural, reading the real header=0), <code>gameController.render</code> (<b>"CHALLENGING STAGE"</b> splash at x=40 vs "STAGE n" at x=80; <code>stg_init_splash</code> string idx 7), <code>bugMotion</code> (<code>isChallengeStage</code>: FF + off-screen → despawn for challenge bugs; combat unchanged). Completion reuses the INT-5 clear path (dead bugs → <code>bugsFlying==0</code> → playing → advance). <b>Scoring OUT OF SCOPE</b> (no "NUMBER OF HITS / PERFECT!" / 10000-pt bonus — the clone has no score system). Verified deterministic + manual loop-replay: stage 3 builds from the challenge table, "CHALLENGING STAGE"=17 glyphs@x40, full stage 3 advances start→fly-through→stage 4 with maxFormed=0, clears without firing. Spec + as-built: <code>research_stage_init.md</code> §14.4.</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 10 ── -->
+<div class="step done">
+  <div class="step-gutter">
+    <div class="step-num">10</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">Boss capture mechanic <span class="badge done">done</span></div>
+    <div class="step-desc">Boss fires the tractor beam → pulls + spins the ship up; the captured ship is carried home and joins the formation as a red slave ("FIGHTER CAPTURED"); it dives WITH its boss; shoot that boss (now 2-hit, green→blue) to rescue → spin/land/dock → 2-ship mode (dual fire + double hitbox). General respawn added (no life-loss). Full research + every-branch trace in <a href="research_boss_capture.md">research_boss_capture.md</a>; built as 6 verified save-point sub-steps (4c-i, 4c-ii, 4d-a..d).</div>
+    <div class="files">
+      <span class="file modified">tasks/tractorBeam.js (l_233D ship-in-beam)</span>
+      <span class="file modified">tasks/pullShip.js (f_20F2 pull+spin)</span>
+      <span class="file new">tasks/fighterCaptured.js (f_19B2 slave + text)</span>
+      <span class="file modified">tasks/enemyStatus.js (2-hit boss + rescue trigger)</span>
+      <span class="file modified">tasks/objectStates.js (blue boss)</span>
+      <span class="file modified">tasks/playerMove/Fire.js (2-ship)</span>
+      <span class="file modified">tasks/bombUpdate.js (2-ship hitbox)</span>
+      <span class="file modified">tasks/gameController.js (respawn)</span>
+      <span class="file modified">state.js · paths.js · gfx/resource.js</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag verify">verify</span><span class="note-text">Live capture→carry-home→respawn observed in normal play; each sub-step browser-verified (deterministic task-stepping). 2-hit bosses, dual fire, lose-one-revert all confirmed. See research_boss_capture.md §9.</span></div>
+      <div class="note"><span class="note-tag decide">decide</span><span class="note-text">As-built deviations (§9): slave is a dedicated <code>state.capturedSlave</code> object (not a 48-roster enemy); glued to its boss (never fires — matches normal-stage escort behavior); captr_status split across <code>state.beam</code> + <code>state.capture</code>; rescue stages simplified.</span></div>
+      <div class="note"><span class="note-tag fix">fix</span><span class="note-text">Boss shot while on beam DUTY now tears down faithfully (was: beam kept tracking / could still capture after the boss died). Cue = boss disposition <code>b_8800[cobj] ≠ 0x09</code>, polled per frame — clone equiv. <code>!boss.alive</code> (kill sets alive=false, leaves state). Mid-dive → <code>captorDive</code> (l_221A) aborts, no beam opens. Beam-up / mid-pull → <code>tractorBeam</code> (l_2257→l_2327) switches to retract, clears pull gate, <b>restores player control</b>; <code>enemyStatus</code> mirrors l_07DF (cflag=0 at once). Browser-verified all 3 windows (dive / grab / pull) against the live task loop. Files: captorDive.js · tractorBeam.js · pullShip.js · enemyStatus.js.</span></div>
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Deferred: G21 standalone-rogue + status-4 forced rogue · G20 slave-body→player (no enemy-body collision yet) · sound · real life-loss/game-over. Z80 ref: f_2222 · f_20F2 · f_19B2 · f_2000 · l_233D · l_1CE3 · case_0A53 (F4).</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Step 11 ── -->
+<div class="step todo">
+  <div class="step-gutter">
+    <div class="step-num">11</div>
+    <div class="step-line"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-title">HUD polish — character tileset + high-score persistence <span class="badge todo">todo</span></div>
+    <div class="step-desc">Replaces the basic HUD from step 9's integration (score / lives / stage rendered in a quick fallback style) with the proper Galaga HUD using the character tileset (<code>dat_character.js</code> + <code>dat_paletteChar.js</code>). Adds high-score persistence in localStorage. This is polish — the game is fully playable after step 9.</div>
+    <div class="files">
+      <span class="file new">tasks/hud.js</span>
+      <span class="file modified">gfx/resource.js (char decoder + sprite group)</span>
+      <span class="file modified">state.js (highScore from localStorage)</span>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="note-tag note">note</span><span class="note-text">Character tileset: 8×8 px tiles, 32×28 tile grid, 32 char palettes. Tile RAM at Z80 0x8000. Z80 ref: <code>dat_character.js</code> already ported (step 1); needs decoder counterpart in <code>gfx/resource.js</code> alongside existing sprite decoder.</span></div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>galaga_clone — combat fly-in path player</title>
+  <style>
+    body { background:#141518; color:#eaeaea; font-family:-apple-system,"Segoe UI",sans-serif; margin:0; padding:24px; }
+    h1 { font-size:19px; font-weight:500; margin:0 0 4px; }
+    p.lead { font-size:13px; color:#b4b4b4; margin:4px 0 18px; max-width:880px; line-height:1.5; }
+    code, .mono { font-family:ui-monospace,Menlo,Consolas,monospace; }
+    a { color:#7cb6ff; }
+    .stage { display:flex; gap:28px; align-items:flex-start; flex-wrap:wrap; }
+    .panel { min-width:340px; max-width:440px; }
+    canvas { background:#161616; border:1px solid #444; image-rendering:pixelated; }
+
+    .controls { display:flex; align-items:center; gap:16px; margin:0 0 10px; font-size:13px; flex-wrap:wrap; }
+    .controls.row2 { margin:0 0 14px; }
+    button { background:#20242b; color:#eaeaea; border:1px solid #3a4048; border-radius:5px; padding:5px 13px; cursor:pointer; font-size:13px; }
+    button:hover { background:#2a2f38; }
+    select { background:#20242b; color:#eaeaea; border:1px solid #3a4048; border-radius:5px; padding:4px 8px; font-size:13px; }
+    input[type=range] { width:120px; vertical-align:middle; }
+    label { color:#b4b4b4; }
+    .modes { display:inline-flex; gap:2px; border:1px solid #3a4048; border-radius:6px; overflow:hidden; }
+    .modes label { padding:5px 11px; cursor:pointer; color:#b4b4b4; }
+    .modes label.on { background:#243044; color:#eaeaea; }
+    .modes input { display:none; }
+
+    h2 { font-size:13px; font-weight:500; color:#eaeaea; margin:0 0 8px; }
+
+    .members { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:0 0 16px; }
+    .member { border:1px solid #2c3038; border-radius:7px; padding:9px 11px; }
+    .member.lefty  { border-left:3px solid #7cb6ff; }
+    .member.righty { border-left:3px solid #f6ad55; }
+    .member.off { opacity:0.4; }
+    .member .who { font-size:12px; color:#eaeaea; margin:0 0 6px; display:flex; justify-content:space-between; }
+    .member .who .swatch { display:inline-block; width:20px; height:0; border-top-width:2px; border-top-style:solid; vertical-align:middle; }
+    .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 8px; font-size:12px; }
+    .kv .k { color:#8a8a8a; }
+    .kv .v { color:#cdd3da; font-family:ui-monospace,Menlo,Consolas,monospace; }
+    .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:20px; margin-top:6px; }
+    .badge.homing   { background:#173a26; color:#68d391; border:1px solid #2b5e40; }
+    .badge.despawned{ background:#3a1717; color:#fc8181; border:1px solid #5e2b2b; }
+    .badge.flying   { background:#1d2430; color:#9ab4d8; border:1px solid #33415a; }
+
+    .codebox { margin:0 0 6px; }
+    .rows { display:flex; flex-direction:column; gap:2px; }
+    .row { display:grid; grid-template-columns:14px 74px 1fr; align-items:center; gap:9px;
+           padding:4px 8px; border-radius:5px; border:1px solid transparent; }
+    .row.active { background:#1d2430; border-color:#33415a; }
+    .row.tok { grid-template-columns:14px 74px 1fr; }
+    .row.tok .bytes { color:#f6ad55; }
+    .row.skip { opacity:0.4; }
+    .row.preempt { opacity:0.3; text-decoration:line-through; }
+    .chip { width:11px; height:11px; border-radius:3px; }
+    .bytes { color:#cdd3da; font-size:12px; letter-spacing:0.4px; }
+    .decode { color:#8a8a8a; font-size:11px; }
+    .sub-label { font-size:11px; color:#8a8a8a; margin:6px 0 3px; padding-left:6px; border-left:2px solid #33415a; }
+
+    #readout { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; color:#8fd6a8; margin:10px 0 0; min-height:16px; }
+    .note { font-size:11px; color:#8a8a8a; margin:10px 0 0; line-height:1.5; }
+    .hint { color:#6f7680; }
+  </style>
+</head>
+<body>
+  <h1>Galaga combat fly-in paths, played from bytecode</h1>
+  <p class="lead">
+    The six <b>token-bearing fly-in leaders</b> — <code>PATH_INDEX</code> 0–5, the paths the
+    normal-play caravan launches. Each carries an <span style="color:#f6ad55">F7</span>
+    (transient swoop) and <span style="color:#f6ad55">F0</span> (stage-8+ attack-wave) sub-path
+    jump plus an <span style="color:#f6ad55">FB</span> turn-home tail. Pick a path and a
+    <b>mode</b>: <i>Formation</i> skips both branches and homes; <i>Stage 8+</i> takes F0;
+    <i>Transient</i> takes F7 (which preempts F0). <span style="color:#7cb6ff">member 0</span> /
+    <span style="color:#f6ad55">member 1</span> launch from the path's paired start positions
+    (member 1 mirrored). <a href="challenge_player.html">bonus-stage player</a> ·
+    <a href="index.html">← all demos</a>
+  </p>
+
+  <div class="controls">
+    <label>fly-in path <select id="path"></select></label>
+    <span class="modes" id="modes">
+      <label data-mode="formation" class="on"><input type="radio" name="mode" value="formation" checked>Formation</label>
+      <label data-mode="stage8"><input type="radio" name="mode" value="stage8">Stage 8+</label>
+      <label data-mode="transient"><input type="radio" name="mode" value="transient">Transient</label>
+    </span>
+  </div>
+  <div class="controls row2">
+    <button id="play">⏸ Pause</button>
+    <button id="restart">↻ Restart</button>
+    <label>speed <input id="speed" type="range" min="0" max="8" value="1"><span id="speedval" class="mono">1×</span></label>
+    <label><input id="pair" type="checkbox" checked> show member 1</label>
+  </div>
+
+  <div class="stage">
+    <canvas id="pf" width="448" height="576"></canvas>
+
+    <div class="panel">
+      <h2>This path's two members</h2>
+      <div id="members" class="members"></div>
+
+      <h2 id="code-h">Path bytecode</h2>
+      <div id="codeboxes"></div>
+
+      <div id="readout">—</div>
+
+      <p class="note" id="mode-note"></p>
+      <p class="note">
+        <span class="hint">solid</span> = member 0 · <span class="hint">dashed</span> = member 1 ·
+        trail colour = segment index · <span style="color:#f6ad55">FB</span> = stop &amp; "homing"
+        (real game guides it to its formation slot) · grid = formation rows.
+      </p>
+    </div>
+  </div>
+
+  <script type="module" src="./flyin_player.js"></script>
+</body>
+</html>

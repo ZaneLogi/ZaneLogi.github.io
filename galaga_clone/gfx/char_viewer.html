@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Galaga char viewer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background:#111; color:#ccc; font-family:monospace; padding:16px; }
+    h1 { font-size:13px; color:#777; letter-spacing:2px; text-transform:uppercase; margin-bottom:10px; }
+    h2 { font-size:11px; color:#666; margin:16px 0 6px; }
+    #grid { display:grid; grid-template-columns:repeat(16, 1fr); gap:3px; width:max-content; }
+    .cell { display:flex; flex-direction:column; align-items:center; gap:1px; }
+    canvas { image-rendering:pixelated; background:#000; border:1px solid #222; }
+    .lbl { font-size:8px; color:#555; }
+    .beamrow { display:flex; gap:4px; flex-wrap:wrap; align-items:flex-end; }
+    .beamcell { display:flex; flex-direction:column; align-items:center; gap:1px; }
+  </style>
+</head>
+<body>
+<h1>Galaga char viewer</h1>
+
+<h2>All 256 chars (palette 0) — 0x00–0x7F normal · 0x80–0xFF bit-reversed (cocktail) — hex code labels</h2>
+<div id="grid"></div>
+
+<h2>Tractor-beam cone — d_23A1 arrangement of tiles 0x4E–0x7F (across palettes 0–7)</h2>
+<div id="beam" class="beamrow"></div>
+
+<script type="module">
+import { charCanvas, CHAR_PALETTE_COUNT } from './resource.js';
+import { BEAM_CONE } from '../paths.js';
+
+const S = 4;
+const grid = document.getElementById('grid');
+for (let code = 0; code < 256; code++) {
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  const cv = document.createElement('canvas');
+  cv.width = 8 * S; cv.height = 8 * S;
+  const ctx = cv.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(charCanvas(code, 0), 0, 0, 8 * S, 8 * S);
+  const lbl = document.createElement('div');
+  lbl.className = 'lbl';
+  lbl.textContent = '0x' + code.toString(16).padStart(2, '0');
+  cell.appendChild(cv); cell.appendChild(lbl);
+  grid.appendChild(cell);
+}
+
+// Assemble the full cone (BEAM_CONE = 10 entries × 6 tiles) at several palettes.
+// Each entry is one 6-tile-wide strip; entries stack downward (narrow at the
+// boss → wide at the ship). 0x24 = blank.
+const beam = document.getElementById('beam');
+const CS = 4;
+for (let pal = 0; pal < 8; pal++) {
+  const col = document.createElement('div');
+  col.className = 'beamcell';
+  const cv = document.createElement('canvas');
+  cv.width  = 6 * 8 * CS;
+  cv.height = BEAM_CONE.length * 8 * CS;
+  const ctx = cv.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  for (let e = 0; e < BEAM_CONE.length; e++)
+    for (let k = 0; k < 6; k++) {
+      const code = BEAM_CONE[e][k];
+      if (code === 0x24) continue;
+      ctx.drawImage(charCanvas(code, pal), k * 8 * CS, e * 8 * CS, 8 * CS, 8 * CS);
+    }
+  const lbl = document.createElement('div');
+  lbl.className = 'lbl';
+  lbl.textContent = 'pal ' + pal;
+  col.appendChild(cv);
+  col.appendChild(lbl);
+  beam.appendChild(col);
+}
+</script>
+</body>
+</html>

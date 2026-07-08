@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Galaga Clone</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #111;
+      color: #ccc;
+      font-family: monospace;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    /* ── Top bar ── */
+    #top-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+    }
+
+    #top-bar span { color: #666; }
+
+    .scale-btn {
+      background: #1a1a1a;
+      color: #aaa;
+      border: 1px solid #333;
+      padding: 3px 10px;
+      cursor: pointer;
+      font-family: monospace;
+      font-size: 12px;
+    }
+    .scale-btn:hover  { border-color: #777; color: #fff; }
+    .scale-btn.active { background: #2a2a2a; border-color: #aaa; color: #fff; }
+
+    /* ── Main layout: canvas left, dev panel right ── */
+    #main {
+      display: flex;
+      align-items: flex-start;
+      gap: 20px;
+    }
+
+    canvas {
+      display: block;
+      image-rendering: pixelated;
+      background: #000;
+      border: 1px solid #222;
+    }
+
+    /* ── Dev panel ── */
+    #dev-panel {
+      width: 210px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 11px;
+    }
+
+    .dp-header {
+      color: #666;
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #222;
+      margin-bottom: 4px;
+    }
+
+    .dp-btnrow {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    .dp-btnrow button {
+      flex: 1;
+      background: #1a1a1a;
+      color: #777;
+      border: 1px solid #2a2a2a;
+      padding: 3px 0;
+      cursor: pointer;
+      font-family: monospace;
+      font-size: 11px;
+    }
+    .dp-btnrow button:hover { border-color: #555; color: #ccc; }
+
+    .dp-group {
+      color: #444;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 8px;
+      margin-bottom: 2px;
+      padding-left: 2px;
+    }
+
+    .dp-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 4px;
+      cursor: pointer;
+      border-radius: 2px;
+      border: 1px solid transparent;
+    }
+    .dp-row:hover { background: #1a1a1a; border-color: #222; }
+
+    .dp-row input[type=checkbox] {
+      accent-color: #5a9;
+      width: 12px;
+      height: 12px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .dp-name {
+      flex: 1;
+      color: #aaa;
+    }
+    .dp-row:has(input:checked) .dp-name { color: #5d9; }
+
+    .dp-ref {
+      color: #444;
+      font-size: 10px;
+    }
+    .dp-row:has(input:checked) .dp-ref { color: #2a6; }
+
+    .dp-always-on { cursor: default; }
+    .dp-always-on .dp-name { color: #7af; }
+    .dp-always-on:has(input:checked) .dp-name { color: #7df; }
+    .dp-always-on .dp-ref  { color: #336; }
+    .dp-always-on:has(input:checked) .dp-ref  { color: #46a; }
+    .dp-always-on input[type=checkbox]:disabled { opacity: 0.5; cursor: not-allowed; }
+    .dp-always-on:hover { background: transparent; border-color: transparent; cursor: default; }
+
+    .dp-internal {
+      color: #333;
+      font-size: 10px;
+      padding: 4px 4px 0;
+      font-style: italic;
+    }
+
+  </style>
+</head>
+<body>
+
+  <div id="top-bar">
+    <span>Scale:</span>
+    <button class="scale-btn active" data-scale="1">1x</button>
+    <button class="scale-btn" data-scale="2">2x</button>
+    <button class="scale-btn" data-scale="3">3x</button>
+  </div>
+
+  <div id="main">
+    <canvas id="screen" width="224" height="288"></canvas>
+    <div id="dev-panel"></div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+
+  <script>
+    const canvas  = document.getElementById('screen');
+    const buttons = document.querySelectorAll('.scale-btn');
+
+    function applyScale(s) {
+      canvas.style.width  = (224 * s) + 'px';
+      canvas.style.height = (288 * s) + 'px';
+    }
+
+    applyScale(1);
+
+    buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        buttons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        applyScale(Number(btn.dataset.scale));
+      });
+    });
+  </script>
+
+</body>
+</html>

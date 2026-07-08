@@ -13,7 +13,7 @@ resource.initPalettes = function() {
     this.colors = [];
     for (const c of color_data) {
         // bbgggrrr
-        const b = Math.floor(255 * ((c>>5) & 0x6) / 7);
+        const b = Math.floor(255 * ((c>>6) & 0x3) / 3);
         const g = Math.floor(255 * ((c>>3) & 0x7) / 7);
         const r = Math.floor(255 * ((c>>0) & 0x7) / 7);
         this.colors.push([r, g, b, 255]);

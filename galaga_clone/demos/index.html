@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>galaga_clone — demo index</title>
+  <style>
+    body { background:#141518; color:#eaeaea; font-family:-apple-system,"Segoe UI",sans-serif; margin:0; padding:28px; }
+    h1 { font-size:20px; font-weight:500; margin:0 0 4px; }
+    p.lead { font-size:13px; color:#b4b4b4; margin:4px 0 22px; max-width:780px; line-height:1.5; }
+    code { color:#8fd6a8; font-family:ui-monospace,Menlo,Consolas,monospace; }
+    a { color:#7cb6ff; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:14px; max-width:960px; }
+    a.card { display:block; text-decoration:none; background:#181a1f; border:1px solid #2c3038; border-radius:8px;
+             padding:14px 16px; color:inherit; transition:border-color .15s, background .15s; }
+    a.card:hover { border-color:#33415a; background:#1b1f27; }
+    a.card .name { font-size:15px; color:#7cb6ff; margin:0 0 4px; }
+    a.card .desc { font-size:12px; color:#9a9a9a; line-height:1.45; margin:0; }
+    a.card .src  { font-size:11px; color:#6f7680; font-family:ui-monospace,Menlo,Consolas,monospace; margin-top:6px; }
+    footer { margin-top:26px; font-size:11px; color:#666; max-width:780px; line-height:1.5; }
+  </style>
+</head>
+<body>
+  <h1>Galaga — demos</h1>
+  <p class="lead">
+    Standalone demos that validate a single mechanism of the <b>Z80-faithful Galaga port</b>
+    in isolation. Each renders from the real extracted ROM data.
+    <a href="../index.html">▶ Play the game</a> — the full port lives at the project root.
+  </p>
+
+  <div class="grid">
+    <a class="card" href="path_player.html">
+      <div class="name">Path player ↝</div>
+      <p class="desc">Shows the <b>path builder</b>: readable <code>pathbuilder.js</code> calls
+         assembled to bytecode, proven <b>byte-identical to the ROM</b> by a live round-trip, then
+         flown through the motion interpreter — the animated counterpart to
+         <code>SVG/path_01E8.svg</code>. Watch the swoop build segment by segment; the mirrored
+         "wishbone" pair.</p>
+      <div class="src">demos/path_player.html · path 01E8 · gg1-5.s:229</div>
+    </a>
+
+    <a class="card" href="challenge_player.html">
+      <div class="name">Bonus-stage path player ↝↝</div>
+      <p class="desc">Shows the <b>paths the challenging (bonus) stages use</b>, one wave at a time.
+         Pick a bonus stage (round 1-8) and a wave (1-5); the launcher join resolves each
+         <span style="color:#7cb6ff">lefty</span>/<span style="color:#f6ad55">righty</span> member —
+         through the real <code>PATH_INDEX</code>/<code>VARIANTS</code> tables — to a ROM path block
+         <i>plus</i> its start position, and flies both.</p>
+      <div class="src">demos/challenge_player.html · d_challg_stg_dat · gg1-3.s:1477</div>
+    </a>
+
+    <a class="card" href="flyin_player.html">
+      <div class="name">Combat fly-in path player ↝↴</div>
+      <p class="desc">Shows the <b>token-bearing fly-in leaders</b> (<code>PATH_INDEX</code> 0–5) the
+         normal-play caravan launches. Pick a path and a mode — <i>Formation</i> (skip both
+         branches, <span style="color:#f6ad55">FB</span> home), <i>Stage 8+</i>
+         (<span style="color:#f6ad55">F0</span> attack-wave jump), <i>Transient</i>
+         (<span style="color:#f6ad55">F7</span> swoop + FE, despawn) — and watch the branch play
+         through <code>PathRunner</code>'s token layer.</p>
+      <div class="src">demos/flyin_player.html · db_2A3C 0–5 · gg1-5.s:82</div>
+    </a>
+
+    <a class="card" href="attack_player.html">
+      <div class="name">Attack-dive test bench ↯</div>
+      <p class="desc">A <b>deterministic harness over the real interpreter</b> — it drives
+         <code>bugMotion.js</code> itself, not a copy. Pick a start slot, a player position, and the
+         <code>FA</code>/<code>EF</code> gates; the <b>moth</b> aims at the player (<code>F3</code>),
+         the <b>bee</b> doesn't. Pin everything, replay, get the identical dive every time — home,
+         loop-forever, or the stage-12+ harder pass.</p>
+      <div class="src">demos/attack_player.html · db_flv_atk_red/yllw · gg1-5.s:285/311</div>
+    </a>
+
+    <a class="card" href="boss_player.html">
+      <div class="name">Boss sortie + capture-dive bench ✦</div>
+      <p class="desc">The boss's <b>path region</b> (<code>ATTACK_PATH_BOSS</code>), driven through the
+         real <code>bugMotion.js</code>. The <b>2-row grid is the path selector</b>: top row =
+         captured-ship slots → the <b>rogue</b> path; bottom row = the 4 bosses → an
+         <span style="color:#7cb6ff">escort</span> sortie (+ wingmen) or a
+         <span style="color:#f6ad55">capture</span> dive. The capture forks at the beam stall —
+         <b>carry-home</b> (<code>l_2305</code>) vs <b>retreat</b> (<code>l_22E3</code>).</p>
+      <div class="src">demos/boss_player.html · db_flv_0411/0454/cboss · gg1-5.s:335</div>
+    </a>
+
+    <a class="card" href="convoy_player.html">
+      <div class="name">Bonus-bee X3 convoy bench ✤</div>
+      <p class="desc">The bonus-bee <b>"clone-attack"</b>, driven through the real
+         <code>bugMotion.js</code>. A wasp launches as the <b>leader</b>; its 2
+         <b>clones</b> aren't launched separately — they <b>split off the leader's path</b> at
+         its <code>F2</code> SPAWN tokens. The <b>color</b> (0/1/2) picks the whole convoy —
+         color <span style="color:#f6ad55">2</span>'s clones fly <i>different</i> sub-paths,
+         color <span style="color:#68d391">0</span>'s aim at the ship (<code>F3</code>).</p>
+      <div class="src">demos/convoy_player.html · db_0473/04AB/04EA · gg1-5.s:370</div>
+    </a>
+  </div>
+
+  <footer>
+    Served as the <code>galaga_clone</code> root by <code>tools/devserver.py</code>
+    via <code>.claude/launch.json</code> (<code>galaga</code>, port 8081). See
+    <code>CLAUDE.md</code> for the task-table architecture and the Z80 source map.
+  </footer>
+</body>
+</html>
