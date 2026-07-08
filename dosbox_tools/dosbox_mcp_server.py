@@ -67,6 +67,92 @@ HINT_NO_MEMBASE = dm.HINT_NO_MEMBASE
 HINT_EMPTY_TABLE = ("Address table is empty. Add entries with table_add(...) "
                     "or load a file with table_load(path).")
 
+# Max hits a first scan keeps. Reported when reached so a truncated scan is never
+# mistaken for an exhaustive one (root CLAUDE.md: no silent caps).
+SCAN_CAP = 200_000
+
+
+def _read_many(addrs, width):
+    """Read `width` bytes at each host address with as few syscalls as possible.
+
+    Sorts the addresses, coalesces them into contiguous spans (breaking on a gap
+    larger than GAP_MAX or once a span would exceed SPAN_MAX), and issues ONE
+    ReadProcessMemory per span, then slices each address out of the blob. For the
+    common dos_only case every candidate lies in the single ~1 MB emulated-RAM
+    window, so this collapses N per-address reads into one -- the big win for
+    next_scan / next_scan_typed / fuzzy_next, which re-read the candidate set each
+    step.
+
+    Correctness: if a coalesced span isn't fully mapped (its bulk read fails), it
+    falls back to per-address reads for that span, so an unmapped hole inside a
+    span never drops the readable addresses around it. Returns raw bytes per
+    address (indexed like `addrs`), or None where the read failed."""
+    n = len(addrs)
+    if n == 0:
+        return []
+    order = sorted(range(n), key=lambda i: addrs[i])
+    out = [None] * n
+    SPAN_MAX = 8 * 1024 * 1024
+    GAP_MAX = 64 * 1024
+    i = 0
+    while i < n:
+        span_start = addrs[order[i]]
+        span_end = span_start + width
+        j = i
+        while j + 1 < n:
+            a = addrs[order[j + 1]]
+            if (a + width) - span_start > SPAN_MAX or a - span_end > GAP_MAX:
+                break
+            span_end = max(span_end, a + width)
+            j += 1
+        span_len = span_end - span_start
+        blob = None
+        try:
+            b = _read(S.handle, span_start, span_len)
+            if len(b) == span_len:
+                blob = b
+        except OSError:
+            pass
+        if blob is not None:                       # fast path: one read for the span
+            for k in range(i, j + 1):
+                idx = order[k]
+                rel = addrs[idx] - span_start
+                out[idx] = blob[rel:rel + width]
+        else:                                      # span not fully mapped: per-address
+            for k in range(i, j + 1):
+                idx = order[k]
+                try:
+                    r = _read(S.handle, addrs[idx], width)
+                    out[idx] = r if len(r) == width else None
+                except OSError:
+                    pass
+        i = j + 1
+    return out
+
+
+def _string_len(t: str):
+    """Parse a 'stringN' type to its byte length N ('string' with no N means 1).
+    Returns None if `t` is not a valid string type (e.g. 'stringZ'), so callers
+    reject it cleanly instead of crashing on int('Z')."""
+    if t == "string":
+        return 1
+    if t.startswith("string") and t[6:].isdigit():
+        return int(t[6:])
+    return None
+
+
+def _field_value(host: int, t: str):
+    """Resolve a typed field at host address `host` to a display value. Raises
+    ValueError for an unknown/malformed type and OSError on a read failure, so the
+    read tools can handle both in one except clause."""
+    n = _string_len(t)
+    if n is not None:
+        raw = _read(S.handle, host, n)
+        return repr(raw.split(b"\x00", 1)[0].decode("latin-1", "replace"))
+    if t in TYPES:
+        return _decode(_read(S.handle, host, _type_width(t)), t)
+    raise ValueError(f"unknown type '{t}'")
+
 
 @mcp.tool()
 def session_init(table_path: str = "",
@@ -139,33 +225,20 @@ def session_init(table_path: str = "",
 # Exact-value integer scanning
 # ----------------------------------------------------------------------------
 @mcp.tool()
-def scan_value(value: int, width: int = 2) -> str:
-    """First scan: find every address in the DOSBox process whose value equals `value`.
+def scan_value(value: int, width: int = 2, dos_only: bool = True) -> str:
+    """First scan: find every address whose value equals `value`.
     `width` is the byte width (1/2/4); 16-bit values use 2.
+    dos_only: if MemBase is set, restrict to the emulated DOS window -- faster, and
+    it excludes false hits in DOSBox's own host heap. Set False to scan everything.
     Results are stored; change the in-game value and call next_scan to narrow down."""
     if not S.handle:
         return HINT_NO_PROC
     needle = _pack(value, width)
-    hits: list[int] = []
-    CAP = 200_000
-    for base, size in _iter_regions(S.handle):
-        try:
-            data = _read(S.handle, base, min(size, 64 * 1024 * 1024))
-        except OSError:
-            continue
-        start = 0
-        while True:
-            i = data.find(needle, start)
-            if i < 0:
-                break
-            hits.append(base + i)
-            start = i + 1
-            if len(hits) >= CAP:
-                break
-        if len(hits) >= CAP:
-            break
+    hits = _find_all(needle, 1, dos_only, cap=SCAN_CAP)
     S.last_scan = hits
-    return (f"First scan done: {len(hits)} addresses equal {value} (width={width}).\n"
+    capped = f"  [capped at {SCAN_CAP} -- narrow first]" if len(hits) >= SCAN_CAP else ""
+    return (f"First scan: {len(hits)} addresses equal {value} "
+            f"(width={width}, dos_only={dos_only}).{capped}\n"
             f"Change this value in-game, then call next_scan(new_value) to narrow down.")
 
 
@@ -176,14 +249,8 @@ def next_scan(value: int, width: int = 2) -> str:
     if not S.last_scan:
         return "No scan results to narrow. Run scan_value(value, width) first."
     needle = _pack(value, width)
-    survivors: list[int] = []
-    for addr in S.last_scan:
-        try:
-            cur = _read(S.handle, addr, width)
-        except OSError:
-            continue
-        if cur == needle:
-            survivors.append(addr)
+    raws = _read_many(S.last_scan, width)
+    survivors = [a for a, r in zip(S.last_scan, raws) if r == needle]
     S.last_scan = survivors
     sample = [hex(a) for a in survivors[:16]]
     note = ""
@@ -255,11 +322,12 @@ def scan_typed(value: str, vtype: str = "u16", alignment: int = 1,
     except ValueError:
         return (f"Could not parse value '{value}' as {vtype}. "
                 f"Give a number for numeric types (e.g. 50 or 0x32), or plain text for string.")
-    hits = _find_all(needle, alignment, dos_only, cap=200_000)
+    hits = _find_all(needle, alignment, dos_only, cap=SCAN_CAP)
     S.last_scan = hits
     sample = [hex(a) for a in hits[:16]]
+    capped = f"  [capped at {SCAN_CAP} -- narrow first]" if len(hits) >= SCAN_CAP else ""
     return (f"Typed scan: {len(hits)} matches for {vtype} {value} "
-            f"(alignment={alignment}, dos_only={dos_only}).\n"
+            f"(alignment={alignment}, dos_only={dos_only}).{capped}\n"
             f"Sample: {sample}\n"
             f"Change the value in-game, then call next_scan_typed(new_value, vtype).")
 
@@ -276,13 +344,8 @@ def next_scan_typed(value: str, vtype: str = "u16") -> str:
         return (f"Could not parse value '{value}' as {vtype}. "
                 f"Give a number for numeric types (e.g. 50 or 0x32), or plain text for string.")
     w = len(needle)
-    survivors = []
-    for addr in S.last_scan:
-        try:
-            if _read(S.handle, addr, w) == needle:
-                survivors.append(addr)
-        except OSError:
-            continue
+    raws = _read_many(S.last_scan, w)
+    survivors = [a for a, r in zip(S.last_scan, raws) if r == needle]
     S.last_scan = survivors
     sample = [hex(a) for a in survivors[:16]]
     note = ""
@@ -359,7 +422,8 @@ def scan_aob(pattern: str, dos_only: bool = True, max_hits: int = 50) -> str:
             break
     S.last_scan = hits
     sample = [hex(a) for a in hits[:max_hits]]
-    return (f"AOB scan: {len(hits)} matches for '{pattern}' (dos_only={dos_only}).\n"
+    capped = f"  [stopped at max_hits={max_hits}]" if len(hits) >= max_hits else ""
+    return (f"AOB scan: {len(hits)} matches for '{pattern}' (dos_only={dos_only}).{capped}\n"
             f"{sample}\n"
             f"Use a stable hit as an anchor; if you know its DOS seg:off, "
             f"set_membase_from(host_addr, seg, off).")
@@ -369,14 +433,11 @@ def scan_aob(pattern: str, dos_only: bool = True, max_hits: int = 50) -> str:
 # (3) Fuzzy scan  (snapshot stays server-side; only a summary is returned)
 # ----------------------------------------------------------------------------
 def _read_vals(addrs, width):
-    """Read current integer values (unsigned little-endian) at each address."""
-    out = []
-    for a in addrs:
-        try:
-            out.append(int.from_bytes(_read(S.handle, a, width), "little"))
-        except OSError:
-            out.append(None)
-    return out
+    """Read current integer values (unsigned little-endian) at each address,
+    batching the reads via _read_many (one syscall per contiguous span instead of
+    one per address -- the fuzzy candidate set re-reads the whole window each step)."""
+    return [int.from_bytes(r, "little") if r is not None else None
+            for r in _read_many(addrs, width)]
 
 
 @mcp.tool()
@@ -415,8 +476,11 @@ def fuzzy_new(vtype: str = "u16", dos_only: bool = True,
     S.fuzzy_addrs = addrs
     S.fuzzy_prev = prev
     S.fuzzy_width = width
+    capped = (f"\n[capped at max_candidates={max_candidates}; the scan window was "
+              f"truncated -- use dos_only=True or a smaller window for full coverage]"
+              if len(addrs) >= max_candidates else "")
     return (f"Fuzzy scan started: {len(addrs)} candidate slots snapshotted "
-            f"({vtype}, {total_bytes // 1024} KB scanned, dos_only={dos_only}).\n"
+            f"({vtype}, {total_bytes // 1024} KB scanned, dos_only={dos_only}).{capped}\n"
             f"Now change the value in-game, then call fuzzy_next with an operator: "
             f"increased / decreased / changed / unchanged / increased_by / decreased_by.")
 
@@ -489,8 +553,8 @@ def struct_dump(segment: int, offset: int, fields: str = "", size: int = 64) -> 
         if not spec or ":" not in spec:
             continue
         name, t = (s.strip() for s in spec.split(":", 1))
-        if t.startswith("string"):
-            n = int(t[6:]) if len(t) > 6 else 1
+        n = _string_len(t)
+        if n is not None:
             try:
                 raw = _read(S.handle, host + cur, n)
             except OSError as ex:
@@ -531,7 +595,7 @@ def _norm_int(v) -> int:
 
 
 def _valid_type(t: str) -> bool:
-    return t in TYPES or t == "string" or t.startswith("string")
+    return t in TYPES or _string_len(t) is not None
 
 
 @mcp.tool()
@@ -654,15 +718,9 @@ def table_read_all() -> str:
         seg, off, t = e["segment"], e["offset"], e["type"]
         host = S.membase + (seg << 4) + off
         try:
-            if t.startswith("string"):
-                n = int(t[6:]) if len(t) > 6 else 1
-                raw = _read(S.handle, host, n)
-                val = repr(raw.split(b"\x00", 1)[0].decode("latin-1", "replace"))
-            else:
-                w = _type_width(t)
-                val = _decode(_read(S.handle, host, w), t)
-        except (OSError, KeyError) as ex:
-            val = f"<read error: {ex}>"
+            val = _field_value(host, t)
+        except (OSError, ValueError, KeyError) as ex:
+            val = f"<error: {ex}>"
         note = f"  ({e['note']})" if e.get("note") else ""
         lines.append(f"  {e['name']:<16} {seg:04X}:{off:04X} {t:<8} = {val}{note}")
     return "\n".join(lines)
@@ -693,13 +751,8 @@ def read_var(name: str) -> str:
     seg, off, t = e["segment"], e["offset"], e["type"]
     host = S.membase + (seg << 4) + off
     try:
-        if t.startswith("string"):
-            n = int(t[6:]) if len(t) > 6 else 1
-            raw = _read(S.handle, host, n)
-            val = repr(raw.split(b"\x00", 1)[0].decode("latin-1", "replace"))
-        else:
-            val = _decode(_read(S.handle, host, _type_width(t)), t)
-    except (OSError, KeyError) as ex:
+        val = _field_value(host, t)
+    except (OSError, ValueError, KeyError) as ex:
         return f"Read error for '{name}' @ {seg:04X}:{off:04X}: {ex}"
     note = f"  ({e['note']})" if e.get("note") else ""
     return f"{name} = {val}  [{seg:04X}:{off:04X} {t}]{note}"
@@ -719,14 +772,16 @@ def write_var(name: str, value: str) -> str:
         return f"No variable named '{name}'. Known: {names}."
     seg, off, t = e["segment"], e["offset"], e["type"]
     host = S.membase + (seg << 4) + off
+    n = _string_len(t)
     try:
-        if t.startswith("string"):
-            n = int(t[6:]) if len(t) > 6 else 1
+        if n is not None:
             data = value.encode("latin-1")[:n].ljust(n, b"\x00")
         elif t in ("float", "double"):
             data = _encode(float(value), t)
-        else:
+        elif t in TYPES:
             data = _encode(int(value, 0), t)
+        else:
+            return f"Unknown type '{t}' for '{name}'. Use u8/i8/u16/i16/u32/i32/float/double/stringN."
     except (ValueError, KeyError) as ex:
         return f"Could not encode '{value}' as {t}: {ex}"
     try:
