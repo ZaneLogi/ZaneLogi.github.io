@@ -102,6 +102,7 @@ function dropAtStart() {
   ch.y = Y_LAND[ch.curr_row + 1];          // set_start_pos, seg003.c:183 (y_land[1] = 55)
   ch.direction = ~s.dir;                   // Char.direction = ~start_dir (seg003.c:157)
   ch.fall_x = 0; ch.fall_y = 0;
+  ctrl1.forward = ctrl1.backward = RELEASED;   // clear_saved_ctrl (seg006.c:1552): a restart resets the latch
   startSeq(ch, 'freefall');                // seq_7_fall (falling entry)
   playSeq(ch);
 }
@@ -516,17 +517,63 @@ addEventListener('keyup', (e) => {
 });
 
 const control = makeControl();
-function buildControl() {
+// The horizontal control latch persists across ticks (ctrl1_forward/backward, seg006.c:1534/1543).
+// control.forward/backward are 3-state (RELEASED/HELD/IGNORE); ctrl1 carries them between frames so a
+// held key reads as a FRESH press for exactly ONE tick (HELD), after which a safe_step latches it to
+// IGNORE — the "disable automatic repeat" that makes a held run-into-wall SETTLE at a gap and a TAP
+// oscillate (research_collision.md §5c). control.x is the raw axis the latch reads. control.up/down/
+// shift stay simple raw HELD/RELEASED — their repeat is already gated by the frame dispatch, so the
+// vertical latch (control_up/down via ctrl1) is a deferred follow-on, not ported here.
+const ctrl1 = { forward: RELEASED, backward: RELEASED };
+let lastDir = ch.direction;                             // facing at the last tick, to detect a turn (flipLatchOnTurn)
+
+// Raw keyboard -> the facing-relative axis (flip_control_x, seg006.c:1520 — folded in at read time so
+// the handlers only ever see forward/backward, not left/right). Sets control.x + the raw up/down/shift.
+function readRawAxis() {
   const facingRight = ch.direction >= DIR_RIGHT;
   const fwdKey = facingRight ? keys.right : keys.left;         // arrow toward the facing dir
   const backKey = facingRight ? keys.left : keys.right;
-  control.forward = fwdKey ? HELD : RELEASED;
-  control.backward = backKey ? HELD : RELEASED;
+  control.x = fwdKey ? FWD : (backKey ? BACK : NONE);          // control_x, facing-relative
   control.up = keys.up ? HELD : RELEASED;
   control.down = keys.down ? HELD : RELEASED;
   control.shift = keys.shift ? HELD : RELEASED;
-  control.x = fwdKey ? FWD : (backKey ? BACK : NONE);          // control_x, facing-relative
 }
+
+// flip_control_x for the PERSISTED latch (seg006.c:1520). DOS stores control_forward/backward ABSOLUTE
+// (left/right) and flips them to facing-relative every frame; we store them facing-RELATIVE, so when a
+// turn flips the facing BETWEEN save and restore, the saved latch must swap to stay aligned with the new
+// facing. Without this, after a turn the still-held key re-latched as a FRESH forward HELD (which the
+// `>= RELEASED` guard then can't clear on release) and ran a step even if you let go mid-turn — the
+// "turn-and-run is too sensitive" bug (fixed 2026-07-08). With it, the held key stays IGNORE across the
+// flip, exactly as DOS's absolute latch does, so releasing during the turn cancels the run.
+function flipLatchOnTurn() {
+  if (ch.direction !== lastDir) {
+    const t = ctrl1.forward; ctrl1.forward = ctrl1.backward; ctrl1.backward = t;
+    lastDir = ch.direction;
+  }
+}
+
+// rest_ctrl_1 (seg006.c:1543): restore the latched forward/backward from the previous tick.
+function restCtrl1() { control.forward = ctrl1.forward; control.backward = ctrl1.backward; }
+
+// read_user_control (seg006.c:1557): advance the 3-state latch from the raw axis. RELEASED + key-down
+// -> HELD (a fresh press); IGNORE stays IGNORE while the key is held (auto-repeat off); key-up ->
+// RELEASED. A HELD left by a prior tick's dispatch is untouched (the `>= RELEASED` guard is false for
+// HELD = -1) — the source relies on control() downgrading HELD (to IGNORE via safe_step, or RELEASED
+// via release_arrows) the same tick it consumes it.
+function readUserControl() {
+  if (control.forward >= RELEASED) {
+    if (control.x === FWD) { if (control.forward === RELEASED) control.forward = HELD; }
+    else control.forward = RELEASED;
+  }
+  if (control.backward >= RELEASED) {
+    if (control.x === BACK) { if (control.backward === RELEASED) control.backward = HELD; }
+    else control.backward = RELEASED;
+  }
+}
+
+// save_ctrl_1 (seg006.c:1534): persist the latch (as control() left it) to the next tick.
+function saveCtrl1() { ctrl1.forward = control.forward; ctrl1.backward = control.backward; }
 
 const world = {
   edgeDistance: () => getEdgeDistance(ch),
@@ -540,8 +587,12 @@ const world = {
 function tick() {
   if (ch.grab_timer > 0) ch.grab_timer--;  // process(grab_timer): counts down a mid-fall grab (seg006.c:1405)
   processTrobs(trobs, level);              // top of play_frame: advance + collapse loose floors
-  buildControl();
-  controlKid(ch, control, world);          // play_kid/control: pick the next sequence
+  readRawAxis();                           // raw keyboard -> facing-relative axis (control.x)
+  flipLatchOnTurn();                       // flip_control_x: swap the saved latch if the facing turned last tick
+  restCtrl1();                             // rest_ctrl_1: restore the forward/backward latch
+  readUserControl();                       // read_user_control: advance the 3-state latch (RELEASED->HELD->IGNORE)
+  controlKid(ch, control, world);          // control(): pick the next sequence (consumes + mutates the latch)
+  saveCtrl1();                             // save_ctrl_1: persist the latch to the next tick
   playSeq(ch);                             // run it -> new frame + Char.x/y
   fallAccel(ch); fallSpeed(ch);            // gravity (freefall only)
   determineCol(ch);                        // recompute curr_col from Char.x (UNCLAMPED — seg006.c:122)
@@ -647,10 +698,13 @@ MaskSheet.load('./gfx/kid_masks.json').then((s) => {
   if (location.hash === '#debug') {
     window.POP = { ch, restart: dropAtStart, step: tick, render: draw,
                    pause: (v) => { paused = v; }, hud: () => hud.textContent,
+                   keys,                                             // raw key state — set for hold/tap tests
+                   ctrl: () => ({ x: control.x, forward: control.forward, backward: control.backward }),  // latch state
                    place: (room, col, row, dir) => {                 // teleport for testing
                      ch.room = room; drawnRoom = room; ch.curr_col = col; ch.curr_row = row;
                      ch.x = standX(col); ch.y = Y_LAND[row + 1]; ch.direction = dir;
                      ch.fall_x = 0; ch.fall_y = 0; startSeq(ch, 'stand'); playSeq(ch);
+                     ctrl1.forward = ctrl1.backward = RELEASED;      // reset the latch for a clean test
                    },
                    room: () => drawnRoom,
                    tile: (room, col, row) => level.rooms[room - 1].fg[row][col] & 0x1F,  // live tile type

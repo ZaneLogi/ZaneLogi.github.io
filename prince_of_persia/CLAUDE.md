@@ -394,6 +394,27 @@ KID sprites natively face **LEFT**.
   the gate; a closed gate pins `Char.x` at its face (x=184); normal climb (→row 0) + normal wall both
   unaffected. Rendering (flat 2D tiles vs the source's pseudo-3D, and the neighbour-sliver draw) is
   deliberately untouched. Full map + verification in `docs/research_environment.md §1d/§1e`.
+- **[done] Control auto-repeat latch — a HELD key settles, a TAP oscillates.** Ported PoP's 3-state
+  control latch so running/holding into a wall *settles at the wall* (one `safe_step`, then the
+  `IGNORE` latch stops the repeat) while *tapping* at the face oscillates (step11-into-wall →
+  `seq_47` recoil → gap → step back in). The clone had the `CONTROL_HELD`/`IGNORE` constants
+  **inverted** and no latch at all (`buildControl` recomputed `control.forward` fresh each tick →
+  walked flush, never oscillated). Fix: corrected constants (`control.js`); a persistence layer in
+  `player.js` (`ctrl1` + `readRawAxis → restCtrl1 → readUserControl → controlKid → saveCtrl1`, the
+  `seg006.c:1428` pipeline); latch-aware handlers (`safe_step` sets `IGNORE` + `else → step11`;
+  `forward_pressed` HELD-gated near a wall; `control_standing` `control_x` fall-through;
+  `back_pressed`/`control_running`/`controlKid` `release_arrows` — the one-shot that stops a turn/
+  run-turn re-firing every tick; `dropAtStart` resets the latch). *(A verification-caught regression —
+  `back_pressed` missing `release_arrows` spun the prince forever with no key — was fixed the faithful
+  way; §5c.)* `checkBumped`/`seq_47` (the Wall-bump entry) is
+  unchanged — the latch just makes it fire only on real penetration. **Validated against DOS ground
+  truth via a live `dosbox-memory` hook** (settle vs oscillate; a 4-unit `= dx(-4)` swing; the gap is
+  general, not the gate `wall_dist` inset) before porting, then **verified in-clone** by deterministic
+  stepping (`#debug` `POP.keys`/`step`): HOLD → settle stable at x=58, TAP → oscillate 58↔62,
+  regressions (turn/jump/run/runstop/fall) pass. **Deferred (separable):** the `wall_dist_from_left`
+  inset (clone rests flush at the raw edge; DOS insets ~10 units — the follow-on that matches the DOS
+  *rest position*) and the vertical (`control_up`/`down`) latch. Full mechanism + verification in
+  `docs/research_collision.md §5c`.
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
 

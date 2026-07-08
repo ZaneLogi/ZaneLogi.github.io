@@ -313,12 +313,93 @@ is beyond (a hole, or at a 1-tile pit a wall on the far side), and would otherwi
 fall or `check_bumped`-bump mid-lean (observed cascade at room 1 col 3: lean → col-5 wall bump →
 recoil into the col-4 pit → fall). Fix: a clone-only `ch.testing` flag (set when `testfoot` starts,
 cleared at the next stand) makes `checkBumped` and `checkOnFloor` **skip** during the lean — correct
-because `testfoot` is self-contained (always returns to the floor). Deferred: `safe_step`'s
-distance-0 / `repeat==0` `unsafe-step`-off-ledge branch (persisting walks you off) → the clone stands.
+because `testfoot` is self-contained (always returns to the floor). **`safe_step`'s distance-0 `else`
+branch is now FAITHFUL (§5c, 2026-07-08):** it plays `seq_39_safe_step_11` (step11) for BOTH cases —
+a full step INTO a wall (→ the bump/oscillation) and OFF a ledge after the peer (`repeat==0`, the
+"unsafe step" that persisting walks you off). It previously played `stand` for both (the deviation is
+retired).
 
 Other deferred: sword bump sequences (`seq_64/65`), `is_obstacle`'s chomper/mirror cases
 (`seg004.c:231` — not modelled; **the gate case IS now modelled** — `can_bump_into_gate` via
 `wallTypeAt`, 2026-07-07), feather-fall (`bumpfloat`).
+
+### 5c. The control auto-repeat latch — IMPLEMENTED (2026-07-08)
+
+The bump above answers *"what happens when the leading edge hits the wall."* This answers *"why a HELD
+key SETTLES at the wall but a TAPPED key OSCILLATES"* — the behaviour the clone got wrong until it
+ported PoP's control latch.
+
+**What the clone had wrong.** `control.js` defined the three control states **inverted**
+(`HELD=1, IGNORE=-1`; source `types.h:1405` is `RELEASED=0, HELD=-1, IGNORE=1`), and `player.js`
+`buildControl` recomputed `control.forward` **fresh from the raw key every tick** — so there was no
+latch at all. A held forward re-fired `forward_pressed` every frame → it walked the prince flush into
+the wall (→ `checkBumped` fired `seq_47` on the run-in) and never oscillated on a tap.
+
+**The source mechanism** (per-frame pipeline, `seg006.c:1428`): `rest_ctrl_1 → read_user_control →
+control() → save_ctrl_1`. `control_forward` is a **3-state latch persisted across frames** via
+`ctrl1_forward`:
+- **`read_user_control`** (`seg006.c:1557`): `RELEASED`+key-down → `HELD` (a fresh press); `IGNORE`
+  stays `IGNORE` while held (auto-repeat off); key-up → `RELEASED`. The `>= CONTROL_RELEASED` guard is
+  why the constant *ordering* matters (`HELD = -1 < 0`).
+- **`safe_step`** (`seg005.c:606`) sets `control_forward = IGNORE` — "disable automatic repeat."
+- **`forward_pressed`** near a wall (`seg005.c:579`) steps **only if `control_forward == HELD`** — a
+  latched (`IGNORE`) hold does nothing ⇒ **settle**.
+- **`control_standing`** line-401 fall-through: `control_x == HELD_FORWARD` re-enters `forward_pressed`
+  even when latched, so the still-held key is "seen" but the HELD-gate stops the repeat.
+- **`safe_step`** distance-0 `else` → `seq_39`/step11 = a full step INTO the wall → penetration →
+  `checkBumped` → `seq_47` recoil → the **tap oscillation**.
+- **`control()`** during `bumped`/`freefall` → `release_arrows` (clear the latch).
+
+**The port.** Constants corrected in `control.js`. `player.js` gained the persistence layer —
+`ctrl1{forward,backward}` + `readRawAxis` (the facing-relative `control.x` from the keyboard) →
+`restCtrl1` → `readUserControl` (before `controlKid`) → `saveCtrl1` (after) — replacing `buildControl`.
+`control.js` handlers made latch-aware: `safeStep(ch, c, world)` sets `c.forward = IGNORE` + `else →
+step11`; `forwardPressed` gates the near-wall step on `c.forward === HELD`; `controlStanding` gained
+the `c.x === FWD` fall-through; `backPressed`/`controlRunning` port `control_* = release_arrows()` so a
+turn / run-turn / run-stop is a **ONE-SHOT** (the acted flag → `IGNORE`, the others → `RELEASED`);
+`controlKid`'s bumped/freefall gate clears the latch; `dropAtStart` resets `ctrl1` (`clear_saved_ctrl`).
+**Regression caught during verification (2026-07-08): omitting the `release_arrows` in `back_pressed`
+left a HELD `backward` that re-fired the turn every tick — the prince spun forever with no key pressed.
+The fix is faithful (`seg005.c:549` does `control_backward = release_arrows()`, which lands `IGNORE` in
+`backward`).**
+
+**A second, subtler bug (also 2026-07-08 — the facing-relative latch vs a turn):** DOS stores the control
+latch ABSOLUTE (left/right) and flips it to facing-relative every frame (`flip_control_x`, `seg006.c:1520`);
+the clone stores it facing-RELATIVE. A turn flips the facing BETWEEN `save_ctrl_1` and `rest_ctrl_1`, so the
+still-held key re-latched as a FRESH forward `HELD` (which the `>= RELEASED` guard then can't clear on
+release) and ran a step even if you released mid-turn — "turn-and-run" felt far too sensitive. Fix:
+`flipLatchOnTurn` (player.js) swaps `ctrl1.forward`↔`ctrl1.backward` whenever the facing turned, so the held
+key stays `IGNORE` across the flip exactly as DOS's absolute latch does — now releasing ANY time during the
+turn cancels the run (verified: release ≤ tick 6 → turn only; hold ≥ tick 7 → turn-run). *(`control_turning`'s
+frame-48 `seq_43_start_run_after_turn` — the smooth turn-into-run — is a deferred nicety; `controlTurning`
+is still a stub, so a held turn commits to a plain `startrun` at frame 50 rather than `seq_43` at 48. The
+sensitivity, which was the actual bug, is fixed.)*
+
+`checkBumped`/`seq_47` (§5b) is UNCHANGED — with the latch
+it now fires only on real penetration (the step11-into-wall, or a sustained run), which is what turns a
+walk-to-flush into a settle-at-a-gap + a tap oscillation.
+
+**DOS ground-truth validation (the `dosbox-memory` live hook).** Zane's running DOSBox PoP 1.4 was
+hooked live (MemBase via BDA; DS via the `x_bump` AOB anchor — see the sync-state memory for the
+re-hook recipe) and the Kid struct + `control_forward`/`control_x` read frame-by-frame. Confirmed on a
+plain room-2 wall: **run/hold → SETTLE at a gap** (x=68, `control_forward` latched), **tap → OSCILLATE**
+(x 64↔68, a **4-unit swing = `seq_47`'s `dx(-4)`**), and the gap is **general, not the gate's
+`wall_dist` inset** (the room-2 plain wall rested at the same x=68 as the room-1 gate wall). This
+validated the mechanism end-to-end *before* the port. **Tool limit found (Zane):** `send_key` blocks
+then reads settle, so the `seq_47` transient frame itself is uncatchable — the fix is a frame-rate
+"watch/trace" tool (agreed, future; sketched in the `dosbox-watch-tool-design` memory).
+
+**Verified (deterministic single-stepping, `index.html#debug` — `POP.keys` + `POP.step`/`ctrl`):**
+HOLD into the wall → run → `seq_47` bump once → recover → one `safe_step` → **stable at x=58 for 20+
+ticks** (`fwd`=IGNORE, no oscillation); TAP at flush → **oscillates x 58↔62** (4-unit, `fwd` toggles
+IGNORE↔RELEASED); regressions turn / jump-up / run / runstop / falling-entry all pass; no console
+errors.
+
+**Deferred (separable, agreed):** (1) the **`wall_dist_from_left` inset** — the clone rests/oscillates
+flush at the raw tile edge (58↔62) where DOS insets ~10 units (64↔68); modelling `wall_dist` is the
+next follow-on and is what makes the clone's *rest position* match DOS. (2) The **vertical latch**
+(`control_up`/`control_down` via `ctrl1`) — up/down stay simple raw HELD/RELEASED here; their
+auto-repeat is already gated by the frame dispatch, so this is a clean separable follow-on.
 
 ---
 

@@ -10,8 +10,8 @@
 import { startSeq, ACT_BUMPED, ACT_IN_FREEFALL } from './playseq.js';
 import { EDGE_WALL } from './collision.js';
 
-export const HELD = 1, RELEASED = 0, IGNORE = -1;   // CONTROL_HELD / _RELEASED / _IGNORE
-export const FWD = 1, NONE = 0, BACK = -1;          // control_x, facing-relative
+export const HELD = -1, RELEASED = 0, IGNORE = 1;   // CONTROL_HELD / _RELEASED / _IGNORE (types.h:1405)
+export const FWD = 1, NONE = 0, BACK = -1;          // control_x, facing-relative (symbolic; sign vs source irrelevant — compared by name)
 
 // A per-tick input snapshot, made FACING-RELATIVE upstream: the read layer converts the
 // absolute L/R arrows + ch.direction into x = FWD/NONE/BACK, so the handlers never see
@@ -30,7 +30,10 @@ export function controlKid(ch, c, world) {
   // crouch (seq_37 `softland_crouch`), so it falls through this gate. Without it, medland's
   // frame-109 crouch triggered controlCrouched -> `standup` (no dy), leaving the prince
   // standing ~2 internal-y units above the floor (a visible gap after a medium land).
-  if (ch.action === ACT_BUMPED || ch.action === ACT_IN_FREEFALL) return;
+  if (ch.action === ACT_BUMPED || ch.action === ACT_IN_FREEFALL) {
+    c.forward = c.backward = c.up = c.down = RELEASED;   // release_arrows (seg006.c:1529): clear the latch
+    return;
+  }
   const f = ch.frame;
   if (f === 15 || (f >= 50 && f < 53)) controlStanding(ch, c, world);  // stand / end-of-turn
   else if (f === 48)                   controlTurning(ch, c);          // mid-turn (frame 48)
@@ -46,15 +49,20 @@ export function controlKid(ch, c, world) {
 function controlStanding(ch, c, world) {
   ch.testing = 0;                     // reaching a stand decision ends any prior test-foot lean
   if (c.shift === HELD) {
-    if (c.backward === HELD) backPressed(ch);
-    else if (c.up === HELD) world.jumpUp();                            // shift+up -> up_pressed (seg005.c:378)
-    else if (c.x === FWD && c.forward === HELD) safeStep(ch, world);   // shift+forward -> safe_step (seg005.c:383)
+    if (c.backward === HELD) backPressed(ch, c);
+    else if (c.up === HELD) world.jumpUp();                              // shift+up -> up_pressed (seg005.c:378)
+    else if (c.x === FWD && c.forward === HELD) safeStep(ch, c, world);  // shift+forward -> safe_step (seg005.c:383)
   } else if (c.forward === HELD) {
     forwardPressed(ch, c, world);     // (source: up+forward -> standing_jump; the horizontal jump is deferred, so this just runs)
   } else if (c.backward === HELD) {
-    backPressed(ch);
+    backPressed(ch, c);
   } else if (c.up === HELD) {
     world.jumpUp();                   // up alone -> up_pressed -> check_jump_up (seg005.c:393): the vertical jump / climb
+  } else if (c.x === FWD) {
+    // seg005.c:401 fall-through: the forward key is still physically HELD but the latch is IGNORE (a
+    // prior safe_step disabled auto-repeat). Re-enter forward_pressed; its HELD-gate does nothing near
+    // a wall -> the hold SETTLES. This is the half of the latch the clone was missing.
+    forwardPressed(ch, c, world);
   }
 }
 
@@ -64,33 +72,52 @@ function controlStanding(ch, c, world) {
 // safe_steps flush to the wall (no bump, no parking back) instead of just standing.
 function forwardPressed(ch, c, world) {
   const { edgeType, distance } = world.edgeDistance();
-  if (edgeType === EDGE_WALL && distance < 8) safeStep(ch, world);   // near a wall -> step, don't run
-  else startSeq(ch, 'startrun');                                     // seq_1_start_run
+  if (edgeType === EDGE_WALL && distance < 8) {
+    // near a wall: step instead of run — but ONLY on a fresh press (seg005.c:579). A latched (IGNORE)
+    // hold reaching here via the control_x fall-through does nothing => the prince SETTLES at the gap.
+    if (c.forward === HELD) safeStep(ch, c, world);
+  } else {
+    startSeq(ch, 'startrun');                                        // seq_1_start_run
+  }
 }
 
-// back_pressed (seg005.c): turn to face the other way (the standing about-face).
-function backPressed(ch) { startSeq(ch, 'turn'); }        // seq_5_turn
+// back_pressed (seg005.c:549): turn to face the other way. FIRST does `control_backward =
+// release_arrows()` — release_arrows() zeroes forward/up/down to RELEASED and returns 1, which lands in
+// control_backward as IGNORE, so the turn is a ONE-SHOT (read_user_control holds it IGNORE until the
+// key is released, then re-arms). WITHOUT this the latched HELD backward re-fires the turn every tick
+// and the prince spins forever with no key pressed (regression fixed 2026-07-08).
+function backPressed(ch, c) {
+  c.forward = RELEASED;
+  c.backward = IGNORE;                                    // control_backward = release_arrows()
+  startSeq(ch, 'turn');                                   // seq_5_turn
+}
 
-// safe_step (seg005.c:604): a careful, measured step that lands EXACTLY at the edge ahead. Pick
-// step<distance> (step1..step14, seq_29..42) from get_edge_distance so the step's dx sum equals the
-// sub-tile gap — flush to a wall face, or right at a ledge's drop; each step sets Char.repeat=1.
-// At distance 0 on a LEDGE (edge != WALL) with repeat set, play `testfoot` — the "peer over the
-// edge + bounce back" (seq_44_step_on_edge, seg005.c:611-613) — then clear repeat. Otherwise (flush
-// at a wall, or repeat already spent) stand. (The source's distance-0/repeat-0 case step11s OFF the
-// ledge — an "unsafe step"; the clone stays put instead, so a careful step never walks him off.)
-function safeStep(ch, world) {
+// safe_step (seg005.c:604): a careful, measured step that lands EXACTLY at the edge ahead. FIRST it
+// disables auto-repeat by latching control_forward = IGNORE (seg005.c:606) — this is what makes a HELD
+// forward do ONE step and then settle (read_user_control keeps it IGNORE until the key is released).
+// Then pick step<distance> (step1..step14, seq_29..42) from get_edge_distance so the step's dx sum
+// equals the sub-tile gap — flush to a wall face, or right at a ledge's drop; each sets Char.repeat=1.
+// At distance 0 on a LEDGE (edge != WALL) with repeat set, play `testfoot` (peer over + bounce back,
+// seq_44) then clear repeat. Otherwise — distance 0 at a WALL, or a ledge after the peer (repeat spent)
+// — play seq_39_safe_step_11 = a FULL step (step11): INTO the wall (-> checkBumped -> seq_47 recoil ->
+// the tap oscillation) or OFF the ledge (an "unsafe step" -> fall). Faithful both cases (seg005.c:615).
+function safeStep(ch, c, world) {
+  c.forward = IGNORE;                                 // seg005.c:606 — disable automatic repeat
   const { edgeType, distance } = world.edgeDistance();
   if (distance > 0 && distance <= 14) { startSeq(ch, 'step' + distance); ch.repeat = 1; }
   else if (edgeType !== EDGE_WALL && ch.repeat) { ch.repeat = 0; ch.testing = 1; startSeq(ch, 'testfoot'); }
-  else startSeq(ch, 'stand');
+  else startSeq(ch, 'step11');                        // seq_39_safe_step_11: step into the wall / off the ledge
 }
 
 // control_running (seg005.c:588): the two signature behaviours.
 function controlRunning(ch, c) {
-  if (c.x === NONE && (ch.frame === 7 || ch.frame === 11))       // frame-gated STOP (only at 7/11)
+  if (c.x === NONE && (ch.frame === 7 || ch.frame === 11)) {     // frame-gated STOP (only at 7/11)
+    c.backward = RELEASED; c.forward = IGNORE;                   // control_forward = release_arrows() (seg005.c:590)
     startSeq(ch, 'runstop');                                     // seq_13_stop_run — skid to a halt
-  else if (c.x === BACK)                                         // facing-relative REVERSE
+  } else if (c.x === BACK) {                                     // facing-relative REVERSE
+    c.forward = RELEASED; c.backward = IGNORE;                   // control_backward = release_arrows() (seg005.c:593) — IGNORE, else infinite run-turn
     startSeq(ch, 'runturn');                                     // skid + SEQ_FLIP + resume the run cycle
+  }
   // else if (c.up === HELD && c.forward === HELD) startSeq(ch, 'runjump');    // TODO (pulls in SET_FALL)
   // else if (c.down === HELD)                     startSeq(ch, 'crouchrun');  // TODO
 }
