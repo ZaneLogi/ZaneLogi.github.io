@@ -16,6 +16,44 @@ re-imagining. When in doubt, **read the Z80 source** before designing.
   then `/galaga_clone/`)
 - ES6 modules load directly in the browser
 
+## Project status — wound down 2026-07-08 (educational goal met)
+
+This Z80-faithful port has reached its educational goal, and **active
+development winds down here.** What's built:
+
+- A **playable** Galaga: fly-in caravans, formation oscillate/pulse,
+  moth/bee/boss attack dives, bombs, the **boss capture → 2-ship** chain,
+  the **bonus-bee X3 convoy**, and challenge (bonus) stages — driven by
+  real ROM path bytecode through the task-table architecture.
+- A **six-demo path-motion family** under `demos/` (cross-linked from
+  `demos/index.html`), each isolating one motion mechanism against the
+  *real* interpreter: `path` · `challenge` · `flyin` · `attack` (moth/bee)
+  · `boss` (sortie + capture dive) · `convoy` (bonus-bee X3). The benches
+  drive `bugMotion` directly, so they are a step ahead of the live
+  gameplay wiring for a few tokens — see the deferred list.
+
+**Deferred — mechanical completeness, not blockers.** The learning goal is
+already met; pick any up only if asked. The living docs (`progress.html`,
+`research_*.md`) stay the reference for resuming them.
+
+- **HUD / scoring** (progress step 11) — proper character-tileset HUD +
+  high-score persistence. The current HUD is a faithful-position debug stub.
+- **Life-loss / game-over** (step 9's last loose end) — respawn is currently
+  unconditional, no life decrement.
+- **Attack-path gameplay integration** (step 9) — a few path tokens the demos
+  drive through the *interpreter* aren't fully wired into *live gameplay*,
+  notably **FD JUMP** and the **stage-8+ continuous-bombing loop** it drives
+  (the launcher still uses the spawn-time bomb-arming workaround).
+- **Sound** — no audio subsystem (the Z80 builds sound on the sound CPU; a
+  defer, not a drop).
+- **Attract-mode demo, 2-player, bonus-life DIP settings** — standard
+  retro-port mechanical-completeness items.
+- **Capture edge cases G20 / G21** (`research_boss_capture.md` §9) —
+  enemy-body→player contact death (needs a collision layer that doesn't
+  exist yet) and the two secondary "rogue" ways the captured ship dives
+  (no-boss fallback + status-4 home-shot). The clone's rescue is the
+  diving-boss case only.
+
 ## Z80 source — the source of truth
 
 The disassembly is **per-PC** — the auto-memory layer doesn't sync repos
