@@ -270,7 +270,7 @@ Table tools: `table_add`, `table_remove`, `table_list`, `table_save`,
 | `find_membase_auto(...)` | Auto-detect MemBase via the DOS BIOS Data Area (BDA) |
 | `session_init(table_path, known_*)` | One-shot: attach + calibrate + load table |
 | `set_membase_from(host_addr, seg, off)` | Derive MemBase from a known address |
-| `scan_value(value, width)` | Exact-value first scan (integer) |
+| `scan_value(value, width, dos_only)` | Exact-value first scan (integer) |
 | `next_scan(value, width)` | Narrow an integer scan |
 | `scan_typed(value, vtype, alignment, dos_only)` | Typed first scan |
 | `next_scan_typed(value, vtype)` | Narrow a typed scan |
