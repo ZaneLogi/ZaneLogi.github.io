@@ -90,22 +90,29 @@ class Wall:
 def poly(points: list[Vec2], facing: str) -> list[Wall]:
     """Build a closed loop of walls from polygon vertices.
 
-    ``facing`` is ``"in"`` (normals point toward the centroid — empty inside,
-    e.g. a room) or ``"out"`` (normals point away — empty outside, e.g. an
-    obstacle). Each edge is wound so its stored normal equals ``normal(a, b)``;
-    if the natural order faces the wrong way the edge is reversed.
+    ``facing`` is ``"in"`` (empty *inside* the polygon — a room) or ``"out"``
+    (empty *outside* — an obstacle). Every wall's normal is derived from the
+    polygon's **winding** and ``facing``, so the order the points are listed
+    (clockwise or counter-clockwise) does not matter, and the polygon may be
+    **concave** (a maze, an L-shape) as well as convex.
     """
     pts = [(float(x), float(y)) for x, y in points]
     n = len(pts)
-    centroid = (sum(p[0] for p in pts) / n, sum(p[1] for p in pts) / n)
-    want_inward = facing == "in"
+
+    # Signed area (shoelace) gives the winding. For a positive-area loop the
+    # N = (-dy, dx) edge normals point toward the interior; for a negative-area
+    # loop they point outward. `facing` then selects interior vs exterior. This
+    # is a single global test per polygon — unlike a per-edge centroid check it
+    # stays correct on concave shapes, where an edge need not face the centroid.
+    area2 = sum(pts[i][0] * pts[(i + 1) % n][1] - pts[(i + 1) % n][0] * pts[i][1]
+                for i in range(n))
+    normal_faces_interior = area2 > 0
+    want_interior = facing == "in"
 
     walls: list[Wall] = []
     for i in range(n):
         a, b = pts[i], pts[(i + 1) % n]
-        mid = mul(add(a, b), 0.5)
-        points_inward = dot(normal(a, b), sub(centroid, mid)) > 0
-        if points_inward != want_inward:
+        if normal_faces_interior != want_interior:
             a, b = b, a  # reverse edge -> flips the normal
         walls.append(Wall(a, b))
     return walls

@@ -13,7 +13,7 @@ Set (PVS) support.** It has two halves that meet at a single data file:
 - **`compiler/` (Python)** — takes a set of 2D walls and *precomputes* a
   dataset: the BSP tree, the convex leaves of empty space, the portals
   (doorways) between them, and each leaf's PVS. Runs offline.
-- **`render.js` (JavaScript)** — loads that dataset in the browser and draws
+- **The browser demos (JavaScript, `demos/`)** — load that dataset and draw
   it: the leaves, the portals, and — given a point — which leaves are
   potentially visible from it.
 
@@ -61,7 +61,7 @@ leaves, portals) exists to make the PVS computable.
  [ PVS calculation ]     →  per-leaf "what can I see" sets           (doc 03)
    │
    ▼
- levels/<scene>.json  ──►  render.js  (draw leaves / portals / PVS)
+ levels/<scene>.json  ──►  demos/     (draw leaves / portals / PVS)
 ```
 
 Four stages, one doc each:
@@ -71,7 +71,7 @@ Four stages, one doc each:
 | `00_overview.md`   | This file — concepts, conventions, seam  | current |
 | `01_leaf_tree.md`  | Build the tree; carve convex empty leaves| current |
 | `02_portals.md`    | Find the doorways between empty leaves    | current |
-| `03_pvs.md`        | Through the doorways, compute visibility  | later   |
+| `03_pvs.md`        | Through the doorways, compute visibility  | current |
 | *(optional)*       | View-frustum rejection at render time     | later   |
 
 Frustum rejection (the tutorial's 4th topic) is a *runtime render*
@@ -110,13 +110,20 @@ Every later stage depends on these, so they are fixed here:
   - both back → **back**
   - both on → **on-line**
   - one front, one back → **spanning** (it must be split by the line)
-- A wall's normal is a 90° rotation of its direction `A → B`. Input walls are
-  **wound** so that this normal faces empty space. The rotation sign, confirmed
-  against the compiled `room`, is **`N = (−dy, dx)`** for a direction
-  `(dx, dy)` — equivalently, *front* (empty) is the right-hand side of `A → B`
-  in the Y-down canvas. A wrong sign silently inverts front/back, so it was
-  confirmed against real output (the room's floor probes resolve to empty, its
-  solid regions to solid) rather than asserted.
+- A wall's normal is a 90° rotation of its direction `A → B`, with a fixed sign:
+  **`N = (−dy, dx)`** for a direction `(dx, dy)` — equivalently, *front* (empty)
+  is the right-hand side of `A → B` in the Y-down canvas. This sign is confirmed
+  against the compiled `room` (its floor probes resolve to empty, its solid
+  regions to solid), not asserted, because a wrong sign silently inverts
+  front/back.
+- **You never wind walls by hand.** A scene is authored as polygons, each tagged
+  `facing: "in"` (empty *inside* — a room) or `facing: "out"` (empty *outside* —
+  an obstacle). The compiler derives every wall's normal from the polygon plus
+  that flag, so the **order you list a polygon's points — clockwise or
+  counter-clockwise — does not matter.** The `facing` flag is the single,
+  unambiguous statement of which side is empty; there is no winding rule to get
+  wrong. (This also lets a scene be **concave** — an obstacle, an L-shape, a
+  maze — since orientation comes from `facing`, not from the shape.)
 
 ## The solid-leaf convention (important)
 
@@ -139,10 +146,9 @@ falls out of the build for free.
 The browser-friendly stand-in for the tutorial's binary `.bsp`. **One file per
 scene** (`levels/room.json`, `levels/maze.json`, …): the compiler writes one
 from each input wall-set, and a demo loads one via `?level=<scene>` (default
-`room`). The file is **cumulative** — the same scene's file gains `portals`
-then `pvs` as those stages land; there is never a separate per-stage file. With
-stages 1–2 in, `planes` / `nodes` / `leaves` / `portals` are all populated; only
-`pvs` is still an empty placeholder, filled by stage 3:
+`room`). The file is **cumulative** — a scene's file gained `portals` then `pvs`
+as those stages landed; there is never a separate per-stage file. With all three
+stages in, **every field is populated** — this is the complete shape:
 
 ```json
 {
@@ -166,7 +172,7 @@ stages 1–2 in, `planes` / `nodes` / `leaves` / `portals` are all populated; on
       "walls":   [ [50, 50, 250, 50] ],
       "bbox":    { "min": [50, 50], "max": [250, 150] },
       "portals": [0],
-      "pvs":     []
+      "pvs":     [0, 1]
     }
   ],
 
@@ -181,7 +187,8 @@ stages 1–2 in, `planes` / `nodes` / `leaves` / `portals` are all populated; on
   `back.kind ∈ {node, solid}`; `index` refers into `nodes[]` or `leaves[]`.
 - `leaves[]` — empty regions. `walls` are the wall fragments that landed in
   the leaf (each `[ax, ay, bx, by]`); `portals` is the leaf's list of portal
-  indices (stage 2); `pvs` is its visible-leaf index list (stage 3, still empty).
+  indices (stage 2); `pvs` is its list of potentially-visible leaf indices,
+  itself included (stage 3).
 - `portals[]` — `{ seg: [ax, ay, bx, by], leaves: [front, back] }`, one per
   doorway (`front` is the leaf on the line's normal side).
 
@@ -203,11 +210,10 @@ leaf_portal_2d/
     02_portals.md      #                                (stage 2)
     03_pvs.md          #                                (stage 3)
   index.html           # menu — links each stage's demo + doc
-  demos/               # one page per stage
+  demos/               # one self-contained page per stage (renders inline)
     01_leaf_tree.html
     02_portals.html    #                                (stage 2)
     03_pvs.html        #                                (stage 3)
-  render.js            # JS — shared draw lib the demos import
 ```
 
 The compiled `levels/*.json` are committed so the demos work with no Python at
@@ -224,4 +230,5 @@ Each stage doc follows the same three beats:
 
 The current `bsp2d.js` at the project root is an early single-file JS sketch
 of the leaf-build half; its build logic is superseded by the Python compiler
-described here, and its rendering is superseded by `render.js`.
+described here, and its rendering is superseded by the per-stage demos under
+`demos/`.

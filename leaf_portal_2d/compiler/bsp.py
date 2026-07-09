@@ -32,18 +32,20 @@ class Leaf:
     ``portals`` holds the indices of the portals on this leaf's border (both set
     in stage 2); ``pvs`` is filled in stage 3."""
 
-    __slots__ = ("walls", "bbox", "index", "portals")
+    __slots__ = ("walls", "bbox", "index", "portals", "pvs")
 
     walls: list[Wall]
     bbox: tuple[Vec2, Vec2]
     index: int
     portals: list[int]
+    pvs: list[int]
 
     def __init__(self, walls: list[Wall]) -> None:
         self.walls = walls
         self.bbox = bbox_of_walls(walls)
         self.index = -1
         self.portals = []
+        self.pvs = []
 
 
 class Node:

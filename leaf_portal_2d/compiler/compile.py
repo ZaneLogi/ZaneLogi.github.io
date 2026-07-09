@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # geom2d / bsp / porta
 import geom2d
 import bsp
 import portals
+import pvs
 
 ROOT = Path(__file__).resolve().parent.parent  # leaf_portal_2d/
 
@@ -76,7 +77,7 @@ def serialize(root, bounds, leaves, portal_list):
                       for w in leaf.walls],
             "bbox": _bbox(leaf.bbox),
             "portals": leaf.portals,
-            "pvs": [],
+            "pvs": leaf.pvs,
         } for leaf in leaves],
         "portals": [{
             "seg": [_r(p.a[0]), _r(p.a[1]), _r(p.b[0]), _r(p.b[1])],
@@ -107,14 +108,18 @@ def main():
 
     root = bsp.build_tree(walls)
     portal_list, leaves = portals.build_portals(root)
+    pvs.calculate_pvs(leaves, portal_list)
     data = serialize(root, scene.BOUNDS, leaves, portal_list)
 
     out = ROOT / "levels" / f"{name}.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps(data, indent=2))
 
+    sizes = [len(leaf.pvs) for leaf in leaves]
     print(f"[{name}] {len(data['nodes'])} nodes, {len(data['leaves'])} leaves, "
           f"{len(data['portals'])} portals -> {out.relative_to(ROOT)}")
+    print(f"  pvs: visible-set sizes {min(sizes)}..{max(sizes)} of {len(leaves)} "
+          f"leaves")
     for point, label in getattr(scene, "PROBES", []):
         leaf = bsp.locate(root, (float(point[0]), float(point[1])))
         print(f"  probe {tuple(point)} ({label}): "

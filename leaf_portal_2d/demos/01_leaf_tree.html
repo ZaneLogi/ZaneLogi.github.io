@@ -32,7 +32,8 @@
   <h1>Stage 01 — Leaf BSP Tree</h1>
   <div class="links">
     <a href="../index.html">← Menu</a> &nbsp;·&nbsp;
-    <a href="../docs/01_leaf_tree.md">Doc 01</a>
+    <a href="../docs/01_leaf_tree.md">Doc 01</a> &nbsp;·&nbsp;
+    <a href="02_portals.html">Demo 02 →</a>
   </div>
 </header>
 
@@ -44,8 +45,7 @@
 <script type="module">
   // Stage 1 renders leaves by their WALL SEGMENTS only — filled polygons wait
   // for portals (doc 02) to supply the missing splitter-line edges.
-  // This inline drawing graduates into ../render.js once the Stage-1 compiler
-  // lands and the scene file carries real leaves.
+  // Each demo renders inline (self-contained); there is no shared render.js.
   //
   // Scene selection: ?level=<name> chooses which compiled scene to load,
   // defaulting to "room". Each scene is one file: levels/<name>.json.

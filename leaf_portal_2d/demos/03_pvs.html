@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>03 — PVS · leaf_portal_2d</title>
+  <style>
+    :root {
+      --bg: #ffffff; --fg: #1a1a1a; --muted: #666; --border: #ccc; --link: #06c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14161a; --fg: #e6e6e6; --muted: #9aa0a6; --border: #444; --link: #6bf;
+      }
+    }
+    body {
+      margin: 0; padding: 1rem 1.25rem; background: var(--bg); color: var(--fg);
+      font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    header { max-width: 800px; margin: 0 auto 1rem; }
+    h1 { font-size: 1.15rem; margin: 0 0 .2rem; }
+    .links { font-size: .85rem; color: var(--muted); }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    #wrap { max-width: 800px; margin: 0 auto; }
+    canvas { border: 1px solid var(--border); display: block; max-width: 100%; cursor: crosshair; }
+    #status { margin-top: .5rem; font-size: .85rem; color: var(--muted); min-height: 1.2em; }
+    .legend { display: inline-flex; gap: 1rem; margin-left: .5rem; }
+    .legend span { display: inline-flex; align-items: center; gap: .35rem; }
+    .sw { width: 13px; height: 13px; border-radius: 3px; display: inline-block; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Stage 03 — PVS</h1>
+  <div class="links">
+    <a href="../index.html">← Menu</a> &nbsp;·&nbsp;
+    <a href="02_portals.html">← Demo 02</a> &nbsp;·&nbsp;
+    <a href="../docs/03_pvs.md">Doc 03</a>
+  </div>
+</header>
+
+<div id="wrap">
+  <canvas id="canvas" width="800" height="600"></canvas>
+  <div id="status">Loading…
+    <span class="legend">
+      <span><i class="sw" style="background:#2ec27e"></i>you are here</span>
+      <span><i class="sw" style="background:rgba(46,194,126,.30)"></i>visible</span>
+      <span><i class="sw" style="background:rgba(140,140,150,.14)"></i>hidden</span>
+    </span>
+  </div>
+</div>
+
+<script type="module">
+  // Stage 3: move the cursor over a chamber; its leaf's PVS lights up (visible
+  // leaves tinted, hidden ones dimmed). The renderer locates the cursor's leaf
+  // by walking the same BSP tree the compiler built. ?level=<name> (default
+  // "maze" — the room can't cull, so it stays fully lit).
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  const status = document.getElementById("status");
+
+  const scene = new URLSearchParams(location.search).get("level") || "maze";
+  const levelUrl = `../levels/${scene}.json`;
+  const PORTAL_COLOR = "#ff6d00";
+
+  function message(text) {
+    ctx.save();
+    ctx.fillStyle = getComputedStyle(document.body).color;
+    ctx.globalAlpha = 0.6;
+    ctx.font = "16px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+    ctx.restore();
+  }
+
+  // Walk the tree to the leaf containing (x, y); -1 if solid. Root is nodes[0]
+  // for any scene that splits (a single-leaf scene would be leaf 0).
+  function locate(level, x, y) {
+    if (level.nodes.length === 0) return level.leaves.length ? 0 : -1;
+    let ref = { kind: "node", index: 0 };
+    while (ref.kind === "node") {
+      const node = level.nodes[ref.index];
+      const pl = level.planes[node.plane];
+      const s = (x - pl.p[0]) * pl.n[0] + (y - pl.p[1]) * pl.n[1];
+      ref = s >= 0 ? node.front : node.back;
+      if (ref.kind === "solid") return -1;
+    }
+    return ref.index;
+  }
+
+  // A leaf's convex outline = wall segments + portal segments, ordered by angle
+  // around the centroid (same as demo 02).
+  function outline(leaf, portals) {
+    const segs = leaf.walls.slice();
+    for (const pi of leaf.portals) segs.push(portals[pi].seg);
+    const pts = [];
+    for (const [ax, ay, bx, by] of segs) { pts.push([ax, ay]); pts.push([bx, by]); }
+    const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+    const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+    const uniq = [];
+    for (const p of pts) {
+      if (!uniq.some((u) => Math.hypot(u[0] - p[0], u[1] - p[1]) < 1e-6)) uniq.push(p);
+    }
+    uniq.sort((p, q) => Math.atan2(p[1] - cy, p[0] - cx) - Math.atan2(q[1] - cy, q[0] - cx));
+    return uniq;
+  }
+
+  let level = null, outlines = [], cursor = null;
+
+  function fillLeaf(poly, style) {
+    if (poly.length < 3) return;
+    ctx.fillStyle = style;
+    ctx.beginPath();
+    ctx.moveTo(poly[0][0], poly[0][1]);
+    for (let k = 1; k < poly.length; k++) ctx.lineTo(poly[k][0], poly[k][1]);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function render(current) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const pvs = current >= 0 ? new Set(level.leaves[current].pvs) : null;
+
+    level.leaves.forEach((leaf, i) => {
+      let style = "rgba(140,140,150,0.10)";           // neutral (no cursor)
+      if (pvs) {
+        if (i === current) style = "rgba(46,194,126,0.55)";     // you are here
+        else if (pvs.has(i)) style = "rgba(46,194,126,0.22)";   // visible
+        else style = "rgba(140,140,150,0.12)";                  // hidden
+      }
+      fillLeaf(outlines[i], style);
+    });
+
+    ctx.strokeStyle = getComputedStyle(document.body).color;
+    ctx.lineWidth = 2.5;
+    for (const leaf of level.leaves)
+      for (const [ax, ay, bx, by] of leaf.walls) {
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      }
+
+    ctx.strokeStyle = PORTAL_COLOR; ctx.lineWidth = 2; ctx.setLineDash([7, 6]);
+    for (const { seg: [ax, ay, bx, by] } of level.portals) {
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    if (cursor) {
+      ctx.fillStyle = "#2ec27e";
+      ctx.beginPath(); ctx.arc(cursor[0], cursor[1], 5, 0, 7); ctx.fill();
+    }
+
+    const n = level.leaves.length;
+    if (current >= 0) {
+      status.firstChild.textContent =
+        `Scene "${scene}": in leaf ${current} — sees ${pvs.size} of ${n} leaves. `;
+    } else if (cursor) {
+      status.firstChild.textContent = `Scene "${scene}": solid space (no leaf). `;
+    } else {
+      status.firstChild.textContent =
+        `Scene "${scene}": ${n} leaves — move the cursor over a chamber. `;
+    }
+  }
+
+  canvas.addEventListener("mousemove", (e) => {
+    const r = canvas.getBoundingClientRect();
+    const x = (e.clientX - r.left) * (canvas.width / r.width);
+    const y = (e.clientY - r.top) * (canvas.height / r.height);
+    cursor = [x, y];
+    render(locate(level, x, y));
+  });
+  canvas.addEventListener("mouseleave", () => { cursor = null; render(-1); });
+
+  status.firstChild.textContent = `Loading ${levelUrl}… `;
+  try {
+    const res = await fetch(levelUrl, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    level = await res.json();
+    outlines = level.leaves.map((leaf) => outline(leaf, level.portals));
+    render(-1);
+  } catch (err) {
+    message(`Could not load ${levelUrl}`);
+    status.firstChild.textContent =
+      `${levelUrl} not found (${err.message}). Run: python compiler/compile.py ${scene} `;
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+<svg viewBox="0 0 560 450" xmlns="http://www.w3.org/2000/svg" role="img" font-family="system-ui, sans-serif">
+  <title>Anti-penumbra of two segment portals</title>
+  <desc>A wide source portal at top and a narrow target portal below, with the two crossed-tangent lines through their opposite endpoints. The wedge those lines bound beyond the target is the anti-penumbra; a generator portal laid across it is clipped, keeping only the part inside. Drawn on its own light panel so it reads on any page background.</desc>
+
+  <!-- self-contained figure panel: fixed colours so the diagram reads on any
+       page background (an embedded SVG can't follow a page's dark-mode toggle). -->
+  <rect x="0.5" y="0.5" width="559" height="449" rx="10" fill="#f7f8fa" stroke="#e3e6ea"/>
+
+  <polygon points="250,220 340,220 560,350 560,450 0,450 0,411" fill="#f5b301" opacity="0.20"/>
+
+  <line x1="120" y1="90" x2="560" y2="350" stroke="#57606a" stroke-dasharray="6 5" stroke-width="1.5"/>
+  <line x1="420" y1="90" x2="0"   y2="411" stroke="#57606a" stroke-dasharray="6 5" stroke-width="1.5"/>
+
+  <line x1="120" y1="90" x2="420" y2="90" stroke="#24292f" stroke-width="5"/>
+  <circle cx="120" cy="90" r="4" fill="#24292f"/><circle cx="420" cy="90" r="4" fill="#24292f"/>
+
+  <line x1="250" y1="220" x2="340" y2="220" stroke="#24292f" stroke-width="5"/>
+  <circle cx="250" cy="220" r="4" fill="#24292f"/><circle cx="340" cy="220" r="4" fill="#24292f"/>
+
+  <circle cx="180" cy="50" r="5" fill="#24292f"/>
+  <line x1="180" y1="56" x2="180" y2="84" stroke="#57606a" stroke-width="1" stroke-dasharray="3 3"/>
+
+  <line x1="80" y1="310" x2="470" y2="310" stroke="#afb8c1" stroke-dasharray="5 5" stroke-width="2"/>
+  <line x1="132" y1="310" x2="470" y2="310" stroke="#1a7f37" stroke-width="5"/>
+  <circle cx="132" cy="310" r="3.5" fill="#24292f"/>
+
+  <text x="180" y="38" text-anchor="middle" font-size="12.5" fill="#24292f">source leaf (viewer)</text>
+  <text x="270" y="80" text-anchor="middle" font-size="13" font-weight="600" fill="#24292f">source portal</text>
+  <text x="106" y="86" text-anchor="end" font-size="12" fill="#57606a">S&#8321;</text>
+  <text x="434" y="86" font-size="12" fill="#57606a">S&#8322;</text>
+  <text x="295" y="243" text-anchor="middle" font-size="13" font-weight="600" fill="#24292f">target portal</text>
+  <text x="242" y="214" text-anchor="end" font-size="12" fill="#57606a">T&#8321;</text>
+  <text x="348" y="214" font-size="12" fill="#57606a">T&#8322;</text>
+  <text x="285" y="392" text-anchor="middle" font-size="15" font-weight="600" fill="#24292f">anti-penumbra</text>
+  <text x="285" y="411" text-anchor="middle" font-size="11" fill="#57606a">the wedge you can see the source through</text>
+  <text x="512" y="322" font-size="11" fill="#57606a" transform="rotate(31 512 322)">S&#8321;&#8211;T&#8322;</text>
+  <text x="60" y="352" font-size="11" fill="#57606a" transform="rotate(-37 60 352)">S&#8322;&#8211;T&#8321;</text>
+  <text x="305" y="300" text-anchor="middle" font-size="12" fill="#1a7f37" font-weight="600">generator: surviving fragment</text>
+  <text x="96" y="300" text-anchor="middle" font-size="11" fill="#57606a">clipped</text>
+</svg>
