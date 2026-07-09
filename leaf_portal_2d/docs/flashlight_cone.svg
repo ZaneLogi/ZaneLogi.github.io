@@ -1,0 +1,30 @@
+<svg viewBox="0 0 560 360" xmlns="http://www.w3.org/2000/svg" role="img" font-family="system-ui, sans-serif">
+  <title>Flashlight reusing the anti-penumbra cone</title>
+  <desc>A point light in a left room casts a cone; where the cone meets a doorway in the dividing wall, the light continues into the right room as a narrower cone bounded by the rays from the light through the doorway's two endpoints. The rest of the right room, behind the solid wall, is in shadow. Drawn on its own light panel so it reads on any page background.</desc>
+
+  <rect x="0.5" y="0.5" width="559" height="359" rx="10" fill="#f7f8fa" stroke="#e3e6ea"/>
+
+  <polygon points="110,180 290,120 290,240" fill="#ffce33" opacity="0.5"/>
+  <polygon points="290,150 290,210 520,248 520,112" fill="#ffce33" opacity="0.30"/>
+
+  <line x1="110" y1="180" x2="290" y2="150" stroke="#c99700" stroke-width="1" stroke-dasharray="4 4"/>
+  <line x1="110" y1="180" x2="290" y2="210" stroke="#c99700" stroke-width="1" stroke-dasharray="4 4"/>
+
+  <rect x="40" y="40" width="480" height="280" fill="none" stroke="#24292f" stroke-width="3"/>
+  <line x1="290" y1="40"  x2="290" y2="150" stroke="#24292f" stroke-width="6"/>
+  <line x1="290" y1="210" x2="290" y2="320" stroke="#24292f" stroke-width="6"/>
+  <circle cx="290" cy="150" r="3.5" fill="#24292f"/><circle cx="290" cy="210" r="3.5" fill="#24292f"/>
+
+  <circle cx="110" cy="180" r="14" fill="#ffce33" opacity="0.35"/>
+  <circle cx="110" cy="180" r="5" fill="#f5a623"/>
+
+  <text x="110" y="216" text-anchor="middle" font-size="12.5" fill="#24292f">light (a point)</text>
+  <text x="188" y="184" text-anchor="middle" font-size="12.5" fill="#24292f" font-weight="600">flashlight cone</text>
+  <text x="418" y="176" text-anchor="middle" font-size="12" fill="#24292f">cone that passed</text>
+  <text x="418" y="192" text-anchor="middle" font-size="12" fill="#24292f">the doorway</text>
+  <text x="232" y="104" font-size="11.5" fill="#57606a">doorway (portal)</text>
+  <line x1="266" y1="112" x2="288" y2="150" stroke="#57606a" stroke-width="1"/>
+  <text x="475" y="300" text-anchor="middle" font-size="12" fill="#57606a">shadow</text>
+  <text x="70"  y="60" font-size="11.5" fill="#57606a">room A</text>
+  <text x="330" y="60" font-size="11.5" fill="#57606a">room B</text>
+</svg>

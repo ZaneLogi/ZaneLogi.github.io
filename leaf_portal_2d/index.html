@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>leaf_portal_2d — 2D BSP + PVS</title>
+  <style>
+    :root {
+      --bg: #ffffff; --fg: #1a1a1a; --muted: #666;
+      --card: #f5f5f5; --border: #ddd; --accent: #2a6; --link: #06c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14161a; --fg: #e6e6e6; --muted: #9aa0a6;
+        --card: #1e2127; --border: #333; --accent: #4c9; --link: #6bf;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 2rem 1.5rem; background: var(--bg); color: var(--fg);
+      font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    main { max-width: 780px; margin: 0 auto; }
+    h1 { margin: 0 0 .25rem; font-size: 1.6rem; }
+    .sub { color: var(--muted); margin: 0 0 1.75rem; }
+    .stages { list-style: none; padding: 0; margin: 0; display: grid; gap: .75rem; }
+    .stage {
+      border: 1px solid var(--border); border-radius: 8px; background: var(--card);
+      padding: .9rem 1.1rem; display: flex; align-items: baseline; gap: .9rem;
+    }
+    .stage.later { opacity: .55; }
+    .num { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--accent); }
+    .body { flex: 1; }
+    .title { font-weight: 600; }
+    .desc { color: var(--muted); font-size: .9rem; margin-top: .15rem; }
+    .links { display: flex; gap: .9rem; margin-top: .4rem; font-size: .88rem; }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .badge {
+      font-size: .72rem; text-transform: uppercase; letter-spacing: .04em;
+      padding: .12rem .5rem; border-radius: 999px; border: 1px solid var(--border);
+      color: var(--muted); white-space: nowrap;
+    }
+    .badge.current { color: var(--accent); border-color: var(--accent); }
+    footer { margin-top: 2rem; color: var(--muted); font-size: .85rem; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>leaf_portal_2d</h1>
+  <p class="sub">A 2D Binary Space Partitioning tree creator with Potentially
+    Visible Set support — a Python compiler precomputes the dataset, the browser
+    renders it. <a href="docs/00_overview.md">Read the overview →</a></p>
+
+  <ul class="stages">
+    <li class="stage current">
+      <span class="num">01</span>
+      <span class="body">
+        <span class="title">Leaf BSP tree</span>
+        <div class="desc">Carve the walls into convex regions of empty space.</div>
+        <div class="links">
+          <a href="demos/01_leaf_tree.html">Open demo</a>
+          <a href="docs/01_leaf_tree.md">Doc</a>
+        </div>
+      </span>
+      <span class="badge current">Current</span>
+    </li>
+
+    <li class="stage current">
+      <span class="num">02</span>
+      <span class="body">
+        <span class="title">Portals</span>
+        <div class="desc">Find the doorways between empty leaves.</div>
+        <div class="links">
+          <a href="demos/02_portals.html">Open demo</a>
+          <a href="docs/02_portals.md">Doc</a>
+        </div>
+      </span>
+      <span class="badge current">Current</span>
+    </li>
+
+    <li class="stage current">
+      <span class="num">03</span>
+      <span class="body">
+        <span class="title">PVS</span>
+        <div class="desc">Through the doorways, compute per-leaf visibility.</div>
+        <div class="links">
+          <a href="demos/03_pvs.html">Open demo</a>
+          <a href="docs/03_pvs.md">Doc</a>
+        </div>
+      </span>
+      <span class="badge current">Current</span>
+    </li>
+
+    <li class="stage current">
+      <span class="num">★</span>
+      <span class="body">
+        <span class="title">Flashlight</span>
+        <div class="desc">Reuses the anti-penumbra to cast a 2D light through the maze.</div>
+        <div class="links">
+          <a href="demos/04_flashlight.html">Open demo</a>
+          <a href="docs/04_flashlight.md">Doc</a>
+        </div>
+      </span>
+      <span class="badge current">Bonus</span>
+    </li>
+  </ul>
+
+  <footer>
+    Demos read <code>levels/&lt;scene&gt;.json</code>, produced offline by
+    <code>compiler/compile.py &lt;scene&gt;</code>. Pick a scene with
+    <code>?level=&lt;name&gt;</code> (default <code>room</code>); re-run the
+    compiler and refresh after changing a scene's walls.
+  </footer>
+</main>
+</body>
+</html>

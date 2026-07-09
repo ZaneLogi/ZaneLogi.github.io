@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>01 — Leaf BSP Tree · leaf_portal_2d</title>
+  <style>
+    :root {
+      --bg: #ffffff; --fg: #1a1a1a; --muted: #666; --border: #ccc; --link: #06c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14161a; --fg: #e6e6e6; --muted: #9aa0a6; --border: #444; --link: #6bf;
+      }
+    }
+    body {
+      margin: 0; padding: 1rem 1.25rem; background: var(--bg); color: var(--fg);
+      font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    header { max-width: 800px; margin: 0 auto 1rem; }
+    h1 { font-size: 1.15rem; margin: 0 0 .2rem; }
+    .links { font-size: .85rem; color: var(--muted); }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    #wrap { max-width: 800px; margin: 0 auto; }
+    canvas { border: 1px solid var(--border); display: block; max-width: 100%; }
+    #status { margin-top: .5rem; font-size: .85rem; color: var(--muted); min-height: 1.2em; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Stage 01 — Leaf BSP Tree</h1>
+  <div class="links">
+    <a href="../index.html">← Menu</a> &nbsp;·&nbsp;
+    <a href="../docs/01_leaf_tree.md">Doc 01</a> &nbsp;·&nbsp;
+    <a href="02_portals.html">Demo 02 →</a>
+  </div>
+</header>
+
+<div id="wrap">
+  <canvas id="canvas" width="800" height="600"></canvas>
+  <div id="status">Loading…</div>
+</div>
+
+<script type="module">
+  // Stage 1 renders leaves by their WALL SEGMENTS only — filled polygons wait
+  // for portals (doc 02) to supply the missing splitter-line edges.
+  // Each demo renders inline (self-contained); there is no shared render.js.
+  //
+  // Scene selection: ?level=<name> chooses which compiled scene to load,
+  // defaulting to "room". Each scene is one file: levels/<name>.json.
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  const status = document.getElementById("status");
+
+  const scene = new URLSearchParams(location.search).get("level") || "room";
+  const levelUrl = `../levels/${scene}.json`;
+
+  // Distinct colour per leaf via golden-angle spacing on the hue wheel.
+  const leafColor = (i) => `hsl(${(i * 137.5) % 360} 70% 50%)`;
+
+  function message(text) {
+    ctx.save();
+    ctx.fillStyle = getComputedStyle(document.body).color;
+    ctx.globalAlpha = 0.6;
+    ctx.font = "16px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+    ctx.restore();
+  }
+
+  function draw(level) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const leaves = level.leaves ?? [];
+    if (leaves.length === 0) {
+      message(`Scene "${scene}" has no leaves yet — run the Stage-1 compiler.`);
+      status.textContent = `Loaded ${levelUrl}, but leaves[] is empty.`;
+      return;
+    }
+
+    let wallCount = 0;
+    leaves.forEach((leaf, i) => {
+      ctx.strokeStyle = leafColor(i);
+      ctx.lineWidth = 2;
+      for (const [ax, ay, bx, by] of leaf.walls ?? []) {
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.stroke();
+        wallCount++;
+      }
+    });
+    status.textContent =
+      `Scene "${scene}": ${leaves.length} leaves · ${wallCount} wall segments.`;
+  }
+
+  status.textContent = `Loading ${levelUrl}…`;
+  try {
+    const res = await fetch(levelUrl, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    draw(await res.json());
+  } catch (err) {
+    message(`Could not load ${levelUrl}`);
+    status.textContent =
+      `${levelUrl} not found (${err.message}). Run: python compiler/compile.py ${scene}`;
+  }
+</script>
+</body>
+</html>
