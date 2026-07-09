@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flashlight · leaf_portal_2d</title>
+  <style>
+    :root {
+      --bg: #ffffff; --fg: #1a1a1a; --muted: #666; --border: #ccc; --link: #06c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14161a; --fg: #e6e6e6; --muted: #9aa0a6; --border: #444; --link: #6bf;
+      }
+    }
+    body {
+      margin: 0; padding: 1rem 1.25rem; background: var(--bg); color: var(--fg);
+      font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    header { max-width: 800px; margin: 0 auto 1rem; }
+    h1 { font-size: 1.15rem; margin: 0 0 .2rem; }
+    .links { font-size: .85rem; color: var(--muted); }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    #wrap { max-width: 800px; margin: 0 auto; }
+    canvas { border: 1px solid var(--border); display: block; max-width: 100%; cursor: crosshair; }
+    #status { margin-top: .5rem; font-size: .85rem; color: var(--muted); min-height: 1.2em; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Bonus — Flashlight (anti-penumbra as light)</h1>
+  <div class="links">
+    <a href="../index.html">← Menu</a> &nbsp;·&nbsp;
+    <a href="03_pvs.html">← Demo 03</a> &nbsp;·&nbsp;
+    <a href="../docs/04_flashlight.md">Doc 04</a>
+  </div>
+</header>
+
+<div id="wrap">
+  <canvas id="canvas" width="800" height="600"></canvas>
+  <div id="status">Loading…</div>
+</div>
+
+<script type="module">
+  // A point light = a degenerate PVS source. The beam floods leaf → portal →
+  // leaf exactly like the PVS, but the cone is carried as geometry and painted:
+  // through each doorway it is narrowed by the rays from the light to the
+  // doorway's two endpoints (the point-source anti-penumbra), so it spills into
+  // adjacent rooms and dies out in the far ones. Left-click places the light;
+  // the cursor sets its aim and reach. ?level=<name> (default "maze").
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  const status = document.getElementById("status");
+  const W = canvas.width, H = canvas.height;
+
+  const scene = new URLSearchParams(location.search).get("level") || "maze";
+  const levelUrl = `../levels/${scene}.json`;
+  const HALF = 0.42;                       // flashlight cone half-angle (radians)
+
+  // --- tree walk: which leaf contains (x, y), or -1 if solid ------------------
+  function locate(level, x, y) {
+    if (level.nodes.length === 0) return level.leaves.length ? 0 : -1;
+    let ref = { kind: "node", index: 0 };
+    while (ref.kind === "node") {
+      const node = level.nodes[ref.index];
+      const pl = level.planes[node.plane];
+      const s = (x - pl.p[0]) * pl.n[0] + (y - pl.p[1]) * pl.n[1];
+      ref = s >= 0 ? node.front : node.back;
+      if (ref.kind === "solid") return -1;
+    }
+    return ref.index;
+  }
+
+  // leaf outline = wall + portal segments, ordered by angle around the centroid
+  function outline(leaf, portals) {
+    const segs = leaf.walls.slice();
+    for (const pi of leaf.portals) segs.push(portals[pi].seg);
+    const pts = [];
+    for (const [ax, ay, bx, by] of segs) { pts.push([ax, ay]); pts.push([bx, by]); }
+    const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+    const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+    const uniq = [];
+    for (const p of pts) {
+      if (!uniq.some((u) => Math.hypot(u[0] - p[0], u[1] - p[1]) < 1e-6)) uniq.push(p);
+    }
+    uniq.sort((p, q) => Math.atan2(p[1] - cy, p[0] - cx) - Math.atan2(q[1] - cy, q[0] - cx));
+    return uniq;
+  }
+
+  // clip a polygon to the half-plane {(v - p)·n ≥ 0}
+  function clipHalf(poly, p, n) {
+    const out = [];
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      const da = (a[0] - p[0]) * n[0] + (a[1] - p[1]) * n[1];
+      const db = (b[0] - p[0]) * n[0] + (b[1] - p[1]) * n[1];
+      if (da >= 0) out.push(a);
+      if ((da >= 0) !== (db >= 0)) {
+        const t = da / (da - db);
+        out.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]);
+      }
+    }
+    return out;
+  }
+
+  let level = null, outlines = [];
+  let P = [0, 0], sourceLeaf = -1, cursor = [0, 0], aim = 0, range = 200;
+
+  const norm = (a) => {                    // bring angle near the aim direction
+    while (a - aim > Math.PI) a -= 2 * Math.PI;
+    while (a - aim < -Math.PI) a += 2 * Math.PI;
+    return a;
+  };
+
+  // Flood the beam through the portals, collecting the lit polygon per leaf.
+  function flood(leafIdx, aLo, aHi, cameFrom, depth, out) {
+    if (depth > 48 || aHi - aLo <= 1e-4) return;
+    let poly = clipHalf(outlines[leafIdx], P, [-Math.sin(aLo), Math.cos(aLo)]);
+    poly = clipHalf(poly, P, [Math.sin(aHi), -Math.cos(aHi)]);
+    if (poly.length >= 3) out.push(poly);
+    for (const pi of level.leaves[leafIdx].portals) {
+      if (pi === cameFrom) continue;
+      const [ax, ay, bx, by] = level.portals[pi].seg;
+      const a1 = norm(Math.atan2(ay - P[1], ax - P[0]));
+      const a2 = norm(Math.atan2(by - P[1], bx - P[0]));
+      const lo = Math.max(aLo, Math.min(a1, a2));
+      const hi = Math.min(aHi, Math.max(a1, a2));
+      if (hi - lo > 1e-4) {
+        const own = level.portals[pi].leaves;
+        flood(own[0] === leafIdx ? own[1] : own[0], lo, hi, pi, depth + 1, out);
+      }
+    }
+  }
+
+  function tracePath(poly) {
+    ctx.beginPath();
+    ctx.moveTo(poly[0][0], poly[0][1]);
+    for (let k = 1; k < poly.length; k++) ctx.lineTo(poly[k][0], poly[k][1]);
+    ctx.closePath();
+  }
+
+  function render() {
+    ctx.fillStyle = "#0f1117";                       // dark, unlit world
+    ctx.fillRect(0, 0, W, H);
+
+    if (sourceLeaf >= 0) {
+      aim = Math.atan2(cursor[1] - P[1], cursor[0] - P[0]);
+      range = Math.min(900, Math.max(45, Math.hypot(cursor[0] - P[0], cursor[1] - P[1])));
+      const lit = [];
+      flood(sourceLeaf, aim - HALF, aim + HALF, -1, 0, lit);
+
+      const g = ctx.createRadialGradient(P[0], P[1], 0, P[0], P[1], range);
+      g.addColorStop(0.0, "rgba(255,228,150,0.92)");
+      g.addColorStop(0.55, "rgba(255,206,100,0.55)");
+      g.addColorStop(1.0, "rgba(255,190,70,0)");
+      ctx.fillStyle = g;
+      for (const poly of lit) { tracePath(poly); ctx.fill(); }
+    }
+
+    ctx.strokeStyle = "#aeb4bd";                      // walls (with doorway gaps)
+    ctx.lineWidth = 2;
+    for (const leaf of level.leaves)
+      for (const [ax, ay, bx, by] of leaf.walls) {
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      }
+
+    ctx.beginPath(); ctx.arc(P[0], P[1], 5, 0, 7);    // the light itself
+    ctx.fillStyle = sourceLeaf >= 0 ? "#fff3c4" : "#ff6b6b";
+    ctx.fill();
+
+    status.textContent = sourceLeaf >= 0
+      ? `Scene "${scene}": light in leaf ${sourceLeaf} · reach ${Math.round(range)}px — left-click to move it, cursor to aim.`
+      : `Scene "${scene}": that spot is solid — left-click inside a room to place the light.`;
+  }
+
+  function toCanvas(e) {
+    const r = canvas.getBoundingClientRect();
+    return [(e.clientX - r.left) * (W / r.width), (e.clientY - r.top) * (H / r.height)];
+  }
+  canvas.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    P = toCanvas(e);
+    sourceLeaf = locate(level, P[0], P[1]);
+    render();
+  });
+  canvas.addEventListener("mousemove", (e) => { cursor = toCanvas(e); render(); });
+  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  try {
+    const res = await fetch(levelUrl, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    level = await res.json();
+    outlines = level.leaves.map((leaf) => outline(leaf, level.portals));
+    const b = level.leaves[0].bbox;                  // start in the first room
+    P = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2];
+    sourceLeaf = locate(level, P[0], P[1]);
+    cursor = [P[0] + 140, P[1] + 40];
+    render();
+  } catch (err) {
+    ctx.fillStyle = "#888"; ctx.font = "16px system-ui"; ctx.textAlign = "center";
+    ctx.fillText(`Could not load ${levelUrl}`, W / 2, H / 2);
+    status.textContent = `${levelUrl} not found (${err.message}). Run: python compiler/compile.py ${scene}`;
+  }
+</script>
+</body>
+</html>

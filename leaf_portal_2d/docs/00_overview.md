@@ -64,7 +64,7 @@ leaves, portals) exists to make the PVS computable.
  levels/<scene>.json  ──►  demos/     (draw leaves / portals / PVS)
 ```
 
-Four stages, one doc each:
+The core stages, one doc each — plus a bonus:
 
 | Doc                | Stage                                    | Status  |
 |--------------------|------------------------------------------|---------|
@@ -72,11 +72,14 @@ Four stages, one doc each:
 | `01_leaf_tree.md`  | Build the tree; carve convex empty leaves| current |
 | `02_portals.md`    | Find the doorways between empty leaves    | current |
 | `03_pvs.md`        | Through the doorways, compute visibility  | current |
+| `04_flashlight.md` | Bonus — the anti-penumbra as a 2D light   | bonus   |
 | *(optional)*       | View-frustum rejection at render time     | later   |
 
 Frustum rejection (the tutorial's 4th topic) is a *runtime render*
 optimisation, not part of the compiled dataset, so it is optional polish —
-not part of the "creator + PVS" goal.
+not part of the "creator + PVS" goal. The **flashlight bonus**
+(`04_flashlight.md`) does demonstrate it, though: a directional light lights
+exactly `cone ∩ PVS`, i.e. `frustum ∩ PVS`.
 
 ## Coordinate system & primitives
 
