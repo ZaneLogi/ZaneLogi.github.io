@@ -70,7 +70,7 @@ Four stages, one doc each:
 |--------------------|------------------------------------------|---------|
 | `00_overview.md`   | This file — concepts, conventions, seam  | current |
 | `01_leaf_tree.md`  | Build the tree; carve convex empty leaves| current |
-| `02_portals.md`    | Find the doorways between empty leaves    | later   |
+| `02_portals.md`    | Find the doorways between empty leaves    | current |
 | `03_pvs.md`        | Through the doorways, compute visibility  | later   |
 | *(optional)*       | View-frustum rejection at render time     | later   |
 
@@ -134,15 +134,15 @@ leaf. Consequently **every enumerated leaf is empty** — which is precisely
 what portals connect and what the PVS is computed over. Doc 01 shows how this
 falls out of the build for free.
 
-## The JSON seam — `levels/<scene>.json` (v1 target shape)
+## The JSON seam — `levels/<scene>.json`
 
 The browser-friendly stand-in for the tutorial's binary `.bsp`. **One file per
 scene** (`levels/room.json`, `levels/maze.json`, …): the compiler writes one
 from each input wall-set, and a demo loads one via `?level=<scene>` (default
 `room`). The file is **cumulative** — the same scene's file gains `portals`
-then `pvs` as those stages land; there is never a separate per-stage file.
-Fields fill in as stages land (`portals` / `pvs` are empty arrays until their
-stage):
+then `pvs` as those stages land; there is never a separate per-stage file. With
+stages 1–2 in, `planes` / `nodes` / `leaves` / `portals` are all populated; only
+`pvs` is still an empty placeholder, filled by stage 3:
 
 ```json
 {
@@ -165,12 +165,14 @@ stage):
     {
       "walls":   [ [50, 50, 250, 50] ],
       "bbox":    { "min": [50, 50], "max": [250, 150] },
-      "portals": [],
+      "portals": [0],
       "pvs":     []
     }
   ],
 
-  "portals": []
+  "portals": [
+    { "seg": [50, 150, 250, 150], "leaves": [0, 1] }
+  ]
 }
 ```
 
@@ -178,9 +180,10 @@ stage):
 - `nodes[]` — internal nodes. `front.kind ∈ {node, leaf}`,
   `back.kind ∈ {node, solid}`; `index` refers into `nodes[]` or `leaves[]`.
 - `leaves[]` — empty regions. `walls` are the wall fragments that landed in
-  the leaf (each `[ax, ay, bx, by]`); `portals` / `pvs` are index lists filled
-  by stages 2 / 3.
-- `portals[]` — `{ seg: [ax, ay, bx, by], leaves: [i, j] }`, one per doorway.
+  the leaf (each `[ax, ay, bx, by]`); `portals` is the leaf's list of portal
+  indices (stage 2); `pvs` is its visible-leaf index list (stage 3, still empty).
+- `portals[]` — `{ seg: [ax, ay, bx, by], leaves: [front, back] }`, one per
+  doorway (`front` is the leaf on the line's normal side).
 
 ## Folder layout
 

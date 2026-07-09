@@ -28,16 +28,22 @@ SOLID: Child = ("solid", None)
 
 class Leaf:
     """A convex region of empty space: the wall fragments that bound it plus
-    their bounding box. ``portals`` / ``pvs`` are filled by later stages."""
+    their bounding box. ``index`` is assigned during portal generation and
+    ``portals`` holds the indices of the portals on this leaf's border (both set
+    in stage 2); ``pvs`` is filled in stage 3."""
 
-    __slots__ = ("walls", "bbox")
+    __slots__ = ("walls", "bbox", "index", "portals")
 
     walls: list[Wall]
     bbox: tuple[Vec2, Vec2]
+    index: int
+    portals: list[int]
 
     def __init__(self, walls: list[Wall]) -> None:
         self.walls = walls
         self.bbox = bbox_of_walls(walls)
+        self.index = -1
+        self.portals = []
 
 
 class Node:

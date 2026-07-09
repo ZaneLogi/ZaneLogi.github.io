@@ -15,9 +15,10 @@ import json
 import importlib.util
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # geom2d / bsp
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # geom2d / bsp / portals
 import geom2d
 import bsp
+import portals
 
 ROOT = Path(__file__).resolve().parent.parent  # leaf_portal_2d/
 
@@ -36,28 +37,22 @@ def _bbox(bb):
     return {"min": _pt(bb[0]), "max": _pt(bb[1])}
 
 
-def serialize(root, bounds):
-    """Flatten the tree into the ``level.json`` shape (planes / nodes / leaves).
+def serialize(root, bounds, leaves, portal_list):
+    """Flatten the tree into the ``level.json`` shape (planes / nodes / leaves /
+    portals). ``leaves`` is the index-ordered leaf list (each already carrying
+    its ``index`` and ``portals``); ``portal_list`` is the portals from stage 2.
 
     The root is always ``nodes[0]`` for a scene that splits, since it is the
     first node emitted; a single-leaf scene has ``nodes == []``.
     """
-    planes, nodes, leaves = [], [], []
+    planes, nodes = [], []
 
     def emit(child):
         kind, obj = child
         if kind == "solid":
             return {"kind": "solid"}
         if kind == "leaf":
-            index = len(leaves)
-            leaves.append({
-                "walls": [[_r(w.a[0]), _r(w.a[1]), _r(w.b[0]), _r(w.b[1])]
-                          for w in obj.walls],
-                "bbox": _bbox(obj.bbox),
-                "portals": [],
-                "pvs": [],
-            })
-            return {"kind": "leaf", "index": index}
+            return {"kind": "leaf", "index": obj.index}
         # node — reserve its slot before recursing so children index correctly
         index = len(nodes)
         nodes.append(None)
@@ -76,8 +71,17 @@ def serialize(root, bounds):
         "bounds": _bbox(bounds),
         "planes": planes,
         "nodes": nodes,
-        "leaves": leaves,
-        "portals": [],
+        "leaves": [{
+            "walls": [[_r(w.a[0]), _r(w.a[1]), _r(w.b[0]), _r(w.b[1])]
+                      for w in leaf.walls],
+            "bbox": _bbox(leaf.bbox),
+            "portals": leaf.portals,
+            "pvs": [],
+        } for leaf in leaves],
+        "portals": [{
+            "seg": [_r(p.a[0]), _r(p.a[1]), _r(p.b[0]), _r(p.b[1])],
+            "leaves": list(p.owners),
+        } for p in portal_list],
     }
 
 
@@ -102,14 +106,15 @@ def main():
         walls += geom2d.poly(polygon["points"], polygon["facing"])
 
     root = bsp.build_tree(walls)
-    data = serialize(root, scene.BOUNDS)
+    portal_list, leaves = portals.build_portals(root)
+    data = serialize(root, scene.BOUNDS, leaves, portal_list)
 
     out = ROOT / "levels" / f"{name}.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps(data, indent=2))
 
-    print(f"[{name}] {len(data['nodes'])} nodes, {len(data['leaves'])} leaves "
-          f"-> {out.relative_to(ROOT)}")
+    print(f"[{name}] {len(data['nodes'])} nodes, {len(data['leaves'])} leaves, "
+          f"{len(data['portals'])} portals -> {out.relative_to(ROOT)}")
     for point, label in getattr(scene, "PROBES", []):
         leaf = bsp.locate(root, (float(point[0]), float(point[1])))
         print(f"  probe {tuple(point)} ({label}): "

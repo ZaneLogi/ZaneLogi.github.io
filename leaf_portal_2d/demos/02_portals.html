@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>02 — Portals · leaf_portal_2d</title>
+  <style>
+    :root {
+      --bg: #ffffff; --fg: #1a1a1a; --muted: #666; --border: #ccc; --link: #06c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14161a; --fg: #e6e6e6; --muted: #9aa0a6; --border: #444; --link: #6bf;
+      }
+    }
+    body {
+      margin: 0; padding: 1rem 1.25rem; background: var(--bg); color: var(--fg);
+      font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    header { max-width: 800px; margin: 0 auto 1rem; }
+    h1 { font-size: 1.15rem; margin: 0 0 .2rem; }
+    .links { font-size: .85rem; color: var(--muted); }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    #wrap { max-width: 800px; margin: 0 auto; }
+    canvas { border: 1px solid var(--border); display: block; max-width: 100%; }
+    #status { margin-top: .5rem; font-size: .85rem; color: var(--muted); min-height: 1.2em; }
+    .legend { display: inline-flex; gap: 1rem; margin-left: .75rem; }
+    .legend span { display: inline-flex; align-items: center; gap: .35rem; }
+    .swatch { width: 22px; height: 0; border-top: 3px solid; display: inline-block; }
+    .swatch.wall { border-top-style: solid; color: var(--fg); }
+    .swatch.portal { border-top-style: dashed; color: #ff6d00; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Stage 02 — Portals</h1>
+  <div class="links">
+    <a href="../index.html">← Menu</a> &nbsp;·&nbsp;
+    <a href="01_leaf_tree.html">Demo 01</a> &nbsp;·&nbsp;
+    <a href="../docs/02_portals.md">Doc 02</a>
+  </div>
+</header>
+
+<div id="wrap">
+  <canvas id="canvas" width="800" height="600"></canvas>
+  <div id="status">Loading…
+    <span class="legend">
+      <span><i class="swatch wall"></i>wall</span>
+      <span><i class="swatch portal"></i>portal</span>
+    </span>
+  </div>
+</div>
+
+<script type="module">
+  // Stage 2 renders the compiled portals AND finally fills each leaf: its
+  // boundary = wall fragments + portal segments, ordered around the centroid
+  // (the cell is convex). Scene chosen with ?level=<name> (default "room").
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  const status = document.getElementById("status");
+
+  const scene = new URLSearchParams(location.search).get("level") || "room";
+  const levelUrl = `../levels/${scene}.json`;
+
+  const PORTAL_COLOR = "#ff6d00";
+  const leafColor = (i) => `hsl(${(i * 137.5) % 360} 70% 55%)`;
+
+  function message(text) {
+    ctx.save();
+    ctx.fillStyle = getComputedStyle(document.body).color;
+    ctx.globalAlpha = 0.6;
+    ctx.font = "16px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+    ctx.restore();
+  }
+
+  // A leaf's convex outline = its wall segments + its portal segments; collect
+  // the unique endpoints and sort them by angle around the centroid.
+  function leafOutline(leaf, portals) {
+    const segs = leaf.walls.slice();
+    for (const pi of leaf.portals) segs.push(portals[pi].seg);
+    const pts = [];
+    for (const [ax, ay, bx, by] of segs) { pts.push([ax, ay]); pts.push([bx, by]); }
+    const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+    const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+    const uniq = [];
+    for (const p of pts) {
+      if (!uniq.some((u) => Math.hypot(u[0] - p[0], u[1] - p[1]) < 1e-6)) uniq.push(p);
+    }
+    uniq.sort((p, q) => Math.atan2(p[1] - cy, p[0] - cx) - Math.atan2(q[1] - cy, q[0] - cx));
+    return uniq;
+  }
+
+  function draw(level) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const leaves = level.leaves ?? [];
+    const portals = level.portals ?? [];
+    if (leaves.length === 0) {
+      message(`Scene "${scene}" has no leaves yet — run the compiler.`);
+      status.firstChild.textContent = `Loaded ${levelUrl}, but leaves[] is empty. `;
+      return;
+    }
+
+    // 1) filled convex leaves
+    leaves.forEach((leaf, i) => {
+      const poly = leafOutline(leaf, portals);
+      if (poly.length < 3) return;
+      ctx.fillStyle = leafColor(i);
+      ctx.globalAlpha = 0.32;
+      ctx.beginPath();
+      ctx.moveTo(poly[0][0], poly[0][1]);
+      for (let k = 1; k < poly.length; k++) ctx.lineTo(poly[k][0], poly[k][1]);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+
+    // 2) walls (solid, foreground)
+    ctx.strokeStyle = getComputedStyle(document.body).color;
+    ctx.lineWidth = 2.5;
+    for (const leaf of leaves) {
+      for (const [ax, ay, bx, by] of leaf.walls) {
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      }
+    }
+
+    // 3) portals (dashed accent, on top)
+    ctx.strokeStyle = PORTAL_COLOR;
+    ctx.lineWidth = 3;
+    ctx.setLineDash([8, 6]);
+    for (const { seg: [ax, ay, bx, by] } of portals) {
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    status.firstChild.textContent =
+      `Scene "${scene}": ${leaves.length} leaves · ${portals.length} portals. `;
+  }
+
+  status.firstChild.textContent = `Loading ${levelUrl}… `;
+  try {
+    const res = await fetch(levelUrl, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    draw(await res.json());
+  } catch (err) {
+    message(`Could not load ${levelUrl}`);
+    status.firstChild.textContent =
+      `${levelUrl} not found (${err.message}). Run: python compiler/compile.py ${scene} `;
+  }
+</script>
+</body>
+</html>
