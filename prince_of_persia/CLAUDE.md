@@ -359,8 +359,16 @@ KID sprites natively face **LEFT**.
   `collision.js` gained `getTileModif` + the row-above accessors + `canGrab`; `player.js` the
   jump-up/grab/hang logic (through the `world` object) + a `grab_timer` countdown. Full port map +
   verification in `docs/research_collision.md §10`. **Deferred (each reuses this hang machinery):**
-  grab-a-ledge-while-falling (Shift, sets `grab_timer`), climb-down (Down → `climbdown`/seq_68),
-  and the horizontal standing/running jumps.
+  grab-a-ledge-while-falling (Shift, sets `grab_timer`) and climb-down (Down → `climbdown`/seq_68).
+- **[done] Standing (horizontal) jump.** ↑+forward from a standstill → `standing_jump` (seg005.c:687)
+  → `seq_3_standing_jump` (the `standjump` sequence already existed; this **wired the three control
+  paths** that call it — `control_standing` up+forward branch, `control_startrun`, `control_jumpup`; +
+  the `standingJump` helper sets `control_forward = IGNORE`). A ~2.8-tile forward hop that clears a
+  1-tile gap **only from near its edge** — faithful: leap frames 19–25 don't need floor, but frame 26
+  does (`FRAME_NEEDS_FLOOR`) and it checks the tile under the lagging **weight point**, so a takeoff too
+  far back drops into the gap (verified vs the source frame table: flat hop lands +2.8 tiles; edge
+  takeoff clears a 1-tile pit; col-2→col-4-pit falls). **Running jump (↑ while running) still deferred**
+  (`runjump` is a TODO in `control_running` — pulls in the fall setup).
 - **[done] Position/room substrate — faithful (W1+W1b+W2+W3).** A ground-up alignment of the
   position/edge pipeline to SDLPoP, prompted by cross-room climbing (grab a ledge in the next room →
   climb → *fell*). The whole `docs/research_*.md` set (frame_loop / position_room /
@@ -415,6 +423,54 @@ KID sprites natively face **LEFT**.
   inset (clone rests flush at the raw edge; DOS insets ~10 units — the follow-on that matches the DOS
   *rest position*) and the vertical (`control_up`/`down`) latch. Full mechanism + verification in
   `docs/research_collision.md §5c`.
+- **[done] Routine-level-identical collision kernel — the x-bias fix, done right.** The whole
+  kid-vs-environment collision path is now a verbatim port of SDLPoP's own routines (`collision_kernel.js`,
+  new) instead of the old `Char.x`-clamp + raw-tile-edge substitutes. Prompted by the wall-stop **x-bias**
+  (the prince stopped ~6 internal units off the source): rather than patch the one number (which the
+  earlier analysis proved leaves a residual), the whole subsystem was un-substituted so any discrepancy is
+  a mechanical value-diff, not a reasoning exercise (the user's call: "make everything identical, or we
+  don't do this"). Ported as named `// segNNN.c:line` routines over module-level globals mirroring the C:
+  **tile access** (`get_tile` with its side-effect globals `curr_room`/`tile_col`/`curr_tilepos`/
+  `curr_tile2`, `find_room_of_tile`, the char-relative reads incl. `get_tile_infrontof_char` setting the
+  pre-hop `infrontx`); **char box** (`set_char_collision` via `load_frame_to_obj`, `determine_col`,
+  `dx_weight`, `distance_to_edge`); **wall faces** (`get_left/right_wall_xpos` + the `wall_dist_from_left/
+  right[]` tables + `coll_tile_left_xpos = x_bump + TILE_MIDX`, `can_bump_into_gate`, `xpos_in_drawn_room`);
+  the **per-column buffer scan** (`check_collisions`/`get_row_collision_data`/`move_coll_to_prev` + the
+  10-column `curr/above/below/prev_row_coll_*` buffers); the **bump** (`check_bumped`/`check_bumped_look_
+  left/right`/`is_obstacle`/`is_obstacle_at_col`/`bumped`/`bumped_floor`/`bumped_fall`); **edge distance**
+  (`get_edge_distance`/`dist_from_wall_forward`); and the **fall/floor** path (`do_fall`/`land`/`start_fall`/
+  `check_on_floor`/`in_wall`/`check_action`) with the faithful per-context fall sequences
+  (`stepfall`/`jumpfall`/`rjumpfall`/`stepfall2`/`patchfall` = `seq_7/18/21/19/104`, transcribed into
+  `seqtbl.js` with `set_fall` for the forward drift — replacing the old `freefall` collapse + its
+  `fall_x=0` stopgap). `player.js` runs the faithful `play_kid_frame` order (seg000.c:1192) over the kernel;
+  the substitutes (`wallAheadFace`, the `Char.x`-clamp `checkBumped`, `getEdgeDistance`'s raw-edge faces,
+  the local `doFall`/`land`/`startFall`/`checkOnFloor`/`checkAction`) are **deleted**.
+  - **The x-bias, resolved per lesson 6c:** collision now stops the prince at the SOURCE's internal x (the
+    inset face `coll_tile_left_xpos + TILE_MIDX` ± `wall_dist`), and the FLAT view re-derives the view-space
+    offset with a render-only constant **`RENDER_X_BIAS = 6`** (draw the prince 6 internal-x units left, so
+    he reads flush against our flat-drawn walls). Collision faithful; only the *number in our render* is
+    re-expressed. (The wall's collision slab is `+7` on the left face vs `+6` on the right — ~2 screen px —
+    so it's a tweakable constant, not a per-facing formula.)
+  - **Two latent bugs the faithful port exposed** (exactly the "identical routines make bugs obvious"
+    payoff): (1) `makeCharacter` never set `alive`, so the faithful `bumped()` guard `Char.alive < 0` failed
+    and the prince walked *through* walls → fixed with `alive: -1` (SDLPoP's alive sentinel). (2) the kernel
+    cached `drawnRoom`, which went stale on **R restart** / teleport (they set the player's `drawnRoom`
+    without syncing the kernel's) → `xpos_in_drawn_room` skipped the −140 straddle offset → a cross-boundary
+    wall's face computed a room-width off → the bump flung `Char.x` to ~208 (the "emerge on the right" bug)
+    → fixed by reading `drawnRoom` **live** through a `getDrawnRoom` getter (never cached).
+  - **Verified** (deterministic `#debug` stepping, zero console errors): wall bump settles at the inset face
+    (x=177 plain wall / x=64 room-1 boundary wall, not the raw 170/58); falling entry soft-lands; ledge-fall
+    runs the real start-fall frames 102–106 → land; loose-floor → room 2; deep fall ends bounded (no
+    "fall forever"); legitimate horizontal cross (room 2↔3); jump-up→grab→hang→climb; turn; runstop. The
+    render-bias screenshot shows the prince flush at the left wall with collision unchanged.
+  - **Deviations retired** (`research_deviation_ledger.md`): **L1** (`Char.x`-clamp bump detection),
+    **L2** (don't-fall-on-a-wall), **D1** (the buffer scan) are now the faithful routines. **Genuinely
+    out of scope** (separate subsystems, not collision-detection substitutes — same class as char-vs-char):
+    spikes, chompers (`start_chompers` stub + `check_chomped_kid`), HP (`take_hp` — a medium land always
+    survives), mid-fall Shift-grab (`check_grab` stub), feather fall, buttons (`check_press` is loose-only),
+    sword combat / guards. Full map: `docs/research_collision.md §11` + the ledger.
+  - Files: `collision_kernel.js` (new), `player.js`, `playseq.js` (`alive`/`sword` init), `seqtbl.js`
+    (the 5 fall sequences).
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
 
@@ -485,12 +541,35 @@ turns. Each lesson was paid for in bugs:
    existed only because the other did, so each looked individually harmless while
    together they produced a wrong-direction bug (climbing into a wall at room edges).
    Unwinding them later cost a full research pass + rework; the faithful port up front
-   would have been cheaper. Two corollaries: **(a)** prove the entanglement before
+   would have been cheaper. Four corollaries: **(a)** prove the entanglement before
    ripping it out — a quick A/B toggle (clamp on/off) both *confirmed* the fix and
    *surfaced* the companion shortcut before the rework, not mid-way; **(b)** don't offer
    the user short-term "let's stop here / make it work for now" off-ramps on substrate
    code — take the long-term view and port the whole coherent mechanism, deferring only
-   separable *features*, never the substrate.
+   separable *features*, never the substrate; **(c)** *not everything in the source is
+   mechanism.* A quantity expressed in a **view / render space we deliberately don't
+   reproduce** is a **second legitimate deviation** (beyond hardware-only): **re-derive
+   it in our view, don't copy the number.** PoP's `wall_dist_from_left` /
+   `dist_from_wall_forward` insets a wall's collision face ~10 units because the DOS room
+   is drawn **pseudo-3D** (the visible wall face sits inset from the abstract tile
+   boundary); our clone draws the wall **flat** at the tile cell, so the faithful stop is
+   **flush**, and any face offset is re-derived from *our* render — not ported. Keep the
+   collision **logic** faithful (which tile blocks, which side, link-hop, bump/recoil,
+   the control latch); re-express only the **view-space number**. Reading "follow the
+   source" as an all-or-nothing binary *is itself the trap* — it stalled a whole session
+   on this exact x-bias (2026-07-09). The test: *is the number in a coordinate/view space
+   we chose not to reproduce?* If yes, re-derive; if it's mechanism, still follow it.
+7. **The flag-and-wait protocol (binding — this is how corollary 6c gets adjudicated).**
+   "Follow the source, don't simplify" is the firm default. When the user asks for
+   something that looks like it breaks that rule, do **NOT** grind trying to reconcile
+   faithfulness with the request, and do **NOT** silently decide for yourself whether the
+   deviation is "legitimate" — that self-adjudication is exactly what causes the
+   stall / no-response loop (paid for 2026-07-09 on `wall_dist`). Instead: **stop, state
+   in one line "this breaks follow-the-source, specifically X," and WAIT for the user's
+   call.** The assistant *flags* the break; the *user* decides whether to break it (e.g.
+   "yes — it's a view-space thing, do the flat version"). Once the user authorises the
+   deviation, implement it without further agonising. Division of labour: I flag, you
+   rule.
 
 ## Commit style
 

@@ -233,6 +233,14 @@ consumer (chomper) isn't a surprise later.
 
 ## 9. What this means for the rework (pointer to the ledger)
 
+> **DONE 2026-07-10.** Both paths in §0 (the buffer-based wall bump AND the tile-map
+> fall/floor/grab) are now ported **verbatim** as `collision_kernel.js` — this whole doc's
+> "target" is implemented routine-for-routine. The buffer scan (§3–4), `get_left/right_wall_xpos`
+> with the `wall_dist` insets, `is_obstacle`, and the `in_wall` eject are all live. Write-up:
+> `research_collision.md §11`; classification: `research_deviation_ledger.md` (L1/L2/D1 ✅). Only
+> `check_gate_push` (§5) + the fall-grab `check_grab` (§7) + char-vs-char remain, each feature-scoped.
+
+
 - The **fall/floor/grab path already works** in the clone *except* for the
   `curr_col` clamp (a §6 concern, not a buffer concern). Faithful `determine_col`
   (unclamped) fixes cross-room climb here.

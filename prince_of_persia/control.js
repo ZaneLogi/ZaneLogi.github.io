@@ -44,8 +44,9 @@ export function controlKid(ch, c, world) {
   else if (f === 109)                  controlCrouched(ch, c);         // crouch
 }
 
-// control_standing (seg005.c:343): Shift+forward = careful step (safe_step); forward = run, or a
-// step if near a wall (forward_pressed); backward = turn. (Up/Down jumps + crouch are later.)
+// control_standing (seg005.c:343): Shift+forward = careful step (safe_step); forward = run, or a step
+// if near a wall (forward_pressed); forward+up = standing jump; backward = turn; up = jump-up / grab a
+// ledge above. (Down/crouch is still later.)
 function controlStanding(ch, c, world) {
   ch.testing = 0;                     // reaching a stand decision ends any prior test-foot lean
   if (c.shift === HELD) {
@@ -53,11 +54,13 @@ function controlStanding(ch, c, world) {
     else if (c.up === HELD) world.jumpUp();                              // shift+up -> up_pressed (seg005.c:378)
     else if (c.x === FWD && c.forward === HELD) safeStep(ch, c, world);  // shift+forward -> safe_step (seg005.c:383)
   } else if (c.forward === HELD) {
-    forwardPressed(ch, c, world);     // (source: up+forward -> standing_jump; the horizontal jump is deferred, so this just runs)
+    if (c.up === HELD) standingJump(ch, c);   // up+forward from stand -> standing (horizontal) jump (seg005.c:386)
+    else forwardPressed(ch, c, world);
   } else if (c.backward === HELD) {
     backPressed(ch, c);
   } else if (c.up === HELD) {
-    world.jumpUp();                   // up alone -> up_pressed -> check_jump_up (seg005.c:393): the vertical jump / climb
+    if (c.forward === HELD) standingJump(ch, c);   // symmetric (seg005.c:394); c.forward isn't HELD in this branch, so effectively up-only
+    else world.jumpUp();              // up alone -> up_pressed -> check_jump_up (seg005.c:393): the vertical jump / climb
   } else if (c.x === FWD) {
     // seg005.c:401 fall-through: the forward key is still physically HELD but the latch is IGNORE (a
     // prior safe_step disabled auto-repeat). Re-enter forward_pressed; its HELD-gate does nothing near
@@ -90,6 +93,14 @@ function backPressed(ch, c) {
   c.forward = RELEASED;
   c.backward = IGNORE;                                    // control_backward = release_arrows()
   startSeq(ch, 'turn');                                   // seq_5_turn
+}
+
+// standing_jump (seg005.c:687): the standing (horizontal) jump — a forward leap from a standstill.
+// Disables auto-repeat (control_forward = IGNORE) and plays seq_3_standing_jump. (The source also
+// IGNOREs control_up, which the clone doesn't persist — the frame dispatch already gates a re-jump.)
+function standingJump(ch, c) {
+  c.forward = IGNORE;                                     // control_up = control_forward = CONTROL_IGNORE
+  startSeq(ch, 'standjump');                              // seq_3_standing_jump
 }
 
 // safe_step (seg005.c:604): a careful, measured step that lands EXACTLY at the edge ahead. FIRST it
@@ -141,12 +152,23 @@ function controlCrouched(ch, c) {
   // else if (c.forward === HELD) startSeq(ch, 'crouchhop');   // TODO
 }
 
-// control_jumpup (seg005.c:680): during the start-of-jump-up frames (67-69), forward held would
-// convert the jump-up into a standing (horizontal) jump. That horizontal jump is deferred, so this
-// is a no-op for now — the jumpup/highjump sequence self-drives the rise. (Port the standing_jump
-// conversion when the horizontal jumps land.)
-function controlJumpup(ch, c) {}
+// control_jumpup (seg005.c:680): during the start-of-jump-up frames (67-69), a held forward converts the
+// vertical jump-up into a standing (horizontal) jump — a forward leap instead of a straight-up hop when
+// you hold the direction as the jump begins.
+function controlJumpup(ch, c) {
+  if (c.x === FWD || c.forward === HELD) standingJump(ch, c);
+}
 
-// --- stubs: same frame-dispatched shape; port each when the player needs it ---
-function controlStartrun(ch, c) {}  // seg005.c:673 — up+forward->standingjump; else commit to the run cycle
-function controlTurning(ch, c)  {}  // seg005.c — forward held at frame 48 -> turnrun (turn straight into a run)
+// control_startrun (seg005.c:673): during the run-accel frames (1-3), up+forward converts the launch
+// into a standing jump; otherwise the startrun sequence commits to the run cycle on its own.
+function controlStartrun(ch, c) {
+  if (c.up === HELD && c.x === FWD) standingJump(ch, c);
+}
+// control_turning (seg005.c:504): at turn frame 48, if the forward key is RAW-held (control_x == FWD)
+// and neither Shift nor Up is held, turn STRAIGHT INTO A RUN (seq_43_start_run_after_turn) — the smooth
+// turn-into-run — instead of finishing the turn to a stand and plain-running at frame 50. Decided from
+// the RAW key (control_x), not the latched control_forward, so a release before frame 48 (control_x !=
+// FWD) leaves the turn to settle into a stand. (control_y >= RELEASED = "up not held"; down is allowed.)
+function controlTurning(ch, c) {
+  if (c.shift !== HELD && c.up !== HELD && c.x === FWD) startSeq(ch, 'startrunafterturn');  // seq_43
+}

@@ -13,7 +13,7 @@ const ACT_IN_FREEFALL = 4, ACT_BUMPED = 5, ACT_HANG_STRAIGHT = 6;  // _4_in_free
 // Faithful transcription of seqtbl.c:243-263 (running / startrun / run cycle / stand).
 const _b = new SeqBuilder();
 _b.label('running').act(ACT_RUN_JUMP).jmp('runcyc1');
-_b.label('startrun').act(ACT_RUN_JUMP).frame(1).frame(2).frame(3).frame(4)
+_b.label('startrun').act(ACT_RUN_JUMP).label('runstt1').frame(1).frame(2).frame(3).frame(4)
   .dx(8).frame(5).dx(3).frame(6)
   .dx(3).label('runcyc1').frame(7)
   .dx(5).frame(8).dx(1).snd(SND_FOOTSTEP).frame(9).dx(2).frame(10)
@@ -92,6 +92,12 @@ _b.label('runturn').act(ACT_RUN_JUMP).dx(1).frame(53)
 _b.label('runstop').act(ACT_RUN_JUMP).frame(53)
   .dx(2).snd(SND_FOOTSTEP).frame(54).dx(7).frame(55).snd(SND_FOOTSTEP).frame(56)
   .dx(2).frame(49).dx(-2).frame(50).frame(51).frame(52).jmp('stand');
+// startrunafterturn (seq_43_start_run_after_turn, seqtbl.c:451, source LABEL "turnrun"): the SMOOTH
+// turn-INTO-run. control_turning (control.js) fires it at turn frame 48 when the forward key is still
+// held — dx(-1) then jmp(runstt1) drops straight into the start-run (frame 1+), so the prince flows out
+// of the turn into a run without settling to a stand first. NB distinct from `runturn` above (seq_6,
+// the RUNNING about-face) — the near-identical names are the source's own.
+_b.label('startrunafterturn').act(ACT_RUN_JUMP).dx(-1).jmp('runstt1');
 
 // --- jumps + fall: standjump, runjump, freefall + soft/med/hard landings ---
 // standjump (seqtbl.c:381): standing jump — a self-contained rotoscoped arc (the dy at
@@ -116,6 +122,21 @@ _b.label('runjump').act(ACT_RUN_JUMP).snd(SND_FOOTSTEP).frame(34)
 // freefall (seqtbl.c:615): act(4) turns on gravity (fallAccel/fallSpeed run only in this
 // action); the loop just holds the falling frame while fall_y accelerates outside play_seq.
 _b.label('freefall').act(ACT_IN_FREEFALL).label('freefall_loop').frame(106).jmp('freefall_loop');
+// start-fall sequences (seqtbl.c:491-524): start_fall picks one by the frame it fell from; each
+// plays the start-fall frames 102-105 then set_fall(fall_x, fall_y) hands off to freefall. fall_x
+// gives the forward DRIFT — a running fall carries forward. The feather-fall variants (stepfloat)
+// are omitted: no feather potion is in scope, so jmp_if_feather never branches (the non-feather
+// path is always taken). Seq map: seq_7=stepfall, seq_18=jumpfall, seq_19=stepfall2, seq_21=rjumpfall,
+// seq_104=patchfall (seqtbl.c:205 offsets table). ACT_IN_MIDAIR runs check_grab at frames 102-105.
+_b.label('stepfall').act(ACT_IN_MIDAIR).dx(1).dy(3)                       // seq_7_fall (stand/run/step/crouch)
+  .label('fall1').frame(102).dx(2).dy(6).frame(103).dx(-1).dy(9).frame(104).dy(12).frame(105)
+  .dx(-2).setFall(1, 15).jmp('freefall');
+_b.label('stepfall2').dx(1).jmp('stepfall');                             // seq_19_fall (run frame 13 / hangdrop)
+_b.label('patchfall').dx(-1).dy(-3).jmp('fall1');                        // seq_104 (start fall in front of a wall)
+_b.label('jumpfall').act(ACT_IN_MIDAIR).dx(1).dy(3).frame(102).dx(2).dy(6).frame(103)   // seq_18 (standing-jump fall)
+  .dx(1).dy(9).frame(104).dx(2).dy(12).frame(105).setFall(2, 15).jmp('freefall');
+_b.label('rjumpfall').act(ACT_IN_MIDAIR).dx(1).dy(3).frame(102).dx(3).dy(6).frame(103)  // seq_21 (running-jump fall)
+  .dx(2).dy(9).frame(104).dx(3).dy(12).frame(105).setFall(3, 15).jmp('freefall');
 // softland (seqtbl.c:916): soft land (fall_y<22) — touch down (107/108) then hold the
 // crouch (109) in a self-loop; the driver fires standup to recover.
 _b.label('softland').act(ACT_BUMPED).knockDown().dx(1).frame(107)

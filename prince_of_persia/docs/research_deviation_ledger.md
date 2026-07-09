@@ -20,6 +20,18 @@ Clone files: `player.js`, `collision.js`, `control.js`, `seqtbl.js`,
 `playseq.js`. The clone's own implementation notes live in `research_collision.md`
 (unchanged by this research).
 
+> **UPDATE 2026-07-10 — the collision-detection substitutes are GONE.** The whole
+> kid-vs-environment collision path was un-substituted into a routine-level-identical
+> port (`collision_kernel.js`), so **L1** (`Char.x`-clamp bump detection), **L2**
+> (don't-fall-on-a-wall), and **D1** (the per-column buffer scan) are no longer
+> substitutes — they are now the source's own routines. The wall-face **x-bias**
+> (the `wall_dist`/`TILE_MIDX` inset) is resolved the lesson-6c way: collision is
+> faithful (stops at the source's internal x), and the flat view re-derives the
+> view-space offset with a render-only `RENDER_X_BIAS = 6`. What's left un-ported is
+> only genuinely-separate *subsystems* (spikes / chompers / HP / mid-fall grab /
+> feather / buttons / sword / guards), not collision-detection stand-ins. Full write-up:
+> `research_collision.md §11` + the resolved rows marked ✅ below.
+
 ---
 
 ## 1. WRONG-DIRECTION PATCHES — the substrate rework  ✅ IMPLEMENTED 2026-07-07
@@ -110,8 +122,8 @@ crossings, the falling entry.
 
 | # | clone substitute | source mechanism | why keeping is right |
 |---|---|---|---|
-| L1 | `checkBumped` detects walls by clamping `Char.x` to the wall face | per-column collision **buffers** (`check_collisions`/`get_row_collision_data` → `is_obstacle_at_col`, edge-triggered) — `research_collision_detection.md §3–4` | the `Char.x` stand-in reproduces the visible bump for every shipped case; the buffer's extra reach (multi-row, char-vs-char) isn't exercised until guards/chompers. `research_collision.md §5b`. |
-| L2 | `checkOnFloor` "don't fall on a wall" | `in_wall()` sideways eject (seg006.c:1057) | a wall is solid, not a hole — the substitute yields the same "you don't fall through a wall" without the eject animation, which no shipped case needs |
+| ~~L1~~ ✅ | `checkBumped` detects walls by clamping `Char.x` to the wall face | per-column collision **buffers** (`check_collisions`/`get_row_collision_data` → `is_obstacle_at_col`, edge-triggered) — `research_collision_detection.md §3–4` | **RESOLVED 2026-07-10 — now the faithful buffer scan in `collision_kernel.js` (§11).** (Was: the `Char.x` stand-in reproduced the visible bump for shipped cases; un-substituted with the whole kernel.) |
+| ~~L2~~ ✅ | `checkOnFloor` "don't fall on a wall" | `in_wall()` sideways eject (seg006.c:1292) | **RESOLVED 2026-07-10 — `check_on_floor` now calls the faithful `in_wall()` eject (§11).** |
 | L3 | neighbour **slivers** in the margins | `xpos_in_drawn_room` straddle draw | cosmetic; makes cross-boundary walls visible. (Promoted to the rework only if W1–W3 expose a straddle artifact — see §1.) |
 | L4 | `load_frame_to_obj` folded into `draw()` | an explicit spine step | pure rendering placement; identical result |
 | L5 | no pre-control `determine_col` (only post-`playSeq`) | two `determine_col`s per tick (seg000.c:1194/1209) | control reads last-tick's `curr_col`; the drift is sub-tile and unobservable in shipped moves |
@@ -122,7 +134,7 @@ crossings, the falling entry.
 
 | # | not ported | owning feature | on-ramp already in place |
 |---|---|---|---|
-| D1 | `check_collisions`/`get_row_collision_data` (buffer scan) | multi-row bumps, char-vs-char (guards), chomper | `bumped*` dispatch is faithful; only the *scan* is stubbed |
+| ~~D1~~ ✅ | `check_collisions`/`get_row_collision_data` (buffer scan) | multi-row bumps, char-vs-char (guards), chomper | **PORTED 2026-07-10** — the full buffer scan is now in `collision_kernel.js` (§11); the multi-row band + per-column room are live (char-vs-char still needs `bump_into_opponent`, a separate subsystem) |
 | D2 | `check_grab` (Shift fall-grab, seq_15) | grab-a-ledge-while-falling | `grab_timer` field + countdown wired; `canGrab` ported |
 | D3 | `down_pressed` climb-down path (seq_68) | climb down | reuses the whole hang machinery from this session |
 | ~~D4~~ ✅ | `can_climb_up`'s `seq_73` (`climbfail`, climb onto a closed gate/mirror/chomper) | gate climb | **PORTED 2026-07-07** — `climbfail` transcribed; `canClimbUp` picks it per `seg005.c:840` |

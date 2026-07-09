@@ -34,6 +34,8 @@ export function makeCharacter(opts = {}) {
     charid: 0, frame: 0, action: 0, curr_seq: 0, curr_row: 0,
     x: opts.x ?? 0, y: opts.y ?? 0, direction: opts.direction ?? DIR_RIGHT,
     fall_x: 0, fall_y: 0, repeat: 0,   // Char.repeat — gates the ledge test-foot (safe_step, seg005.c:609)
+    sword: 0,                          // sword_0_sheathed (the kid never draws; the kernel guards on this)
+    alive: -1,                         // SDLPoP sentinel: alive == -1, dead == 0 (bumped() guards on Char.alive < 0)
     grab_timer: 0,                     // set to 12 when grabbing a ledge mid-fall; blocks climb-up until it counts down (seg006.c:1405)
     testing: 0,                        // clone-only: true during `testfoot` (the peer-over lean must not fall/bump)
   };

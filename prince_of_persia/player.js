@@ -20,13 +20,19 @@ import { FRAME_TABLE_KID } from './res/frame_table_kid.js';
 import { LEVEL1 } from './res/level1.js';
 import { makeCharacter, startSeq, playSeq, fallAccel, fallSpeed, charDxForward,
          DIR_RIGHT, DIR_LEFT, ACT_IN_MIDAIR, ACT_IN_FREEFALL } from './playseq.js';
-import { getTile, getTileModif, tileIsFloor, wallType, tileDivMod, tileDivModM7, standX,
-         Y_LAND, SCREENSPACE_X, TILE_SIZEX, TILE_RIGHTX, ROOM_XSPAN, ROOM_YSPAN, TILE_WALL,
+import { getTile, getTileModif, tileIsFloor, wallType, tileDivMod, standX,
+         Y_LAND, SCREENSPACE_X, TILE_SIZEX, ROOM_XSPAN, ROOM_YSPAN, TILE_WALL,
          DIR_FRONT, getTileAtChar, getTileAboveChar, getTileFrontAboveChar, getTileBehindAboveChar,
-         getTileBehindChar, canGrab, distanceToEdge, yToRowMod4,
-         EDGE_WALL, EDGE_FLOOR, EDGE_CLOSER } from './collision.js';
+         getTileBehindChar, canGrab, distanceToEdge, yToRowMod4, EDGE_WALL } from './collision.js';
 import { controlKid, makeControl, HELD, RELEASED, FWD, NONE, BACK } from './control.js';
 import { makeTrobs, processTrobs, makeLooseFall, TILE_LOOSE } from './trob.js';
+// The routine-level-identical collision kernel (seg004.c/seg006.c). Replaces the old Char.x-clamp
+// substitute: determine_col / set_char_collision / the per-column buffer scan (check_collisions) /
+// the bump dispatch (check_bumped) / get_edge_distance all run the source's own arithmetic, so the
+// wall face is the faithful inset (coll_tile_left_xpos + TILE_MIDX ± wall_dist), not the raw tile edge.
+import { bindKernel, setLevel as kSetLevel,
+         determine_col, load_frame_to_obj, set_char_collision, check_collisions,
+         check_bumped, check_action, get_edge_distance, edge_type } from './collision_kernel.js';
 
 // Frame flags (types.h:379-381): FRAME_WEIGHT_X = low 5 bits, FRAME_NEEDS_FLOOR = 0x40.
 const FRAME_WEIGHT_X = 0x1F, FRAME_NEEDS_FLOOR = 0x40;
@@ -42,7 +48,7 @@ const TILE_DOORTOP_FLOOR = 7, TILE_DOORTOP = 12;
 // restoring every loose tile. trobs = the active transient-object list (loose floors only).
 let level = structuredClone(LEVEL1);
 const trobs = makeTrobs();
-function resetLevel() { level = structuredClone(LEVEL1); trobs.list = []; }
+function resetLevel() { level = structuredClone(LEVEL1); trobs.list = []; kSetLevel(level); }  // re-point the kernel at the fresh clone
 const cv = document.getElementById('stage');
 const ctx = cv.getContext('2d');
 const hud = document.getElementById('hud');
@@ -80,6 +86,16 @@ function applyZoom() {
 const screenX = (ix) => ROOM_X0 + (ix - SCREENSPACE_X) * sx;
 const screenY = (iy) => ROOM_Y0 + (iy - Y_LAND[0]) * sy;
 
+// RENDER-ONLY view-space correction (does NOT touch collision — CLAUDE.md lesson 6c). The kernel
+// now stops the prince at the SOURCE's internal x, i.e. at the wall's INSET collision face
+// (coll_tile_left_xpos + TILE_MIDX), which the DOS engine draws flush because its walls are drawn
+// PSEUDO-3D (the visible face sits inset from the abstract tile cell). Our view draws walls FLAT at
+// the tile cell, so the faithful stop leaves the prince ~6 internal units off the flat wall. We
+// re-derive that offset for OUR view by drawing the prince 6 internal-x units left of his true x —
+// purely cosmetic, collision is unchanged. (Facing into a wall this reads flush; the opposite-face
+// case is ~1 unit different — negligible at this scale. Tweak here if the eye wants it.)
+const RENDER_X_BIAS = 6;
+
 let tint = '#e0d4a8', paused = false;   // warm cream — the prince reads clearly on the dark room
 let sheet = null;
 
@@ -112,103 +128,22 @@ const spriteOf = (frame) => {
   return image === 255 ? null : sheet.get(401 + image);
 };
 
-// --- collision physics (ported seg005.c / seg006.c) -------------------------------
-// determine_col (seg006.c:122): Char.curr_col is DERIVED from Char.x each frame, taken at
-// the frame's weight point (dx_weight, seg006.c:547).
+// --- collision physics: now the routine-level-identical kernel (collision_kernel.js) ----
+// determine_col / set_char_collision / check_collisions / check_bumped / get_edge_distance all run
+// in the kernel over the source's own global state. Kept here: dx_weight (the weight point, for the
+// control-phase jump/grab pre-positioning) and edgeDist() — a thin adapter turning the kernel's
+// get_edge_distance (returns distance, sets the module edge_type) into the { edgeType, distance }
+// shape control.js + the jump code read.
 function dxWeight(ch) {
   const [, , frameDx, , flags] = FRAME_TABLE_KID[ch.frame];
   return charDxForward(ch, frameDx - (flags & FRAME_WEIGHT_X));
 }
-function determineCol(ch) {
-  // FAITHFUL (seg006.c:122): curr_col is UNCLAMPED. At/across a room edge it is legitimately -1 or
-  // 10, and every get_tile_at_char / get_tile_infrontof_char link-hops into the neighbour room to
-  // read the correct tile (collision.js getTile). The source clamps only the collision-SCAN bounds
-  // (char_col_left/right in set_char_collision), never curr_col — the two are distinct
-  // (research_position_room.md §3). Consumers that needed the old clamp were themselves shortcuts
-  // (the front-only getEdgeDistance); those are ported faithfully so the unclamped col is correct.
-  ch.curr_col = tileDivModM7(dxWeight(ch));
-}
+function edgeDist() { const distance = get_edge_distance(); return { edgeType: edge_type, distance }; }
 
-// Does a wall of this wall_type block the char's facing direction?
-//   wall_type 1 = wall at right, 2 = at left, 3 = obstacle at left, 4 = both sides.
-function wallBlocksFacing(wt, facingRight) {
-  if (wt === 4) return true;
-  return facingRight ? (wt === 1) : (wt === 2 || wt === 3);
-}
-
-// can_bump_into_gate (seg004.c:373): a gate obstructs only while its collision height (modifier>>2)+6
-// is below the character — a closed/low gate blocks, a RAISED gate (high modifier) lets him walk
-// under. char_height is the current frame's sprite height (image->h, seg006.c:1019 = MaskSprite.h).
-function canBumpIntoGate(ch, modif) {
-  const sp = spriteOf(ch.frame);
-  return ((modif >> 2) + 6) < (sp ? sp.h : 0);
-}
-
-// wallTypeAt: wall_type at (room,col,row) — but an OPEN gate reads as NO wall (0). The source folds
-// this into is_obstacle (seg004.c:234) and dist_from_wall_forward (seg004.c:589), which short-circuit
-// an open gate to passable; centralized here so wallAheadFace + getEdgeDistance stay in agreement. A
-// CLOSED gate keeps wall_type 1, so for level 1 (all gates static/closed) this leaves behaviour intact.
-function wallTypeAt(ch, room, col, row) {
-  const t = getTile(level, room, col, row);
-  if (t === 4 /*gate*/ && !canBumpIntoGate(ch, getTileModif(level, room, col, row))) return 0;
-  return wallType(t);
-}
-
-// --- sub-tile wall collision, Char.x-based (§5b: Char.x detection feeds the bump below) --------
-// Char.x IS the char's leading edge in the facing direction (set_char_collision, seg006.c:1021:
-// char_x_right = Char.x facing right, char_x_left = Char.x facing left). So working in Char.x
-// (not the weight-point curr_col) gives sub-tile wall approach that's symmetric and stable.
-//
-// wallAheadFace(ch): the internal-x the leading edge can advance to before a blocking wall in
-// the facing direction — the wall's near face — or null if no wall ahead. Keyed off the LEADING
-// EDGE column `tileDivMod(Char.x)`, NOT the weight-point curr_col: at a wall the weight point
-// lags ~10 units behind and can sit in the wall while the edge is safely past it (facing away),
-// so a curr_col-based test mis-fires. The wall column is the edge's own column if a fast frame
-// overshot the edge into it, else the next column ahead; the limit is that column's near edge.
-function wallAheadFace(ch) {
-  const facingRight = ch.direction >= DIR_RIGHT;
-  const isWall = (col) => wallBlocksFacing(wallTypeAt(ch, ch.room, col, ch.curr_row), facingRight);
-  const edgeCol = tileDivMod(ch.x);                       // column of the leading edge (Char.x)
-  let wallCol;
-  if (isWall(edgeCol)) wallCol = edgeCol;                 // edge overshot INTO the wall
-  else { wallCol = facingRight ? edgeCol + 1 : edgeCol - 1; if (!isWall(wallCol)) return null; }
-  return facingRight ? (SCREENSPACE_X + wallCol * TILE_SIZEX)          // wall's LEFT edge
-                     : (SCREENSPACE_X + (wallCol + 1) * TILE_SIZEX);   // wall's RIGHT edge
-}
-
-// get_edge_distance (seg004.c:378): the sub-tile distance to the edge ahead + its type — the input
-// to the safe-step decision (control.js). FAITHFUL structure: check the char's OWN tile FIRST
-// (get_tile_at_char, seg004.c:383), then the tile in FRONT (get_tile_infrontof_char, seg004.c:400).
-// The own-tile-first check is load-bearing with the unclamped curr_col: flush against a boundary
-// wall the char's own column IS -1/10, and get_tile link-hops it to the ADJACENT wall — so the
-// distance is 0 and forward_pressed safe-steps flush. (The old front-only shortcut read curr_col+
-// facing = -2 at a boundary → the wrong wall → run → re-bump oscillation. research_deviation_ledger
-// W1b.) A wall gives distance-to-its-near-face; a floor gives a full step (11); an empty tile ahead
-// = a LEDGE (distance to the drop). Gate/doortop/loose/closer/sword/potion branches out of scope.
-function getEdgeDistance(ch) {
-  determineCol(ch);                                     // seg004.c:380: fresh (unclamped) curr_col
-  const facingRight = ch.direction >= DIR_RIGHT;
-  // seg004.c:383-397 — the char's OWN tile first (its column is -1/10 when flush at a room edge).
-  if (wallTypeAt(ch, ch.room, ch.curr_col, ch.curr_row) !== 0) {   // gate-aware: an OPEN gate is no wall
-    const face = facingRight ? (SCREENSPACE_X + ch.curr_col * TILE_SIZEX)          // wall's LEFT edge
-                             : (SCREENSPACE_X + (ch.curr_col + 1) * TILE_SIZEX);   // wall's RIGHT edge
-    const distance = Math.abs(face - ch.x);
-    return distance <= TILE_RIGHTX ? { edgeType: EDGE_WALL, distance }
-                                   : { edgeType: EDGE_FLOOR, distance: 11 };
-  }
-  // seg004.c:400 — else the tile directly in front.
-  const frontCol = ch.curr_col + (facingRight ? 1 : -1);
-  const front = getTile(level, ch.room, frontCol, ch.curr_row);          // hops the room link if off-room
-  if (wallTypeAt(ch, ch.room, frontCol, ch.curr_row) !== 0) {            // gate-aware (front): open gate -> passable
-    const face = facingRight ? (SCREENSPACE_X + frontCol * TILE_SIZEX)          // wall's LEFT edge
-                             : (SCREENSPACE_X + (frontCol + 1) * TILE_SIZEX);   // wall's RIGHT edge
-    const distance = Math.abs(face - ch.x);
-    return distance <= TILE_RIGHTX ? { edgeType: EDGE_WALL, distance }
-                                   : { edgeType: EDGE_FLOOR, distance: 11 };  // wall a full tile+ off -> step as floor
-  }
-  if (tileIsFloor(front)) return { edgeType: EDGE_FLOOR, distance: 11 };      // floor in front -> full step
-  return { edgeType: EDGE_CLOSER, distance: distanceToEdge(ch, dxWeight(ch)) }; // empty in front = a ledge
-}
+// (wallBlocksFacing / canBumpIntoGate / wallTypeAt / wallAheadFace / getEdgeDistance — the
+// Char.x-clamp + raw-tile-edge substitutes — are GONE. Their faithful counterparts (is_obstacle,
+// can_bump_into_gate, get_left/right_wall_xpos, the buffer scan, dist_from_wall_forward,
+// get_edge_distance) now live in collision_kernel.js and run the source's inset wall-face math.)
 
 // --- vertical jump-up (ported seg005.c): pressing Up while standing -----------------------
 // These run in the CONTROL phase (called from controlKid via the world object), so they only
@@ -237,7 +172,7 @@ function checkJumpUp(ch) {
 // (distance < 4), then read the tile one row above at the weight column: neither wall nor floor
 // there -> open air above -> highjump; a wall or floor above -> jump into the ceiling -> jumpup.
 function jumpUp(ch) {
-  const { edgeType, distance } = getEdgeDistance(ch);
+  const { edgeType, distance } = edgeDist();
   if (distance < 4 && edgeType === EDGE_WALL) ch.x = charDxForward(ch, distance - 3);  // seg005.c:738
   const col = tileDivMod(dxWeight(ch) - 6);            // back_delta_x(0)=0 -> dx_weight()-6 (seg005.c:781)
   const above = getTile(level, ch.room, col, ch.curr_row - 1);
@@ -249,8 +184,8 @@ function jumpUp(ch) {
 // pre-position Char.x by the distance to the ledge's near edge.
 function grabUpWithFloorBehind(ch) {
   const distance = distanceToEdge(ch, dxWeight(ch));            // distance_to_edge_weight
-  const { edgeType, distance: edgeDist } = getEdgeDistance(ch);
-  if (distance < 4 && edgeDist < 4 && edgeType !== EDGE_WALL) {
+  const { edgeType, distance: edist } = edgeDist();
+  if (distance < 4 && edist < 4 && edgeType !== EDGE_WALL) {
     ch.x = charDxForward(ch, distance);
     startSeq(ch, 'jumphangMed');                                // seq_8
   } else {
@@ -273,7 +208,7 @@ function jumpUpOrGrab(ch) {
   if (distance < 6) { jumpUp(ch); return; }
   if (!tileIsFloor(getTileBehindChar(level, ch))) { grabUpNoFloorBehind(ch); return; }
   ch.x = charDxForward(ch, distance - TILE_SIZEX);              // go back a bit (seg005.c:720)
-  determineCol(ch);                                             // load_fram_det_col: re-derive curr_col
+  determine_col();                                             // load_fram_det_col: re-derive curr_col
   grabUpWithFloorBehind(ch);
 }
 
@@ -317,124 +252,15 @@ function hangAgainstWall(ch) {
   if (!tileIsFloor(getTileAboveChar(level, ch))) hangFall(ch);
 }
 
-// set_char_collision (seg006.c:1012): the character's collision box in internal-x. The FORWARD
-// edge stays Char.x — char_x_right_coll = Char.x facing right, char_x_left_coll = Char.x facing
-// left, on the frameDx==0 contact frames — so it does NOT change the forward wall stop (that's
-// still keyed off Char.x below). char_width_half = (sprite width + 1)/2 gives the box only its
-// BACKWARD extent, which the deferred trailing-edge / guard collision would use (§5b writeup).
-// Anchored at the drawn x (char_dx_forward(frame.dx) = obj_x/2 + 58) so it tracks the sprite.
-function setCharCollision(ch) {
-  const [, , frameDx, , flags] = FRAME_TABLE_KID[ch.frame];
-  const sp = spriteOf(ch.frame);
-  const wHalf = sp ? (sp.w + 1) >> 1 : 0;               // char_width_half (0 for a blank frame, seg006.c:1015)
-  let xl = charDxForward(ch, frameDx);                  // char_x_left = char_dx_forward(frame.dx)
-  if (ch.direction >= DIR_RIGHT) xl -= wHalf;           // facing right (seg006.c:1023)
-  let xr = xl + wHalf;
-  if (flags & 0x20 /*FRAME_THIN*/) { xl += 4; xr -= 4; } // seg006.c:1038
-  ch.char_x_left_coll = xl; ch.char_x_right_coll = xr; ch.char_width_half = wHalf;
-}
+// (set_char_collision, the bump DETECTION [check_collisions/get_row_collision_data + the per-column
+// buffers], and the bumped/bumped_floor/bumped_fall dispatch are now in collision_kernel.js — the
+// faithful buffer scan replaces the old Char.x-clamp, and the wall face carries the wall_dist inset.)
 
-// --- the bump: wall collision with the faithful recoil (§5b) ------------------------
-// We substitute the source's per-column collision buffers (check_collisions/get_row_collision_data)
-// with the Char.x DETECTION below — what that defers is written up in research_collision.md §5b —
-// but on top of it run the faithful bumped/bumped_floor/bumped_fall dispatch so a wall hit plays
-// the real recoil (seq_47_bump) or tips into a fall (seq_45_bumpfall), instead of a dead stop.
-
-// bumped_fall (seg004.c:298): bumped a wall with no floor to catch him -> tip into a fall.
-function bumpedFall(ch) {
-  if (ch.action === ACT_IN_FREEFALL) { ch.fall_x = 0; return; }   // already falling: just kill x-drift
-  ch.x = charDxForward(ch, -4);                                   // skid back off the wall
-  startSeq(ch, 'bumpfall'); playSeq(ch);                          // seq_45_bumpfall -> freefall
-}
-
-// bumped_floor (seg004.c:311): grounded wall bump. Floor far below (>=15) -> it's really a fall;
-// else seat the feet and pick the hard bump (jump/fall-onset frames) or the normal recoil.
-function bumpedFloor(ch) {
-  if (Y_LAND[ch.curr_row + 1] - ch.y >= 15) { bumpedFall(ch); return; }
-  ch.y = Y_LAND[ch.curr_row + 1];
-  if (ch.fall_y >= 22) { ch.x = charDxForward(ch, -5); return; }  // heavy-landing bump (no recoil seq)
-  ch.fall_y = 0;
-  const f = ch.frame;
-  const hard = (f === 24 || f === 25 || (f >= 40 && f < 43) || (f >= 102 && f < 107));
-  startSeq(ch, hard ? 'hardbump' : 'bump');                       // seq_46_hardbump / seq_47_bump
-  playSeq(ch);
-}
-
-// checkBumped (replaces clampToWall): detect the forward edge (Char.x) passing the wall face this
-// tick, pin Char.x to the face (= bumped()'s push-back, seg004.c:266), then dispatch the recoil by
-// the char's floor state. Skips a turn (check_collisions returns early on action 7, seg004.c:44),
-// so the turn's own dx carries him off the face. The recoil (seq_47's dx(-4)) leaves him ~4 units
-// back; forward_pressed then safe_steps him flush to the wall (step4), no re-run/bump oscillation.
-function checkBumped(ch) {
-  if (ch.action === 7 /*actions_7_turn*/) return;
-  if (ch.testing) return;               // test-foot: the peer-over lean reaches over the edge on purpose
-  const face = wallAheadFace(ch);
-  if (face === null) return;
-  const past = ch.direction >= DIR_RIGHT ? (ch.x > face) : (ch.x < face);
-  if (!past) return;
-  ch.x = face;                                   // bumped(): pin Char.x to the wall face (seg004.c:269)
-  determineCol(ch);                              // curr_col at the pinned x, for the floor decision
-  // bumped()'s floor test uses the tile the char STANDS on — the wall's neighbour on his side, NOT
-  // the wall itself (seg004.c:270-288 steps tile_col off the wall by ±1). Without this, a bump where
-  // curr_col lands on the wall reads tile_is_floor(wall)=false and wrongly plays bumpfall.
-  let col = ch.curr_col;
-  if (wallType(getTile(level, ch.room, col, ch.curr_row)) !== 0)
-    col += (ch.direction >= DIR_RIGHT) ? -1 : +1;   // facing right: char is left of the wall; left: right
-  if (ch.action !== ACT_IN_FREEFALL && tileIsFloor(getTile(level, ch.room, col, ch.curr_row)))
-    bumpedFloor(ch);                             // grounded -> recoil (seq_47/46)
-  else
-    bumpedFall(ch);                              // no floor -> tip into a fall (seq_45)
-  determineCol(ch);                              // re-derive at the recoiled position for the rest of the tick
-}
-
-// land (seg005.c:114): clamp feet to the floor line, pick the landing by impact speed
-// (soft <22 / medium <33 / hard >=33, seg005.c:174), then emit its first frame.
-function land(ch) {
-  ch.y = Y_LAND[ch.curr_row + 1];
-  const fy = ch.fall_y;
-  startSeq(ch, fy < 22 ? 'softland' : fy < 33 ? 'medland' : 'hardland');
-  playSeq(ch);
-  ch.fall_y = 0;                           // seg005.c:216
-}
-
-// do_fall (seg005.c:37): once the feet reach curr_row's floor line, land on a floor or
-// descend to the next row (inc_curr_row); otherwise keep falling.
-function doFall(ch) {
-  if (Y_LAND[ch.curr_row + 1] > ch.y) return;   // feet haven't reached the floor line yet
-  const t = getTile(level, ch.room, ch.curr_col, ch.curr_row);
-  if (tileIsFloor(t)) land(ch);
-  else ch.curr_row++;                             // inc_curr_row (seg006.c:2152)
-}
-
-// start_fall (seg006.c:1099): drop off a ledge — descend a row, switch to freefall.
-function startFall(ch) {
-  ch.curr_row++;                                  // inc_curr_row
-  startSeq(ch, 'freefall');                       // seq_7_fall (general grounded case)
-  playSeq(ch);
-  determineCol(ch);
-}
-
-// check_on_floor (seg006.c:1046): for a grounded frame that needs a floor, start a fall if
-// the tile under the char isn't a floor — EXCEPT a wall. The source ejects from a wall
-// (`if (get_tile_at_char() == tiles_20_wall) in_wall()`) before the floor test; a wall is a
-// solid obstacle, not a hole, so you never fall *through* one. The clone's stand-in: if the
-// weight-point column reads a wall (a fast run frame can overshoot the leading edge into a
-// wall column for a tick), don't fall — clampToWall pins the leading edge at the face.
-function checkOnFloor(ch) {
-  if (ch.testing) return;               // test-foot: the weight stays on the floor; the lean must not fall
-  if (!(frameFlags(ch.frame) & FRAME_NEEDS_FLOOR)) return;
-  const t = getTileAtChar(level, ch);
-  if (wallType(t) !== 0) return;                  // in/against a wall (solid) — not a hole
-  if (!tileIsFloor(t)) startFall(ch);
-}
-
-// check_action (seg006.c:909): the collision hub — freefall lands/descends via do_fall,
-// a grounded frame checks its floor.
-function checkAction(ch) {
-  if (ch.action === ACT_IN_FREEFALL) doFall(ch);
-  else if (ch.action === ACT_IN_MIDAIR) { /* frames 102..105 check_grab — not modeled */ }
-  else checkOnFloor(ch);
-}
+// (land / do_fall / start_fall / check_on_floor / check_action — the fall/floor collision
+// routines — are now the identical bodies in collision_kernel.js. start_fall picks the faithful
+// per-context fall sequence [stepfall/jumpfall/rjumpfall + set_fall drift, seqtbl.js] instead of
+// the old freefall collapse; check_on_floor ejects from a wall via in_wall instead of the "don't
+// fall on a wall" stand-in. The old fall_x=0 stopgap is gone — set_fall re-establishes it faithfully.)
 
 // check_press (seg006.c:1683): the loose-floor (and, in the full game, button) trigger.
 // For a grounded / turning / bumped actor on a frame that needs a floor, read the tile
@@ -459,8 +285,8 @@ function gotoRoom(nextRoom, dir) {
   else if (dir === 'down') ch.y -= ROOM_YSPAN;   // 189
   else if (dir === 'up')   ch.y += ROOM_YSPAN;
   if (dir === 'up' || dir === 'down') ch.curr_row = yToRowMod4(ch.y);
-  else determineCol(ch);                         // re-derive curr_col in the new room
-  drawnRoom = ch.room;                           // redraw_screen(1) — the room on screen swaps
+  else determine_col();                          // re-derive curr_col in the new room
+  drawnRoom = ch.room;                           // redraw_screen(1) — the room on screen swaps (kernel reads drawnRoom live)
 }
 
 // leave_room (seg002.c:423). FAITHFUL order, run AFTER the kid frame (exit_room in play_frame,
@@ -576,7 +402,7 @@ function readUserControl() {
 function saveCtrl1() { ctrl1.forward = control.forward; ctrl1.backward = control.backward; }
 
 const world = {
-  edgeDistance: () => getEdgeDistance(ch),
+  edgeDistance: edgeDist,                   // kernel get_edge_distance -> { edgeType, distance }
   jumpUp: () => checkJumpUp(ch),            // up while standing -> jump / grab a ledge above
   climbUp: () => canClimbUp(ch),            // up while hanging -> climb onto the ledge
   hangFall: () => hangFall(ch),             // release a hang -> drop / fall
@@ -593,12 +419,16 @@ function tick() {
   readUserControl();                       // read_user_control: advance the 3-state latch (RELEASED->HELD->IGNORE)
   controlKid(ch, control, world);          // control(): pick the next sequence (consumes + mutates the latch)
   saveCtrl1();                             // save_ctrl_1: persist the latch to the next tick
-  playSeq(ch);                             // run it -> new frame + Char.x/y
-  fallAccel(ch); fallSpeed(ch);            // gravity (freefall only)
-  determineCol(ch);                        // recompute curr_col from Char.x (UNCLAMPED — seg006.c:122)
-  setCharCollision(ch);                    // the collision box (char_x_left/right_coll)
-  checkBumped(ch);                         // wall bump: pin Char.x to the face + recoil (seq_47/46/45)
-  checkAction(ch);                         // do_fall / check_on_floor — reads across a boundary via the unclamped col
+  playSeq(ch);                             // play_seq -> new frame + Char.x/y
+  fallAccel(ch); fallSpeed(ch);            // fall_accel / fall_speed (freefall only)
+  // The faithful play_kid_frame tail (seg000.c:1205-1216): obj + box, then the kernel's buffer
+  // scan + bump, then the action check. No determine_col AFTER the bump — a bumped char (action 5)
+  // no-ops in check_action, so the recoil settles with the pre-bump curr_col, exactly as the source.
+  load_frame_to_obj();                     // obj_x/obj_y for set_char_collision
+  determine_col();                         // curr_col at the weight point (UNCLAMPED — seg006.c:122)
+  set_char_collision();                    // the collision box (char_x_left/right_coll)
+  if (!ch.testing) { check_collisions(); check_bumped(); }   // fill the buffers + edge-detect a bump -> recoil
+  check_action();                          // do_fall / check_on_floor — reads across a boundary via the unclamped col
   checkPress(ch);                          // loose-floor trigger (grounded on tile 11 -> make_loose_fall)
   leaveRoom();                             // exit_room: the room cross, AFTER the kid frame (seg000.c:881)
 }
@@ -653,7 +483,7 @@ function draw() {
   if (sp) {
     // reg-point registration (motion sandbox / draw_mid, seg008.c:1022/1736). Rounded so the
     // silhouette stays crisp — sx = 320/140 is fractional, so raw positions are sub-pixel.
-    const regX = Math.round(screenX(ch.x) + (ch.direction < DIR_RIGHT ? -frameDx : frameDx) * sx);
+    const regX = Math.round(screenX(ch.x - RENDER_X_BIAS) + (ch.direction < DIR_RIGHT ? -frameDx : frameDx) * sx);
     const feetY = screenY(ch.y + frameDy);
     const top = Math.round(feetY - (sp.content.maxy + 1) * spriteScale);
     if (ch.direction >= DIR_RIGHT) {                 // facing right: mirror about reg point
@@ -693,6 +523,8 @@ function loop(ts) {
 applyZoom();
 MaskSheet.load('./gfx/kid_masks.json').then((s) => {
   sheet = s;
+  bindKernel({ Char: ch, getSprite: spriteOf, getDrawnRoom: () => drawnRoom });  // ch + sprite dims + the LIVE drawn room
+  kSetLevel(level);
   dropAtStart();                     // level-1 falling entry
   // Console handle (open with index.html#debug): step the engine deterministically.
   if (location.hash === '#debug') {
