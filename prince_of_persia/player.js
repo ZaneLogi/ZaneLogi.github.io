@@ -25,14 +25,16 @@ import { getTile, getTileModif, tileIsFloor, wallType, tileDivMod, tileDivModM7,
          DIR_FRONT, getTileAtChar, getTileInFrontOfChar, getTileAboveChar, getTileFrontAboveChar,
          getTileBehindAboveChar, getTileBehindChar, canGrab, distanceToEdge, yToRowMod4, EDGE_WALL } from './collision.js';
 import { controlKid, makeControl, HELD, RELEASED, FWD, NONE, BACK } from './control.js';
-import { makeTrobs, processTrobs, makeLooseFall, TILE_LOOSE } from './trob.js';
+import { makeTrobs, processTrobs, makeLooseFall, triggerButton,
+         TILE_LOOSE, TILE_OPENER, TILE_CLOSER } from './trob.js';
 // The routine-level-identical collision kernel (seg004.c/seg006.c). Replaces the old Char.x-clamp
 // substitute: determine_col / set_char_collision / the per-column buffer scan (check_collisions) /
 // the bump dispatch (check_bumped) / get_edge_distance all run the source's own arithmetic, so the
 // wall face is the faithful inset (coll_tile_left_xpos + TILE_MIDX ± wall_dist), not the raw tile edge.
 import { bindKernel, setLevel as kSetLevel,
          determine_col, load_frame_to_obj, set_char_collision, check_collisions,
-         check_bumped, check_action, get_edge_distance, edge_type } from './collision_kernel.js';
+         check_bumped, check_action, get_edge_distance, edge_type,
+         get_tile_at_char as k_get_tile_at_char, currModif, curr_room, curr_tilepos } from './collision_kernel.js';
 
 // Frame flags (types.h:379-381): FRAME_WEIGHT_X = low 5 bits, FRAME_NEEDS_FLOOR = 0x40.
 const FRAME_WEIGHT_X = 0x1F, FRAME_NEEDS_FLOOR = 0x40;
@@ -319,17 +321,24 @@ function downPressed(ch) {
 // the old freefall collapse; check_on_floor ejects from a wall via in_wall instead of the "don't
 // fall on a wall" stand-in. The old fall_x=0 stopgap is gone — set_fall re-establishes it faithfully.)
 
-// check_press (seg006.c:1683): the loose-floor (and, in the full game, button) trigger.
-// For a grounded / turning / bumped actor on a frame that needs a floor, read the tile
-// underfoot; a loose tile (type 11) starts its collapse timer (make_loose_fall). Minimal
-// port — no hanging/climbing frames, no jumphang break-from-above, no buttons yet — just
-// loose floors. Runs after check_action, exactly as in play_kid_frame (seg000.c:1215-1216).
+// check_press (seg006.c:1683): the loose-floor + button trigger. For a grounded / turning / bumped
+// actor on a frame that needs a floor, read the tile underfoot: a raise/drop BUTTON (15/6) triggers
+// its door-link chain (trigger_button); a LOOSE tile (11) starts its collapse (make_loose_fall). The
+// tile read goes through the KERNEL's get_tile_at_char so curr_room / curr_tilepos / currModif reflect
+// the link-hopped tile — exactly the globals trigger_button then reads. (Still a grounded-only slice:
+// the hanging/climbing tile-above and the frame-79 loose-break-from-above branches stay deferred.)
+// Runs after check_action, as in play_kid_frame (seg000.c:1215-1216).
 function checkPress(ch) {
   const a = ch.action;
   if (!(a === ACT_TURN || a === ACT_BUMPED || a < ACT_HANG_CLIMB)) return;  // grounded/turn/bumped only
   if (!(frameFlags(ch.frame) & FRAME_NEEDS_FLOOR)) return;                   // needs floor contact
-  if (getTileAtChar(level, ch) === TILE_LOOSE)
+  const tile = k_get_tile_at_char();                                         // sets curr_room/curr_tilepos/currModif
+  if (tile === TILE_OPENER || tile === TILE_CLOSER) {
+    // the kid is alive (died_on_button is skipped): press its button type with its bg door-link index
+    triggerButton(level, trobs, curr_room, curr_tilepos, tile, currModif());
+  } else if (tile === TILE_LOOSE) {
     makeLooseFall(trobs, level, ch.room, ch.curr_col, ch.curr_row);
+  }
 }
 
 // --- room-relative bounded position: swap the room at an edge (research_collision.md §6) --
@@ -375,8 +384,19 @@ function leaveRoom() {
   if (a === ACT_TURN) return;                                //    ... nor a turn (seg002.c:459)
   const facingRight = ch.direction >= DIR_RIGHT;             // 4. HORIZONTAL, leading-edge Char.x
   if (facingRight) {
-    if (ch.x >= 201 && links.right)     gotoRoom(links.right, 'right');
-    else if (ch.x <= 57 && links.left)  gotoRoom(links.left, 'left');
+    // seg002.c:472 — before leaving RIGHT the source reads col 9 of THIS room: a doortop (7/12) there
+    // blocks the crossing (return -1; you stand/bump against it). The clone had dropped this guard —
+    // restored, and extended to a still-BLOCKING closed gate. (The source leans on check_bumped to stop
+    // you at a gate, but the gate's inset collision face x=201 coincides with the right-boundary
+    // threshold, also 201, so a post-bump safe_step would slip through into the next room.) The
+    // gate-block test IS check_bumped's own can_bump_into_gate — (modif>>2)+6 < char_height, char_height =
+    // the current frame's sprite height (spriteOf(ch.frame).h) — so leave_room and the bump agree exactly.
+    const col9 = getTile(level, ch.room, 9, ch.curr_row);
+    const sp = spriteOf(ch.frame);
+    const col9blocks = col9 === TILE_DOORTOP_FLOOR || col9 === TILE_DOORTOP ||
+      (col9 === 4 /*gate*/ && sp && ((getTileModif(level, ch.room, 9, ch.curr_row) >> 2) + 6) < sp.h);
+    if (ch.x >= 201 && links.right && !col9blocks) gotoRoom(links.right, 'right');
+    else if (ch.x <= 57 && links.left)             gotoRoom(links.left, 'left');
   } else {
     if (ch.x <= 54 && links.left)       gotoRoom(links.left, 'left');
     else if (ch.x >= 198 && links.right) gotoRoom(links.right, 'right');
@@ -511,13 +531,28 @@ function drawRoom(room) {
     if (wallType(t) === 4) {                          // solid wall block
       ctx.fillStyle = '#5b6b82'; ctx.fillRect(cx, cellTopY, cellW, cellH);
       ctx.fillStyle = '#6f8199'; ctx.fillRect(cx, cellTopY, cellW, 2 * zoom);
-    } else if (t === 4) {                             // gate = portcullis (also a floor you stand on)
+    } else if (t === 4) {                             // gate = portcullis; bars RETRACT by its open height
+      // The gate's bg modifier is its open height (0 closed .. 188 open, 238 held, 0xFF permanent) — the
+      // same byte can_bump_into_gate reads. Draw the bars hanging from the top, their bottom edge sliding
+      // UP as it opens (openFrac 0 -> full bars/closed, 1 -> just the top frame/open-walk-under). Flat-2D
+      // re-derivation of the source's pseudo-3D gate draw (view-space, CLAUDE.md lesson 6c).
+      const mod = getTileModif(level, room, col, row);
+      const openFrac = Math.min(mod, 188) / 188;
+      const barBottom = cellTopY + (floorY - cellTopY) * (1 - openFrac);
       ctx.fillStyle = '#7f8c5a'; ctx.fillRect(cx, floorY, cellW, LEDGE * sy);  // the floor at its base
-      ctx.fillStyle = '#c9a13b';                       // brass bars, top frame -> floor
+      ctx.fillStyle = '#c9a13b';                       // brass bars (retracted from the bottom up)
       const bars = 4, bw = Math.max(1, Math.round(zoom));
       for (let b = 0; b < bars; b++)
-        ctx.fillRect(Math.round(cx + (b + 0.5) * cellW / bars - bw / 2), cellTopY, bw, floorY - cellTopY);
+        ctx.fillRect(Math.round(cx + (b + 0.5) * cellW / bars - bw / 2), cellTopY, bw, Math.max(0, barBottom - cellTopY));
       ctx.fillRect(cx, cellTopY, cellW, Math.max(1, Math.round(zoom)));        // top frame bar
+    } else if (t === 15 || t === 6) {                 // pressure button: a floor with a raised plate on top
+      // A button is a floor you stand on (tile_is_floor(15/6) == true), so draw the floor slab, then a
+      // small coloured plate centred on it so you can SEE where the plate is. Colours match the block-map
+      // demo: raise (15) = blue, drop (6) = orange. Static (the pressed-anim/debounce isn't drawn).
+      ctx.fillStyle = '#7f8c5a'; ctx.fillRect(cx, floorY, cellW, LEDGE * sy);
+      const bwid = Math.round(cellW * 0.55), bh = Math.max(2, Math.round(3 * zoom));
+      ctx.fillStyle = (t === 15) ? '#4a90d0' : '#d07a4a';
+      ctx.fillRect(Math.round(cx + (cellW - bwid) / 2), floorY - bh, bwid, bh);
     } else if (tileIsFloor(t)) {                      // floor: slab with its top on the feet line
       ctx.fillStyle = (t === 11) ? '#8a7048' : '#7f8c5a';
       ctx.fillRect(cx, floorY, cellW, LEDGE * sy);

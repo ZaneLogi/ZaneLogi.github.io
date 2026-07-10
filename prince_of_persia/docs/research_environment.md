@@ -121,27 +121,38 @@ drop. This is exactly what surfaces at the **left edge of room 1**: its climbabl
 ledge one row up is **room 5's col 9 gate**, so the link-hop makes the neighbour
 gate the tile-above.
 
-**Clone status (updated 2026-07-07 — collision ported, animate/button deferred):**
-the *collision* half is now implemented and verified:
-- **`can_bump_into_gate`** (`(modif>>2)+6 < char_height`, char_height = the current
-  frame's sprite height / `MaskSprite.h`) folded into a `wallTypeAt` helper so an
-  **open** gate reads as no-wall and a **closed** gate blocks — wired into
-  `getEdgeDistance` and `wallAheadFace` (the clone's `is_obstacle` /
-  `dist_from_wall_forward` equivalents). Verified: running into room 5's closed gate
-  pins `Char.x` at the gate face.
-- **`climbfail` (seq_73)** + `can_climb_up`'s gate/mirror/chomper branch (§1e).
-  Verified by single-stepping: at room 5's col 9 closed gate the prince plays
-  `135→138→135` **without changing row**, then drops — looping while Up is held.
+**Clone status (updated — collision + animate/button now IMPLEMENTED):**
+- **`can_bump_into_gate`** ((modif>>2)+6 < char_height) lives in the collision kernel
+  (`is_obstacle` / `dist_from_wall_forward`), so an **open** gate reads as no-wall and a
+  **closed** gate blocks — verified: a closed gate pins `Char.x` at its face; the prince
+  walks **through** an opened gate once it is high enough.
+- **`climbfail` (seq_73)** + `can_climb_up`'s gate/mirror/chomper branch (§1e) — verified.
+- **The animate/button subsystem (this milestone).** `trob.js` grew from loose-only to the
+  full trob system: **`trigger_button` → `do_trigger_list` → `trigger_1` → `trigger_gate`**
+  (the press → door-link chain, §1a/§1b), **`animate_door` + `gate_stop`** (rise +4/frame to
+  188, hold 238, sink −1/frame to 0 — §1c), **`animate_button`** (the pressed debounce), and
+  the door-link accessors over the decoded `level.doorLinks`. `check_press` (player.js) gained
+  the **button branch** (opener 15 / drop 6 → `trigger_button`, reading through the kernel's
+  `get_tile_at_char` so `curr_room`/`curr_tilepos`/`currModif` resolve the link-hopped tile).
+  Verified (deterministic stepping): the room-5 raise button opens both its linked gates
+  (col 5 + col 9), held at 238 while standing, auto-closing to 0 on step-off; the prince runs
+  through an opened gate; a closed gate still bumps.
+- **The gate RENDER** (`drawRoom`, player.js) now retracts the portcullis bars by the open
+  height (`openFrac = min(modifier,188)/188`) — a flat-2D re-derivation of the source's
+  pseudo-3D gate draw (view-space, CLAUDE.md lesson 6c). **Buttons** are also drawn now — a small
+  coloured plate on their floor tile (raise 15 = blue, drop 6 = orange, the block-map palette) so
+  the pressure plates are visible. Still no straddle/overlay draw (`research_position_room.md §6`)
+  — that stays a separate rendering concern.
+- **A boundary-gate fix (found while testing).** The clone's `leave_room` had dropped the
+  source's col-9 guard (seg002.c:472: don't cross right if col 9 is a doortop), which let a
+  closed gate at a room boundary be *safe-stepped through* — the gate's inset face (x=201)
+  coincides with the right-boundary threshold. Restored the doortop guard and extended it to a
+  still-blocking closed gate (using `check_bumped`'s own `can_bump_into_gate` so leave_room and
+  the bump agree). Verified: a closed boundary gate now holds the prince (stays in room 5,
+  x=201); an **open** one still lets him cross; normal floor-boundary crossings unaffected.
 
-Still deferred (the **animate/button** subsystem — out of scope by request): the
-button trigger (`check_press` button branch), `animate_door` (open/close over time),
-and `check_gate_push` (a closing gate ejecting you). Gates therefore hold their
-**static** initial modifier; every level-1 gate is closed, so `can_bump_into_gate`
-always blocks *today*, but the open-state path is faithful and future-proof for when
-`animate_door` lands. Rendering is untouched: the gate is still flat 2D portcullis
-bars (not the source's pseudo-3D draw), shown only as a dim neighbour-sliver at a
-room edge — the faithful straddle/overlay draw (`research_position_room.md §6`) is a
-separate, rendering-only concern deliberately left alone.
+Still deferred: `check_gate_push` (a *closing* gate ejecting the prince sideways) and the
+loose falling-debris chunk / shake visual.
 
 ---
 

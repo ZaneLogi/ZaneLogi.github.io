@@ -57,6 +57,17 @@ not a formal license); our silhouettes are a heavier reduction still.
 - **Routine-level translation from SDLPoP**, citing source lines
   (e.g. `// seg009.c:840`) — the repo's address-citation convention, with
   SDLPoP labels standing in for the usual `Lxxxx`.
+- **`collision_kernel.js` is a ROUTINE-FOR-ROUTINE mirror of the source over its
+  own C-style globals — keep it that way.** Every function in that file is a named
+  port of ONE SDLPoP routine with its `// segNNN.c:line` citation; the module-level
+  `let`s ARE the C globals. **Do not add clone-only helpers or new logic to the
+  kernel** — a quantity the source computes inline, or a decision a control/render
+  routine needs, belongs in `player.js` / `collision.js`, never in the kernel.
+  Adding `export` to expose an existing routine/global is fine (visibility only);
+  inventing a routine with no `segNNN.c` counterpart is not. A kernel function
+  without a source citation is a red flag. *(This is exactly the trap that was
+  caught in review 2026-07-10 — a stray `gateBlocksChar` helper; the fix moved to
+  `player.js`. The file's own header carries the same invariant.)*
 - **Black silhouettes = 1-bit masks.** We extract the frame *shape* only
   (palette index 0 = transparent, anything else = opaque), so the palette
   (`PRINCE.DAT`) is never needed. This is a canonical PoP look, not a
@@ -388,8 +399,8 @@ KID sprites natively face **LEFT**.
   a feedback memory): with a faithful RE source, follow it — don't simplify away without a strong
   reason; entangled shortcuts cost more later than the faithful port.**
 - **[done] Gate collision + climb-into-a-closed-gate.** The portcullis's *collision* half (the
-  animate/button open-close subsystem stays deferred): a **closed gate blocks** and an **open gate is
-  passable** — `can_bump_into_gate` (`(modif>>2)+6 < char_height`, char_height = the frame's sprite
+  animate/button open-close subsystem landed later — see the **Button → portcullis** entry below): a
+  **closed gate blocks** and an **open gate is passable** — `can_bump_into_gate` (`(modif>>2)+6 < char_height`, char_height = the frame's sprite
   height / `MaskSprite.h`) folded into a `wallTypeAt` helper feeding `getEdgeDistance`/`wallAheadFace`
   (the clone's `is_obstacle`/`dist_from_wall_forward` equivalents). And climbing up into a **closed
   gate above** now plays **`climbfail`** (`seq_73`, transcribed into `seqtbl.js`: reach up 135→138,
@@ -489,6 +500,30 @@ KID sprites natively face **LEFT**.
   runstop, turn→turn-run, jump-up, wall bump x=64, loose-floor→room 2) pass. Files: `seqtbl.js`
   (`climbdown`), `player.js` (`runJump`/`downPressed` + `world`), `control.js` (run-jump + down
   branches), `index.html` (control hint). Detail: `docs/research_actions.md §4/§5/§7`.
+- **[done] Button → portcullis (the animate/press subsystem).** A pressure plate now raises a
+  gate: `trob.js` grew from loose-only to the full trob system (`process_trobs` → `animate_tile`
+  dispatch by tile type) — `trigger_button` → `do_trigger_list` → `trigger_1` → `trigger_gate`
+  (the press → door-link chain), `animate_door`/`gate_stop` (rise +4/frame to 188, hold 238, sink
+  −1/frame to 0), `animate_button` (the pressed debounce), + the door-link accessors over the
+  decoded `level.doorLinks`. `player.js` `check_press` gained the button branch (opener 15 / drop 6
+  → `trigger_button`, read through the kernel's `get_tile_at_char` so `curr_room`/`curr_tilepos`/
+  `currModif` resolve the tile). `drawRoom` renders the gate's open height by retracting the bars
+  (`openFrac = min(modifier,188)/188`) and draws the **buttons** as coloured floor plates (raise 15 =
+  blue, drop 6 = orange — the block-map demo's palette) so you can see where they are. The gate's
+  animated modifier feeds collision automatically
+  (the kernel's `can_bump_into_gate` reads it live), so an opening gate becomes passable on its own.
+  **Found + fixed mid-step:** the clone's `leave_room` had dropped the source's col-9 guard
+  (seg002.c:472) — a closed gate at a room boundary could be *safe-stepped through* (its inset face
+  x=201 coincides with the right-cross threshold). Restored the doortop guard + extended it to a
+  still-blocking closed gate (via `check_bumped`'s `can_bump_into_gate`, so leave_room and the bump
+  agree; computed in player.js from `spriteOf(ch.frame).h` — the kernel stays routine-identical, no
+  invented helper). **Verified** (deterministic `#debug` stepping, no console errors): the room-5
+  raise button opens both linked gates → held 238 while standing → auto-closes to 0 on step-off; the
+  prince runs *through* an opened gate; a closed boundary gate holds him (stays in room 5, x=201); an
+  open one lets him cross; regressions (falling entry, run/turn, jump-up, wall bump, loose → room 2,
+  multi-room 2→3→9) pass. Files: `trob.js` (rewritten), `player.js` (checkPress + gate render +
+  leave_room guard), `collision_kernel.js` (export `get_tile_at_char`/`currModif`/`curr_room`/
+  `curr_tilepos`). Detail: `docs/research_environment.md §1`.
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
 

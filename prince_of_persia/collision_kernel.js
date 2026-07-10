@@ -6,6 +6,19 @@
 // line-by-line comparable to the source (and value-diffable against a live DOS hook), which
 // is the whole point of un-substituting the old Char.x-clamp stand-in.
 //
+// ┌─ EDITING INVARIANT — read before you change this file ──────────────────────────────┐
+// │ This is a ROUTINE-FOR-ROUTINE MIRROR of the source over its own C-style globals.     │
+// │ Every function below is a named port of ONE SDLPoP routine and carries its           │
+// │ `// segNNN.c:line` citation; the module-level `let`s ARE the C globals. The rule:     │
+// │   • Do NOT add a clone-only helper or new logic here. A quantity the source computes  │
+// │     inline, or a decision a control/render routine needs, goes in player.js /         │
+// │     collision.js — never here. (A stray non-source `gateBlocksChar` helper slipped    │
+// │     in 2026-07-10 and was caught in review; hence this explicit note.)                │
+// │   • You MAY add `export` to expose an existing routine/global (visibility only, no    │
+// │     new code). You may NOT invent a routine with no `segNNN.c` counterpart.           │
+// │   • A function here WITHOUT a source citation is a red flag — remove it or move it out.│
+// └─────────────────────────────────────────────────────────────────────────────────────┘
+//
 // Bind the kid + level once (bindKernel), then the routines run over Char (=== the player's
 // `ch`, same object) and `level`. Citations are SDLPoP (C:\Z_Temp\SDLPoP\src), segNNN.c:line.
 // GPLv3 (see NOTICE).
@@ -28,8 +41,12 @@ export function setLevel(lv) { level = lv; }          // resetLevel reassigns th
 // face a full room-width off and flinging Char.x to the wrong room.
 
 // ---- side-effect globals mirroring the C ----------------------------------------------
-// get_tile writes these (seg006.c:28); collision routines read them right after a get_tile.
-let curr_room = 0, tile_col = 0, tile_row = 0, curr_tilepos = 0, curr_tile2 = 0;
+// get_tile writes these (seg006.c:28); collision routines read them right after a get_tile. The
+// three EXPORTED ones are live bindings the control-phase item/button code reads after calling an
+// (also-exported) char-relative get_tile_* — mirroring the C's global-state reads (check_press,
+// check_get_item). tile_col/tile_row stay private (internal scan helpers).
+export let curr_room = 0, curr_tilepos = 0, curr_tile2 = 0;
+let tile_col = 0, tile_row = 0;
 // load_frame_to_obj (seg008.c:1728) + get_tile_div_mod (seg006.c:799).
 let obj_x = 0, obj_y = 0, obj_xl = 0, obj_direction = 0, obj_id = 0, cur_frame = null;
 // set_char_collision (seg006.c:1012).
@@ -64,7 +81,7 @@ const facingLeft = () => Char.direction < DIR_RIGHT;
 // ---- current-tile modifier (bg byte) access -------------------------------------------
 // The C reads curr_room_modif[curr_tilepos]; the clone's level is 2D, so index by the same
 // (curr_room, tile_row, tile_col) get_tile just resolved. Value-identical to the flat read.
-function currModif()      { return curr_room > 0 ? level.rooms[curr_room - 1].bg[tile_row][tile_col] : 0; }
+export function currModif() { return curr_room > 0 ? level.rooms[curr_room - 1].bg[tile_row][tile_col] : 0; }
 function setCurrModif(v)  { if (curr_room > 0) level.rooms[curr_room - 1].bg[tile_row][tile_col] = v; }
 
 // =======================================================================================
@@ -101,7 +118,7 @@ export function get_tile(room, col, row) {
 // char-relative reads (seg006.c). get_tile_infrontof_char stores the PRE-normalization column
 // in `infrontx` (seg006.c:1306) — load-bearing: get_edge_distance feeds that raw -1/10 (not the
 // hopped 9/0) to dist_from_wall_forward so x_bump indexes the off-screen entry directly.
-function get_tile_at_char()        { return get_tile(Char.room, Char.curr_col, Char.curr_row); }
+export function get_tile_at_char() { return get_tile(Char.room, Char.curr_col, Char.curr_row); }
 function get_tile_infrontof_char() { infrontx = DIR_FRONT[Char.direction + 1] + Char.curr_col; return get_tile(Char.room, infrontx, Char.curr_row); }
 function get_tile_behind_char()    { return get_tile(Char.room, DIR_BEHIND[Char.direction + 1] + Char.curr_col, Char.curr_row); }
 
