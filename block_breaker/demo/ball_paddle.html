@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>block_breaker — ball ↔ paddle</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; padding: 24px;
+      font: 14px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace;
+      background: #0e0e14; color: #d7d7e0;
+      display: flex; flex-direction: column; align-items: center; gap: 14px;
+    }
+    h1 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: .5px; }
+    h1 small { color: #8a8a9a; font-weight: 400; }
+    canvas {
+      background: #05050a; border: 1px solid #2a2a38; border-radius: 4px;
+      image-rendering: pixelated;
+    }
+    #hud { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; color: #9a9aac; font-size: 13px; }
+    #hud b { color: #d7d7e0; font-weight: 600; }
+    .keys { color: #6a6a7a; font-size: 12px; }
+    .keys kbd {
+      background: #23232f; border: 1px solid #3a3a4a; border-bottom-width: 2px;
+      border-radius: 4px; padding: 1px 6px; color: #cfcfda;
+    }
+  </style>
+</head>
+<body>
+  <h1>block_breaker <small>— ball ↔ paddle collision (faithful Arkanoid MSX physics)</small></h1>
+
+  <canvas id="view"></canvas>
+
+  <div id="hud">
+    <span>state: <b id="state">glued</b></span>
+    <span>skewness: <b id="skew">3</b></span>
+    <span>speedPos: <b id="spos">12</b></span>
+    <span>ball: <b id="pos">—</b></span>
+  </div>
+
+  <div class="keys">
+    <kbd>←</kbd> <kbd>→</kbd> move paddle · <kbd>Space</kbd> launch ·
+    catch the ball on the left / centre / right of the paddle to feel the rebound
+  </div>
+
+  <script type="module" src="./ball_paddle.js"></script>
+</body>
+</html>

@@ -91,6 +91,47 @@ the 0–8 index→colour mapping in `palette.js` — those are canonical-Arkanoi
 stand-ins for the layout viewer, to be replaced by the real per-tile colours in
 the faithful-tile step.
 
+## Ball physics — ball ↔ paddle collision (DONE)
+
+`src/ball.js` is a faithful port of the ball movement + collision;
+`demo/ball_paddle.html` exercises it (box open at the bottom, paddle, ball,
+Space launches). Every method cites its source routine. The model:
+
+- **`skewness` is the master trajectory-angle** (signed, magnitude 1–8). x/y
+  speed are *derived* from it each move via `SKEWNESS_POS/NEG_TO_XY`
+  (`disassembly.asm:7491/7503`). skewness 1/8 = shallow, 4/5 = steep.
+- **Speed is rate-limited, not per-pixel** (`UPDATE_BALL_POSITION` @7356): a
+  `(speedPos, |skewness|)` lookup (`@7519/7537/7555`) gives
+  `(speedMultiplier, moveTarget)`; the ball moves only every `moveTarget`
+  frames, then applies the vector `speedMultiplier+1` times. `speedPos` starts
+  at 12 (`SPEED_TABLE_POSITIONS` @7179) and **accelerates each bounce**
+  (`UPDATE_BALL_SPEED` @7574, `BALL_SPEED_TABLE` @7614), capped at 15.
+- **Walls** (`ACTION_9941` @7233): bounce at `x<18` / `x≥186` / `y<9`; each
+  negates speed **and** reflects skewness (`BALL_HORIZONTAL_BOUNCE` @7690 =
+  `9−|s|`; `BALL_VERTICAL_BOUNCE` @7662 = `|s|−9`). `y≥184` = lost. Every 40
+  wall bounces perturbs the angle (`CHANGE_BALLS_SKEWNESS` @8082).
+- **Ball ↔ paddle** (`CHECK_UPDATE_BALL_GLUE_AND_SKEWNESS` @7726) — the
+  centrepiece: only when moving down and `167≤y<173` and `VAUS_X<x≤VAUS_X+41`;
+  snap `y=169`; invert Y; `zone = (x−VAUS_X)/7`; `skewness =
+  BALL_SKEWNESS_TABLE[zone]` = `{7,6,5,4,3,2}` → **left edge = sharp-left,
+  centre = steep-up, right edge = sharp-right**.
+- **Glue / launch** (`@7143/@7186`): starts glued (`skewness=3`, `y=169`,
+  `vausHitX=26`), tracks `VAUS_X+vausHitX`, releases on fire or a 120-frame
+  timeout. Coordinate constants live in `PLAYFIELD` (ball.js).
+
+**Verification** (run in-page against the real module): paddle-response mapping
+exact for every zone; a 5000-frame launch/bounce/auto-catch sim kept the ball in
+`x∈[18,185], y∈[9,169]` with **0 escapes** and acceleration 12→15. Keep the
+`selfTest()` in `ball_paddle.js` as the regression check.
+
+**Adaptations** (faithful data/physics, demo-shaped I/O): arrow keys replace the
+MSX control read (`read_controls_move_vaus` @3197). The demo draws the paddle
+*bar* directly at `paddle.x`, so it clamps the bar to the wall faces (18 and 190)
+rather than the source's `VAUS_X` min of 8 — that 8 is a sprite-ORIGIN value (the
+Vaus graphic has a ~10px transparent left margin inside its sprite), which the
+abstract rectangle doesn't model; the bar's own edge is the faithful-looking
+reference. Ball-lost respawns instead of losing a life; sound calls omitted.
+
 ## Next step — faithful MSX-tile rendering (additive, planned)
 
 Reuses `levels.json` / `levels.js` / `palette.js` unchanged; adds:
@@ -103,9 +144,9 @@ Reuses `levels.json` / `levels.js` / `palette.js` unchanged; adds:
 This will also yield the *real* brick colours, retiring the provisional 0–8 map.
 
 ## Out of scope (for now)
-Gameplay (ball/paddle/bricks/bounce, capsules, aliens, lasers, DOH), sound
-(check whether the MSX PSG path is real code before deciding port-vs-drop),
-attract/demo mode.
+Remaining gameplay (brick collision + effects, capsules, aliens, lasers, DOH),
+sound (check whether the MSX PSG path is real code before deciding port-vs-drop),
+attract/demo mode, lives/score. (Ball movement + ball↔wall + ball↔paddle: done.)
 
 ## Conventions
 - ES6 modules, no build step; `python tools/devserver.py` (no-cache) for preview.
