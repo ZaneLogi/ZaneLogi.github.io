@@ -199,5 +199,5 @@ rework.
    room-width) rather than snapping to one room.
 
 Wall-bump detection (the per-column buffers) is a separate concern —
-`research_collision_detection.md` — and can stay on the clone's `Char.x` stand-in
-until enemies force it (the legitimate defer).
+`research_collision_detection.md` — and is now the faithful per-column buffer scan in
+`collision_kernel.js` (the old `Char.x` stand-in was un-substituted, 2026-07-10).

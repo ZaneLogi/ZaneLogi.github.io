@@ -346,6 +346,18 @@ KID sprites natively face **LEFT**.
   **through the room boundary** into room 2 — a multi-room fall. **Deferred (agreed):** the
   falling-debris chunk (`add_mob`) and the shake visual (`loose_shake`). Full mechanism +
   verification in `docs/research_collision.md §9`.
+- **[done] Break a loose floor from below (jump up under it).** `check_press` upgraded from the
+  grounded-only slice to the **full port** (`seg006.c:1683`): besides the tile underfoot, it now reads
+  the tile **above** in two cases — while **hanging/climbing** (frames 87–99 / 135–140, the grabbed
+  tile) and at **frame 79** (a plain jump-up bonking the ceiling), where a `tiles_11_loose` directly
+  overhead is broken **from below** — the classic "jump up to drop a ceiling loose floor." Needed a
+  kernel `get_tile_above_char` (`seg006.c:1644`, a `curr_row-1` read that link-hops into the up-room —
+  added next to the other `get_tile_*_char` accessors, routine-for-routine). Prompted by room 6, whose
+  up-link (room 5) has a loose tile at col 5 row 2 = room 6's ceiling. **Verified** (deterministic
+  stepping): jump-up at room-6 col-5 → at frame 79 the room-5 loose tile arms (mod 1) → counts to 11 →
+  vanishes; the falling-debris chunk (`add_mob`) stays deferred, so it collapses without a falling piece;
+  regressions (step-on-loose → room 2, button→gate, entry slam) pass. Files: `collision_kernel.js`
+  (`get_tile_above_char`), `player.js` (full `checkPress`). Detail: `docs/research_collision.md §9`.
 - **[done] Wall bump — §5b, the box + recoil animation.** A run/walk into a wall now plays the
   faithful **recoil** (`seq_47_bump`: skid back `dx(-4)` + settle) instead of a dead stop, on top
   of a **collision box** (`setCharCollision`, port of `seg006.c:1012`). `checkBumped` replaces
@@ -489,8 +501,10 @@ KID sprites natively face **LEFT**.
     **L2** (don't-fall-on-a-wall), **D1** (the buffer scan) are now the faithful routines. **Genuinely
     out of scope** (separate subsystems, not collision-detection substitutes — same class as char-vs-char):
     spikes, chompers (`start_chompers` stub + `check_chomped_kid`), HP (`take_hp` — a medium land always
-    survives), mid-fall Shift-grab (`check_grab` stub), feather fall, buttons (`check_press` is loose-only),
-    sword combat / guards. Full map: `docs/research_collision.md §11` + the ledger.
+    survives), mid-fall Shift-grab (`check_grab` stub), feather fall,
+    sword combat / guards. Full map: `docs/research_collision.md §11` + the ledger. *(This out-of-scope
+    snapshot is from the kernel commit; spikes, mid-fall grab, and the full `check_press` [buttons +
+    loose-break-from-above] have since been implemented — see their own roadmap entries.)*
   - Files: `collision_kernel.js` (new), `player.js`, `playseq.js` (`alive`/`sword` init), `seqtbl.js`
     (the 5 fall sequences).
 - **[done] Traversal gaps — running jump + Down→crouch + climb-down.** The last on-foot moves the

@@ -212,22 +212,22 @@ the exact path the clone's clamp corrupts.
   32`, alive, and within 25 of the landing row, nudge x by −8 and test
   `can_grab_front_above`; on success seat at the edge, `seq_15` (grab ledge
   midair), **`grab_timer = 12`**. Called from `do_fall`/`check_action` (midair
-  frames). This is the deferred "grab a ledge while falling" — the clone has
-  `grab_timer` wired but not `check_grab`.
+  frames). ✅ **PORTED 2026-07-10** — `check_grab` is a `player.js checkGrab` reached via an
+  `onCheckGrab` kernel hook (the kernel call sites unchanged); `research_collision.md §12`.
 
 ---
 
 ## 8. Hazards (edge cases, for completeness)
 
 - **`check_spiked`** (seg006.c:968) / **`is_spike_harmful`** (seg007.c:1178) —
-  running/jumping onto extended spikes → `spiked()`; reads the tile map.
+  running/jumping onto extended spikes → `spiked()`; reads the tile map. ✅ **PORTED**
+  (lethal spikes; `research_environment.md §2.5`), together with `check_spike_below` (the
+  proximity pop-up) and the land-on-spikes branch.
 - **`check_chomped_kid`** (seg004.c:439) — **reads the collision buffer**
   (`curr_row_coll_flags`/`curr_row_coll_room`): a column fully walled (`0xFF`) whose
   tile is a *closed* chomper → `chomped()`. The other buffer reader besides the
-  bump path.
-
-Both out of scope for the traversal substrate but noted so the buffer's second
-consumer (chomper) isn't a surprise later.
+  bump path. **Still deferred** (the chomper subsystem), but the buffer it reads is
+  live, so it's a bounded add.
 
 ---
 
@@ -237,17 +237,20 @@ consumer (chomper) isn't a surprise later.
 > fall/floor/grab) are now ported **verbatim** as `collision_kernel.js` — this whole doc's
 > "target" is implemented routine-for-routine. The buffer scan (§3–4), `get_left/right_wall_xpos`
 > with the `wall_dist` insets, `is_obstacle`, and the `in_wall` eject are all live. Write-up:
-> `research_collision.md §11`; classification: `research_deviation_ledger.md` (L1/L2/D1 ✅). Only
-> `check_gate_push` (§5) + the fall-grab `check_grab` (§7) + char-vs-char remain, each feature-scoped.
+> `research_collision.md §11`; classification: `research_deviation_ledger.md` (L1/L2/D1 ✅).
+> `check_gate_push` (§5) and the fall-grab `check_grab` (§7) have **since been ported** too; only
+> the chomper buffer-reader (`check_chomped_kid`) + char-vs-char (`bump_into_opponent`) remain,
+> each feature-scoped.
 
 
 - The **fall/floor/grab path already works** in the clone *except* for the
   `curr_col` clamp (a §6 concern, not a buffer concern). Faithful `determine_col`
   (unclamped) fixes cross-room climb here.
-- The **wall-bump buffers** (§3–4) are the legitimate defer: the clone's `Char.x`
-  stand-in covers shipped cases; port the buffers when guards/chompers/multi-row
-  bumps force it.
-- **`check_gate_push`** (§5) and the **fall-grab `check_grab`** (§7) are small
-  bounded additions, each tied to a specific feature (closing gates, Shift-grab).
+- The **wall-bump buffers** (§3–4) are now the faithful per-column scan in the kernel
+  (no longer a `Char.x` stand-in) — so multi-row bumps + the buffer's chomper reader are
+  unblocked.
+- **`check_gate_push`** (§5) and the **fall-grab `check_grab`** (§7) are ✅ ported. The
+  bounded additions left are the **chomper** (reads the live buffer) and **char-vs-char**
+  (`bump_into_opponent`, with guards).
 
 Classification lives in `research_deviation_ledger.md`.

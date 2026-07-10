@@ -47,8 +47,9 @@ A gate is a vertical bar-grid that **raises to open and lowers to close**. Its
 ### 1a. The button → door-link → gate chain
 1. **Press.** `check_press` (seg006.c:1683) — a grounded/turning/bumped actor on a
    `FRAME_NEEDS_FLOOR` frame reads the tile underfoot; a **button** (raise
-   `tiles_15` / drop `tiles_6`) → `trigger_button`. (The clone's `check_press`
-   currently handles only the loose tile; buttons are deferred.)
+   `tiles_15` / drop `tiles_6`) → `trigger_button`. (The clone now ports the **full**
+   `check_press` — the button branch, plus the tile-above reads while hanging/climbing and
+   at frame 79 for the loose-break-from-above, `research_collision.md §9`.)
 2. **`trigger_button`** (seg007.c:749) → **`do_trigger_list(index, button_type)`**
    (seg007.c:656): the button's modifier indexes a **door-link chain**; walk it —
    for each link get `room`+`tilepos`+target tile type, call `trigger_1`, and if

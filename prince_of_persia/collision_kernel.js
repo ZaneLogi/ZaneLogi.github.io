@@ -122,6 +122,7 @@ export function get_tile(room, col, row) {
 export function get_tile_at_char() { return get_tile(Char.room, Char.curr_col, Char.curr_row); }
 export function get_tile_infrontof_char() { infrontx = DIR_FRONT[Char.direction + 1] + Char.curr_col; return get_tile(Char.room, infrontx, Char.curr_row); }
 export function get_tile_behind_char()    { return get_tile(Char.room, DIR_BEHIND[Char.direction + 1] + Char.curr_col, Char.curr_row); }
+export function get_tile_above_char()     { return get_tile(Char.room, Char.curr_col, Char.curr_row - 1); }  // seg006.c:1644 (row-1 link-hops up)
 
 // =======================================================================================
 // COORDINATES  (seg006.c) — internal-x <-> column, the weight point, sub-tile distance

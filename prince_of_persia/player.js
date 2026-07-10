@@ -37,8 +37,8 @@ import { bindKernel, setLevel as kSetLevel,
          check_bumped, check_gate_push, check_action, get_edge_distance, edge_type,
          get_tile as k_get_tile, get_tile_at_char as k_get_tile_at_char,
          get_tile_infrontof_char as k_get_tile_infrontof_char,
-         get_tile_behind_char as k_get_tile_behind_char, load_fram_det_col,
-         check_spike_below, check_spiked,
+         get_tile_behind_char as k_get_tile_behind_char, get_tile_above_char as k_get_tile_above_char,
+         load_fram_det_col, check_spike_below, check_spiked,
          currModif, curr_tile2, curr_room, curr_tilepos } from './collision_kernel.js';
 
 // Frame flags (types.h:379-381): FRAME_WEIGHT_X = low 5 bits, FRAME_NEEDS_FLOOR = 0x40.
@@ -490,23 +490,35 @@ function procGetObject(ch) {
   potionFlash = { color: (POT_TYPES[ch.pickup_obj_type] || POT_TYPES[0]).color, time: FLASH_MAX };
 }
 
-// check_press (seg006.c:1683): the loose-floor + button trigger. For a grounded / turning / bumped
-// actor on a frame that needs a floor, read the tile underfoot: a raise/drop BUTTON (15/6) triggers
-// its door-link chain (trigger_button); a LOOSE tile (11) starts its collapse (make_loose_fall). The
-// tile read goes through the KERNEL's get_tile_at_char so curr_room / curr_tilepos / currModif reflect
-// the link-hopped tile — exactly the globals trigger_button then reads. (Still a grounded-only slice:
-// the hanging/climbing tile-above and the frame-79 loose-break-from-above branches stay deferred.)
-// Runs after check_action, as in play_kid_frame (seg000.c:1215-1216).
+// check_press (seg006.c:1683): the loose-floor + button trigger. Reads the "pressed" tile — normally
+// the one underfoot, but two cases read the tile ABOVE: while HANGING/CLIMBING (frames 87-99 / 135-140)
+// the pressed tile is the one being grabbed; and at frame 79 (a plain jump-up bonking the ceiling) a
+// LOOSE tile directly above is broken FROM BELOW — the "jump up under a loose floor to drop it" move.
+// A BUTTON (15/6) triggers its door-link chain (trigger_button); a LOOSE tile starts its collapse
+// (make_loose_fall). All reads go through the KERNEL's get_tile_* so curr_room / curr_tilepos / currModif
+// reflect the link-hopped tile (the above-tile link-hops into the up-room), exactly the globals
+// trigger_button / make_loose_fall then read. Runs after check_action (play_kid_frame, seg000.c:1215).
+const looseFallHere = () => makeLooseFall(trobs, level, curr_room, curr_tilepos % 10, (curr_tilepos / 10) | 0);
 function checkPress(ch) {
-  const a = ch.action;
-  if (!(a === ACT_TURN || a === ACT_BUMPED || a < ACT_HANG_CLIMB)) return;  // grounded/turn/bumped only
-  if (!(frameFlags(ch.frame) & FRAME_NEEDS_FLOOR)) return;                   // needs floor contact
-  const tile = k_get_tile_at_char();                                         // sets curr_room/curr_tilepos/currModif
+  const frame = ch.frame, a = ch.action;
+  let tile;
+  if ((frame >= 87 && frame < 100) || (frame >= 135 && frame < 141)) {
+    tile = k_get_tile_above_char();                     // hanging/climbing: the pressed tile is the grabbed one (above)
+  } else if (a === ACT_TURN || a === ACT_BUMPED || a < ACT_HANG_CLIMB) {  // grounded / turn / bumped
+    if (frame === 79 /*jumphang*/ && k_get_tile_above_char() === TILE_LOOSE) {
+      tile = TILE_LOOSE;                                 // break a loose floor from above — curr_room/tilepos = the above tile
+    } else {
+      if (!(frameFlags(frame) & FRAME_NEEDS_FLOOR)) return;
+      tile = k_get_tile_at_char();                       // else: the tile underfoot
+    }
+  } else {
+    return;
+  }
   if (tile === TILE_OPENER || tile === TILE_CLOSER) {
     // the kid is alive (died_on_button is skipped): press its button type with its bg door-link index
     triggerButton(level, trobs, curr_room, curr_tilepos, tile, currModif());
   } else if (tile === TILE_LOOSE) {
-    makeLooseFall(trobs, level, ch.room, ch.curr_col, ch.curr_row);
+    looseFallHere();
   }
 }
 

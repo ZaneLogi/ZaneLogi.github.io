@@ -28,8 +28,10 @@ Clone files: `player.js`, `collision.js`, `control.js`, `seqtbl.js`,
 > (the `wall_dist`/`TILE_MIDX` inset) is resolved the lesson-6c way: collision is
 > faithful (stops at the source's internal x), and the flat view re-derives the
 > view-space offset with a render-only `RENDER_X_BIAS = 6`. What's left un-ported is
-> only genuinely-separate *subsystems* (spikes / chompers / HP / mid-fall grab /
-> feather / buttons / sword / guards), not collision-detection stand-ins. Full write-up:
+> only genuinely-separate *subsystems*. **Since ported (2026-07-10):** spikes (lethal),
+> mid-fall grab, buttons/portcullis + `check_gate_push`, potions (drink + colour), the full
+> `check_press` (loose-break-from-above). **Still un-ported:** chompers / HP / feather /
+> potion *effects* / sword / guards / `add_mob` debris / exit-door. Full write-up:
 > `research_collision.md §11` + the resolved rows marked ✅ below.
 
 ---
@@ -135,13 +137,13 @@ crossings, the falling entry.
 | # | not ported | owning feature | on-ramp already in place |
 |---|---|---|---|
 | ~~D1~~ ✅ | `check_collisions`/`get_row_collision_data` (buffer scan) | multi-row bumps, char-vs-char (guards), chomper | **PORTED 2026-07-10** — the full buffer scan is now in `collision_kernel.js` (§11); the multi-row band + per-column room are live (char-vs-char still needs `bump_into_opponent`, a separate subsystem) |
-| D2 | `check_grab` (Shift fall-grab, seq_15) | grab-a-ledge-while-falling | `grab_timer` field + countdown wired; `canGrab` ported |
+| ~~D2~~ ✅ | `check_grab` (Shift fall-grab, seq_15) | grab-a-ledge-while-falling | **PORTED 2026-07-10** — `check_grab` is a `player.js checkGrab` reached via an `onCheckGrab` kernel hook (kernel stays routine-identical); `fallhang`/seq_15 transcribed (`research_collision.md §12`) |
 | ~~D3~~ ✅ | `down_pressed` climb-down path (seq_68) | climb down | **PORTED** — `climbdown` transcribed; `down_pressed` wired; reuses the hang machinery (the hang after frame 91 is transient — `hang_fall`'s `seq_11` is the source's "end of climb down") |
 | ~~D4~~ ✅ | `can_climb_up`'s `seq_73` (`climbfail`, climb onto a closed gate/mirror/chomper) | gate climb | **PORTED 2026-07-07** — `climbfail` transcribed; `canClimbUp` picks it per `seg005.c:840` |
 | ~~D5~~ ✅ | horizontal `standing_jump`/`run_jump` control wiring | horizontal jumps | **PORTED** — standing jump wired earlier; `run_jump` (edge-align + `control_running` Up branch) this milestone |
-| ~~D6~~ ✅ (mostly) | `trigger_button`/`do_trigger_list`/`trigger_gate` + `animate_door`/`animate_button` (**button/animate subsystem**) | **portcullis open/close** | **PORTED** — `trob.js` grew to the full trob system; `check_press` button branch; gate render retracts by the modifier; the `leave_room` col-9 guard restored + extended to a blocking closed gate. Only `check_gate_push` (a *closing* gate ejecting you sideways) remains. |
-| D7 | `add_mob` debris chunk + `loose_shake` visual | loose-floor polish | loose collapse + fall already work |
-| D8 | spikes / chompers / potions / mirror / level-door interactions | hazards & items | tile predicates + `wall_type` already classify them statically |
+| ~~D6~~ ✅ | `trigger_button`/`do_trigger_list`/`trigger_gate` + `animate_door`/`animate_button` (**button/animate subsystem**) + `check_gate_push` | **portcullis open/close** | **PORTED** — `trob.js` grew to the full trob system; `check_press` button branch; gate render retracts by the modifier; `leave_room` col-9 guard; and **`check_gate_push`** (a closing gate ejects you sideways) is now in the kernel. **The portcullis is complete** — plus the level-1 entry event slams it shut (`research_environment.md §6a`). |
+| D7 | `add_mob` debris chunk + `loose_shake` visual | loose-floor polish | loose collapse + fall already work (incl. break-from-below, §9); the falling *piece* + pre-collapse shake are the remainder |
+| ~~D8~~ partial | ~~spikes~~ ✅ / ~~potions~~ ✅ / chompers / mirror / level-door | hazards & items | **spikes PORTED** (lethal; `research_environment.md §2.5`) + **potions PORTED** (drink + colour label + the `alter_mods` load fixup, §6 — *effects* still out of scope, no HP). **Still deferred:** chompers (`start_chompers` no-op stub + `animate_chomper`/`check_chomped_kid`), the mirror break/shadow-split, and the exit level-door animator (`animate_leveldoor`). |
 
 ---
 
@@ -160,8 +162,9 @@ crossings, the falling entry.
 - **Fall/land + bump:** `checkAction` action-branching, `doFall`/`land`/`startFall`
   thresholds (soft/med/hard), `bumped`/`bumpedFloor`/`bumpedFall` recoil dispatch.
 - **Room rebase math:** `gotoRoom` (±140/±189, `curr_row` recompute on up/down).
-- **Loose floors:** the full trob slice (`trob.js`), `check_press` loose branch,
-  the mutable-level modifier countdown.
+- **Loose floors:** the full trob slice (`trob.js`), the **full `check_press`**
+  (loose + button + hanging/frame-79 loose-break-from-above), the mutable-level
+  modifier countdown.
 - **Frame-loop order** *except* W2 (crossRooms placement) and D1 (check_collisions).
 
 ---
@@ -203,9 +206,11 @@ Everything else is either faithful, a keeper substitute, or a feature-scoped
 defer. The rework is bounded to the layer that `research_position_room.md` maps,
 and its acceptance test is §1.
 
-**Portcullis progress:** now **essentially complete.** The collision half (2026-07-07):
+**Portcullis progress:** **COMPLETE.** The collision half (2026-07-07):
 `can_bump_into_gate` (open/closed-aware block) + `climbfail` (D4). The **button/animate
-subsystem** (this milestone, D6): `trigger_button`→`do_trigger_list`→`trigger_gate` +
+subsystem** (D6): `trigger_button`→`do_trigger_list`→`trigger_gate` +
 `animate_door`/`animate_button` in the grown `trob.js`, the `check_press` button branch,
 the gate render retracting by its open height, and the `leave_room` col-9 boundary-gate
-guard. Only `check_gate_push` (a *closing* gate ejecting the prince sideways) is left.
+guard. **`check_gate_push`** (a *closing* gate ejecting the prince sideways) is now ported
+into the kernel too — and the level-1 entry event slams the entry gate shut on drop-in
+(`research_environment.md §6a`).

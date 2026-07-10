@@ -131,24 +131,28 @@ in `research_deviation_ledger.md`.
 
 ---
 
-## 3. The clone's `tick()` vs the source order (pointer, not a change)
+## 3. The clone's `tick()` vs the source order (now FAITHFUL — the reworks landed)
 
-`index.html`'s `player.js` `tick()` currently does:
+`index.html`'s `player.js` `tick()` currently does (matching the source spine):
 
 ```
-processTrobs → buildControl → controlKid → playSeq → fallAccel → fallSpeed
-→ determineCol → setCharCollision → checkBumped → crossRooms → checkAction → checkPress
+processTrobs → readRawAxis/restCtrl1/readUserControl → controlKid → saveCtrl1
+→ playSeq → fallAccel → fallSpeed → load_frame_to_obj → determine_col → set_char_collision
+→ check_collisions → check_bumped → check_gate_push → check_action → checkPress
+→ check_spike_below → check_spiked → leaveRoom
 ```
 
-Differences from the source spine (each classified in the ledger):
+The table below was the *old* divergence list — **every row has since been resolved** (the
+routine-level-identical kernel + the W1/W2 substrate rework):
 
-| step | source | clone | note |
-|---|---|---|---|
-| pre-control `determine_col` | yes (before `play_kid`) | no | control reads last tick's col — minor |
-| `load_frame_to_obj` as a step | explicit | folded into `draw()` | cosmetic, fine |
-| `check_collisions` (fill buffers) | yes | **absent** — ad-hoc `Char.x` detection in `checkBumped` | §5b deferred buffer scan |
-| `check_gate_push` | yes | **absent** | portcullis push-out not modeled |
-| **room cross vs `check_action`** | `check_action` **then** `exit_room` | `crossRooms` **then** `checkAction` | **wrong order** (§2.4) |
-| `curr_col` clamp | none | clamps `[0,9]` | **wrong-direction patch** (§2.4) |
+| step | old clone state | now |
+|---|---|---|
+| pre-control `determine_col` | no | still folded (control reads last tick's col — minor, kept) |
+| `load_frame_to_obj` as a step | folded into `draw()` | now an explicit `tick()` step feeding `set_char_collision` |
+| `check_collisions` (fill buffers) | absent — ad-hoc `Char.x` | ✅ the faithful per-column buffer scan (kernel, §5b/`research_collision.md §11`) |
+| `check_gate_push` | absent | ✅ ported into the kernel (a closing gate ejects you sideways) |
+| room cross vs `check_action` | `crossRooms` **before** `checkAction` (wrong) | ✅ **W2** — `leaveRoom` runs **after** `checkAction` (source `exit_room` order) |
+| `curr_col` clamp | clamps `[0,9]` (wrong-direction patch) | ✅ **W1** — clamp removed; only the collision-scan bounds clamp |
 
-The two bold rows are the substrate rework; the rest are either fine or deferred.
+(New steps since: `check_spike_below`/`check_spiked` for the lethal-spike hazard, and the
+control-latch pipeline `restCtrl1`/`readUserControl`/`saveCtrl1`.)

@@ -569,12 +569,15 @@ per-column buffer *scan*.
 - **`safe_step`-to-edge IS implemented** (§5b): `step1..step14` + `get_edge_distance` wired through
   `control.js`, so Shift-step and the post-bump forward both land the char *exactly* at the wall face
   (flush) or a ledge's brink. Only `safe_step`'s distance-0 climb branches are deferred.
-- **`start_fall`'s run-frame variants** (frame 9 → `seq_7`, frame 13 → `seq_19`) collapse to
-  the general `seq_7_fall` (`freefall`); visually identical for a single actor.
+- **`start_fall`'s run-frame variants** are now **faithful** (the kernel port added the per-context
+  fall sequences `stepfall`/`stepfall2`/`jumpfall`/`rjumpfall`/`patchfall` with `set_fall` drift —
+  they no longer collapse to a single `freefall`; §11).
 - **Gate collision IS implemented** (2026-07-07): `can_bump_into_gate` (open/closed-aware wall) +
   the climb-into-a-closed-gate `climbfail` (`research_environment.md §1e`). The *animate/button*
-  subsystem (open/close over time) and spikes stay out of scope for the collision substrate.
-  **Loose-floor collapse IS implemented** (§9); **the sub-tile bump system IS implemented** (§5b).
+  subsystem (open/close over time, + `check_gate_push` + the entry-slam) and **spikes** (lethal)
+  are now implemented too (`research_environment.md §1/§2.5/§6a`).
+  **Loose-floor collapse IS implemented** (§9, incl. break-from-below); **the sub-tile bump system IS
+  implemented** (§5b).
 
 ---
 
@@ -588,11 +591,18 @@ falling-debris chunk and the shake visual deferred by agreement.
 
 ### The mechanism (three source touch-points)
 
-1. **Trigger — `check_press` (`seg006.c:1683`).** Each frame, for a grounded / turning /
-   bumped actor (`action==turn || action==bumped || action < actions_2_hang_climb`) on a
-   `FRAME_NEEDS_FLOOR` frame, it reads the tile underfoot (`get_tile_at_char`); if that tile is
-   `tiles_11_loose` it calls `make_loose_fall(1)`. (The full routine also handles hanging/
-   climbing frames, a jump-hang break-from-above, and buttons — none in the toy's move set yet.)
+1. **Trigger — `check_press` (`seg006.c:1683`).** The full routine is now ported (was a
+   grounded-only slice). It reads the "pressed" tile — normally the one underfoot
+   (`get_tile_at_char`, on a `FRAME_NEEDS_FLOOR` frame while `action==turn || bumped || <
+   actions_2_hang_climb`), but two cases read the tile **above** (`get_tile_above_char`, whose
+   `curr_row-1` link-hops into the up-room): while **hanging/climbing** (frames 87–99 / 135–140)
+   the pressed tile is the one being grabbed, and at **frame 79** (a plain jump-up bonking the
+   ceiling) a `tiles_11_loose` directly above is broken **from below** — the "jump up under a
+   loose floor to drop it" move. Whatever tile it lands on: a `tiles_11_loose` → `make_loose_fall`,
+   a button (15/6) → `trigger_button`. *(The clone reaches frame 79 via `jumpup`/seq_14 — a solid
+   loose floor overhead isn't grabbed as a ledge here because the surrounding tiles fail `can_grab`,
+   so `check_jump_up` falls through to `jumpAtCeiling`. The kid then bonks it at frame 79 and it
+   collapses; the falling-debris chunk `add_mob` stays deferred, so the tile simply vanishes.)*
 2. **Arm — `make_loose_fall` (`seg007.c:904`).** Guards twice: the tile must be a still-solid
    loose floor, and its **modifier must be `<= 0`** (a fresh loose tile is 0) so re-stepping a
    tile that's already counting down never restarts it. It sets the modifier to 1 and
@@ -858,12 +868,14 @@ collapse → room 2; deep fall ends **bounded** (no "fall forever"); legitimate 
 screenshot shows the prince flush at the left wall with `Char.x=64` unchanged.
 
 **Genuinely out of scope** (separate *subsystems*, not collision-detection substitutes — the same
-class as char-vs-char): spikes (hazard), chompers (`start_chompers` stub + the buffer-reading
-`check_chomped_kid`), HP (`take_hp` — a medium land always survives), feather fall, and sword
-**combat** / guards. These arrive with their own features; none is a stand-in *in the collision
-path*. *(Since implemented as their own features: **buttons/portcullis** — `check_press` now has the
-button branch + the trob animate subsystem; the **sword/potion pickup** — `check_get_item`/
-`get_item`; and the **mid-fall Shift-grab** — the `check_grab` stub is now the real routine, §12.)*
+class as char-vs-char): chompers (`start_chompers` stub + the buffer-reading `check_chomped_kid`),
+HP (`take_hp` — a medium land always survives), feather fall + the other potion **effects**, the
+exit level-door, and sword **combat** / guards. These arrive with their own features; none is a
+stand-in *in the collision path*. *(Since implemented as their own features: **buttons/portcullis**
+(+ `check_gate_push`, the entry-slam); the **sword/potion pickup** — `check_get_item`/`get_item`,
++ potion drink + colour label; the **mid-fall Shift-grab** — the `check_grab` stub is now the real
+routine, §12; **spikes** — now lethal (`research_environment.md §2.5`); and the **full `check_press`**
+— loose-break-from-above, §9.)*
 
 **Files:** `collision_kernel.js` (new), `player.js` (kernel-wired, substitutes deleted, the
 render-bias), `playseq.js` (`alive`/`sword` init), `seqtbl.js` (the 5 fall sequences). Deviation

@@ -184,7 +184,7 @@ The closed-gate climb-up variant (`seq_73` = `climbfail`) is now **ported** (202
 |---|---|---|---|---|
 | **start fall (off a ledge)** | `check_on_floor`: `FRAME_NEEDS_FLOOR` + no floor + not a wall (`start_fall`, seg006.c:1099) | `seq_7`/`19` (run), `18`/`21` (jump), climb variants → freefall | reads tile at char | →3/4 |
 | **freefall** | in `seq_7` etc. | `seq_10`… wait — `freefall` (seq_12 label) frame 106 loop | gravity (`fall_accel`/`fall_speed`); `do_fall` each tick | 4 |
-| **fall-grab** | Shift held, `fall_y<32`, near landing row (`check_grab`, seg006.c:1177) *(deferred)* | `seq_15` fallhang → hang | `can_grab_front_above`; sets `grab_timer=12` | 3→2 |
+| **fall-grab** | Shift held, `fall_y<32`, near landing row (`check_grab`, seg006.c:1177) *(✅ ported, §12)* | `seq_15` fallhang → hang | `can_grab_front_above`; sets `grab_timer=12` | 3→2 |
 | **soft land** | `do_fall`→`land`, `fall_y<22` (seg005.c:174) | `seq_17` softland → crouch → stand | seat feet `y_land[curr_row+1]` | 5→1 |
 | **medium land** | `22 ≤ fall_y < 33` (−1 HP) | `seq_20` medland → stand | same | 5 |
 | **hard land** | `fall_y ≥ 33` (death) | `seq_22` crushed (`SEQ_DIE`) | same | 5 |
@@ -246,11 +246,11 @@ modifier ~72–140 blocks a stand but passes a crouch; `research_collision.md §
 | `get_edge_distance` (edge classify) | careful step, forward-run gate, run-jump align, turn-run | ported |
 | `can_grab` + above-row tiles | jump-up grab, climb-up, climb-down, fall-grab | ported — grab, climb-down, **and fall-grab** (`check_grab`, `research_collision.md §12`) |
 | **`get_tile` link-hop on unclamped `curr_col`** | any action that lands/climbs across a room boundary | faithful (the clamp was removed — §11 / `research_collision.md §11`) |
-| room cross (`leave_room` after `check_action`) | any action that crosses a boundary | wrong order + missing climb-frame block/`Char.y` up-down — **rework** |
-| per-column bump buffers | wall bump (all grounded moves), gate push, chomper | `Char.x` stand-in (legit defer) |
+| room cross (`leave_room` after `check_action`) | any action that crosses a boundary | ✅ faithful — **W2** (runs after `check_action`) + **W3** (climb-frame block / `Char.y` up-down) landed |
+| per-column bump buffers | wall bump (all grounded moves), gate push, chomper | ✅ faithful — the kernel's per-column scan (`research_collision.md §11`); no longer a `Char.x` stand-in |
 
-The two bold rows are the substrate rework (`research_deviation_ledger.md`); the
-rest are either done or a clean, feature-scoped defer.
+Every row above is now faithful (the substrate rework + the routine-level-identical
+kernel landed); classification in `research_deviation_ledger.md`.
 
 ---
 
