@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>block_breaker — level viewer</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; padding: 24px;
+      font: 14px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace;
+      background: #0e0e14; color: #d7d7e0;
+      display: flex; flex-direction: column; align-items: center; gap: 16px;
+    }
+    h1 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: .5px; }
+    h1 small { color: #8a8a9a; font-weight: 400; }
+    .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
+    button {
+      font: inherit; background: #23232f; color: #d7d7e0;
+      border: 1px solid #3a3a4a; border-radius: 6px; padding: 6px 12px; cursor: pointer;
+    }
+    button:hover { background: #2d2d3c; }
+    button:active { background: #34344a; }
+    input[type=number] {
+      font: inherit; width: 3.5em; text-align: center;
+      background: #1a1a24; color: #d7d7e0; border: 1px solid #3a3a4a;
+      border-radius: 6px; padding: 6px 4px;
+    }
+    #label { min-width: 5.5em; text-align: center; }
+    canvas {
+      background: #05050a; border: 1px solid #2a2a38; border-radius: 4px;
+      image-rendering: pixelated;
+    }
+    #status { font-size: 13px; }
+    .ok { color: #6ad081; } .bad { color: #ff6d6d; }
+    .meta { color: #9a9aac; }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px 16px; justify-content: center; max-width: 640px; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; color: #9a9aac; font-size: 12px; }
+    .sw { width: 14px; height: 10px; border-radius: 2px; border: 1px solid #00000060; }
+    .hint { color: #6a6a7a; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>block_breaker <small>— level viewer · Arkanoid MSX layouts</small></h1>
+
+  <div class="controls">
+    <button id="prev">◀ Prev</button>
+    <input id="num" type="number" min="1" max="32" value="1">
+    <span id="label">Level 1/32</span>
+    <button id="next">Next ▶</button>
+  </div>
+
+  <canvas id="view"></canvas>
+
+  <div id="status">…</div>
+  <div class="legend" id="legend"></div>
+  <div class="hint">← / → to change level · data decoded from tiburoncio's Arkanoid MSX disassembly</div>
+
+  <script type="module" src="./level_viewer.js"></script>
+</body>
+</html>
