@@ -114,6 +114,7 @@ let sheet = null;
 const ch = makeCharacter({ x: 0, y: 0, direction: DIR_LEFT });
 ch.room = level.start.room;
 ch.onGetItem = () => procGetObject(ch);   // SEQ_GET_ITEM 1 -> proc_get_object (fires from pickupsword/drinkpotion)
+ch.onCheckGrab = () => checkGrab(ch);      // check_grab hook: the kernel's do_fall/check_action fire this mid-fall
 let drawnRoom = level.start.room;
 
 // Level-1 START = a FALLING entry (do_startpos, seg003.c:167 -> seq_7_fall). The start
@@ -263,6 +264,40 @@ function hangAgainstWall(ch) {
     (ch.direction < DIR_RIGHT && (at === TILE_DOORTOP_FLOOR || at === TILE_DOORTOP));
   if (ch.action !== ACT_HANG_STRAIGHT && againstWall) { startSeq(ch, 'hangstraight'); return; }
   if (!tileIsFloor(getTileAboveChar(level, ch))) hangFall(ch);
+}
+
+// check_grab (seg006.c:1177): grab a ledge in mid-fall. The kernel's do_fall / check_action fire
+// this (via the onCheckGrab hook) while falling — do_fall each freefall tick the feet are still
+// above the floor line, check_action during the start-fall frames 102-105 (action 3). It reads the
+// control layer (control_shift) + the grab helpers, so it lives here like check_get_item, not in
+// the routine-for-routine kernel. Hold Shift while dropping past a grabbable ledge that's close
+// enough ahead-and-above and you're not falling too fast (fall_y < 32) -> snap onto it and hang.
+// Mirrors can_grab_front_above via the same collision.js helpers as check_jump_up (through = tile
+// above; target = tile front-above). The -8 pre-nudge + load_fram_det_col re-derive the column at a
+// slightly-back x so a ledge just ahead reads as grabbable; distance_to_edge_weight then snaps
+// Char.x flush to its near edge, Char.y to the landing row, and grab_timer=12 gates the climb (as
+// jump-up-grab does). Sound (sound_9_grab) / is_screaming / the FIX chomper-start are dropped.
+function checkGrab(ch) {
+  if (control.shift === HELD &&                                   // press Shift to grab
+      ch.fall_y < 32 &&                                           // not falling too fast (MAX_GRAB_FALLING_SPEED)
+      ch.alive < 0 &&                                             // not dead
+      u16(Y_LAND[ch.curr_row + 1]) <= u16(ch.y + 25)) {           // near a landing row (word compare)
+    const old_x = ch.x;
+    ch.x = charDxForward(ch, -8);
+    load_fram_det_col();                                          // re-derive curr_col at the nudged x
+    const facingRight = ch.direction >= DIR_RIGHT;
+    const frontCol = ch.curr_col + DIR_FRONT[ch.direction + 1];
+    if (!canGrab(getTileAboveChar(level, ch), getTileFrontAboveChar(level, ch),          // can_grab_front_above
+                 getTileModif(level, ch.room, frontCol, ch.curr_row - 1), facingRight)) {
+      ch.x = old_x;                                               // can't grab -> undo the nudge, keep falling
+    } else {
+      ch.x = charDxForward(ch, distanceToEdge(ch, dxWeight(ch))); // snap flush to the ledge's near edge
+      ch.y = Y_LAND[ch.curr_row + 1];                             // seat the feet at the landing row
+      ch.fall_y = 0;                                              // stop the fall
+      startSeq(ch, 'fallhang'); playSeq(ch);                      // seq_15: reach-up frame 80 -> hang loop
+      ch.grab_timer = 12;                                         // gate the climb for 12 ticks (seg006.c:1405)
+    }
+  }
 }
 
 // --- running jump (ported seg005.c) + Down->crouch/climb-down -----------------------------

@@ -259,6 +259,11 @@ _b.label('hangfall').act(ACT_IN_MIDAIR).frame(81)
   .dy(6).frame(81)
   .dy(9).frame(81)
   .dy(12).dx(2).setFall(0, 12).jmp('freefall');
+// fallhang (seqtbl.c:687, = seq_15_grab_ledge_midair): grab a ledge in mid-fall. Show the reach-up
+// frame 80 (still act 3 in_midair for one tick) then hand off to the ordinary `hang` loop (act 2).
+// check_grab (player.js) snaps Char.x/Char.y to the ledge, zeroes fall_y, and starts this + a
+// grab_timer=12 countdown before control_hanging will climb — the same hang machinery as jump-up.
+_b.label('fallhang').act(ACT_IN_MIDAIR).frame(80).jmp('hang');
 
 // --- wall-bump recoils (§5b): the three bump sequences the bumped/bumped_floor/bumped_fall
 // dispatch (player.js, ported seg004.c:266/311/298) picks by the character's state. ---

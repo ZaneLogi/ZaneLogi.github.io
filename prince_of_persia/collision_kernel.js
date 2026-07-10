@@ -460,8 +460,12 @@ let fall_frame = 0;
 export function load_fram_det_col() { load_frame_to_obj(); determine_col(); }
 // inc_curr_row (seg006.c:2152).
 function inc_curr_row() { Char.curr_row++; }
-// check_grab (seg006.c:1177): the Shift-grab-a-ledge-mid-fall — a DEFERRED feature (no-op here).
-function check_grab() { /* not modeled: mid-fall Shift-grab sets grab_timer + seq_15 */ }
+// check_grab (seg006.c:1177): the Shift-grab-a-ledge-mid-fall. Its body reads the control layer
+// (control_shift) + the grab helpers, so — like check_get_item / check_press, "a decision a control
+// routine needs" — it lives in player.js and fires through the bound onCheckGrab hook (the SEQ_GET_ITEM
+// / onGetItem pattern). The kernel keeps the source's two call sites (do_fall / check_action) so the
+// call graph stays faithful; no control state or grab predicate is pulled into the kernel.
+function check_grab() { Char.onCheckGrab?.(); }
 // start_chompers (seg007.c): activate chompers on landing — OUT OF SCOPE (chomper subsystem).
 function start_chompers() { /* not modeled */ }
 

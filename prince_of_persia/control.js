@@ -142,10 +142,11 @@ function controlRunning(ch, c, world) {
 }
 
 // control_hanging (seg005.c:791): while hanging from a ledge (frames 87-99). Up — once the grab
-// timer has counted down (only set by the deferred mid-fall grab, so 0 here) — climbs onto the
-// ledge; Shift hangs flat against a wall (or lets go if there's nothing above to climb); anything
-// else lets go and drops or falls. (The kid is alive throughout, so source's Char.alive<0 guard is
-// implicit.) All three are control-phase, so they only startSeq via the world helpers.
+// timer has counted down (check_grab sets it to 12 on a mid-fall grab; a jump-up grab leaves it 0)
+// — climbs onto the ledge; Shift hangs flat against a wall (or lets go if there's nothing above to
+// climb); anything else lets go and drops or falls. So after a mid-fall grab you hold Shift to keep
+// hanging through the 12-tick countdown, then Up to climb. (The kid is alive throughout, so source's
+// Char.alive<0 guard is implicit.) All three are control-phase, so they only startSeq via the world helpers.
 function controlHanging(ch, c, world) {
   if (ch.grab_timer === 0 && c.up === HELD) world.climbUp();       // can_climb_up -> climbup
   else if (c.shift === HELD)                world.hangAgainstWall();// hangstraight / let go

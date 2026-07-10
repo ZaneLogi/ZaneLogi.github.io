@@ -565,6 +565,30 @@ KID sprites natively face **LEFT**.
   (`SEQ_GET_ITEM` hook + `have_sword`/`pickup_obj_type`/`onGetItem` fields), `collision_kernel.js` (3
   exports), `control.js` (shift2 + get-item branches), `player.js` (the 4 functions + latch + HUD).
   Detail: `docs/research_actions.md §11`.
+- **[done] Grab a ledge in mid-fall.** Hold **Shift** while falling and the prince catches a ledge
+  that's close enough ahead-and-above (and you're not falling too fast) → hangs, from where the §10
+  machinery climbs (Up) or drops (release). This fills the `check_grab` stub the routine-identical
+  kernel left. Port of `check_grab` (`seg006.c:1177`): fires while `control_shift == HELD`, `fall_y < 32`,
+  `alive < 0`, and the landing row is within reach (`(word)y_land[curr_row+1] <= (word)(Char.y+25)`);
+  nudges `Char.x` back 8 so a ledge just ahead reads as grabbable, tests `can_grab_front_above`, and on
+  success snaps flush to the ledge, seats `Char.y` at the landing row, zeroes `fall_y`, starts
+  **`fallhang`** (seq_15 = `act(3) frame_80 jmp(hang)`, transcribed), and sets `grab_timer = 12` (which
+  gates the climb — the last consumer of the field the jump-up step put in place). **The kernel's two
+  call sites** (`do_fall` each freefall tick the feet are above the floor line; `check_action` at the
+  start-fall frames 102–105) are unchanged. **Design (respects the kernel invariant):** `check_grab`
+  needs the control layer (`control_shift`) + the grab predicates already in `collision.js`, so the body
+  is `checkGrab(ch)` in **`player.js`** (next to `checkJumpUp`, reusing `canGrab`/`getTileAboveChar`/
+  `distanceToEdge`) and the kernel's `check_grab()` becomes a one-line `Char.onCheckGrab?.()` delegate —
+  the `onGetItem`/`SEQ_GET_ITEM` hook pattern — so no control state or grab predicate is pulled into the
+  kernel (zero duplication, no new import). **Verified** (deterministic `#debug` stepping, no console
+  errors): run off room-5 col-6 into the col-7 pit + Shift → grab (frame 80 → hang loop, `grab_timer=12`,
+  `Char.y` snapped to 118) → Shift-hold-then-Up climbs row 1→0, or release drops; negatives all correct
+  (no Shift lands; `fall_y ≥ 32` falls through; a *centred* drop — stand-on-col-7 or the room-12 loose
+  floors — doesn't grab because the `-8` back-nudge lands "above" on an adjacent floor, so a natural grab
+  needs the front-of-column position a run-off gives). Regressions (falling entry, run/runstop, wall bump,
+  **jump-up grab** — `grab_timer` stays 0 there, no leak) pass. Files: `seqtbl.js` (`fallhang`),
+  `player.js` (`checkGrab` + `onCheckGrab` binding), `collision_kernel.js` (`check_grab` → hook delegate),
+  `control.js` (stale comment fix). Detail: `docs/research_collision.md §12`.
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
 

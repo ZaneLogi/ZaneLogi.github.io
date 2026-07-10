@@ -722,10 +722,10 @@ player control — you climb or drop almost immediately.
 
 ### `grab_timer`
 
-Set to 12 only when grabbing a ledge **mid-fall** (`check_grab`, `seg006.c:1217`) — that path is
-deferred (below) — and counted down each tick (`process(grab_timer)`, `seg006.c:1405`; our tick
-top). So in this step it is always 0 and the climb starts immediately; the field + countdown are in
-place so the deferred mid-fall grab works when added.
+Set to 12 only when grabbing a ledge **mid-fall** (`check_grab`, `seg006.c:1217`; **now implemented
+— §12**) and counted down each tick (`process(grab_timer)`, `seg006.c:1405`; our tick top). For a
+jump-up grab it stays 0, so the climb starts immediately; after a mid-fall grab it gates the climb
+for 12 ticks (you hold Shift to keep hanging through the countdown, then Up to climb).
 
 ### Sequences transcribed (`seqtbl.js`, from `seqtbl.c`)
 
@@ -752,8 +752,8 @@ climb-up — **not** "only from `seq_9_grab_while_jumping`" as an earlier draft 
 
 ### Deferred (each a clean follow-on that reuses this hang machinery)
 
-- **Grab a ledge while falling** — Shift held during a fall → `check_grab` (`seg006.c:1177`) →
-  `fallhang` (seq_15); this is what sets `grab_timer = 12`.
+- ~~Grab a ledge while falling~~ — **DONE (§12):** Shift held during a fall → `check_grab`
+  (`seg006.c:1177`) → `fallhang` (seq_15); this is what sets `grab_timer = 12`.
 - **Climb down** — Down at a ledge edge with an edge behind → `down_pressed` grab path
   (`seg005.c:472`) → `climbdown` (seq_68).
 - ~~Climb onto a closed gate/mirror/chomper~~ — **DONE 2026-07-07:** `can_climb_up`'s `seq_73`
@@ -859,12 +859,66 @@ screenshot shows the prince flush at the left wall with `Char.x=64` unchanged.
 
 **Genuinely out of scope** (separate *subsystems*, not collision-detection substitutes — the same
 class as char-vs-char): spikes (hazard), chompers (`start_chompers` stub + the buffer-reading
-`check_chomped_kid`), HP (`take_hp` — a medium land always survives), mid-fall Shift-grab
-(`check_grab` stub), feather fall, and sword **combat** / guards. These arrive with their own
-features; none is a stand-in *in the collision path*. *(Since implemented as their own features:
-**buttons/portcullis** — `check_press` now has the button branch + the trob animate subsystem; and
-the **sword/potion pickup** — `check_get_item`/`get_item`; see the `CLAUDE.md` roadmap.)*
+`check_chomped_kid`), HP (`take_hp` — a medium land always survives), feather fall, and sword
+**combat** / guards. These arrive with their own features; none is a stand-in *in the collision
+path*. *(Since implemented as their own features: **buttons/portcullis** — `check_press` now has the
+button branch + the trob animate subsystem; the **sword/potion pickup** — `check_get_item`/
+`get_item`; and the **mid-fall Shift-grab** — the `check_grab` stub is now the real routine, §12.)*
 
 **Files:** `collision_kernel.js` (new), `player.js` (kernel-wired, substitutes deleted, the
 render-bias), `playseq.js` (`alive`/`sword` init), `seqtbl.js` (the 5 fall sequences). Deviation
 classification: `research_deviation_ledger.md` (L1/L2/D1 marked ✅).
+
+## 12. Grab a ledge in mid-fall (`check_grab`, 2026-07-10)
+
+**What it is.** Hold **Shift** while falling and, if a grabbable ledge is close enough ahead-and-
+above and you're not plummeting, the prince catches it and hangs — from where the §10 hang machinery
+climbs (Up) or drops (release). This fills the `check_grab` stub the kernel left (§11's "out of
+scope" list) and is the last consumer of the `grab_timer` field §10 put in place.
+
+**The routine** (`check_grab`, `seg006.c:1177`). Fires while `control_shift == HELD`, `fall_y < 32`
+(not too fast — `MAX_GRAB_FALLING_SPEED`), `alive < 0`, and the landing row is within reach
+(`(word)y_land[curr_row+1] <= (word)(Char.y + 25)`). It then nudges `Char.x` back 8
+(`char_dx_forward(-8)` + `load_fram_det_col`) so a ledge *just ahead* reads as grabbable, tests
+`can_grab_front_above` (through = the tile directly above; target = the tile front-above — the ledge),
+and on success snaps `Char.x` flush to the ledge's near edge (`distance_to_edge_weight`), seats
+`Char.y` at the landing row, zeroes `fall_y`, starts **`seq_15_grab_ledge_midair`** (our `fallhang`:
+`act(3) frame_80 jmp(hang)` — one reach-up frame then the ordinary hang loop), and sets
+`grab_timer = 12`. On failure it restores only `Char.x` (leaving the nudged `curr_col`, faithfully —
+next tick's `determine_col` re-derives it).
+
+**Two call sites, both already in the kernel** (unchanged): `check_action` runs it at the start-fall
+frames 102–105 (action `3_in_midair`); `do_fall` runs it every freefall tick the feet are still above
+the current row's floor line. So the grab window spans the whole descent until `fall_y` passes 32.
+
+**Where the body lives — the hook.** `check_grab` needs the control layer (`control_shift`) and the
+grab predicates that already live in `collision.js` (`canGrab`/`getTileAboveChar`/…). Per the kernel's
+own editing invariant ("a decision a control routine needs goes in `player.js`, never in the kernel"),
+the body is `checkGrab(ch)` in **`player.js`** — next to `checkJumpUp`/`hangFall`, reusing the same
+helpers as the jump-up grab (`can_grab_front_above` = `canGrab(getTileAboveChar, getTileFrontAboveChar,
+modifier, facingRight)`; the snap = `charDxForward(ch, distanceToEdge(ch, dxWeight(ch)))`). The kernel's
+`check_grab()` becomes a one-line delegate `Char.onCheckGrab?.()` — the **`onGetItem`/`SEQ_GET_ITEM`
+pattern** — so the source's two call sites stay faithful while no control state or grab predicate is
+pulled into the kernel (zero duplication, no new kernel import). The stale mid-fall-grab-is-deferred
+comment in `controlHanging` (`control.js`) was corrected in the same change.
+
+**Verified** (deterministic `#debug` stepping, zero console errors):
+
+- **Positive grab (natural motion):** run right off room 5 col 6 into the col-7 pit + Shift once
+  airborne → at the freefall tick with `y≈103, fall_y≈15` `check_grab` fires: `frame 80`, `Char.y`
+  snapped to 118 (`y_land[2]`), `fall_y=0`, `grab_timer=12` → next tick the `hang` loop (frame 91,
+  action 2) on the col-8 ledge. Screenshot confirms the hang pose.
+- **Grab → climb:** hold Shift through the 12-tick countdown (stays hanging, `hangstraight`), then Up
+  → `climbup` (frames 135→145), **row 1→0** onto the ledge.
+- **Grab → release:** let go → `hangdrop`/`hangfall` (§10) → drops and lands. (Idle hang drops, per the
+  faithful `control_hanging` — `else → hang_fall`.)
+- **Negatives (correctly no grab):** no Shift → lands; `fall_y` forced ≥ 32 → falls through; a
+  *centred* drop (stand on room 5 col 7, or the room 12 loose floors) → the `-8` back-nudge lands the
+  "above" check on an adjacent **floor** (can't grab *through* a floor) → no grab — this is why a
+  natural grab needs the prince at the *front* of his column (running off toward the ledge), exactly
+  as the mechanic intends.
+- **Regressions:** falling entry, run/runstop, wall bump (x=64/177), and the **jump-up grab**
+  (`grab_timer` stays 0 there — the mid-fall timer didn't leak) all still pass.
+
+**Files:** `seqtbl.js` (`fallhang` = seq_15), `player.js` (`checkGrab` + the `onCheckGrab` binding),
+`collision_kernel.js` (`check_grab` → hook delegate), `control.js` (stale comment fix).
