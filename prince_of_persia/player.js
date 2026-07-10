@@ -35,7 +35,8 @@ import { makeTrobs, processTrobs, makeLooseFall, triggerButton,
 import { bindKernel, setLevel as kSetLevel,
          determine_col, load_frame_to_obj, set_char_collision, check_collisions,
          check_bumped, check_gate_push, check_action, get_edge_distance, edge_type,
-         get_tile_at_char as k_get_tile_at_char, get_tile_infrontof_char as k_get_tile_infrontof_char,
+         get_tile as k_get_tile, get_tile_at_char as k_get_tile_at_char,
+         get_tile_infrontof_char as k_get_tile_infrontof_char,
          get_tile_behind_char as k_get_tile_behind_char, load_fram_det_col,
          currModif, curr_tile2, curr_room, curr_tilepos } from './collision_kernel.js';
 
@@ -55,7 +56,34 @@ const TILE_POTION = 10, TILE_SWORD = 22;
 // restoring every loose tile. trobs = the active transient-object list (loose floors only).
 let level = structuredClone(LEVEL1);
 const trobs = makeTrobs();
-function resetLevel() { level = structuredClone(LEVEL1); trobs.list = []; kSetLevel(level); }  // re-point the kernel at the fresh clone
+function resetLevel() { level = structuredClone(LEVEL1); alterModsAllrm(level); trobs.list = []; kSetLevel(level); }  // re-point the kernel at the fresh clone
+
+// alter_mods_allrm / load_alter_mod (seg008.c): the level-LOAD tile-modifier fixup, run once when
+// the level is (re)cloned. LEVELS.DAT stores DESIGN-time modifiers; the engine rewrites a few tile
+// types' modifiers into the runtime encoding before play. We port the cases that matter for our
+// collision/gameplay (the WALL case is render-only wall-connection bits — the source uses them to
+// pick which wall sprite to draw; we draw flat walls and wallType() is by tile-type not modifier, so
+// it's a view-space deviation we skip, CLAUDE.md lesson 6c):
+//   - POTION (10): modifier <<= 3. The stored low bits ARE the potion effect type (1 heal, 2 life,
+//     3 slow-fall, 4 flip, 5 hurt, 6 open); the runtime keeps the type in the HIGH bits (>>3, read by
+//     do_pickup / the pot_types annotation) and the low 3 bits become the bubble-animation phase. So
+//     without this, every potion reads as type 0 (no effect). Level-1 potions are stored 1 -> 8 = HEAL.
+//   - GATE (4): stored==1 -> 188 (loads OPEN), else -> 0 (loads CLOSED). The modifier then IS the
+//     gate's open height (can_bump_into_gate / animate_door read it). Room-5 col-9's gate is stored 1,
+//     so it loads open (the clone previously read the raw 1 and wrongly treated it as closed).
+//   - LOOSE (11): -> 0 (the collapse countdown starts fresh; make_loose_fall arms it to 1).
+function alterModsAllrm(lv) {
+  for (const room of lv.rooms) {
+    if (!room) continue;
+    for (let row = 0; row < 3; row++) for (let col = 0; col < 10; col++) {
+      const t = room.fg[row][col] & 0x1F;
+      if (t === 10)      room.bg[row][col] = (room.bg[row][col] << 3) & 0xFF;   // potion: type moves to the high bits
+      else if (t === 4)  room.bg[row][col] = (room.bg[row][col] === 1) ? 188 : 0;  // gate: open (188) or closed (0)
+      else if (t === 11) room.bg[row][col] = 0;                                  // loose: fresh countdown
+    }
+  }
+}
+alterModsAllrm(level);   // apply to the initial clone (resetLevel re-applies on each restart)
 const cv = document.getElementById('stage');
 const ctx = cv.getContext('2d');
 const hud = document.getElementById('hud');
@@ -111,6 +139,26 @@ const RENDER_X_BIAS = 6;
 let tint = '#e0d4a8', paused = false;   // warm cream — the prince reads clearly on the dark room
 let sheet = null;
 
+// pot_types (screenshot.c:181) — the potion effect -> colour + short label, keyed by the runtime
+// modifier's HIGH bits (modifier >> 3, after alter_mods' <<3). SDLPoP uses this exact mapping for its
+// own on-screen potion annotation; the colours are the EGA bright palette (12 red / 10 green / 9 blue /
+// 7 light-gray). We only HAVE body silhouettes, so a potion is drawn as an abstract bottle tinted by
+// this — the "label the potions with colours" ask. Level-1 potions are type 1 (heal) -> red.
+const POT_TYPES = [
+  { color: '#a8a8a8', text: 'x'    },   // 0 empty / no effect
+  { color: '#ff5555', text: '+1'   },   // 1 heal   (small red)
+  { color: '#ff5555', text: '+++'  },   // 2 life   (big red)
+  { color: '#55ff55', text: 'slow' },   // 3 slow fall (green)
+  { color: '#55ff55', text: 'flip' },   // 4 upside-down (green)
+  { color: '#5555ff', text: '-1'   },   // 5 hurt   (blue)
+  { color: '#5555ff', text: 'trig' },   // 6 open / trigger (blue)
+];
+// A short-lived screen flash in the drunk potion's colour — proc_get_object sets flash_color/flash_time
+// (seg006.c:1857). We have no HP subsystem, so the effect itself is a no-op, but the flash makes drinking
+// visibly DO something and reinforces the colour label. {color, time} in render frames; ticked in draw().
+const FLASH_MAX = 24;
+let potionFlash = { color: null, time: 0 };
+
 // --- the character + which room is on screen ---
 const ch = makeCharacter({ x: 0, y: 0, direction: DIR_LEFT });
 ch.room = level.start.room;
@@ -134,6 +182,14 @@ function dropAtStart() {
   ch.fall_x = 0; ch.fall_y = 0;
   ch.have_sword = 0;                       // level 1 starts swordless (do_startpos; restore after a pickup)
   ctrl1.forward = ctrl1.backward = ctrl1.shift2 = RELEASED;   // clear_saved_ctrl (seg006.c:1552): a restart resets the latch
+  // Level-1 ENTRY special event (do_startpos, seg003.c:167, `tbl_entry_pose[1] == 1`): "press button
+  // + falling entry". The prince is shoved into the dungeon and the entry portcullis (room 5 col 9,
+  // loaded OPEN at 188 by alter_mods) SLAMS shut behind him — by pressing the DROP button at room 5
+  // col 2 (`get_tile(5,2,0); trigger_button(0,0,-1)`). A drop button → `trigger_gate` anim_type 3 =
+  // FAST close (gate_close_speeds, ~4 frames), NOT the slow −1/frame button-lower. Runs before the
+  // fall seq, so processTrobs slams the gate over the first few ticks as he drops in.
+  const btype = k_get_tile(5, 2, 0);       // the drop button — sets curr_room/curr_tilepos/currModif
+  triggerButton(level, trobs, curr_room, curr_tilepos, btype, currModif());
   startSeq(ch, 'freefall');                // seq_7_fall (falling entry)
   playSeq(ch);
 }
@@ -426,7 +482,10 @@ function doPickup(ch, objType) {
 // is a no-op — the drink animation plays and the potion vanished in do_pickup.
 function procGetObject(ch) {
   if (ch.charid !== 0 /*kid*/ || ch.pickup_obj_type === 0) return;
-  if (ch.pickup_obj_type === -1) ch.have_sword = -1;     // got the sword (sound + flash not modeled)
+  if (ch.pickup_obj_type === -1) { ch.have_sword = -1; return; }  // got the sword (sound not modeled)
+  // a potion (type 1..6): the HP/feather/flip effect is out of scope (no HP subsystem), but flash the
+  // screen in the potion's colour — the source's flash_color/flash_time, here purely a visible cue.
+  potionFlash = { color: (POT_TYPES[ch.pickup_obj_type] || POT_TYPES[0]).color, time: FLASH_MAX };
 }
 
 // check_press (seg006.c:1683): the loose-floor + button trigger. For a grounded / turning / bumped
@@ -704,6 +763,19 @@ function drawRoom(room) {
       const bx = Math.round(cx + (cellW - blW) / 2), by = floorY - th - Math.max(1, Math.round(zoom));
       ctx.fillStyle = '#dbe3ee'; ctx.fillRect(bx, by, blW, th);                 // steel blade
       ctx.fillStyle = '#c9a13b'; ctx.fillRect(bx - 1, by - th, Math.max(2, Math.round(2 * zoom)), th * 3);  // brass hilt
+    } else if (t === 10) {                            // a POTION bottle standing on the floor
+      // Drawn as a small flask filled with liquid in the potion's TYPE colour (POT_TYPES, keyed by
+      // modifier>>3 — the alter_mods'd high bits). A glass neck + a highlight so it reads as a bottle.
+      // It vanishes on pickup (do_pickup erases the tile to floor). Level 1 -> type 1 heal -> red.
+      ctx.fillStyle = '#7f8c5a'; ctx.fillRect(cx, floorY, cellW, LEDGE * sy);   // floor base
+      const liquid = (POT_TYPES[getTileModif(level, room, col, row) >> 3] || POT_TYPES[0]).color;
+      const bw = Math.max(3, Math.round(7 * zoom)), bx = Math.round(cx + (cellW - bw) / 2);
+      const bodyH = Math.max(5, Math.round(9 * zoom)), neckH = Math.max(2, Math.round(3 * zoom));
+      const nw = Math.max(2, Math.round(bw * 0.4)), nx = Math.round(cx + (cellW - nw) / 2);
+      const bodyTop = floorY - bodyH;
+      ctx.fillStyle = liquid; ctx.fillRect(bx, bodyTop, bw, bodyH);             // liquid-filled body
+      ctx.fillStyle = '#cfe0e8'; ctx.fillRect(nx, bodyTop - neckH, nw, neckH);  // glass neck (light)
+      ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fillRect(bx + 1, bodyTop + 1, Math.max(1, Math.round(zoom)), bodyH - 2);  // glass highlight
     } else if (t === 2) {                             // SPIKES (a floor tile) — labelled, though the hazard isn't wired yet
       // Spikes sit in the floor and stab upward. Not yet a hazard (no is_spike_harmful / check_spiked),
       // but drawn as red blades pointing up from the floor line (block-map palette) so you can see them.
@@ -753,6 +825,16 @@ function draw() {
     } else {                                          // facing left (native)
       sp.draw(ctx, regX, top, { color: tint, scale: spriteScale });
     }
+  }
+
+  // potion drink flash — a brief colour wash over the whole frame that fades out (proc_get_object).
+  if (potionFlash.time > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.30 * (potionFlash.time / FLASH_MAX);
+    ctx.fillStyle = potionFlash.color;
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.restore();
+    potionFlash.time--;
   }
 
   const dirTxt = ch.direction < DIR_RIGHT ? 'left' : 'right';

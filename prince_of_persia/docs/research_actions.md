@@ -266,7 +266,7 @@ The path: `control_standing`/`control_crouched` (a get-item check at the top) �
 | **initiate (crouched)** | `control_shift2 == HELD && check_get_item()` (seg005.c:330) | — | 1 | the second half of the two-step |
 | **align + crouch** | `get_item`, frame ≠ 109 (seg005.c:641) | `stoop` (seq_50) | 1 | aligns `Char.x` to the item edge (`get_edge_distance`), then `crouch()` |
 | **pick up sword** | `get_item`, frame == 109, `curr_tile2 == sword` (seg005.c:650) | `pickupsword` (seq_91) → `resheathe` | 1 | `do_pickup(-1)` erases the tile; `SEQ_GET_ITEM 1` → `proc_get_object` → `have_sword = -1` |
-| **drink potion** | `get_item`, frame == 109, else (seg005.c:653) | `drinkpotion` (seq_78) | 1 | `do_pickup(modifier>>3)`; effects out of scope (no HP) — a no-op `proc_get_object` |
+| **drink potion** | `get_item`, frame == 109, else (seg005.c:653) | `drinkpotion` (seq_78) | 1 | `do_pickup(modifier>>3)` = the effect type; HP/feather/flip effects out of scope, but `proc_get_object` fires a colour **flash** |
 
 **Mechanism the pickup needs faithful:** (a) the kernel's char-relative `get_tile_*`
 reads (the source reads `curr_tile2`/`curr_tilepos` across a *sequence* of them);
@@ -279,3 +279,27 @@ consumed; the standing-on-the-sword back-up path; Shift near a non-item still
 careful-steps). **Deferred (faithful):** the sword-drawn combat stance + guards (the
 source only draws the sword near a guard — `can_guard_see_kid`), and the separate
 sword-blade overlay sprite (body silhouettes only). Detail: `CLAUDE.md` roadmap.
+
+### Potion — drink + colour label *(implemented)*
+
+The potion path is the same two-step as the sword, and now with the correct **type**.
+`do_pickup(modifier >> 3)` reads the effect type from the **high** bits — but only after
+the level-load `alter_mods` shift makes them meaningful (`research_environment.md §6`);
+the clone had been missing that shift, so `modifier >> 3` was always 0 and every potion
+read as no-effect. With the shift, level-1 potions are **type 1 = heal** (verified
+`pickup_obj_type == 1` end-to-end: crouch → full `drinkpotion` seq 191–205 → potion tile
+erased to floor).
+
+Effects (`proc_get_object`, seg006.c:1857 — heal/life/feather/flip/hurt/open) stay out
+of scope (no HP subsystem), but two visible pieces make the potion *read* as a potion:
+
+- **Colour label.** `drawRoom` draws each potion as a bottle tinted by SDLPoP's own
+  `pot_types` table (`screenshot.c:181`), keyed by `modifier >> 3`: red = heal/life,
+  green = slow-fall/flip, blue = hurt/open, gray = empty. ("Label the potions with
+  colours.") Level 1 → red.
+- **Drink flash.** `proc_get_object` sets a short screen wash in the potion's colour
+  (`flash_color`/`flash_time`) — cosmetic here (no HP to change), so drinking visibly
+  does *something* and reinforces the colour.
+
+Verified: potion renders red, drink consumes it (tile 10 → 1, modifier → 0), flash fires
+(type 1 → red). Detail: `CLAUDE.md` roadmap + `research_environment.md §6`.

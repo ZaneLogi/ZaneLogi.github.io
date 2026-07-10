@@ -625,6 +625,41 @@ KID sprites natively face **LEFT**.
   pushes +5; no spurious fire in normal play (run / turn / falling entry / crouch-hop through an open
   gate / blocked at a closed gate). Sprite heights measured (stand 41, crouch 19–24). Files:
   `collision_kernel.js` (`check_gate_push`), `player.js` (tick wiring). Detail: `docs/research_actions.md §9`.
+- **[done] `alter_mods` — the level-load modifier fixup (a missing substrate routine).** The clone had
+  never ported SDLPoP's `alter_mods_allrm` / `load_alter_mod` (seg008.c), which rewrites a few tile
+  types' stored modifiers into their runtime encoding once at level load. Ported in `player.js`
+  `alterModsAllrm(level)`, called from `resetLevel` (so a restart re-applies it): **potion** `modifier
+  <<= 3` (the stored low bits are the effect type; the runtime keeps it in the high bits read by
+  `do_pickup`/`pot_types` — without this every potion read as type 0); **gate** `1 → 188` (open) else
+  `→ 0` (closed) — the modifier then *is* the open height; **loose** `→ 0`. The **wall** case (render-only
+  wall-connection bits) is skipped as a view-space deviation (lesson 6c — flat walls, `wallType` keys off
+  the tile type). **Fixed a latent bug:** room-5 col-9's gate stores `1`, so it now **loads open (188)**
+  — the clone had read the raw `1` and treated it as closed (the gate drawn into room 1's left edge; the
+  gate-collision entry's "closed gate pins x=184" test was against that wrong initial state — the
+  *mechanism* `can_bump_into_gate` is unchanged, only this gate's load state). All other level-1 gates
+  store `2 → 0` (closed, unchanged). **Verified:** potions → modif 8 (type 1 heal), gate → 188, loose →
+  0; button→gate still raises (r5c9 188→238); regressions pass. Detail: `docs/research_environment.md §6`.
+- **[done] Level-1 entry event — the portcullis SLAMS shut.** The room-5 col-9 gate loads *open* (188,
+  above) but the DOS game slams it shut behind the prince as he's shoved in. Ported the missing half of
+  the `do_startpos` level-1 special event (seg003.c:167, `tbl_entry_pose[1] == 1` = "press button +
+  falling entry"): `get_tile(5,2,0)` selects the room-5 col-2 **drop** button, `trigger_button(0,0,-1)`
+  presses it → `trigger_gate` anim_type **3 = FAST close** (`gate_close_speeds`, ~4 frames), distinct
+  from a raise button's slow `-1`/frame lower. The clone had only the `seq_7_fall` falling entry; added
+  the button press to `player.js` `dropAtStart` (+ import the kernel's raw `get_tile`). **Verified**
+  (deterministic stepping + screenshot): gate `188 → 148 → 88 → 8 → 0` over 4 ticks as he drops in, ends
+  closed (bars down at room 1's left edge); the raise button still rises `+4`/frame (slow), so the two
+  animations are visibly different; no console errors. Detail: `docs/research_environment.md §6a`.
+- **[done] Drink a potion + colour-label the potions.** With `alter_mods` correcting the type, level-1
+  potions are **type 1 = heal** (they were reading as type-0 no-ops). The pickup/drink path already
+  existed (the sword milestone: Shift near a potion → crouch → `drinkpotion`/seq_78 → `do_pickup`
+  erases the tile); this made it *correct* and *visible*. **Colour label:** `drawRoom` draws each potion
+  as a bottle tinted by SDLPoP's own `pot_types` table (`screenshot.c:181`), keyed by `modifier >> 3` —
+  red heal/life, green slow-fall/flip, blue hurt/open. **Drink flash:** `proc_get_object` sets a brief
+  screen wash in the potion's colour (`flash_color`/`flash_time`) so drinking visibly does something (the
+  HP/feather/flip *effects* stay out of scope — no HP subsystem). **Verified** (deterministic stepping +
+  screenshot): the room-5 potion renders red; Shift → crouch → full drink seq (191–205) →
+  `pickup_obj_type == 1` → potion tile erased to floor; flash fires. Files: `player.js` (`POT_TYPES` +
+  potion render + flash + `alterModsAllrm`). Detail: `docs/research_actions.md §11` + `research_environment.md §6`.
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
 

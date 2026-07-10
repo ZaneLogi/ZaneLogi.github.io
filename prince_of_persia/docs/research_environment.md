@@ -232,3 +232,51 @@ each tile at `col·TILE`; when torch/gate/wall art is added, emit the flame and 
 right-face into the **next** column (source offsets above), not the tile's own —
 same "the data grid is collision, the sprite decorates outward from it" rule as
 the floor plate sitting at the *bottom* of its cell (§1d, `draw_bottom_y`).
+
+---
+
+## 6. `alter_mods` — the level-load modifier fixup *(implemented)*
+
+`LEVELS.DAT` stores **design-time** tile modifiers; `load_level` runs
+`alter_mods_allrm` → `load_alter_mod` (seg008.c) once at load to rewrite a few tile
+types' modifiers into the **runtime** encoding *before play*. The clone had been
+missing this entirely (it read the raw stored bytes), which quietly mis-read every
+potion and one gate. Ported in `player.js` `alterModsAllrm(level)`, called from
+`resetLevel` after each `structuredClone` (so a restart re-applies it):
+
+| tile | stored → runtime | why it matters |
+|---|---|---|
+| **potion** (`10`) | `modifier <<= 3` | the stored **low** bits are the effect type (1 heal, 2 life, 3 slow-fall, 4 flip, 5 hurt, 6 open); the runtime keeps the type in the **high** bits (`>> 3`, read by `do_pickup`/`pot_types`) and the low 3 bits become the bubble-anim phase. Without the shift **every potion reads as type 0** (no effect). Level-1 potions store `1` → `8` = **heal**. |
+| **gate** (`4`) | `1 → 188` (open), else `→ 0` (closed) | the modifier then **is** the gate's open height. Room-5 col-9's gate stores `1`, so it **loads open** — the clone had read the raw `1` and wrongly treated it as closed (a latent bug this fixes; verified `modif==188`, and the raise-button holds it at 238). All other level-1 gates store `2` → `0` (closed, unchanged collision). |
+| **loose** (`11`) | `→ 0` | the collapse countdown starts fresh (`make_loose_fall` arms it to 1). Level-1 loose tiles already store 0 — a no-op here. |
+
+**Skipped: the WALL case.** `load_alter_mod` also packs *wall-connection bits* into a
+wall's modifier (which neighbouring wall sprite to draw + the "no blue" flag). That is
+**render-only** — the clone draws walls flat and `wallType()` keys off the tile *type*,
+not the modifier — so it's a view-space deviation we don't reproduce (root `CLAUDE.md`
+lesson 6c). Spikes/chompers have **no** `alter_mods` case, so their stored `0` is their
+runtime dormant state directly.
+
+### 6a. The level-1 entry event — the gate SLAMS shut *(implemented)*
+
+The room-5 col-9 gate loads **open** (188 above) — but in the DOS game it doesn't *stay*
+open: the prince is shoved into the dungeon and it **slams shut behind him.** That is a
+level-start **special event** in `do_startpos` (seg003.c:167), gated on
+`tbl_entry_pose[current_level] == 1` (level 1 = "press button + falling entry"):
+
+```c
+get_tile(5, 2, 0);          // room 5, col 2, row 0 = the DROP button (tile 6)
+trigger_button(0, 0, -1);   // press it (button_type/modifier "currently selected")
+seqtbl_offset_char(seq_7_fall);   // then the falling entry
+```
+
+`get_tile(5,2,0)` selects the drop button; `trigger_button(0,0,-1)` presses it (the two
+`-1`/`0` args mean "use the current tile's type + modifier"). A **drop** button →
+`trigger_gate` returns anim_type **3** = *fast close* (`gate_close_speeds` 20/40/60/80…÷4
+px/frame), **not** the slow `-1`/frame of a released raise button. So the linked gate
+drops from 188 to 0 in ~4 frames — the slam — while the prince falls in. Ported in
+`player.js` `dropAtStart` (the clone had `seq_7_fall` but was missing the button press).
+**Verified:** gate `188 → 148 → 88 → 8 → 0` over 4 ticks as he drops; a raise button by
+contrast rises `+4`/frame (`0 → 4 → 8 …`) — the two are visibly different animations. The
+gate ends **closed**, sealing room 1's left edge (its collision was open only for those
+few frames).
