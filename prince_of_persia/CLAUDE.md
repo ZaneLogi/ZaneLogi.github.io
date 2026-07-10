@@ -294,13 +294,24 @@ KID sprites natively face **LEFT**.
     frame at integer zoom** (default **1×**): **`sx = 32/14` → 32 px/tile** — the faithful DOS scale
     (`obj_x = 2·internal` then `calc_screen_x_coord ×320/280`, seg008.c:1736/1850; `types.h:1427`
     "a tile is 32 pixels wide in screen space") — and `sy = 1` (obj_y 1:1, `TILE_SIZEY = 63`). The
-    room is the full **320 px** (10·32) width; a **full extra tile (32 px) each side shows a
-    neighbour-room SLIVER** (`drawRoom` draws cols −1..10 via `getTile`'s link-hop; a void link →
-    solid cap), darkened — so an across-the-edge wall/portcullis/passage (e.g. room 5's col 9 gate at
-    the level-1 start) is visible. Canvas = 32 + 320 + 32 = 384. **(Was `sx = 2` → 28 px/tile /
-    280 px room / 20 px margins; corrected 2026-07-07 — the 28 px omitted the `×320/280` stretch, so
-    the room was 7/8-compressed and the sprite ~8/7 too wide. Vertical/collision were always right.)**
-    Coord pipeline: `docs/research_collision.md §2.1`.
+    room is the full **320 px** (10·32) width; a **neighbour-room SLIVER on all four sides** (`drawRoom`
+    draws cols −1..10 AND rows −1..3 via `getTile`'s link-hop; a void link → solid cap), darkened — so an
+    across-the-edge wall/portcullis/passage is visible. Side margins = one tile (32 px); **top/bottom =
+    `MARGIN_Y` (24 px)** — the **row −1** margin shows the ABOVE room's row 2 (the source's own
+    `draw_tile_aboveroom`, seg008.c:148, which is why in the DOS game you see the bottom of the room
+    above), the **row 3** margin the BELOW room's row 0 (a symmetric clone extension — the source draws
+    only the above one), corners = the diagonal rooms. Each sliver row is drawn **behind** the active
+    room and **clipped to its own margin**, so the active room's row-2 floor slab (the ledge) stays
+    bright on top of the below sliver (the bottom dim starts below the ledge). The **above** sliver's
+    clip extends `LEDGE` px past `roomTop` so its row-2 floor slabs — the **ceiling ledges the prince
+    bonks on a jump-up** — are drawn too (else he'd hit an invisible blocker; its walls stay dimmed in
+    the margin, the ledge reads bright as the surface he collides with). Canvas = 32+320+32 = 384
+    **× (24+189+24 = 237)**. (Spikes, gate/portcullis, buttons, and the sword are drawn as labelled
+    tiles in `drawRoom` — see their roadmap entries / the code.)
+    **(Was `sx = 2` → 28 px/tile / 280 px room / 20 px margins; corrected 2026-07-07 — the 28 px omitted
+    the `×320/280` stretch, so the room was 7/8-compressed and the sprite ~8/7 too wide. Top/bottom
+    slivers added 2026-07-10. Vertical/collision were always right.)** Coord pipeline:
+    `docs/research_collision.md §2.1`.
   - **`control.js`** — now **wired** (was a scaffold): `control_standing` (`forward_pressed`
     → run, blocked at a wall; Shift → `safe_step`; back → `turn`), `control_running`
     (frame-gated `runstop` on release, `runturn` on reverse), `control_crouched` (stand up —

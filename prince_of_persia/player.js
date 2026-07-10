@@ -71,21 +71,26 @@ const padW = (v, n) => String(v).padEnd(n);
 // kid via chtab_flip_clip, NOT to tiles which are native 32). Net factor = 32/14 = 16/7 per
 // internal-x unit = `sx` below. Internal-y is 1:1 (TILE_SIZEY=63 == the screen pixel height), so
 // `sy` = 1 and the sprite registration is untouched.
-// A room (10 tiles) = 320 px = the full DOS screen width. To keep this flat 2D view legible we add
-// ONE extra tile (32 px) of margin each side as a SLIVER of the neighbour room — drawRoom draws cols
-// -1..10, so col -1 = the left room's col 9 and col 10 = the right room's col 0 (getTile hops the
-// link; a void link reads as a wall = a solid cap), darkened so they read as adjacent. These slivers
-// are how the 2D view conveys what the source's pseudo-3D draw shows in-frame (a wall / portcullis /
-// a passage to the next room). Canvas = 32 + 320 + 32 = 384 px wide. Coords: research_collision.md §2.1.
-const TILE_PX = 32, MARGIN_PX = TILE_PX;               // 32 px/tile (faithful); a 1-tile sliver each side
-const BASE_W = 10 * TILE_PX + 2 * MARGIN_PX, BASE_H = 200;   // 320 room + 2*32 margins = 384
-let zoom = 1;                                          // default 1x: a native 384x200 frame (32 px tiles)
+// A room (10 tiles) = 320 px = the full DOS screen width. To keep this flat 2D view legible we add a
+// SLIVER of each neighbour room in a margin on all four sides — drawRoom draws cols -1..10 AND rows
+// -1..3, and getTile link-hops so col -1 = the left room's col 9, col 10 = the right room's col 0,
+// row -1 = the ABOVE room's row 2 (the source's `draw_tile_aboveroom`, seg008.c:148), row 3 = the
+// BELOW room's row 0, and the four corners = the diagonal rooms; a void link reads as a wall (solid
+// cap). Each margin is darkened so it reads as adjacent. These slivers are the flat-2D stand-in for
+// what the source's pseudo-3D draw shows in-frame (a wall / portcullis / a passage to the next room,
+// and the bottom of the room above). Side margins = one tile (32 px); top/bottom = MARGIN_Y px (a
+// thinner peek since a row is 63 px tall). Coords: research_collision.md §2.1.
+const TILE_PX = 32, MARGIN_PX = TILE_PX, MARGIN_Y = 24; // 32 px/tile; a 1-tile L/R sliver, a 24 px T/B sliver
+const ROOM_H = Y_LAND[3] - Y_LAND[0];                  // 189 internal-y = the 3 rows' screen height (sy = 1)
+const BASE_W = 10 * TILE_PX + 2 * MARGIN_PX;           // 320 room + 2*32 margins = 384
+const BASE_H = ROOM_H + 2 * MARGIN_Y;                  // 189 room + 2*24 margins = 237
+let zoom = 1;                                          // default 1x: a native 384x237 frame (32 px tiles)
 let sx, sy, spriteScale, ROOM_X0, ROOM_Y0;              // set by applyZoom()
 function applyZoom() {
   cv.width = BASE_W * zoom; cv.height = BASE_H * zoom;
   sx = (TILE_PX / TILE_SIZEX) * zoom;                  // 32/14 per internal-x = the *320/280 stretch -> 32 px tile
   sy = 1 * zoom; spriteScale = zoom;                    // internal-y 1:1 (63 px row); sprite at native px * zoom
-  ROOM_X0 = MARGIN_PX * zoom; ROOM_Y0 = 6 * zoom;       // one-tile (32 px) sliver margin each side
+  ROOM_X0 = MARGIN_PX * zoom; ROOM_Y0 = MARGIN_Y * zoom; // one-tile L/R sliver + a MARGIN_Y top/bottom sliver
 }
 // internal (room-relative) -> screen px. x measured from the room's col-0 left edge (58);
 // y measured from the room's top (y_land[0] = -8), so y_land[r+1] lands on row r's floor.
@@ -591,17 +596,37 @@ function tick() {
 const LEDGE = 4;                     // floor-slab thickness in internal-y units
 
 function drawRoom(room) {
-  // backdrop across the full width (the room + the neighbour slivers in the side margins)
+  // backdrop over the whole canvas (the room + all four neighbour-room slivers)
   ctx.fillStyle = '#141924';
-  ctx.fillRect(0, screenY(Y_LAND[0]), cv.width, (Y_LAND[3] - Y_LAND[0]) * sy);
-  // cols -1..10: col -1 = a sliver of the LEFT neighbour's col 9, col 10 = the RIGHT neighbour's
-  // col 0 (getTile hops the link; a 0 link = void reads as wall = a solid cap). The slivers land
-  // in the 20 px side margins and the canvas clips them.
-  for (let row = 0; row < 3; row++) for (let col = -1; col <= 10; col++) {
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  // cols -1..10 AND rows -1..3: getTile link-hops so the margins show the neighbour rooms — col -1/10 =
+  // the left/right room's col 9/0, row -1 = the ABOVE room's row 2 (the source's draw_tile_aboveroom,
+  // seg008.c:148), row 3 = the BELOW room's row 0, and the corners = the diagonal rooms (a void link
+  // reads as a wall = a solid cap). The canvas clips each to a sliver. yTop(r) = row r's ceiling in
+  // internal-y; r < 0 extrapolates one row-height (63) above Y_LAND[0] for the above-room row.
+  const yTop = (r) => r < 0 ? Y_LAND[0] + r * 63 : Y_LAND[r];
+  const roomTop = screenY(Y_LAND[0]), roomBot = screenY(Y_LAND[3]);   // active-room top / row-2 floor line
+  // Draw the vertical-sliver rows (-1 above, 3 below) FIRST as background — each CLIPPED to its own margin
+  // so the neighbour's tiles + floor slabs can't bleed into the active room (its ledge or its ceiling) —
+  // then the active room's rows (0,1,2) ON TOP, so the active room is the foreground at both boundaries.
+  // (A pure bottom-to-top reverse would fix only the bottom; clipping the slivers fixes both cleanly.)
+  for (const row of [-1, 3, 0, 1, 2]) {
+    const sliver = row < 0 || row > 2;
+    if (sliver) {                                   // confine the above/below sliver to its own margin
+      ctx.save(); ctx.beginPath();
+      // The above room's floor slabs (its row-2 LEDGES) sit LEDGE px below roomTop — and the prince
+      // collides with them (a jump-up bonks that ceiling), so the top clip must include them (down to
+      // roomTop + LEDGE), else he's blocked by an invisible ledge. The below room only shows walls
+      // (its floor is off-canvas), so its clip is just the bottom margin.
+      if (row < 0) ctx.rect(0, 0, cv.width, roomTop + LEDGE * sy);
+      else         ctx.rect(0, roomBot, cv.width, cv.height - roomBot);
+      ctx.clip();
+    }
+    for (let col = -1; col <= 10; col++) {
     const t = getTile(level, room, col, row);
     const cx = screenX(SCREENSPACE_X + col * TILE_SIZEX);
-    const cellTopY = screenY(Y_LAND[row]);          // ceiling of this row (= row-1 floor line)
-    const floorY = screenY(Y_LAND[row + 1]);        // this row's floor line (feet rest here)
+    const cellTopY = screenY(yTop(row));            // ceiling of this row (= row-1 floor line)
+    const floorY = screenY(yTop(row + 1));          // this row's floor line (feet rest here)
     const cellW = TILE_SIZEX * sx, cellH = floorY - cellTopY;
     if (wallType(t) === 4) {                          // solid wall block
       ctx.fillStyle = '#5b6b82'; ctx.fillRect(cx, cellTopY, cellW, cellH);
@@ -636,19 +661,35 @@ function drawRoom(room) {
       const bx = Math.round(cx + (cellW - blW) / 2), by = floorY - th - Math.max(1, Math.round(zoom));
       ctx.fillStyle = '#dbe3ee'; ctx.fillRect(bx, by, blW, th);                 // steel blade
       ctx.fillStyle = '#c9a13b'; ctx.fillRect(bx - 1, by - th, Math.max(2, Math.round(2 * zoom)), th * 3);  // brass hilt
+    } else if (t === 2) {                             // SPIKES (a floor tile) — labelled, though the hazard isn't wired yet
+      // Spikes sit in the floor and stab upward. Not yet a hazard (no is_spike_harmful / check_spiked),
+      // but drawn as red blades pointing up from the floor line (block-map palette) so you can see them.
+      ctx.fillStyle = '#7f8c5a'; ctx.fillRect(cx, floorY, cellW, LEDGE * sy);   // floor base
+      ctx.fillStyle = '#b04040';
+      const n = 3, sh = Math.max(3, Math.round(6 * zoom)), hw = Math.max(1, (cellW / n) * 0.3);
+      for (let s = 0; s < n; s++) {
+        const xm = cx + (s + 0.5) * cellW / n;
+        ctx.beginPath(); ctx.moveTo(xm - hw, floorY); ctx.lineTo(xm, floorY - sh); ctx.lineTo(xm + hw, floorY); ctx.closePath(); ctx.fill();
+      }
     } else if (tileIsFloor(t)) {                      // floor: slab with its top on the feet line
       ctx.fillStyle = (t === 11) ? '#8a7048' : '#7f8c5a';
       ctx.fillRect(cx, floorY, cellW, LEDGE * sy);
     }
+    }
+    if (sliver) ctx.restore();                        // end this sliver row's clip
   }
-  // Dim the neighbour-room SLIVERS in the side margins (cols -1 / 10) so they read as adjacent
-  // rooms, not the active one. A translucent wash toward the page bg darkens both margins; the
-  // prince is drawn after drawRoom, so he stays full-brightness even when he overlaps a margin.
-  const topY = screenY(Y_LAND[0]), h = (Y_LAND[3] - Y_LAND[0]) * sy;
+  // Dim the neighbour-room SLIVERS in all four margins so they read as adjacent rooms, not the active
+  // one. A translucent wash toward the page bg darkens each margin; the prince is drawn after drawRoom,
+  // so he stays full-brightness even when he overlaps a margin. The active room keeps its row-2 floor
+  // slab (the ledge, LEDGE px below roomBot) BRIGHT — so the bottom wash starts at ledgeBot and the L/R
+  // strips run down to ledgeBot too. Top/bottom strips span the full width (dimming the corners as well).
+  const ledgeBot = roomBot + LEDGE * sy;
   const leftEdge = screenX(SCREENSPACE_X), rightEdge = screenX(SCREENSPACE_X + ROOM_XSPAN);
   ctx.fillStyle = 'rgba(13,16,23,0.6)';             // #0d1017 @ 60%
-  ctx.fillRect(0, topY, leftEdge, h);
-  ctx.fillRect(rightEdge, topY, cv.width - rightEdge, h);
+  ctx.fillRect(0, 0, cv.width, roomTop);                          // top sliver (the above room's row 2)
+  ctx.fillRect(0, ledgeBot, cv.width, cv.height - ledgeBot);      // bottom sliver (below the row-2 ledge)
+  ctx.fillRect(0, roomTop, leftEdge, ledgeBot - roomTop);         // left margin (down to the ledge bottom)
+  ctx.fillRect(rightEdge, roomTop, cv.width - rightEdge, ledgeBot - roomTop);  // right margin
 }
 
 function draw() {
