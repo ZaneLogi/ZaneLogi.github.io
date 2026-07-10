@@ -99,6 +99,12 @@ guard its own `crossRooms`/`checkBumped` against `action==7` (it does).
 `down_pressed` also nudges `Char.x` away from a too-close edge (seg005.c:466), and
 routes to **climb-down** if there's a grabbable ledge behind (§7).
 
+**Clone status:** `down_pressed` (player.js) is wired into `control_standing`'s down
+branch (both the Shift-held and plain blocks, seg005.c:380/399) — it picks **climb-down**
+(a grabbable ledge behind, far enough from the back edge) or **crouch** (`stoop` = seq_50).
+Stand-up on release was already done. `crouch-hop` (fwd held at frame 109) stays deferred.
+Verified: Down → `stoop` (107/108/109), release → `standup` → stand.
+
 ---
 
 ## 5. Horizontal jumps (standing / running)
@@ -108,9 +114,12 @@ routes to **climb-down** if there's a grabbable ledge behind (§7).
 | **standing jump** | fwd+up while standing / start-run / jump-up (`standing_jump`, seg005.c:687; from `control_standing` 386/394, `control_startrun` 674, `control_jumpup` 681, `up_pressed` 455) | `seq_3_standing_jump` → `stand` | airborne frames 19–24 lack `FRAME_NEEDS_FLOOR` (no fall mid-arc); landing frames re-check floor; `check_bumped` on a wall | 1 | self-contained arc, net dy ~0 |
 | **running jump** | up held during run, frame ≥ 7 (`run_jump`, seg005.c:898, from `control_running` 595) | `seq_4_run_jump` → `runcyc1` | **edge alignment**: scans up to 2 tiles fwd for a non-floor take-off (`get_tile_div_mod_m7` + `distance_to_edge`), aligns `Char.x`; airborne frames 38–42 no-floor; landing re-checks | 1 | clears a gap; lands running |
 
-**Clone status:** sequences transcribed (`standjump`/`runjump`); the horizontal
-*control wiring* is deferred (the earlier scope choice went to vertical). Airborne
-`FRAME_NEEDS_FLOOR` gaps verified in the frame table.
+**Clone status (both implemented):** `standing jump` — `standingJump` wired into
+`control_standing`/`control_startrun`/`control_jumpup`. `running jump` — `run_jump`
+(player.js) wired into `control_running` (Up held during the run cycle): scans up to 2
+tiles forward for the take-off edge and aligns `Char.x`, then plays `runjump` (seq_4);
+on flat ground it jumps straight. Verified (deterministic stepping): the 34→44 arc
+plays and resumes the run cycle; a held Up re-leaps each pass of run frame 7.
 
 ---
 
@@ -139,15 +148,24 @@ The closed-gate climb-up variant (`seq_73` = `climbfail`) is now **ported** (202
 
 ---
 
-## 7. Climb down *(deferred)*
+## 7. Climb down *(implemented — this session)*
 
 - **trigger**: `down_pressed` (seg005.c:472) — no floor behind, `distance_to_edge_
   weight ≥ 8`, `can_grab(behind, at-char)`, and (facing right OR the tile isn't a
   closed gate). Aligns `Char.x`, fires `seq_68_climb_down`.
-- **sequence**: `seq_68` climbdown — `dx(-5) dy(63) SEQ_DOWN` → `hang1` (you end
-  hanging from the ledge below, then climb back up or release).
+- **sequence**: `seq_68` climbdown — reach down (148→141, act 1), `dx(-5) dy(63)
+  SEQ_DOWN` drops one row (act 3, frames 140/138/136/91), then `act(2) jmp(hang1)`.
 - **collision**: `can_grab` (behind-below), `distance_to_edge_weight`, the gate
-  check. Reuses the entire hang machinery from §6 — a clean follow-on.
+  check. Reuses the entire hang machinery from §6.
+- **KEY (found in verification):** the hang is *transient*. On the tick after frame 91
+  (still action 3), `control()` dispatches `control_hanging` (frame 87–99); with nothing
+  held it calls `hang_fall`, whose `seq_11_release_ledge_and_land` the source itself
+  labels **"end of climb down"** (seg005.c:866). So climb-down = *reach down → descend
+  one row → controlled land*, unless the player holds **Up** (climb back up) or **Shift**
+  (hang against the wall) at that moment. Not a bug — the intended flow.
+- **Clone status:** implemented; `climbdown` transcribed into `seqtbl.js`; wired via
+  `down_pressed` (§4). Verified: room-4 col-3-facing-left → descends row 1 → row 2 and
+  lands standing on the floor (tileUnderChar = 1); no console errors.
 
 ---
 
@@ -189,7 +207,7 @@ Detection in the source is the **per-column buffer** edge-trigger
 |---|---|---|
 | `check_on_floor` / `do_fall` / `land` (tile-map floor read) | stand, walk, run, crouch, jump landings, fall | works **except** the `curr_col` clamp (cross-room) |
 | `get_edge_distance` (edge classify) | careful step, forward-run gate, run-jump align, turn-run | ported |
-| `can_grab` + above-row tiles | jump-up grab, climb-up, climb-down, fall-grab | ported (grab); fall-grab/climb-down deferred |
+| `can_grab` + above-row tiles | jump-up grab, climb-up, climb-down, fall-grab | ported (grab + climb-down); fall-grab deferred |
 | **`get_tile` link-hop on unclamped `curr_col`** | any action that lands/climbs across a room boundary | **broken by the clamp — substrate rework** |
 | room cross (`leave_room` after `check_action`) | any action that crosses a boundary | wrong order + missing climb-frame block/`Char.y` up-down — **rework** |
 | per-column bump buffers | wall bump (all grounded moves), gate push, chomper | `Char.x` stand-in (legit defer) |

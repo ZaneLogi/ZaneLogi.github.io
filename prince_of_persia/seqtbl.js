@@ -239,6 +239,19 @@ _b.label('climbfail').frame(135)
   .frame(138).frame(138).frame(138).frame(138)
   .frame(137).frame(136).frame(135)
   .dx(-7).jmp('hangdrop');
+// climbdown (seqtbl.c, = seq_68_climb_down): lower yourself off the ledge you're standing at the
+// edge of into a hang below. Reach down (148->141, act 1), then dx(-5) dy(63) SEQ_DOWN drops one
+// tile-row (curr_row++) into midair (act 3, frames 140/138/136), settle to the hang frame 91, and
+// hand off to the hang loop (jmp hang1, act 2). down_pressed (player.js) picks this over `stoop`
+// when there is a grabbable ledge behind and enough room from the back edge. From the hang,
+// control_hanging then climbs back up (Up) or lets go (release) — the same machinery as jump-up-grab.
+_b.label('climbdown').act(ACT_RUN_JUMP).frame(148)
+  .frame(145).frame(144).frame(143).frame(142)
+  .frame(141)
+  .dx(-5).dy(63).down().act(ACT_IN_MIDAIR).frame(140)
+  .frame(138).frame(136)
+  .frame(91)
+  .act(ACT_HANG_CLIMB).jmp('hang1');
 // hangfall (seqtbl.c:609, = seq_23_release_ledge_and_fall): let go over a pit — a short midair
 // drop (action 3) that accelerates, then set_fall + hand off to freefall. control_hanging picks
 // this (via hang_fall) when there is no floor to land on below.

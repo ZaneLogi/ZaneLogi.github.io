@@ -20,10 +20,10 @@ import { FRAME_TABLE_KID } from './res/frame_table_kid.js';
 import { LEVEL1 } from './res/level1.js';
 import { makeCharacter, startSeq, playSeq, fallAccel, fallSpeed, charDxForward,
          DIR_RIGHT, DIR_LEFT, ACT_IN_MIDAIR, ACT_IN_FREEFALL } from './playseq.js';
-import { getTile, getTileModif, tileIsFloor, wallType, tileDivMod, standX,
+import { getTile, getTileModif, tileIsFloor, wallType, tileDivMod, tileDivModM7, standX,
          Y_LAND, SCREENSPACE_X, TILE_SIZEX, ROOM_XSPAN, ROOM_YSPAN, TILE_WALL,
-         DIR_FRONT, getTileAtChar, getTileAboveChar, getTileFrontAboveChar, getTileBehindAboveChar,
-         getTileBehindChar, canGrab, distanceToEdge, yToRowMod4, EDGE_WALL } from './collision.js';
+         DIR_FRONT, getTileAtChar, getTileInFrontOfChar, getTileAboveChar, getTileFrontAboveChar,
+         getTileBehindAboveChar, getTileBehindChar, canGrab, distanceToEdge, yToRowMod4, EDGE_WALL } from './collision.js';
 import { controlKid, makeControl, HELD, RELEASED, FWD, NONE, BACK } from './control.js';
 import { makeTrobs, processTrobs, makeLooseFall, TILE_LOOSE } from './trob.js';
 // The routine-level-identical collision kernel (seg004.c/seg006.c). Replaces the old Char.x-clamp
@@ -252,6 +252,63 @@ function hangAgainstWall(ch) {
   if (!tileIsFloor(getTileAboveChar(level, ch))) hangFall(ch);
 }
 
+// --- running jump (ported seg005.c) + Down->crouch/climb-down -----------------------------
+// These run in the CONTROL phase (called from controlRunning / controlStanding via the world
+// object), so they only startSeq / nudge Char.x — the tick's own playSeq emits the new frame.
+
+// run_jump (seg005.c:898): the running (horizontal) jump — Up held during the run cycle at frame >= 7.
+// First auto-ALIGNS Char.x to the take-off edge: scan up to 2 tiles forward for a spike / non-floor
+// (the gap's near edge) and, if the alignment nudge lands in the source's takeoff window, shift Char.x
+// so the leap launches from the brink; outside the window it returns (no jump — the run keeps going and
+// re-checks next frame). On flat ground the scan finds no edge and it jumps straight (no alignment).
+const TILE_SPIKE = 2;
+const u16 = (v) => v & 0xFFFF;                          // the source's (word) reinterpret cast
+function runJump(ch) {
+  if (ch.frame < 7) return;                             // only from run frame 7+ (seg005.c:900)
+  const xpos = charDxForward(ch, 4);
+  let col = tileDivModM7(xpos);
+  for (let tilesForward = 0; tilesForward < 2; tilesForward++) {   // this tile + the next
+    col += DIR_FRONT[ch.direction + 1];
+    const t = getTile(level, ch.room, col, ch.curr_row);
+    if (t === TILE_SPIKE || !tileIsFloor(t)) {          // found the take-off edge
+      let posAdj = distanceToEdge(ch, xpos) + TILE_SIZEX * tilesForward - TILE_SIZEX;
+      if (u16(posAdj) < u16(-8) || posAdj >= 2) {       // outside the takeoff window (seg005.c:909)
+        if (posAdj < 128) return;                       // too far to align -> don't jump (always taken: posAdj <= 13)
+        posAdj = -3;
+      }
+      ch.x = charDxForward(ch, posAdj + 4);
+      break;
+    }
+  }
+  startSeq(ch, 'runjump');                              // seq_4_run_jump
+}
+
+// down_pressed (seg005.c:464): the Down key while standing — climb down to a hang, or crouch. If a
+// drop is right in FRONT and the char is at that brink (dist < 3), nudge back off it (no crouch).
+// Else if a drop is BEHIND and he is far enough from the back edge (>= 8) with a grabbable ledge there
+// (can_grab) that isn't a closed gate unless facing right, align Char.x and climb down (seq_68).
+// Otherwise crouch (crouch() = seq_50_crouch = the `stoop` sequence).
+function downPressed(ch) {
+  const facingRight = ch.direction >= DIR_RIGHT;
+  if (!tileIsFloor(getTileInFrontOfChar(level, ch)) && distanceToEdge(ch, dxWeight(ch)) < 3) {
+    ch.x = charDxForward(ch, 5);                         // step back off the front brink (seg005.c:469)
+    determine_col();                                     // load_fram_det_col: re-derive curr_col
+    return;
+  }
+  const behind = getTileBehindChar(level, ch);
+  if (!tileIsFloor(behind) && distanceToEdge(ch, dxWeight(ch)) >= 8) {
+    const at = getTileAtChar(level, ch);                 // curr_tile2 = the ledge to grab onto
+    const atModif = getTileModif(level, ch.room, ch.curr_col, ch.curr_row);
+    if (canGrab(behind, at, atModif, facingRight) &&
+        (facingRight || at !== 4 /*gate*/ || (atModif >> 2) >= 6)) {    // not a closed gate unless facing right
+      ch.x = charDxForward(ch, distanceToEdge(ch, dxWeight(ch)) - 9);   // align to the ledge (seg005.c:485)
+      startSeq(ch, 'climbdown');                         // seq_68_climb_down
+      return;
+    }
+  }
+  startSeq(ch, 'stoop');                                 // crouch() -> seq_50_crouch
+}
+
 // (set_char_collision, the bump DETECTION [check_collisions/get_row_collision_data + the per-column
 // buffers], and the bumped/bumped_floor/bumped_fall dispatch are now in collision_kernel.js — the
 // faithful buffer scan replaces the old Char.x-clamp, and the wall face carries the wall_dist inset.)
@@ -407,6 +464,8 @@ const world = {
   climbUp: () => canClimbUp(ch),            // up while hanging -> climb onto the ledge
   hangFall: () => hangFall(ch),             // release a hang -> drop / fall
   hangAgainstWall: () => hangAgainstWall(ch),  // shift while hanging -> hang flat / let go
+  runJump: () => runJump(ch),               // up while running -> the running (horizontal) jump
+  downPressed: () => downPressed(ch),       // down while standing -> climb down / crouch
 };
 
 // --- one engine tick — faithful play_kid_frame order (seg000.c:1192) --------------

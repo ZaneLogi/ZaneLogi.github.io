@@ -367,8 +367,8 @@ KID sprites natively face **LEFT**.
   1-tile gap **only from near its edge** — faithful: leap frames 19–25 don't need floor, but frame 26
   does (`FRAME_NEEDS_FLOOR`) and it checks the tile under the lagging **weight point**, so a takeoff too
   far back drops into the gap (verified vs the source frame table: flat hop lands +2.8 tiles; edge
-  takeoff clears a 1-tile pit; col-2→col-4-pit falls). **Running jump (↑ while running) still deferred**
-  (`runjump` is a TODO in `control_running` — pulls in the fall setup).
+  takeoff clears a 1-tile pit; col-2→col-4-pit falls). (Running jump is now wired too — see the
+  **Traversal gaps** entry below.)
 - **[done] Position/room substrate — faithful (W1+W1b+W2+W3).** A ground-up alignment of the
   position/edge pipeline to SDLPoP, prompted by cross-room climbing (grab a ledge in the next room →
   climb → *fell*). The whole `docs/research_*.md` set (frame_loop / position_room /
@@ -471,6 +471,24 @@ KID sprites natively face **LEFT**.
     sword combat / guards. Full map: `docs/research_collision.md §11` + the ledger.
   - Files: `collision_kernel.js` (new), `player.js`, `playseq.js` (`alive`/`sword` init), `seqtbl.js`
     (the 5 fall sequences).
+- **[done] Traversal gaps — running jump + Down→crouch + climb-down.** The last on-foot moves the
+  level-1 route needs (part of the sword milestone). **Running jump** (`run_jump`, seg005.c:898,
+  player.js): Up held during the run cycle → scan up to 2 tiles forward for the take-off edge (spike /
+  non-floor), align `Char.x` to launch from the brink (a bad alignment window returns → the run
+  re-checks next frame; flat ground jumps straight), then `runjump` (seq_4); wired into
+  `control_running` (seg005.c:595). **Down→crouch / climb-down** — one handler, `down_pressed`
+  (seg005.c:464, player.js), wired into `control_standing`'s down branch (both blocks, seg005.c:380/399):
+  a grabbable ledge behind + far enough from the back edge → `climbdown` (seq_68, transcribed into
+  `seqtbl.js`) else `crouch()` = the existing `stoop` (seq_50). *Finding:* climb-down's hang is
+  transient — after frame 91 (action 3) `control_hanging`→`hang_fall` runs `seq_11`, which the source
+  labels **"end of climb down"** (seg005.c:866); so it descends one row and lands unless Up (climb back)
+  / Shift (hang) is held. Reuses collision.js tile reads (the `checkJumpUp`/`hangFall` layer) — no new
+  kernel exports here (those come with `check_press`, next). **Verified** (deterministic `#debug`
+  stepping, zero console errors): run-jump 34→44 arc resumes the run; Down → stoop 107/108/109 →
+  release → standup; climb-down row 1 → row 2 lands on a floor; all regressions (falling entry,
+  runstop, turn→turn-run, jump-up, wall bump x=64, loose-floor→room 2) pass. Files: `seqtbl.js`
+  (`climbdown`), `player.js` (`runJump`/`downPressed` + `world`), `control.js` (run-jump + down
+  branches), `index.html` (control hint). Detail: `docs/research_actions.md §4/§5/§7`.
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
 

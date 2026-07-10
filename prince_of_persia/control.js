@@ -39,7 +39,7 @@ export function controlKid(ch, c, world) {
   else if (f === 48)                   controlTurning(ch, c);          // mid-turn (frame 48)
   else if (f < 4)                      controlStartrun(ch, c);         // startrun accel 1-3
   else if (f >= 67 && f < 70)          controlJumpup(ch, c);           // start jump up (frames 67-69)
-  else if (f < 15)                     controlRunning(ch, c);          // run cycle 4-14
+  else if (f < 15)                     controlRunning(ch, c, world);   // run cycle 4-14
   else if (f >= 87 && f < 100)         controlHanging(ch, c, world);   // hanging from a ledge (87-99)
   else if (f === 109)                  controlCrouched(ch, c);         // crouch
 }
@@ -52,6 +52,7 @@ function controlStanding(ch, c, world) {
   if (c.shift === HELD) {
     if (c.backward === HELD) backPressed(ch, c);
     else if (c.up === HELD) world.jumpUp();                              // shift+up -> up_pressed (seg005.c:378)
+    else if (c.down === HELD) world.downPressed();                       // shift+down -> down_pressed (seg005.c:380)
     else if (c.x === FWD && c.forward === HELD) safeStep(ch, c, world);  // shift+forward -> safe_step (seg005.c:383)
   } else if (c.forward === HELD) {
     if (c.up === HELD) standingJump(ch, c);   // up+forward from stand -> standing (horizontal) jump (seg005.c:386)
@@ -61,6 +62,8 @@ function controlStanding(ch, c, world) {
   } else if (c.up === HELD) {
     if (c.forward === HELD) standingJump(ch, c);   // symmetric (seg005.c:394); c.forward isn't HELD in this branch, so effectively up-only
     else world.jumpUp();              // up alone -> up_pressed -> check_jump_up (seg005.c:393): the vertical jump / climb
+  } else if (c.down === HELD) {
+    world.downPressed();              // down alone -> down_pressed (seg005.c:399): climb down / crouch
   } else if (c.x === FWD) {
     // seg005.c:401 fall-through: the forward key is still physically HELD but the latch is IGNORE (a
     // prior safe_step disabled auto-repeat). Re-enter forward_pressed; its HELD-gate does nothing near
@@ -120,17 +123,18 @@ function safeStep(ch, c, world) {
   else startSeq(ch, 'step11');                        // seq_39_safe_step_11: step into the wall / off the ledge
 }
 
-// control_running (seg005.c:588): the two signature behaviours.
-function controlRunning(ch, c) {
+// control_running (seg005.c:588): stop / run-turn / run-jump (crouch-while-running still out of scope).
+function controlRunning(ch, c, world) {
   if (c.x === NONE && (ch.frame === 7 || ch.frame === 11)) {     // frame-gated STOP (only at 7/11)
     c.backward = RELEASED; c.forward = IGNORE;                   // control_forward = release_arrows() (seg005.c:590)
     startSeq(ch, 'runstop');                                     // seq_13_stop_run — skid to a halt
   } else if (c.x === BACK) {                                     // facing-relative REVERSE
     c.forward = RELEASED; c.backward = IGNORE;                   // control_backward = release_arrows() (seg005.c:593) — IGNORE, else infinite run-turn
     startSeq(ch, 'runturn');                                     // skid + SEQ_FLIP + resume the run cycle
+  } else if (c.up === HELD) {                                    // Up during a run -> the running jump
+    world.runJump();                                             // run_jump (seg005.c:595) — gated to frame >= 7 internally
   }
-  // else if (c.up === HELD && c.forward === HELD) startSeq(ch, 'runjump');    // TODO (pulls in SET_FALL)
-  // else if (c.down === HELD)                     startSeq(ch, 'crouchrun');  // TODO
+  // else if (c.down === HELD)                     startSeq(ch, 'crouchrun');  // TODO (crouch while running)
 }
 
 // control_hanging (seg005.c:791): while hanging from a ledge (frames 87-99). Up — once the grab
