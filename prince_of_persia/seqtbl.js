@@ -165,6 +165,10 @@ _b.dx(1).frame(110).frame(110).frame(110).frame(111)
 // hardland (seqtbl.c:955): hard land (fall_y>=33) — SEQ_DIE, hold the dead frame (185).
 _b.label('hardland').act(ACT_BUMPED).knockDown().dy(-2).dx(3).frame(185)
   .die().label('hardland_dead').frame(185).jmp('hardland_dead');
+// spiked (seqtbl.c:970, = seq_51_spiked, source LABEL "impale"): the impale death — knock down, shove
+// forward onto the spike, hold the impaled frame 177. spiked() (kernel) seats + positions the kid first.
+_b.label('spiked').act(ACT_RUN_JUMP).knockDown().dx(4).frame(177)
+  .die().label('impale_dead').frame(177).jmp('impale_dead');
 // standup (seqtbl.c:871): stand up from crouch (seq_49) — used to recover after a soft land.
 _b.label('standup').act(ACT_BUMPED).dx(1).frame(110).frame(111)
   .dx(2).frame(112).frame(113)

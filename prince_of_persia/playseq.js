@@ -41,6 +41,8 @@ export function makeCharacter(opts = {}) {
     have_sword: 0,                     // 0 = no sword, -1 = has it (proc_get_object sets it; level 1 starts swordless)
     pickup_obj_type: 0,                // set by do_pickup, read by proc_get_object (SEQ_GET_ITEM): -1 sword / >=1 potion type
     onGetItem: null,                   // hook fired by SEQ_GET_ITEM 1 -> proc_get_object (player.js binds it)
+    onCheckGrab: null,                 // hook fired by the kernel's do_fall/check_action -> check_grab (player.js binds it)
+    onSpikeTrigger: null,              // hook fired by the kernel's check_spike_below -> start_anim_spike (player.js binds it)
   };
 }
 

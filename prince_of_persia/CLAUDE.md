@@ -92,7 +92,7 @@ prince_of_persia/
 ├─ masksheet.js        # shared module: load + rasterize 1-bpp mask sheets
 ├─ playseq.js/seqtbl.js/seqbuilder.js   # animation engine (play_seq interpreter + sequence data)
 ├─ collision.js        # tile-collision substrate: getTile + floor/wall predicates + coord helpers
-├─ trob.js             # transient-object animator (ported seg007.c) — loose floors only, so far
+├─ trob.js             # transient-object animator (ported seg007.c) — loose floors, gates/buttons, spikes
 ├─ control.js          # input→transition layer (ported control_kid) — wired by the player
 ├─ demos/              # one <name>.html + <name>.js per demo (lunar_lander pattern)
 │  ├─ actor_frames.html / .js   # dev inspector: contact sheet of every KID.DAT silhouette
@@ -660,6 +660,24 @@ KID sprites natively face **LEFT**.
   screenshot): the room-5 potion renders red; Shift → crouch → full drink seq (191–205) →
   `pickup_obj_type == 1` → potion tile erased to floor; flash fires. Files: `player.js` (`POT_TYPES` +
   potion render + flash + `alterModsAllrm`). Detail: `docs/research_actions.md §11` + `research_environment.md §6`.
+- **[done] Spikes become lethal.** A spike (`tiles_2`) now pops up as the prince nears it and kills him
+  if he runs into it or falls onto it — the full port of the spike hazard. **`trob.js`:** `startAnimSpike`
+  (arm, seg007.c:596) + `animateSpike` (the extend/retract modifier state machine, seg007.c:317),
+  dispatched from `processTrobs`. **`collision_kernel.js`** (pure-collision → the kernel, like
+  `check_gate_push`): `is_spike_harmful` (seg007.c:1178), `spiked` (the impale death, seg005.c:220 —
+  disable the spike `0xFF`, seat/shove the kid, play `seq_51`), `check_spiked` (seg006.c:968 — impale
+  when standing on a harmful spike in a run/jump frame), `check_spike_below` (seg006.c:1720 — the
+  proximity arm; its `start_anim_spike` call goes through the `onSpikeTrigger` hook to `trob.js`, the
+  `onCheckGrab` pattern, so no trob import enters the kernel); plus a **land-on-spikes** branch in
+  `land()`. **`seqtbl.js`:** `spiked` (= `seq_51_spiked` / source `impale` → hold **frame 177**).
+  **`player.js`:** bind `onSpikeTrigger`; wire `check_spike_below` → `check_spiked` into `tick()` after
+  `checkPress` (seg000.c:1217-1219); render the blades' height + brightness by the modifier state. No HP
+  subsystem, so the death is the held impale frame (like the other deaths); the impaled char is inert
+  (frame 177 matches no control dispatch; `check_bumped` guards `frame != 177`). **Verified**
+  (deterministic stepping + screenshots): run into an armed spike → impale (frame 177, spike → `0xFF`);
+  fall onto a spike → impale via `land`; the spike arms as he approaches (modifier 0→1 mid-cross);
+  standing on an out spike survives (frame-gated); regressions (loose → medium land, jump-up, run,
+  button→gate) pass; no console errors. Detail: `docs/research_environment.md §2.5`.
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
 

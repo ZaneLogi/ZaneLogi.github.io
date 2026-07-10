@@ -71,8 +71,9 @@ const wall_dist_from_left  = [0, 10, 0, -1, 0, 0];
 const wall_dist_from_right = [0, 0, 10, 13, 0, 0];
 const TBL_LINE = [0, 10, 20];                       // tbl_line[row] flat-index base (seg006.c:105)
 // tile types the kernel special-cases (types.h).
-const TILE_EMPTY = 0, TILE_GATE = 4, TILE_DOORTOP_FLOOR = 7, TILE_LOOSE = 11, TILE_DOORTOP = 12,
+const TILE_EMPTY = 0, TILE_SPIKE = 2, TILE_GATE = 4, TILE_DOORTOP_FLOOR = 7, TILE_LOOSE = 11, TILE_DOORTOP = 12,
       TILE_MIRROR = 13, TILE_CHOMPER = 18, TILE_POTION = 10;
+const sbyte8 = (v) => (v << 24 >> 24);              // read a byte as signed 8-bit
 // character actions (types.h:407) + directions.
 const ACT_STAND = 0, ACT_IN_FREEFALL = 4, ACT_BUMPED = 5, ACT_HANG_CLIMB = 2, ACT_HANG_STRAIGHT = 6, ACT_TURN = 7;
 const DIR_RIGHT = 0;
@@ -515,17 +516,26 @@ function do_fall() {
 }
 
 // land (seg005.c:114): seat the feet on the floor line, nudge back off a ledge edge, then pick
-// the landing by impact speed. Spikes / take_hp / guard+sword branches are out of scope (hazard /
-// HP / char-vs-char subsystems), so a kid always survives a 2-row (medium) land and a 3+-row land
-// is the crushed seq. fall_x is NOT reset here (the source doesn't) — each start_fall's set_fall
-// re-establishes it, so no stale drift leaks.
+// the landing by impact speed. Landing ON a spike (at the feet, or one backed onto the ledge) that is
+// harmful -> spiked() death. take_hp / guard+sword branches are out of scope (HP / char-vs-char), so a
+// kid always survives a 2-row (medium) land and a 3+-row land is the crushed seq. fall_x is NOT reset
+// here (the source doesn't) — each start_fall's set_fall re-establishes it, so no stale drift leaks.
 function land() {
   Char.y = Y_LAND[Char.curr_row + 1];
-  if (!tileIsFloor(get_tile_infrontof_char()) && distance_to_edge_weight() < 3) {
-    Char.x = char_dx_forward(-3);                     // landed at a ledge brink -> nudge back
+  if (get_tile_at_char() !== TILE_SPIKE) {            // the ledge-brink nudge is skipped when landing on a spike
+    if (!tileIsFloor(get_tile_infrontof_char()) && distance_to_edge_weight() < 3) {
+      Char.x = char_dx_forward(-3);                   // landed at a ledge brink -> nudge back
+    }
+    // start_chompers() — chompers out of scope
   }
   let seq;
   if (Char.alive < 0) {
+    // fell on spikes: the tile behind (if backed far enough onto the ledge) or the tile at the feet.
+    // The last get_tile of the OR sets curr_tilepos/tile_col that is_spike_harmful/spiked then read.
+    if ((distance_to_edge_weight() >= 12 && get_tile_behind_char() === TILE_SPIKE) ||
+        get_tile_at_char() === TILE_SPIKE) {
+      if (is_spike_harmful()) { spiked(); return; }   // loc_5EE6
+    }
     if (Char.fall_y < 22) seq = 'softland';           // seq_17 (fell 1 row)
     else if (Char.fall_y < 33) seq = 'medland';       // seq_20 (fell 2 rows; -1 HP not modeled)
     else seq = 'hardland';                            // seq_22 (fell 3+ rows -> crushed)
@@ -586,4 +596,69 @@ export function check_action() {
   else if (a === 3 /*in_midair*/) { if (Char.frame >= 102 && Char.frame <= 105) check_grab(); }
   else if (a === ACT_HANG_CLIMB) { /* hanging never falls */ }
   else check_on_floor();
+}
+
+// ---- SPIKES (the death path) ----------------------------------------------------------
+// Pure-collision routines (read the char box + tiles + the spike's own modifier, write Char/modifier),
+// so they live in the kernel (like check_gate_push). The one out-of-kernel dependency — arming the
+// spike animation, which lives in trob.js — goes through the onSpikeTrigger HOOK, the same pattern as
+// check_grab's onCheckGrab (so no trob import is pulled into the kernel).
+
+// is_spike_harmful (seg007.c:1178): classify the spike at curr_tilepos by its (signed) modifier.
+// 0 dormant / -1 (0xFF) disabled -> harmless; <0 (out) -> 1 (harmful); 1..4 (rising) -> 2 (harmful);
+// else (6..8 sinking) -> harmless.
+function is_spike_harmful() {
+  const modifier = sbyte8(currModif());
+  if (modifier === 0 || modifier === -1) return 0;
+  if (modifier < 0) return 1;
+  if (modifier < 5) return 2;
+  return 0;
+}
+
+// spiked (seg005.c:220): the impale death. Disable this spike for others (modifier 0xFF), seat + shove
+// the kid onto the spike, then play seq_51_spiked (the "impale" -> frame 177). take_hp(100) is not
+// modeled (no HP subsystem) — the death IS the held impale frame, as the clone's other deaths are.
+function spiked() {
+  if (curr_room > 0) level.rooms[curr_room - 1].bg[tile_row][tile_col] = 0xFF;  // curr_room_modif[curr_tilepos] = 0xFF
+  Char.y = Y_LAND[Char.curr_row + 1];
+  Char.x = X_BUMP[tile_col + FIRST_ONSCREEN_COLUMN] + 10;
+  Char.x = char_dx_forward(8);
+  Char.fall_y = 0;
+  startSeq(Char, 'spiked'); playSeq(Char);            // seq_51_spiked (sound_48 + take_hp not modeled)
+}
+
+// check_spiked (seg006.c:968): every frame, if the kid stands on a harmful spike AND is in a fast
+// frame (running 7..14 / start-run-jump 34..39 need harmful>=2; run-jump land 43 / stand-jump land 26
+// need any harm), he is impaled. Careful-stepping (non-run frames) crosses safely.
+export function check_spiked() {
+  const frame = Char.frame;
+  if (get_tile(Char.room, Char.curr_col, Char.curr_row) === TILE_SPIKE) {
+    const harmful = is_spike_harmful();
+    if ((harmful >= 2 && ((frame >= 7 && frame < 15) || (frame >= 34 && frame < 40))) ||
+        ((frame === 43 || frame === 26) && harmful !== 0)) {
+      spiked();
+    }
+  }
+}
+
+// check_spike_below (seg006.c:1720): scan the column(s) under the char and TRIGGER (arm the extend
+// animation of) any spike directly below through open air — this is what pops spikes up as the prince
+// approaches. Uses the FIX_INFINITE_DOWN_BUG bound (row <= 2, stay in the room) instead of the base
+// `room == curr_room`, so the descent can't loop. The arm call (start_anim_spike, trob.js) is the
+// onSpikeTrigger hook.
+export function check_spike_below() {
+  const right_col = get_tile_div_mod_m7(char_x_right);
+  if (right_col < 0) return;
+  const room = Char.room;
+  for (let col = get_tile_div_mod_m7(char_x_left); col <= right_col; ++col) {
+    let row = Char.curr_row, not_finished;
+    do {
+      not_finished = 0;
+      if (get_tile(room, col, row) === TILE_SPIKE) {
+        Char.onSpikeTrigger?.(curr_room, curr_tilepos);          // start_anim_spike(curr_room, curr_tilepos)
+      } else if (!tileIsFloor(curr_tile2) && curr_room !== 0 && row <= 2) {
+        ++row; not_finished = 1;
+      }
+    } while (not_finished);
+  }
 }

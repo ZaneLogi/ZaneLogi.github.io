@@ -26,7 +26,7 @@ import { getTile, getTileModif, tileIsFloor, wallType, tileDivMod, tileDivModM7,
          DIR_FRONT, getTileAtChar, getTileInFrontOfChar, getTileAboveChar, getTileFrontAboveChar,
          getTileBehindAboveChar, getTileBehindChar, canGrab, distanceToEdge, yToRowMod4, EDGE_WALL, EDGE_FLOOR } from './collision.js';
 import { controlKid, makeControl, HELD, RELEASED, IGNORE, FWD, NONE, BACK } from './control.js';
-import { makeTrobs, processTrobs, makeLooseFall, triggerButton,
+import { makeTrobs, processTrobs, makeLooseFall, triggerButton, startAnimSpike,
          TILE_LOOSE, TILE_OPENER, TILE_CLOSER } from './trob.js';
 // The routine-level-identical collision kernel (seg004.c/seg006.c). Replaces the old Char.x-clamp
 // substitute: determine_col / set_char_collision / the per-column buffer scan (check_collisions) /
@@ -38,6 +38,7 @@ import { bindKernel, setLevel as kSetLevel,
          get_tile as k_get_tile, get_tile_at_char as k_get_tile_at_char,
          get_tile_infrontof_char as k_get_tile_infrontof_char,
          get_tile_behind_char as k_get_tile_behind_char, load_fram_det_col,
+         check_spike_below, check_spiked,
          currModif, curr_tile2, curr_room, curr_tilepos } from './collision_kernel.js';
 
 // Frame flags (types.h:379-381): FRAME_WEIGHT_X = low 5 bits, FRAME_NEEDS_FLOOR = 0x40.
@@ -164,6 +165,7 @@ const ch = makeCharacter({ x: 0, y: 0, direction: DIR_LEFT });
 ch.room = level.start.room;
 ch.onGetItem = () => procGetObject(ch);   // SEQ_GET_ITEM 1 -> proc_get_object (fires from pickupsword/drinkpotion)
 ch.onCheckGrab = () => checkGrab(ch);      // check_grab hook: the kernel's do_fall/check_action fire this mid-fall
+ch.onSpikeTrigger = (room, tp) => startAnimSpike(trobs, level, room, tp);  // check_spike_below -> arm a spike
 let drawnRoom = level.start.room;
 
 // Level-1 START = a FALLING entry (do_startpos, seg003.c:167 -> seq_7_fall). The start
@@ -686,7 +688,9 @@ function tick() {
     check_gate_push();                     // a closing gate shoves a stand/crouch/turn char out (seg000.c:1214)
   }
   check_action();                          // do_fall / check_on_floor — reads across a boundary via the unclamped col
-  checkPress(ch);                          // loose-floor trigger (grounded on tile 11 -> make_loose_fall)
+  checkPress(ch);                          // loose-floor + button trigger (grounded on tile 11/15/6)
+  check_spike_below();                     // arm any spike under the char (proximity pop-up, seg000.c:1217)
+  check_spiked();                          // impale death: run/jump into an out spike (resurrect_time always 0)
   leaveRoom();                             // exit_room: the room cross, AFTER the kid frame (seg000.c:881)
 }
 
@@ -776,12 +780,25 @@ function drawRoom(room) {
       ctx.fillStyle = liquid; ctx.fillRect(bx, bodyTop, bw, bodyH);             // liquid-filled body
       ctx.fillStyle = '#cfe0e8'; ctx.fillRect(nx, bodyTop - neckH, nw, neckH);  // glass neck (light)
       ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fillRect(bx + 1, bodyTop + 1, Math.max(1, Math.round(zoom)), bodyH - 2);  // glass highlight
-    } else if (t === 2) {                             // SPIKES (a floor tile) — labelled, though the hazard isn't wired yet
-      // Spikes sit in the floor and stab upward. Not yet a hazard (no is_spike_harmful / check_spiked),
-      // but drawn as red blades pointing up from the floor line (block-map palette) so you can see them.
+    } else if (t === 2) {                             // SPIKES — height + brightness track the extend/retract state
+      // The blades rise/sink with the tile's modifier (the animate_spike state machine): dormant/disabled
+      // -> a low dim nub flush in the floor; rising (1..4) / fully-out (0x8F..0x81) -> tall bright-red;
+      // sinking (6..8) -> shrinking. So a spike visibly pops up as the prince nears it and kills on contact.
       ctx.fillStyle = '#7f8c5a'; ctx.fillRect(cx, floorY, cellW, LEDGE * sy);   // floor base
-      ctx.fillStyle = '#b04040';
-      const n = 3, sh = Math.max(3, Math.round(6 * zoom)), hw = Math.max(1, (cellW / n) * 0.3);
+      const m = getTileModif(level, room, col, row);
+      let outFrac;
+      // Follows get_spike_frame (seg008.c:521): ANY high-bit modifier draws the fully-out sprite —
+      // which includes both 0x8F..0x81 (out) AND 0xFF (disabled after a kill), so the blades stay
+      // extended under the impaled prince (they only disable re-harm, they don't retract).
+      if (m === 0) outFrac = 0;                               // dormant -> flush
+      else if (m & 0x80) outFrac = 1;                         // fully out (0x8F..0x81) OR disabled-after-kill (0xFF)
+      else if (m < 5) outFrac = 0.35 + 0.65 * (m / 4);        // rising 1..4
+      else outFrac = Math.max(0, (9 - m) / 4);                // sinking 6..8
+      const nub = Math.max(1, Math.round(3 * zoom));         // dormant/retracted: a small stub in the floor
+      const full = Math.max(nub + 2, Math.round(16 * zoom)); // fully out: tall blades (shoot up when triggered)
+      const sh = Math.round(nub + (full - nub) * outFrac);   // interpolate the blade height by extension
+      ctx.fillStyle = outFrac > 0.5 ? '#e05555' : '#8a4a4a';  // out = bright red, retracted = dim
+      const n = 3, hw = Math.max(1, (cellW / n) * 0.3);
       for (let s = 0; s < n; s++) {
         const xm = cx + (s + 0.5) * cellW / n;
         ctx.beginPath(); ctx.moveTo(xm - hw, floorY); ctx.lineTo(xm, floorY - sh); ctx.lineTo(xm + hw, floorY); ctx.closePath(); ctx.fill();

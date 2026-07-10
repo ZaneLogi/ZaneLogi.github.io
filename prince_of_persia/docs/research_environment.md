@@ -167,11 +167,72 @@ deferred.
 
 ---
 
+## 2.5 Spikes (`tiles_2_spike`) — *implemented (the hazard is now lethal)*
+
+Spikes are a trob whose **modifier byte is an extend/retract state machine**, read by
+the death path. Level-1 spikes all store modifier `0` (dormant) and `alter_mods` leaves
+them untouched, so the state below is the runtime lifecycle:
+
+| modifier | phase | `is_spike_harmful` |
+|---|---|---|
+| `0` | dormant / retracted (flush in the floor) | 0 (harmless) |
+| `1..4` | extending upward | **2** (harmful — impale-on-the-rise) |
+| `0x8F` then `0x8E..0x81` | fully out, ticking down but still out | **1** (harmful) |
+| `6,7,8` | final sink into the floor | 0 (harmless) |
+| `0xFF` | disabled (someone already died on it) | 0 (harmless) — but drawn **fully out** (see below) |
+
+**`start_anim_spike` (seg007.c:596) — arm.** Dormant (`0`) → `add_trob` (begin the
+extend animation); already-out (`< 0`, not the disabled `0xFF`) → snap to fully-out
+`0x8F`; mid-cycle (`1..8`) → left alone. In `trob.js` (`startAnimSpike`).
+
+**`animate_spike` (seg007.c:317) — tick.** High-bit set → count DOWN (at `0x80` flip to
+the sink phase `6`); else count UP (`5` → hold-out `0x8F`; `9` → done, drop the trob).
+In `trob.js` (`animateSpike`), dispatched from `processTrobs`.
+
+**Two triggers + two death sites** (all in `collision_kernel.js` except the arm, which
+goes through the `onSpikeTrigger` hook to `trob.js` — the `onCheckGrab` pattern):
+
+- **`check_spike_below` (seg006.c:1720)** — every frame, scan the column(s) under the
+  char and arm any spike directly below through open air. This is the **proximity
+  pop-up**: a spike rises as the prince nears it. (Uses the `FIX_INFINITE_DOWN_BUG`
+  bound `row ≤ 2` so the descent can't loop.)
+- **`check_spiked` (seg006.c:968)** — every frame, if the kid stands on a *harmful*
+  spike **and** is in a fast frame (running `7..14` / start-run-jump `34..39` need
+  `harmful ≥ 2`; run-jump land `43` / stand-jump land `26` need any harm) → `spiked()`.
+  Careful-stepping (non-run frames) crosses safely; **standing** on an out spike also
+  survives (frame 15 isn't a run/jump frame).
+- **`land()` spike branch (seg005.c:114)** — a fall that lands on a spike tile (at the
+  feet, or one backed onto the ledge with `distance_to_edge_weight ≥ 12`) that is
+  harmful → `spiked()`.
+- **`spiked()` (seg005.c:220)** — disable this spike (`modifier = 0xFF`), seat + shove
+  the kid onto it (`x_bump[...] + 10`, then `char_dx_forward(8)`), play `seq_51_spiked`
+  (the *impale*, hold **frame 177**). `take_hp(100)` is not modeled (no HP subsystem —
+  the death is the held impale frame, like the clone's other deaths); the impaled char
+  is inert (frame 177 matches no control dispatch, and `check_bumped` guards `frame != 177`).
+
+**Drawing (`get_spike_frame`, seg008.c:521):** `if (modifier & 0x80) return frame 5`
+(the fully-out sprite) `else return modifier` (indexes the rise/sink frame table). So
+**any high-bit modifier draws fully extended** — which includes both `0x8F..0x81` (out)
+AND `0xFF` (disabled-after-kill). That is why a **dead prince stays impaled on visibly
+extended spikes**: `spiked()`'s `0xFF` only stops *re-harm*, it does not retract the
+blades. The clone's `drawRoom` mirrors this: `m === 0` → flush, `m & 0x80` → fully out
+(incl. `0xFF`), `1..4` → rising, `6..8` → sinking. (Clone deviation: a dormant `0`
+spike draws a faint stub for playground legibility, where the source draws nothing.)
+
+Frame order in `tick()` (seg000.c:1217-1219): `check_press` → `check_spike_below` →
+`check_spiked`. Verified (deterministic stepping + screenshots): run into an armed spike
+→ impale (frame 177, spike → `0xFF`, blades stay out under the body); fall onto a spike →
+impale via `land`; the spike **arms as the prince approaches** (modifier 0→1 while he
+crosses); standing on an out spike survives; render blades rise/sink + brighten with the
+modifier.
+
+---
+
 ## 3. Other traversal tiles (at a glance)
 
 | tile | animator | collision-relevant behavior | citation |
 |---|---|---|---|
-| **spike** (`tiles_2`) | `animate_spike` | extends (modifier 0→5) then retracts; `is_spike_harmful` (modifier state) gates `check_spiked`/`land` damage | seg007.c:317; seg007.c:1178 |
+| **spike** (`tiles_2`) — *implemented, see §2.5* | `animate_spike` | extends (modifier 0→5) then retracts; `is_spike_harmful` (modifier state) gates `check_spiked`/`land` damage | seg007.c:317; seg007.c:1178 |
 | **chomper** (`tiles_18`) | `animate_chomper` | cycles blades; `wall_type == 3` (obstacle at left); a *closed* chomper (`modif==2`) is a bump obstacle + `check_chomped_kid` (reads the collision buffer) | seg007.c:288; seg004.c:439 |
 | **potion** (`tiles_10`) | `animate_potion` | bubble frame cycles; **not a bump obstacle** (`is_obstacle` returns 0); picked up via `check_get_item` | seg007.c:253; seg004.c:232 |
 | **doortop** (`7` / `12`) | static | `wall_type == 1` (wall at right); `12` is not a floor, `7` is; grab rules differ by facing (`can_grab`) | seg006.c:1626/951 |

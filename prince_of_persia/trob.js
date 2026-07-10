@@ -14,14 +14,19 @@
 // a button's bg is its door-link INDEX (whose timer slot doubles as the press debounce). The player
 // mutates a structuredClone of the level (never the shared LEVEL1), so a restart restores every tile.
 //
+//   - SPIKE (tiles_2): triggered (start_anim_spike) it extends up over a few frames, holds out, then
+//     retracts back into the floor. Its modifier is the extend/retract state (0 dormant, 1-4 rising,
+//     0x8F-0x81 out, 6-8 sinking, 0xFF disabled); is_spike_harmful (kernel) reads it, the death path
+//     (check_spiked / land) reads it, and drawRoom renders the blades by it.
+//
 // Deferred by agreement (out of this milestone): the loose falling-debris chunk (add_mob) + shake
 // visual; the level-exit door animator (animate_leveldoor — trigger_1 routes to it faithfully, but a
-// door trob is dropped un-animated for now); spikes/chompers/potion animators. (check_gate_push — a
-// closing gate shoving a stand/crouch/turn char sideways — is now ported in collision_kernel.js.)
+// door trob is dropped un-animated for now); chompers/potion animators. (check_gate_push — a closing
+// gate shoving a stand/crouch/turn char sideways — is now ported in collision_kernel.js.)
 //
 // Citations are SDLPoP (C:\Z_Temp\SDLPoP\src), segNNN.c:line. GPLv3 (see NOTICE).
 
-export const TILE_EMPTY = 0, TILE_GATE = 4, TILE_CLOSER = 6, TILE_DEBRIS = 14, TILE_OPENER = 15;
+export const TILE_EMPTY = 0, TILE_SPIKE = 2, TILE_GATE = 4, TILE_CLOSER = 6, TILE_DEBRIS = 14, TILE_OPENER = 15;
 export const TILE_LEVELDOOR_LEFT = 16, TILE_LOOSE = 11;
 export const LOOSE_FLOOR_DELAY = 11;              // custom->loose_floor_delay (seg007.c:832)
 
@@ -180,6 +185,46 @@ function animateButton(level, trob) {
 }
 
 // =============================================================================================
+// SPIKES  (seg007.c) — start_anim_spike (arm) + animate_spike (tick the extend/retract state machine)
+// =============================================================================================
+// The spike modifier (its curr_room_modif byte) is the animation state, read as SIGNED for the arm
+// guard and by is_spike_harmful (kernel):
+//   0        dormant / retracted (harmless)
+//   1..4     extending upward     (harmful — impale-on-the-way-up)
+//   0x8F     just reached full extension; 0x8F..0x81 = fully out, slowly ticking (harmful)
+//   6,7,8    final retract into the floor (harmless); at the +1 that makes 9 -> 0, trob done
+//   0xFF     disabled (a char already died on it — harmless to others)
+
+// start_anim_spike (seg007.c:596): trigger a spike. A dormant spike (0) arms its extend animation; a
+// spike already out/retracting (modifier < 0, but not the disabled 0xFF) snaps back to fully-out 0x8F.
+// A spike mid-extend (1..8) or disabled (0xFF) is left alone. (sound_49_spikes not modeled.)
+export function startAnimSpike(trobs, level, room, tilepos) {
+  const old = sbyte(bgAt(level, room, tilepos));
+  if (old > 0) return;                                     // 1..127 mid-animation -> don't re-trigger
+  if (old === 0) addTrob(trobs, room, tilepos, 1);         // dormant -> arm the extend animation
+  else if (old !== -1) setBg(level, room, tilepos, 0x8F);  // out/retracting (not 0xFF disabled) -> re-extend
+}
+
+// animate_spike (seg007.c:317): advance one spike frame. High-bit set = the out/retract phase (count
+// DOWN; at 0x80 flip to the sink phase 6); else the extend phase (count UP; 5 -> hold-out 0x8F, 9 ->
+// done). 0xFF stays disabled. curr_modifier is the tile's own bg byte.
+function animateSpike(level, trob) {
+  if (trob.type < 0) return;
+  let mod = bgAt(level, trob.room, trob.tilepos);
+  if (mod === 0xFF) return;                                // disabled spike -> no animation
+  if (mod & 0x80) {                                        // fully-out / retracting (high bit set)
+    mod = (mod - 1) & 0xFF;
+    if (mod & 0x7F) { setBg(level, trob.room, trob.tilepos, mod); return; }  // still out -> keep ticking
+    mod = 6;                                               // reached 0x80 -> begin the sink-into-floor phase
+  } else {                                                 // extending upward
+    mod = mod + 1;
+    if (mod === 5) mod = 0x8F;                             // fully extended -> hold out
+    else if (mod === 9) { mod = 0; trob.type = -1; }       // fully retracted -> spike done, drop trob
+  }
+  setBg(level, trob.room, trob.tilepos, mod);
+}
+
+// =============================================================================================
 // process_trobs (seg007.c:24) -> animate_tile (seg007.c:48): tick every active trob, dispatching by
 // the TILE type at its position, then compact out the finished ones (type -1). Runs at the TOP of the
 // player tick (like process_trobs at the top of play_frame, seg000.c:869).
@@ -189,6 +234,7 @@ export function processTrobs(trobs, level) {
     const type = fgAt(level, trob.room, trob.tilepos);
     if (type === TILE_LOOSE) animateLoose(level, trob);
     else if (type === TILE_GATE) animateDoor(level, trob);
+    else if (type === TILE_SPIKE) animateSpike(level, trob);
     else if (type === TILE_OPENER || type === TILE_CLOSER) animateButton(level, trob);
     else trob.type = -1;                                   // unhandled tile (e.g. a collapsed loose / an exit door) -> drop
   }
