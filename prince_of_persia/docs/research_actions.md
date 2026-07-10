@@ -11,7 +11,8 @@ and making sure the collision it needs is faithful.
 (labels + `seqtbl_offsets[]`). Collision detail: `research_collision_detection.md`.
 Frame order: `research_frame_loop.md`. Position/room: `research_position_room.md`.
 
-**Scope.** Traversal only (no sword/guard/cutscene). Control-state values:
+**Scope.** Traversal + the item pickup (§11 — sword/potion). Sword-*combat* stance,
+guards, and cutscenes are still out. Control-state values:
 `CONTROL_HELD = CONTROL_HELD_UP = CONTROL_HELD_FORWARD = −1`; `CONTROL_HELD_DOWN =
 CONTROL_HELD_BACKWARD = 1`; `RELEASED = 0`; `IGNORE = 1`.
 
@@ -214,3 +215,31 @@ Detection in the source is the **per-column buffer** edge-trigger
 
 The two bold rows are the substrate rework (`research_deviation_ledger.md`); the
 rest are either done or a clean, feature-scoped defer.
+
+---
+
+## 11. Item pickup — sword (and potion) *(implemented — the milestone)*
+
+Not a traversal move, but a Shift-driven **action** the prince does, so catalogued here.
+The path: `control_standing`/`control_crouched` (a get-item check at the top) →
+`check_get_item` → `get_item` → `do_pickup` + `SEQ_GET_ITEM 1` → `proc_get_object`.
+
+| step | trigger (seg005.c / seg006.c) | sequence | act | notes |
+|---|---|---|---|---|
+| **initiate (standing)** | `control_shift == HELD && control_shift2 == HELD && check_get_item()` (seg005.c:344) | — | 0 | fires only near a sword/potion; else falls through to the normal Shift handling |
+| **initiate (crouched)** | `control_shift2 == HELD && check_get_item()` (seg005.c:330) | — | 1 | the second half of the two-step |
+| **align + crouch** | `get_item`, frame ≠ 109 (seg005.c:641) | `stoop` (seq_50) | 1 | aligns `Char.x` to the item edge (`get_edge_distance`), then `crouch()` |
+| **pick up sword** | `get_item`, frame == 109, `curr_tile2 == sword` (seg005.c:650) | `pickupsword` (seq_91) → `resheathe` | 1 | `do_pickup(-1)` erases the tile; `SEQ_GET_ITEM 1` → `proc_get_object` → `have_sword = -1` |
+| **drink potion** | `get_item`, frame == 109, else (seg005.c:653) | `drinkpotion` (seq_78) | 1 | `do_pickup(modifier>>3)`; effects out of scope (no HP) — a no-op `proc_get_object` |
+
+**Mechanism the pickup needs faithful:** (a) the kernel's char-relative `get_tile_*`
+reads (the source reads `curr_tile2`/`curr_tilepos` across a *sequence* of them);
+(b) the **`control_shift2` latch** (seg006.c:1594) — a fresh Shift reads HELD for one
+tick, then `do_pickup` sets it IGNORE ("disable automatic repeat") so the grab fires
+once; (c) `SEQ_GET_ITEM` in `play_seq` (fires the `onGetItem` hook = `proc_get_object`).
+
+**Clone status:** implemented + verified (crouch → grab → `have_sword`, sword tile
+consumed; the standing-on-the-sword back-up path; Shift near a non-item still
+careful-steps). **Deferred (faithful):** the sword-drawn combat stance + guards (the
+source only draws the sword near a guard — `can_guard_see_kid`), and the separate
+sword-blade overlay sprite (body silhouettes only). Detail: `CLAUDE.md` roadmap.

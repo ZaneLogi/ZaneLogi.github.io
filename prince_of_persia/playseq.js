@@ -38,6 +38,9 @@ export function makeCharacter(opts = {}) {
     alive: -1,                         // SDLPoP sentinel: alive == -1, dead == 0 (bumped() guards on Char.alive < 0)
     grab_timer: 0,                     // set to 12 when grabbing a ledge mid-fall; blocks climb-up until it counts down (seg006.c:1405)
     testing: 0,                        // clone-only: true during `testfoot` (the peer-over lean must not fall/bump)
+    have_sword: 0,                     // 0 = no sword, -1 = has it (proc_get_object sets it; level 1 starts swordless)
+    pickup_obj_type: 0,                // set by do_pickup, read by proc_get_object (SEQ_GET_ITEM): -1 sword / >=1 potion type
+    onGetItem: null,                   // hook fired by SEQ_GET_ITEM 1 -> proc_get_object (player.js binds it)
   };
 }
 
@@ -66,7 +69,7 @@ export function playSeq(ch) {
       case SEQ.SOUND: ch.curr_seq++; break;                      // audio not modeled
       case SEQ.UP: ch.curr_row--; break;
       case SEQ.DOWN: ch.curr_row++; break;
-      case SEQ.GET_ITEM: ch.curr_seq++; break;
+      case SEQ.GET_ITEM: { const which = SEQTBL[ch.curr_seq++]; if (which === 1) ch.onGetItem?.(); break; }  // proc_get_object
       case SEQ.KNOCK_UP: case SEQ.KNOCK_DOWN: case SEQ.DIE: case SEQ.END_LEVEL: break;
       default: ch.frame = cmd; return;                           // a frame number -> emit + stop
     }

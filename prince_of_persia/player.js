@@ -23,8 +23,8 @@ import { makeCharacter, startSeq, playSeq, fallAccel, fallSpeed, charDxForward,
 import { getTile, getTileModif, tileIsFloor, wallType, tileDivMod, tileDivModM7, standX,
          Y_LAND, SCREENSPACE_X, TILE_SIZEX, ROOM_XSPAN, ROOM_YSPAN, TILE_WALL,
          DIR_FRONT, getTileAtChar, getTileInFrontOfChar, getTileAboveChar, getTileFrontAboveChar,
-         getTileBehindAboveChar, getTileBehindChar, canGrab, distanceToEdge, yToRowMod4, EDGE_WALL } from './collision.js';
-import { controlKid, makeControl, HELD, RELEASED, FWD, NONE, BACK } from './control.js';
+         getTileBehindAboveChar, getTileBehindChar, canGrab, distanceToEdge, yToRowMod4, EDGE_WALL, EDGE_FLOOR } from './collision.js';
+import { controlKid, makeControl, HELD, RELEASED, IGNORE, FWD, NONE, BACK } from './control.js';
 import { makeTrobs, processTrobs, makeLooseFall, triggerButton,
          TILE_LOOSE, TILE_OPENER, TILE_CLOSER } from './trob.js';
 // The routine-level-identical collision kernel (seg004.c/seg006.c). Replaces the old Char.x-clamp
@@ -34,7 +34,9 @@ import { makeTrobs, processTrobs, makeLooseFall, triggerButton,
 import { bindKernel, setLevel as kSetLevel,
          determine_col, load_frame_to_obj, set_char_collision, check_collisions,
          check_bumped, check_action, get_edge_distance, edge_type,
-         get_tile_at_char as k_get_tile_at_char, currModif, curr_room, curr_tilepos } from './collision_kernel.js';
+         get_tile_at_char as k_get_tile_at_char, get_tile_infrontof_char as k_get_tile_infrontof_char,
+         get_tile_behind_char as k_get_tile_behind_char, load_fram_det_col,
+         currModif, curr_tile2, curr_room, curr_tilepos } from './collision_kernel.js';
 
 // Frame flags (types.h:379-381): FRAME_WEIGHT_X = low 5 bits, FRAME_NEEDS_FLOOR = 0x40.
 const FRAME_WEIGHT_X = 0x1F, FRAME_NEEDS_FLOOR = 0x40;
@@ -43,6 +45,8 @@ const frameFlags = (f) => FRAME_TABLE_KID[f][4];
 const ACT_HANG_CLIMB = 2, ACT_BUMPED = 5, ACT_HANG_STRAIGHT = 6, ACT_TURN = 7;
 // Tile types the grab/hang tests special-case (types.h): doortop-with-floor and plain doortop.
 const TILE_DOORTOP_FLOOR = 7, TILE_DOORTOP = 12;
+// Pick-up-able item tiles (types.h): the sword lying on the floor + a potion.
+const TILE_POTION = 10, TILE_SWORD = 22;
 
 // A MUTABLE working copy of the level: loose floors collapse into it (fg 11 -> 0), so the
 // tile data itself changes just as the source's curr_room_tiles does. LEVEL1 (the shared
@@ -104,6 +108,7 @@ let sheet = null;
 // --- the character + which room is on screen ---
 const ch = makeCharacter({ x: 0, y: 0, direction: DIR_LEFT });
 ch.room = level.start.room;
+ch.onGetItem = () => procGetObject(ch);   // SEQ_GET_ITEM 1 -> proc_get_object (fires from pickupsword/drinkpotion)
 let drawnRoom = level.start.room;
 
 // Level-1 START = a FALLING entry (do_startpos, seg003.c:167 -> seq_7_fall). The start
@@ -120,7 +125,8 @@ function dropAtStart() {
   ch.y = Y_LAND[ch.curr_row + 1];          // set_start_pos, seg003.c:183 (y_land[1] = 55)
   ch.direction = ~s.dir;                   // Char.direction = ~start_dir (seg003.c:157)
   ch.fall_x = 0; ch.fall_y = 0;
-  ctrl1.forward = ctrl1.backward = RELEASED;   // clear_saved_ctrl (seg006.c:1552): a restart resets the latch
+  ch.have_sword = 0;                       // level 1 starts swordless (do_startpos; restore after a pickup)
+  ctrl1.forward = ctrl1.backward = ctrl1.shift2 = RELEASED;   // clear_saved_ctrl (seg006.c:1552): a restart resets the latch
   startSeq(ch, 'freefall');                // seq_7_fall (falling entry)
   playSeq(ch);
 }
@@ -321,6 +327,67 @@ function downPressed(ch) {
 // the old freefall collapse; check_on_floor ejects from a wall via in_wall instead of the "don't
 // fall on a wall" stand-in. The old fall_x=0 stopgap is gone — set_fall re-establishes it faithfully.)
 
+// --- item pickup (ported seg005.c / seg006.c): the sword (and potions) --------------------
+// Run in the CONTROL phase (from control_standing / control_crouched via world.getItem). They read the
+// tile at / in-front-of / behind the char through the KERNEL's char-relative get_tile_* so curr_tile2 /
+// curr_room / curr_tilepos reflect the (link-hopped) tile — the same globals get_item / do_pickup then
+// read, mirroring the C's global-state sequence.
+
+// check_get_item (seg005.c:620): is there a sword/potion to pick up? If the item is AT the char (with
+// floor behind to back onto), step back 14 so it becomes the tile IN FRONT; then, if the tile in front
+// is the item, get_item() and report handled. Returns false when there is nothing to grab.
+function checkGetItem(ch) {
+  const atChar = k_get_tile_at_char();
+  if (atChar === TILE_POTION || atChar === TILE_SWORD) {
+    if (!tileIsFloor(k_get_tile_behind_char())) return false;
+    ch.x = charDxForward(ch, -14);
+    load_fram_det_col();                                  // re-derive curr_col at the new x
+  }
+  const inFront = k_get_tile_infrontof_char();            // sets curr_tile2 / curr_tilepos / curr_room = the in-front tile
+  if (inFront === TILE_POTION || inFront === TILE_SWORD) {
+    getItem(ch);
+    return true;
+  }
+  return false;
+}
+
+// get_item (seg005.c:640): the two-step. Not crouched yet -> align to the item's edge, nudge, and
+// crouch() (= the `stoop` sequence). Already crouched (frame 109) -> do_pickup + the pickup animation
+// (sword -> pickupsword/seq_91; potion -> drinkpotion/seq_78). curr_tile2 here is the in-front item
+// (get_edge_distance's last read lands on it), exactly as the source reads it.
+function getItem(ch) {
+  if (ch.frame !== 109 /*frame_109_crouch*/) {
+    const { edgeType, distance } = edgeDist();
+    if (edgeType !== EDGE_FLOOR) ch.x = charDxForward(ch, distance);
+    if (ch.direction >= DIR_RIGHT) ch.x = charDxForward(ch, (curr_tile2 === TILE_POTION ? 1 : 0) - 2);
+    startSeq(ch, 'stoop');                                // crouch()
+  } else if (curr_tile2 === TILE_SWORD) {
+    doPickup(ch, -1);
+    startSeq(ch, 'pickupsword');                          // seq_91_get_sword
+  } else {                                                // potion
+    doPickup(ch, currModif() >> 3);
+    startSeq(ch, 'drinkpotion');                          // seq_78_drink
+  }
+}
+
+// do_pickup (seg006.c:1671): record what's being picked up (proc_get_object reads it), disable Shift
+// auto-repeat, and ERASE the item tile -> plain floor at the resolved (curr_room, curr_tilepos).
+function doPickup(ch, objType) {
+  ch.pickup_obj_type = objType;
+  control.shift2 = IGNORE;                                // disable automatic repeat
+  const tp = curr_tilepos;
+  level.rooms[curr_room - 1].fg[(tp / 10) | 0][tp % 10] = 1;   // tiles_1_floor
+  level.rooms[curr_room - 1].bg[(tp / 10) | 0][tp % 10] = 0;
+}
+
+// proc_get_object (seg006.c:1857): the SEQ_GET_ITEM 1 effect. For the SWORD, set have_sword. Potion
+// effects (heal / life / feather / upside-down) are out of scope (no HP/effect subsystem), so a potion
+// is a no-op — the drink animation plays and the potion vanished in do_pickup.
+function procGetObject(ch) {
+  if (ch.charid !== 0 /*kid*/ || ch.pickup_obj_type === 0) return;
+  if (ch.pickup_obj_type === -1) ch.have_sword = -1;     // got the sword (sound + flash not modeled)
+}
+
 // check_press (seg006.c:1683): the loose-floor + button trigger. For a grounded / turning / bumped
 // actor on a frame that needs a floor, read the tile underfoot: a raise/drop BUTTON (15/6) triggers
 // its door-link chain (trigger_button); a LOOSE tile (11) starts its collapse (make_loose_fall). The
@@ -424,10 +491,11 @@ const control = makeControl();
 // control.forward/backward are 3-state (RELEASED/HELD/IGNORE); ctrl1 carries them between frames so a
 // held key reads as a FRESH press for exactly ONE tick (HELD), after which a safe_step latches it to
 // IGNORE — the "disable automatic repeat" that makes a held run-into-wall SETTLE at a gap and a TAP
-// oscillate (research_collision.md §5c). control.x is the raw axis the latch reads. control.up/down/
-// shift stay simple raw HELD/RELEASED — their repeat is already gated by the frame dispatch, so the
-// vertical latch (control_up/down via ctrl1) is a deferred follow-on, not ported here.
-const ctrl1 = { forward: RELEASED, backward: RELEASED };
+// oscillate (research_collision.md §5c). control.x is the raw axis the latch reads. control.up/down
+// stay simple raw HELD/RELEASED — their repeat is already gated by the frame dispatch. control.shift2
+// IS latched (like forward) — the item-pickup two-step needs it: a fresh Shift press reads HELD, and
+// do_pickup latches it to IGNORE so the grab doesn't auto-repeat (seg006.c:1594). control.shift stays raw.
+const ctrl1 = { forward: RELEASED, backward: RELEASED, shift2: RELEASED };
 let lastDir = ch.direction;                             // facing at the last tick, to detect a turn (flipLatchOnTurn)
 
 // Raw keyboard -> the facing-relative axis (flip_control_x, seg006.c:1520 — folded in at read time so
@@ -456,8 +524,8 @@ function flipLatchOnTurn() {
   }
 }
 
-// rest_ctrl_1 (seg006.c:1543): restore the latched forward/backward from the previous tick.
-function restCtrl1() { control.forward = ctrl1.forward; control.backward = ctrl1.backward; }
+// rest_ctrl_1 (seg006.c:1543): restore the latched forward/backward (+ shift2) from the previous tick.
+function restCtrl1() { control.forward = ctrl1.forward; control.backward = ctrl1.backward; control.shift2 = ctrl1.shift2; }
 
 // read_user_control (seg006.c:1557): advance the 3-state latch from the raw axis. RELEASED + key-down
 // -> HELD (a fresh press); IGNORE stays IGNORE while the key is held (auto-repeat off); key-up ->
@@ -473,10 +541,16 @@ function readUserControl() {
     if (control.x === BACK) { if (control.backward === RELEASED) control.backward = HELD; }
     else control.backward = RELEASED;
   }
+  // control_shift2 latch (seg006.c:1594): a fresh Shift press RELEASED->HELD; key-up -> RELEASED; an
+  // IGNORE set by do_pickup stays IGNORE while Shift is held (>= RELEASED is true for IGNORE, false for HELD).
+  if (control.shift2 >= RELEASED) {
+    if (control.shift === HELD) { if (control.shift2 === RELEASED) control.shift2 = HELD; }
+    else control.shift2 = RELEASED;
+  }
 }
 
 // save_ctrl_1 (seg006.c:1534): persist the latch (as control() left it) to the next tick.
-function saveCtrl1() { ctrl1.forward = control.forward; ctrl1.backward = control.backward; }
+function saveCtrl1() { ctrl1.forward = control.forward; ctrl1.backward = control.backward; ctrl1.shift2 = control.shift2; }
 
 const world = {
   edgeDistance: edgeDist,                   // kernel get_edge_distance -> { edgeType, distance }
@@ -486,6 +560,7 @@ const world = {
   hangAgainstWall: () => hangAgainstWall(ch),  // shift while hanging -> hang flat / let go
   runJump: () => runJump(ch),               // up while running -> the running (horizontal) jump
   downPressed: () => downPressed(ch),       // down while standing -> climb down / crouch
+  getItem: () => checkGetItem(ch),          // shift over a sword/potion -> crouch, then pick up
 };
 
 // --- one engine tick — faithful play_kid_frame order (seg000.c:1192) --------------
@@ -553,6 +628,14 @@ function drawRoom(room) {
       const bwid = Math.round(cellW * 0.55), bh = Math.max(2, Math.round(3 * zoom));
       ctx.fillStyle = (t === 15) ? '#4a90d0' : '#d07a4a';
       ctx.fillRect(Math.round(cx + (cellW - bwid) / 2), floorY - bh, bwid, bh);
+    } else if (t === 22) {                            // the SWORD lying on the floor (the objective)
+      // Drawn as a bright steel blade + a small brass hilt lying flat, so the milestone item is easy to
+      // spot. Only drawn while the tile IS a sword — after pickup do_pickup erases it to floor (t=1).
+      ctx.fillStyle = '#7f8c5a'; ctx.fillRect(cx, floorY, cellW, LEDGE * sy);   // floor base
+      const blW = Math.round(cellW * 0.6), th = Math.max(2, Math.round(2 * zoom));
+      const bx = Math.round(cx + (cellW - blW) / 2), by = floorY - th - Math.max(1, Math.round(zoom));
+      ctx.fillStyle = '#dbe3ee'; ctx.fillRect(bx, by, blW, th);                 // steel blade
+      ctx.fillStyle = '#c9a13b'; ctx.fillRect(bx - 1, by - th, Math.max(2, Math.round(2 * zoom)), th * 3);  // brass hilt
     } else if (tileIsFloor(t)) {                      // floor: slab with its top on the feet line
       ctx.fillStyle = (t === 11) ? '#8a7048' : '#7f8c5a';
       ctx.fillRect(cx, floorY, cellW, LEDGE * sy);
@@ -592,7 +675,8 @@ function draw() {
   hud.textContent =
     `room=${padN(ch.room, 2)}  col=${padN(ch.curr_col, 2)} row=${padN(ch.curr_row, 1)}  ` +
     `Char.x=${padN(ch.x, 3)} Char.y=${padN(Math.round(ch.y), 4)}  ` +
-    `frame=${padN(ch.frame, 3)}  dir=${padW(dirTxt, 5)}  act=${padN(ch.action, 1)}  fall_y=${padN(ch.fall_y, 2)}`;
+    `frame=${padN(ch.frame, 3)}  dir=${padW(dirTxt, 5)}  act=${padN(ch.action, 1)}  fall_y=${padN(ch.fall_y, 2)}  ` +
+    `sword=${padW(ch.have_sword ? 'yes' : 'no', 3)}`;
 }
 
 // --- controls / loop ---
@@ -625,12 +709,13 @@ MaskSheet.load('./gfx/kid_masks.json').then((s) => {
     window.POP = { ch, restart: dropAtStart, step: tick, render: draw,
                    pause: (v) => { paused = v; }, hud: () => hud.textContent,
                    keys,                                             // raw key state — set for hold/tap tests
-                   ctrl: () => ({ x: control.x, forward: control.forward, backward: control.backward }),  // latch state
+                   ctrl: () => ({ x: control.x, forward: control.forward, backward: control.backward,
+                                  shift: control.shift, shift2: control.shift2 }),  // latch state
                    place: (room, col, row, dir) => {                 // teleport for testing
                      ch.room = room; drawnRoom = room; ch.curr_col = col; ch.curr_row = row;
                      ch.x = standX(col); ch.y = Y_LAND[row + 1]; ch.direction = dir;
                      ch.fall_x = 0; ch.fall_y = 0; startSeq(ch, 'stand'); playSeq(ch);
-                     ctrl1.forward = ctrl1.backward = RELEASED;      // reset the latch for a clean test
+                     ctrl1.forward = ctrl1.backward = ctrl1.shift2 = RELEASED;   // reset the latch for a clean test
                    },
                    room: () => drawnRoom,
                    tile: (room, col, row) => level.rooms[room - 1].fg[row][col] & 0x1F,  // live tile type

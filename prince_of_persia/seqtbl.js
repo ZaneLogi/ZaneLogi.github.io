@@ -5,7 +5,7 @@
 // mostly a new label + its bytes here. Executed by playseq.js. GPLv3 (see NOTICE).
 import { SeqBuilder } from './seqbuilder.js';
 
-const SND_SILENT = 0, SND_FOOTSTEP = 1;              // enum seqtbl_sounds (types.h:1124)
+const SND_SILENT = 0, SND_FOOTSTEP = 1, SND_DRINK = 3;   // enum seqtbl_sounds (types.h:1124)
 const ACT_STAND = 0, ACT_RUN_JUMP = 1, ACT_TURN = 7; // actions_0_stand / _1_run_jump / _7_turn
 const ACT_HANG_CLIMB = 2, ACT_IN_MIDAIR = 3;         // actions_2_hang_climb / _3_in_midair
 const ACT_IN_FREEFALL = 4, ACT_BUMPED = 5, ACT_HANG_STRAIGHT = 6;  // _4_in_freefall / _5_bumped / _6_hang_straight
@@ -284,6 +284,40 @@ _b.label('hardbump').act(ACT_BUMPED).dx(-1).dy(-4).frame(102)
   .dx(2).frame(108)
   .snd(SND_FOOTSTEP).frame(109)
   .jmp('standup');
+
+// --- item pickup: sword (pickupsword + resheathe) and potion (drinkpotion) -----------------
+// pickupsword (seqtbl.c:882, = seq_91_get_sword): the crouched prince picks up the sword. The
+// SEQ_GET_ITEM 1 opcode fires proc_get_object (sets have_sword) at the start; then the "found sword"
+// flourish (frame 229 held, then 230-232 sheathe) hands off to resheathe. get_item (player.js) starts
+// this only from the crouch frame 109 over a sword tile (a first Shift crouches; a second picks up).
+_b.label('pickupsword').act(ACT_RUN_JUMP).getItem(1).frame(229)
+  .frame(229).frame(229).frame(229).frame(229)
+  .frame(229).frame(230).frame(231).frame(232)
+  .jmp('resheathe');
+// resheathe (seqtbl.c:888): sheathe the just-picked-up sword and rise back to a stand — the sheathe
+// frames (233-240, 133-134) then the turn-tail (48-52) settle to stand. (fastsheathe seq_93 not ported.)
+_b.label('resheathe').act(ACT_RUN_JUMP).dx(-5).frame(233)
+  .frame(234).frame(235).frame(236).frame(237)
+  .frame(238).frame(239).frame(240).frame(133)
+  .frame(133).frame(134).frame(134).frame(134)
+  .frame(48)
+  .dx(1).frame(49)
+  .dx(-2).act(ACT_BUMPED).frame(50)
+  .act(ACT_RUN_JUMP).frame(51)
+  .frame(52)
+  .jmp('stand');
+// drinkpotion (seqtbl.c:905, = seq_78_drink): drink a potion (the toy has no HP/effect subsystem, so
+// proc_get_object's potion branch is a no-op — the animation plays and the potion vanishes via
+// do_pickup). SEQ_GET_ITEM 1 mid-sequence fires proc_get_object with the potion type.
+_b.label('drinkpotion').act(ACT_RUN_JUMP).dx(4).frame(191)
+  .frame(192).frame(193).frame(194).frame(195)
+  .frame(196).frame(197).snd(SND_DRINK)
+  .frame(198).frame(199).frame(200).frame(201)
+  .frame(202).frame(203).frame(204).frame(205)
+  .frame(205).frame(205)
+  .getItem(1).frame(205)
+  .frame(205).frame(201).frame(198)
+  .dx(-4).jmp('stand');
 
 const built = _b.build();
 

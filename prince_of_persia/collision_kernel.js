@@ -119,8 +119,8 @@ export function get_tile(room, col, row) {
 // in `infrontx` (seg006.c:1306) — load-bearing: get_edge_distance feeds that raw -1/10 (not the
 // hopped 9/0) to dist_from_wall_forward so x_bump indexes the off-screen entry directly.
 export function get_tile_at_char() { return get_tile(Char.room, Char.curr_col, Char.curr_row); }
-function get_tile_infrontof_char() { infrontx = DIR_FRONT[Char.direction + 1] + Char.curr_col; return get_tile(Char.room, infrontx, Char.curr_row); }
-function get_tile_behind_char()    { return get_tile(Char.room, DIR_BEHIND[Char.direction + 1] + Char.curr_col, Char.curr_row); }
+export function get_tile_infrontof_char() { infrontx = DIR_FRONT[Char.direction + 1] + Char.curr_col; return get_tile(Char.room, infrontx, Char.curr_row); }
+export function get_tile_behind_char()    { return get_tile(Char.room, DIR_BEHIND[Char.direction + 1] + Char.curr_col, Char.curr_row); }
 
 // =======================================================================================
 // COORDINATES  (seg006.c) — internal-x <-> column, the weight point, sub-tile distance
@@ -457,7 +457,7 @@ export function get_edge_distance() {
 let fall_frame = 0;
 
 // load_fram_det_col (seg006.c): reload obj + re-derive the (unclamped) column.
-function load_fram_det_col() { load_frame_to_obj(); determine_col(); }
+export function load_fram_det_col() { load_frame_to_obj(); determine_col(); }
 // inc_curr_row (seg006.c:2152).
 function inc_curr_row() { Char.curr_row++; }
 // check_grab (seg006.c:1177): the Shift-grab-a-ledge-mid-fall — a DEFERRED feature (no-op here).

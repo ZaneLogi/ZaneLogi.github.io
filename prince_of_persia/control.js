@@ -18,7 +18,7 @@ export const FWD = 1, NONE = 0, BACK = -1;          // control_x, facing-relativ
 // left/right — only forward/backward. That is what makes "left arrow while running right"
 // read as BACK (and drive a runturn) with no special-casing here.
 export const makeControl = () => ({ x: NONE, forward: RELEASED, backward: RELEASED,
-                                    up: RELEASED, down: RELEASED, shift: RELEASED });
+                                    up: RELEASED, down: RELEASED, shift: RELEASED, shift2: RELEASED });
 
 // control_kid dispatch (seg005.c:262-288): the CURRENT FRAME selects the handler.
 export function controlKid(ch, c, world) {
@@ -41,7 +41,7 @@ export function controlKid(ch, c, world) {
   else if (f >= 67 && f < 70)          controlJumpup(ch, c);           // start jump up (frames 67-69)
   else if (f < 15)                     controlRunning(ch, c, world);   // run cycle 4-14
   else if (f >= 87 && f < 100)         controlHanging(ch, c, world);   // hanging from a ledge (87-99)
-  else if (f === 109)                  controlCrouched(ch, c);         // crouch
+  else if (f === 109)                  controlCrouched(ch, c, world);  // crouch
 }
 
 // control_standing (seg005.c:343): Shift+forward = careful step (safe_step); forward = run, or a step
@@ -49,6 +49,10 @@ export function controlKid(ch, c, world) {
 // ledge above. (Down/crouch is still later.)
 function controlStanding(ch, c, world) {
   ch.testing = 0;                     // reaching a stand decision ends any prior test-foot lean
+  // seg005.c:344 — Shift (both the raw shift and the latched shift2) over a sword/potion picks it up
+  // (crouches on the first press, grabs on the second). check_get_item returns false when not near an
+  // item, so this falls through to the normal Shift handling below (careful step, etc.) — no conflict.
+  if (c.shift === HELD && c.shift2 === HELD && world.getItem()) return;
   if (c.shift === HELD) {
     if (c.backward === HELD) backPressed(ch, c);
     else if (c.up === HELD) world.jumpUp();                              // shift+up -> up_pressed (seg005.c:378)
@@ -151,7 +155,8 @@ function controlHanging(ch, c, world) {
 // controlCrouched (seg005.c:313): release Down -> stand up from the crouch (seq_49).
 // This is what recovers the prince to standing after a soft landing (the falling entry
 // ends here). Forward-held crouch-hop is a later addition.
-function controlCrouched(ch, c) {
+function controlCrouched(ch, c, world) {
+  if (c.shift2 === HELD && world.getItem()) return;   // shift over an item while crouched -> pick it up (seg005.c:330)
   if (c.down !== HELD) startSeq(ch, 'standup');       // stand up from crouch (seq_49)
   // else if (c.forward === HELD) startSeq(ch, 'crouchhop');   // TODO
 }

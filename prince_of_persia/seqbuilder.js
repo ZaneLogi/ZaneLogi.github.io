@@ -31,6 +31,7 @@ export class SeqBuilder {
   die() { return this._b(SEQ.DIE); }                // SEQ_DIE (hard land)
   snd(s) { return this._b(SEQ.SOUND, s); }
   setFall(x, y) { return this._b(SEQ.SET_FALL, x & 0xFF, y & 0xFF); }
+  getItem(n) { return this._b(SEQ.GET_ITEM, n & 0xFF); }   // SEQ_GET_ITEM <n> — 1 = proc_get_object (pick up)
   jmp(n) { this.toks.push({ t: 'jmp', n }); return this; }
   build() {
     let off = 0; const labels = {};              // pass 1: resolve label offsets

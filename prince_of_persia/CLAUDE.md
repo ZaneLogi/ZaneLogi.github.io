@@ -524,6 +524,36 @@ KID sprites natively face **LEFT**.
   multi-room 2→3→9) pass. Files: `trob.js` (rewritten), `player.js` (checkPress + gate render +
   leave_room guard), `collision_kernel.js` (export `get_tile_at_char`/`currModif`/`curr_room`/
   `curr_tilepos`). Detail: `docs/research_environment.md §1`.
+- **[done] Sword pickup (the milestone).** The prince picks up his sword: stand near it (or on it),
+  hold/press **Shift** → he crouches, then grabs it. A two-step port of `check_get_item` (seg005.c:620)
+  → `get_item` (seg005.c:640) → `do_pickup` (seg006.c:1671) → `proc_get_object` (seg006.c:1857), all in
+  `player.js`, reading the at/in-front/behind tiles through the kernel's `get_tile_*` so
+  `curr_tile2`/`curr_room`/`curr_tilepos` mirror the C's globals. First Shift → `get_item` aligns +
+  `crouch()` (the existing `stoop`); second Shift while crouched (frame 109) → `do_pickup(-1)` erases the
+  sword tile → floor + plays `pickupsword` (seq_91, transcribed), whose `SEQ_GET_ITEM 1` fires
+  `proc_get_object` → `have_sword = -1`; then `resheathe` (seq_91→seq's tail) → stand. Wiring: a new
+  **`control_shift2` latch** (`player.js` — `ctrl1.shift2` + the `readUserControl`/`restCtrl1`/`saveCtrl1`
+  branch, seg006.c:1594) so a held Shift is a fresh press for one tick then `do_pickup` latches it IGNORE;
+  `control.js` `control_standing` (Shift+shift2, seg005.c:344) + `control_crouched` (shift2, seg005.c:330)
+  gained the get-item check at the top (it returns false when not near an item, so Shift still careful-steps
+  — no conflict). `playseq.js` `SEQ_GET_ITEM` fires an `onGetItem` hook (kept PoP-agnostic; `player.js`
+  binds it to `proc_get_object`). Potions share the path (`drinkpotion`/seq_78 transcribed) — the drink
+  animation plays + the potion vanishes, but its *effects* (HP/life/feather) are out of scope (no HP
+  system), so `proc_get_object`'s potion branch is a no-op. HUD gained a `sword=yes/no` field; `drawRoom`
+  draws the sword tile as a bright steel blade + brass hilt lying on the floor so the objective is
+  visible (it vanishes after pickup, when the tile becomes floor). The kernel
+  gained `export` on `get_tile_infrontof_char`/`get_tile_behind_char`/`load_fram_det_col` (visibility only —
+  the routine-for-routine invariant holds). **Deferred (faithful):** the sword-drawn combat stance + guards
+  (the source only draws the sword near a guard) and the little sword-blade overlay sprite (we have body
+  silhouettes only, so the grab reads as reach-down-and-rise without the blade). **Verified** (deterministic
+  `#debug` stepping, no console errors): Shift by the room-15 sword → crouch (107/108/109) → `pickupsword`
+  (229) → `have_sword`=-1 / HUD `sword=yes` → `resheathe` → stand; sword tile → floor (consumed); the
+  standing-on-the-sword back-up path works; Shift near a non-item still careful-steps; all regressions
+  (falling entry, runstop, jump-up, Down-crouch, wall bump, loose → room 2, button→gate) pass. Files:
+  `seqbuilder.js` (`getItem`), `seqtbl.js` (`pickupsword`/`resheathe`/`drinkpotion`), `playseq.js`
+  (`SEQ_GET_ITEM` hook + `have_sword`/`pickup_obj_type`/`onGetItem` fields), `collision_kernel.js` (3
+  exports), `control.js` (shift2 + get-item branches), `player.js` (the 4 functions + latch + HUD).
+  Detail: `docs/research_actions.md §11`.
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
 

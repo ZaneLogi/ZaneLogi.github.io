@@ -860,8 +860,10 @@ screenshot shows the prince flush at the left wall with `Char.x=64` unchanged.
 **Genuinely out of scope** (separate *subsystems*, not collision-detection substitutes — the same
 class as char-vs-char): spikes (hazard), chompers (`start_chompers` stub + the buffer-reading
 `check_chomped_kid`), HP (`take_hp` — a medium land always survives), mid-fall Shift-grab
-(`check_grab` stub), feather fall (potion), buttons (`check_press` is loose-floor-only), sword
-combat / guards. These arrive with their own features; none is a stand-in *in the collision path*.
+(`check_grab` stub), feather fall, and sword **combat** / guards. These arrive with their own
+features; none is a stand-in *in the collision path*. *(Since implemented as their own features:
+**buttons/portcullis** — `check_press` now has the button branch + the trob animate subsystem; and
+the **sword/potion pickup** — `check_get_item`/`get_item`; see the `CLAUDE.md` roadmap.)*
 
 **Files:** `collision_kernel.js` (new), `player.js` (kernel-wired, substitutes deleted, the
 render-bias), `playseq.js` (`alive`/`sword` init), `seqtbl.js` (the 5 fall sequences). Deviation
