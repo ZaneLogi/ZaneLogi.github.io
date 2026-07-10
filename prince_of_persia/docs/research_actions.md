@@ -96,6 +96,7 @@ guard its own `crossRooms`/`checkBumped` against `action==7` (it does).
 | **crouch (stoop)** | `down_pressed` on a floor (seg005.c:488/491) | `seq_50_crouch` → hold frame 109 | `check_on_floor` at frame 109 (action gated) | 1 | |
 | **stand up** | `control_y != HELD_DOWN` at frame 109 (`control_crouched`, seg005.c:331) | `seq_49_stand_up_from_crouch` → `stand` | — | 5→1 | recovers the soft-land + crouch |
 | **crouch-hop** | Down held + fresh fwd at frame 109 (seg005.c:334) | `seq_79_crouch_hop` (the "crawl") | `check_on_floor` + gate-height | 1 | shuffle forward ~7 units while low |
+| **crouch-while-running** | Down held during the run cycle (`control_running`, seg005.c:599) | `seq_26_crouch_while_running` (source LABEL `rdiveroll`) → skid `dx≈11` into frame 109 | `check_on_floor` at 107–109 | 1 | run → drop into a crouch. `control_forward` stays HELD from the run, so at frame 109 one `crouch-hop` fires immediately (faithful — the source does the same), then holds the crouch |
 
 `down_pressed` also nudges `Char.x` away from a too-close edge (seg005.c:466), and
 routes to **climb-down** if there's a grabbable ledge behind (§7).

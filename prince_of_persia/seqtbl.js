@@ -37,6 +37,16 @@ _b.label('crouchhop').act(ACT_RUN_JUMP).dx(1).frame(110)
   .dx(2).frame(112)
   .dx(2).frame(108)
   .dx(2).label('crawl_crouch').frame(109).jmp('crawl_crouch');
+// crouchrun (seqtbl.c:416, = seq_26_crouch_while_running, source LABEL "rdiveroll"): press Down WHILE
+// running → skid forward ~11 units dropping into a crouch (fall-land frames 107→108→109), then hold the
+// crouch and self-loop on 109. control_running (control.js) fires it on a held Down (one crouch per
+// press — the run frames 7-14 leave the running dispatch as soon as this plays). From frame 109 the
+// normal control_crouched takes over (release Down → standup; Down+fresh-forward → crouch-hop).
+_b.label('crouchrun').act(ACT_RUN_JUMP).dx(1).frame(107)
+  .dx(2).dx(2).frame(108)
+  .dx(2).frame(109)
+  .dx(2).frame(109)
+  .dx(2).label('crouchrun_crouch').frame(109).jmp('crouchrun_crouch');
 // step1..step14 — safe_step-to-edge (seqtbl.c:737-863): "step forward N pixels". safe_step
 // (control.js) picks step<distance> from get_edge_distance so the careful step lands the char
 // EXACTLY at the wall face / tile edge ahead (flush, no bump; stops right at a ledge). Each

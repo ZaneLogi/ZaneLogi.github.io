@@ -620,6 +620,20 @@ KID sprites natively face **LEFT**.
   renders short (screenshot). Regressions (crouch/stand-up, get-item-while-crouched, falling entry) pass.
   Files: `seqtbl.js` (`crouchhop`), `control.js` (`controlCrouched` branch). Detail:
   `docs/research_actions.md §4`.
+- **[done] Crouch-while-running (the last on-foot move).** Press **Down** *while running* and the prince
+  skids forward into a crouch — `seq_26_crouch_while_running` (source LABEL `rdiveroll`; the offset-table
+  index 26 → `rdiveroll`), transcribed into `seqtbl.js` as `crouchrun`: `act(run_jump) dx(1) f107,
+  dx(2)dx(2) f108, dx(2) f109 ×3 loop` — a ~11-unit forward skid through the fall-land frames into the
+  held crouch. Wired into `control_running`'s down branch (`control.js`, seg005.c:599). **Finding
+  (faithful):** `control_forward` stays **HELD** through a run (the latch's `read_user_control` skips a
+  HELD value, and `start_run` never clears it — confirmed in the source), so on reaching frame 109 the
+  `control_crouched` branch fires **one crouch-hop immediately**, then holds the crouch — the DOS game
+  does exactly this. **Verified** (deterministic stepping + screenshot): run → Down → `crouchrun`
+  (107→108→109) → one crouch-hop → hold 109; release forward keeps the crouch; release Down → `standup`
+  (110–119) → stand; the other `control_running` branches (plain run / runstop / runturn / runjump) all
+  still fire; no console errors. This clears the last unused non-sword *movement* sequence (the
+  moveset audit). Files: `seqtbl.js` (`crouchrun`), `control.js` (`controlRunning` down branch). Detail:
+  `docs/research_actions.md §4`.
 - **[done] Gate push (a closing portcullis shoves you out).** Port of `check_gate_push`
   (`seg004.c:487`): when a **descending** gate comes down on a *stationary* char (frame 15 stand,
   frames 108–110 crouch, or action 7 turn) who's straddling its column, it nudges `Char.x` **±5**

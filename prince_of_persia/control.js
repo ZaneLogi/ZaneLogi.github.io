@@ -127,7 +127,7 @@ function safeStep(ch, c, world) {
   else startSeq(ch, 'step11');                        // seq_39_safe_step_11: step into the wall / off the ledge
 }
 
-// control_running (seg005.c:588): stop / run-turn / run-jump (crouch-while-running still out of scope).
+// control_running (seg005.c:588): stop / run-turn / run-jump / crouch-while-running.
 function controlRunning(ch, c, world) {
   if (c.x === NONE && (ch.frame === 7 || ch.frame === 11)) {     // frame-gated STOP (only at 7/11)
     c.backward = RELEASED; c.forward = IGNORE;                   // control_forward = release_arrows() (seg005.c:590)
@@ -137,8 +137,10 @@ function controlRunning(ch, c, world) {
     startSeq(ch, 'runturn');                                     // skid + SEQ_FLIP + resume the run cycle
   } else if (c.up === HELD) {                                    // Up during a run -> the running jump
     world.runJump();                                             // run_jump (seg005.c:595) — gated to frame >= 7 internally
+  } else if (c.down === HELD) {                                  // Down during a run -> crouch-while-running (seg005.c:599)
+    c.down = IGNORE;                                             // control_down = CONTROL_IGNORE (disable auto-repeat)
+    startSeq(ch, 'crouchrun');                                   // seq_26_crouch_while_running — skid into a crouch
   }
-  // else if (c.down === HELD)                     startSeq(ch, 'crouchrun');  // TODO (crouch while running)
 }
 
 // control_hanging (seg005.c:791): while hanging from a ledge (frames 87-99). Up — once the grab
