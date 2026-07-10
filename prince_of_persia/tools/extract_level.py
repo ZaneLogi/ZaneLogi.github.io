@@ -66,7 +66,10 @@ def main():
     # --- level_type field slices (types.h:228, verified offsets) ---
     fg  = d[0:720]; bg = d[720:1440]
     dl1 = d[1440:1696]; dl2 = d[1696:1952]
-    rlk = d[1952:2048]; used = d[2048]
+    rlk = d[1952:2048]
+    # used_rooms is stored as 25 in several levels, but PoP clamps it to ROOMCOUNT=24 on load
+    # (reset_level_unused_fields, seg000.c:1172) -- the extra room is not real.
+    used = min(d[2048], 24)
     s_room, s_pos, s_dir = d[2112], d[2113], sbyte(d[2114])
     g_tile  = d[2119:2143]; g_dir   = d[2143:2167]
     g_skill = d[2215:2239]; g_color = d[2263:2287]

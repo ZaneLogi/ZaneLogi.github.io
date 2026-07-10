@@ -19,6 +19,7 @@
 import { MaskSheet } from './masksheet.js';
 import { FRAME_TABLE_KID } from './res/frame_table_kid.js';
 import { LEVEL1 } from './res/level1.js';
+import { alterModsAllrm, POT_TYPES } from './leveldecode.js';
 import { makeCharacter, startSeq, playSeq, fallAccel, fallSpeed, charDxForward,
          DIR_RIGHT, DIR_LEFT, ACT_IN_MIDAIR, ACT_IN_FREEFALL } from './playseq.js';
 import { getTile, getTileModif, tileIsFloor, wallType, tileDivMod, tileDivModM7, standX,
@@ -59,31 +60,8 @@ let level = structuredClone(LEVEL1);
 const trobs = makeTrobs();
 function resetLevel() { level = structuredClone(LEVEL1); alterModsAllrm(level); trobs.list = []; kSetLevel(level); }  // re-point the kernel at the fresh clone
 
-// alter_mods_allrm / load_alter_mod (seg008.c): the level-LOAD tile-modifier fixup, run once when
-// the level is (re)cloned. LEVELS.DAT stores DESIGN-time modifiers; the engine rewrites a few tile
-// types' modifiers into the runtime encoding before play. We port the cases that matter for our
-// collision/gameplay (the WALL case is render-only wall-connection bits — the source uses them to
-// pick which wall sprite to draw; we draw flat walls and wallType() is by tile-type not modifier, so
-// it's a view-space deviation we skip, CLAUDE.md lesson 6c):
-//   - POTION (10): modifier <<= 3. The stored low bits ARE the potion effect type (1 heal, 2 life,
-//     3 slow-fall, 4 flip, 5 hurt, 6 open); the runtime keeps the type in the HIGH bits (>>3, read by
-//     do_pickup / the pot_types annotation) and the low 3 bits become the bubble-animation phase. So
-//     without this, every potion reads as type 0 (no effect). Level-1 potions are stored 1 -> 8 = HEAL.
-//   - GATE (4): stored==1 -> 188 (loads OPEN), else -> 0 (loads CLOSED). The modifier then IS the
-//     gate's open height (can_bump_into_gate / animate_door read it). Room-5 col-9's gate is stored 1,
-//     so it loads open (the clone previously read the raw 1 and wrongly treated it as closed).
-//   - LOOSE (11): -> 0 (the collapse countdown starts fresh; make_loose_fall arms it to 1).
-function alterModsAllrm(lv) {
-  for (const room of lv.rooms) {
-    if (!room) continue;
-    for (let row = 0; row < 3; row++) for (let col = 0; col < 10; col++) {
-      const t = room.fg[row][col] & 0x1F;
-      if (t === 10)      room.bg[row][col] = (room.bg[row][col] << 3) & 0xFF;   // potion: type moves to the high bits
-      else if (t === 4)  room.bg[row][col] = (room.bg[row][col] === 1) ? 188 : 0;  // gate: open (188) or closed (0)
-      else if (t === 11) room.bg[row][col] = 0;                                  // loose: fresh countdown
-    }
-  }
-}
+// alter_mods (level-load modifier fixup) now lives in the shared leveldecode.js (imported above) so
+// the level viewer applies the identical fixup; see there for the per-tile-type rationale.
 alterModsAllrm(level);   // apply to the initial clone (resetLevel re-applies on each restart)
 const cv = document.getElementById('stage');
 const ctx = cv.getContext('2d');
@@ -140,20 +118,8 @@ const RENDER_X_BIAS = 6;
 let tint = '#e0d4a8', paused = false;   // warm cream — the prince reads clearly on the dark room
 let sheet = null;
 
-// pot_types (screenshot.c:181) — the potion effect -> colour + short label, keyed by the runtime
-// modifier's HIGH bits (modifier >> 3, after alter_mods' <<3). SDLPoP uses this exact mapping for its
-// own on-screen potion annotation; the colours are the EGA bright palette (12 red / 10 green / 9 blue /
-// 7 light-gray). We only HAVE body silhouettes, so a potion is drawn as an abstract bottle tinted by
-// this — the "label the potions with colours" ask. Level-1 potions are type 1 (heal) -> red.
-const POT_TYPES = [
-  { color: '#a8a8a8', text: 'x'    },   // 0 empty / no effect
-  { color: '#ff5555', text: '+1'   },   // 1 heal   (small red)
-  { color: '#ff5555', text: '+++'  },   // 2 life   (big red)
-  { color: '#55ff55', text: 'slow' },   // 3 slow fall (green)
-  { color: '#55ff55', text: 'flip' },   // 4 upside-down (green)
-  { color: '#5555ff', text: '-1'   },   // 5 hurt   (blue)
-  { color: '#5555ff', text: 'trig' },   // 6 open / trigger (blue)
-];
+// POT_TYPES (the potion effect -> colour/label palette, pot_types screenshot.c:181) is imported from
+// the shared leveldecode.js above — the player and the level viewer tint potions from the same table.
 // A short-lived screen flash in the drunk potion's colour — proc_get_object sets flash_color/flash_time
 // (seg006.c:1857). We have no HP subsystem, so the effect itself is a no-op, but the flash makes drinking
 // visibly DO something and reinforces the colour label. {color, time} in render frames; ticked in draw().

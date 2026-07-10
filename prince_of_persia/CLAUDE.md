@@ -92,12 +92,16 @@ prince_of_persia/
 ├─ masksheet.js        # shared module: load + rasterize 1-bpp mask sheets
 ├─ playseq.js/seqtbl.js/seqbuilder.js   # animation engine (play_seq interpreter + sequence data)
 ├─ collision.js        # tile-collision substrate: getTile + floor/wall predicates + coord helpers
+├─ dat.js              # DAT container reader (seg009.c) — browser-side, no image decode
+├─ leveldecode.js      # decode a LEVELS.DAT level (extract_level.py port) + shared alter_mods / POT_TYPES
 ├─ trob.js             # transient-object animator (ported seg007.c) — loose floors, gates/buttons, spikes
 ├─ control.js          # input→transition layer (ported control_kid) — wired by the player
 ├─ demos/              # one <name>.html + <name>.js per demo (lunar_lander pattern)
 │  ├─ actor_frames.html / .js   # dev inspector: contact sheet of every KID.DAT silhouette
 │  ├─ motion.html / .js          # move sandbox (stand/walk/run/turn/jump/fall)
-│  └─ blockmap.html / .js         # level-1 solid-geometry map (imports collision.js predicates)
+│  ├─ blockmap_render.js         # shared block-map renderer (used by blockmap + level_viewer)
+│  ├─ blockmap.html / .js         # static level-1 solid-geometry map
+│  └─ level_viewer.html / .js     # drop a LEVELS.DAT, browse any level's block map
 ├─ res/                # generated JS data: frame_table_kid.js, level1.js
 ├─ gfx/                # extracted assets, flat: <datname>_masks.json (no per-char subdir)
 │  └─ kid_masks.json
@@ -706,6 +710,42 @@ KID sprites natively face **LEFT**.
   fall onto a spike → impale via `land`; the spike arms as he approaches (modifier 0→1 mid-cross);
   standing on an out spike survives (frame-gated); regressions (loose → medium land, jump-up, run,
   button→gate) pass; no console errors. Detail: `docs/research_environment.md §2.5`.
+- **[done] Level viewer — drop a LEVELS.DAT, browse any level.** A block-map viewer for every level,
+  decoded ON THE FLY in the browser: drop a `LEVELS.DAT` you own and a `<select>` lists every level it
+  contains (`demos/level_viewer.html`/`.js`). No level data lands in the repo beyond the committed level-1
+  default; the dropped bytes live in memory only (no persistence — re-drop after a refresh, by design, so
+  Ubisoft's IP never touches the repo or storage). **New browser-side decoders** (faithful JS ports of the
+  Python tools; levels are raw structs so there's NO image decode): `dat.js` (`readResource`/`listResources`
+  = the DAT container parse, seg009.c) + `leveldecode.js` (`decodeLevel` → the same shape as `res/level1.js`;
+  `listLevels` probes the DAT index — a port of `tools/extract_level.py`). **Shared module:** `alter_mods`
+  (level-load modifier fixup) + `POT_TYPES` (potion palette) moved out of `player.js` into `leveldecode.js`,
+  so the viewer applies the identical fixup and the player just imports them. **Renderer factored:**
+  `blockmap.js`'s layout/render/overlay → `demos/blockmap_render.js` (`renderLevel(canvas, level)`), used by
+  both the static block-map demo and the viewer; it clones + `alter_mods` the level so potion/gate modifiers
+  read at their runtime encoding and the caller's level (the shared `LEVEL1`) is untouched. **Overlay
+  upgrades:** potions coloured by TYPE (`pot_types`, `modifier>>3` — needs `alter_mods`, so running it in the
+  viewer makes the colour path identical to the player's); **door-link lines** (each button → the gate(s) its
+  bg modifier chains to via `doorLinks`, seg007.c:720); and a **reciprocity-based dangling rule** for non-planar
+  levels — a PRE-PASS flags any room with a one-way (non-reciprocal) link as an editor leftover and excludes it
+  from the main grid, so the REAL (fully bidirectional) rooms flood into a clean grid while the leftovers + any
+  unreachable rooms stack below (info line: `N placed separately (M with one-way links)`; a cell-occupancy check
+  is kept as a final no-two-rooms-share-a-cell backstop). **Verified** (deterministic browser
+  checks + pixel inspection, no console errors): the JS decode of level 1 is byte-identical to `res/level1.js`;
+  all 14 levels decode + render; level-1 potions render red (type 1 heal), the old generic magenta gone;
+  **level 13 renders cleanly** — its 11 REAL rooms {1,2,3,4,10,11,13,16,17,23,24} form a fully-bidirectional graph
+  and flood into a proper grid, while its 13 leftover rooms (9 with one-way links + 4 unreachable) stack below; the
+  player still boots unchanged after the extraction (potion modifier 8 → type 1). **Why reciprocity, not
+  `roomxs`/`roomys` or a cell gate:** the game IGNORES `roomxs`/`roomys` (memset to 0 on every load,
+  `reset_level_unused_fields` seg000.c:1165) and navigates by LINKS + room number only, with no 2D grid — so it
+  can't be confused; only a whole-level MAP renderer must handle the non-planarity. Reading the DAT showed all 12
+  of level 13's one-way links ORIGINATE from editor-leftover rooms (the `roomxs/roomys = 255,255` "unplaced" ones),
+  while the real rooms are cleanly reciprocal — so reciprocity separates real from leftover semantically and
+  order-independently, beating both authored positions (which would pile the unplaced rooms at one corner) and a
+  cell-occupancy gate (which cascaded a room's whole subtree out of the grid). **Decode faithfulness:** `used_rooms` is clamped to
+  `ROOMCOUNT=24` (`reset_level_unused_fields` seg000.c:1172) — several levels store 25 but the extra room isn't
+  real; this fixed a latent bug shared with `extract_level.py` (which had only ever run on level 1 = 24 rooms).
+  Files: `dat.js`, `leveldecode.js` (new, root); `demos/blockmap_render.js`, `demos/level_viewer.html`/`.js`
+  (new); `player.js`, `demos/blockmap.js`, `demos/blockmap.html`, `tools/extract_level.py` (edited).
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
 

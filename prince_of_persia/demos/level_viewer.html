@@ -3,13 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PoP — level 1 block map</title>
+<title>PoP — level viewer</title>
 <style>
   body { margin: 0; background: #0a0c11; color: #b9c4d4;
          font: 13px/1.5 system-ui, sans-serif; padding: 16px; }
   h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: #7d8aa0; margin: 0 0 12px; font-size: 12px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-bottom: 10px; }
+  .drop { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px;
+          border: 1px dashed #2f3a4c; border-radius: 6px; background: #10141c; cursor: pointer; }
+  .drop.over { border-color: #54e0a0; background: #12241c; }
+  .drop b { color: #d8c78a; }
+  .bar label { display: inline-flex; align-items: center; gap: 6px; }
+  select, input[type=file] { background: #10141c; color: #b9c4d4; border: 1px solid #2f3a4c;
+          border-radius: 4px; padding: 3px 6px; font: 12px system-ui, sans-serif; }
   #info { color: #7d8aa0; margin: 0 0 12px; font: 12px monospace; }
-  .wrap { overflow-x: auto; border: 1px solid #1c2430; border-radius: 4px; }
+  .wrap { overflow: auto; max-height: 70vh; border: 1px solid #1c2430; border-radius: 4px; }
   canvas { display: block; image-rendering: pixelated; }
   .legend { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; }
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
@@ -17,7 +26,16 @@
 </style>
 </head>
 <body>
-  <h1>Prince of Persia — level 1 collision block map</h1>
+  <h1>Prince of Persia — level viewer</h1>
+  <p class="sub">Collision block map of any level, decoded on the fly. The built-in default is level 1;
+    drop your own <b>LEVELS.DAT</b> (from a copy of the game you own) to browse all levels. Nothing is
+    uploaded or stored — the file stays in memory, so re-drop it after a refresh.</p>
+  <div class="bar">
+    <label class="drop" id="drop">
+      Drop <b>LEVELS.DAT</b> here, or <input type="file" id="file" accept=".dat,.DAT">
+    </label>
+    <label>Level <select id="level"><option value="1">Level 1 (built-in)</option></select></label>
+  </div>
   <p id="info">loading…</p>
   <div class="wrap"><canvas id="map"></canvas></div>
   <div class="legend">
@@ -33,6 +51,6 @@
     <span><i class="sw" style="background:#54e0a0"></i>start</span>
     <span><i class="sw" style="background:#e05a5a"></i>guard</span>
   </div>
-  <script type="module" src="./blockmap.js"></script>
+  <script type="module" src="./level_viewer.js"></script>
 </body>
 </html>
