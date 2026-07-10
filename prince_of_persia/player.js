@@ -8,6 +8,7 @@
 // Per-tick order follows play_frame / play_kid_frame (seg000.c:869/1192):
 //   process_trobs (loose floors) -> control -> play_seq -> fall_accel -> fall_speed
 //   -> determine_col (UNCLAMPED) -> set_char_collision -> check_bumped (wall recoil)
+//   -> check_gate_push (a closing gate shoves a stand/crouch/turn char out)
 //   -> check_action (freefall: do_fall / grounded: check_on_floor) -> check_press (loose-floor)
 //   -> leave_room (the room CROSS is LAST, matching exit_room's place after the kid frame,
 //      seg000.c:881). curr_col is unclamped so check_action reads across a boundary via get_tile's
@@ -33,7 +34,7 @@ import { makeTrobs, processTrobs, makeLooseFall, triggerButton,
 // wall face is the faithful inset (coll_tile_left_xpos + TILE_MIDX ± wall_dist), not the raw tile edge.
 import { bindKernel, setLevel as kSetLevel,
          determine_col, load_frame_to_obj, set_char_collision, check_collisions,
-         check_bumped, check_action, get_edge_distance, edge_type,
+         check_bumped, check_gate_push, check_action, get_edge_distance, edge_type,
          get_tile_at_char as k_get_tile_at_char, get_tile_infrontof_char as k_get_tile_infrontof_char,
          get_tile_behind_char as k_get_tile_behind_char, load_fram_det_col,
          currModif, curr_tile2, curr_room, curr_tilepos } from './collision_kernel.js';
@@ -621,7 +622,10 @@ function tick() {
   load_frame_to_obj();                     // obj_x/obj_y for set_char_collision
   determine_col();                         // curr_col at the weight point (UNCLAMPED — seg006.c:122)
   set_char_collision();                    // the collision box (char_x_left/right_coll)
-  if (!ch.testing) { check_collisions(); check_bumped(); }   // fill the buffers + edge-detect a bump -> recoil
+  if (!ch.testing) {
+    check_collisions(); check_bumped();    // fill the buffers + edge-detect a bump -> recoil
+    check_gate_push();                     // a closing gate shoves a stand/crouch/turn char out (seg000.c:1214)
+  }
   check_action();                          // do_fall / check_on_floor — reads across a boundary via the unclamped col
   checkPress(ch);                          // loose-floor trigger (grounded on tile 11 -> make_loose_fall)
   leaveRoom();                             // exit_room: the room cross, AFTER the kid frame (seg000.c:881)
@@ -670,16 +674,20 @@ function drawRoom(room) {
       // The gate's bg modifier is its open height (0 closed .. 188 open, 238 held, 0xFF permanent) — the
       // same byte can_bump_into_gate reads. Draw the bars hanging from the top, their bottom edge sliding
       // UP as it opens (openFrac 0 -> full bars/closed, 1 -> just the top frame/open-walk-under). Flat-2D
-      // re-derivation of the source's pseudo-3D gate draw (view-space, CLAUDE.md lesson 6c).
+      // re-derivation of the source's pseudo-3D gate draw (view-space, CLAUDE.md lesson 6c). The bars sit
+      // in the tile's RIGHT part (px 16..31 of the 32px tile) — the portcullis is a "wall at right"
+      // (wall_type 1), so its visible face is the right side of the cell, not the whole width.
       const mod = getTileModif(level, room, col, row);
       const openFrac = Math.min(mod, 188) / 188;
       const barBottom = cellTopY + (floorY - cellTopY) * (1 - openFrac);
+      const tpx = (p) => cx + cellW * p / 32;          // tile-px (0..32) -> screen x
+      const GATE_L = 16, GATE_R = 31;                  // bars span the tile's right part
       ctx.fillStyle = '#7f8c5a'; ctx.fillRect(cx, floorY, cellW, LEDGE * sy);  // the floor at its base
       ctx.fillStyle = '#c9a13b';                       // brass bars (retracted from the bottom up)
       const bars = 4, bw = Math.max(1, Math.round(zoom));
       for (let b = 0; b < bars; b++)
-        ctx.fillRect(Math.round(cx + (b + 0.5) * cellW / bars - bw / 2), cellTopY, bw, Math.max(0, barBottom - cellTopY));
-      ctx.fillRect(cx, cellTopY, cellW, Math.max(1, Math.round(zoom)));        // top frame bar
+        ctx.fillRect(Math.round(tpx(GATE_L + b * (GATE_R - GATE_L) / (bars - 1)) - bw / 2), cellTopY, bw, Math.max(0, barBottom - cellTopY));
+      ctx.fillRect(Math.round(tpx(GATE_L)), cellTopY, Math.round(tpx(GATE_R) - tpx(GATE_L)) + bw, Math.max(1, Math.round(zoom)));  // top frame over the bars
     } else if (t === 15 || t === 6) {                 // pressure button: a floor with a raised plate on top
       // A button is a floor you stand on (tile_is_floor(15/6) == true), so draw the floor slab, then a
       // small coloured plate centred on it so you can SEE where the plate is. Colours match the block-map

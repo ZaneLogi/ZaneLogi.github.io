@@ -25,6 +25,18 @@ _b.label('stand').act(ACT_STAND).frame(15).jmp('stand');
 // stoop (seqtbl.c:865): duck down, then hold the crouch frame in a self-loop.
 _b.label('stoop').act(ACT_RUN_JUMP).dx(1).frame(107).dx(2).frame(108)
   .label('stoop_crouch').frame(109).jmp('stoop_crouch');
+// crouchhop (seqtbl.c:427, = seq_79_crouch_hop, the "crawl" sequence): shuffle forward ~7 units
+// while staying low — creep under a low (partly-open) gate a standing prince couldn't clear. Rise
+// slightly (110->111->112->108) moving forward dx 1+2+2, then settle back to the crouch frame 109
+// and self-loop there. control_crouched (control.js) starts this on a held forward while Down is
+// held, setting control_forward=IGNORE so it's ONE hop per press (not a continuous glide). The
+// low-gate fit is automatic: the kernel's can_bump_into_gate compares the CURRENT frame's sprite
+// height, and frame 109 (crouch) is short, so a gate that blocks a tall stand lets the crouch pass.
+_b.label('crouchhop').act(ACT_RUN_JUMP).dx(1).frame(110)
+  .frame(111)
+  .dx(2).frame(112)
+  .dx(2).frame(108)
+  .dx(2).label('crawl_crouch').frame(109).jmp('crawl_crouch');
 // step1..step14 — safe_step-to-edge (seqtbl.c:737-863): "step forward N pixels". safe_step
 // (control.js) picks step<distance> from get_edge_distance so the careful step lands the char
 // EXACTLY at the wall face / tile edge ahead (flush, no bump; stops right at a ledge). Each

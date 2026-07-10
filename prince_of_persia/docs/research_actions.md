@@ -95,7 +95,7 @@ guard its own `crossRooms`/`checkBumped` against `action==7` (it does).
 |---|---|---|---|---|---|
 | **crouch (stoop)** | `down_pressed` on a floor (seg005.c:488/491) | `seq_50_crouch` → hold frame 109 | `check_on_floor` at frame 109 (action gated) | 1 | |
 | **stand up** | `control_y != HELD_DOWN` at frame 109 (`control_crouched`, seg005.c:331) | `seq_49_stand_up_from_crouch` → `stand` | — | 5→1 | recovers the soft-land + crouch |
-| **crouch-hop** | fwd held at frame 109 (seg005.c:334) | `seq_79_crouch_hop` | `check_on_floor` | 1 | |
+| **crouch-hop** | Down held + fresh fwd at frame 109 (seg005.c:334) | `seq_79_crouch_hop` (the "crawl") | `check_on_floor` + gate-height | 1 | shuffle forward ~7 units while low |
 
 `down_pressed` also nudges `Char.x` away from a too-close edge (seg005.c:466), and
 routes to **climb-down** if there's a grabbable ledge behind (§7).
@@ -103,8 +103,16 @@ routes to **climb-down** if there's a grabbable ledge behind (§7).
 **Clone status:** `down_pressed` (player.js) is wired into `control_standing`'s down
 branch (both the Shift-held and plain blocks, seg005.c:380/399) — it picks **climb-down**
 (a grabbable ledge behind, far enough from the back edge) or **crouch** (`stoop` = seq_50).
-Stand-up on release was already done. `crouch-hop` (fwd held at frame 109) stays deferred.
-Verified: Down → `stoop` (107/108/109), release → `standup` → stand.
+Stand-up on release was already done. **Crouch-hop is now done** (`control_crouched`, control.js):
+Down held + a *fresh* forward → `control_forward = IGNORE` (one hop per press, no glide) +
+`crouchhop` (= `seq_79`/`crawl`, seqtbl.c:427: rise 110→111→112→108 moving forward dx 1+2+2, settle
+back to the crouch frame 109 and self-loop). **The under-a-low-gate fit is automatic** — no new
+collision code: the kernel's `can_bump_into_gate` (`(modif>>2)+6 < char_height`) reads the *current*
+frame's sprite height, and frame 109 is short, so a partly-open gate that blocks a tall stand lets the
+crouch pass (the mechanism verified in the gate-collision step). Verified (deterministic `#debug`
+stepping): Down → `stoop` (107/108/109); hold Down + forward → `crawl` shuffles **dx = 7** and loops
+back to 109; a held forward gives exactly one hop (latch `IGNORE`), a release+repress gives another;
+release Down → `standup` → stand.
 
 ---
 
@@ -194,11 +202,39 @@ substitutes `in_wall` with "don't fall on a wall."
 | **grounded bump** | `bumped_floor`, non-jump frame (seg004.c:333) | `seq_47` bump (`dx-4`) → stand | 5 | the common recoil |
 | **hard bump** | `bumped_floor`, jump/fall-onset frames `{24,25,40–42,102–106}` | `seq_46` hardbump → standup | 5 | |
 | **bump-fall** | `bumped_fall`: wall with no floor (seg004.c:298) | `seq_45` bumpfall → freefall | 5→4 | |
-| **gate push** | `check_gate_push` (seg004.c): closing gate, standing/crouch/turn *(deferred)* | (none — just `Char.x ±5`) | — | ejects from a closing gate |
+| **gate push** | `check_gate_push` (seg004.c:487): closing gate on a standing/crouch/turn char *(implemented)* | (none — just `Char.x ±5`) | — | ejects from a closing gate |
 
 Detection in the source is the **per-column buffer** edge-trigger
-(`research_collision_detection.md §3–4`); the clone uses a `Char.x` stand-in
-(deferred buffer scan, `research_collision.md §5b`).
+(`research_collision_detection.md §3–4`); this is now the faithful buffer scan in
+`collision_kernel.js` (`research_collision.md §11`), not the old `Char.x` stand-in.
+
+### Gate push *(implemented — `check_gate_push`, seg004.c:487)*
+
+A **closing** portcullis shoves a *stationary* char (frame 15 stand, frames 108–110
+crouch, or action 7 turn) sideways out of its path. It fires when a gate sits at the
+char's tile (→ push **left −5**, back) or one column to his left (→ push **right +5**,
+forward), the gate column has been solidly blocked two frames running
+(`curr_row_coll_flags[tile_col] & prev_coll_flags[tile_col] == 0xFF`), and the gate is
+low enough to bump (`can_bump_into_gate`). Ported into the kernel (a pure collision
+routine over the buffers + gate tile) and called at the faithful frame-loop slot —
+after `check_bumped`, before `check_action` (`seg000.c:1214`). The `--tile_col` idiom
++ `||` short-circuit pick the push direction (see the code comment). `bumped_sound`
+and the `FIX_CAPED_PRINCE` straddle correction are not modeled.
+
+**Why it needs `check_bumped` to run first.** The `0xFF` "straddling the gate column"
+state only arises when the gate **descends onto** a char who was already mid-tile while
+it was *open* — because a char who *walks into* a low gate is caught by `check_bumped`
+(edge-triggered on a fresh `0→nonzero` flag) and knocked back to the gate face *before*
+`check_gate_push` runs. So the natural sequence is: straddle the open gate (no bump,
+`is_obstacle` needs `can_bump_into_gate`) → the gate descends → the moment the gap drops
+below the char's height, `check_gate_push` fires. **Verified** (deterministic `#debug`
+stepping, room-5 mid-room gate (5,5,0), zero console errors): a char straddling the open
+gate at x=146 is pushed **−5** the instant the descending gate's gap reaches 40 (just
+below stand height 41); the mirror case (char at col 6, gate one column left) pushes
+**+5**. No spurious fire in normal play (run / turn / falling entry / crouch-hop through
+an open gate / blocked at a closed gate). *(Sprite heights measured: stand 41, run 39,
+crouch-hop 20–24, crouch 19 — so the crouch-under-a-partly-open-gate window is real:
+modifier ~72–140 blocks a stand but passes a crouch; `research_collision.md §12`.)*
 
 ---
 
@@ -206,10 +242,10 @@ Detection in the source is the **per-column buffer** edge-trigger
 
 | collision mechanism | actions that need it | clone status |
 |---|---|---|
-| `check_on_floor` / `do_fall` / `land` (tile-map floor read) | stand, walk, run, crouch, jump landings, fall | works **except** the `curr_col` clamp (cross-room) |
+| `check_on_floor` / `do_fall` / `land` (tile-map floor read) | stand, walk, run, crouch, jump landings, fall | ported (kernel; the `curr_col` clamp is gone — §11 / `research_collision.md §11`) |
 | `get_edge_distance` (edge classify) | careful step, forward-run gate, run-jump align, turn-run | ported |
-| `can_grab` + above-row tiles | jump-up grab, climb-up, climb-down, fall-grab | ported (grab + climb-down); fall-grab deferred |
-| **`get_tile` link-hop on unclamped `curr_col`** | any action that lands/climbs across a room boundary | **broken by the clamp — substrate rework** |
+| `can_grab` + above-row tiles | jump-up grab, climb-up, climb-down, fall-grab | ported — grab, climb-down, **and fall-grab** (`check_grab`, `research_collision.md §12`) |
+| **`get_tile` link-hop on unclamped `curr_col`** | any action that lands/climbs across a room boundary | faithful (the clamp was removed — §11 / `research_collision.md §11`) |
 | room cross (`leave_room` after `check_action`) | any action that crosses a boundary | wrong order + missing climb-frame block/`Char.y` up-down — **rework** |
 | per-column bump buffers | wall bump (all grounded moves), gate push, chomper | `Char.x` stand-in (legit defer) |
 

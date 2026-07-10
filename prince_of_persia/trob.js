@@ -16,7 +16,8 @@
 //
 // Deferred by agreement (out of this milestone): the loose falling-debris chunk (add_mob) + shake
 // visual; the level-exit door animator (animate_leveldoor — trigger_1 routes to it faithfully, but a
-// door trob is dropped un-animated for now); spikes/chompers/potion animators; check_gate_push.
+// door trob is dropped un-animated for now); spikes/chompers/potion animators. (check_gate_push — a
+// closing gate shoving a stand/crouch/turn char sideways — is now ported in collision_kernel.js.)
 //
 // Citations are SDLPoP (C:\Z_Temp\SDLPoP\src), segNNN.c:line. GPLv3 (see NOTICE).
 

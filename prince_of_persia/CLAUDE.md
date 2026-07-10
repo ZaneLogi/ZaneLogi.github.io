@@ -589,6 +589,42 @@ KID sprites natively face **LEFT**.
   **jump-up grab** — `grab_timer` stays 0 there, no leak) pass. Files: `seqtbl.js` (`fallhang`),
   `player.js` (`checkGrab` + `onCheckGrab` binding), `collision_kernel.js` (`check_grab` → hook delegate),
   `control.js` (stale comment fix). Detail: `docs/research_collision.md §12`.
+- **[done] Crouch-hop (creep forward while crouched).** While crouched (frame 109), hold **Down**
+  and press **forward** → the prince shuffles forward ~7 units staying low — the move that creeps
+  under a low (partly-open) gate a standing prince can't clear. Port of `control_crouched`'s crouch-hop
+  branch (`seg005.c:334`): Down held + a *fresh* forward → `control_forward = IGNORE` (disable
+  auto-repeat, so it's **one hop per press**, not a glide) + `seq_79_crouch_hop`. That sequence is the
+  **`crawl`** (`seqtbl.c:427`, offset-table index 79), transcribed into `seqtbl.js` as `crouchhop`:
+  `act(run_jump) dx(1) f110, f111, dx(2) f112, dx(2) f108, dx(2) f109, jmp(loop)` — rise slightly while
+  moving forward, then settle back to the crouch frame 109 and self-loop. **No new collision code — the
+  under-a-low-gate fit is automatic:** the kernel's `can_bump_into_gate` (`(modif>>2)+6 < char_height`)
+  already reads the *current* frame's sprite height, and frame 109 is short, so a gate open just enough
+  for a crouch (but not a stand) lets the shuffle through (mechanism verified in the gate-collision
+  step). **Verified** (deterministic `#debug` stepping, no console errors): Down → `stoop` (107/108/109);
+  hold Down + forward → `crawl` shuffles **dx = 7** and loops back to 109; a held forward gives exactly
+  one hop (latch `IGNORE`), release+repress gives another; release Down → `standup` → stand; the crouch
+  renders short (screenshot). Regressions (crouch/stand-up, get-item-while-crouched, falling entry) pass.
+  Files: `seqtbl.js` (`crouchhop`), `control.js` (`controlCrouched` branch). Detail:
+  `docs/research_actions.md §4`.
+- **[done] Gate push (a closing portcullis shoves you out).** Port of `check_gate_push`
+  (`seg004.c:487`): when a **descending** gate comes down on a *stationary* char (frame 15 stand,
+  frames 108–110 crouch, or action 7 turn) who's straddling its column, it nudges `Char.x` **±5**
+  sideways out of the bars — **−5** (back) if the gate is at his tile, **+5** (forward) if it's one
+  column to his left. Gated on the column being solidly blocked two frames running
+  (`curr & prev coll flags == 0xFF`) and the gate being low enough (`can_bump_into_gate`). A **pure
+  collision routine** (reads the buffers + gate tile, writes `Char.x`, no control state) → it lives
+  **in `collision_kernel.js`** (routine-for-routine invariant holds) and is called at the faithful
+  frame-loop slot in `tick()` — after `check_bumped`, before `check_action` (`seg000.c:1214`).
+  **Why `check_bumped` must precede it:** the `0xFF` straddle state only arises when a gate descends
+  onto a char who was mid-tile while it was *open* — a char who walks into a *low* gate is knocked
+  back to the face by `check_bumped` first. So this completes the descending-gate picture that the
+  crouch-hop opened: `can_bump_into_gate` already lets a crouch (h≤24) *pass* a partly-open gate that
+  blocks a stand (h41), and now a gate that shuts *on* you ejects you. **Verified** (deterministic
+  `#debug` stepping, room-5 mid-room gate (5,5,0), no console errors): a char straddling the open gate
+  is pushed −5 the instant the descending gap reaches 40 (just under stand height 41); the mirror case
+  pushes +5; no spurious fire in normal play (run / turn / falling entry / crouch-hop through an open
+  gate / blocked at a closed gate). Sprite heights measured (stand 41, crouch 19–24). Files:
+  `collision_kernel.js` (`check_gate_push`), `player.js` (tick wiring). Detail: `docs/research_actions.md §9`.
 - **[later] Enemies.** `GUARD.DAT` / `SHADOW.DAT` / … → `demos/enemy_frames.html`,
   same pipeline (`extract_masks.py <DAT>` is already generic).
 

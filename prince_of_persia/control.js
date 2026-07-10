@@ -153,13 +153,17 @@ function controlHanging(ch, c, world) {
   else                                      world.hangFall();      // release -> hangdrop / hangfall
 }
 
-// controlCrouched (seg005.c:313): release Down -> stand up from the crouch (seq_49).
-// This is what recovers the prince to standing after a soft landing (the falling entry
-// ends here). Forward-held crouch-hop is a later addition.
+// controlCrouched (seg005.c:313): release Down -> stand up from the crouch (seq_49). Hold Down and
+// press forward -> crouch-hop (seq_79, the "crawl") — shuffle forward while low (creep under a low
+// gate). This is also what recovers the prince to standing after a soft landing (the falling entry
+// ends here). (The level-1 crouch-start music special event, seg005.c:314, is not modeled.)
 function controlCrouched(ch, c, world) {
   if (c.shift2 === HELD && world.getItem()) return;   // shift over an item while crouched -> pick it up (seg005.c:330)
-  if (c.down !== HELD) startSeq(ch, 'standup');       // stand up from crouch (seq_49)
-  // else if (c.forward === HELD) startSeq(ch, 'crouchhop');   // TODO
+  if (c.down !== HELD) { startSeq(ch, 'standup'); }   // Down released -> stand up from crouch (seq_49)
+  else if (c.forward === HELD) {                       // Down held + a fresh forward -> crouch-hop (seg005.c:334)
+    c.forward = IGNORE;                                // disable automatic repeat: one hop per press
+    startSeq(ch, 'crouchhop');                         // seq_79_crouch_hop
+  }
 }
 
 // control_jumpup (seg005.c:680): during the start-of-jump-up frames (67-69), a held forward converts the

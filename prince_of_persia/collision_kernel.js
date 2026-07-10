@@ -393,6 +393,28 @@ export function check_bumped() {
   }
 }
 
+// check_gate_push (seg004.c:487): a CLOSING gate shoves a stand / crouch / turn char sideways out of
+// its path. Fires only at frame 15 (stand), frames 108-110 (crouch), or action 7 (turn). When a gate
+// sits AT the char's tile (curr_tile2), push him LEFT (back); when the gate is one tile to his LEFT,
+// push him RIGHT (forward) — always away from the descending bars. Gated on the column being solidly
+// blocked two frames running (curr_row & prev coll flags == 0xFF, so a momentary read doesn't twitch
+// him) and the gate being low enough to bump (can_bump_into_gate). The `--tile_col` idiom: if the
+// char's own tile is NOT the gate, get_tile re-reads one column left and leaves tile_col = orig_col-1
+// (=> push right); if it IS the gate the `||` short-circuits and tile_col stays orig_col (=> push
+// left). bumped_sound + the FIX_CAPED_PRINCE straddle correction are not modeled.
+export function check_gate_push() {
+  const frame = Char.frame;
+  if (Char.action === ACT_TURN || frame === 15 || (frame >= 108 && frame < 111)) {
+    get_tile_at_char();
+    const orig_col = tile_col;
+    if ((curr_tile2 === TILE_GATE || get_tile(curr_room, tile_col - 1, tile_row) === TILE_GATE) &&
+        (curr_row_coll_flags[tile_col] & prev_coll_flags[tile_col]) === 0xFF &&
+        can_bump_into_gate()) {
+      Char.x += 5 - (orig_col <= tile_col ? 10 : 0);   // gate at tile -> -5 (left); gate one col left -> +5 (right)
+    }
+  }
+}
+
 // =======================================================================================
 // EDGE DISTANCE  (seg004.c) — the safe_step / forward_pressed input
 // =======================================================================================
