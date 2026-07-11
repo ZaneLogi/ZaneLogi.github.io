@@ -160,10 +160,15 @@ export class Ball {
     this.ySpeed = ys;
     this.xSpeed = xs;
 
-    // apply the vector multiplier+1 times (even mult=0 -> once)
+    // apply the vector multiplier+1 times (even mult=0 -> once). The source calls
+    // CHECK_BRICK_HIT per unit sub-step here (disassembly.asm:7443) and KEEPS
+    // sub-stepping after a hit -- the loop only stops on DOH_BEEN_HIT, which stays 0
+    // for normal bricks -- so a fast ball can hit several bricks in one frame. So we
+    // do NOT break here. brickCheck is inert (undefined) unless a field is wired.
     for (let i = 0; i <= this.speedMultiplier; i++) {
       this.y += this.ySpeed;
       this.x += this.xSpeed;
+      if (this.brickCheck) this.brickCheck(this);
     }
   }
 

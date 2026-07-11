@@ -1,0 +1,827 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ball Motion — Design Spec · block_breaker</title>
+<style>
+  :root{
+    --bg:#eef1f6; --surface:#ffffff; --surface-2:#f6f8fc;
+    --text:#161c2e; --muted:#54607e; --border:#d4dbe9;
+    --accent:#1379a6;        /* cyan, darkened for contrast on paper */
+    --accent-soft:#e2f1f8;
+    --brick:#c34a34; --ball:#9a7e1f; --ok:#3f8c4e;
+    /* the MSX "screen" panel is dark in BOTH themes — true palette */
+    --screen:#0b0e1a; --screen-line:#1b2540; --screen-text:#c9d3ea; --screen-muted:#6b789c;
+    --msx-cyan:#65dbef; --msx-ball:#ded087; --msx-brick:#ff897d; --msx-green:#74d07d; --msx-blue:#8076f1;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --maxw:74ch;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0b0e1a; --surface:#111726; --surface-2:#0e1420;
+      --text:#e5eaf5; --muted:#8b97b6; --border:#232d47;
+      --accent:#65dbef; --accent-soft:#12283a;
+      --brick:#ff897d; --ball:#ded087; --ok:#74d07d;
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#eef1f6; --surface:#ffffff; --surface-2:#f6f8fc;
+    --text:#161c2e; --muted:#54607e; --border:#d4dbe9;
+    --accent:#1379a6; --accent-soft:#e2f1f8;
+    --brick:#c34a34; --ball:#9a7e1f; --ok:#3f8c4e;
+  }
+  :root[data-theme="dark"]{
+    --bg:#0b0e1a; --surface:#111726; --surface-2:#0e1420;
+    --text:#e5eaf5; --muted:#8b97b6; --border:#232d47;
+    --accent:#65dbef; --accent-soft:#12283a;
+    --brick:#ff897d; --ball:#ded087; --ok:#74d07d;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0; background:var(--bg)}
+  .page{
+    background:var(--bg); color:var(--text);
+    font-family:var(--sans); font-size:16px; line-height:1.6;
+    -webkit-font-smoothing:antialiased; padding:clamp(18px,4vw,56px) 20px 80px;
+  }
+  .wrap{max-width:920px; margin:0 auto}
+  .col{max-width:var(--maxw)}
+
+  a{color:var(--accent); text-underline-offset:2px}
+
+  /* theme toggle (standalone repo build only) */
+  .themetoggle{
+    position:fixed; top:14px; right:14px; z-index:10;
+    font-family:var(--mono); font-size:.72rem; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--muted); background:var(--surface); border:1px solid var(--border);
+    border-radius:8px; padding:7px 11px; cursor:pointer;
+  }
+  .themetoggle:hover{color:var(--text); border-color:var(--accent)}
+
+  /* ---- masthead ------------------------------------------------------- */
+  .eyebrow{
+    font-family:var(--mono); font-size:.72rem; letter-spacing:.22em;
+    text-transform:uppercase; color:var(--accent); margin:0 0 14px;
+    display:flex; align-items:center; gap:10px;
+  }
+  .eyebrow::before{content:""; width:26px; height:2px; background:var(--accent)}
+  h1{
+    font-family:var(--mono); font-weight:700;
+    font-size:clamp(2rem,5.4vw,3.1rem); line-height:1.02; letter-spacing:-.01em;
+    margin:0; text-wrap:balance;
+  }
+  h1 .sub{display:block; color:var(--muted); font-weight:500; font-size:.42em; letter-spacing:.02em; margin-top:.55em}
+  .lede{color:var(--muted); font-size:1.05rem; margin:18px 0 0; max-width:64ch}
+  .lede code{color:var(--text)}
+
+  /* ---- stat strip ----------------------------------------------------- */
+  .stats{
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(128px,1fr));
+    gap:1px; background:var(--border); border:1px solid var(--border);
+    border-radius:12px; overflow:hidden; margin:34px 0 8px;
+  }
+  .stat{background:var(--surface); padding:14px 16px}
+  .stat .k{font-family:var(--mono); font-size:.66rem; letter-spacing:.14em; text-transform:uppercase; color:var(--muted)}
+  .stat .v{font-family:var(--mono); font-size:1.28rem; font-weight:600; margin-top:5px; font-variant-numeric:tabular-nums}
+  .stat .v small{font-size:.6em; color:var(--muted); font-weight:500}
+
+  /* ---- sections ------------------------------------------------------- */
+  section{margin-top:56px; scroll-margin-top:20px}
+  .sec-head{display:flex; align-items:baseline; gap:16px; border-bottom:1px solid var(--border); padding-bottom:12px; margin-bottom:22px}
+  .sec-num{font-family:var(--mono); font-size:.95rem; font-weight:700; color:var(--accent); letter-spacing:.05em}
+  h2{font-family:var(--mono); font-size:1.42rem; font-weight:700; margin:0; letter-spacing:-.01em}
+  h3{font-family:var(--sans); font-size:1.02rem; font-weight:700; margin:30px 0 8px; letter-spacing:.005em}
+  p{margin:0 0 14px}
+  p code, li code, td code, .lede code{
+    font-family:var(--mono); font-size:.86em; background:var(--surface-2);
+    border:1px solid var(--border); border-radius:5px; padding:.06em .38em;
+  }
+  strong{font-weight:700}
+  ul{margin:0 0 14px; padding-left:1.15em}
+  li{margin:.28em 0}
+
+  /* ---- tables --------------------------------------------------------- */
+  .tscroll{overflow-x:auto; border:1px solid var(--border); border-radius:10px; margin:8px 0 20px; background:var(--surface)}
+  table{border-collapse:collapse; width:100%; font-size:.9rem}
+  th,td{padding:9px 13px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap}
+  thead th{
+    font-family:var(--mono); font-size:.68rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--muted); background:var(--surface-2); font-weight:600;
+  }
+  tbody tr:last-child td{border-bottom:0}
+  tbody tr:hover td{background:var(--surface-2)}
+  td.n, th.n{font-family:var(--mono); font-variant-numeric:tabular-nums}
+  .src{color:var(--muted); font-family:var(--mono); font-size:.82em}
+  .val{font-family:var(--mono); font-weight:600; color:var(--text)}
+  caption{caption-side:top; text-align:left; font-family:var(--mono); font-size:.7rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); padding:11px 13px 3px}
+
+  /* ---- MSX "screen" diagram panels (dark in both themes) -------------- */
+  .screen{
+    background:
+      linear-gradient(var(--screen-line) 1px,transparent 1px) 0 0/100% 16px,
+      var(--screen);
+    border:1px solid #223055; border-radius:12px;
+    padding:18px; margin:10px 0 22px; color:var(--screen-text);
+  }
+  .screen .cap{font-family:var(--mono); font-size:.66rem; letter-spacing:.16em; text-transform:uppercase; color:var(--msx-cyan); margin:0 0 12px; display:flex; gap:9px; align-items:center}
+  .screen .cap::before{content:"\25B8"; color:var(--msx-cyan)}
+  .screen svg{display:block; width:100%; height:auto}
+  .legend{display:flex; flex-wrap:wrap; gap:14px 20px; margin-top:12px; font-family:var(--mono); font-size:.72rem; color:var(--screen-muted)}
+  .legend span{display:inline-flex; align-items:center; gap:7px}
+  .legend i{width:11px; height:11px; border-radius:2px; display:inline-block}
+
+  /* pixel ball glyph */
+  .spritebox{display:flex; gap:22px; align-items:center; flex-wrap:wrap}
+  .pixgrid{display:grid; grid-template-columns:repeat(5,14px); grid-auto-rows:14px; gap:2px; background:#223055; padding:3px; border-radius:4px}
+  .pixgrid i{border-radius:1px; background:#0d1424}
+  .pixgrid i.on{background:var(--msx-ball)}
+  .spritebox .note{font-family:var(--mono); font-size:.78rem; color:var(--screen-muted); line-height:1.7}
+  .spritebox .note b{color:var(--msx-ball); font-weight:600}
+
+  /* ---- callout -------------------------------------------------------- */
+  .callout{
+    border:1px solid var(--border); border-left:3px solid var(--brick);
+    background:var(--surface); border-radius:0 10px 10px 0; padding:16px 18px; margin:22px 0;
+  }
+  .callout .lab{font-family:var(--mono); font-size:.68rem; letter-spacing:.14em; text-transform:uppercase; color:var(--brick); font-weight:700; margin-bottom:7px}
+  .callout p:last-child{margin-bottom:0}
+
+  .ok-tag{display:inline-flex; align-items:center; gap:7px; font-family:var(--mono); font-size:.78rem; color:var(--ok); font-weight:600}
+  .ok-tag::before{content:""; width:9px; height:9px; border-radius:50%; background:var(--ok)}
+
+  /* ---- footer --------------------------------------------------------- */
+  footer{margin-top:64px; padding-top:22px; border-top:1px solid var(--border); color:var(--muted); font-size:.86rem}
+  footer code{font-family:var(--mono)}
+  .kbd{font-family:var(--mono); font-size:.8em; background:var(--surface-2); border:1px solid var(--border); border-radius:5px; padding:.08em .4em}
+
+  @media (max-width:640px){
+    .grid2{grid-template-columns:1fr !important}
+  }
+  a:focus-visible,tr:focus-visible,.themetoggle:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  @media (prefers-reduced-motion:no-preference){
+    .fade{animation:rise .5s cubic-bezier(.2,.7,.3,1) both}
+    @keyframes rise{from{opacity:0; transform:translateY(8px)}to{opacity:1; transform:none}}
+  }
+</style>
+</head>
+<body>
+
+<button class="themetoggle" id="themeToggle" type="button" aria-label="Toggle light or dark theme">&#9680; theme</button>
+
+<div class="page">
+<div class="wrap">
+
+  <!-- ============ MASTHEAD ============ -->
+  <header class="fade">
+    <p class="eyebrow">block_breaker · design spec</p>
+    <h1>Ball Motion<span class="sub">how the ball moves &amp; collides — ball ↔ brick demo</span></h1>
+    <p class="lede">The behaviour of the ball in <code>demo/ball_blocks.html</code>: sizing, motion, and its
+      response to the walls and bricks. A faithful port of Taito's <em>Arkanoid</em> for MSX — every value here
+      names its home module; the address-cited derivation lives in <code>research_brick_collision.md</code>.</p>
+
+    <div class="stats">
+      <div class="stat"><div class="k">Frame rate</div><div class="v">60 <small>Hz</small></div></div>
+      <div class="stat"><div class="k">Native res</div><div class="v">256×192</div></div>
+      <div class="stat"><div class="k">Ball</div><div class="v">5×4 <small>px</small></div></div>
+      <div class="stat"><div class="k">Brick cell</div><div class="v">16×8 <small>px</small></div></div>
+      <div class="stat"><div class="k">Grid</div><div class="v">11×12</div></div>
+      <div class="stat"><div class="k">Angle index</div><div class="v">±1…8</div></div>
+    </div>
+    <p class="lede" style="font-size:.92rem">Positions are in <strong>source pixel space</strong> — native MSX
+      playfield, origin top-left, <code>+x</code> right / <code>+y</code> down. The ball is addressed by the
+      <strong>top-left of its visible sprite</strong>, never its centre. The demo renders this space at 3× on a
+      cropped 208×124 canvas; the physics never sees the scale.</p>
+  </header>
+
+  <!-- ============ 1 · BACKGROUND ============ -->
+  <section id="s1">
+    <div class="sec-head"><span class="sec-num">01</span><h2>Background</h2></div>
+
+    <div class="col">
+    <p>Environment and geometry every later rule is measured against. Bricks are <strong>16 px wide × 8 px
+      tall</strong>, laid out <strong>11 columns × 12 rows</strong> from grid origin <code>(16, 24)</code>. The
+      playfield is bounded by three real walls plus a lost line.</p>
+    </div>
+
+    <div class="tscroll">
+      <table>
+        <caption>Constants</caption>
+        <thead><tr><th>Quantity</th><th>Value</th><th>Source</th></tr></thead>
+        <tbody>
+          <tr><td>Frame rate</td><td class="val">60 Hz — 1 tick = 1 game frame</td><td class="src">demo loop / VBLANK</td></tr>
+          <tr><td>Native resolution</td><td class="val">256 × 192 (SCREEN 2, 16-colour)</td><td class="src">CLAUDE.md</td></tr>
+          <tr><td>Demo canvas</td><td class="val">208 × 124 px, ×3 = 624 × 372</td><td class="src">ball_blocks.js</td></tr>
+          <tr><td>Ball sprite</td><td class="val">5 w × 4 h lozenge, top-left anchored</td><td class="src">ball_sprite.js</td></tr>
+          <tr><td>Brick cell</td><td class="val">16 w × 8 h</td><td class="src">brick_field.js</td></tr>
+          <tr><td>Brick grid</td><td class="val">11 cols × 12 rows (row-major)</td><td class="src">brick_field.js</td></tr>
+          <tr><td>Grid origin</td><td class="val">(16, 24) → cell (0,0) top-left</td><td class="src">brick_field.js</td></tr>
+          <tr><td>Left wall</td><td class="val">x &lt; 18 → clamp 18</td><td class="src">PLAYFIELD.LEFT</td></tr>
+          <tr><td>Right wall</td><td class="val">x ≥ 186 → clamp 185</td><td class="src">PLAYFIELD.RIGHT</td></tr>
+          <tr><td>Ceiling</td><td class="val">y &lt; 9 → clamp 9</td><td class="src">PLAYFIELD.TOP</td></tr>
+          <tr><td>Lost line</td><td class="val">y ≥ 184 → ball lost</td><td class="src">PLAYFIELD.LOST_Y</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="screen">
+      <p class="cap">Ball sprite · pattern 0x80 (ROM 0x8A84)</p>
+      <div class="spritebox">
+        <div class="pixgrid" aria-hidden="true">
+          <i></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i>
+          <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+          <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+          <i></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i>
+        </div>
+        <div class="note">A <b>5×4 lozenge</b>, four corners cut, <b>no transparent margin</b> —<br>
+          the sprite origin <em>is</em> the ball's visible top-left. That is why one<br>
+          ball sits flush against both the origin-based wall checks and the<br>
+          edge-based brick checks. Bytes <b>70 F8 F8 70</b>.</div>
+      </div>
+    </div>
+
+    <p class="col"><strong>Enclosure.</strong> 3 real walls (top / left / right) + a solid bottom row of
+      unbreakable bricks (grid row 11) + a few interior blocks. There is no paddle — the brick floor holds the
+      ball above the paddle band, so the paddle and lost-ball paths stay dormant by geometry. A fixed-timestep
+      accumulator advances physics in 1/60 s ticks, clamped to ≤ 5 ticks per animation frame.</p>
+  </section>
+
+  <!-- ============ 2 · MOTION ============ -->
+  <section id="s2">
+    <div class="sec-head"><span class="sec-num">02</span><h2>Motion</h2></div>
+
+    <div class="col">
+    <p>Direction is not a velocity vector. It is a single signed index,
+      <code>skewness ∈ {±1 … ±8}</code>, and the per-move velocity <code>(ySpeed, xSpeed)</code> is
+      <strong>derived</strong> from it each move. The <strong>sign</strong> sets vertical direction (+ up, − down);
+      the <strong>magnitude</strong> sweeps the angle from shallow to steep.</p>
+    </div>
+
+    <!-- skewness fan -->
+    <div class="screen">
+      <p class="cap">The skewness fan · +s trajectories (−s mirrors below the horizon)</p>
+      <svg viewBox="0 0 400 184" role="img" aria-label="Fan of the eight positive-skewness directions, sweeping from shallow up-right through steep up to shallow up-left.">
+        <!-- baseline -->
+        <line x1="40" y1="156" x2="360" y2="156" stroke="#223055" stroke-width="1"/>
+        <!-- rays: from origin (200,156), normalised real (xSpeed,ySpeed) vectors -->
+        <g stroke-width="2.4" fill="none" stroke-linecap="round">
+          <line x1="200" y1="156" x2="285" y2="113" stroke="#65dbef"/><!-- 1·2 -->
+          <line x1="200" y1="156" x2="267" y2="89"  stroke="#65dbef"/><!-- 3 -->
+          <line x1="200" y1="156" x2="242" y2="71"  stroke="#ded087"/><!-- 4 steep -->
+          <line x1="200" y1="156" x2="158" y2="71"  stroke="#ded087"/><!-- 5 steep -->
+          <line x1="200" y1="156" x2="133" y2="89"  stroke="#65dbef"/><!-- 6 -->
+          <line x1="200" y1="156" x2="115" y2="113" stroke="#65dbef"/><!-- 7·8 -->
+        </g>
+        <!-- arrowheads -->
+        <g fill="#65dbef">
+          <circle cx="285" cy="113" r="3"/><circle cx="267" cy="89" r="3"/>
+          <circle cx="133" cy="89" r="3"/><circle cx="115" cy="113" r="3"/>
+        </g>
+        <g fill="#ded087"><circle cx="242" cy="71" r="3"/><circle cx="158" cy="71" r="3"/></g>
+        <!-- labels -->
+        <g font-family="ui-monospace,monospace" font-size="11" fill="#c9d3ea" text-anchor="middle">
+          <text x="296" y="110">1·2</text><text x="278" y="84">3</text>
+          <text x="248" y="62">4</text><text x="152" y="62">5</text>
+          <text x="122" y="84">6</text><text x="104" y="110">7·8</text>
+        </g>
+        <g font-family="ui-monospace,monospace" font-size="8.5" fill="#6b789c" text-anchor="middle">
+          <text x="300" y="122">shallow</text><text x="200" y="60">steep</text><text x="100" y="122">shallow</text>
+        </g>
+        <!-- ball at origin -->
+        <rect x="195" y="151" width="10" height="8" rx="2" fill="#ded087"/>
+      </svg>
+      <div class="legend">
+        <span><i style="background:#65dbef"></i>shallow (|s| 1·2·7·8, |xSpeed| 2)</span>
+        <span><i style="background:#ded087"></i>steep (|s| 4·5, |ySpeed| 2)</span>
+        <span><i style="background:#ded087;border-radius:50%"></i>ball</span>
+      </div>
+    </div>
+
+    <div class="col"><p>Adjacent skewness values sometimes share a heading (1≡2, 7≡8) but differ in the speed
+      schedule below. The negative table is the exact <strong>sign-flip of both axes</strong> — <code>−s</code> is
+      the vertical <em>and</em> horizontal mirror of <code>+s</code>.</p></div>
+
+    <div class="tscroll">
+      <table>
+        <caption>skewness → (ySpeed, xSpeed) · ball.js SKEWNESS_POS/NEG_TO_XY</caption>
+        <thead><tr><th class="n">|s|</th><th>+s (up)</th><th>−s (down)</th><th>angle</th></tr></thead>
+        <tbody>
+          <tr><td class="n">1</td><td class="val">(−1, +2)</td><td class="val">(+1, −2)</td><td class="src">shallow</td></tr>
+          <tr><td class="n">2</td><td class="val">(−1, +2)</td><td class="val">(+1, −2)</td><td class="src">shallow</td></tr>
+          <tr><td class="n">3</td><td class="val">(−1, +1)</td><td class="val">(+1, −1)</td><td class="src">—</td></tr>
+          <tr><td class="n">4</td><td class="val">(−2, +1)</td><td class="val">(+2, −1)</td><td class="src">steep</td></tr>
+          <tr><td class="n">5</td><td class="val">(−2, −1)</td><td class="val">(+2, +1)</td><td class="src">steep</td></tr>
+          <tr><td class="n">6</td><td class="val">(−1, −1)</td><td class="val">(+1, +1)</td><td class="src">—</td></tr>
+          <tr><td class="n">7</td><td class="val">(−1, −2)</td><td class="val">(+1, +2)</td><td class="src">shallow</td></tr>
+          <tr><td class="n">8</td><td class="val">(−1, −2)</td><td class="val">(+1, +2)</td><td class="src">shallow</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Speed — rate-limited, not per-pixel</h3>
+    <div class="col">
+    <p>Magnitude is decoupled from direction. The ball moves on a schedule set by two derived values:
+      <code>moveTarget</code> — it moves only once every <code>moveTarget</code> frames — and
+      <code>speedMultiplier</code> — on a move frame it applies the velocity vector
+      <code>speedMultiplier + 1</code> times (so even <code>mult = 0</code> moves once). Both come from one lookup
+      indexed by <code>speedPos</code> (0–15), the table chosen by <code>|skewness|</code> (<strong>_1</strong>
+      for |s| ∈ {3,6}, else <strong>_2</strong>).</p>
+    </div>
+
+    <div class="tscroll">
+      <table>
+        <caption>[speedMultiplier, moveTarget] per speedPos · ball.js SPEED_PER_SKEWNESS_1/_2</caption>
+        <thead><tr><th>speedPos →</th><th class="n">0</th><th class="n">1</th><th class="n">2</th><th class="n">3</th><th class="n">4</th><th class="n">5</th><th class="n">6</th><th class="n">7</th><th class="n">8</th><th class="n">9</th><th class="n">10</th><th class="n">11</th><th class="n">12</th><th class="n">13</th><th class="n">14</th><th class="n">15</th></tr></thead>
+        <tbody>
+          <tr><td class="src">_1 (m,t)</td><td class="n">0,15</td><td class="n">0,14</td><td class="n">0,13</td><td class="n">0,12</td><td class="n">1,15</td><td class="n">1,14</td><td class="n">1,13</td><td class="n">1,12</td><td class="n">0,4</td><td class="n">2,8</td><td class="n">0,2</td><td class="n">2,4</td><td class="n">0,1</td><td class="n">2,2</td><td class="n">1,1</td><td class="n">2,1</td></tr>
+          <tr><td class="src">_2 (m,t)</td><td class="n">0,23</td><td class="n">0,21</td><td class="n">0,20</td><td class="n">0,18</td><td class="n">1,23</td><td class="n">1,21</td><td class="n">1,20</td><td class="n">1,18</td><td class="n">0,6</td><td class="n">2,12</td><td class="n">0,3</td><td class="n">1,4</td><td class="n">1,3</td><td class="n">1,2</td><td class="n">0,1</td><td class="n">1,1</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- design intent: why two speed tables -->
+    <div class="callout" style="border-left-color:var(--accent)">
+      <div class="lab" style="color:var(--accent)">Design intent · why two tables</div>
+      <p style="margin-bottom:0"><code>|s| = 3</code> and <code>6</code> are the only <strong>pure 45°
+        diagonals</strong> — vectors <code>(±1, ±1)</code>, <strong>√2 ≈ 1.41 px</strong> per step. Every other
+        magnitude is a 2:1 vector (<code>(±2, ±1)</code> or <code>(±1, ±2)</code>), <strong>√5 ≈ 2.24 px</strong>
+        per step. A diagonal step covers less ground, so table <strong>_1</strong> is tuned with smaller
+        <code>moveTarget</code>s to compensate — keeping the ball's <strong>on-screen speed roughly constant
+        whichever way it heads</strong>. The split isn't about the <em>angle</em>; it's the two per-step
+        <strong>distance families</strong> (√2 vs √5).</p>
+    </div>
+
+    <p class="col" style="font-size:.92rem">The source doesn't comment it, but the arithmetic confirms the intent
+      — effective speed <code>= (mult + 1) × |vector| ÷ moveTarget</code>, in px per frame:</p>
+
+    <div class="tscroll">
+      <table>
+        <caption>_1 vs _2 · effective on-screen speed</caption>
+        <thead><tr><th class="n">speedPos</th><th>_1 · diagonal (√2)</th><th>_2 · 2:1 (√5)</th><th>Δ</th></tr></thead>
+        <tbody>
+          <tr><td class="n">0</td><td class="val">[0,15] → 0.094</td><td class="val">[0,23] → 0.097</td><td class="src">+3%</td></tr>
+          <tr><td class="n">8</td><td class="val">[0,4] → 0.35</td><td class="val">[0,6] → 0.37</td><td class="src">+5%</td></tr>
+          <tr><td class="n">12</td><td class="val">[0,1] → 1.41</td><td class="val">[1,3] → 1.49</td><td class="src">+5%</td></tr>
+          <tr><td class="n">15</td><td class="val">[2,1] → 4.24</td><td class="val">[1,1] → 4.47</td><td class="src">+5%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="col" style="color:var(--muted); font-size:.92rem">Within ~5% at every step — the diagonal and 2:1
+      trajectories feel like one speed.</p>
+
+    <h3>Acceleration</h3>
+    <div class="col">
+    <p><code>speedPos</code> starts at <strong>12</strong> and climbs on every bounce, capped at <strong>15</strong>.
+      Each bounce increments a counter; when it exceeds <code>BALL_SPEED_TABLE[speedPos]</code>, <code>speedPos</code>
+      advances and the counter resets. Early steps are one bounce apart; the top steps take many —
+      <strong>9 bounces to leave speedPos 12, 17 to leave 13</strong> — so the ball ramps up quickly, then
+      plateaus near the cap.</p>
+    </div>
+    <div class="tscroll">
+      <table>
+        <caption>BALL_SPEED_TABLE — bounces to leave each speedPos</caption>
+        <thead><tr><th>speedPos</th><th class="n">0–9</th><th class="n">10</th><th class="n">11</th><th class="n">12</th><th class="n">13</th><th class="n">14</th><th class="n">15</th></tr></thead>
+        <tbody><tr><td class="src">threshold</td><td class="n">1</td><td class="n">2</td><td class="n">4</td><td class="n">8</td><td class="n">16</td><td class="n">24</td><td class="n">31</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="callout" style="border-left-color:var(--accent)">
+      <div class="lab" style="color:var(--accent)">Worked example · initial state</div>
+      <p style="margin:0"><code>speedPos 12</code>, <code>skewness 1</code> → table <strong>_2</strong>,
+        <code>[1, 3]</code>; velocity <code>(−1, +2)</code>. The ball moves <strong>every 3rd frame</strong>, and on
+        that frame applies <code>(−1, +2)</code> <strong>twice</strong> → steps up-right by <code>(−2, +4)</code> px,
+        then holds two frames. As bounces accumulate, the same skewness moves more often and further per move.</p>
+    </div>
+  </section>
+
+  <!-- ============ 3 · WALLS ============ -->
+  <section id="s3">
+    <div class="sec-head"><span class="sec-num">03</span><h2>Wall collision</h2></div>
+
+    <div class="col">
+    <p>Walls are checked <strong>once per frame, after the whole move loop</strong> — not per sub-step. Each check
+      is <strong>gated on the relevant speed's sign</strong>, so a wall only fires while the ball heads into it.</p>
+    </div>
+
+    <div class="tscroll">
+      <table>
+        <caption>Detection · ball.js moveNormally (ACTION_9941)</caption>
+        <thead><tr><th>Wall</th><th>Fires when</th><th>Clamp to</th></tr></thead>
+        <tbody>
+          <tr><td>Right</td><td class="val">xSpeed ≥ 0 &nbsp;and&nbsp; x ≥ 186</td><td class="val">x = 185</td></tr>
+          <tr><td>Left</td><td class="val">xSpeed &lt; 0 &nbsp;and&nbsp; x &lt; 18</td><td class="val">x = 18</td></tr>
+          <tr><td>Ceiling</td><td class="val">ySpeed &lt; 0 &nbsp;and&nbsp; y &lt; 9</td><td class="val">y = 9</td></tr>
+          <tr><td>Lost</td><td class="val">y ≥ 184 (after the above)</td><td class="src">ball lost</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Response</h3>
+    <div class="col"><p>On a hit, in order: <strong>accelerate</strong> (the bounce counts toward speedPos) →
+      <strong>flip the speed axis and reflect skewness to match</strong> → <strong>clamp</strong> to the face →
+      and a separate counter perturbs the angle <strong>every 40th wall bounce</strong>, so a long rally slowly
+      wanders off a repeating path.</p></div>
+
+    <!-- wall reflection diagram -->
+    <div class="screen">
+      <p class="cap">Reflection · a shallow up-right ball off the right wall</p>
+      <svg viewBox="0 0 400 150" role="img" aria-label="A ball moving up and right reflects off the right wall to move up and left; skewness 1 becomes 8.">
+        <!-- right wall -->
+        <rect x="356" y="8" width="8" height="134" fill="#8076f1" opacity=".5"/>
+        <line x1="356" y1="8" x2="356" y2="142" stroke="#8076f1" stroke-width="2"/>
+        <text x="352" y="24" font-family="ui-monospace,monospace" font-size="10" fill="#8076f1" text-anchor="end">x = 186</text>
+        <!-- incoming ray (up-right), hit point at (350,60) -->
+        <g stroke-width="2.4" fill="none" stroke-linecap="round">
+          <line x1="150" y1="120" x2="350" y2="60" stroke="#65dbef"/>
+          <line x1="350" y1="60" x2="170" y2="6"  stroke="#ded087"/>
+        </g>
+        <circle cx="350" cy="60" r="3.4" fill="#ff897d"/>
+        <rect x="146" y="115" width="10" height="8" rx="2" fill="#65dbef"/>
+        <!-- labels -->
+        <g font-family="ui-monospace,monospace" font-size="11">
+          <text x="196" y="112" fill="#65dbef">in · s = 1</text>
+          <text x="196" y="36" fill="#ded087">out · s = 8</text>
+        </g>
+        <text x="250" y="146" font-family="ui-monospace,monospace" font-size="9.5" fill="#6b789c" text-anchor="middle">horizontal bounce: xSpeed = −xSpeed,  skewness → 9 − |s|</text>
+      </svg>
+      <div class="legend">
+        <span><i style="background:#65dbef"></i>incoming</span>
+        <span><i style="background:#ded087"></i>reflected</span>
+        <span><i style="background:#ff897d;border-radius:50%"></i>contact</span>
+      </div>
+    </div>
+
+    <div class="tscroll">
+      <table>
+        <caption>Bounce transforms · ball.js verticalBounce / horizontalBounce</caption>
+        <thead><tr><th>Bounce</th><th>Speed</th><th>skewness →</th><th>Used by</th></tr></thead>
+        <tbody>
+          <tr><td>Horizontal</td><td class="val">xSpeed = −xSpeed</td><td class="val">sign(s) · (9 − |s|)</td><td class="src">left / right wall</td></tr>
+          <tr><td>Vertical</td><td class="val">ySpeed = −ySpeed</td><td class="val">sign(s) · (|s| − 9)</td><td class="src">ceiling</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="col" style="color:var(--muted); font-size:.92rem">The reflect-skewness step keeps the stored angle
+      consistent with the flipped velocity — a shallow up-right ball (<code>s = 1</code>) off the right wall becomes
+      a shallow up-<em>left</em> ball (<code>9 − 1 = 8</code>). The sign-gating is load-bearing: it is exactly why a
+      brick/border bounce that has already flipped a speed axis is <strong>not</strong> re-bounced by the wall check
+      that frame (§4).</p>
+  </section>
+
+  <!-- ============ 4 · BRICKS ============ -->
+  <section id="s4">
+    <div class="sec-head"><span class="sec-num">04</span><h2>Brick collision</h2></div>
+
+    <div class="col">
+    <p>Bricks are checked <strong>per unit sub-step</strong> — after <em>every</em> single application of the
+      velocity vector, inside the move loop. This is the anti-tunnelling guarantee: one sub-step moves the ball at
+      most ±2 px on an axis, and a brick is 8 px tall, so no sub-step can skip one. The loop does
+      <strong>not</strong> stop after a hit (for normal bricks), so a fast ball can hit several bricks in a frame.</p>
+
+    <p>The routine uses a <strong>leading contact edge</strong> of the ball — which edge depends on the movement
+      direction — and converts it to a grid cell. It computes <strong>two</strong> cells: <code>CURR</code> from the
+      ball's position and <code>PREV</code> from <code>position − speed</code>. Comparing them classifies the
+      crossing and selects the face to test and the axis to bounce.</p>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start" class="grid2">
+      <div class="tscroll" style="margin-top:0">
+        <table>
+          <caption>Contact edge → grid</caption>
+          <thead><tr><th>moving</th><th>offset</th></tr></thead>
+          <tbody>
+            <tr><td>up</td><td class="val">y − 24</td></tr>
+            <tr><td>down</td><td class="val">y − 19</td></tr>
+            <tr><td>right</td><td class="val">x − 12</td></tr>
+            <tr><td>left</td><td class="val">x − 17</td></tr>
+          </tbody>
+        </table>
+        <p style="font-family:var(--mono); font-size:.78rem; color:var(--muted); padding:0 4px">
+          row = (y−Yoff) &gt;&gt; 3<br>col = (x−Xoff) &gt;&gt; 4</p>
+      </div>
+
+      <!-- crossing classification diagram -->
+      <div class="screen" style="margin-top:0">
+        <p class="cap">PREV → CURR crossing</p>
+        <svg viewBox="0 0 200 150" role="img" aria-label="A two by two cell grid showing the four crossing types from the previous cell to the current cell.">
+          <defs>
+            <marker id="ah" markerWidth="7" markerHeight="7" refX="5" refY="3.2" orient="auto">
+              <path d="M0,0 L6,3.2 L0,6.4 Z" fill="#65dbef"/>
+            </marker>
+          </defs>
+          <!-- grid -->
+          <g stroke="#223055" stroke-width="1" fill="none">
+            <rect x="20" y="20" width="70" height="45"/><rect x="90" y="20" width="70" height="45"/>
+            <rect x="20" y="65" width="70" height="45"/><rect x="90" y="65" width="70" height="45"/>
+          </g>
+          <!-- PREV cell tint -->
+          <rect x="90" y="65" width="70" height="45" fill="#65dbef" opacity=".08"/>
+          <text x="125" y="92" font-family="ui-monospace,monospace" font-size="9" fill="#6b789c" text-anchor="middle">PREV</text>
+          <!-- arrows from PREV(125,87) to four targets -->
+          <g stroke="#65dbef" stroke-width="1.6" marker-end="url(#ah)">
+            <line x1="120" y1="82" x2="70"  y2="92"/><!-- side face (Δcol) -->
+            <line x1="122" y1="80" x2="128" y2="45"/><!-- top face (Δrow) -->
+            <line x1="118" y1="80" x2="66"  y2="45"/><!-- corner (Δrow+Δcol) -->
+          </g>
+          <text x="150" y="30" font-family="ui-monospace,monospace" font-size="8" fill="#ded087" text-anchor="middle">Y flip</text>
+          <text x="45"  y="30" font-family="ui-monospace,monospace" font-size="8" fill="#ff897d" text-anchor="middle">corner</text>
+          <text x="52"  y="104" font-family="ui-monospace,monospace" font-size="8" fill="#ded087" text-anchor="middle">X flip</text>
+        </svg>
+        <div class="legend" style="margin-top:8px">
+          <span><i style="background:#ded087"></i>face → snap + flip</span>
+          <span><i style="background:#ff897d"></i>corner → resolve</span>
+        </div>
+      </div>
+    </div>
+
+    <h3>Why those offsets — leading edge + grid frame</h3>
+    <div class="col">
+    <p>Each offset does two jobs at once: it selects the ball's <strong>leading edge</strong> — the side facing the
+      way it is moving — and shifts that edge into the brick grid's pixel frame (origin <code>(16, 24)</code>, §1).
+      Moving <em>up</em>, the edge that touches a brick first is the ball's <strong>top</strong>; the top is the
+      ball's own <code>y</code>, and the grid's Y origin is <strong>24</strong> — so <code>y − 24</code> lands the
+      top edge on the right row. The other three faces are the same idea rotated.</p>
+    <p>The giveaway is the arithmetic: the two offsets on each axis <strong>differ by exactly 5 — the ball's
+      collision size</strong> (<code>24 − 19</code> vertical, <code>17 − 12</code> horizontal). The larger offset
+      picks the near edge (top / left); subtracting the 5&nbsp;px ball reaches the far edge (bottom / right). So
+      whichever way the ball travels, the edge tested is the one that actually makes contact. (Vertically the base
+      is exactly the grid origin, 24; horizontally it sits one pixel off the render origin — a small
+      collision-vs-render bias baked into the original.)</p>
+    </div>
+
+    <div class="screen">
+      <p class="cap">Contact edges · the leading edge tested per direction</p>
+      <svg viewBox="0 0 380 210" role="img" aria-label="The 5-by-4 ball with each of its four edges labelled by the movement direction that tests it and the contact offset used: up y minus 24, down y minus 19, left x minus 17, right x minus 12.">
+        <!-- dashed connectors label -> edge -->
+        <g stroke="#33406b" stroke-width="1" stroke-dasharray="3 3">
+          <line x1="190" y1="57"  x2="190" y2="72"/>
+          <line x1="190" y1="145" x2="190" y2="160"/>
+          <line x1="96"  y1="113" x2="140" y2="110"/>
+          <line x1="284" y1="113" x2="240" y2="110"/>
+        </g>
+        <!-- ball: cut-corner lozenge -->
+        <polygon points="163,74 217,74 238,92 238,124 217,142 163,142 142,124 142,92" fill="#ded087"/>
+        <text x="190" y="112" font-family="ui-monospace,monospace" font-size="10" fill="#0b0e1a" text-anchor="middle">5 × 4</text>
+        <!-- leading edges highlighted -->
+        <g stroke="#65dbef" stroke-width="2.5" stroke-linecap="round">
+          <line x1="163" y1="74"  x2="217" y2="74"/>
+          <line x1="163" y1="142" x2="217" y2="142"/>
+          <line x1="142" y1="92"  x2="142" y2="124"/>
+          <line x1="238" y1="92"  x2="238" y2="124"/>
+        </g>
+        <!-- direction words -->
+        <g font-family="ui-monospace,monospace" font-size="12" fill="#c9d3ea" text-anchor="middle">
+          <text x="190" y="34">↑ up</text>
+          <text x="190" y="190">↓ down</text>
+          <text x="68"  y="104">← left</text>
+          <text x="312" y="104">right →</text>
+        </g>
+        <!-- offsets -->
+        <g font-family="ui-monospace,monospace" font-size="12" font-weight="bold" fill="#ded087" text-anchor="middle">
+          <text x="190" y="53">y − 24</text>
+          <text x="190" y="172">y − 19</text>
+          <text x="68"  y="122">x − 17</text>
+          <text x="312" y="122">x − 12</text>
+        </g>
+      </svg>
+      <div class="legend">
+        <span><i style="background:#65dbef"></i>edge tested for that direction</span>
+        <span><i style="background:#ded087;border-radius:50%"></i>ball (5×4)</span>
+        <span>paired offsets differ by 5 = the ball's size</span>
+      </div>
+    </div>
+
+    <h3>Guards — is the cell even on the board?</h3>
+    <div class="col">
+    <p>Turning a pixel into a cell index means the next step is an <strong>array lookup</strong> into a fixed
+      11×12 brick map. But the ball roams the whole playfield — above the bricks, down by the paddle, against the
+      walls — and most of it is <em>not</em> brick territory, so those positions convert to indices
+      <strong>outside</strong> the grid. On the original Z80, querying the brick bitmap out of range reads the bytes
+      <em>past</em> the table: the ball would "bounce off nothing" (a phantom brick from garbage) or read into
+      unrelated state. The guards are range checks that <strong>reject off-grid cells before the lookup</strong>,
+      and double as an early-out when there is simply no brick to hit.</p>
+    <p>One detail makes them elegant: the math is <strong>unsigned 8-bit</strong> (the port's <code>& 0xFF</code>
+      reproduces it). A ball <em>above</em> the field makes <code>y − 24</code> go negative, which wraps to a large
+      byte — e.g. <code>y = 5 → (5 − 24) & 255 = 237 → row 29</code>. A ball <em>below</em> the field gives an honest
+      12+. Both land <code>≥ 12</code>, so a <strong>single upper-bound check rejects the ball being above OR below
+      the field</strong> — underflow wraps high, so there is no separate "<code>&lt; 0</code>" case to test.</p>
+    </div>
+
+    <div class="tscroll">
+      <table>
+        <caption>the guard sequence · order is load-bearing</caption>
+        <thead><tr><th class="n">#</th><th>check</th><th>rejects / does</th></tr></thead>
+        <tbody>
+          <tr><td class="src">A</td><td class="val">curr row ≥ 12</td><td>current row off the field</td></tr>
+          <tr><td class="src">B</td><td class="val">prev row ≥ 13 <span class="src">(up only)</span></td><td>prev row too far below — but lets 12 through for double-impact</td></tr>
+          <tr><td class="src">C</td><td class="val">prev col ≥ 11</td><td>previous column off the field</td></tr>
+          <tr><td class="src">↯</td><td class="val">border special</td><td>wall-adjacent case — fires on curr col <strong>11 / 15</strong> on purpose</td></tr>
+          <tr><td class="src">D</td><td class="val">curr col ≥ 11</td><td>current column off the field — <em>after</em> the border check</td></tr>
+          <tr><td class="src">↯</td><td class="val">double-impact</td><td>curr row 11 &amp; prev row 12 — entering the bottom row from below</td></tr>
+          <tr><td class="src">E</td><td class="val">prev row ≥ 12</td><td>previous row off the field, for the normal classification</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="col" style="color:var(--muted); font-size:.92rem">Why the <strong>order</strong> matters: the border
+      and double-impact specials fire on indices that are <em>deliberately</em> off the normal grid — <code>curr
+      col = 11 / 15</code> at a wall, <code>prev row = 12</code> one row below the field. A pure top-of-function
+      bounds check (as an early build had) would reject those before their special path ran. So the two "just off
+      the edge" cases are handled <em>between</em> the guards, and guard <strong>D</strong> (<code>curr col ≥
+      11</code>) sits after the border check, not before it. The <code>13</code> in guard <strong>B</strong> vs the
+      <code>12</code> in <strong>E</strong> is the same trick: <code>prev row = 12</code> must survive B to reach
+      the double-impact, then E rejects it for the ordinary classification.</p>
+
+    <div class="col">
+    <p>The <span class="src">↯</span> rows — <strong>border</strong> and <strong>double impact</strong> — hand off
+      to a <strong>special path</strong> instead of the ordinary classification below. Both handle the ball at the
+      field's <strong>outer edge</strong>, where its previous cell is off the grid and the normal classification
+      (which needs both cells in-field) would throw it out. The <strong>border</strong> special covers the
+      <strong>side</strong> edges; <strong>double impact</strong> the <strong>top and bottom</strong>.</p>
+    <p>The <strong>wall-adjacent border</strong> case is subtler, and its numbers are easy to misread. The grid is
+      columns <strong>0–10</strong>; the side walls sit <em>just outside</em> it. When the ball's leading edge
+      crosses past the last column, the cell math lands on <code>curr col = 11</code> at the right wall — or, by the
+      same byte-wrap the guards use, <code>curr col = 15</code> at the left — and <strong>those indices are the
+      wall, not a brick</strong>. Yet the ball's body still overlaps the last brick column (<code>prev col = 10</code>
+      on the right, <code>0</code> on the left), so it <strong>straddles the corner</strong>: leading edge in the
+      wall, still touching the edge brick. When it is <em>also</em> crossing into a neighbouring row, this special
+      decides whether the trajectory catches that edge brick's face (bounce off the brick) or slips past into the
+      wall (wall bounce).</p>
+    </div>
+
+    <div class="screen">
+      <p class="cap">Wall-adjacent border · the ball straddles the last column and the wall</p>
+      <svg viewBox="0 0 360 200" role="img" aria-label="A bottom-right corner: brick columns 9 and 10, then the wall occupying the col-11 region. The ball straddles the col-10 / wall boundary — its right edge in the wall, its body over col 10 — while crossing down into the next row, where an edge brick sits in col 10.">
+        <defs>
+          <marker id="cornerArrow" markerWidth="7" markerHeight="7" refX="5" refY="3.2" orient="auto">
+            <path d="M0,0 L6,3.2 L0,6.4 Z" fill="#ded087"/>
+          </marker>
+        </defs>
+        <!-- wall region (col 11) -->
+        <rect x="190" y="48" width="52" height="84" fill="#8076f1" opacity="0.25"/>
+        <rect x="190" y="48" width="4"  height="84" fill="#8076f1"/>
+        <!-- grid cells: col 9, col 10, two rows -->
+        <g stroke="#33406b" stroke-width="1" fill="none">
+          <rect x="70"  y="48" width="60" height="42"/>
+          <rect x="130" y="48" width="60" height="42"/>
+          <rect x="70"  y="90" width="60" height="42"/>
+          <rect x="130" y="90" width="60" height="42"/>
+        </g>
+        <!-- edge brick: lower row, col 10 -->
+        <rect x="133" y="93" width="54" height="36" rx="2" fill="#ff897d"/>
+        <text x="160" y="115" font-family="ui-monospace,monospace" font-size="9" fill="#0b0e1a" text-anchor="middle">brick</text>
+        <!-- column labels -->
+        <g font-family="ui-monospace,monospace" font-size="10" fill="#6b789c" text-anchor="middle">
+          <text x="100" y="42">col 9</text>
+          <text x="160" y="42">col 10</text>
+          <text x="216" y="42">col 11 = wall</text>
+        </g>
+        <!-- ball straddling the col-10/wall boundary AND the row divider -->
+        <polygon points="184,82 196,82 201,88 201,96 196,102 184,102 179,96 179,88" fill="#ded087"/>
+        <!-- down-right motion into the corner -->
+        <line x1="199" y1="99" x2="215" y2="118" stroke="#ded087" stroke-width="2" marker-end="url(#cornerArrow)"/>
+        <!-- callouts -->
+        <g font-family="ui-monospace,monospace" font-size="10" text-anchor="middle">
+          <text x="180" y="164" fill="#ded087">leading edge in the wall · body over col 10</text>
+          <text x="180" y="182" fill="#c9d3ea">…and crossing into the next row → check the edge brick</text>
+        </g>
+      </svg>
+      <div class="legend">
+        <span><i style="background:#ff897d"></i>edge brick (prev col 10 / 0)</span>
+        <span><i style="background:#8076f1"></i>wall = curr col 11 (right) / 15 (left)</span>
+        <span><i style="background:#ded087;border-radius:50%"></i>ball, straddling</span>
+      </div>
+    </div>
+
+    <div class="col">
+    <p><strong>Double impact</strong> is that same idea at the top and bottom edges — and it's the direct
+      <em>edge cousin of the ambiguous corner</em>. The ball's contact point steps from just outside the field into
+      the edge row: moving <em>up</em>, <code>prev row 12 → curr row 11</code> (into the bottom row from below);
+      moving <em>down</em>, <code>prev row 31 → curr row 0</code> (into the top row from above — the <code>31</code>
+      is the byte-wrap of "above the field", the guards' trick again). Crossing in diagonally, the ball faces
+      <strong>two candidate bricks at once</strong> — a brick's bottom/top <strong>face</strong> (vertical bounce)
+      or a neighbour's <strong>side</strong> (horizontal bounce) — and the routine runs the same <code>RESOLVE_
+      CORNER</code> sub-step machinery to decide which. It also reads the column the previous sub-step's hit left,
+      so a fast ball that strikes a <em>second</em> brick as it enters the edge in one frame is resolved. Hence
+      "double".</p>
+    </div>
+
+    <div class="screen">
+      <p class="cap">Double impact · entering the bottom edge row from below</p>
+      <svg viewBox="0 0 360 210" role="img" aria-label="The field's bottom edge. Two bricks sit in row 11, the bottom row; below the dashed edge line is the off-grid row-12 region. The ball rises from below into row 11, diagonally, facing two candidate faces — a brick's bottom face (vertical bounce) or the neighbouring brick's side face (horizontal bounce).">
+        <defs>
+          <marker id="diArrow" markerWidth="7" markerHeight="7" refX="5" refY="3.2" orient="auto">
+            <path d="M0,0 L6,3.2 L0,6.4 Z" fill="#ded087"/>
+          </marker>
+        </defs>
+        <!-- below-field region (row 12) -->
+        <rect x="90" y="119" width="180" height="40" fill="#5b6b95" opacity="0.2"/>
+        <!-- grid cells: col A, col B, rows 10 and 11 -->
+        <g stroke="#33406b" stroke-width="1" fill="none">
+          <rect x="90"  y="47" width="90" height="36"/>
+          <rect x="180" y="47" width="90" height="36"/>
+          <rect x="90"  y="83" width="90" height="36"/>
+          <rect x="180" y="83" width="90" height="36"/>
+        </g>
+        <!-- row 11 edge bricks -->
+        <rect x="92"  y="85" width="86" height="32" rx="2" fill="#ff897d"/>
+        <rect x="182" y="85" width="86" height="32" rx="2" fill="#ff897d"/>
+        <!-- field bottom edge -->
+        <line x1="90" y1="119" x2="270" y2="119" stroke="#65dbef" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <!-- the two candidate faces -->
+        <g stroke="#65dbef" stroke-width="2.5" stroke-linecap="round">
+          <line x1="120" y1="117" x2="176" y2="117"/>
+          <line x1="182" y1="90"  x2="182" y2="115"/>
+        </g>
+        <!-- ball rising from below, up-right -->
+        <polygon points="134,123 146,123 151,129 151,137 146,143 134,143 129,137 129,129" fill="#ded087"/>
+        <line x1="149" y1="125" x2="170" y2="106" stroke="#ded087" stroke-width="2" marker-end="url(#diArrow)"/>
+        <!-- labels -->
+        <g font-family="ui-monospace,monospace" font-size="10">
+          <text x="84"  y="103" text-anchor="end"    fill="#6b789c">row 11</text>
+          <text x="210" y="141" text-anchor="middle" fill="#8b97b6">row 12 · below the field</text>
+        </g>
+        <g font-family="ui-monospace,monospace" font-size="10" text-anchor="middle">
+          <text x="180" y="180" fill="#ded087">ball enters row 11 from below (prev 12 → curr 11)</text>
+          <text x="180" y="196" fill="#65dbef">then resolves: face → vertical, side → horizontal</text>
+        </g>
+      </svg>
+      <div class="legend">
+        <span><i style="background:#ff897d"></i>row-11 edge bricks</span>
+        <span><i style="background:#5b6b95"></i>row 12 = below the field</span>
+        <span><i style="background:#65dbef"></i>the two candidate faces</span>
+      </div>
+    </div>
+
+    <div class="tscroll">
+      <table>
+        <caption>Crossing classification · which face, which bounce</caption>
+        <thead><tr><th>PREV → CURR</th><th>interpretation</th><th>brick tested</th><th>bounce</th></tr></thead>
+        <tbody>
+          <tr><td class="val">same cell</td><td>vertical face</td><td class="src">(prevRow, currCol)</td><td class="val">Y flip</td></tr>
+          <tr><td class="val">Δcol only</td><td>horizontal (side) face</td><td class="src">(prevRow, currCol)</td><td class="val">X flip</td></tr>
+          <tr><td class="val">Δrow only</td><td>top / bottom face</td><td class="src">(currRow, prevCol)</td><td class="val">Y flip</td></tr>
+          <tr><td class="val">Δrow &amp; Δcol</td><td>ambiguous corner</td><td class="src">resolved arithmetically</td><td class="val">Y or X</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col">
+    <p>The last row — an <strong>ambiguous corner</strong> (<code>Δrow &amp; Δcol</code>) — is resolved by
+      sub-stepping along an auxiliary slope, counting <code>TICKS_TO_HIT</code> until the trajectory crosses the
+      brick's Y edge, then reconstructing the exact X there to decide which face actually got hit — the same
+      machinery that pins the impact pixel for the snap.</p>
+    </div>
+
+    <h3>Response</h3>
+    <div class="col"><p>When a face test finds a present brick: <strong>snap</strong> the ball flush to the exact
+      hit pixel (so it never visibly overlaps) → <strong>bounce</strong> with the same vertical/horizontal
+      primitives as the walls → apply the <strong>effect</strong>: <code>updateSpeed()</code> to accelerate, then a
+      per-type dispatch. The demo's blocks are all unbreakable, so the only action is a shared counter that
+      <strong>perturbs the angle every 20th hit</strong> — keeping the ball lively in a box that never empties. No
+      brick removed, no score, no capsule.</p></div>
+
+    <div class="callout">
+      <div class="lab">The faithful wall-poke</div>
+      <p>One border sub-case (ball at the wall, same row) does a horizontal bounce <strong>without</strong>
+        snapping — its snap was computed by <code>COMPUTE_PRECISE_HIT_POINT</code>, whose result is a
+        <strong>dead vestige</strong> in the source (unread at both call sites). So on a fast ball the ball sits up
+        to ~3 px past the wall face — <strong>x reaches 15 (left) / 189 (right)</strong> — for the single frame
+        before the flipped <code>xSpeed</code> carries it back. This is faithful, not a bug: the sign-gated wall
+        clamps don't re-fire, so there is no double-bounce and the ball always recovers.</p>
+    </div>
+
+    <p class="col ok-tag">Verified — 0 escapes over 20 000 frames</p>
+    <p class="col" style="color:var(--muted); font-size:.92rem; margin-top:8px">The headless self-test fires the
+      ball into the enclosure for tens of thousands of frames (normal <em>and</em> accelerated to
+      <code>speedPos 15</code>) and asserts <code>x ∈ [15, 189]</code> and <code>y</code> never reaches the lost
+      line 184 (the brick floor holds it). Measured: 0 escapes, 0 losses, the ball exercising all 16 skewness
+      values via the perturbation.</p>
+  </section>
+
+  <footer>
+    <p><strong>Ball Motion — design specification.</strong> block_breaker · faithful Arkanoid-MSX port.
+      Modules: <code>ball.js</code> (motion + walls), <code>brick_collision.js</code> (bricks + effect),
+      <code>brick_field.js</code> (grid), <code>ball_sprite.js</code> (sprite). Full derivation with Z80
+      addresses: <code>docs/research_brick_collision.md</code>. Theme follows your OS preference; the ◐ button
+      overrides it.</p>
+  </footer>
+
+</div>
+</div>
+
+<script>
+  (function () {
+    var btn = document.getElementById('themeToggle');
+    var root = document.documentElement;
+    btn.addEventListener('click', function () {
+      var cur = root.getAttribute('data-theme');
+      if (!cur) cur = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+    });
+  })();
+</script>
+
+</body>
+</html>

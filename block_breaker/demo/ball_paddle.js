@@ -66,7 +66,10 @@ function tick() {
 }
 
 function frame(now) {
-  acc += now - last;
+  // Clamp the delta: while the tab is hidden the browser pauses rAF, so on return
+  // `now - last` would be huge and fast-forward the ball through a backlog. Cap it
+  // to a few ticks so a hidden tab / lag spike just resumes smoothly.
+  acc += Math.min(now - last, TICK * 5);
   last = now;
   let guard = 0;
   while (acc >= TICK && guard++ < 8) { tick(); acc -= TICK; }

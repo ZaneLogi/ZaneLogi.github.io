@@ -132,6 +132,36 @@ Vaus graphic has a ~10px transparent left margin inside its sprite), which the
 abstract rectangle doesn't model; the bar's own edge is the faithful-looking
 reference. Ball-lost respawns instead of losing a life; sound calls omitted.
 
+## Ball ↔ brick collision (DONE — S1–S6)
+
+`src/brick_collision.js` is the faithful port of `CHECK_BRICK_HIT_AND_BOUNCE_BALL`
+(`check_brick_hit_and_bounce_ball.asm`), run once per unit sub-step from ball.js's
+multiplier-loop hook (`ball.brickCheck`, injected — ball.js stays bricks-agnostic).
+`src/brick_field.js` = the 11×12 grid + pixel geometry; `demo/ball_blocks.html`
+exercises it (a ball fired into a box of 3 real walls + an unbreakable-brick floor +
+interior blocks). **Full detail + address citations in
+[`docs/research_brick_collision.md`](docs/research_brick_collision.md).** Highlights:
+
+- **Four direction blocks** (up/down × left/right) collapse to one
+  direction-parameterized function; each classifies the prev→curr brick-cell crossing
+  into vertical-face / horizontal-face / ambiguous-corner and bounces via ball.js's
+  `verticalBounce`/`horizontalBounce`.
+- **Corner + sub-pixel snap:** `RESOLVE_CORNER_COLLISION` + `HANDLE_CORNER_CASE_*` use a
+  `TICKS_TO_HIT` sub-step along an auxiliary slope (`TBL_SPEED_FROM_SKEWNESS`) to pin the
+  exact hit pixel and disambiguate corners.
+- **Specials:** `CHECK_VERTICAL_DOUBLE_IMPACT`; the wall-adjacent border cases
+  (`CHECK_BALL_REACHES_RIGHT_BORDER` / `CHECK_RARE_OR_IMPOSSIBLE_CASE` +
+  `COMPUTE_WALL_ADJACENT_HIT_POINT`).
+- **Effect:** `APPLY_BRICK_HIT_EFFECT` = `updateSpeed()` (accelerate) + a per-type
+  dispatch; the demo's `action_unbreakable_brick_hit` = a shared 20-hit counter →
+  `changeSkewness()`. No brick removal/score/capsule (unbreakable-only demo).
+- **Decoded finding:** `COMPUTE_PRECISE_HIT_POINT` is a **dead vestige** (its output is
+  provably unread at both call sites) → not ported; this is why the ball faithfully pokes
+  ~3px past a wall (x=15/189) for one frame when a border special fires.
+- **Verify:** in-page `selfTest()` (17 cases: 4 directions, corners, double-impact,
+  4 border cases, the 20-hit perturb) + a 20 000-frame headless box-scan
+  (x∈[15,189], 0 escapes / 0 losses, normal + fast ball).
+
 ## Next step — faithful MSX-tile rendering (additive, planned)
 
 Reuses `levels.json` / `levels.js` / `palette.js` unchanged; adds:
@@ -144,9 +174,10 @@ Reuses `levels.json` / `levels.js` / `palette.js` unchanged; adds:
 This will also yield the *real* brick colours, retiring the provisional 0–8 map.
 
 ## Out of scope (for now)
-Remaining gameplay (brick collision + effects, capsules, aliens, lasers, DOH),
-sound (check whether the MSX PSG path is real code before deciding port-vs-drop),
-attract/demo mode, lives/score. (Ball movement + ball↔wall + ball↔paddle: done.)
+Breakable-brick effects (removal / score / capsule — only the unbreakable action is
+ported), aliens, lasers, DOH, sound (check whether the MSX PSG path is real code before
+deciding port-vs-drop), attract/demo mode, lives/score. (Done: ball movement, ball↔wall,
+ball↔paddle, **ball↔brick collision + the unbreakable-brick effect**.)
 
 ## Conventions
 - ES6 modules, no build step; `python tools/devserver.py` (no-cache) for preview.
