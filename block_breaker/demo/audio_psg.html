@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>block_breaker — PSG audio (ayumi) playground</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; padding: 24px;
+    font: 14px/1.5 system-ui, sans-serif;
+    background: #14161c; color: #e6e8ee;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #8b90a0; margin: 0 0 20px; }
+  .panel {
+    background: #1c1f28; border: 1px solid #2b2f3a; border-radius: 8px;
+    padding: 16px; margin-bottom: 16px; max-width: 640px;
+  }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+    color: #8b90a0; margin: 0 0 12px; }
+  button {
+    font: inherit; color: #e6e8ee; background: #2b3140;
+    border: 1px solid #3a4152; border-radius: 6px;
+    padding: 8px 14px; margin: 0 6px 6px 0; cursor: pointer;
+  }
+  button:hover { background: #353d50; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: #2d5bd7; border-color: #3f6ce8; }
+  button.primary:hover { background: #3768e8; }
+  #tests { max-width: 640px; }
+  .test { display: flex; gap: 8px; padding: 3px 0; font-variant-numeric: tabular-nums; }
+  .test .tag { width: 18px; font-weight: 700; }
+  .pass .tag { color: #4ade80; } .fail .tag { color: #f87171; }
+  .test .detail { color: #8b90a0; }
+  #summary { font-weight: 700; margin: 6px 0 14px; }
+  code { background: #0f1116; padding: 1px 5px; border-radius: 4px; color: #b9c0d4; }
+</style>
+</head>
+<body>
+  <h1>PSG audio playground — ayumi-js + AY-3-8910 register seam</h1>
+  <p class="sub">Faithful MSX Arkanoid sound path. The register shadow feeds
+    <code>Psg.flushToAyumi</code>; ayumi does the oscillation.</p>
+
+  <div class="panel">
+    <h2>Self-test (headless — runs on load, no audio output needed)</h2>
+    <div id="summary">running…</div>
+    <div id="tests"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Listen (needs a click to start audio)</h2>
+    <button id="enable" class="primary">Enable audio</button>
+    <button class="snd" data-snd="tone" disabled>Tone A-440</button>
+    <button class="snd" data-snd="noise" disabled>Noise</button>
+    <button class="snd" data-snd="env" disabled>Envelope sweep</button>
+    <button class="snd" data-snd="chord" disabled>3-voice chord</button>
+    <button class="snd" data-snd="melody" disabled>▶ 小蜜蜂 (Little Bee)</button>
+    <button class="snd" data-snd="arrangement" disabled>▶ 小蜜蜂 + bass + drums</button>
+    <button class="snd" data-snd="silence" disabled>Silence</button>
+  </div>
+
+  <script type="module" src="./audio_psg.js"></script>
+</body>
+</html>

@@ -162,6 +162,69 @@ interior blocks). **Full detail + address citations in
   4 border cases, the 20-hit perturb) + a 20 000-frame headless box-scan
   (x∈[15,189], 0 escapes / 0 losses, normal + fast ball).
 
+## Audio — PSG sound (hardware seam + demo DONE; sequencer pending)
+
+**Research finding — the MSX PSG path IS real code, so it ports** (contrast an
+analog-only subsystem, which the root `CLAUDE.md` says to *drop*). The sound
+engine (`sound_src.asm`, ~1400 lines incl. data) is a genuine register-driven
+music/effects sequencer. What it does NOT do is generate the waveform — the 3
+tone oscillators + noise **LFSR** + envelope are the **AY-3-8910 (PSG)
+hardware**. So the port splits cleanly:
+
+- **sequencer → software** (ports faithfully as JS routines);
+- **oscillators → `ayumi-js`** (an accurate AY-3-8910 emulation — the JS analog
+  of the chip; we do NOT hand-roll the square/noise generators).
+
+**The seam.** The Z80 keeps a 14-byte shadow of the PSG registers
+(`SOUNDS_REGS_BUFFER` @ `0xE5C4`) and, each 60 Hz VBLANK tick, flushes the dirty
+ones to the chip via `out (0A0h)/(0A1h)` (`SOUND_ISR_UPDATE`, `sound_src.asm:509`;
+hooked at `VDP_HOOK_HANDLER`, `disassembly.asm:484`). The port mirrors this: a
+`Psg` register shadow + `flushToAyumi` = the flush; `ayumi` does the oscillation.
+**This hardware seam is complete and verified.**
+
+```
+src/psg/ayumi.js        vendored ayumi-js (Peter Sovietov's AY core); ES-module
+                        adapted (one-line const + export) — emulation untouched
+src/psg/sound_engine.js Psg = 14-register shadow + flushToAyumi (DONE);
+                        SoundEngine = queue (ADD_SOUND, DONE) + the bytecode
+                        player (SOUND_ISR_UPDATE) as a marked skeleton
+src/psg/psg_worklet.js  AudioWorkletProcessor: owns Ayumi + SoundEngine; ticks
+                        the engine at 60 Hz ON THE AUDIO CLOCK (sampleRate/60,
+                        not rAF), renders one sample per ayumi.process()
+demo/audio_psg.html     PSG playground + headless selfTest + 小蜜蜂 demos
+```
+
+Key facts (verified in-page):
+- **MSX AY clock = 1,789,772 Hz** (3.579545 MHz ÷ 2); `ayumi.configure(false,…)`
+  (`false` = AY-3-8910, not YM2149).
+- **R7 mixer is active-low** (1 = source off) — `flushToAyumi` passes the bits
+  straight through as ayumi's `tOff`/`nOff`. Only **R13 (envelope shape)** is
+  guarded: writing it retriggers the envelope on real hardware, so it's pushed
+  only on the flush where it was actually written (mirrors the `SOUND_REG_MASK`
+  bit).
+- **60 Hz tick lives inside the worklet** (sample-counted), so tempo is immune
+  to frame-rate jank — the faithful analog of the VBLANK-IRQ-driven original.
+
+**Verify:** `selfTest()` in `audio_psg.html` (headless, no audio output needed,
+4/4): tone pitch (measured 439.9 Hz for A-440 → clock + period math), mixer
+active-low (silent when the tone bit is disabled), noise, and envelope-driven
+amplitude (audible with volume nibble = 0). Keep as the regression check.
+
+**Demo-only (NOT the game's audio):** the `▶ 小蜜蜂` melody + `+ bass + drums`
+buttons are a hand-scheduled tune in the demo page (♩=120), there to exercise
+all three tone channels + the noise voice. The faithful engine files carry no
+tune data — that stays in the demo.
+
+### Next increment — the faithful sequencer port
+Port `SOUND_ISR_UPDATE`'s bytecode player + effects into `SoundEngine.isrUpdate`,
+fed the extracted `SOUND_SEQUENCES` data, so `sfx(196)` plays the genuine
+level-start music and `sfx(2)` the brick-break. Pieces: the queue drain
+(`PLAY_SOUND` @ `sound_src.asm:202`), descriptor decode (`TBL_SOUND_PARAMS` @ `:7`),
+the two stream advancers (`ADVANCE_SOUND_STREAM_IF_READY` @ `:130` + `DISPATCH_*`),
+the note handler (`CMD_SET_ONE_NOTE_ON_CHANNEL` @ `:785`), and the period / volume
+/ delay effect generators (`:892`+). Source map: `sound.asm` (RAM layout),
+`sounds.asm` (sound-ID table), `sound_src.asm` (the player).
+
 ## Next step — faithful MSX-tile rendering (additive, planned)
 
 Reuses `levels.json` / `levels.js` / `palette.js` unchanged; adds:
@@ -175,9 +238,10 @@ This will also yield the *real* brick colours, retiring the provisional 0–8 ma
 
 ## Out of scope (for now)
 Breakable-brick effects (removal / score / capsule — only the unbreakable action is
-ported), aliens, lasers, DOH, sound (check whether the MSX PSG path is real code before
-deciding port-vs-drop), attract/demo mode, lives/score. (Done: ball movement, ball↔wall,
-ball↔paddle, **ball↔brick collision + the unbreakable-brick effect**.)
+ported), aliens, lasers, DOH, attract/demo mode, lives/score. Audio: the PSG **hardware
+seam + demo are done** (see **Audio** above); the faithful *sequencer* port is the
+remaining sound work. (Done: ball movement, ball↔wall, ball↔paddle, **ball↔brick
+collision + the unbreakable-brick effect**, **PSG audio seam + Web Audio path**.)
 
 ## Conventions
 - ES6 modules, no build step; `python tools/devserver.py` (no-cache) for preview.
