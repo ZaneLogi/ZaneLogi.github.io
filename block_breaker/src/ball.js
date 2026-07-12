@@ -80,6 +80,7 @@ export const PLAYFIELD = {
   PADDLE_BOTTOM: 173,
   LOST_Y: 184,       // y >= 184 -> ball lost
   PADDLE_MIN_X: 8,   // VAUS_X floor (l69b7h @3297)
+  BALL_W: 5,         // decoded ball lozenge width (ball_sprite.js) -- for the AABB paddle hit-test
   PADDLE_W: 41,      // normal paddle collision span (+41); zones of 7
   PADDLE_ZONES: 7,
   PADDLE_W_ENLARGED: 57,
@@ -93,6 +94,11 @@ export class Ball {
   constructor(level = 0) {
     this.level = level;
     this.active = 1;
+    // NOT source -- an opt-in "easy mode" toggle (game.js maps ?easy onto it). When
+    // true, updateSpeed() is a no-op, so the ball holds its starting speedPos forever
+    // and never accelerates. Set AFTER construction (like brickCheck) and deliberately
+    // left out of reset(), so it survives respawns. Default false = faithful physics.
+    this.freezeSpeed = false;
     this.reset();
   }
 
@@ -173,7 +179,10 @@ export class Ball {
   }
 
   // UPDATE_BALL_SPEED @7574 -- bounce-driven acceleration, capped at speedPos 15.
+  // freezeSpeed (game.js ?easy) short-circuits it: no source counterpart, an opt-in
+  // easy mode where the ball keeps its starting speed instead of climbing each bounce.
   updateSpeed() {
+    if (this.freezeSpeed) return;
     this.speedCounter++;
     if (BALL_SPEED_TABLE[this.speedPos] < this.speedCounter) {
       this.speedCounter = 0;
@@ -216,13 +225,17 @@ export class Ball {
     if (this.ySpeed < 0) return;                          // moving up: no hit
     if (this.y < PLAYFIELD.PADDLE_TOP || this.y >= PLAYFIELD.PADDLE_BOTTOM)
       return;                                             // 167 <= y < 173
-    if (this.x <= paddle.x + 1) return;                   // left of paddle
+    // Left gate re-derived for OUR drawn paddle (view-space, not the Vaus sprite):
+    // catch when the ball's RIGHT edge reaches the paddle's LEFT edge -- a real AABB
+    // overlap, so a ball straddling the paddle's left edge no longer slips through.
+    // The source tests only BALL_X vs VAUS_X+1 (a single point that works in its
+    // sprite-coordinate space, which we don't reproduce -- we draw our own bar).
+    if (this.x + PLAYFIELD.BALL_W - 1 < paddle.x) return; // ball right edge left of paddle
 
-    const zones = paddle.enlarged ? PLAYFIELD.PADDLE_ZONES_ENLARGED
-                                  : PLAYFIELD.PADDLE_ZONES;      // C = 7 / 10
     const width = paddle.enlarged ? PLAYFIELD.PADDLE_W_ENLARGED
-                                  : PLAYFIELD.PADDLE_W;          // B = 41 / 57
-    if (this.x > paddle.x + width) return;                // right of paddle
+                                  : PLAYFIELD.PADDLE_W;          // 41 / 57
+    // Right gate, clean AABB: ball's LEFT edge within the paddle's RIGHT edge.
+    if (this.x > paddle.x + width - 1) return;            // ball left edge right of paddle
 
     // hit
     this.y = PLAYFIELD.BALL_REST_Y;                       // snap to 169
@@ -234,10 +247,16 @@ export class Ball {
       return;
     }
 
-    // rebound: invert Y, pick skewness from the hit zone (l9c05h @7801)
+    // Rebound: invert Y, then pick the skewness zone from where the ball hit.
+    // View-space re-derivation of the source's (BALL_X - VAUS_X) / C zone (l9c05h
+    // @7801): our AABB catch spans (paddle.w + ball.w - 1) positions, so we map the
+    // ball's position within that range PROPORTIONALLY onto the 6 skewness values.
+    // Width-agnostic (the enlarged paddle needs no separate divisor), and the two
+    // gates guarantee offset in [0, range-1] -> the index is always in [0, 5].
     this.ySpeed = -this.ySpeed;
-    const offset = this.x - paddle.x;
-    const zone = Math.floor(offset / zones);             // DIVIDE_HL_BY_C @9261
+    const offset = this.x - (paddle.x - PLAYFIELD.BALL_W + 1);   // from the leftmost catch
+    const range = width + PLAYFIELD.BALL_W - 1;                  // total catch positions
+    const zone = Math.floor(offset * BALL_SKEWNESS_TABLE.length / range);
     this.skewness = BALL_SKEWNESS_TABLE[zone];           // {7,6,5,4,3,2}
   }
 

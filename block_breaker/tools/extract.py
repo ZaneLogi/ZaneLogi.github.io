@@ -157,6 +157,20 @@ def decode_to_grid(bitmask, colors, cols=COLS, rows=ROWS):
     return grid, cursor
 
 
+def decompress_brick_actions(stream):
+    """Port of the brick-action RLE unroll (disassembly.asm:1031-1057). Each byte
+    packs (action << 4) | count -> emit `action` `count` times; a 0xFF byte ends
+    the level. `action` indexes TBL_BRICK_ACTIONS: 0 normal, 1 capsule, 2 hard,
+    3 unbreakable (gold), 4 empty (no brick). Returns the 132 per-cell actions.
+    """
+    out = []
+    for b in stream:
+        if b == 0xFF:
+            break
+        out.extend([(b >> 4) & 0x0F] * (b & 0x0F))
+    return out
+
+
 def decompress_tile_colors(stream, out_len=TILE_TABLE_BYTES):
     """Port of DECOMPRESS_TILE_COLORS (disassembly.asm @0x4389). A source byte
     with high-nibble != 0 is a LITERAL (written verbatim). Otherwise a 4-byte
@@ -249,6 +263,11 @@ def main():
     maps_mem = build_addr_map(src / "level_maps.asm")
     colors_mem = build_addr_map(src / "level_colors.asm")
 
+    # Per-level brick ACTION table (RLE-compressed), separate from the colours.
+    ca_text = read_asm(src / "compressed_brick_actions_per_level.asm")
+    action_ptrs = read_table(ca_text, "COMPRESSED_BRICK_ACTIONS_PER_LEVEL", NUM_LEVELS)
+    actions_mem = build_addr_map(src / "compressed_brick_actions_per_level.asm")
+
     # ---- levels: pre-bake each grid + assert geometry ----------------------
     levels = []
     total_present = 0
@@ -281,7 +300,25 @@ def main():
             f"level {i+1}: gridded {placed} != popcount {present} "
             f"(a set bit landed in the padding region -> wrong geometry)")
 
-        levels.append({"grid": grid, "brickCount": present, "breakable": breakable})
+        # Per-cell brick action (0..4), decompressed + gridded. Cross-check the
+        # action table against the bitmask: action 4 (empty) <=> no brick.
+        addr = action_ptrs[i]
+        stream = []
+        while actions_mem[addr] != 0xFF:
+            stream.append(actions_mem[addr])
+            addr += 1
+        flat = decompress_brick_actions(stream)
+        assert len(flat) == COLS * ROWS, (
+            f"level {i+1}: {len(flat)} action cells != {COLS*ROWS}")
+        actions = [flat[r * COLS:(r + 1) * COLS] for r in range(ROWS)]
+        for r in range(ROWS):
+            for c in range(COLS):
+                assert (actions[r][c] == 4) == (grid[r][c] == -1), (
+                    f"level {i+1} cell ({r},{c}): action {actions[r][c]} "
+                    f"disagrees with bitmask (grid={grid[r][c]})")
+
+        levels.append({"grid": grid, "actions": actions,
+                       "brickCount": present, "breakable": breakable})
         total_present += present
 
     # ---- tiles: patterns (plain) + colours (RLE) + colour->pattern ---------

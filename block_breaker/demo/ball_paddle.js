@@ -115,22 +115,35 @@ function render() {
 }
 
 // ---- defining-case self-test: paddle hit zone -> rebound skewness -----------
-// Reproduces CHECK_UPDATE_BALL_GLUE_AND_SKEWNESS's mapping and checks that the
-// live Ball produces the same skewness when caught at each offset.
+// The paddle collision is a view-space AABB (see ball.js checkVausCollision): the
+// ball is caught across the whole overlap range and its position maps PROPORTIONALLY
+// onto the 6 skewness values (width-agnostic). Assert: every position in range is
+// caught + a valid skewness + non-increasing left->right, sharp deflection at the
+// ends, and a clean miss one pixel outside either end.
 function selfTest() {
-  const EXPECT = [7, 6, 5, 4, 3, 2];               // BALL_SKEWNESS_TABLE @7836
-  const px = 100;                                   // fixed paddle x for the test
-  let ok = true;
-  const row = [];
-  for (let offset = 2; offset <= 41; offset++) {
+  const px = 100, pad = { x: px, enlarged: false, sticky: false };
+  const lo = px - PLAYFIELD.BALL_W + 1;             // leftmost catch (ball right edge at paddle left)
+  const hi = px + PLAYFIELD.PADDLE_W - 1;           // rightmost catch (ball left edge at paddle right)
+  const valid = [7, 6, 5, 4, 3, 2];                 // BALL_SKEWNESS_TABLE order, left -> right
+  const hitSkew = (x) => {
     const b = new Ball(0);
-    b.glue = 2; b.ySpeed = 1; b.y = 170; b.x = px + offset; // moving down onto paddle
-    b.checkVausCollision({ x: px, enlarged: false, sticky: false });
-    const expect = EXPECT[Math.floor(offset / PLAYFIELD.PADDLE_ZONES)];
-    if (b.skewness !== expect) ok = false;
-    if (offset % 7 === 2) row.push(`off${offset}->sk${b.skewness}`);
+    b.glue = 2; b.ySpeed = 1; b.y = 170; b.x = x;   // moving down onto the paddle
+    b.checkVausCollision(pad);
+    return b.ySpeed === -1 ? b.skewness : null;     // -1 = caught (Y flipped); null = missed
+  };
+  let ok = true, prev = 8;
+  for (let x = lo; x <= hi; x++) {
+    const s = hitSkew(x);
+    if (s === null || !valid.includes(s) || s > prev) ok = false;
+    prev = s;
   }
-  console.log(`[ball_paddle] paddle-response self-test ${ok ? 'PASS' : 'FAIL'}  (${row.join('  ')})`);
+  ok = ok
+    && hitSkew(lo) === 7           // far left  -> sharp-left
+    && hitSkew(hi) === 2           // far right -> sharp-right
+    && hitSkew(lo - 1) === null    // one px further left  -> no catch
+    && hitSkew(hi + 1) === null;   // one px further right -> no catch
+  console.log(`[ball_paddle] paddle-response self-test ${ok ? 'PASS' : 'FAIL'}  ` +
+              `(range ${lo}..${hi}, L->${hitSkew(lo)} R->${hitSkew(hi)})`);
   return ok;
 }
 

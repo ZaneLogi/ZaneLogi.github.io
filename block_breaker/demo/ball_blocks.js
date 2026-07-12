@@ -14,6 +14,7 @@ import { Ball, PLAYFIELD } from '../src/ball.js';
 import { BrickField, BRICK, CELL } from '../src/brick_field.js';
 import { BALL_SPRITE } from '../src/ball_sprite.js';
 import { checkBrickHit, resetBrickEffectState } from '../src/brick_collision.js';
+import { LEVELS } from '../assets/dat_levels.js';
 
 const SCALE = 3;
 const VIEW_W = 208;   // native px; symmetric 18px wall margins (walls at 18 / 190)
@@ -133,6 +134,57 @@ function boxScan(fast) {
   return { escapes, lost };
 }
 
+// ---- anti-tunnel scan over the REAL levels (research_brick_collision.md §5d) --
+// The box-scan above is a fully-enclosed box: a WRONG-axis corner bounce there still
+// keeps the ball contained, so it cannot surface a tunnel. Real levels have stacked-
+// brick pockets (e.g. level 8's (2,8)H / (1,9)U / (2,9)H) where a mis-resolved corner
+// lets the ball drift sideways THROUGH a brick. This is the case that caught the two
+// ambiguous-corner divergences (dropped la0b4h fallback; inverted moving-right carry):
+// fire a paddle-tracked, accelerated ball into every level from a sweep of launch
+// angles and flag any frame whose ball centre is buried >=2px inside a solid brick.
+// Returns the number of runs that tunnelled (must be 0). NB: a plain "did it bounce?"
+// corner assertion does NOT catch this -- the bounce happens, just on the wrong axis.
+function levelTunnelScan() {
+  const PADDLE_MAX_X = 190 - PLAYFIELD.PADDLE_W;
+  const buried = (b, f) => {
+    const cx = b.x + 2, cy = b.y + 2;
+    const col = Math.floor((cx - BRICK.ORIGIN_X) / BRICK.CELL_W);
+    const row = Math.floor((cy - BRICK.ORIGIN_Y) / BRICK.CELL_H);
+    if (!f.inBounds(row, col) || !f.brickExistsAt(row, col)) return false;
+    const rc = f.cellRect(row, col);
+    return cx > rc.x + 2 && cx < rc.x + rc.w - 2 && cy > rc.y + 2 && cy < rc.y + rc.h - 2;
+  };
+  let tunnels = 0;
+  for (let lv = 0; lv < LEVELS.length; lv++) {
+    const actions = LEVELS[lv].actions, hardHits = (lv >> 3) + 2;
+    for (const sx of [30, 60, 90, 120, 150, 180]) {
+      for (const sk of [1, 3, -3, 4, -4, 7, -7]) {
+        const f = new BrickField();
+        for (let r = 0; r < actions.length; r++)
+          for (let c = 0; c < actions[r].length; c++) {
+            const k = actions[r][c];
+            if (k === CELL.EMPTY) continue;
+            f.set(r, c, k);
+            if (k === CELL.HARD) f.setHardHits(r, c, hardHits);
+          }
+        resetBrickEffectState();
+        const b = new Ball(0);
+        b.glue = 2; b.x = sx; b.y = 150; b.ySpeed = -1; b.xSpeed = sk < 0 ? -1 : 1;
+        b.skewness = sk; b.speedPos = 15;              // accelerated: multi sub-step frames
+        b.brickCheck = (bb) => checkBrickHit(bb, f);
+        const pad = { x: 82, width: PLAYFIELD.PADDLE_W, enlarged: false, sticky: false };
+        for (let i = 0; i < 800; i++) {
+          pad.x = Math.max(PLAYFIELD.LEFT, Math.min(PADDLE_MAX_X, Math.round(b.x) - 18));
+          b.step(pad, false);
+          if (buried(b, f)) { tunnels++; break; }      // one flag per run is enough
+        }
+      }
+    }
+  }
+  resetBrickEffectState();
+  return tunnels;
+}
+
 // ---- self-test: brick collision, all four directions -----------------------
 // Hand-placed cells + a ball with a chosen (pos, speed) so the collision routine
 // classifies a specific crossing, then assert it bounced the right axis.
@@ -234,6 +286,9 @@ function selfTest() {
   const scan = boxScan(false), scanFast = boxScan(true);
   t('box-scan normal contained', scan.escapes === 0 && scan.lost === 0);
   t('box-scan fast contained',   scanFast.escapes === 0 && scanFast.lost === 0);
+
+  // Anti-tunnel over all 32 real levels (§5d) -- the defining case the box-scan misses.
+  t('no tunnel over all 32 levels', levelTunnelScan() === 0);
 
   const verdict = ok ? 'S6 VERIFY: PASS' : 'S6 VERIFY: FAIL';
   lines.push(verdict);

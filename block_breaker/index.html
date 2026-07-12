@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>block_breaker</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; padding: 24px; box-sizing: border-box; min-height: 100vh;
+      font: 14px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace;
+      background: #0e0e14; color: #d7d7e0;
+      display: flex; flex-direction: column; align-items: center; gap: 14px;
+    }
+    h1 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: .5px; }
+    h1 small { color: #8a8a9a; font-weight: 400; }
+    /* Native buffer is 208x192; CSS scales it up, image-rendering keeps it crisp.
+       width is capped by BOTH the viewport width and height (78vh leaves room for
+       the header/footer), preserving the 208:192 ratio -- so it never overflows
+       vertically and there's no scrollbar on a short window. */
+    #view {
+      background: #17294d; border: 1px solid #2a2a38; border-radius: 4px;
+      image-rendering: pixelated;
+      width: min(92vw, 78vh, 520px); height: auto; aspect-ratio: 208 / 192;
+    }
+    .keys { color: #6a6a7a; font-size: 12px; }
+    .keys kbd {
+      background: #23232f; border: 1px solid #3a3a4a; border-bottom-width: 2px;
+      border-radius: 4px; padding: 1px 6px; color: #cfcfda;
+    }
+  </style>
+</head>
+<body>
+  <h1>Block Breaker</h1>
+
+  <canvas id="view"></canvas>
+
+  <div class="keys"><kbd>←</kbd> <kbd>→</kbd> move paddle · <kbd>Space</kbd> launch</div>
+
+  <script type="module" src="./game.js"></script>
+</body>
+</html>

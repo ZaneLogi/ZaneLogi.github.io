@@ -6,19 +6,24 @@
 // Built incrementally per docs/research_brick_collision.md:
 //   S1: extracted data tables.
 //   S2: the up-right direction block (faces only).
-//   S3 (this commit): the other three directions. The source has four
+//   S3: the other three directions. The source has four
 //       near-duplicated blocks -- up-right (@9c41), up-left (@9ddd),
-//       down-right (@9f6b), down-left (@a102) -- that differ only by the
-//       contact offsets and the step direction. Verified identical face
-//       logic, so ported as ONE direction-parameterized function.
+//       down-right (@9f6b), down-left (@a102). They share the prev->curr
+//       crossing classification, so they port as ONE direction-parameterized
+//       function -- but they are NOT "identical face logic" (an earlier claim,
+//       now retracted): the ambiguous-corner path differs by X-direction, and
+//       two right-vs-left divergences were later found, each of which let a ball
+//       tunnel through a brick. Both fixed; see docs/research_brick_collision.md
+//       §5d: (1) the dropped la0b4h horizontal fallback (carry-set branch), and
+//       (2) an inverted carry decision in resolveCorner's moving-right branch.
 //   S4:  corner precise-snap (RESOLVE_CORNER_COLLISION + TICKS_TO_HIT).
 //   S5a: double-impact (CHECK_VERTICAL_DOUBLE_IMPACT).
-//   S5b (this commit): the wall-adjacent border specials --
+//   S5b: the wall-adjacent border specials --
 //       CHECK_BALL_REACHES_RIGHT_BORDER / CHECK_RARE_OR_IMPOSSIBLE_CASE and their
 //       shared body, plus COMPUTE_WALL_ADJACENT_HIT_POINT, wired into checkBrickHit
 //       before the face classification. (COMPUTE_PRECISE_HIT_POINT is a source
 //       vestige -- see borderBody -- so it is not ported; only its bounce is.)
-//   S6 (this commit): APPLY_BRICK_HIT_EFFECT (@aa05) + action_unbreakable_brick_hit
+//   S6: APPLY_BRICK_HIT_EFFECT (@aa05) + action_unbreakable_brick_hit
 //       (@aaa4). The ball.js per-sub-step hook was already in place from S5; S6 fills
 //       in the effect that runs after each brick bounce: accelerate + the 20-hit
 //       skewness perturbation. The demo's blocks are all UNBREAKABLE, so only that one
@@ -100,19 +105,31 @@ export function resetBrickEffectState() {
 // action table indexed by (BRICK_ROW, BRICK_COL); we substitute a direct read of the
 // cell type at the just-queried cell (the BRICK_ROW/BRICK_COL globals = lastQueriedRow/
 // Col, set by the `exists` right before the bounce) -- same contract, no RAM mirror
-// (cf. BRICK_EXISTS_AT_ROWCOL, brick_field.js). The demo uses only CELL.UNBREAKABLE, so
-// only action_unbreakable_brick_hit is ported; other types arrive with the full game.
+// (cf. BRICK_EXISTS_AT_ROWCOL, brick_field.js). Scope (block_breaker/CLAUDE.md): brick
+// removal + hard-brick multi-hit + the gold perturb; score, level-clear, and the capsule
+// spawn are deferred (capsule bricks break like normal for now).
 function applyBrickHitEffect(ball, field) {
   ball.updateSpeed();                                   // UPDATE_BALL_SPEED (@aa05)
-  const type = field.get(lastQueriedRow, lastQueriedCol);
-  if (type === CELL.UNBREAKABLE) {
-    // action_unbreakable_brick_hit (@aaa4): every 20th hit -> CHANGE_BALLS_SKEWNESS.
-    // (The two BRICK_UNUSED vars it sets are never checked; action_hard_brick_bounce's
-    // tail is VRAM name-table + hard-brick table + sound -- hardware/render, dropped.)
-    if (++unbreakableHitCount === 20) {
-      unbreakableHitCount = 0;
-      ball.changeSkewness();                            // CHANGE_BALLS_SKEWNESS (@ab38)
-    }
+  const r = lastQueriedRow, c = lastQueriedCol;
+  switch (field.get(r, c)) {
+    case CELL.UNBREAKABLE:
+      // action_unbreakable_brick_hit (@aaa4): every 20th hit -> CHANGE_BALLS_SKEWNESS.
+      // No removal. (The BRICK_UNUSED writes + the VRAM/sound tail are dropped.)
+      if (++unbreakableHitCount === 20) {
+        unbreakableHitCount = 0;
+        ball.changeSkewness();                          // CHANGE_BALLS_SKEWNESS (@ab38)
+      }
+      break;
+    case CELL.HARD:
+      // action_hard_brick_hit (@aac7): count down the per-cell hits; the ball already
+      // bounced, so destroy the brick only once the counter reaches 0.
+      if (field.decHardHits(r, c) <= 0) field.remove(r, c);
+      break;
+    case CELL.NORMAL:
+    case CELL.CAPSULE:
+      // action_brick_hit (@aaef) / _and_capsule (@aac1): remove the brick.
+      field.remove(r, c);
+      break;
   }
 }
 
@@ -182,9 +199,14 @@ export function checkBrickHit(ball, field) {
   } else if (aRow === 1 && aCol === 1) {          // diagonal -> ambiguous corner (@9d54)
     // RESOLVE_CORNER decides vertical vs horizontal; cells are (CURR_BRICK_Y, PREV_BRICK_X) etc.
     const r = resolveCorner(ball, currY, prevX);
-    if (r.vertical) {                              // carry set -> vertical; RESOLVE_CORNER gave the snap
+    if (r.vertical) {                              // carry set -> vertical candidate (currY, prevX)
       if (exists(field, currY, prevX)) { ball.x = r.hitX; ball.y = r.hitY; return bounce('v'); }
-    } else {                                       // carry clear
+      // la0b4h / up_right_no_brick (@a0b4 / @9d81): no brick at the vertical candidate ->
+      // horizontal bounce off the DIAGONAL brick (currY, currX). Omitting this let a ball
+      // that entered a 1-wide vertical column diagonally tunnel straight through it
+      // (RESOLVE_CORNER said "vertical" but that candidate is the empty cell beside the column).
+      if (exists(field, currY, currX)) { snapHorizontal(ball, currY, currX); return bounce('h'); }
+    } else {                                       // carry clear -> horizontal candidate (prevY, currX)
       if (exists(field, prevY, currX)) { snapHorizontal(ball, prevY, currX); return bounce('h'); }
       if (exists(field, currY, currX)) { snapVertical(ball, currY, currX); return bounce('v'); }
     }
@@ -340,15 +362,21 @@ function resolveCorner(ball, row, col) {
   // reconstruct X at the crossing: PREV_X_PX + (ticks - 1) * X_SLOPE
   const B = (((ball.x - xs) & 0xFF) + (ticks - 1) * xSlope) & 0xFF;
 
-  // classify B against the brick's horizontal band; carry polarity flips with X dir
+  // classify B against the brick's horizontal band, returning `vertical` = the
+  // source carry (set = vertical face wins). The two X directions are MIRROR
+  // IMAGES, not identical -- the carry polarity is opposite in the outer bands
+  // (source la725 moving-right vs la75eh moving-left). NB: the two middle bands
+  // (base < B <= base+31) were once inverted here for moving-right, which let a
+  // ball drift sideways through a brick (vertical bounce flips ys, never xs);
+  // keep these matched to la725/la797h, and the left branch to la75eh/la7d7h.
   const base = (16 * col + (xs >= 0 ? 12 : 16)) & 0xFF;
   let vertical, hitX;
-  if (xs >= 0) {                            // moving right
-    if (base >= B)            { vertical = true;  hitX = base; }
-    else if (base + 31 < B)   { vertical = false; hitX = base + 31; }
-    else if (base + 15 < B)   { vertical = true;  hitX = B; }
-    else                      { vertical = false; hitX = B; }
-  } else {                                  // moving left
+  if (xs >= 0) {                            // moving right (la725 / la797h)
+    if (base >= B)            { vertical = true;  hitX = base; }      // B <= base
+    else if (base + 31 < B)   { vertical = false; hitX = base + 31; } // B > base+31
+    else if (base + 15 < B)   { vertical = false; hitX = B; }         // right half -> horizontal
+    else                      { vertical = true;  hitX = B; }         // left half  -> vertical
+  } else {                                  // moving left (la75eh / la7d7h)
     if (base >= B)            { vertical = false; hitX = base; }
     else if (base + 31 < B)   { vertical = true;  hitX = base + 31; }
     else if (base + 15 >= B)  { vertical = true;  hitX = B; }

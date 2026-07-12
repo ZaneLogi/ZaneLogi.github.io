@@ -30,19 +30,24 @@ export const BRICK = {
   ORIGIN_Y: 24,
 };
 
-// Brick cell types. 0 = empty; the rest map to APPLY_BRICK_HIT_EFFECT's dispatch
-// (TBL_BRICK_ACTIONS, disassembly.asm:7923). The ball_blocks demo uses only
-// UNBREAKABLE (action_unbreakable_brick_hit); more types arrive with the full game.
+// Brick cell KIND -- the source's TBL_BRICK_ACTIONS index (disassembly.asm:7923):
+//   0 normal (breakable), 1 capsule (breaks like normal; capsule spawn deferred),
+//   2 hard (multi-hit), 3 unbreakable/gold (bounce only), 4 empty (no brick).
+// Cells default to EMPTY; a level (dat_levels.js `actions`) or demo fills the rest.
 export const CELL = {
-  EMPTY: 0,
-  UNBREAKABLE: 1,
+  NORMAL: 0,
+  CAPSULE: 1,
+  HARD: 2,
+  UNBREAKABLE: 3,
+  EMPTY: 4,
 };
 
 export class BrickField {
   constructor(cols = BRICK.COLS, rows = BRICK.ROWS) {
     this.cols = cols;
     this.rows = rows;
-    this.cells = new Uint8Array(cols * rows); // row-major; 0 = CELL.EMPTY
+    this.cells = new Uint8Array(cols * rows).fill(CELL.EMPTY);   // row-major kinds
+    this.hardHits = new Uint8Array(cols * rows);                 // hard-brick remaining hits
   }
 
   inBounds(row, col) {
@@ -84,5 +89,21 @@ export class BrickField {
 
   fillCol(col, type, rowStart = 0, rowEnd = this.rows - 1) {
     for (let r = rowStart; r <= rowEnd; r++) this.set(r, col, type);
+  }
+
+  // ---- breakable-brick mutation (the game's brick-removal side) --------------
+  // Remove a brick: it becomes EMPTY, so brickExistsAt() -> false (render skips
+  // it, collision ignores it). Analog of CHECK_AND_REMOVE_BRICK @abd3.
+  remove(row, col) { this.set(row, col, CELL.EMPTY); }
+
+  // Hard bricks carry a per-cell remaining-hit counter (HARD_BRICKS_REMAINING_HITS
+  // @0xe039, init level/8 + 2). decHardHits returns the hits LEFT after the hit.
+  setHardHits(row, col, n) {
+    if (this.inBounds(row, col)) this.hardHits[row * this.cols + col] = n;
+  }
+  decHardHits(row, col) {
+    if (!this.inBounds(row, col)) return 0;
+    const i = row * this.cols + col;
+    return this.hardHits[i] > 0 ? --this.hardHits[i] : 0;
   }
 }

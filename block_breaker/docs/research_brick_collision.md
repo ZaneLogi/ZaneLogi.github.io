@@ -246,6 +246,60 @@ disqualifies them and there is **no** double-bounce. Had `COMPUTE_PRECISE_HIT_PO
 snap survived, the ball would have been pinned to the face and never poked. The `[15,
 189]` range is the exact, empirically-confirmed faithful boundary (§9).
 
+### 5d. The ambiguous-corner tunnels — "identical face logic" was WRONG (two divergences)
+
+**Retraction.** S3 originally read the four direction blocks as "identical face logic,
+ported as one function." That is **wrong**, and the wrong claim *hid two bugs* — both in
+the ambiguous-corner path (`aRow==1 && aCol==1`), both letting a ball **tunnel through a
+solid brick**. The blocks share the crossing classification but the corner path is
+**X-direction-dependent** (right vs left are mirror images, not copies). Address-cited:
+
+- **Divergence 1 — dropped `la0b4h` fallback (carry-SET branch).** Source
+  `up_right_resolve_ambiguous_corner` (`:325`): after `RESOLVE_CORNER_COLLISION` returns
+  carry-set (vertical), it checks `(CURR_BRICK_Y, PREV_BRICK_X)`; if **empty** it falls to
+  `up_right_no_brick` (`:350`) → check `(CURR_BRICK_Y, CURR_BRICK_X)` → **horizontal**
+  bounce off the diagonal brick. The port had only the first check. Repro: **level 32**, a
+  1-wide gold column entered diagonally (the vertical candidate is the empty pocket beside
+  it) → no bounce → the ball wedged and drifted through. Fix: one line in the carry-set
+  branch of `checkBrickHit`. **VERIFIED, but its verification was too narrow** — only level
+  32, one paddle path — so it left Divergence 2 undiscovered.
+
+- **Divergence 2 — inverted carry in `RESOLVE_CORNER_COLLISION`'s moving-right branch.**
+  The port's `resolveCorner` collapsed the four source classifiers (`la725` DR / `la797h`
+  UR / `la75eh` DL / `la7d7h` UL) into `xs>=0` and `xs<0`. That collapse is valid — up/down
+  share carry logic for a given X — **but the moving-right (`xs>=0`) branch had the two
+  middle bands swapped.** For `base < B <= base+31` (base = `16*col+12`), reconstructed
+  crossing-X `B`:
+
+  | B band | source (la725/la797h) | port (was) | port (now) |
+  |---|---|---|---|
+  | `B <= base` | vertical (carry set) | vertical ✓ | vertical |
+  | `base < B <= base+15` | **vertical** | ❌ horizontal | vertical |
+  | `base+15 < B <= base+31` | **horizontal** | ❌ vertical | horizontal |
+  | `B > base+31` | horizontal (carry clear) | horizontal ✓ | horizontal |
+
+  So a ball crossing a corner **moving right** got the wrong bounce axis in the middle
+  bands. When the faithful answer was horizontal (flip X) but the port bounced vertical
+  (flip Y only), `xs` stayed positive and the ball walked right **through** the 16px brick
+  — e.g. **level 8**, the (2,8)H/(1,9)U/(2,9)H pocket: the ball drifted x=158→172 straight
+  through the unbreakable brick over ~15 sub-steps. The `xs<0` (left) branch was already
+  correct (mirror of `la75eh`). Fix: swap the two middle-band `vertical` flags to match
+  `la725`. See `brick_collision.js resolveCorner`.
+
+**Why both slipped past the S1–S6 tests.** The `ball_blocks` corner case asserts only
+*that* a bounce happened (`ySpeed !== -1 || xSpeed !== 1`), never *which axis* — so it
+passed with the inverted decision. The box-scan is a fully-enclosed box, where a
+wrong-axis bounce still keeps the ball contained (no escape) — so it never surfaced the
+drift-through. **Defining-case lesson:** a corner test must assert the *axis*, and
+anti-tunnel coverage must scan the *real levels* (stacked-brick pockets), not just a
+curated box.
+
+**Verification (the defining case, done right this time).** A headless scan over **all 32
+levels × 80 trajectories** (8 start-x × 10 skewness × normal/fast), ~4.1M collision
+sub-steps, flagging any frame where the ball's centre is buried ≥2px inside a solid brick:
+**68 penetrations on 8 levels (12, 8, 9, 4, 20, 21, 28, 32) → 0 after the fix.** Escape
+scan (all levels): 0. `ball_blocks` 17/17 PASS, `ball_paddle` PASS — no regression.
+
 ## 6. `APPLY_BRICK_HIT_EFFECT` — and the indestructible-block adaptation
 
 `disassembly.asm:7851`. Dispatches per brick type via `TBL_BRICK_ACTIONS`

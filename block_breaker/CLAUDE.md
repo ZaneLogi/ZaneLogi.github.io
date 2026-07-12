@@ -144,7 +144,14 @@ MSX control read (`read_controls_move_vaus` @3197). The demo draws the paddle
 rather than the source's `VAUS_X` min of 8 — that 8 is a sprite-ORIGIN value (the
 Vaus graphic has a ~10px transparent left margin inside its sprite), which the
 abstract rectangle doesn't model; the bar's own edge is the faithful-looking
-reference. Ball-lost respawns instead of losing a life; sound calls omitted.
+reference. **The ball↔paddle hit-test itself is re-derived to a view-space AABB** (a
+flagged, agreed deviation — we draw our own bar, not the Vaus sprite): the catch gates are
+real edge overlaps (`ball.x+BALL_W-1 ≥ paddle.x` left, `ball.x ≤ paddle.x+width-1` right) and
+the rebound maps the hit offset *proportionally* onto the 6 skewness zones, so it is
+**width-agnostic** — the enlarged paddle needs no separate divisor. The source's single-point
+`BALL_X` vs `VAUS_X+1` catch + `/7`,`/10` zone divisors only work in its sprite-coordinate
+space, which the flat bar doesn't reproduce. Ball-lost respawns instead of losing a life;
+sound calls omitted.
 
 ## Ball ↔ brick collision (DONE — S1–S6)
 
@@ -163,18 +170,81 @@ interior blocks). **Full detail + address citations in
 - **Corner + sub-pixel snap:** `RESOLVE_CORNER_COLLISION` + `HANDLE_CORNER_CASE_*` use a
   `TICKS_TO_HIT` sub-step along an auxiliary slope (`TBL_SPEED_FROM_SKEWNESS`) to pin the
   exact hit pixel and disambiguate corners.
+- **Corner path is X-mirror-dependent (a correctness trap — see §5d):** the four blocks
+  share the crossing classifier but NOT the ambiguous-corner resolution — `resolveCorner`'s
+  carry polarity **mirrors** with X direction (source `la725`/`la797h` right vs
+  `la75eh`/`la7d7h` left), so "the four blocks are identical face logic" was **wrong**. Two
+  divergences that each let a ball tunnel straight through a solid brick were found + fixed:
+  (1) a dropped `la0b4h` horizontal fallback in the carry-set branch, and (2) an **inverted
+  moving-right carry** in `resolveCorner`'s two middle bands (it returned the wrong bounce
+  *axis*, so `xs` never flipped and the ball drifted sideways through the brick).
 - **Specials:** `CHECK_VERTICAL_DOUBLE_IMPACT`; the wall-adjacent border cases
   (`CHECK_BALL_REACHES_RIGHT_BORDER` / `CHECK_RARE_OR_IMPOSSIBLE_CASE` +
   `COMPUTE_WALL_ADJACENT_HIT_POINT`).
-- **Effect:** `APPLY_BRICK_HIT_EFFECT` = `updateSpeed()` (accelerate) + a per-type
-  dispatch; the demo's `action_unbreakable_brick_hit` = a shared 20-hit counter →
-  `changeSkewness()`. No brick removal/score/capsule (unbreakable-only demo).
+- **Effect:** `APPLY_BRICK_HIT_EFFECT` **accelerates first, unconditionally** — its opening
+  `call UPDATE_BALL_SPEED` (`disassembly.asm:7852`) runs before any type dispatch, so *every*
+  brick contact speeds the ball up (**gold included** — that's why a ball bouncing on gold
+  visibly accelerates to the `speedPos=15` cap; walls do the same). It then dispatches on the
+  hit cell's type: normal/capsule → remove; hard → per-cell multi-hit countdown (init
+  `level/8 + 2`) then remove; gold/unbreakable → a shared 20-hit counter → `changeSkewness()`,
+  never removed. Capsule *spawn*, score, and level-clear are still deferred.
 - **Decoded finding:** `COMPUTE_PRECISE_HIT_POINT` is a **dead vestige** (its output is
   provably unread at both call sites) → not ported; this is why the ball faithfully pokes
   ~3px past a wall (x=15/189) for one frame when a border special fires.
-- **Verify:** in-page `selfTest()` (17 cases: 4 directions, corners, double-impact,
-  4 border cases, the 20-hit perturb) + a 20 000-frame headless box-scan
-  (x∈[15,189], 0 escapes / 0 losses, normal + fast ball).
+- **Verify:** in-page `ball_blocks.js selfTest()` (18 cases: 4 directions, corners,
+  double-impact, 4 border cases, the 20-hit perturb, **+ an all-32-level anti-tunnel scan**)
+  + a headless box-scan (x∈[15,189], 0 escapes / 0 losses, normal + fast ball). The tunnel
+  scan is the **defining guard** — it asserts *which axis* a corner bounces, and is proven to
+  fail on the re-inverted code while every other case still passes (§5d).
+
+## The game — a playable level (root `index.html` + `game.js`, DONE)
+
+The repo-root `index.html` + `game.js` assemble the faithful pieces into one playfield:
+ball physics + wall/paddle/brick collision (`src/ball.js` + `src/brick_collision.js`) over a
+real level (`assets/dat_levels.js`), drawn with real MSX tiles (`src/tiles.js`).
+
+- **Level select:** `?level=N` in the URL (1-based, default 1), clamped to the 32 levels
+  (`0`/junk/negative → 1, `99` → 32). `grid` (colour index per cell) drives rendering;
+  `actions` (per-cell brick KIND) drives collision.
+- **`?easy`** (a non-source gameplay toggle): when present, sets `ball.freezeSpeed` so
+  `updateSpeed()` is a no-op — the ball holds its starting `speedPos=12` instead of climbing
+  to the 15 cap, and never speeds up. Combinable, e.g. `?level=8&easy`. Params are read once
+  at load via a single `URLSearchParams(location.search)`.
+- **`?debug`** (a dev overlay, pure observation — never mutates ball/field): a fixed-width
+  **ball-state HUD** (glue, skewness, speedPos + derived mult/target, x/y speed + position,
+  contact cells, bounce counter — every field padded to its domain max so it doesn't jitter,
+  per the repo HUD rule) plus an in-canvas **collision-cell overlay** — a faint grid lattice
+  over the brick region and a highlight of the exact `(currY,currX)`/`(prevY,prevX)` cells
+  `checkBrickHit` classifies (curr = red if it holds a brick, green if empty; skipped when the
+  ball is below the grid). `contactCells()` mirrors `brick_collision.js`'s offsets, so it marks
+  precisely the cell the collision tests. **Loop control** (also `?debug`-only): `P` toggles
+  pause; `.` frame-advances exactly one tick (auto-pausing first, emulator-style — hold to crawl
+  forward), turning the HUD into a frame-by-frame collision inspector. Arrows/Space still apply,
+  but only take effect on the next stepped tick, so you can nudge the paddle or arm a launch one
+  frame at a time. The HUD's top line shows `[running]`/`[PAUSED]`. Combinable, e.g.
+  `?level=8&easy&debug`.
+- **Bricks break by kind** (`applyBrickHitEffect`): normal/capsule → one hit, hard →
+  `level/8 + 2` hits, gold → never. Broken cells are removed from the field and render is
+  gated on `brickExistsAt`, so collision and drawing agree by construction.
+- **Canvas** is native 208×192, CSS-scaled `min(92vw, 78vh, 520px)` (`image-rendering:
+  pixelated`); the paddle is a `roundRect`, the ball an on-the-fly bitmap from the decoded
+  5×4 lozenge. The ball spawns glued on the paddle (`spawnOnPaddle` snaps it to
+  `paddle.x + vausHitX` so a fresh ball doesn't flash at mid-screen) and respawns only once
+  it falls fully off-screen (`y ≥ 192`), not the source's `y ≥ 184` "lost" line.
+- **Playfield frame** = the real MSX silver border tiles (source `DRAW_FRAME`,
+  disassembly.asm:2098-2136), not flat bars: the top edge (`FRAME_UP_CHARS` = codes
+  `2,12,8-11,13`) on name-table row 0 cols 1..24, and the two side walls (`FRAME_LATERAL_CHARS`
+  = the `3,4,5,6,7` cycle) down cols 1 and 24, blitted from the same `tiles` bitmaps as the
+  bricks. Walls sit in cols 1/24, bricks in cols 2..23 (no overlap); the ball's bounce lines
+  (x<18 / x≥186, y<9) sit a couple px inside the wall faces — the same sprite-margin geometry
+  as the paddle.
+- **Loop:** a fixed 60 Hz accumulator (source = one step per VBLANK) with a delta clamp,
+  first paint before rAF. NOTE: a hidden preview tab pauses rAF, so verify headlessly via
+  `await import('/src/*.js')` in the console, **not** screenshots.
+- **Scope = "break only, no win":** capsule spawn, score, lives HUD, win / level-clear, and
+  level advancement are deferred (see Out of scope).
+- **Self-test:** `game.js selfTest()` fires a ball into a private copy of the selected level
+  for 3000 frames — asserts containment (x∈[15,189]) and that some bricks actually break.
 
 ## Audio — PSG sound (hardware seam + demo DONE; sequencer pending)
 
@@ -270,12 +340,13 @@ brick type 8 renders real gray (palette 14, not the provisional "silver?"), the
 black brick-separator seams are present, and level 8 shows 24 gold.
 
 ## Out of scope (for now)
-Breakable-brick effects (removal / score / capsule — only the unbreakable action is
-ported), aliens, lasers, DOH, attract/demo mode, lives/score. Audio: the PSG **hardware
-seam + demo are done** (see **Audio** above); the faithful *sequencer* port is the
-remaining sound work. (Done: ball movement, ball↔wall, ball↔paddle, **ball↔brick
-collision + the unbreakable-brick effect**, **PSG audio seam + Web Audio path**,
-**MSX tile-data extraction**.)
+Capsule *spawn* + the capsule power-ups, score, lives, win / level-clear + level
+advancement, aliens, lasers, DOH, attract/demo mode. Audio: the PSG **hardware seam + demo
+are done** (see **Audio** above); the faithful *sequencer* port is the remaining sound work.
+(Done: ball movement, ball↔wall, ball↔paddle, **ball↔brick collision incl. breakable removal
++ hard-brick multi-hit + the gold perturb**, the **playable-level game** (`index.html` +
+`game.js`, `?level=N`; see "The game" above), **PSG audio seam + Web Audio path**, **MSX
+tile-data extraction**.)
 
 ## Conventions
 - ES6 modules, no build step; `python tools/devserver.py` (no-cache) for preview.
