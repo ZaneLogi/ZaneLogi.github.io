@@ -1,0 +1,936 @@
+# research_collision.md — PoP tile collision
+
+Research notes for the **actor-in-a-room** step: drop the actor onto the level-1
+collision map and give it *real* tile collision — stand on the ledges, get
+blocked by the walls, fall when unsupported — replacing the motion sandbox's
+invented flat `[0,640]` strip with PoP's **room-relative bounded `Char.x`** model.
+
+All citations are SDLPoP (`C:\Z_Temp\SDLPoP\src`), the address-citation
+convention (`segNNN.c:line`). This doc is the *mechanism*; two pieces of it are
+already ported (`wall_type` + `tile_is_floor` in `demos/blockmap.js`), and the
+whole animation/gravity engine already exists (`playseq.js` / `seqtbl.js`).
+Where a claim is synthesis rather than a single cited line, it says so.
+
+---
+
+## 0. Collision needs two answers
+
+1. **WHERE am I** — the character's position → which tile it occupies.
+2. **WHAT is there** — that tile's type → is it a floor (stand on) / a wall
+   (blocked by)?
+
+Everything below is those two, plus the room-relative position model that makes
+"which tile" work across a 24-room level.
+
+---
+
+## 1. The character position model (`char_type`, `types.h:302`)
+
+```c
+typedef struct char_type {
+  byte  frame;              // animation frame (indexes frame_table_kid)
+  byte  x;                 // ROOM-RELATIVE internal-x (a byte; see §2)
+  byte  y;                 // internal-y
+  sbyte direction;         // dir_0_right = 0, dir_FF_left = -1
+  sbyte curr_col, curr_row;// the tile the char occupies — DERIVED each frame
+  byte  action;
+  sbyte fall_x, fall_y;    // falling velocity (fall_y also = fall distance gauge)
+  byte  room;              // which room the char is in
+  ...
+} char_type;
+```
+
+The load-bearing facts:
+- **`Char.x` is a *room-relative* byte**, not an absolute world coordinate.
+  A room is 140 internal-x units wide (§2); `Char.x` lives inside that.
+- **`curr_col` / `curr_row` are derived from `Char.x` / `Char.y` every frame**
+  (`determine_col`, §2) — they are *outputs*, not stored state you set.
+
+> **Clone gap:** `demos/motion.js` uses an invented `actorX ∈ [0,640]` flat
+> accumulator instead. The next step replaces that with `(Char.room, Char.x
+> byte)` + derived `curr_col/curr_row`.
+
+---
+
+## 2. The coordinate system (internal-x, not screen pixels)
+
+Constants (`types.h:1427-1434`):
+- `SCREENSPACE_X = 58` — the room's left edge in internal-x.
+- `TILE_SIZEX = 14` — tile width in internal-x (`TILE_MIDX = 7`, `TILE_RIGHTX = 13`).
+- `SCREEN_TILECOUNTX = 10` → a room spans **`10 × 14 = 140`** internal-x units.
+
+**x → column** (`get_tile_div_mod`, `seg006.c:750`):
+```c
+int x  = xpos - SCREENSPACE_X;   // 58
+int xh = x / TILE_SIZEX;          // 14  -> tile COLUMN
+int xl = x % TILE_SIZEX;          //     -> sub-tile offset 0..13 (pixel-precise)
+```
+`get_tile_div_mod_m7(xpos)` = the same on `xpos - 7` (`seg006.c:697`). In DOS PoP
+these were two 256-byte LUTs (`tile_div_tbl` / `tile_mod_tbl`, `seg006.c:702/726`).
+
+**Deriving the column** (`determine_col`, `seg006.c:122`):
+```c
+Char.curr_col = get_tile_div_mod_m7( dx_weight() );
+```
+where `dx_weight()` (`seg006.c:547`) = `char_dx_forward(cur_frame.dx -
+(cur_frame.flags & FRAME_WEIGHT_X))` — i.e. the column is taken at the frame's
+**weight point** (a per-frame forward-offset), not raw `Char.x`. For a first cut
+you can approximate with `Char.x`; the weight offset only matters for exact
+edge/tile registration.
+
+**Vertical / rows:** rows are 63 units tall (`TILE_SIZEY = 63`, `types.h:1430`).
+`y_land[] = {-8, 55, 118, 181, 244}` (`data.h:506`) are the feet-y values at the row
+boundaries; a character standing in `curr_row` rests at **`Char.y = y_land[curr_row + 1]`**
+(used at `set_start_pos` and after landing, e.g. `bumped_floor` sets
+`Char.y = y_land[Char.curr_row + 1]`, `seg004.c:316`).
+
+### 2.1 From internal units to the screen — the render pipeline
+
+The point of "internal, not pixels" is that **the game logic is decoupled from the display
+resolution.** There are three coordinate spaces, and the physics lives entirely in the first:
+
+```
+  internal units            obj_x / obj_y            the window
+  (Char.x, tiles,     →     (screen pixels on   →    (any size; the whole
+   collision, y_land)        a FIXED 320×200          fixed frame is scaled)
+                             surface)
+```
+
+**1. Internal → screen pixels (`obj_x`/`obj_y`).** A fixed map — and horizontally it is a
+**two-step** conversion (the subtlety, spelled out at `types.h:1427`: "TILE_SIZEX=14 … a tile is
+32 pixels wide in screen space"):
+- **x, step 1:** `obj_x = (char_dx_forward(dx) << 1) − 116` (`seg008.c:1736`) → 2 px per
+  internal-x unit; a tile is `14 × 2 = 28` px in this **logical** space, a room `140 × 2 = 280`.
+- **x, step 2:** `calc_screen_x_coord(x) = x × 320/280` (`seg008.c:1850`) stretches that 280
+  logical → 320 screen, so a tile is **`28 × 320/280 = 32` px on screen**. Net factor = `32/14
+  = 16/7` per internal-x unit. The stretch is applied to the **kid** (`chtab_flip_clip[2] = 1`,
+  `data.h:196`, in the `add_midtable` draw path `seg008.c:1019`) but **not** to tiles — tiles are
+  drawn natively at `col_xh[c]·8 = c·32` (`seg008.c:346`). Both therefore land on the same 32 px grid.
+- **y:** `obj_y = cur_frame.dy + internal_y` → **1 px per internal-y unit** (1:1). A tile is
+  `63` px tall (`TILE_SIZEY = 63` == the screen height, `types.h:1430`).
+
+So the on-screen tile grid is **32 × 63**, and the `frame_table` `dx`/`dy` are in **internal
+units** (14/63 per tile), fed *before* the conversion — never in screen pixels. **(Correction: an
+earlier draft of this doc claimed "the positioning grid is 28 px and the art bitmaps are ~32 px
+and overlap slightly" — that is WRONG; it missed `calc_screen_x_coord`. The `×320/280` stretch
+makes the positioning grid exactly 32 px, matching the 32 px art with no overlap.)** The
+DOS-pixels-are-not-square note still holds only for the final *window* stretch (`seg009.c:2485`
+`SDL_RenderSetLogicalSize(320*5, 200*6)` for 4:3, or 16:10 at `320×200`, `:2487`).
+
+**2. The fixed frame → the window.** Everything is drawn into one **320×200 offscreen
+surface** (`screen_rect = {0,0,200,320}`, `data.h:62`), uploaded to a texture, and blitted to
+fill the whole window with `SDL_RenderCopy(renderer, texture, NULL, NULL)` (`seg009.c:2790`).
+**This final scale is the *only* place window size enters** — the engine drawing `obj_x`/
+`obj_y` at 320×200 has no idea how big the window is. So: **the source does adapt to different
+rendering dimensions, but only by stretching the finished fixed-size frame; the game logic
+never changes.** That separation is what keeps the physics deterministic across displays.
+
+**3. How the clone player maps it** (`player.js`). Same structure, now with the faithful 32 px tile:
+- `screenX(ix) = ROOM_X0 + (ix−58)·sx`, `screenY(iy) = ROOM_Y0 + (iy+8)·sy`, with **`sx = 32/14`**
+  (= the DOS `×2` then `×320/280`, so a tile is **32 px**) and `sy = 1` (`obj_y` 1:1). A room =
+  `140 · 32/14 = 320` px = the full DOS screen width. Sprites draw at native px · `spriteScale`,
+  which now matches the 32 px grid (at the old `sx = 2` / 28 px they were ~`8/7` too wide).
+- **A full extra tile (32 px) each side shows a neighbour SLIVER.** `drawRoom` draws cols
+  **−1..10**: `getTile(room, −1, row)` hops the left link to that room's col 9, `getTile(room,
+  10, row)` hops right to col 0, and a `0`/void link reads as a wall = a solid cap. `ROOM_X0 = 32`
+  places col 0 at x=32, so col −1 fills `[0,32)` and col 10 fills `[352,384)`, each darkened by a
+  translucent wash so they read as adjacent rooms. The wall/portcullis/passage across a room edge
+  (e.g. room 5's col 9 gate at the level-1 start) is thus visible — the flat 2D view's stand-in for
+  what the source's pseudo-3D draw shows in-frame. **Canvas = 32 + 320 + 32 = 384 px wide.**
+- The **`zoom` control is the equivalent of the final `RenderCopy` scale:** the canvas is
+  `384·zoom × 200·zoom` (default **1×** = a native 384×200 frame) and every coordinate is drawn `×zoom` (integer, `image-rendering:
+  pixelated`). The collision/logic in `collision.js` is in internal units and is **untouched
+  by zoom or `sx`** — only `draw()` multiplies. Same decoupling as the source. The clone also
+  rasterizes the silhouette masks itself at `spriteScale = zoom`, so it isn't bound to DOS's
+  tile-art pixel sizes.
+
+---
+
+## 3. `get_tile` — the universal accessor + auto room-crossing
+
+`get_tile(room, col, row)` (`seg006.c:28`) is the heart of all collision:
+
+```c
+curr_room = find_room_of_tile();          // normalize out-of-range col/row
+if (curr_room > 0) {
+    curr_tile2 = curr_room_tiles[tbl_line[row] + col] & 0x1F;   // low 5 bits = type
+} else {
+    curr_tile2 = tiles_20_wall;           // room 0 = the void = solid wall
+}
+```
+
+`find_room_of_tile` (`seg006.c:46`) walks room links when the query leaves the
+`[0..9] × [0..2]` range:
+- `col >= 10` → `col -= 10`, `room = roomlinks[room-1].right`
+- `col <  0`  → `col += 10`, `room = roomlinks[room-1].left`
+- `row >= 3`  → `row -= 3`,  `room = roomlinks[room-1].down`
+- `row <  0`  → `row += 3`,  `room = roomlinks[room-1].up`
+(`tbl_line = {0,10,20}` — a room is row-major, 3 rows of 10.)
+
+**Consequences that matter for us:**
+- "The tile in front of me" (`get_tile_infrontof_char`, `seg006.c:1305`) works
+  *across a room boundary* with no special-casing — the accessor hops the link.
+- A missing neighbor is **room 0**, which reads as `tiles_20_wall` — so the edge
+  of the map is implicitly walled.
+
+> **Clone plan:** `res/level1.js` already stores `fg` types per room +
+> `roomlinks {left,right,up,down}`. A JS `getTile(room,col,row)` that mirrors
+> `find_room_of_tile` (link-hop; `0 → wall`) reproduces this exactly and drives
+> every query below. `blockmap.js` already walks the same link graph.
+
+---
+
+## 4. Floor support — stand vs. fall
+
+**`tile_is_floor(type)`** (`seg006.c:951`) — has a surface to stand on. Floor for
+everything **except** `{ 0 empty, 9 bigpillar_top, 12 doortop, 20 wall, 26/27/28/29
+lattice }`. (This is one of the two predicates already ported in `blockmap.js`.)
+
+- **Standing:** feet at `y_land[curr_row + 1]` (§2).
+- **Unsupported → fall.** When no floor is under the character it starts a fall
+  sequence. Representative check (ledge release, `seg005.c:853`):
+  ```c
+  if (!tile_is_floor(get_tile_behind_char()) && !tile_is_floor(get_tile_at_char()))
+      seqtbl_offset_char(seq_23_release_ledge_and_fall);
+  ```
+  The general model (synthesis, confirmed by the many `tile_is_floor(get_tile_*_char())`
+  checks in `seg005.c`): each frame the physics knows `curr_row/curr_col`; if the
+  tile under the char isn't a floor, transition to `freefall`.
+- **Falling** then runs gravity (`fallAccel`/`fallSpeed`, `seg006.c:0577/05AE`)
+  until the feet reach the next floor's `y_land`, then a landing sequence keyed by
+  impact speed — soft `fall_y<22` / medium `<33` / hard `>=33` (`seg005.c:174`).
+
+> **Clone status:** the fall + soft/med/hard landing engine **already exists**
+> (the motion-sandbox fall pick, `playseq.js` gravity + `seqtbl.js` land seqs).
+> The new wiring is just: "is `getTile(room, curr_col, curr_row)` (or the tile
+> under the feet) a floor? — if not, start `freefall`."
+
+---
+
+## 5. Wall blocking — two layers
+
+### 5a. Coarse: whole-tile, by type (enough for a first cut)
+
+**`wall_type(type)`** (`seg006.c:1626`) — vertical obstacle, and which side:
+| type | wall_type | meaning |
+|---|---|---|
+| 4 gate, 7 doortop+floor, 12 doortop | 1 | wall at right |
+| 13 mirror | 2 | wall at left |
+| 18 chomper | 3 | obstacle at left |
+| 20 wall | 4 | wall on both sides |
+| else | 0 | not a wall |
+
+(The other already-ported predicate in `blockmap.js`.) Movement checks the tile
+ahead via `get_tile_infrontof_char`; a wall ahead makes the actor **stop / step
+instead of run** — e.g. `forward_pressed` (`seg005.c:577`): *"If char is near a
+wall, step instead of run."* For "get blocked by walls," this layer is enough.
+
+### 5b. Fine: sub-tile x, the bump system — IMPLEMENTED (box + animation on a substitute)
+
+> **SUPERSEDED 2026-07-10 by §11.** The `Char.x`-clamp *detection* described here is gone —
+> the whole bump path (buffer scan + faithful wall faces) is now the routine-level-identical
+> `collision_kernel.js`. This section is kept as the record of the interim substitute.
+
+**Status (2026-07-05):** the bump is in the player — a wall hit plays the faithful **recoil
+animation** (`seq_47_bump`) instead of a dead stop, on top of a **collision box**
+(`setCharCollision`). But the *detection* is the clone's `Char.x`-clamp substitute, **not** the
+source's per-column collision-buffer scan. This section is the durable record of exactly what was
+substituted, why, and where a bug would surface if the substitute is ever the cause.
+
+**What the source does (the mechanism we did NOT port).** For pixel-precise "I hit the wall at
+exactly this x, on this side," PoP keeps per-column collision buffers (`data.h:655-674`:
+`curr/above/below/prev _row_coll_room[10]` + `_flags[10]`). Each frame:
+- `check_collisions` (`seg004.c:42`) → `get_row_collision_data` (`seg004.c:111`) scans the columns
+  `left_checked_col-1 .. right_checked_col+2` across **three rows** (curr/above/below), computing
+  each column's wall **left/right face x** (`get_left/right_wall_xpos`, `seg004.c:131/141`) from the
+  per-type offsets `wall_dist_from_left[] = {0,10,0,-1,0,0}` / `wall_dist_from_right[] =
+  {0,0,10,13,0,0}` (`seg004.c:37-39`), and compares them to the char's collision box
+  (`char_x_left/right_coll`).
+- A column that flips clear→overlapping **this frame** (prev vs curr `_flags`) becomes
+  `bump_col_left/right_of_wall` — detection on **both** sides (forward *and* the trailing edge).
+- `check_bumped` (`seg004.c:151`) → `bumped` (`seg004.c:266`): step `tile_col` off the wall to the
+  char's side, push `Char.x` back by the overlap, and play `seq_47_bump` / `seq_46_hardbump` /
+  `seq_45_bumpfall` (chosen by `bumped_floor`/`bumped_fall`, seg004.c:311/298).
+
+**What the clone does instead (`player.js`).** `setCharCollision` (port of `seg006.c:1012`) builds
+the box `char_x_left/right_coll` (width `char_width_half = (sprite.w+1)/2`). `checkBumped` reuses the
+existing `wallAheadFace` **`Char.x`-clamp** to detect the forward edge passing the wall face, pins
+`Char.x` there (= `bumped()`'s push-back), steps off the wall to the char's standing column exactly
+as `bumped()` does (seg004.c:270-288 — needed, or a bump where `curr_col` lands on the wall wrongly
+reads `tile_is_floor(wall)=false` and plays bumpfall), then runs the faithful
+`bumpedFloor`/`bumpedFall` dispatch to pick the sequence. `blockedForward` widened to the source's
+`distance < 8` run-gate (seg005.c:577) so the `dx(-4)` recoil doesn't trigger a re-run (no bump
+oscillation).
+
+**Correction to an earlier claim.** A prior note here said "this buffer system is *also*
+character-vs-character collision." **That is wrong** — verified: the buffers are read only by
+`check_collisions`/`check_bumped` (wall collision) and the per-char save/restore (`seg000.c:313`).
+Kid-vs-guard collision is a **separate** mechanism: `bump_into_opponent` (`seg003.c:622`) uses
+`char_opp_dist()` (distance ≤ 15) and plays `seq_47_bump`; it never touches these buffers. So the
+buffers are **wall-collision only**, and deferring them does *not* affect future char-vs-char work.
+
+**What the substitute loses, and where a bug would surface (the "where the bodies are buried" map).**
+For the current single-actor walk/run/turn/fall scope this loses **nothing visible**. Deferred:
+1. **Multi-row wall bumps.** The buffers scan curr/above/below rows; the clamp checks only the char's
+   **current row** (`wallAheadFace` reads `getTile(room, col, Char.curr_row)`). *If you ever see the
+   char clip a wall segment that is above/below his standing row* (e.g. a head-height wall while his
+   feet are at a floor edge), the cause is the missing above/below scan — port
+   `get_row_collision_data`'s 3-row loop (`seg004.c:50-52`).
+2. **Trailing-edge / knockback-into-a-wall.** The clamp only stops **forward** motion
+   (`bump_col_left_of_wall` equivalent). The source also fires `bump_col_right_of_wall` — a wall
+   hitting the char's **back** edge. *If a future knockback/explosion push drives the char backward
+   through a wall*, the cause is the missing trailing-edge test (`get_row_collision_data`'s
+   `right_wall_xpos > char_x_left_coll`, `seg004.c:123`); the box (`char_x_left_coll`) is already
+   computed, so this is the natural next step.
+3. **Exact multi-column bump-column selection** — invisible for a single-column contact; matters only
+   with wide/compound obstacles.
+
+**Bump-sequence verify status.**
+- `seq_47_bump` — **VERIFIED** (run into a wall both facings: recoil `dx(-4)`, frames 50-52, no
+  penetration/oscillation/fall, stays in room; then `safe_step` walks him flush — see below).
+- `seq_45_bumpfall` — **bytes verified** (frames 102-105 render with the falling `dy`), but the
+  natural trigger + freefall handoff needs airborne geometry (bumping a wall over a gap / while
+  falling); not reachable in the current move set (jumps not wired). Re-verify end-to-end with jumps.
+- `seq_46_hardbump` — **ported, unverified**: only reached from jump/fall-onset frames
+  `{24,25,40-42,102-106}` the current player can't produce. Verify when jumps land.
+
+**`safe_step`-to-edge — IMPLEMENTED (the recoil no longer leaves him parked back).** `get_edge_distance`
+(seg004.c:378, `player.js` — walls / floor edges / ledges only) + the 14 `step1..step14` sequences
+(seqtbl.c:737-863) + `safe_step` (seg005.c:604) wired into `control.js`. `forward_pressed`'s
+`distance < 8` rule now **steps flush** to a wall (the recoil's ~4-unit gap → `step4` → flush) instead
+of parking back, **Shift+forward** lands the careful step exactly at the wall face or the ledge's
+drop. **`getEdgeDistance` must decide on the tile *directly in front* (`curr_col + facing`), NOT the
+leading edge** — the leading-edge approach (`wallAheadFace`) has two failure modes, both fixed by
+computing the front column's near face directly: (1) it finds a wall *across* an empty tile and steps
+the char off a **ledge** toward it; (2) it only scans the leading-edge column ±1, so it **misses** a
+wall a full tile away or **across a room boundary** — which falsely *blocked* a left-facing char at a
+room edge (he had ~14 units of floor to step but `distance` defaulted to 0). VERIFIED: Shift-step→wall
+flush (both facings, incl. a left-facing char stepping to a room-edge wall); run→bump→step flush;
+forward (no Shift)→ledge still runs off.
+
+**At a ledge brink, Shift+forward plays `testfoot` (the "peer over the edge + bounce back").** This
+is `seq_44_step_on_edge` (`seqtbl.c:720`, frame `86_test_foot`), fired by `safe_step`'s distance-0 /
+`edge != WALL` / `Char.repeat` branch (seg005.c:611): so a careful step at a drop is step-to-brink →
+lean out + retreat (net dx 0) → stand, gated by `Char.repeat` so it happens once. `testfoot` leans
++10 **past** the edge, which — unlike the plain steps that stop *at* the edge — reaches into whatever
+is beyond (a hole, or at a 1-tile pit a wall on the far side), and would otherwise `check_on_floor`-
+fall or `check_bumped`-bump mid-lean (observed cascade at room 1 col 3: lean → col-5 wall bump →
+recoil into the col-4 pit → fall). Fix: a clone-only `ch.testing` flag (set when `testfoot` starts,
+cleared at the next stand) makes `checkBumped` and `checkOnFloor` **skip** during the lean — correct
+because `testfoot` is self-contained (always returns to the floor). **`safe_step`'s distance-0 `else`
+branch is now FAITHFUL (§5c, 2026-07-08):** it plays `seq_39_safe_step_11` (step11) for BOTH cases —
+a full step INTO a wall (→ the bump/oscillation) and OFF a ledge after the peer (`repeat==0`, the
+"unsafe step" that persisting walks you off). It previously played `stand` for both (the deviation is
+retired).
+
+Other deferred: sword bump sequences (`seq_64/65`), `is_obstacle`'s chomper/mirror cases
+(`seg004.c:231` — not modelled; **the gate case IS now modelled** — `can_bump_into_gate` via
+`wallTypeAt`, 2026-07-07), feather-fall (`bumpfloat`).
+
+### 5c. The control auto-repeat latch — IMPLEMENTED (2026-07-08)
+
+The bump above answers *"what happens when the leading edge hits the wall."* This answers *"why a HELD
+key SETTLES at the wall but a TAPPED key OSCILLATES"* — the behaviour the clone got wrong until it
+ported PoP's control latch.
+
+**What the clone had wrong.** `control.js` defined the three control states **inverted**
+(`HELD=1, IGNORE=-1`; source `types.h:1405` is `RELEASED=0, HELD=-1, IGNORE=1`), and `player.js`
+`buildControl` recomputed `control.forward` **fresh from the raw key every tick** — so there was no
+latch at all. A held forward re-fired `forward_pressed` every frame → it walked the prince flush into
+the wall (→ `checkBumped` fired `seq_47` on the run-in) and never oscillated on a tap.
+
+**The source mechanism** (per-frame pipeline, `seg006.c:1428`): `rest_ctrl_1 → read_user_control →
+control() → save_ctrl_1`. `control_forward` is a **3-state latch persisted across frames** via
+`ctrl1_forward`:
+- **`read_user_control`** (`seg006.c:1557`): `RELEASED`+key-down → `HELD` (a fresh press); `IGNORE`
+  stays `IGNORE` while held (auto-repeat off); key-up → `RELEASED`. The `>= CONTROL_RELEASED` guard is
+  why the constant *ordering* matters (`HELD = -1 < 0`).
+- **`safe_step`** (`seg005.c:606`) sets `control_forward = IGNORE` — "disable automatic repeat."
+- **`forward_pressed`** near a wall (`seg005.c:579`) steps **only if `control_forward == HELD`** — a
+  latched (`IGNORE`) hold does nothing ⇒ **settle**.
+- **`control_standing`** line-401 fall-through: `control_x == HELD_FORWARD` re-enters `forward_pressed`
+  even when latched, so the still-held key is "seen" but the HELD-gate stops the repeat.
+- **`safe_step`** distance-0 `else` → `seq_39`/step11 = a full step INTO the wall → penetration →
+  `checkBumped` → `seq_47` recoil → the **tap oscillation**.
+- **`control()`** during `bumped`/`freefall` → `release_arrows` (clear the latch).
+
+**The port.** Constants corrected in `control.js`. `player.js` gained the persistence layer —
+`ctrl1{forward,backward}` + `readRawAxis` (the facing-relative `control.x` from the keyboard) →
+`restCtrl1` → `readUserControl` (before `controlKid`) → `saveCtrl1` (after) — replacing `buildControl`.
+`control.js` handlers made latch-aware: `safeStep(ch, c, world)` sets `c.forward = IGNORE` + `else →
+step11`; `forwardPressed` gates the near-wall step on `c.forward === HELD`; `controlStanding` gained
+the `c.x === FWD` fall-through; `backPressed`/`controlRunning` port `control_* = release_arrows()` so a
+turn / run-turn / run-stop is a **ONE-SHOT** (the acted flag → `IGNORE`, the others → `RELEASED`);
+`controlKid`'s bumped/freefall gate clears the latch; `dropAtStart` resets `ctrl1` (`clear_saved_ctrl`).
+**Regression caught during verification (2026-07-08): omitting the `release_arrows` in `back_pressed`
+left a HELD `backward` that re-fired the turn every tick — the prince spun forever with no key pressed.
+The fix is faithful (`seg005.c:549` does `control_backward = release_arrows()`, which lands `IGNORE` in
+`backward`).**
+
+**A second, subtler bug (also 2026-07-08 — the facing-relative latch vs a turn):** DOS stores the control
+latch ABSOLUTE (left/right) and flips it to facing-relative every frame (`flip_control_x`, `seg006.c:1520`);
+the clone stores it facing-RELATIVE. A turn flips the facing BETWEEN `save_ctrl_1` and `rest_ctrl_1`, so the
+still-held key re-latched as a FRESH forward `HELD` (which the `>= RELEASED` guard then can't clear on
+release) and ran a step even if you released mid-turn — "turn-and-run" felt far too sensitive. Fix:
+`flipLatchOnTurn` (player.js) swaps `ctrl1.forward`↔`ctrl1.backward` whenever the facing turned, so the held
+key stays `IGNORE` across the flip exactly as DOS's absolute latch does — releasing during the turn now
+cancels the run. **And `control_turning` is now PORTED (2026-07-08, no longer a stub):** at frame 48, if the
+forward key is RAW-held (`control_x == FWD`, with Shift/Up not held) it fires `seq_43_start_run_after_turn`
+(`controlTurning` → `startrunafterturn` in seqtbl.js: `act(run)`, `dx(-1)`, `jmp(runstt1)` = straight into
+the start-run at frame 1) — the SMOOTH turn-into-run at frame 48, exactly as DOS, instead of finishing to a
+stand and plain-running at frame 50. Decided from the RAW key, so a release before frame 48 leaves the turn
+to settle into a stand. Verified: release ≤ 4 ticks → turn only; hold ≥ 5 ticks (through frame 48) → smooth
+turn-run.
+
+`checkBumped`/`seq_47` (§5b) is UNCHANGED — with the latch
+it now fires only on real penetration (the step11-into-wall, or a sustained run), which is what turns a
+walk-to-flush into a settle-at-a-gap + a tap oscillation.
+
+**DOS ground-truth validation (the `dosbox-memory` live hook).** Zane's running DOSBox PoP 1.4 was
+hooked live (MemBase via BDA; DS via the `x_bump` AOB anchor — see the sync-state memory for the
+re-hook recipe) and the Kid struct + `control_forward`/`control_x` read frame-by-frame. Confirmed on a
+plain room-2 wall: **run/hold → SETTLE at a gap** (x=68, `control_forward` latched), **tap → OSCILLATE**
+(x 64↔68, a **4-unit swing = `seq_47`'s `dx(-4)`**), and the gap is **general, not the gate's
+`wall_dist` inset** (the room-2 plain wall rested at the same x=68 as the room-1 gate wall). This
+validated the mechanism end-to-end *before* the port. **Tool limit found (Zane):** `send_key` blocks
+then reads settle, so the `seq_47` transient frame itself is uncatchable — the fix is a frame-rate
+"watch/trace" tool (agreed, future; sketched in the `dosbox-watch-tool-design` memory).
+
+**Verified (deterministic single-stepping, `index.html#debug` — `POP.keys` + `POP.step`/`ctrl`):**
+HOLD into the wall → run → `seq_47` bump once → recover → one `safe_step` → **stable at x=58 for 20+
+ticks** (`fwd`=IGNORE, no oscillation); TAP at flush → **oscillates x 58↔62** (4-unit, `fwd` toggles
+IGNORE↔RELEASED); regressions turn / jump-up / run / runstop / falling-entry all pass; no console
+errors.
+
+**Deferred (separable, agreed):** (1) the **`wall_dist_from_left` inset** — the clone rests/oscillates
+flush at the raw tile edge (58↔62) where DOS insets ~10 units (64↔68); modelling `wall_dist` is the
+next follow-on and is what makes the clone's *rest position* match DOS. (2) The **vertical latch**
+(`control_up`/`control_down` via `ctrl1`) — up/down stay simple raw HELD/RELEASED here; their
+auto-repeat is already gated by the frame dispatch, so this is a clean separable follow-on.
+
+---
+
+## 6. The room-relative bounded `obj_x` model (the deferred position piece)
+
+PoP is **room-by-room with NO scroll**. The screen shows `drawn_room` plus thin
+slivers of its neighbors (`room_L/R/A/BL/BR`).
+
+- `Char.x` is a **bounded byte, room-relative** (`types.h:304`); a room = 140
+  internal-x units (§2).
+- **On crossing a room edge:** `drawn_room = next_room; redraw_screen(1)`
+  (`draw_game_frame`, `seg000.c:918`), and the actor's `x` rebases into the new
+  room (via `roomlinks`).
+- **Drawing an actor that straddles the boundary:** offset its x by one
+  room-width — `xpos_in_drawn_room` (`seg004.c:254`) does `xpos ∓= TILE_SIZEX *
+  SCREEN_TILECOUNTX` (= 140) when `curr_room` is L/BL (−) or R/BR (+).
+
+> **Clone plan:** replace the sandbox's `actorX ∈ [0,640]` accumulator with
+> `(Char.room, Char.x byte)`. Screen-x = map `Char.x` into the drawn room's
+> pixels; when `Char.x` crosses a room edge, swap `Char.room` via `roomlinks` and
+> rebase `Char.x`. The block map already lays rooms out via `roomlinks`, so the
+> same graph drives the room-swap.
+
+---
+
+## 7. What the clone already has vs. still needs
+
+> **Superseded in part (2026-07-07): the position/room/edge substrate is now FAITHFUL.**
+> The `curr_col` clamp, the front-only `getEdgeDistance`, the room-cross-before-`check_action`
+> order, and the `curr_row`-based vertical cross described in §7/§8 were all **removed** in the
+> substrate rework (W1+W1b+W2+W3). Stale claims below are corrected inline. The authoritative,
+> fully-mapped source model now lives in the dedicated research set —
+> `research_frame_loop.md`, `research_position_room.md`, `research_collision_detection.md`,
+> and the clone-vs-source classification in `research_deviation_ledger.md`.
+
+**Already ported / available:**
+- Animation + gravity engine: `playSeq`, `fallAccel`/`fallSpeed`, fall + land
+  sequences — `playseq.js` / `seqtbl.js`.
+- `wall_type`, `tile_is_floor` (cited) — `demos/blockmap.js`.
+- Level collision data: `fg` types + `bg` + `roomlinks` + `start` — `res/level1.js`.
+- Room layout by `roomlinks` (flood-fill) — `demos/blockmap.js`.
+
+**Built for the actor-in-a-room step** (all of the below — `index.html` / `player.js`,
+`collision.js`, wired `control.js`, `runstop` added to `seqtbl.js`):
+1. ✅ **Position as `(room, x-byte, curr_col/curr_row)`** with the full `determine_col`
+   mapping (§2, `dxWeight` incl. the per-frame weight offset), replacing the flat `actorX`.
+   `curr_col` is **unclamped** (faithful, seg006.c:122) — at a room edge it is legitimately
+   −1/10 and `getTile` link-hops (research_position_room.md §3).
+2. ✅ **`getTile(level,room,col,row)`** with `find_room_of_tile` link-crossing + `0 → wall`
+   (§3) — `collision.js`, drives every query.
+3. ✅ **Floor-support → fall** (§4): `check_on_floor` (see §8) + the existing gravity/land
+   engine, keyed by tile state.
+4. ✅ **Wall stop** — a sub-tile `Char.x`-clamp to the wall face (the §5b substitute; see §8).
+5. ✅ **Room-swap at the boundary + `Char.x/y` rebase** (§6): `leave_room` trigger +
+   `goto_other_room` (see §8).
+
+Keyboard control (`control.js`, ported `control_kid`): run (`forward_pressed` → `start_run`,
+blocked at a wall), `runstop` on release (frame-gated 7/11), `runturn` on reverse, standing
+`turn`, `safe_step` (Shift) — all consuming the substrate above.
+
+---
+
+## 8. Traced during implementation (the §8 open items, resolved)
+
+> **NOTE 2026-07-10:** the source mechanisms traced below (`check_on_floor`/`start_fall`/`do_fall`/
+> `land`, the per-tick order, the room-edge bump) are now ported **verbatim in `collision_kernel.js`**
+> (see §11) — the "Ported … in `player.js`" mentions below moved to the kernel with the routine-level
+> port. The traces themselves stand.
+
+The three open items above were all traced end-to-end while building the player:
+
+- **The walk-off-ledge trigger is `check_on_floor` (`seg006.c:1046`)**, dispatched from
+  `check_action` (`seg006.c:909`) for a grounded actor. For a frame flagged
+  `FRAME_NEEDS_FLOOR` (`0x40`, `types.h:381`), if `tile_is_floor(get_tile_at_char())` is
+  false it calls `start_fall` (`seg006.c:1099`) → `inc_curr_row` + `seq_7_fall`. The freefall
+  side is `do_fall` (`seg005.c:37`): when `Char.y` reaches `y_land[curr_row+1]`, `land()`
+  (floor) or `inc_curr_row` (descend). Ported verbatim in `player.js`.
+- **The per-tick order is `play_kid_frame` (`seg000.c:1192`):** `control` → `play_seq` →
+  `fall_accel` → `fall_speed` → `determine_col` → `set_char_collision` → `check_bumped` →
+  `check_action` → `check_press` → **(then, after the whole kid frame, `exit_room`)**. The player
+  now follows this exactly — the room cross runs **after** `check_action`, matching `exit_room`'s
+  place in `play_frame` (`seg000.c:881`). *(Corrected: the earlier draft ran the room cross before
+  `check_action`; that was the W2 deviation — see `research_frame_loop.md §2.4` and
+  `research_deviation_ledger.md`.)*
+- **Room crossing = `leave_room` (`seg002.c:423`) trigger + `goto_other_room`
+  (`seg002.c:390`) rebase:** left `Char.x += 140` / right `-= 140` / up `Char.y += 189` /
+  down `-= 189` (`+ curr_row = y_to_row_mod4`, `seg006.c:804`), then hop the roomlink and
+  swap `drawn_room`. The clone's `leaveRoom` is now the **faithful `leave_room` order**
+  (research_position_room.md §5): **(1) UP** and **(2) DOWN** are **`Char.y`-based** (up when
+  `Char.y ∈ (−16,10)` and the action is grounded/climbing — this is what crosses a two-floor
+  climb into the room above; down when `Char.y ≥ 211`); **(3)** a **climb frame (135–149)**,
+  **stand-up-from-crouch (110–119)**, or **turn (`action 7`)** blocks *horizontal* leave only;
+  **(4)** horizontal on the leading edge `Char.x` with the direction-dependent thresholds
+  (`seg002.c:462-483`; facing **right** → right at `>=201`, left at `<=57`; facing **left** →
+  left at `<=54`, right at `>=198`). A `0` link is the void. *(Corrected: the earlier draft used
+  `curr_row` leaving `[0,2]` for the vertical cross and lacked the climb-frame block — the W3
+  deviation; the turn/stand-up guards were already present. The turn-teleport bug they fixed is
+  still real: turning at a room edge, the turn's own `dx` would push `Char.x` past the threshold
+  and cross into a walled neighbour, so the `action 7` guard on horizontal leave stays.)*
+- **`dx_weight`'s per-frame weight offset (§2) IS implemented** (`determineCol` uses
+  `char_dx_forward(frame.dx - (flags & 0x1F))`), not the first-cut `Char.x` approximation. And
+  **`curr_col` is UNCLAMPED** (faithful, `determine_col` seg006.c:122), so at a room edge it is
+  legitimately −1/10 and every `getTileAtChar` link-hops to read the neighbour tile. *(Corrected:
+  the earlier draft clamped `curr_col` to `[0,9]` — the W1 deviation. It only "worked" because the
+  front-only `getEdgeDistance` was co-designed with it; both were removed together, and
+  `getEdgeDistance` is now the source's own-tile-first `get_edge_distance`, seg004.c:383. Full
+  account: `research_deviation_ledger.md §1`.)*
+
+### How the source blocks at a room-edge wall (cross-check)
+
+When the char walks toward a room boundary whose neighbour has a wall (e.g. room 1 col 0 → room
+5's col-9 wall), **the source does NOT cross into the walled room — it bumps him back at the
+boundary first.** The design that makes this work, and which the clone mirrors:
+
+- **Per-frame order** (`play_frame`, `seg000.c:863`): `play_kid_frame()` → … → `exit_room()` →
+  `check_the_end()`. The wall bump (`check_collisions`/`check_bumped`) is *inside*
+  `play_kid_frame`; the room change (`leave_room`/`goto_other_room`) is in `exit_room`; the
+  `drawn_room` flip is in `check_the_end`. So **the wall bump runs before the room-leave check.**
+- **The collision scan reaches across the boundary.** `check_collisions` (`seg004.c:42`) sets
+  `left_checked_col = get_tile_div_mod_m7(char_x_left_coll) − 1` (can be **−1**), and
+  `get_row_collision_data` (`seg004.c:118`) reads walls via `get_tile(room, column, row)`, which
+  **hops the room link** for out-of-range columns. So the neighbour room's edge wall is detected
+  while the char is still in the current room. The scan is keyed off the sprite collision box
+  (`char_x_left/right`, a *position* from `Char.x`), not the lagging weight point. (`check_collisions`
+  returns early during a turn, `action==7`.)
+- **The bump pins the box to the wall face** (`check_bumped`→`bumped`, `seg004.c:194/266`):
+  `Char.x += (wall_face − char_edge)`. Then `leave_room` reads the *pushed-back* position, its
+  `char_x_left/right` threshold isn't met, it returns −1, and no room flip happens.
+
+**The clone mirrors this faithfully.** The wall bump (`checkBumped`, position-based on `Char.x`
+and boundary-aware via `getTile`'s link-hop) runs *inside* the tick and pins `Char.x` at the wall
+face; the room cross (`leaveRoom`) runs *after* `checkAction` (matching `exit_room`'s place after
+the kid frame). So the bump pushes `Char.x` back before `leaveRoom` reads it, its `Char.x`
+threshold isn't met, and no flip happens — exactly as the source's `check_bumped`-then-`exit_room`
+order does. *(This ordering is the W2 fix; the earlier draft ran the cross before `check_action`
+and relied on the now-removed `curr_col` clamp — see the §7 banner + `research_deviation_ledger.md`.)*
+The bump *animation* + collision *box* are modelled (§5b); the one remaining substitute is the
+per-column buffer *scan*.
+
+**Deviations (honest):**
+- **Wall block — the box + recoil animation ARE modelled (§5b); the per-column buffer *scan* is
+  the substitute.** Detection works in **`Char.x`, the leading edge** (`set_char_collision`,
+  `seg006.c:1021`: `char_x_right = Char.x` facing right, `char_x_left = Char.x` facing left):
+  `wallAheadFace` finds the blocking wall by the **leading edge's column** `tileDivMod(Char.x)` —
+  the edge's own column if a fast frame overshot it into the wall, else the next column ahead — and
+  `checkBumped` pins `Char.x` to that column's near face (no penetration), then runs the faithful
+  `bumped`/`bumped_floor`/`bumped_fall` dispatch (recoil `seq_47` / bumpfall `seq_45` / hardbump
+  `seq_46`). Three subtleties, all learned from bugs:
+  - **Key off the leading edge, never `curr_col`.** The weight point lags `Char.x` by ~10 units
+    and can sit *in* a wall while the edge is safely past it (facing away) — a `curr_col`-based
+    test then pushes the char the wrong way. `tileDivMod(Char.x)` is the actual edge.
+  - **A wall isn't a hole.** `check_on_floor` must not fall when the tile under the char is a
+    wall (a fast frame can leave the weight-point `curr_col` in a wall for a tick). The source
+    ejects (`in_wall`) before its floor test; the clone just skips the fall (`wallType != 0`).
+  - **Skip the bump during a turn** (`action==7`), as `check_collisions` does (`seg004.c:44`) —
+    the turn's own `dx` carries the char off the wall.
+  The remaining substitute is the per-column buffer **scan** (`check_collisions`/
+  `get_row_collision_data`) — see **§5b** for exactly what that defers (multi-row + trailing-edge
+  bumps) and where a bug would surface.
+- **`safe_step`-to-edge IS implemented** (§5b): `step1..step14` + `get_edge_distance` wired through
+  `control.js`, so Shift-step and the post-bump forward both land the char *exactly* at the wall face
+  (flush) or a ledge's brink. Only `safe_step`'s distance-0 climb branches are deferred.
+- **`start_fall`'s run-frame variants** are now **faithful** (the kernel port added the per-context
+  fall sequences `stepfall`/`stepfall2`/`jumpfall`/`rjumpfall`/`patchfall` with `set_fall` drift —
+  they no longer collapse to a single `freefall`; §11).
+- **Gate collision IS implemented** (2026-07-07): `can_bump_into_gate` (open/closed-aware wall) +
+  the climb-into-a-closed-gate `climbfail` (`research_environment.md §1e`). The *animate/button*
+  subsystem (open/close over time, + `check_gate_push` + the entry-slam) and **spikes** (lethal)
+  are now implemented too (`research_environment.md §1/§2.5/§6a`).
+  **Loose-floor collapse IS implemented** (§9, incl. break-from-below); **the sub-tile bump system IS
+  implemented** (§5b).
+
+---
+
+## 9. Loose floors — the first *trob* (transient object)
+
+A loose floor (tile type 11) is a floor you can stand on that **collapses a moment after
+weight lands on it**, dropping you through. It's the first *trob* (transient object — a tile
+that animates over several frames) the toy ports. Source is `seg007.c` (the whole trob
+system); this is a **minimal, loose-only** slice of it — faithful to the mechanism, with the
+falling-debris chunk and the shake visual deferred by agreement.
+
+### The mechanism (three source touch-points)
+
+1. **Trigger — `check_press` (`seg006.c:1683`).** The full routine is now ported (was a
+   grounded-only slice). It reads the "pressed" tile — normally the one underfoot
+   (`get_tile_at_char`, on a `FRAME_NEEDS_FLOOR` frame while `action==turn || bumped || <
+   actions_2_hang_climb`), but two cases read the tile **above** (`get_tile_above_char`, whose
+   `curr_row-1` link-hops into the up-room): while **hanging/climbing** (frames 87–99 / 135–140)
+   the pressed tile is the one being grabbed, and at **frame 79** (a plain jump-up bonking the
+   ceiling) a `tiles_11_loose` directly above is broken **from below** — the "jump up under a
+   loose floor to drop it" move. Whatever tile it lands on: a `tiles_11_loose` → `make_loose_fall`,
+   a button (15/6) → `trigger_button`. *(The clone reaches frame 79 via `jumpup`/seq_14 — a solid
+   loose floor overhead isn't grabbed as a ledge here because the surrounding tiles fail `can_grab`,
+   so `check_jump_up` falls through to `jumpAtCeiling`. The kid then bonks it at frame 79 and it
+   collapses; the falling-debris chunk `add_mob` stays deferred, so the tile simply vanishes.)*
+2. **Arm — `make_loose_fall` (`seg007.c:904`).** Guards twice: the tile must be a still-solid
+   loose floor, and its **modifier must be `<= 0`** (a fresh loose tile is 0) so re-stepping a
+   tile that's already counting down never restarts it. It sets the modifier to 1 and
+   `add_trob(room, tilepos, 0)`.
+3. **Tick — `process_trobs` → `animate_loose` (`seg007.c:24` / `:816`).** `process_trobs` runs
+   at the **top of `play_frame` (`seg000.c:869`)**, before `play_kid_frame`. For each active
+   loose tile it `++`s the modifier; once it reaches **`loose_floor_delay = 11` (`seg007.c:832`)**
+   it calls `remove_loose` (`seg007.c:897`: `curr_room_tiles[tilepos] = tiles_0_empty`) and drops
+   the trob (plus `add_mob` for the falling debris chunk — **deferred**). Otherwise it keeps
+   shaking (`loose_shake` — the visual, **deferred**) and stores the bumped modifier back.
+
+The **modifier is the tile's own `bg` byte** (`curr_room_modif[tilepos]`): `get_curr_tile`
+loads it (`seg007.c:974`), `animate_tile` stores it back (`seg007.c:87`). So a loose tile's
+collapse countdown lives *in the level data*, not in a side table.
+
+Because `process_trobs` removes the tile at the top of the frame and `check_action` /
+`check_on_floor` (§8) run later the same frame, the tile is already empty when the floor test
+sees it — so the actor **falls the very frame the tile ripens**, via the existing fall engine
+(§4). No new fall code; the loose floor just deletes the floor under him.
+
+### The clone port (`trob.js` + `player.js`)
+
+- **`trob.js`** (new) — the minimal trob module: `makeTrobs` / `makeLooseFall` (arm) /
+  `processTrobs` (tick + collapse). Loose-only; pure over `(trobs, level)`, no rendering. Ports
+  points 2–3 above verbatim, including the `(sbyte)modifier <= 0` guard and `loose_floor_delay`.
+- **`player.js`** — three wirings:
+  - The player now holds a **mutable `structuredClone` of the level** (loose floors collapse
+    into its `fg`/`bg`; the shared `LEVEL1` const — also read by the block-map demo — is never
+    touched). **Restart re-clones**, restoring every loose tile.
+  - `processTrobs(trobs, level)` runs at the **top of `tick()`** (mirroring `process_trobs` at
+    the top of `play_frame`); `checkPress(ch)` runs **after `checkAction`** (mirroring
+    `check_press` after `check_action` in `play_kid_frame`, `seg000.c:1215-1216`). `checkPress`
+    is point 1 above, reduced to the loose-floor branch.
+- **Level-1 loose tile: room 1, col 6, row 2** — its room's `down` link is room 2, so the
+  collapse drops the prince **through a room boundary** into room 2, where he lands on the
+  floor at row 1 (a ~2-row multi-room fall, medium landing).
+
+### Verified (deterministic single-stepping, `index.html#debug`)
+
+Standing him on the loose tile (`POP.place(1,6,2,0)`) and stepping: the modifier counts
+`1 → 10` over ten frames (tile stays 11, one trob), then at frame 11 the tile flips to `0`
+(empty), the trob drops, and he enters `freefall` (`action 4`, `curr_row 2→3`) — falling into
+room 2 the next frame and landing on its row-1 floor (`fall_y 24` → medium land → recover).
+Re-stepping a shaking tile does **not** reset the timer (modifier stays monotone); `restart`
+restores the tile to 11; the shared `LEVEL1` module const is never mutated (still reads 11).
+
+### A latent control bug the medium landing exposed (fixed)
+
+The loose-floor fall is the first thing in the *player* (as opposed to the motion sandbox) that
+produces a **medium landing**, and it immediately surfaced a bug: the prince ended up standing
+~2 internal-y units **above** the floor (a visible gap between his feet and the ledge).
+
+Cause: `medland` (`seqtbl.c:935`) opens with `dy(-2)` (drop into a crouch) and compensates with
+`dy(1)+dy(1)` in its **own** stand-up tail. But the clone's `controlKid` dispatched purely by
+frame, and medland's long crouch is `frame_109_crouch` — the same frame the *soft*-land crouch
+holds. So `controlCrouched` fired and redirected him into the separate `standup` sequence, which
+has **no `dy`** — the `dy(-2)` was never repaid, leaving `Char.y` two units high.
+
+The source doesn't hit this because **`control()` (`seg005.c:264`) suppresses all control while
+`action == bumped` or `in_freefall`** (it just `release_arrows()`). The medium/hard-land crouch
+runs at `actions_5_bumped`, so it's *not* controllable and plays its own dy-balanced recovery;
+only the **soft**-land crouch is controllable, because `softland` deliberately switches to
+`actions_1_run_jump` at its crouch (`seqtbl.c:919`) so the player can stand up on input. The
+clone was missing exactly this gate. Adding `if (action==bumped || action==in_freefall) return;`
+at the top of `controlKid` fixes it: the medium land now plays its full faithful 29-frame crouch
+and lands flush on the floor line (`Char.y = y_land[row+1]`, gap 0, pixel-confirmed), while the
+soft-land falling entry still stands up as before.
+
+### Deferred (agreed, same bucket)
+
+- **The falling-debris chunk** (`add_mob` / `curmob`, `seg007.c:848-855`) — a separate mobile
+  object that tumbles down and can hurt whoever's below. Its own subsystem (`do_mobs`).
+- **The shake visual** (`loose_shake`, `seg007.c:870`) — the tile just renders as its normal
+  (brown) floor ledge until it vanishes. The collapse is still legible (floor disappears → fall).
+
+## 10. Vertical jump-up + climb (Up → jump / grab a ledge / climb up)
+
+The first move that carries the prince *between* rows under player control. Pressing **Up** while
+standing jumps straight up; if a ledge is within reach above, he **grabs it and hangs**; pressing
+**Up** again **climbs him onto** it. The striking thing about the port: it needed **no new engine
+mechanism** — the row change, the hang render, and "don't fall while hanging" all fall out of
+machinery that was already there (`§2.1`, `§4`, the `play_seq` opcodes). It is transcription +
+control/collision wiring.
+
+### The control paths (ported `seg005.c`)
+
+`control_standing` (`seg005.c:393`) routes a standing **Up** to `up_pressed` → `check_jump_up`
+(`seg005.c:693`), which tries three things in order:
+
+1. **Grab a ledge in front & above** — `can_grab(through = tile directly above, target = tile
+   front-above)`. Success → `grab_up_with_floor_behind` (`seg005.c:871`): close to the edge and not
+   against a wall → `jumphangMed` (seq_8, dx 0), else `jumphangLong` (seq_24, reach forward dx +4).
+2. **Grab a ledge straight above** — `can_grab(through = behind-above, target = above)`. Success →
+   `jump_up_or_grab` (`seg005.c:711`): too close (<6) just jumps; no floor behind → `jumpbackhang`
+   (seq_16); else step back a tile and `grab_up_with_floor_behind`.
+3. **Neither** → `jump_up` (`seg005.c:734`): read the tile one row above at the weight column —
+   neither wall nor floor → open air → `highjump` (seq_28); a wall/floor above → `jumpup` (seq_14,
+   touch the ceiling with `SEQ_KNOCK_UP`). Both self-contained arcs ending in `hangdrop` → stand.
+
+`can_grab` (`seg006.c:1606`, ported to `collision.js canGrab(through, target, mod, facingRight)`):
+grab is allowed only when the *through* tile is passable (not wall / not a floor / not a
+right-facing doortop) and the *target* is a floor (with the doortop-with-floor and shaking-loose
+exclusions). Our `loose_floor_delay == 11`, so a shaking loose target (modifier ≠ 0) is not
+grabbable — matching source.
+
+Once hanging (frames 87–99, action `2_hang_climb`), `control_hanging` (`seg005.c:791`, our
+`controlHanging`) decides each frame: **Up** (once `grab_timer` has counted down) → `can_climb_up`
+→ `climbup` (seq_10); **Shift** against a wall/doortop → `hangstraight` (seq_25, action
+`6_hang_straight`); **anything else** → `hang_fall` (`seg005.c:846`) → `hangdrop` (seq_11, land on
+the floor below) or `hangfall` (seq_23, release over a pit → `freefall`). Because control interrupts
+on the *first* hang frame, the long `hang` swing loop (`seqtbl.c:554`, 42 frames) rarely plays under
+player control — you climb or drop almost immediately.
+
+### Why the row change / render / no-fall are free
+
+- **Row change:** `climbup` is `… dx(5) dy(-63) SEQ_UP frame_141 …`. `SEQ_UP` decrements `curr_row`
+  and `dy(-63)` lifts the feet exactly one tile (`y_land`: 118→55, `§2`), so he ends standing on the
+  ledge one row up. `play_seq` already executes `SEQ_UP/DOWN/KNOCK_UP` (`playseq.js`) — the only new
+  builder work was the `up()`/`down()`/`knockUp()` helpers in `seqbuilder.js`.
+- **Hang render:** the rise-and-hang is entirely the per-frame `frame_table_kid` **draw-offset dy**
+  (already applied in `player.js draw()`, `§2.1`). `Char.y` barely moves while hanging (the feet of
+  a char hanging from the row-above ledge sit ≈ where they'd stand in the current row), so hanging
+  keeps `curr_row` unchanged and the sprite is drawn up by the frame dy.
+- **No spurious fall:** `check_action` (`seg006.c:909`) does nothing for actions `2_hang_climb` /
+  `6_hang_straight`, so a hanging char never falls via the floor check. During the jump-up *rise*
+  `curr_row` is unchanged, so `check_on_floor` keeps finding the take-off floor.
+
+### `grab_timer`
+
+Set to 12 only when grabbing a ledge **mid-fall** (`check_grab`, `seg006.c:1217`; **now implemented
+— §12**) and counted down each tick (`process(grab_timer)`, `seg006.c:1405`; our tick top). For a
+jump-up grab it stays 0, so the climb starts immediately; after a mid-fall grab it gates the climb
+for 12 ticks (you hold Shift to keep hanging through the countdown, then Up to climb).
+
+### Sequences transcribed (`seqtbl.js`, from `seqtbl.c`)
+
+`jumpup` (629), `highjump` (637), `hangdrop` (602), `jumphangMed` (526), `jumphangLong` (534),
+`jumpbackhang` (544), `hang`+`hang1` (554), `hangstraight`+loop (569), `climbup` (590), `hangfall`
+(609), and `climbfail` (575, = `seq_73_climb_up_to_closed_gate`, **transcribed 2026-07-07**).
+`climbfail` is reached from `can_climb_up` (`seg005.c:840`) — the closed-gate / mirror / chomper
+climb-up — **not** "only from `seq_9_grab_while_jumping`" as an earlier draft of this doc claimed
+(`seq_73` is referenced at that one site only). See `research_environment.md §1e`.
+
+### Verified (deterministic single-stepping, `index.html#debug`)
+
+- **Jump up in place:** `POP.place(2,6,1,0)` + Up → `highjump` (open air above; apex-hold), ends
+  standing at the **same** row. `POP.place(2,3,1,0)` + Up → `jumpup` (wall above; single apex +
+  `KNOCK_UP`). Both drop via `hangdrop` and never fall.
+- **Grab front-above + climb:** `POP.place(7,5,2,-1)` (facing left; above = empty, front-above col 4
+  = floor) + Up held → `67…80,91,135…149,118,119,15`: rise → grab → one hang frame → `climbup` →
+  ends standing **row 2→1** on the col-4 floor, `Char.y` 181→118. Screenshot confirms the hang pose.
+- **Grab straight-above + climb:** `POP.place(5,6,2,-1)` + Up → `jump_up_or_grab` path → climb
+  (row 2→1, uses `climbup` frame 141).
+- **Release while hanging:** grab then release → `…,91,81,82,83,84,85,15` (`hangdrop`) back to row 2.
+- **Regressions:** run/stop/turn/careful-step, wall-bump, loose-floor fall, room crossings, the
+  falling entry — all still pass; no console errors.
+
+### Deferred (each a clean follow-on that reuses this hang machinery)
+
+- ~~Grab a ledge while falling~~ — **DONE (§12):** Shift held during a fall → `check_grab`
+  (`seg006.c:1177`) → `fallhang` (seq_15); this is what sets `grab_timer = 12`.
+- **Climb down** — Down at a ledge edge with an edge behind → `down_pressed` grab path
+  (`seg005.c:472`) → `climbdown` (seq_68).
+- ~~Climb onto a closed gate/mirror/chomper~~ — **DONE 2026-07-07:** `can_climb_up`'s `seq_73`
+  (`climbfail`) variant (`seg005.c:840`) is ported — a closed gate/mirror/chomper above now bounces
+  the pull-up back down (`climbfail`) instead of climbing through. See `research_environment.md §1e`.
+- **The horizontal jumps** (standing jump / running jump) — the other branch of the jump family;
+  `control_jumpup`'s forward→standing-jump conversion (`seg005.c:680`) is a no-op until then.
+
+## 11. The routine-level-identical collision kernel (2026-07-10)
+
+**What changed.** The whole kid-vs-environment collision path was un-substituted into a
+verbatim port of SDLPoP's own routines — a new module **`collision_kernel.js`** that mirrors
+the C's *global-state* model (one `get_tile` that sets side-effect globals; the per-column
+collision buffers as module-level arrays; every routine reading/writing those globals exactly
+as `seg004.c`/`seg006.c` do). This **supersedes §5b** (the `Char.x`-clamp bump) and the
+"don't-fall-on-a-wall" stand-in: those substitutes, plus `wallAheadFace`, `getEdgeDistance`'s
+raw-tile-edge faces, and the local `doFall`/`land`/`startFall`/`checkOnFloor`/`checkAction`,
+are **deleted** from `player.js`.
+
+**Why (not just the one number).** The wall-stop **x-bias** — the prince settling ~6 internal
+units off the source — could have been closed by porting the `wall_dist`/`TILE_MIDX` face
+formula alone. But the earlier analysis proved that leaves a residual (the settle behaviour is
+entangled with the buffer scan + latch), and, more importantly, a *mix* of substitutes and
+faithful code is what made the bug hard to reason about (a phantom "+4" took several rounds to
+unwind). The decision (user's): make the whole subsystem identical so any discrepancy is a
+mechanical **value-diff against the source**, not a reasoning exercise. Identical routines don't
+prevent porting slips — they make them a one-line find (and two showed up immediately, below).
+
+**The port (each a named `// segNNN.c:line` routine):**
+
+- **Tile access** — `find_room_of_tile`, `get_tile` (sets `curr_room`/`tile_col`/`tile_row`/
+  `curr_tilepos`/`curr_tile2`), `get_tile_at_char`/`_infrontof_char`/`_behind_char`. Crucially
+  `get_tile_infrontof_char` stores the **pre-hop** column in `infrontx` (seg006.c:1306) — the
+  load-bearing detail (§2/§0 of `research_collision_detection.md`): `get_edge_distance` feeds
+  that raw `−1`/`10` (not the hopped `9`/`0`) to `dist_from_wall_forward`, so `x_bump` indexes
+  the off-screen entry directly. (`collision.js`'s pure `getTile` stays for value-only callers —
+  blockmap, the grab/hang reads — which don't need the globals.)
+- **Char box** — `load_frame_to_obj` (obj_x = internal·2 − 116; the even/odd ±1 is
+  collision-invariant here), `set_char_collision` (char_x_left/right_coll; the `FRAME_THIN`
+  inset; `char_col_left/right` are the clamped `[0,9]` *scan* helpers, never `curr_col`),
+  `determine_col` (UNCLAMPED), `dx_weight`, `distance_to_edge`. Its outputs — previously written
+  but dead — are now the buffer scan's inputs.
+- **Wall faces** — `get_left/right_wall_xpos` anchored at `coll_tile_left_xpos = x_bump[col+5]
+  + TILE_MIDX`, plus the per-type insets `wall_dist_from_left[] = {0,10,0,-1,0,0}` /
+  `wall_dist_from_right[] = {0,0,10,13,0,0}` (seg004.c:37/39), `can_bump_into_gate`,
+  `xpos_in_drawn_room` (the straddle offset). **This is the x-bias's origin:** a plain wall's
+  faces sit at tile-mid `+7` and tile-mid `+20`, not at the abstract cell edges.
+- **Buffer scan** — `check_collisions` (fill the 3-row band + edge-detect a `0→nonzero` bump in
+  the same room as last frame; a turn never bumps), `move_coll_to_prev` (with the FIX_COLL_FLAGS
+  zero-out SDLPoP enables by default), `get_row_collision_data` (pack the two nibble flags vs
+  `char_x_left/right_coll`, store the wall's room per column).
+- **Bump** — `check_bumped`/`check_bumped_look_left/right` (fed from the buffers),
+  `is_obstacle_at_col`/`is_obstacle` (open-gate / chomper-closed / mirror-break filter),
+  `bumped`/`bumped_floor`/`bumped_fall` (pin `Char.x` to the face + the `seq_47/46/45` recoil).
+- **Edge distance** — `get_edge_distance` (own-tile-first, then in-front) + `dist_from_wall_forward`
+  (indexes `x_bump[tile_col+5]` with **no** `xpos_in_drawn_room`, so the raw `infrontx` is what
+  makes a boundary wall resolve). Returns the distance + sets `edge_type`; `player.js`'s `edgeDist()`
+  wraps it into `{edgeType, distance}` for `control.js` + the jump code.
+- **Fall/floor** — `do_fall`/`land`/`start_fall`/`check_on_floor`/`in_wall`/`check_action` as
+  identical bodies. `start_fall` picks the faithful per-context fall sequence by fell-from frame
+  (`stepfall`=seq_7, `jumpfall`=seq_18, `stepfall2`=seq_19, `rjumpfall`=seq_21, `patchfall`=seq_104
+  — the `seqtbl.c:205` offsets table), each transcribed into `seqtbl.js` with the start-fall frames
+  102–105 + `set_fall` for the forward **drift** (a running fall carries forward). This retires the
+  old `freefall`-for-everything collapse and its `fall_x=0` stopgap (the drift is now re-established
+  each fall). `check_on_floor` ejects from a wall via the real `in_wall` (retiring L2). The
+  feather-fall variants (`stepfloat`) are omitted — no feather potion in scope, so
+  `jmp_if_feather` never branches.
+
+**The x-bias, resolved the lesson-6c way (collision faithful, view re-derived).** The kernel now
+stops the prince at the **source's** internal x — the inset collision face. In the DOS pseudo-3D
+view that reads flush (the wall's visible face is drawn inset from the abstract cell). Our view
+draws walls **flat** at the cell, so the faithful stop leaves the prince ~6 units off. We
+re-express that offset for *our* view with a render-only constant **`RENDER_X_BIAS = 6`**
+(`player.js`: draw the prince 6 internal-x units left of his true x). Collision is untouched;
+only the number in the render is our own. (The slab is `+7` on the left face vs `+6` on the
+right — ~2 screen px — so it's a tweakable constant, not a per-facing formula.)
+
+**Two porting slips the faithful routines made obvious:**
+
+1. **`alive`** — the faithful `bumped()` guards `Char.alive < 0` (SDLPoP's alive == −1). The
+   clone's `makeCharacter` never set `alive` → `undefined < 0` false → `bumped()` no-op'd and the
+   prince walked *through* walls. Fixed: `makeCharacter` inits `alive: -1` (+ `sword: 0`).
+2. **`drawnRoom` staleness** — the kernel first *cached* `drawnRoom`; `gotoRoom` synced it but
+   `dropAtStart` (R restart) / `POP.place` set the player's `drawnRoom` without a sync, so after a
+   cross + restart the cache was stale. `xpos_in_drawn_room` then skipped the −140 straddle offset,
+   computing a cross-boundary wall's face a room-width off, and the bump flung `Char.x` to ~208
+   ("suddenly emerge on the right side"). Fixed by reading `drawnRoom` **live** via a `getDrawnRoom`
+   getter — no cache, no desync.
+
+**Tick order** (`player.js`, faithful `play_kid_frame`, seg000.c:1205–1216): `play_seq →
+fall_accel/speed → load_frame_to_obj → determine_col → set_char_collision → check_collisions →
+check_bumped → check_action → check_press → exit_room`. No `determine_col` after `check_bumped`
+— a bumped char (action 5) no-ops in `check_action`, so the recoil settles on the pre-bump column
+exactly as the source. (`check_collisions`/`check_bumped` are skipped during the clone-only
+`testfoot` lean via `ch.testing`; `check_on_floor` guards on it too.)
+
+**Verified** (deterministic `#debug` stepping, zero console errors): wall bump settles at the
+inset face — **x=177** (plain wall col 8) / **x=64** (room-1 boundary wall), not the raw 170/58;
+falling entry → soft land; ledge-fall runs the real start-fall frames 102–106 → land; loose-floor
+collapse → room 2; deep fall ends **bounded** (no "fall forever"); legitimate horizontal cross
+(room 2↔3 both ways); jump-up → grab → hang → climb (row 1→0); turn; runstop. The render-bias
+screenshot shows the prince flush at the left wall with `Char.x=64` unchanged.
+
+**Genuinely out of scope** (separate *subsystems*, not collision-detection substitutes — the same
+class as char-vs-char): chompers (`start_chompers` stub + the buffer-reading `check_chomped_kid`),
+HP (`take_hp` — a medium land always survives), feather fall + the other potion **effects**, the
+exit level-door, and sword **combat** / guards. These arrive with their own features; none is a
+stand-in *in the collision path*. *(Since implemented as their own features: **buttons/portcullis**
+(+ `check_gate_push`, the entry-slam); the **sword/potion pickup** — `check_get_item`/`get_item`,
++ potion drink + colour label; the **mid-fall Shift-grab** — the `check_grab` stub is now the real
+routine, §12; **spikes** — now lethal (`research_environment.md §2.5`); and the **full `check_press`**
+— loose-break-from-above, §9.)*
+
+**Files:** `collision_kernel.js` (new), `player.js` (kernel-wired, substitutes deleted, the
+render-bias), `playseq.js` (`alive`/`sword` init), `seqtbl.js` (the 5 fall sequences). Deviation
+classification: `research_deviation_ledger.md` (L1/L2/D1 marked ✅).
+
+## 12. Grab a ledge in mid-fall (`check_grab`, 2026-07-10)
+
+**What it is.** Hold **Shift** while falling and, if a grabbable ledge is close enough ahead-and-
+above and you're not plummeting, the prince catches it and hangs — from where the §10 hang machinery
+climbs (Up) or drops (release). This fills the `check_grab` stub the kernel left (§11's "out of
+scope" list) and is the last consumer of the `grab_timer` field §10 put in place.
+
+**The routine** (`check_grab`, `seg006.c:1177`). Fires while `control_shift == HELD`, `fall_y < 32`
+(not too fast — `MAX_GRAB_FALLING_SPEED`), `alive < 0`, and the landing row is within reach
+(`(word)y_land[curr_row+1] <= (word)(Char.y + 25)`). It then nudges `Char.x` back 8
+(`char_dx_forward(-8)` + `load_fram_det_col`) so a ledge *just ahead* reads as grabbable, tests
+`can_grab_front_above` (through = the tile directly above; target = the tile front-above — the ledge),
+and on success snaps `Char.x` flush to the ledge's near edge (`distance_to_edge_weight`), seats
+`Char.y` at the landing row, zeroes `fall_y`, starts **`seq_15_grab_ledge_midair`** (our `fallhang`:
+`act(3) frame_80 jmp(hang)` — one reach-up frame then the ordinary hang loop), and sets
+`grab_timer = 12`. On failure it restores only `Char.x` (leaving the nudged `curr_col`, faithfully —
+next tick's `determine_col` re-derives it).
+
+**Two call sites, both already in the kernel** (unchanged): `check_action` runs it at the start-fall
+frames 102–105 (action `3_in_midair`); `do_fall` runs it every freefall tick the feet are still above
+the current row's floor line. So the grab window spans the whole descent until `fall_y` passes 32.
+
+**Where the body lives — the hook.** `check_grab` needs the control layer (`control_shift`) and the
+grab predicates that already live in `collision.js` (`canGrab`/`getTileAboveChar`/…). Per the kernel's
+own editing invariant ("a decision a control routine needs goes in `player.js`, never in the kernel"),
+the body is `checkGrab(ch)` in **`player.js`** — next to `checkJumpUp`/`hangFall`, reusing the same
+helpers as the jump-up grab (`can_grab_front_above` = `canGrab(getTileAboveChar, getTileFrontAboveChar,
+modifier, facingRight)`; the snap = `charDxForward(ch, distanceToEdge(ch, dxWeight(ch)))`). The kernel's
+`check_grab()` becomes a one-line delegate `Char.onCheckGrab?.()` — the **`onGetItem`/`SEQ_GET_ITEM`
+pattern** — so the source's two call sites stay faithful while no control state or grab predicate is
+pulled into the kernel (zero duplication, no new kernel import). The stale mid-fall-grab-is-deferred
+comment in `controlHanging` (`control.js`) was corrected in the same change.
+
+**Verified** (deterministic `#debug` stepping, zero console errors):
+
+- **Positive grab (natural motion):** run right off room 5 col 6 into the col-7 pit + Shift once
+  airborne → at the freefall tick with `y≈103, fall_y≈15` `check_grab` fires: `frame 80`, `Char.y`
+  snapped to 118 (`y_land[2]`), `fall_y=0`, `grab_timer=12` → next tick the `hang` loop (frame 91,
+  action 2) on the col-8 ledge. Screenshot confirms the hang pose.
+- **Grab → climb:** hold Shift through the 12-tick countdown (stays hanging, `hangstraight`), then Up
+  → `climbup` (frames 135→145), **row 1→0** onto the ledge.
+- **Grab → release:** let go → `hangdrop`/`hangfall` (§10) → drops and lands. (Idle hang drops, per the
+  faithful `control_hanging` — `else → hang_fall`.)
+- **Negatives (correctly no grab):** no Shift → lands; `fall_y` forced ≥ 32 → falls through; a
+  *centred* drop (stand on room 5 col 7, or the room 12 loose floors) → the `-8` back-nudge lands the
+  "above" check on an adjacent **floor** (can't grab *through* a floor) → no grab — this is why a
+  natural grab needs the prince at the *front* of his column (running off toward the ledge), exactly
+  as the mechanic intends.
+- **Regressions:** falling entry, run/runstop, wall bump (x=64/177), and the **jump-up grab**
+  (`grab_timer` stays 0 there — the mid-fall timer didn't leak) all still pass.
+
+**Files:** `seqtbl.js` (`fallhang` = seq_15), `player.js` (`checkGrab` + the `onCheckGrab` binding),
+`collision_kernel.js` (`check_grab` → hook delegate), `control.js` (stale comment fix).

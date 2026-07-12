@@ -1,0 +1,5 @@
+# Raw game data — Ubisoft's IP, never committed (see NOTICE).
+# Bring your own copy of the game and regenerate assets with tools/extract_masks.py.
+*.DAT
+*.dat
+*.pal

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prince of Persia — actor frames (KID.DAT silhouettes)</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 13px/1.4 system-ui, sans-serif; background: #1b1d22; color: #d7d9de; }
+  header { position: sticky; top: 0; z-index: 2; background: #14161a; border-bottom: 1px solid #2a2e36;
+           padding: 10px 16px; display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  h1 small { color: #8a8f99; font-weight: 400; margin-left: 8px; }
+  label { display: inline-flex; gap: 6px; align-items: center; color: #a7acb6; }
+  input[type=range] { width: 120px; }
+  #stage { padding: 16px; display: flex; flex-wrap: wrap; gap: 10px; align-content: flex-start; }
+  .cell { background: var(--bg, #b7b1a3); border-radius: 4px; padding: 6px 6px 3px;
+          display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .cell canvas { image-rendering: pixelated; display: block; }
+  .cap { font: 10px/1 ui-monospace, monospace; color: #333; opacity: .75; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Prince of Persia — actor frames <small id="sub">— KID.DAT silhouettes</small></h1>
+  <label>tint <input type="color" id="tint" value="#000000"></label>
+  <label>bg <input type="color" id="bg" value="#b7b1a3"></label>
+  <label>scale <input type="range" id="scale" min="1" max="6" step="1" value="3"><span id="scaleval">3×</span></label>
+</header>
+<div id="stage"></div>
+
+<script type="module" src="./actor_frames.js"></script>
+</body>
+</html>

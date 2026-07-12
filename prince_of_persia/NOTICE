@@ -1,0 +1,41 @@
+prince_of_persia — NOTICE
+==========================
+
+This project is an unofficial, non-commercial, educational experiment: a study
+of Prince of Persia's rotoscoped actor animation and movement. It is not
+affiliated with, endorsed by, or licensed by Ubisoft.
+
+
+Game assets
+-----------
+Prince of Persia and its original artwork are © Ubisoft Entertainment
+(originally Brøderbund, 1989).
+
+The silhouette masks committed under gfx/ (e.g. gfx/kid_masks.json) are 1-bit
+shape reductions derived from the original DOS sprite data, kept only so this
+educational animation study runs without a separate build step. The collision
+data committed under res/ (e.g. res/level1.js) is likewise a reduction — the
+per-tile collision TYPES + room links of a level, with no graphics — derived
+from LEVELS.DAT so experiments run without the game data. The original game data
+files (KID.DAT, LEVELS.DAT, PRINCE.DAT, …) are NOT included in this repository —
+bring your own copy of the game and regenerate assets with the tools/ extractors.
+
+If you are a rights holder and would prefer these derived assets not be
+distributed here, that is understood — they can be removed and generated
+locally instead (the extractor makes this a one-command step).
+
+
+Decoder — ported from SDLPoP (GPLv3)
+------------------------------------
+tools/extract_masks.py is a port of the DAT container + image decoder from
+SDLPoP — src/seg009.c (the four decompressors, conv_to_8bpp, and the resource
+/ image layout). tools/extract_level.py is a port of the level_type field
+layout + the doorlink bit-packing from SDLPoP — src/types.h, seg000.c (level
+load), seg006.c / seg007.c (tile + doorlink decode). SDLPoP is licensed under
+the GNU General Public License v3, so these decoders are derivative works and
+are likewise offered under the GPLv3.
+
+    SDLPoP — https://github.com/NagyD/SDLPoP  (NagyD and contributors)
+
+With thanks to the SDLPoP authors and the wider Prince of Persia preservation
+community, whose reverse-engineering made this study possible.
