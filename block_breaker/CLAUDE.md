@@ -36,19 +36,27 @@ screen-RAM mapping. The upfront investigation established:
   needed. Source routines port as JS functions with `Lxxxx` citations; ROM data
   tables are extracted verbatim.
 
-## Current state — Phase 1: level viewer (DONE)
+## Current state — level + tile data extracted (DONE)
 
 ```
 block_breaker/
-  tools/extract.py     dev tool: reads the external .asm  →  assets/levels.json
-  assets/levels.json   32 levels: { bitmask[17], colors[N], brickCount, breakable }
-  src/levels.js        decodeLevel(level, cols=11, rows=12) → grid  (port of L5C7E)
-  src/palette.js       MSX 16-colour palette + brick-index→RGB
-  demo/level_viewer.html + level_viewer.js   browse all 32 layouts
+  tools/extract.py     dev tool: reads the external .asm and decodes EVERYTHING at
+                       build time — ports L5C7E (bitmask→grid) and
+                       DECOMPRESS_TILE_COLORS (colour RLE). Runtime never unpacks.
+  assets/dat_levels.js export const LEVELS = 32 × { grid[12][11], brickCount, breakable }
+                       grid[r][c] = brick colour-index 0..9 or -1 (empty; pre-baked)
+  assets/dat_tiles.js  export const TILES = { patterns[2048], colors[2048], colorToPattern[20] }
+                       real MSX brick patterns + RLE-decompressed colours (extracted + rendered)
+  src/tiles.js         buildTileBitmaps(TILES) → 256 MSX tile bitmaps; drawBrick blits
+                       a brick's two 8×8 tiles. The faithful renderer.
+  src/palette.js       MSX 16-colour palette (MSX_PALETTE, used by tiles.js) + a now-
+                       superseded provisional brick-index→RGB map
+  demo/level_viewer.html + level_viewer.js   browse all 32 layouts, drawn with REAL MSX tiles
 ```
 
-Run it: `preview_start block_breaker` (port **8087**, config in
-`.claude/launch.json`), open `/demo/level_viewer.html`. Regenerate data:
+Data is imported as ES modules — no `fetch`, no runtime decode. Run it:
+`preview_start block_breaker` (port **8087**, config in `.claude/launch.json`),
+open `/demo/level_viewer.html`. Regenerate data:
 `python block_breaker/tools/extract.py [path-to-arkanoid_msx_disasm]`.
 
 ## Level format (verified against the disassembly + the live viewer)
@@ -74,11 +82,16 @@ Run it: `preview_start block_breaker` (port **8087**, config in
 
 ### The correctness invariant (standing test)
 
-> `popcount(bitmask) == len(colours) == (LEVEL_COLORS_PTR delta)` for every level.
+> `placed == popcount(bitmask) == brickCount` for every level — where `placed` is
+> the count of bricks the grid decode actually positioned on the 12×11 grid.
 
-Every present brick has exactly one colour byte. `tools/extract.py` asserts this
-at extraction; `demo/level_viewer.js` re-checks it live (the ✓/✗ per level). Keep
-this as the regression check whenever the decode path changes.
+Every present brick has exactly one colour byte, and gridding must place exactly
+`popcount` of them (a set bit landing in the 4-bit padding region would surface as
+`placed != popcount`). `tools/extract.py` asserts this at **build time** (plus the
+`LEVEL_COLORS_PTR` delta cross-check); the data ships pre-validated, so the viewer
+no longer re-checks live. Grid regression = the viewer rendering all 32 layouts
+unchanged — level 1 is 6 full rows of 11, level 15 is bilaterally symmetric, level
+8 shows 24 gold; a transposed or bit-reversed decode would break these.
 
 ### Gotcha: `BRICKS_PER_LEVEL` ≠ brick count
 
@@ -88,8 +101,9 @@ of bricks drawn. `present − breakable == goldCount`, and **colour index 9 =
 gold** is a *decoded fact*: index 9's per-level frequency equals
 `present − breakable` across all 32 levels. Provisional (unverified) so far:
 the 0–8 index→colour mapping in `palette.js` — those are canonical-Arkanoid
-stand-ins for the layout viewer, to be replaced by the real per-tile colours in
-the faithful-tile step.
+stand-ins for the layout viewer. The **real** per-tile patterns + colours are
+extracted into `assets/dat_tiles.js` and now rendered by `src/tiles.js`, retiring the
+provisional map (the viewer draws real tiles).
 
 ## Ball physics — ball ↔ paddle collision (DONE)
 
@@ -225,23 +239,43 @@ the note handler (`CMD_SET_ONE_NOTE_ON_CHANNEL` @ `:785`), and the period / volu
 / delay effect generators (`:892`+). Source map: `sound.asm` (RAM layout),
 `sounds.asm` (sound-ID table), `sound_src.asm` (the player).
 
-## Next step — faithful MSX-tile rendering (additive, planned)
+## Tile data extraction + rendering (DONE)
 
-Reuses `levels.json` / `levels.js` / `palette.js` unchanged; adds:
-- `src/rle.js` — port of `DECOMPRESS_TILE_COLORS` (`disassembly.asm:860`), the
-  colour-table RLE (literal if high-nibble≠0; else `[0x0X][countHi][a][b]` →
-  pair `(a,b)` × count). Reused later for backgrounds/title.
-- `src/tiles.js` — render an 8×8 pattern / 16×8 brick from pattern bytes
-  (`in_game_patterns.asm`) + decoded colour bytes (`in_game_colors.asm`) + palette.
-- `assets/tiles.json` — extracted patterns + decoded colour table.
-This will also yield the *real* brick colours, retiring the provisional 0–8 map.
+**Extraction — DONE.** The real MSX brick graphics are extracted into
+`assets/dat_tiles.js` (`export const TILES = { patterns, colors, colorToPattern }`).
+All decoding happens at **build time** in `extract.py` — there is **no `rle.js`**
+and **no `tiles.json`** (a decode mechanism is meaningless to run for gameplay):
+- **patterns** — 2048 bytes (256 chars × 8 rows) from `in_game_patterns.asm`
+  (ROM `0x7d84`), plain. `patterns[code*8 + row]`, MSB = leftmost pixel.
+- **colors** — 2048 bytes, RLE-decompressed by the ported `DECOMPRESS_TILE_COLORS`
+  (`disassembly.asm` @`0x4389`): literal if high-nibble≠0; else `[0x0X][Y][a][b]`
+  → pair `(a,b)` × `N = 256·X + Y`. `colors[code*8 + row] = (fg<<4)|bg`, nibbles
+  index the MSX palette. *Faithful boundary quirk:* the routine's outer check tests
+  only the pointer's HIGH byte, so the last record overshoots the 2048-byte third
+  by a few bytes (they spill into the next third, which is overwritten) — the
+  extractor decodes past the end and truncates to 2048, the hardware's effective
+  result.
+- **colorToPattern** — 20 bytes (`TBL_COLOR_TO_PATTERN` @`0x5ddb`): brick
+  colour-index `i` → `(colorToPattern[2i], colorToPattern[2i+1])` = the brick's
+  left + right 8×8 char codes (a 16×8 brick). `i=9` (gold) → `(0x67, 0x68)`.
+
+**Rendering — DONE (exact tiles).** `src/tiles.js` `buildTileBitmaps(TILES)` builds
+256 ready-to-blit 8×8 tile bitmaps once at load — each pixel is the pattern bit
+selecting that row's fg/bg colour, so it is pixel-identical to the MSX; `drawBrick`
+blits a brick's two tiles (`colorToPattern[2i]`, `[2i+1]`) scaled, nearest-neighbour.
+The fidelity call is settled as **exact** (real patterns + the 2-colours-per-8px-row
+colour bytes, not a flat colour). `demo/level_viewer.js` draws every layout — grid
+**and** the 10-type legend — with real tiles. Verified by canvas-pixel measurement:
+brick type 8 renders real gray (palette 14, not the provisional "silver?"), the
+black brick-separator seams are present, and level 8 shows 24 gold.
 
 ## Out of scope (for now)
 Breakable-brick effects (removal / score / capsule — only the unbreakable action is
 ported), aliens, lasers, DOH, attract/demo mode, lives/score. Audio: the PSG **hardware
 seam + demo are done** (see **Audio** above); the faithful *sequencer* port is the
 remaining sound work. (Done: ball movement, ball↔wall, ball↔paddle, **ball↔brick
-collision + the unbreakable-brick effect**, **PSG audio seam + Web Audio path**.)
+collision + the unbreakable-brick effect**, **PSG audio seam + Web Audio path**,
+**MSX tile-data extraction**.)
 
 ## Conventions
 - ES6 modules, no build step; `python tools/devserver.py` (no-cache) for preview.
