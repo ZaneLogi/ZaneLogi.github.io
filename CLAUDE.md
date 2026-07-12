@@ -521,6 +521,107 @@ for the developer's safety during the work. Only the squash goes
 to origin. Commit-body convention: cite the research-doc sections
 that hold the details, don't restate them in the commit message.
 
+## Lessons — porting a rotoscoped animation engine (from prince_of_persia)
+
+These surfaced from `prince_of_persia` (a routine-level port of Prince
+of Persia's rotoscoped actor from SDLPoP) but generalise past it — they
+belong with the retro-port lessons above. Getting the run cycle right —
+facing → anchor → step distance — took several wrong turns; each lesson
+was paid for in bugs.
+
+1. **Source data that looks "weird" is usually load-bearing.** The frames'
+   asymmetric padding looked like sloppiness; it was the per-frame
+   registration. Suspect *meaning* before normalising it away. (= the rule
+   *"deviations are load-bearing"* above, applied to art assets.)
+2. **In a faithful port, find the transform in the source — don't invent
+   it.** The flip's mirror axis was guessed twice (box centre, content
+   centre) before reading `draw_mid`, where PoP's exact rule (`xpos -= w;
+   hflip`) was waiting. The draw/blit routine — flip, clip included — is part
+   of the mechanism; read it, don't reconstruct it.
+3. **Static correctness ≠ dynamic correctness.** A fix that passes a
+   single-frame symmetry test can still be wrong in motion. When the symptom
+   is animation, measure the animation over time (the failing feature — the
+   feet), not a static proxy.
+4. **Measure canvas pixels, not screenshots.** The preview screenshot
+   rasterises at a non-1:1 scale — it invented an offset that wasn't there and
+   could equally hide a real one. Every correct conclusion came from
+   `getImageData` via `preview_eval`. Eyeballing precise position / facing /
+   symmetry is actively misleading.
+5. **Suspect your own last fix; trust the observer's "this looks off."** The
+   step asymmetry was *caused by* the previous fix — a new symptom right after
+   a change makes the change the prime suspect. When the user reports a
+   mismatch and your reasoning "proves" it's fine, **measure** — the observer
+   watching the real output beats reasoning from assumptions.
+6. **With a faithful RE source, follow it — don't simplify away without a
+   strong reason.** Deviating needs a *load-bearing* justification (a
+   hardware-only mechanism, §"When a subsystem has no software counterpart —
+   drop, not defer" above), never "this is simpler / enough for now." The trap
+   is that **shortcuts entangle**: the position substrate accumulated a
+   `curr_col` clamp *and* a front-only `getEdgeDistance` — each existed only
+   because the other did, so each looked individually harmless while together
+   they produced a wrong-direction bug (climbing into a wall at room edges).
+   Unwinding them later cost a full research pass + rework; the faithful port
+   up front would have been cheaper. Four corollaries: **(a)** prove the
+   entanglement before ripping it out — a quick A/B toggle (clamp on/off) both
+   *confirmed* the fix and *surfaced* the companion shortcut before the rework,
+   not mid-way; **(b)** don't offer the user short-term "let's stop here / make
+   it work for now" off-ramps on substrate code — take the long-term view and
+   port the whole coherent mechanism, deferring only separable *features*,
+   never the substrate; **(c)** *not everything in the source is mechanism.* A
+   quantity expressed in a **view / render space we deliberately don't
+   reproduce** is a **second legitimate deviation** (beyond hardware-only):
+   **re-derive it in our view, don't copy the number.** PoP's
+   `wall_dist_from_left` / `dist_from_wall_forward` insets a wall's collision
+   face ~10 units because the DOS room is drawn **pseudo-3D** (the visible wall
+   face sits inset from the abstract tile boundary); a **flat** clone draws the
+   wall at the tile cell, so the faithful stop is **flush**, and any face
+   offset is re-derived from *its own* render — not ported. Keep the collision
+   **logic** faithful (which tile blocks, which side, link-hop, bump/recoil,
+   the control latch); re-express only the **view-space number**. Reading
+   "follow the source" as an all-or-nothing binary *is itself the trap* — it
+   stalled a whole session on this exact x-bias (2026-07-09). The test: *is the
+   number in a coordinate/view space we chose not to reproduce?* If yes,
+   re-derive; if it's mechanism, still follow it.
+7. **The flag-and-wait protocol (binding — this is how corollary 6c gets
+   adjudicated).** "Follow the source, don't simplify" is the firm default.
+   When the user asks for something that looks like it breaks that rule, do
+   **NOT** grind trying to reconcile faithfulness with the request, and do
+   **NOT** silently decide for yourself whether the deviation is "legitimate" —
+   that self-adjudication is exactly what causes the stall / no-response loop
+   (paid for 2026-07-09 on `wall_dist`). Instead: **stop, state in one line
+   "this breaks follow-the-source, specifically X," and WAIT for the user's
+   call.** The assistant *flags* the break; the *user* decides whether to break
+   it (e.g. "yes — it's a view-space thing, do the flat version"). Once the
+   user authorises the deviation, implement it without further agonising.
+   Division of labour: I flag, you rule.
+
+## UI conventions — HUD / on-screen readouts
+
+A general UI rule (surfaced in `prince_of_persia`, applies to every game's HUD).
+
+**Live readouts use fixed-width fields — pad each value to its domain's maximum
+width so the text never bounces.** A HUD that updates every frame shifts every
+field to the right of any value whose *digit / character count* changes
+(`frame=7` → `frame=11`, `dir=left` → `dir=right`). That horizontal jitter is
+noisy and hard to read. A monospace font alone does **not** fix it — `1` and
+`11` are still one cell vs two; the *field width itself* must be held constant.
+
+The rule, in three parts:
+
+1. **Monospace + `white-space: pre`** on the container, so the pad spaces render
+   at a fixed cell width (a proportional font defeats padding).
+2. **Pad every variable field to the max width its value can reach** — numbers
+   right-aligned (`padStart`), state words left-aligned (`padEnd`). Size to the
+   domain maximum: a coordinate bounded `0..640` → 3 digits; a `left`/`right`
+   state → 5. Constant fields (e.g. `[bounds 0..640]`) need no padding.
+3. **The test is one constant string length.** Sample the rendered readout over
+   many ticks across all states; if the set of distinct lengths is > 1, a field
+   is still bouncing. (Measure the string, not a screenshot — same discipline as
+   the pixel-measure lesson (#4) above.)
+
+Reference implementation: `prince_of_persia/demos/motion.js` — the `padN` /
+`padW` helpers and the HUD line that uses them.
+
 ## mini_mario (`mario_physics/`) — quick reference
 
 Fixed-timestep accumulator (1/60 s physics ticks) with render

@@ -751,9 +751,9 @@ KID sprites natively face **LEFT**.
 
 ## UI conventions — HUD / on-screen readouts
 
-> **Promote to the repo-root `CLAUDE.md` on merge** (same as the lessons below).
-> This is a general UI rule, not PoP-specific — it applies to every game's HUD;
-> it just stays local until the project lands so it rides in with the merge.
+> **Promoted to the repo-root `CLAUDE.md`** (2026-07-12, with the merge into
+> `main`). Kept here too as the project-local reference; the root copy is the
+> general version.
 
 **Live readouts use fixed-width fields — pad each value to its domain's maximum
 width so the text never bounces.** A HUD that updates every frame shifts every
@@ -780,10 +780,9 @@ HUD line that uses them.
 
 ## Lessons learned — debugging the run cycle
 
-> **Promote this list to the repo-root `CLAUDE.md` once `prince_of_persia` is
-> completed and merged to `main`.** These generalise well past this project (they
-> belong with the retro-port lessons at the root), but stay local until the
-> project lands so they ride in with its merge.
+> **Promoted to the repo-root `CLAUDE.md`** (2026-07-12, with the merge into
+> `main`) — they sit with the retro-port lessons there. Kept here too as the
+> project-local record.
 
 Getting the run cycle right — facing → anchor → step distance — took several wrong
 turns. Each lesson was paid for in bugs:
