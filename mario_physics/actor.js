@@ -26,6 +26,17 @@ const BIG_H = 64;
 // the constants (accel = 0.4, gravity = 0.6) are tuned for 60 FPS.
 // Multiplying by (dt * 60) normalizes them to behave identically at any FPS.
 
+// ----------------------
+// Actor
+// ----------------------
+// An Actor models a body's own intentions, not its place in the world. Each
+// step it produces two things and nothing more:
+//   applyInput()           input + gravity + jump -> velocity    (how it wants to move)
+//   updateAnimationState() velocity + contacts    -> currentState (how it wants to look)
+// It holds no knowledge of tiles or geometry. Whatever the world permits comes
+// back through `this.contacts`, and that struct is the single place where the
+// results of collision (grounded / hit wall / hit ceiling) re-enter the actor's
+// own decisions.
 export class Actor {
   constructor(x, y) {
     this.x = x;
@@ -46,53 +57,62 @@ export class Actor {
     this.gravity = GRAVITY;
     this.maxFall = 6.0;
 
-    this.onGround = false;
+    // The world's answer to last step's motion: which sides ended in contact.
+    // Read as an input to this step's movement — jumping and ground traction are
+    // only available when grounded.
+    this.contacts = { ground: false, ceiling: false, left: false, right: false };
     this.jumpHeld = false;
     this.prevJump = false;
 
     this.skidFriction = 0.2;
+    this.isSkidding = false;
 
     this.facing = 1; // 1 = right, -1 = left
     this.currentState = "idle"; // main animation state
   }
 
-  doPhysics(input, dt) {
-    let desiredSpeed = input.run ? this.speedRun : this.speedWalk;
-    let accel = this.onGround ? (input.run ? this.accelRun : this.accelWalk) : this.airAccel;
+  // How the actor wants to move this step: fold input and forces into a
+  // velocity. Reaches the world only through `this.contacts` (last step's
+  // result), never by inspecting tiles directly.
+  applyInput(input, dt) {
+    const grounded = this.contacts.ground;
+    const step = dt * 60;
 
-    let isSkidding = false;
+    let desiredSpeed = input.run ? this.speedRun : this.speedWalk;
+    let accel = grounded ? (input.run ? this.accelRun : this.accelWalk) : this.airAccel;
+
+    this.isSkidding = false;
 
     // --- HORIZONTAL MOVEMENT ---
     if (input.left) {
       this.facing = -1;
-      if (this.vx > 0 && this.onGround) {
-        isSkidding = true;
-        this.vx -= this.skidFriction * (dt * 60); // scaled
+      if (this.vx > 0 && grounded) {
+        this.isSkidding = true;
+        this.vx -= this.skidFriction * step; // scaled
         if (this.vx < 0) this.vx = 0;
       } else {
-        this.vx -= accel * (dt * 60); // scaled
+        this.vx -= accel * step; // scaled
         if (this.vx < -desiredSpeed) this.vx = -desiredSpeed;
       }
     } else if (input.right) {
       this.facing = 1;
-      if (this.vx < 0 && this.onGround) {
-        isSkidding = true;
-        this.vx += this.skidFriction * (dt * 60); // scaled
+      if (this.vx < 0 && grounded) {
+        this.isSkidding = true;
+        this.vx += this.skidFriction * step; // scaled
         if (this.vx > 0) this.vx = 0;
       } else {
-        this.vx += accel * (dt * 60); // scaled
+        this.vx += accel * step; // scaled
         if (this.vx > desiredSpeed) this.vx = desiredSpeed;
       }
     } else {
       // natural decel
-      this.vx *= Math.pow(this.decel, dt * 60); // framerate independent friction
+      this.vx *= Math.pow(this.decel, step); // framerate independent friction
     }
 
     // --- JUMPING ---
     // Jump start (only on new key press AND on ground)
-    if (input.jump && !this.prevJump && this.onGround) {
+    if (input.jump && !this.prevJump && grounded) {
       this.vy = this.jumpVel;
-      this.onGround = false;
       this.jumpHeld = true;
     }
 
@@ -106,13 +126,17 @@ export class Actor {
     this.prevJump = input.jump;
 
     // --- GRAVITY ---
-    this.vy += this.gravity * (dt * 60); // scaled
+    this.vy += this.gravity * step; // scaled
     if (this.vy > this.maxFall) this.vy = this.maxFall;
+  }
 
-    // --- STATE PRIORITY ---
-    if (isSkidding) {
+  // How the actor wants to look, given the motion the world actually allowed.
+  // Kept apart from the movement step so presentation and physics can each
+  // change without disturbing the other.
+  updateAnimationState() {
+    if (this.isSkidding) {
       this.currentState = "skid";
-    } else if (!this.onGround) {
+    } else if (!this.contacts.ground) {
       if (this.vy < 0) this.currentState = "jump";
       else this.currentState = "fall";
     } else if (Math.abs(this.vx) > 0.1) {
@@ -121,51 +145,5 @@ export class Actor {
     } else {
       this.currentState = "idle";
     }
-  }
-
-  moveAndCollide(levelMap, dt) {
-    const TILE_SIZE = levelMap.tileSize;
-    const isSolidTileAt = (x, y) => levelMap.isSolidAt(x, y);
-
-    // Horizontal move
-    this.x += this.vx * (dt * 60); // scaled
-    if (this.vx > 0) { // moving right
-      if (isSolidTileAt(this.x + this.w, this.y + 0.01) || isSolidTileAt(this.x + this.w, this.y + this.h - 1.01)) {
-        this.x = Math.floor((this.x + this.w) / TILE_SIZE) * TILE_SIZE - this.w - 0.01;
-        this.vx = 0;
-      }
-    } else if (this.vx < 0) { // moving left
-      if (isSolidTileAt(this.x, this.y + 0.01) || isSolidTileAt(this.x, this.y + this.h - 1.01)) {
-        this.x = Math.floor(this.x / TILE_SIZE + 1) * TILE_SIZE;
-        this.vx = 0;
-      }
-    }
-
-    // Vertical move
-    this.y += this.vy * (dt * 60); // scaled
-    this.onGround = false; // reset
-
-    if (this.vy > 0) { // falling
-      if (isSolidTileAt(this.x, this.y + this.h) || isSolidTileAt(this.x + this.w - 1, this.y + this.h)) {
-        this.y = Math.floor((this.y + this.h) / TILE_SIZE) * TILE_SIZE - this.h - 0.01;
-        this.vy = 0;
-        this.onGround = true;
-      }
-    } else if (this.vy < 0) { // jumping upward
-      if (isSolidTileAt(this.x, this.y) || isSolidTileAt(this.x + this.w - 1, this.y)) {
-        this.y = Math.floor(this.y / TILE_SIZE + 1) * TILE_SIZE;
-        this.vy = 0;
-      }
-    } else {
-      // this.vy === 0, Check if standing on ground
-      if (isSolidTileAt(this.x, this.y + this.h + 1) || isSolidTileAt(this.x + this.w - 1, this.y + this.h + 1)) {
-        this.onGround = true;
-      }
-    }
-  }
-
-  update(input, levelMap, dt) {
-    this.doPhysics(input, dt);
-    this.moveAndCollide(levelMap, dt);
   }
 }

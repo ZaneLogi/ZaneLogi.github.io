@@ -1,3 +1,5 @@
+import { resolveCollision } from './collision.js';
+
 export class World {
   constructor(levelMap) {
     this.levelMap = levelMap;
@@ -10,8 +12,11 @@ export class World {
 
   update(input, dt) {
     for (const obj of this.objects) {
-      obj.actor.update(input, this.levelMap, dt);
-      obj.animator.update(obj.actor.currentState, dt);
+      const actor = obj.actor;
+      actor.applyInput(input, dt);                              // 1. intent  -> velocity
+      actor.contacts = resolveCollision(actor, this.levelMap, dt); // 2. integrate + collide + respond
+      actor.updateAnimationState();                             // 3. velocity + contacts -> anim state
+      obj.animator.update(actor.currentState, dt);
     }
   }
 
