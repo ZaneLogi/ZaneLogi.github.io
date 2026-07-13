@@ -621,29 +621,3 @@ The rule, in three parts:
 
 Reference implementation: `prince_of_persia/demos/motion.js` — the `padN` /
 `padW` helpers and the HUD line that uses them.
-
-## mini_mario (`mario_physics/`) — quick reference
-
-Fixed-timestep accumulator (1/60 s physics ticks) with render
-interpolation, so visuals stay smooth regardless of display refresh
-rate. Physics values in `actor.js` are multiplied by `dt * 60` to stay
-frame-rate independent — keep this invariant when adding new forces or
-velocities.
-
-| File                | Role                                                    |
-|---------------------|---------------------------------------------------------|
-| `main.js`           | Game loop, input, canvas setup                          |
-| `actor.js`          | AABB physics: gravity, accel, skid, jump, tilemap col.  |
-| `actor_animator.js` | Sprite state-machine + horizontal facing flip           |
-| `world.js`          | Owns actor/animator list; drives update + render        |
-| `camera.js`         | Smooth follow with dead zone, world→screen, map clamp   |
-| `level_map.js`      | Tile queries: world pos → tile, solid check, tile bbox  |
-
-Input: arrows = move · Space = jump (early release = short jump) ·
-Shift / Z = run.
-
-Sprites loaded via `mario/resource.js` (shared with the legacy demo).
-
-`mario/` is the original full-game implementation (~2300 lines, no
-fixed timestep, string-based state). Useful as a reference for sprite
-data and level structure but intentionally not refactored.
