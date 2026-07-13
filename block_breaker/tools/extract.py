@@ -55,12 +55,29 @@ DEFAULT_SRC = Path(r"C:\Z_Temp\arkanoid_msx_disasm")
 OUT_DIR = Path(__file__).resolve().parent.parent / "assets"
 OUT_LEVELS = OUT_DIR / "dat_levels.js"
 OUT_TILES = OUT_DIR / "dat_tiles.js"
+OUT_SOUND = OUT_DIR / "dat_sound.js"
 
 BITMASK_BYTES = 17
 NUM_LEVELS = 32
 COLS = 11
 ROWS = 12
 TILE_TABLE_BYTES = 2048   # one SCREEN 2 third: 256 chars x 8 rows
+
+# The PSG player + its data span this region (sound_src.asm ORG 0xB400).
+SOUND_BASE = 0xB400
+SOUND_END = 0xC000        # exclusive; the image is 0xB400..0xBFFF = 0x0C00 bytes
+
+# z80dasm omitted the opcode bytes on a few code lines where a label immediately
+# follows the instruction. Supply them explicitly (byte verified from the Z80
+# mnemonic). This is code, not sound data -- included only for a gap-free image.
+SOUND_ROM_OVERRIDES = {
+    0xB58B: 0x5E,         # ld e,(hl)  (WRITE_MASKED_PSG_REG_AND_ADVANCE, sound_src.asm:483)
+    # CMD_NOTE_CH1_AND_EFFECT prologue @0xB676 (sound_src.asm:716-718), written
+    # symbolically without byte comments. Assembled by hand:
+    0xB676: 0x21, 0xB677: 0xC5, 0xB678: 0xE5,   # ld hl, PERIOD_EFFECT0_DELTA (0xE5C5)
+    0xB679: 0x16, 0xB67A: 0x01,                 # ld d, 1
+    0xB67B: 0xCD, 0xB67C: 0xE6, 0xB67D: 0xB6,   # call CMD_SET_ONE_NOTE_ON_CHANNEL (0xB6E6)
+}
 
 
 def read_asm(path):
@@ -73,6 +90,16 @@ def read_asm(path):
 ADDR_RE = re.compile(r";\s*0x([0-9a-fA-F]+)")
 # a numeric token (hex or decimal) inside a db/dw operand list.
 NUM_RE = re.compile(r"0x[0-9a-fA-F]+|\d+")
+
+# For the sound PC-walk (build_sound_rom): a code line's comment is
+# `<addr>\t<bytes>\t<ascii>`; a data range comment is `0xADDR - 0xADDR`.
+BYTE_RE = re.compile(r"^[0-9a-fA-F]{2}$")            # one opcode byte
+RANGE_ADDR_RE = re.compile(r"0x([0-9a-fA-F]+)\s*-")  # a data line's start-of-range addr
+# a code line's `;<addr>\t<bytes>` (addr = 4 hex; bytes = the field up to the next
+# tab). Search anywhere -- some lines carry a stray `;` in the operand first
+# (e.g. `ld b, (TBL_SOUND_PARAMS & 0xFF00) >> 8; ;b51d\t06 b4`).
+CODE_COMMENT_RE = re.compile(r";([0-9a-fA-F]{4})\t([^\t]*)")
+SOUND_ID_RE = re.compile(r"^(SOUND_\w+):\s*equ\s+(\d+)")
 
 
 def build_addr_map(path):
@@ -203,6 +230,107 @@ def decompress_tile_colors(stream, out_len=TILE_TABLE_BYTES):
     return out[:out_len]                    # discard the benign overshoot
 
 
+def build_sound_rom(path):
+    """Assemble sound_src.asm's 0xB400..0xBFFF byte image WITHOUT a Z80 assembler.
+
+    z80dasm emits every instruction's raw opcode bytes in its
+    `;<addr>\\t<bytes>\\t<ascii>` comment, and the data lines carry db/dw
+    operands. So we PC-walk from ORG 0xB400: code lines are self-locating (the
+    comment holds addr + bytes); db/dw data lines advance the PC, resyncing it at
+    any `0xADDR -` range comment (and at the comment-only line that precedes the
+    descriptor blocks). The one symbolic operand `dw SOUND_SEQUENCES` resolves to
+    0xB855.
+
+    Why not just parse db lines (like the level/tile extractor): some effect-preset
+    bytes (SOUND_EFFECT_PRESET_TABLE -> 0xB4xx) live at addresses the disassembler
+    rendered as CODE, so the code-comment bytes are load-bearing sound data.
+    """
+    mem = {}
+    pc = SOUND_BASE
+    for raw in read_asm(path).splitlines():
+        code = raw.split(";", 1)[0].strip()      # operand text, before any comment
+
+        if code.startswith("db") or code.startswith("dw"):
+            is_dw = code.startswith("dw")
+            m = RANGE_ADDR_RE.search(raw)         # this data line states its own addr?
+            if m:
+                pc = int(m.group(1), 16)
+            for tok in code[2:].split(","):
+                tok = tok.strip()
+                if not tok:
+                    continue
+                val = 0xB855 if tok == "SOUND_SEQUENCES" else int(tok, 0)
+                if is_dw:                         # little-endian word
+                    mem[pc] = val & 0xFF
+                    mem[pc + 1] = (val >> 8) & 0xFF
+                    pc += 2
+                else:
+                    mem[pc] = val & 0xFF
+                    pc += 1
+            continue
+
+        # A code line: its comment holds `;<addr>\t<bytes>`. Self-locating.
+        cm = CODE_COMMENT_RE.search(raw)
+        if cm:
+            pc = int(cm.group(1), 16)
+            for b in cm.group(2).split():         # the byte field, up to the ascii tab
+                if not BYTE_RE.match(b):
+                    break
+                mem[pc] = int(b, 16)
+                pc += 1
+            continue
+
+        # A comment-only line that seeds the next block's address (`; 0xb422 - ...`).
+        m = RANGE_ADDR_RE.search(raw)
+        if m:
+            pc = int(m.group(1), 16)
+
+    for a, b in SOUND_ROM_OVERRIDES.items():      # fill only the byte-less code lines
+        mem.setdefault(a, b)
+
+    rom = []
+    for a in range(SOUND_BASE, SOUND_END):        # contiguity = parse-desync tripwire
+        if a not in mem:
+            raise SystemExit(f"sound rom gap at {a:#06x} (PC-walk desync)")
+        rom.append(mem[a])
+    return rom
+
+
+def parse_sound_ids(path):
+    """sounds.asm `SOUND_NAME: equ N` -> { NAME: N } (SOUND_ prefix stripped)."""
+    ids = {}
+    for line in read_asm(path).splitlines():
+        m = SOUND_ID_RE.match(line.strip())
+        if m:
+            ids[m.group(1)[len("SOUND_"):]] = int(m.group(2))
+    return ids
+
+
+def check_sound_anchors(rom):
+    """Fail the build if the byte image is misaligned (see docs/research_sound.md §8)."""
+    def at(addr):
+        return rom[addr - SOUND_BASE]
+
+    anchors = [
+        (0xB400, [0xC3, 0xE8, 0xB4], "jp PLAY_SOUND"),
+        (0xB403, [0xC3, 0x94, 0xB5], "jp SOUND_ISR_UPDATE"),
+        (0xB855, [0x01], "SOUND_SEQUENCES[0]"),
+        (0xBA68, [0x0C], "stream 0xBA68 (sfx196 primary)"),
+        (0xB86A, [0x7F], "stream 0xB86A (sfx2 brick-destroyed)"),
+    ]
+    for addr, expect, name in anchors:
+        got = [at(addr + i) for i in range(len(expect))]
+        assert got == expect, (
+            f"sound anchor {name} @{addr:#06x}: "
+            f"{['0x%02x' % v for v in got]} != {['0x%02x' % v for v in expect]}")
+
+    # Descriptor cross-check: sfx 2 -> pointer[2] -> block -> stream 0xB86A. If the
+    # PC-walk over the 5-byte descriptor blocks desynced, this word is wrong.
+    block = 0xB400 | at(0xB406 + 2)
+    stream = at(block + 3) | (at(block + 4) << 8)
+    assert stream == 0xB86A, f"sfx2 descriptor stream {stream:#06x} != 0xB86A"
+
+
 def fmt_hex(vals, per_line=16, indent="    "):
     """Wrap a byte list as 0xNN rows for a readable generated array."""
     rows = []
@@ -232,6 +360,30 @@ TILES_HEADER = """\
 //                                  = the brick's two 8x8 halves (16x8 brick)
 //                                  (TBL_COLOR_TO_PATTERN @0x5ddb). i=9 = gold.
 """
+
+
+SOUND_HEADER = """\
+// AUTO-GENERATED by tools/extract.py -- do not edit by hand.
+// The Arkanoid MSX PSG player + data, assembled from sound_src.asm (ORG 0xB400)
+// WITHOUT a Z80 assembler: db/dw operands + the raw opcode bytes z80dasm emits in
+// each instruction's ;addr comment (some effect-preset data lives at addresses the
+// disassembler rendered as code). See docs/research_sound.md.
+//   base   0xB400  -- rom[addr - base] mirrors the Z80's absolute addressing.
+//   rom    0x0C00 bytes (0xB400..0xBFFF): jp table, TBL_SOUND_PARAMS + descriptor
+//          blocks, the handler/effect code region, and SOUND_SEQUENCES bytecode.
+//   ids    sounds.asm's SOUND_* equ table (prefix stripped).
+"""
+
+
+def write_sound_js(rom, ids):
+    id_lines = ",\n".join(f"    {k}: {v}" for k, v in ids.items())
+    OUT_SOUND.write_text(
+        SOUND_HEADER
+        + "export const SOUND = {\n"
+        + f"  base: 0x{SOUND_BASE:04x},\n"
+        + "  rom: [\n" + fmt_hex(rom) + "\n  ],\n"
+        + "  ids: {\n" + id_lines + ",\n  },\n"
+        + "};\n")
 
 
 def write_levels_js(levels):
@@ -338,9 +490,15 @@ def main():
     assert patterns[0x23 * 8] == 0xff, (
         f"solid brick 0x23 row0 = {patterns[0x23*8]:#04x} != 0xff")
 
+    # ---- sound: the whole PSG player + data as a byte image + the id table ---
+    sound_rom = build_sound_rom(src / "sound_src.asm")
+    sound_ids = parse_sound_ids(src / "sounds.asm")
+    check_sound_anchors(sound_rom)
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     write_levels_js(levels)
     write_tiles_js(patterns, tile_colors, color_to_pattern)
+    write_sound_js(sound_rom, sound_ids)
 
     print(f"OK  {NUM_LEVELS} levels, {total_present} bricks present total")
     print(f"    present (drawn): {[lv['brickCount'] for lv in levels]}")
@@ -355,6 +513,9 @@ def main():
     print("    level 1 grid (anchor -- expect 6 full rows of 11):")
     for row in levels[0]["grid"]:
         print("      " + "".join("#" if c != -1 else "." for c in row))
+    print(f"OK  sound: rom={len(sound_rom)} bytes (0x{SOUND_BASE:04x}..0x{SOUND_END-1:04x}), "
+          f"{len(sound_ids)} ids; anchors OK (jp table, SOUND_SEQUENCES, sfx2/sfx196 streams)")
+    print(f"    wrote  {OUT_SOUND}")
 
 
 if __name__ == "__main__":

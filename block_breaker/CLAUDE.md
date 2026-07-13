@@ -246,7 +246,7 @@ real level (`assets/dat_levels.js`), drawn with real MSX tiles (`src/tiles.js`).
 - **Self-test:** `game.js selfTest()` fires a ball into a private copy of the selected level
   for 3000 frames — asserts containment (x∈[15,189]) and that some bricks actually break.
 
-## Audio — PSG sound (hardware seam + demo DONE; sequencer pending)
+## Audio — PSG sound (hardware seam + demo DONE; sequencer deferred)
 
 **Research finding — the MSX PSG path IS real code, so it ports** (contrast an
 analog-only subsystem, which the root `CLAUDE.md` says to *drop*). The sound
@@ -299,15 +299,29 @@ buttons are a hand-scheduled tune in the demo page (♩=120), there to exercise
 all three tone channels + the noise voice. The faithful engine files carry no
 tune data — that stays in the demo.
 
-### Next increment — the faithful sequencer port
-Port `SOUND_ISR_UPDATE`'s bytecode player + effects into `SoundEngine.isrUpdate`,
-fed the extracted `SOUND_SEQUENCES` data, so `sfx(196)` plays the genuine
-level-start music and `sfx(2)` the brick-break. Pieces: the queue drain
-(`PLAY_SOUND` @ `sound_src.asm:202`), descriptor decode (`TBL_SOUND_PARAMS` @ `:7`),
-the two stream advancers (`ADVANCE_SOUND_STREAM_IF_READY` @ `:130` + `DISPATCH_*`),
-the note handler (`CMD_SET_ONE_NOTE_ON_CHANNEL` @ `:785`), and the period / volume
-/ delay effect generators (`:892`+). Source map: `sound.asm` (RAM layout),
-`sounds.asm` (sound-ID table), `sound_src.asm` (the player).
+### Sequencer — deferred (research banked 2026-07-13)
+The faithful sequencer port (the bytecode player + effect generators that WRITE
+the seam's shadow) is **deferred** — we chose not to implement in-game sound for
+now, but the research is **complete and banked** in
+[`docs/research_sound.md`](docs/research_sound.md): a routine-for-routine spec of
+`SOUND_ISR_UPDATE` (queue drain `PLAY_SOUND` @ `sound_src.asm:202`, descriptor
+decode `TBL_SOUND_PARAMS`, the two stream advancers @ `:130`, the note handler
+`CMD_SET_ONE_NOTE_ON_CHANNEL` @ `:785`, the period/volume/delay effect generators
+@ `:892`+). `tools/extract.py` also gained a sound-extraction driver that
+assembles the full player+data ROM image (`0xB400..0xC000`) into
+`assets/dat_sound.js`; that generated blob is **not committed** (nothing consumes
+it — re-run `extract.py` to regenerate). Resuming is therefore a pure coding
+task — no re-research, no re-extraction.
+
+**Load-bearing finding (`research_sound.md §4/§6`):** the note data alone won't
+play — a "note" is a raw 12-bit tone period held for N frames, and the sound is
+the effect generators sculpting volume/pitch on top every tick. Strip them and
+SFX become sustained beeps, music a flat drone; the generators ARE the sound.
+
+No player is wired — committed `sound_engine.js` is the `Psg` seam + queue
+skeleton only, and the game plays no audio; the seam (ayumi + worklet, `1d30535`)
+stays, unused. (A hand-authored blip SFX engine was weighed and set aside in
+favour of faithful-or-nothing, per the finding above.)
 
 ## Tile data extraction + rendering (DONE)
 
