@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>block_breaker — ball ↔ blocks</title>
+<style>
+  body { margin: 0; background: #05060a; color: #c9d2e0;
+         font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace;
+         display: flex; flex-direction: column; align-items: center; gap: 12px;
+         padding: 20px; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0; }
+  canvas { image-rendering: pixelated; background: #0d0f17;
+           border: 1px solid #2a2f3d; }
+  .note { color: #7d879b; max-width: 640px; text-align: center; }
+  .step { color: #ffe14d; }
+</style>
+</head>
+<body>
+  <h1>block_breaker — ball ↔ blocks</h1>
+  <canvas id="view"></canvas>
+  <p class="note"><span class="step">S1:</span> static render of the box (3 real
+  walls + a bottom row of indestructible bricks) and the decoded 5×4 ball lozenge.
+  Motion + brick collision arrive in the next steps.</p>
+  <script type="module" src="./ball_blocks.js"></script>
+</body>
+</html>
