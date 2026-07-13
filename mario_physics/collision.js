@@ -26,7 +26,7 @@ export function resolveCollision(actor, levelMap, dt) {
   const TILE_SIZE = levelMap.tileSize;
   const isSolidTileAt = (x, y) => levelMap.isSolidAt(x, y);
   const step = dt * 60; // constants are tuned for 60 FPS; keep them frame-rate independent
-  const contacts = { ground: false, ceiling: false, left: false, right: false };
+  const contacts = { ground: false, ceiling: false, left: false, right: false, bumped: null };
 
   // --- HORIZONTAL: move, then resolve ---
   actor.x += actor.vx * step;
@@ -52,8 +52,15 @@ export function resolveCollision(actor, levelMap, dt) {
       actor.vy = 0;
       contacts.ground = true;
     }
-  } else if (actor.vy < 0) { // jumping upward
-    if (isSolidTileAt(actor.x, actor.y) || isSolidTileAt(actor.x + actor.w - 1, actor.y)) {
+  } else if (actor.vy < 0) { // rising: head-bump from below
+    const leftSolid = isSolidTileAt(actor.x, actor.y);
+    const rightSolid = isSolidTileAt(actor.x + actor.w - 1, actor.y);
+    if (leftSolid || rightSolid) {
+      // Name the bumped tile (from the pre-snap head position) so the world can
+      // react to it — e.g. a ? block. Detection only; the resolver stays unaware
+      // of what any tile does.
+      const px = leftSolid ? actor.x : actor.x + actor.w - 1;
+      contacts.bumped = { tx: Math.floor(px / TILE_SIZE), ty: Math.floor(actor.y / TILE_SIZE) };
       actor.y = Math.floor(actor.y / TILE_SIZE + 1) * TILE_SIZE;
       actor.vy = 0;
       contacts.ceiling = true;

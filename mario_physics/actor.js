@@ -1,32 +1,4 @@
 // ----------------------
-// Basic constants
-// ----------------------
-const GRAVITY = 0.6;
-const FRICTION = 0.8;
-
-// Walking parameters
-const WALK_ACCEL = 0.4;
-const WALK_MAX_SPEED = 3.0;
-
-// Running parameters
-const RUN_ACCEL = 0.6;
-const RUN_MAX_SPEED = 6.0;
-
-// Jump parameters
-const JUMP_SPEED = 12;
-const JUMP_CUT = 3;
-
-const SMALL_W = 24;
-const SMALL_H = 32;
-const BIG_W = 32;
-const BIG_H = 64;
-
-// Time based movement constants
-// Why (dt * 60)?
-// the constants (accel = 0.4, gravity = 0.6) are tuned for 60 FPS.
-// Multiplying by (dt * 60) normalizes them to behave identically at any FPS.
-
-// ----------------------
 // Actor
 // ----------------------
 // An Actor models a body's own intentions, not its place in the world. Each
@@ -38,24 +10,28 @@ const BIG_H = 64;
 // results of collision (grounded / hit wall / hit ceiling) re-enter the actor's
 // own decisions.
 export class Actor {
-  constructor(x, y) {
+  constructor(def, x, y) {
+    this.def = def;
     this.x = x;
     this.y = y;
-    this.w = SMALL_W;
-    this.h = SMALL_H;
+    this.w = def.size.w;
+    this.h = def.size.h;
     this.vx = 0;
     this.vy = 0;
 
-    this.speedWalk = WALK_MAX_SPEED;
-    this.speedRun = RUN_MAX_SPEED;
-    this.accelWalk = WALK_ACCEL;
-    this.accelRun = RUN_ACCEL;
-    this.decel = FRICTION;
-    this.airAccel = WALK_ACCEL/2;
+    const p = def.physics;
+    this.speedWalk = p.speedWalk;
+    this.speedRun = p.speedRun;
+    this.accelWalk = p.accelWalk;
+    this.accelRun = p.accelRun;
+    this.decel = p.decel;
+    this.airAccel = p.airAccel;
+    this.skidFriction = p.skidFriction;
 
-    this.jumpVel = -JUMP_SPEED;
-    this.gravity = GRAVITY;
-    this.maxFall = 6.0;
+    this.jumpVel = -p.jumpVel;
+    this.jumpCut = p.jumpCut;
+    this.gravity = p.gravity;
+    this.maxFall = p.maxFall;
 
     // The world's answer to last step's motion: which sides ended in contact.
     // Read as an input to this step's movement — jumping and ground traction are
@@ -64,7 +40,6 @@ export class Actor {
     this.jumpHeld = false;
     this.prevJump = false;
 
-    this.skidFriction = 0.2;
     this.isSkidding = false;
 
     this.facing = 1; // 1 = right, -1 = left
@@ -117,8 +92,8 @@ export class Actor {
     }
 
     // Short jump cut when releasing Space
-    if (!input.jump && this.jumpHeld && this.vy < -JUMP_CUT) {
-      this.vy = -JUMP_CUT;
+    if (!input.jump && this.jumpHeld && this.vy < -this.jumpCut) {
+      this.vy = -this.jumpCut;
       this.jumpHeld = false;
     }
 
