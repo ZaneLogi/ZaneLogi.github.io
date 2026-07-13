@@ -299,6 +299,89 @@ mechanism is genuinely hardware-only. When the source DOES
 implement the subsystem (e.g. phoenix_clone's sound, which the
 8085 explicitly builds), defer + later-port is the right call.
 
+## Matching rigor to reversibility — when to stop researching
+
+The research-first lessons above (and the sub-agent / research-doc sections
+below) all push one way: research harder, verify more, re-derive from primary
+source. They were written from the pain of **under**-research — claims that
+shipped wrong and drifted for weeks. That bias is right for its target, but on
+its own it has no brake: applied literally it produces the *opposite* failure —
+**stalling**. Endless re-reading, re-verifying what's already known, treating
+"feel certain" as the entry ticket to writing any code. This section is the
+counterweight.
+
+**Scale rigor to how expensive the work is to reverse, not to habit.** The
+exhaustive-up-front discipline is for **irreversible** decisions — the
+faithful-port architecture choice (routine-level vs screen-RAM), a data format
+the whole port hangs off, a source claim later steps will build on. Those are
+cheap to research and expensive to undo, so front-load them. But a **build-time
+tool, a self-contained function, anything with a fast check** is cheap to
+reverse: build a piece, run it, let the result falsify you. Researching it to
+certainty first is precision the task doesn't need.
+
+**A stopping condition.** Once you can name the next concrete step and starting
+it is cheap to undo, **start**. Research is finished not when you feel certain
+but when the remaining uncertainty is *load-bearing* — it would change what you
+build. Everything else is *comfort uncertainty* (wanting to feel sure), and it
+is not a reason to keep reading.
+
+**Two specific anti-patterns, both real:**
+- **Re-reading what's already in context is not research.** If you read a file
+  earlier this session, re-opening it "to be thorough" adds nothing — it's
+  avoidance wearing diligence's clothes. Act on what you already hold.
+- **Over-verifying cheap-to-check work has a cost.** The address-citation /
+  re-grep discipline is for claims that land in docs or faithful-port code,
+  where a wrong one is expensive. It is not a tax to levy on every function you
+  could simply run and observe.
+
+**The tell.** If you've spent more effort preparing to act than the action would
+take to attempt-and-check, you are past the stopping point. When unsure which
+side of the line you're on, prefer the small reversible attempt over more
+reading — the attempt produces evidence; more reading produces only a feeling.
+
+*(Surfaced 2026-07, a sound-effects task: stalled through repeated re-reading of
+source already in context — the research bias above with no governor. This
+section is the governor.)*
+
+### Flag the rulebook (this doc can be wrong for the case at hand)
+
+This CLAUDE.md is a prior, not a straitjacket. When a rule here is pushing you
+toward a bad outcome for the task in front of you — stalling, disproportionate
+effort, a wrong-direction pull — **say so in one line and pause for a ruling.**
+This is wanted, not insubordination: a rule written from past pain can misfit
+the present case, and only the flag surfaces it.
+
+The move (same shape as the flag-and-wait protocol under the rotoscoped-port
+lessons — you flag, the user rules):
+
+> "Rule X here is pushing me to Y, but this task looks like Z (cheap to check /
+> already known / reversible). Relax it here?"
+
+Then wait for the call. Once ruled, proceed without re-litigating.
+
+Guardrails, so flagging doesn't become its own stall:
+- **One line, then stop.** Flagging is not a new place to deliberate. Name the
+  rule, the pull, the mismatch — don't write an essay.
+- **Flag the mismatch, not your discomfort.** The trigger is a rule genuinely
+  fighting the task's reversibility/verifiability (the section above), not
+  reluctance to do hard work. Don't use it to dodge rigor on irreversible things.
+- **The user can also invite it.** If they ask "doc check?" or "is a rule
+  fighting you?", that's the cue to raise anything the rulebook is making awkward.
+
+### A human command that breaks a rule — flag it in one line, don't adjudicate
+
+The mirror of the above: there a *rule* pushes you toward a bad outcome and you
+flag it; here a *human's instruction* crosses a rule in this doc. Same move —
+**name the break in one line and let the human rule. Do NOT analyse whether the
+rule is right, weigh the exceptions, or propose rewording it** — that judgment is
+the human's, not yours.
+
+> "Heads up — X breaks rule Y. Your call."
+
+Then do as they say. Evaluate or rewrite the rule only if they explicitly ask, and
+keep even that brief. Answering a plain instruction with an "is the rule too tight"
+essay is the failure this guards against.
+
 ## Delegating to sub-agents
 
 Sub-agents (Explore, general-purpose, etc.) are good for **bounded
