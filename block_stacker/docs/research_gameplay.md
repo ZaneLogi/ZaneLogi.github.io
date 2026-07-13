@@ -341,16 +341,36 @@ After the first bump, every 10 lines. Type B counts `lines` **down** from a goal
 
 ---
 
-## Scope decisions (E) — decide before implementation
+## Scope decisions (E) — RESOLVED 2026-07-14 → option (b)
 
-- **E1** — Type A (endless) vs Type B (25-line garbage goal). *Suggest: Type A
-  first.*
-- **E2** — 2-player + garbage (`pendingGarbage`, `garbageHole`,
-  `playfieldForSecondPlayer`). *Suggest: drop.*
-- **E3** — Endings / high-score entry / demo / stats screens. *Suggest: drop
-  (cosmetic).*
-- **E4** — Audio (APU music + SFX, software-sequenced). *Defer* (like
-  `block_breaker`'s sound); research-first when picked up.
+Build a **faithful NES core** (the default — everything above) plus **modern
+conveniences as opt-in URL-flag toggles** (the `block_breaker` `?easy`/`?debug`
+pattern). Toggles are additive layers *around* the core, never woven through it
+(the "shortcuts entangle" lesson).
+
+- **E1 — Type A first.** Endless marathon is the default build; Type B (garbage
+  goal) optional later.
+- **E2 — Drop** 2-player + garbage (`pendingGarbage`, `garbageHole`,
+  `playfieldForSecondPlayer`).
+- **E3 — Drop** endings / high-score entry / demo / stats screens (cosmetic).
+- **E4 — Defer** audio (APU music + SFX, software-sequenced) — research-first,
+  like `block_breaker`'s sound.
+
+**Modern toggles in scope (b):** `?ghost` (landing shadow, reuses
+`isPositionValid`), `?hold` (hold/swap slot), `?harddrop`, `?next=N` (extended
+queue — caveat: NES RNG is frame-tied, so >1 lookahead needs a pre-roll model).
+**NOT in (b):** SRS rotation, 7-bag, lock delay — those *replace* NES feel =
+option (c), a separate ruleset fork.
+
+## Implementation phases
+
+1. **Core substrate** — playfield, shape/rotation/spawn tables, spawn,
+   `isPositionValid`, fixed-60 Hz tick + `playState` machine. ← **DONE (phase 1)**
+2. Movement/rotation — DAS, soft drop, no-kick rotate, gravity.
+3. Lock → line-clear → scoring → level (+ 20-frame clear animation).
+4. RNG — roll-twice sequence.
+5. Entry delay — wire ARE, calibrate the constant vs emulator.
+6. Toggles — ghost / hold / hard-drop / next-queue.
 
 ## Open items — frame-accurate lifecycle
 
