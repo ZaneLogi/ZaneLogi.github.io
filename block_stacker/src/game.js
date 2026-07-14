@@ -4,7 +4,7 @@
 // lock (2), line-clear (3), scoring (5) are stubbed here and land in later phases.
 
 import {
-  SPAWN_X, SPAWN_Y, PIECE, BTN, ORI,
+  SPAWN_X, SPAWN_Y, BTN, ORI,
   DAS_DELAY, DAS_RESET, INITIAL_AUTOREPEAT_Y, framesPerDrop,
   COLS, ROWS, TILE_EMPTY, TILE_CURTAIN, POINTS, LEFT_COLUMNS, RIGHT_COLUMNS,
 } from './constants.js';
@@ -39,14 +39,17 @@ export class Game {
     this.fallTimer = 0;
     this.levelNumber = 0;   // = startLevel; menu selection lands in a later phase
 
-    // PHASE-1 stub for piece selection. The roll-twice RNG is phase 4
-    // (main.asm:2964). Until then, a deterministic cycle so sequences are testable.
-    this._stubSeq = 0;
+    // RNG state (roll-twice, main.asm:2964). 16-bit LFSR seeded $8988; spawnCount
+    // increments per pick; spawnID = the last piece's spawn orientation (repeat check).
+    this.rngSeed0 = 0x88;
+    this.rngSeed1 = 0x89;
+    this.spawnCount = 0;
+    this.spawnID = 0;
 
-    // The FIRST piece is placed directly by initGameState (main.asm:1190,
-    // 1203-1207) and initGameBackground_finish sets playState = 1 (main.asm:1173-1174).
-    // It does NOT go through the spawn state — piece 1 has no entry delay.
-    this.currentPiece = SPAWN_TABLE[PIECE.T];   // stub first piece
+    // The FIRST piece + nextPiece come from the RNG in initGameState (main.asm:1190,
+    // 1203-1207); playState=1 (main.asm:1173-1174). The first piece is placed
+    // directly — no spawn state, no entry delay.
+    this.currentPiece = this._chooseNextPiece();
     this.nextPiece = this._chooseNextPiece();
     this.tetriminoX = SPAWN_X;
     this.tetriminoY = SPAWN_Y;
@@ -80,6 +83,7 @@ export class Game {
     this.heldButtons = heldButtons;
     this.newlyPressedButtons = newlyPressedButtons;
     this.frameCounter++;
+    this._advanceRng();   // RNG ticks once per frame in NMI (main.asm:282)
     this.fallTimer++;
     this._runPlayState();
   }
@@ -339,13 +343,33 @@ export class Game {
     this.curtainRow++;
   }
 
-  // PHASE-1 stub: deterministic 7-piece cycle. Returns a spawn orientation
-  // (like chooseNextTetrimino, main.asm:2948). Replaced by roll-twice RNG in phase 4.
+  // pickRandomTetrimino (main.asm:2964) — the "roll-twice" randomizer. Returns a
+  // spawn orientation. First roll: index = (rngLow + spawnCount) & 7; reroll once
+  // if it lands on the unused 8th slot OR repeats the last piece.
   _chooseNextPiece() {
-    const order = [PIECE.T, PIECE.J, PIECE.Z, PIECE.O, PIECE.S, PIECE.L, PIECE.I];
-    const type = order[this._stubSeq % order.length];
-    this._stubSeq++;
-    return SPAWN_TABLE[type];
+    this.spawnCount = (this.spawnCount + 1) & 0xFF;
+    const index = (this.rngSeed0 + this.spawnCount) & 7;
+    if (index !== 7) {
+      const piece = SPAWN_TABLE[index];
+      if (piece !== this.spawnID) { this.spawnID = piece; return piece; } // not a repeat
+    }
+    // reroll: advance RNG, index = ((rngLow & 7) + spawnID) mod 7 (main.asm:2986)
+    this._advanceRng();
+    let index2 = (this.rngSeed0 & 7) + this.spawnID;
+    while (index2 >= 7) index2 -= 7;
+    const piece = SPAWN_TABLE[index2];
+    this.spawnID = piece;
+    return piece;
+  }
+
+  // generateNextPseudorandomNumber (main.asm:5468) — 16-bit LFSR, taps at bits 1
+  // & 9, one step per call: carry-in = bit1(seed0) ^ bit1(seed1), then ror seed0
+  // (carry into bit 7, bit 0 out) then ror seed1 (that carry into bit 7).
+  _advanceRng() {
+    const newBit = ((this.rngSeed0 >> 1) & 1) ^ ((this.rngSeed1 >> 1) & 1);
+    const carryToSeed1 = this.rngSeed0 & 1;                          // seed0 bit0 → seed1 bit7
+    this.rngSeed0 = ((this.rngSeed0 >> 1) | (newBit << 7)) & 0xFF;
+    this.rngSeed1 = ((this.rngSeed1 >> 1) | (carryToSeed1 << 7)) & 0xFF;
   }
 
   // PHASE-1 debug helper: force-spawn a given piece type to verify the shape table.

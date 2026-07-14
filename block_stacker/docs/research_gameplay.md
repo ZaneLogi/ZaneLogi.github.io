@@ -371,7 +371,7 @@ option (c), a separate ruleset fork.
    `isPositionValid`, fixed-60 Hz tick + `playState` machine. ← **DONE (phase 1)**
 2. **Movement** — DAS, soft drop, no-kick rotate, gravity. ← **DONE (phase 2)**
 3. **Lock → line-clear → scoring → level** (+ 20-frame clear animation). ← **DONE (phase 3)**
-4. RNG — roll-twice sequence.
+4. **RNG — roll-twice sequence.** ← **DONE (phase 4)**
 5. Entry delay — wire ARE, calibrate the constant vs emulator.
 6. Toggles — ghost / hold / hard-drop / next-queue.
 

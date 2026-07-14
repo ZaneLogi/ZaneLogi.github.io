@@ -55,7 +55,11 @@ gravity, in the same tick.
    after the wipe (we render the array directly, not via VRAM), `vramRow`/ARE gates
    skipped (phase 5). Verified by driven cycle tests + confirmed playable
    end-to-end in a real browser.
-4. **RNG** (roll-twice) — next. · 5. Entry delay (ARE). · 6. Modern toggles.
+4. **RNG** ✅ — roll-twice randomizer: 16-bit LFSR (taps 1 & 9, ticked every
+   frame) + reroll-on-repeat-or-8th-slot. Verified: long period / no stick, even
+   7-piece spread, ~6% immediate-repeat rate (vs 14% uniform — the NES drought
+   feel), deterministic. Replaced the placeholder cycle.
+5. **Entry delay (ARE)** — next (needs emulator calibration). · 6. Modern toggles.
 
 Modules: `src/{constants,pieces,playfield,game,render,input}.js` + `main.js`.
 
