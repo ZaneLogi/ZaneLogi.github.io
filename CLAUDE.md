@@ -382,6 +382,32 @@ Then do as they say. Evaluate or rewrite the rule only if they explicitly ask, a
 keep even that brief. Answering a plain instruction with an "is the rule too tight"
 essay is the failure this guards against.
 
+### Faithful is a chosen default, not an absolute — the user's deliberate add-ons are fine
+
+All the "follow the source / don't simplify" rigor above targets **accidental
+drift** — quietly weakening a mechanism because it's easier, or deviating without
+noticing. It is **not** a mandate that every line be faithful.
+
+When the user **deliberately chooses** a non-source feature — a modern add-on
+(hard drop, ghost, a scoring tweak), a QoL toggle, an original mechanic — that
+choice **is** the justification. It's their clone; faithfulness is the standard
+they apply **where they want it** (usually the core mechanics), not a gate their
+chosen features must pass.
+
+- **Build user-requested non-faithful features without agonizing.** Don't re-ask
+  "is this OK since it isn't faithful?" beyond a one-line heads-up. The
+  flag-and-wait protocol is for *you* deviating on load-bearing mechanism — not
+  for a feature the user asked for.
+- **Still be honest about it.** Mark the add-on in code and docs as a deliberate
+  non-source deviation, so the record stays clear about faithful-vs-invented.
+  Honesty about the deviation is not resistance to it.
+- **The faithful default still holds for the parts the user wants faithful** — the
+  ported core mechanics. This doesn't loosen those.
+
+(Surfaced 2026-07 on `block_stacker`, adding a hard-drop score bonus: *"we do
+faithfully only when I think we can... with extra innovation or add-on, we do it
+on purpose, we know it is not faithful. so what? this is our clone."*)
+
 ## Delegating to sub-agents
 
 Sub-agents (Explore, general-purpose, etc.) are good for **bounded
