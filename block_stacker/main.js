@@ -5,14 +5,36 @@ import { NTSC_FPS, PIECE } from './src/constants.js';
 import { ORIENTATIONS, ROTATION, SPAWN_TABLE, SPAWN_ORIENTATION, TYPE_FROM_ORIENTATION } from './src/pieces.js';
 import { Game } from './src/game.js';
 import { Input } from './src/input.js';
-import { render, CANVAS_W, CANVAS_H } from './src/render.js';
+import { render, CANVAS_W, CANVAS_H, toggleHitTest } from './src/render.js';
 
 const canvas = document.getElementById('game');
 canvas.width = CANVAS_W;
 canvas.height = CANVAS_H;
 const ctx = canvas.getContext('2d');
 
-const game = new Game();
+// Live gameplay toggles — a shared object the game + renderer read every frame,
+// so flipping one changes behavior on the fly. Drawn as clickable checkboxes in
+// the panel (render.js); default ON.
+const options = { ghost: true, harddrop: true };
+
+// Map a canvas click through the CSS scale to internal coords, then hit-test the
+// panel toggles.
+function canvasCoords(e) {
+  const rect = canvas.getBoundingClientRect();
+  return [
+    (e.clientX - rect.left) * (canvas.width / rect.width),
+    (e.clientY - rect.top) * (canvas.height / rect.height),
+  ];
+}
+canvas.addEventListener('click', (e) => {
+  const hit = toggleHitTest(...canvasCoords(e));
+  if (hit) options[hit] = !options[hit];
+});
+canvas.addEventListener('mousemove', (e) => {
+  canvas.style.cursor = toggleHitTest(...canvasCoords(e)) ? 'pointer' : 'default';
+});
+
+const game = new Game(options);
 const input = new Input();
 
 // --- Fixed-timestep loop. Real time is diced into NES frames; game.tick() is

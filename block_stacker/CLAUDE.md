@@ -36,7 +36,7 @@ gravity, in the same tick.
 
 ## Status
 
-**Phases 1–5 done; phase 6 (modern toggles) next.** Build proceeds in phases (tracker:
+**Phases 1–5 done; phase 6 in progress (ghost + hard-drop toggles done).** Build proceeds in phases (tracker:
 `docs/research_gameplay.md` → *Implementation phases*):
 
 1. **Core substrate** ✅ — `playfield` array + `isPositionValid`,
@@ -64,7 +64,11 @@ gravity, in the same tick.
    values, tetris.wiki); armed on lock, decremented per frame, gates spawn.
    Verified 10/12/14/16/18 by lock height. Resolves the long-standing "needs
    emulator" flag.
-6. **Modern toggles** (`?ghost`/`?hold`/`?harddrop`/`?next=N`) — last phase.
+6. **Modern toggles** — opt-in **live checkboxes** (read each frame → flip on the
+   fly). **Ghost ✅** (landing shadow, render-only) + **hard-drop ✅** (Up slams +
+   locks, reuses the lock/ARE path; **+2 pts/cell** — a deliberate non-NES add-on).
+   Hold + next-queue deferred; SRS/wall-kick stays option (c). Verified by driven
+   tests (incl. the on-the-fly flip).
 
 Modules: `src/{constants,pieces,playfield,game,render,input}.js` + `main.js`.
 
@@ -74,13 +78,13 @@ Modules: `src/{constants,pieces,playfield,game,render,input}.js` + `main.js`.
 
 ## Scope — decided (option b)
 
-An NES core (default, no flags) plus modern QoL as opt-in URL toggles (the
-`block_breaker` `?easy`/`?debug` pattern). Detail: `docs/research_gameplay.md`
-→ *Scope decisions (E)*.
+An NES core (default) plus modern QoL as opt-in **live checkboxes** (read every
+frame, so they flip on the fly). Detail: `docs/research_gameplay.md` → *Scope
+decisions (E)*.
 
 - **Type A** (endless) first; Type B (garbage goal) optional.
-- **Toggles in (b):** `?ghost`, `?hold`, `?harddrop`, `?next=N` — additive
-  layers over the core, never woven in.
+- **Toggles in (b):** ghost ✅ + hard-drop ✅ (checkboxes); hold + next-queue
+  deferred. Additive layers over the core, never woven in.
 - **Drop:** 2-player + garbage, endings, high-score entry, demo, stats screens.
 - **Defer:** audio (APU music + SFX are software-sequenced — portable, but a
   separate research-first effort, like `block_breaker`'s sound).

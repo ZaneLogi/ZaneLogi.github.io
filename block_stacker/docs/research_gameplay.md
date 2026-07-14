@@ -373,7 +373,7 @@ option (c), a separate ruleset fork.
 3. **Lock → line-clear → scoring → level** (+ 20-frame clear animation). ← **DONE (phase 3)**
 4. **RNG — roll-twice sequence.** ← **DONE (phase 4)**
 5. **Entry delay — ARE.** ← **DONE (phase 5, direct countdown)**
-6. Toggles — ghost / hold / hard-drop / next-queue.
+6. **Toggles** — ghost ✅ + hard-drop ✅ (live checkboxes); hold / next-queue deferred.
 
 ## Open items — frame-accurate lifecycle
 

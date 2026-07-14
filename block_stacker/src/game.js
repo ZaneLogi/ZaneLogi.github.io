@@ -28,7 +28,8 @@ export const PS = {
 };
 
 export class Game {
-  constructor() {
+  constructor(options = { ghost: true, harddrop: true }) {
+    this.options = options;   // live toggles; kept out of init() so restart preserves them
     this.playfield = new Playfield();
     this.init();
   }
@@ -121,9 +122,29 @@ export class Game {
   // playState 1 — main.asm:489-493. Order is load-bearing: shift, then rotate,
   // then drop, all within one frame.
   _playerControls() {
+    // Hard drop (opt-in toggle; not NES). Up slams the piece down and locks it.
+    if (this.options.harddrop && (this.newlyPressedButtons & BTN.UP)) {
+      this._hardDrop();
+      return;                 // hard drop consumes the frame — skip shift/rotate/drop
+    }
     this._shiftTetrimino();
     this._rotateTetrimino();
     this._dropTetrimino();
+  }
+
+  // _hardDrop — modern convenience, no NES counterpart. Slam straight down to the
+  // landing row, then hand off to the normal lock path (which arms the ARE).
+  _hardDrop() {
+    const startY = this.tetriminoY;
+    while (true) {
+      this.tetriminoY++;
+      if (!this._valid()) { this.tetriminoY--; break; }
+    }
+    // Hard-drop bonus: 2 points per cell dropped. Deliberately NOT NES (the NES has
+    // no hard drop at all) — a modern add-on, part of the opt-in toggle.
+    this.score = Math.min(999999, this.score + 2 * (this.tetriminoY - startY));
+    this.fallTimer = 0;
+    this.playState = PS.LOCK;
   }
 
   // shift_tetrimino — main.asm:1616. Horizontal move + DAS auto-repeat.
