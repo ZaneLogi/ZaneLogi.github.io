@@ -5,7 +5,7 @@
 
 import {
   SPAWN_X, SPAWN_Y, BTN, ORI,
-  DAS_DELAY, DAS_RESET, INITIAL_AUTOREPEAT_Y, framesPerDrop,
+  DAS_DELAY, DAS_RESET, INITIAL_AUTOREPEAT_Y, framesPerDrop, areFrames,
   COLS, ROWS, TILE_EMPTY, TILE_CURTAIN, POINTS, LEFT_COLUMNS, RIGHT_COLUMNS,
 } from './constants.js';
 import { SPAWN_TABLE, SPAWN_ORIENTATION, ROTATION, ORIENTATIONS } from './pieces.js';
@@ -75,6 +75,7 @@ export class Game {
     this.lineIndex = 0;       // checkForCompletedRows cursor (0..3)
     this.rowY = 0;            // line-clear wipe step (0..5)
     this.curtainRow = 0;      // game-over curtain cursor
+    this.areTimer = 0;        // entry-delay (ARE) countdown; 0 = ready (first piece has none)
   }
 
   // One NES frame. fallTimer is incremented once per frame in the non-player
@@ -85,6 +86,7 @@ export class Game {
     this.frameCounter++;
     this._advanceRng();   // RNG ticks once per frame in NMI (main.asm:282)
     this.fallTimer++;
+    if (this.areTimer > 0) this.areTimer--;   // entry delay (ARE) counts down each frame
     this._runPlayState();
   }
 
@@ -106,6 +108,7 @@ export class Game {
 
   // spawn — playState_spawnNextTetrimino (main.asm:2896). Used for pieces 2+.
   spawn() {
+    if (this.areTimer > 0) return;   // wait out the entry delay (ARE, phase 5)
     this.tetriminoY = SPAWN_Y;
     this.fallTimer = 0;
     this.playState = PS.CONTROL;
@@ -215,9 +218,10 @@ export class Game {
     return this.playfield.isPositionValid(this.currentPiece, this.tetriminoX, this.tetriminoY);
   }
 
-  // updatePlayfield — main.asm:3532. Rewinds the VRAM copy cursor that drives the
-  // entry delay (ARE). Phase 5 (needs emulator calibration); no-op for now.
-  _updatePlayfield() { /* phase 5 */ }
+  // updatePlayfield — main.asm:3532. In the ROM this rewinds the VRAM copy cursor
+  // whose catch-up *is* the entry delay. We reproduce that delay directly (areFrames
+  // / areTimer) and render the array without a VRAM model, so this stays a no-op.
+  _updatePlayfield() { /* not modeled — ARE handled by areTimer */ }
 
   // playState 2 — playState_lockTetrimino (main.asm:3062). Freeze the piece into
   // the playfield array, or top out.
@@ -234,7 +238,8 @@ export class Game {
       if (row >= 0) this.playfield.set(this.tetriminoX + dx, row, ori.tile); // skip vanish zone
     }
     this.lineIndex = 0;
-    this._updatePlayfield();           // phase 5 no-op
+    this.areTimer = areFrames(this.tetriminoY); // entry delay before the next piece (phase 5)
+    this._updatePlayfield();
     this.playState++;                  // → 3 (CHECK_ROWS)
   }
 

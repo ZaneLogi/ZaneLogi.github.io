@@ -73,3 +73,13 @@ export const RIGHT_COLUMNS = [5, 6, 7, 8, 9];
 
 // --- Frame rate. NES logic ticks at the NTSC vblank rate (main.asm:248 NMI). ---
 export const NTSC_FPS = 60.0988;
+
+// --- Entry delay (ARE) by lock height. The NES value is a side-effect of the
+//     VRAM redraw throttle (see docs/research_gameplay.md §8); we reproduce its
+//     documented result directly (b, direct countdown) rather than model VRAM.
+//     tetris.wiki: 10 frames for a lock in the bottom two rows, +2 per group of 4
+//     rows higher, capped at 18. Keyed by tetriminoY (0 = top .. ~18 = floor). ---
+export function areFrames(tetriminoY) {
+  const groupsAbove = Math.max(0, Math.floor((18 - tetriminoY) / 4));
+  return Math.min(18, 10 + 2 * groupsAbove);
+}

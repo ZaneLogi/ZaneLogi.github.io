@@ -36,7 +36,7 @@ gravity, in the same tick.
 
 ## Status
 
-**Phases 1–2 done; phase 3 next.** Build proceeds in phases (tracker:
+**Phases 1–5 done; phase 6 (modern toggles) next.** Build proceeds in phases (tracker:
 `docs/research_gameplay.md` → *Implementation phases*):
 
 1. **Core substrate** ✅ — `playfield` array + `isPositionValid`,
@@ -59,14 +59,16 @@ gravity, in the same tick.
    frame) + reroll-on-repeat-or-8th-slot. Verified: long period / no stick, even
    7-piece spread, ~6% immediate-repeat rate (vs 14% uniform — the NES drought
    feel), deterministic. Replaced the placeholder cycle.
-5. **Entry delay (ARE)** — next (needs emulator calibration). · 6. Modern toggles.
+5. **Entry delay (ARE)** ✅ — direct frame countdown (option b), not a VRAM model:
+   `areFrames(y)` = 10 at the floor, +2 per 4 rows up, cap 18 (documented NES
+   values, tetris.wiki); armed on lock, decremented per frame, gates spawn.
+   Verified 10/12/14/16/18 by lock height. Resolves the long-standing "needs
+   emulator" flag.
+6. **Modern toggles** (`?ghost`/`?hold`/`?harddrop`/`?next=N`) — last phase.
 
 Modules: `src/{constants,pieces,playfield,game,render,input}.js` + `main.js`.
 
-**Still open (empirical, not memory):**
-- **Entry delay (ARE) exact frame count** (phase 5) — mechanism derived
-  (`updatePlayfield` rewinds `vramRow`; render copies 4 rows/frame; spawn+scan
-  gate on `vramRow ≥ 32`); pin the constant by **frame-stepping an emulator**.
+**Still open:**
 - **In-app preview freezes when idle** (hidden tab → no rAF, no compositing) —
   verify look/feel in a real browser (VS Code Live Server), not the in-app pane.
 

@@ -372,7 +372,7 @@ option (c), a separate ruleset fork.
 2. **Movement** — DAS, soft drop, no-kick rotate, gravity. ← **DONE (phase 2)**
 3. **Lock → line-clear → scoring → level** (+ 20-frame clear animation). ← **DONE (phase 3)**
 4. **RNG — roll-twice sequence.** ← **DONE (phase 4)**
-5. Entry delay — wire ARE, calibrate the constant vs emulator.
+5. **Entry delay — ARE.** ← **DONE (phase 5, direct countdown)**
 6. Toggles — ghost / hold / hard-drop / next-queue.
 
 ## Open items — frame-accurate lifecycle
@@ -403,13 +403,16 @@ pass; **one** constant genuinely remains open.
   the port uses a fixed tick. Load-bearing contract — **`playState` machine +
   `fallTimer++` once per 60 Hz tick** — is solid (`main.asm:1448`).
 
-### Still genuinely open (needs empirical work, not memory)
+### Resolved (was: needs empirical work)
 
-1. **ARE (entry delay) exact frame constant** — mechanism known (`vramRow`
-   rewind to `tetriminoY−2`, 4 rows/frame, spawn+scan gate on `≥32`); the
-   resulting frame count per lock-height must be pinned by **frame-stepping an
-   emulator** (or hand-counting the state chain and validating). Last unknown
-   affecting piece-to-piece cadence.
+1. **ARE (entry delay)** — RESOLVED in phase 5 via **direct countdown** (option b),
+   not a VRAM model. Instead of pinning a constant by emulator, we reproduce the
+   *documented* result: `areFrames(y)` = 10 frames at the floor, +2 per group of 4
+   rows higher, capped at 18 (tetris.wiki NES values). Armed on lock, decremented
+   per frame, gates spawn. Verified 10/12/14/16/18 by lock height. The source's
+   VRAM machinery (`vramRow` rewind, 4 rows/frame, `≥32` gate) is *why* the NES
+   delay is height-dependent; we render the array directly, so `updatePlayfield`
+   stays a no-op.
 
 ### Port note (non-timing) — make explicit in code
 
