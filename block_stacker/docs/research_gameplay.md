@@ -1,6 +1,6 @@
 # block_stacker — gameplay research (NES Tetris)
 
-A faithful study of the **NES Tetris** gameplay logic, as the basis for a
+A study of the **NES Tetris** gameplay logic, as the basis for a
 web-canvas port. Visual assets are **not** the point — we reproduce the
 *mechanics and feel*, and draw the board with Canvas APIs.
 
@@ -186,8 +186,11 @@ constants NTSC `DAS_RESET=16, DAS_DELAY=10` / PAL `12, 8` (`constants.asm:74-96`
 **Soft drop** — `drop_tetrimino` (`main.asm:1530-1599`):
 - Down must be a **fresh, solo** press to engage (not while holding L/R)
   (`main.asm:1541-1550`).
-- While held: drop one row every **3 frames**, accrue `holdDownPoints`
-  (`main.asm:1562-1569`).
+- While held: drop one row every **2 frames**, accrue `holdDownPoints`
+  (`main.asm:1562-1569`). *(The `@downPressed` counter resets to **1** and fires
+  at **3** → period 2, not 3. Corrected 2026-07-14 during the phase-2 port +
+  measurement; the earlier "3 frames" conflated the `cmp #3` threshold with the
+  period.)*
 - Game-start lockout: `autorepeatY` seeded `$A0` (bit 7 set) → soft-drop
   auto-repeat suppressed for ~96 frames unless Down is tapped
   (`main.asm:1531-1537`).
@@ -343,7 +346,7 @@ After the first bump, every 10 lines. Type B counts `lines` **down** from a goal
 
 ## Scope decisions (E) — RESOLVED 2026-07-14 → option (b)
 
-Build a **faithful NES core** (the default — everything above) plus **modern
+Build an **NES core** (the default — everything above) plus **modern
 conveniences as opt-in URL-flag toggles** (the `block_breaker` `?easy`/`?debug`
 pattern). Toggles are additive layers *around* the core, never woven through it
 (the "shortcuts entangle" lesson).
@@ -366,7 +369,7 @@ option (c), a separate ruleset fork.
 
 1. **Core substrate** — playfield, shape/rotation/spawn tables, spawn,
    `isPositionValid`, fixed-60 Hz tick + `playState` machine. ← **DONE (phase 1)**
-2. Movement/rotation — DAS, soft drop, no-kick rotate, gravity.
+2. **Movement** — DAS, soft drop, no-kick rotate, gravity. ← **DONE (phase 2)**
 3. Lock → line-clear → scoring → level (+ 20-frame clear animation).
 4. RNG — roll-twice sequence.
 5. Entry delay — wire ARE, calibrate the constant vs emulator.

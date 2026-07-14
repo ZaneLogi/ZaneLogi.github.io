@@ -1,6 +1,6 @@
 // constants.js — scalar constants + enums, ported from the NES disassembly.
 // Source: C:\Z_Temp\TetrisNESDisasm\  (constants.asm, tetris-ram.asm).
-// Faithful NES port; see ../docs/research_gameplay.md.
+// See ../docs/research_gameplay.md.
 
 // --- Board dimensions (tetris-ram.asm:170 — playfield .res $C8 = 200 = 10x20) ---
 export const COLS = 10;
@@ -43,6 +43,8 @@ export const INITIAL_AUTOREPEAT_Y = 0xA0;
 export const BTN = {
   A: 0x80, B: 0x40, SELECT: 0x20, START: 0x10,
   UP: 0x08, DOWN: 0x04, LEFT: 0x02, RIGHT: 0x01,
+  DPAD: 0x0F,           // Up|Down|Left|Right (BUTTON_DPAD)
+  LEFT_RIGHT: 0x03,     // Left|Right
 };
 
 // --- Gravity: frames-per-row by level (main.asm:1608-1611, NTSC).

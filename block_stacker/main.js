@@ -1,9 +1,10 @@
 // main.js — composition root: canvas, the fixed-timestep loop, input, wiring.
-// Faithful NES Tetris port; see docs/research_gameplay.md.
+// NES Tetris port; see docs/research_gameplay.md.
 
 import { NTSC_FPS, PIECE } from './src/constants.js';
 import { ORIENTATIONS, ROTATION, SPAWN_TABLE, SPAWN_ORIENTATION, TYPE_FROM_ORIENTATION } from './src/pieces.js';
 import { Game } from './src/game.js';
+import { Input } from './src/input.js';
 import { render, CANVAS_W, CANVAS_H } from './src/render.js';
 
 const canvas = document.getElementById('game');
@@ -12,6 +13,7 @@ canvas.height = CANVAS_H;
 const ctx = canvas.getContext('2d');
 
 const game = new Game();
+const input = new Input();
 
 // --- Fixed-timestep loop. Real time is diced into NES frames; game.tick() is
 //     one frame. NES logic is integer-frame-based, so ticks are unscaled. ---
@@ -25,7 +27,8 @@ function loop(now) {
   last = now;
   acc += dt;
   while (acc >= FIXED_DT) {
-    game.tick();
+    input.poll();
+    game.tick(input.heldButtons, input.newlyPressedButtons);
     acc -= FIXED_DT;
   }
   render(ctx, game);

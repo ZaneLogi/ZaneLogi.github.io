@@ -91,14 +91,21 @@ export function render(ctx, game) {
   ctx.fillStyle = '#94a3b8';
   ctx.font = '12px monospace';
   const valid = playfield.isPositionValid(currentPiece, game.tetriminoX, game.tetriminoY);
+  const bits = (b) => (b & 0xFF).toString(2).padStart(8, '0');
   const lines = [
-    `frame  ${String(game.frameCounter).padStart(5)}`,
-    `piece  ${PIECE_NAME[TYPE_FROM_ORIENTATION[currentPiece]]}  (ori 0x${currentPiece.toString(16).padStart(2, '0')})`,
-    `state  ${game.playState}`,
-    `x,y    ${game.tetriminoX},${game.tetriminoY}`,
-    `valid  ${valid}`,
+    `frame ${String(game.frameCounter).padStart(6)}`,
+    `piece ${PIECE_NAME[TYPE_FROM_ORIENTATION[currentPiece]]} ori 0x${currentPiece.toString(16).padStart(2, '0')}`,
+    `state ${game.playState}`,
+    `x,y   ${String(game.tetriminoX).padStart(2)},${String(game.tetriminoY).padStart(2)}`,
+    `valid ${valid ? 'y' : 'n'}`,
+    `dasX  ${String(game.autorepeatX).padStart(3)}`,
+    `dropY ${String(game.autorepeatY).padStart(3)}`,
+    `hdPts ${String(game.holdDownPoints).padStart(3)}`,
+    `held  ${bits(game.heldButtons)}`,
     '',
-    'debug: 1-7 spawn piece',
+    'move ←→  soft ↓',
+    'rotate  Z / X',
+    'debug 1-7 = piece',
   ];
-  lines.forEach((t, i) => ctx.fillText(t, PANEL_X, BOARD_Y + 150 + i * 18));
+  lines.forEach((t, i) => ctx.fillText(t, PANEL_X, BOARD_Y + 150 + i * 16));
 }

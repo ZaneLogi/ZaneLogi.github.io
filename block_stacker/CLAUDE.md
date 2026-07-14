@@ -4,7 +4,7 @@ Per-project guidance. Overrides the root `CLAUDE.md` where they differ.
 
 ## What this is
 
-A **faithful gameplay port of NES Tetris** to a web canvas. The goal is the
+A **gameplay port of NES Tetris** to a web canvas. The goal is the
 *mechanics and feel* — playfield, piece set, rotation, input/DAS, gravity,
 lock/line-clear/scoring cadence. **Visual assets are explicitly not the point**;
 the board is drawn with Canvas APIs, not the original CHR tiles.
@@ -36,21 +36,43 @@ gravity, in the same tick.
 
 ## Status
 
-**Study complete, pre-implementation.** All gameplay sub-goals (A–D) are decoded
-in `docs/research_gameplay.md`. One item is intentionally left for empirical
-validation:
+**Phases 1–2 done; phase 3 next.** Build proceeds in phases (tracker:
+`docs/research_gameplay.md` → *Implementation phases*):
 
-- **Entry delay (ARE) exact frame count** — mechanism derived from source
+1. **Core substrate** ✅ — `playfield` array + `isPositionValid`,
+   piece/rotation/spawn tables, spawn, fixed-60 Hz tick, `playState` machine,
+   canvas render.
+2. **Movement** ✅ — edge-detected controller input, DAS shift (16-charge /
+   6-repeat, wall-charge, carries across pieces), no-kick A=CW/B=CCW rotation,
+   soft drop + gravity, lock-on-landing. Verified by driven per-frame checks.
+   Surfaced + fixed a research-doc error: **soft drop is every 2 frames, not 3**
+   (`@downPressed` resets the counter to 1 and fires at 3 → period 2).
+3. **Lock → line-clear → scoring → level** (+ 20-frame clear animation) — next.
+4. RNG (roll-twice). · 5. Entry delay (ARE). · 6. Modern toggles.
+
+Modules: `src/{constants,pieces,playfield,game,render,input}.js` + `main.js`.
+
+**Still open (empirical, not memory):**
+- **Entry delay (ARE) exact frame count** (phase 5) — mechanism derived
   (`updatePlayfield` rewinds `vramRow`; render copies 4 rows/frame; spawn+scan
-  gate on `vramRow ≥ 32`). Pin the exact constant by **frame-stepping an
-  emulator** before hard-coding — do not assert from memory.
+  gate on `vramRow ≥ 32`); pin the constant by **frame-stepping an emulator**.
+- **In-app preview freezes when idle** (hidden tab → no rAF, no compositing) —
+  verify look/feel in a real browser (VS Code Live Server), not the in-app pane.
 
-## Scope (pending decision, not study)
+## Scope — decided (option b)
+
+An NES core (default, no flags) plus modern QoL as opt-in URL toggles (the
+`block_breaker` `?easy`/`?debug` pattern). Detail: `docs/research_gameplay.md`
+→ *Scope decisions (E)*.
 
 - **Type A** (endless) first; Type B (garbage goal) optional.
+- **Toggles in (b):** `?ghost`, `?hold`, `?harddrop`, `?next=N` — additive
+  layers over the core, never woven in.
 - **Drop:** 2-player + garbage, endings, high-score entry, demo, stats screens.
 - **Defer:** audio (APU music + SFX are software-sequenced — portable, but a
   separate research-first effort, like `block_breaker`'s sound).
+- **Not in (b):** SRS / wall-kick, 7-bag, lock delay = a separate ruleset
+  (option c) — not a toggle.
 
 ## Running locally (once built)
 
