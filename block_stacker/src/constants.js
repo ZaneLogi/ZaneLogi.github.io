@@ -12,6 +12,7 @@ export const TILE1       = 0x7B; // color group {T, O, I}
 export const TILE2       = 0x7C; // color group {Z, L}
 export const TILE3       = 0x7D; // color group {J, S}
 export const TILE_HIDDEN = 0xFF; // used during clear/curtain animations
+export const TILE_CURTAIN = 0x4F; // game-over curtain fill (main.asm:3146)
 
 // --- Piece type IDs (constants.asm:111-118) ---
 export const PIECE = { T: 0, J: 1, Z: 2, O: 3, S: 4, L: 5, I: 6 };
@@ -60,6 +61,15 @@ export const FRAMES_PER_DROP = [
 export function framesPerDrop(level) {
   return level < FRAMES_PER_DROP.length ? FRAMES_PER_DROP[level] : 1;
 }
+
+// --- Line-clear points (pointsTable, main.asm:3529), indexed by lines cleared
+//     (0..4), awarded x(levelNumber+1). ---
+export const POINTS = [0, 40, 100, 300, 1200];
+
+// --- Line-clear wipe columns (main.asm:2828-2831). Blanked center-out, one pair
+//     per animation step: {4,5} -> {3,6} -> {2,7} -> {1,8} -> {0,9}. ---
+export const LEFT_COLUMNS = [4, 3, 2, 1, 0];
+export const RIGHT_COLUMNS = [5, 6, 7, 8, 9];
 
 // --- Frame rate. NES logic ticks at the NTSC vblank rate (main.asm:248 NMI). ---
 export const NTSC_FPS = 60.0988;

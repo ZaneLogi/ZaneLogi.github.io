@@ -1,8 +1,9 @@
 // render.js — draws the game to canvas. Visual assets are not the point
 // (see ../docs/research_gameplay.md); we draw plain colored cells.
 
-import { COLS, ROWS, TILE_EMPTY, TILE1, TILE2, TILE3 } from './constants.js';
+import { COLS, ROWS, TILE_EMPTY, TILE1, TILE2, TILE3, TILE_HIDDEN, TILE_CURTAIN } from './constants.js';
 import { ORIENTATIONS, TYPE_FROM_ORIENTATION } from './pieces.js';
+import { PS } from './game.js';
 
 export const CELL = 24;
 const BOARD_X = 20;
@@ -17,6 +18,7 @@ const TILE_COLOR = {
   [TILE1]: '#2dd4bf', // {T, O, I}
   [TILE2]: '#f59e0b', // {Z, L}
   [TILE3]: '#60a5fa', // {J, S}
+  [TILE_CURTAIN]: '#64748b', // game-over curtain
 };
 
 const PIECE_NAME = ['T', 'J', 'Z', 'O', 'S', 'L', 'I'];
@@ -66,14 +68,16 @@ export function render(ctx, game) {
     }
   }
 
-  // active piece
+  // active piece — hidden during the clear wipe and the game-over curtain
   const ori = ORIENTATIONS[currentPiece];
-  const color = TILE_COLOR[ori.tile] || '#fff';
-  for (const [dy, dx] of ori.cells) {
-    const bx = game.tetriminoX + dx;
-    const by = game.tetriminoY + dy;
-    if (by < 0) continue; // vanish zone above the board
-    drawCell(ctx, BOARD_X + bx * CELL, BOARD_Y + by * CELL, color);
+  if (ori.tile !== TILE_HIDDEN && game.playState !== PS.GAME_OVER) {
+    const color = TILE_COLOR[ori.tile] || '#fff';
+    for (const [dy, dx] of ori.cells) {
+      const bx = game.tetriminoX + dx;
+      const by = game.tetriminoY + dy;
+      if (by < 0) continue; // vanish zone above the board
+      drawCell(ctx, BOARD_X + bx * CELL, BOARD_Y + by * CELL, color);
+    }
   }
 
   // next-piece box
@@ -86,6 +90,13 @@ export function render(ctx, game) {
   for (const [dy, dx] of nOri.cells) {
     drawCell(ctx, nx + dx * CELL, ny + dy * CELL, nColor);
   }
+
+  // HUD — score / lines / level
+  ctx.fillStyle = '#e2e8f0';
+  ctx.font = '13px monospace';
+  ctx.fillText(`SCORE ${String(game.score).padStart(6, '0')}`, PANEL_X, BOARD_Y + 120);
+  ctx.fillText(`LINES ${String(game.lines).padStart(3, '0')}`, PANEL_X, BOARD_Y + 140);
+  ctx.fillText(`LEVEL ${String(game.levelNumber).padStart(2, '0')}`, PANEL_X, BOARD_Y + 160);
 
   // debug overlay
   ctx.fillStyle = '#94a3b8';
@@ -107,5 +118,21 @@ export function render(ctx, game) {
     'rotate  Z / X',
     'debug 1-7 = piece',
   ];
-  lines.forEach((t, i) => ctx.fillText(t, PANEL_X, BOARD_Y + 150 + i * 16));
+  lines.forEach((t, i) => ctx.fillText(t, PANEL_X, BOARD_Y + 185 + i * 16));
+
+  // game-over banner
+  if (game.playState === PS.GAME_OVER) {
+    const cx = BOARD_X + (COLS * CELL) / 2;
+    const cy = BOARD_Y + (ROWS * CELL) / 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(BOARD_X, cy - 34, COLS * CELL, 64);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#f87171';
+    ctx.font = 'bold 26px monospace';
+    ctx.fillText('GAME OVER', cx, cy + 2);
+    ctx.fillStyle = '#e2e8f0';
+    ctx.font = '12px monospace';
+    ctx.fillText('press Enter', cx, cy + 22);
+    ctx.textAlign = 'left';
+  }
 }

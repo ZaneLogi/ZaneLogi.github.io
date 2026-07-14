@@ -4,10 +4,11 @@
 // lock (2), line-clear (3), scoring (5) are stubbed here and land in later phases.
 
 import {
-  SPAWN_X, SPAWN_Y, PIECE, BTN,
+  SPAWN_X, SPAWN_Y, PIECE, BTN, ORI,
   DAS_DELAY, DAS_RESET, INITIAL_AUTOREPEAT_Y, framesPerDrop,
+  COLS, ROWS, TILE_EMPTY, TILE_CURTAIN, POINTS, LEFT_COLUMNS, RIGHT_COLUMNS,
 } from './constants.js';
-import { SPAWN_TABLE, SPAWN_ORIENTATION, ROTATION } from './pieces.js';
+import { SPAWN_TABLE, SPAWN_ORIENTATION, ROTATION, ORIENTATIONS } from './pieces.js';
 import { Playfield } from './playfield.js';
 
 // playState values (main.asm:474-488).
@@ -60,6 +61,17 @@ export class Game {
     this.autorepeatX = 0;
     this.autorepeatY = INITIAL_AUTOREPEAT_Y;
     this.holdDownPoints = 0;
+
+    // Scoring + line-clear state. score/lines are plain integers (the NES keeps
+    // BCD for its decimal display — a view-space storage detail; the level-up
+    // >>4 quirk is replicated in _checkLevelUp).
+    this.score = 0;
+    this.lines = 0;
+    this.completedLines = 0;  // rows cleared by the current piece (0..4)
+    this.completedRows = [];  // their indices, for the wipe + collapse
+    this.lineIndex = 0;       // checkForCompletedRows cursor (0..3)
+    this.rowY = 0;            // line-clear wipe step (0..5)
+    this.curtainRow = 0;      // game-over curtain cursor
   }
 
   // One NES frame. fallTimer is incremented once per frame in the non-player
@@ -74,12 +86,16 @@ export class Game {
 
   _runPlayState() {
     switch (this.playState) {
-      case PS.CONTROL:         this._playerControls(); break; // phase 2
-      case PS.LOCK:            this._lock(); break;           // phase 3
-      case PS.CHECK_ROWS:      this._checkRows(); break;      // phase 3
-      case PS.UPDATE_LINES:    this._updateLines(); break;    // phase 3
-      case PS.SPAWN:           this.spawn(); break;           // phase 1
-      // UNASSIGN / NOOP4 / BTYPE_GOAL / RECEIVE_GARBAGE / NOOP9 / GAME_OVER / INC:
+      case PS.CONTROL:         this._playerControls(); break;     // phase 2
+      case PS.LOCK:            this._lock(); break;               // phase 3
+      case PS.CHECK_ROWS:      this._checkRows(); break;          // phase 3
+      case PS.NOOP4:           this._lineClearAnimation(); break; // phase 3 — clear wipe
+      case PS.UPDATE_LINES:    this._updateLines(); break;        // phase 3
+      case PS.BTYPE_GOAL:      this.playState++; break;           // Type A: no goal → advance
+      case PS.RECEIVE_GARBAGE: this.playState++; break;           // 1P: no garbage → advance
+      case PS.SPAWN:           this.spawn(); break;               // phase 1
+      case PS.GAME_OVER:       this._gameOverCurtain(); break;    // phase 3
+      // UNASSIGN / NOOP9 / INC:
       default: break;
     }
   }
@@ -199,9 +215,129 @@ export class Game {
   // entry delay (ARE). Phase 5 (needs emulator calibration); no-op for now.
   _updatePlayfield() { /* phase 5 */ }
 
-  _lock() { /* phase 3: playState_lockTetrimino, main.asm:3062 */ }
-  _checkRows() { /* phase 3: main.asm:3188 */ }
-  _updateLines() { /* phase 3: main.asm:3329 */ }
+  // playState 2 — playState_lockTetrimino (main.asm:3062). Freeze the piece into
+  // the playfield array, or top out.
+  _lock() {
+    if (!this._valid()) {              // resting position overlaps → top-out
+      this.playState = PS.GAME_OVER;
+      this.curtainRow = -16;           // 0xF0 as signed: ~64-frame pause before the fill
+      return;                          // (lock / game-over SFX deferred)
+    }
+    // (vramRow >= 32 gate skipped — that ARE mechanism is phase 5)
+    const ori = ORIENTATIONS[this.currentPiece];
+    for (const [dy, dx] of ori.cells) {
+      const row = this.tetriminoY + dy;
+      if (row >= 0) this.playfield.set(this.tetriminoX + dx, row, ori.tile); // skip vanish zone
+    }
+    this.lineIndex = 0;
+    this._updatePlayfield();           // phase 5 no-op
+    this.playState++;                  // → 3 (CHECK_ROWS)
+  }
+
+  // playState 3 — playState_checkForCompletedRows (main.asm:3188). One candidate
+  // row per frame; a full row is marked (collapse deferred to the wipe animation).
+  _checkRows() {
+    // (vramRow >= 32 gate skipped — phase 5)
+    const rowBase = Math.max(0, this.tetriminoY - 2) + this.lineIndex;
+    if (rowBase < ROWS && this._isRowFull(rowBase)) {
+      this.completedRows.push(rowBase);
+      this.completedLines++;
+      this.currentPiece = ORI.hidden;  // hide the active piece during the clear
+    }
+    this.lineIndex++;
+    if (this.lineIndex < 4) return;    // more candidate rows next frame
+    this.rowY = 0;
+    this.playState++;                  // → 4 (wipe animation)
+    if (this.completedLines === 0) this.playState++; // nothing to clear → skip to 5
+  }
+
+  // playState 4 — the line-clear wipe (updateLineClearingAnimation, main.asm:2757).
+  // Blank the completed rows center-out over 20 frames, THEN collapse. The deferred
+  // collapse is a view-space re-derivation: the source collapses in state 3 and
+  // wipes VRAM, but we render the playfield array directly.
+  _lineClearAnimation() {
+    if ((this.frameCounter & 3) !== 0) return;   // one step every 4 frames
+    const left = LEFT_COLUMNS[this.rowY];
+    const right = RIGHT_COLUMNS[this.rowY];
+    for (const row of this.completedRows) {
+      this.playfield.set(left, row, TILE_EMPTY);
+      this.playfield.set(right, row, TILE_EMPTY);
+    }
+    this.rowY++;
+    if (this.rowY >= 5) {              // fully wiped → collapse + advance
+      this._collapseCompletedRows();
+      this.playState++;               // → 5 (UPDATE_LINES)
+    }
+  }
+
+  // Remove the completed rows; shift everything above down (main.asm:3228-3244,
+  // run here after the wipe rather than during the scan).
+  _collapseCompletedRows() {
+    const cleared = new Set(this.completedRows);
+    const cells = this.playfield.cells;
+    const next = new Uint8Array(COLS * ROWS).fill(TILE_EMPTY);
+    let dst = ROWS - 1;
+    for (let src = ROWS - 1; src >= 0; src--) {
+      if (cleared.has(src)) continue;             // drop the completed rows
+      for (let x = 0; x < COLS; x++) next[dst * COLS + x] = cells[src * COLS + x];
+      dst--;
+    }
+    cells.set(next);
+  }
+
+  // playState 5 — playState_updateLinesAndStatistics (main.asm:3329), Type A.
+  _updateLines() {
+    const cleared = this.completedLines;
+    if (cleared > 0) this._checkLevelUp(cleared);   // lines++ / level-up per line
+    // addHoldDownPoints (main.asm:3431): soft-drop score = holdDownPoints - 1 (if >= 2)
+    if (this.holdDownPoints >= 2) this.score += this.holdDownPoints - 1;
+    this.holdDownPoints = 0;
+    // addLineClearPoints (main.asm:3460): line points x (levelNumber + 1), capped
+    this.score += POINTS[cleared] * (this.levelNumber + 1);
+    if (this.score > 999999) this.score = 999999;
+    this.completedLines = 0;
+    this.completedRows = [];
+    this.playState++;                 // → 6
+  }
+
+  // Level-up (Type A, main.asm:3378). Increment lines one at a time; on each
+  // multiple of 10, level up if levelNumber < (BCD(lines) >> 4). That >>4-on-BCD
+  // is the source's implicit start-level threshold quirk, replicated here.
+  _checkLevelUp(cleared) {
+    for (let i = 0; i < cleared; i++) {
+      this.lines++;
+      if (this.lines % 10 === 0 && this.levelNumber < (this._bcdPack(this.lines) >> 4)) {
+        this.levelNumber++;
+      }
+    }
+  }
+
+  // Pack a decimal number into BCD (each digit in its own nibble), as the NES
+  // stores `lines`. Used only to reproduce the level-up threshold.
+  _bcdPack(n) {
+    let bcd = 0, shift = 0;
+    while (n > 0) { bcd |= (n % 10) << shift; shift += 4; n = Math.floor(n / 10); }
+    return bcd;
+  }
+
+  _isRowFull(row) {
+    for (let x = 0; x < COLS; x++) if (this.playfield.get(x, row) === TILE_EMPTY) return false;
+    return true;
+  }
+
+  // playState 10 — playState_updateGameOverCurtain (main.asm:3130). Fill the board
+  // top-down with the curtain tile, one row every 4 frames, then restart on Start.
+  _gameOverCurtain() {
+    if (this.curtainRow >= ROWS) {                  // filled → wait for Start
+      if (this.newlyPressedButtons & BTN.START) this.init();
+      return;
+    }
+    if ((this.frameCounter & 3) !== 0) return;      // every 4 frames
+    if (this.curtainRow >= 0) {                     // negative values are the initial pause
+      for (let x = 0; x < COLS; x++) this.playfield.set(x, this.curtainRow, TILE_CURTAIN);
+    }
+    this.curtainRow++;
+  }
 
   // PHASE-1 stub: deterministic 7-piece cycle. Returns a spawn orientation
   // (like chooseNextTetrimino, main.asm:2948). Replaced by roll-twice RNG in phase 4.

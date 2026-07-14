@@ -47,8 +47,15 @@ gravity, in the same tick.
    soft drop + gravity, lock-on-landing. Verified by driven per-frame checks.
    Surfaced + fixed a research-doc error: **soft drop is every 2 frames, not 3**
    (`@downPressed` resets the counter to 1 and fires at 3 → period 2).
-3. **Lock → line-clear → scoring → level** (+ 20-frame clear animation) — next.
-4. RNG (roll-twice). · 5. Entry delay (ARE). · 6. Modern toggles.
+3. **Lock / clear / score / level** ✅ — lock into the array (+ top-out →
+   game-over curtain), line detect + 20-frame center-out wipe + collapse, scoring
+   (`pointsTable × (level+1)` + soft-drop points), level-up (BCD `>>4` threshold).
+   *Deviations (view-space / phase-deferred):* score & lines as plain ints (BCD is
+   a display detail; the level-up `>>4` quirk is replicated), collapse deferred to
+   after the wipe (we render the array directly, not via VRAM), `vramRow`/ARE gates
+   skipped (phase 5). Verified by driven cycle tests + confirmed playable
+   end-to-end in a real browser.
+4. **RNG** (roll-twice) — next. · 5. Entry delay (ARE). · 6. Modern toggles.
 
 Modules: `src/{constants,pieces,playfield,game,render,input}.js` + `main.js`.
 
