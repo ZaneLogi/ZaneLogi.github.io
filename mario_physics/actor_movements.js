@@ -13,6 +13,31 @@
 // differ only in numbers.
 
 /**
+ * Constant-velocity walking, and nothing else. No accel, no friction, no jump —
+ * a Goomba is not a slower Mario, it moves at exactly one speed or not at all.
+ * That is the point of movement riding on the type: sharing Mario's model here
+ * and tuning the constants could not produce this.
+ *
+ * @param {Actor}  a
+ * @param {object} intent  { left, right } from the type's controller
+ * @param {number} dt      fixed timestep, in seconds
+ */
+export function constantWalk(a, intent, dt) {
+  const step = dt * 60;
+
+  if (intent.right) { a.vx = a.speed; a.facing = 1; }
+  else if (intent.left) { a.vx = -a.speed; a.facing = -1; }
+  else a.vx = 0;
+
+  // Gravity on the same terms as everything else: skipped while resting, so a
+  // walker that steps off a ledge falls, and one on the floor stays put.
+  if (!a.contacts.ground) {
+    a.vy += a.gravity * step;
+    if (a.vy > a.maxFall) a.vy = a.maxFall;
+  }
+}
+
+/**
  * Mario's model. Not a linear ramp to a cap: an additive per-tick impulse is
  * damped by multiplicative friction, so top speed is the equilibrium of the two.
  * The jump is not an impulse either — see the thrust block below.

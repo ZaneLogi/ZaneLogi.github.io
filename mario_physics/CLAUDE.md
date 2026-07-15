@@ -122,12 +122,27 @@ boost is the sole intended difference.
 A generic instance class plus a table of type definitions it is built from.
 **Adding a kind of thing is a table entry, not new engine code.**
 
-- **`ACTOR_TYPES[name] → { size, control, move, physics, sprites }`.** An `Actor`
-  (the instance) is constructed from one entry. `Actor` is the typed object; the
-  entry is its type. Behaviour rides on the type in two layers: `control`
-  (perception → intent) may look at the world; `move` (intent + contacts →
-  velocity) may not. Splitting them lets an actor that must *see* — one tracking
-  the player, or probing for a ledge — exist without handing every actor the map.
+- **`ACTOR_TYPES[name] → { size, control, move, animate, physics, sprites }`.** An
+  `Actor` (the instance) is constructed from one entry. `Actor` is the typed
+  object; the entry is its type — and the Actor holds only *state*, never
+  behaviour. That rides on the type, in three layers:
+  - **`control(actor)` → intent.** May look at the world.
+  - **`move(actor, intent, dt)` → velocity.** May *not*. Keeping it blind is what
+    leaves an actor drivable from synthetic contacts with no map at all, which is
+    how `test/` measures one.
+  - **`animate(actor)` → a state name.** Derived, never driving.
+
+  Splitting control from move lets an actor that must *see* exist without handing
+  every actor the map. Nothing sees yet: a **reactive** actor needs no senses,
+  because "I hit a wall" is a *consequence* and consequences already arrive
+  through `contacts`. An actor that must **probe** (is there a ledge ahead?) or
+  **perceive** (where is the player?) needs a sense interface that does not exist
+  yet — `contacts` cannot serve either, being retrospective by construction.
+
+  Physics constants are copied onto the Actor wholesale, because *which* constants
+  exist is the type's business — a walker carries a `speed`; Mario carries a
+  friction model and a jump curve. An Actor that named them would know every type.
+
   The player is not special: its controller reads `actor.input`, which the
   composition root writes, so no other actor ever sees it.
 - **`TILES[id] → { solid, look, onBump? }`.** A grid cell's type. `look` is either
@@ -146,17 +161,25 @@ resolver, world pipeline, animator — do not change.
 | File | Owns |
 |---|---|
 | `main.js` | composition root: canvas, input, level data, wiring, the fixed-timestep loop |
-| `actor.js` | `Actor`: movement intent + animation-state derivation; built from an `ACTOR_TYPES` entry; world-agnostic |
+| `actor.js` | `Actor`: a body — state, plus the constants its type's behaviour reads; world-agnostic |
+| `actor_types.js` | `ACTOR_TYPES` registry — the blueprint an `Actor` is instanced from |
+| `actor_controllers.js` | `control` fns: perception → intent (`keyboard`, `reactiveWalker`) |
+| `actor_movements.js` | `move` fns: intent + contacts → velocity (`marioMovement`, `constantWalk`) |
+| `actor_animations.js` | `animate` fns: velocity + contacts → a state name (`marioAnimation`, `alwaysWalk`) |
 | `collision.js` | `resolveCollision`: per-axis integrate + tile detect + respond; returns `contacts` |
-| `world.js` | `World`: owns actors + map; runs the pipeline and the react step; owns tile animations + block-bump hops; draws |
-| `animator.js` | `Animator`: plays a sprite-set; owns all frame-cycling |
-| `actor_types.js` | `ACTOR_TYPES` registry |
+| `world.js` | `World`: owns the actor list (`addActor`/`removeActor`) + map; runs the pipeline and the react step; owns tile animations + block-bump hops; draws every actor |
+| `animator.js` | `Animator`: plays a sprite-set; owns all frame-cycling. Distinct from `actor_animations.js`, which only *names* the state to show |
 | `tiles.js` | `TILES` registry + `isSolid` |
 | `level_map.js` | `LevelMap`: tile-grid queries (`isSolidAt`, `setTile`, `worldToTile`, `getTileRect`) |
 | `camera.js` | smooth follow, world→screen, map clamp |
 
 Sprites load via `../mario/resource.js` (shared with the legacy `mario/` demo);
-`0xFF00FF` is the colorkey.
+`0xFF00FF` is the colorkey. That module is an explicit **registry**, not a
+directory scan: `res_loader` fetches only the paths listed in it, so **a new
+sprite must be added there or it never loads** — the file sits on disk, and you
+get a `No resource …` assert when something first tries to draw it. A frame name
+in a sprite-set is the registry key minus `res/images/` (`"goomba/goombas_0"` →
+`'res/images/goomba/goombas_0'`).
 
 ## Verifying a change — the fingerprint harness
 

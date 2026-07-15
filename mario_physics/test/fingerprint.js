@@ -271,6 +271,40 @@ function animStates() {
   };
 }
 
+// 9. A second actor, driven by a computed controller rather than a keyboard.
+//    Proves the reactive class: it walks at a constant speed and turns around on
+//    contact, using no senses at all — `contacts.left/right` is enough. Also
+//    proves a non-player actor never sees the player's input (it is given none).
+function goombaWalks() {
+  // A pen: floor on the bottom row, and out-of-bounds counts as solid, so the
+  // walker turns at both ends of a 10-tile strip.
+  const map = new LevelMap(makeLevel(16, 10), T);
+  const world = new World(map);
+  const g = new Actor(ACTOR_TYPES.goomba, 160, 0);
+  world.addActor(g, new Animator(ACTOR_TYPES.goomba.sprites));
+
+  const x = [], facing = [];
+  let turns = 0, prevFacing = g.facing;
+  for (let f = 0; f < 900; f++) {
+    world.update(DT);
+    x.push(g.x);
+    facing.push(g.facing);
+    if (g.facing !== prevFacing) turns++;
+    prevFacing = g.facing;
+  }
+  return {
+    trace: [...x, ...facing],
+    scalars: {
+      turns,
+      minX: r3(Math.min(...x)),
+      maxX: r3(Math.max(...x)),
+      speed: r3(Math.abs(g.vx)),
+      state: g.currentState,
+      restsOnFloor: g.contacts.ground,
+    },
+  };
+}
+
 const SCENARIOS = {
   run_and_settle: runAndSettle,
   run_reverse_settle: runReverseSettle,
@@ -280,6 +314,7 @@ const SCENARIOS = {
   sprint: sprint,
   qblock_bump: qBlockBump,
   anim_states: animStates,
+  goomba_walks: goombaWalks,
 };
 
 /** Run every scenario; return { name: { hash, scalars } }. */

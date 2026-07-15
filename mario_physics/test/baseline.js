@@ -85,5 +85,19 @@ export const BASELINE = {
       "statesSeen": ["idle", "walk", "run", "skid", "jump", "fall"],
       "finalState": "walk"
     }
+  },
+  // Added when the Goomba landed. Re-blessed once, deliberately: its speed went
+  // 1.0 -> 0.84 to match the reference. Mario's eight kept their hashes through
+  // both, so nothing else moved.
+  "goomba_walks": {
+    "hash": "f3bf2971",
+    "scalars": {
+      "turns": 3,
+      "minX": 0,
+      "maxX": 287.99,
+      "speed": 0.84,
+      "state": "walk",
+      "restsOnFloor": true
+    }
   }
 };

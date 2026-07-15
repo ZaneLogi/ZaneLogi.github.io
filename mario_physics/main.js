@@ -29,7 +29,7 @@ const level = [
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0,0],
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,0,0],
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0,0,0],
-  [1,0,0,0,0,0,0,4,3,3,3,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0,0,0,0,0,0],
+  [1,0,0,0,0,0,0,4,3,3,3,4,0,4,4,4,4,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0,0,0,0,0,0],
   [1,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
   [1,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
@@ -47,6 +47,17 @@ const player = new Actor(ACTOR_TYPES.mario, 64, 0);
 const playerAnimator = new Animator(ACTOR_TYPES.mario.sprites);
 
 world.addActor(player, playerAnimator);
+
+// A Goomba, dropped in above the blocks. It gets no input — its type names a
+// computed controller — so it walks left on its own and cascades down the
+// stepped platforms: it catches the brick row on the way in, then steps off each
+// ledge in turn (rows 11 → 12 → 13) down to the floor, and turns at the wall.
+// Nothing tells it about a ledge: it simply stops being supported, which is
+// gravity's job. Note it drifts left *while* falling — horizontal speed is
+// unaffected by being airborne, so each fall is a little arc.
+const goomba = new Actor(ACTOR_TYPES.goomba, 400, 0);
+goomba.facing = -1; // start it walking left, into the steps
+world.addActor(goomba, new Animator(ACTOR_TYPES.goomba.sprites));
 
 // ----------------------
 // Input handling

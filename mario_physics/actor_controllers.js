@@ -27,3 +27,21 @@
 export function keyboard(a) {
   return a.input;
 }
+
+/**
+ * Walk forward; turn around on hitting something. The whole reactive class:
+ * it needs no senses at all, because "I hit a wall" is a *consequence*, and
+ * consequences already arrive through `contacts`. It never learns where it is,
+ * what the tile was, or where the player is — and a Goomba shouldn't.
+ *
+ * `facing` doubles as the direction state: the intent below derives from it, and
+ * the movement sets it back from that intent, so the two agree by construction.
+ *
+ * @param {Actor} a
+ * @returns {object} { left, right }
+ */
+export function reactiveWalker(a) {
+  if (a.contacts.left) a.facing = 1;   // blocked going left -> go right
+  if (a.contacts.right) a.facing = -1; // blocked going right -> go left
+  return { left: a.facing < 0, right: a.facing > 0 };
+}

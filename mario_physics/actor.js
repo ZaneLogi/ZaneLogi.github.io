@@ -20,22 +20,11 @@ export class Actor {
     this.vx = 0;
     this.vy = 0;
 
-    // Physics constants come from the type definition (see actor_types.js).
-    const p = def.physics;
-    this.runAccel = p.runAccel;
-    this.friction = p.friction;
-    this.decelMoving = p.decelMoving;
-    this.decelIdle = p.decelIdle;
-    this.maxSpeed = p.maxSpeed;
-    this.runAnimSpeed = p.runAnimSpeed;
-
-    this.jumpUnit = p.jumpUnit;
-    this.jumpMod = p.jumpMod;
-    this.jumpModSpeed = p.jumpModSpeed;
-    this.maxRise = p.maxRise;
-
-    this.gravity = p.gravity;
-    this.maxFall = p.maxFall;
+    // Physics constants come from the type definition, copied wholesale: which
+    // constants exist is the *type's* business, not the Actor's. A walker carries
+    // a `speed`; Mario carries a friction model and a jump curve. Naming them here
+    // would make the Actor know every type.
+    Object.assign(this, def.physics);
 
     // The world's answer to last step's motion: which sides ended in contact.
     // Read as an input to this step's movement — jumping and ground traction are
@@ -62,21 +51,11 @@ export class Actor {
   }
 
   // How the actor wants to look, given the motion the world actually allowed.
-  // Kept apart from the movement step so presentation and physics can each
+  // Which states exist is the type's business — Mario has a skid and a jump, a
+  // walker has neither — so the type's `animate` decides and this only stores the
+  // answer. Kept apart from the movement step so presentation and physics can each
   // change without disturbing the other.
   updateAnimationState() {
-    if (this.isSkidding) {
-      this.currentState = "skid";
-    } else if (!this.contacts.ground) {
-      if (this.vy < 0) this.currentState = "jump";
-      else this.currentState = "fall";
-    } else if (Math.abs(this.vx) > 0.1) {
-      // Run animation only when sprinting fast enough; walking tops out below
-      // runAnimSpeed, so it never trips the run frames.
-      if (this.isRunning && Math.abs(this.vx) > this.runAnimSpeed) this.currentState = "run";
-      else this.currentState = "walk";
-    } else {
-      this.currentState = "idle";
-    }
+    this.currentState = this.def.animate(this);
   }
 }

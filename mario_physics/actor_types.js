@@ -10,18 +10,20 @@
 // motion is identical at any frame rate. Values are px per 1/60 s tick, and an
 // on-screen tile is 32 px (this project's TILE_SIZE). The design these encode —
 // and its lineage — is described under "Movement model" in CLAUDE.md.
-import { keyboard } from './controllers.js';
-import { marioMovement } from './movements.js';
+import { keyboard, reactiveWalker } from './actor_controllers.js';
+import { marioMovement, constantWalk } from './actor_movements.js';
+import { marioAnimation, alwaysWalk } from './actor_animations.js';
 
 export const ACTOR_TYPES = {
   mario: {
     size: { w: 24, h: 32 },
 
-    // Behaviour, in two layers: `control` perceives and produces intent;
-    // `move` turns intent + contacts into velocity. Adding a kind of actor is
-    // naming a pair here, not writing engine code.
+    // Behaviour, in three layers: `control` perceives and produces intent; `move`
+    // turns intent + contacts into velocity; `animate` reads the result and names
+    // a look. Adding a kind of actor is naming a trio here, not writing engine code.
     control: keyboard,
     move: marioMovement,
+    animate: marioAnimation,
 
     physics: {
       // Horizontal. Top speed is an *emergent* equilibrium of per-tick accel vs.
@@ -57,6 +59,32 @@ export const ACTOR_TYPES = {
       skid:  { frames: ["mario/mario_st"] },
       squat: { frames: ["mario/mario"] },
       dead:  { frames: ["mario/mario_death"] },
+    },
+  },
+
+  // A Goomba: walks forward, turns around on hitting something, falls off
+  // ledges. Entirely a table entry — the trio it names already existed, and no
+  // engine code knows a Goomba exists. Sprite is a full tile (32x32), so the
+  // hitbox matches it, as Mario's does his.
+  goomba: {
+    size: { w: 32, h: 32 },
+
+    control: reactiveWalker,
+    move: constantWalk,
+    animate: alwaysWalk,
+
+    physics: {
+      speed: 0.84,   // constant, not a top speed — there is no accel to reach it
+      gravity: 0.48, // shared with Mario: gravity is the world's, not his
+      maxFall: 8,
+    },
+
+    // The two walk frames are exact horizontal mirrors of each other, which is
+    // how the original reads as alternating feet. fps is ours, not derived —
+    // see the movement model note in CLAUDE.md.
+    sprites: {
+      walk: { frames: ["goomba/goombas_0", "goomba/goombas_1"], fps: 6 },
+      dead: { frames: ["goomba/goombas_ded"] },
     },
   },
 };

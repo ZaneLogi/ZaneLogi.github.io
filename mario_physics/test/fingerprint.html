@@ -28,6 +28,7 @@
     td.name { font-family: ui-monospace, monospace; color: #cdd9e6; white-space: nowrap; }
     td.ok { color: #7ee08f; }
     td.bad { color: #ff9d9d; }
+    td.new { color: #f5cf6b; }
     .scalars { font-family: ui-monospace, monospace; font-size: 12px; color: #9fb0c3; }
     .diff { color: #ff9d9d; }
     pre {
@@ -60,11 +61,15 @@
   const verdict = document.getElementById('verdict');
   const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-  let failures = 0;
+  let failures = 0, unblessed = 0;
   for (const name of Object.keys(actual)) {
     const a = actual[name];
     const b = BASELINE && BASELINE[name];
     const tr = document.createElement('tr');
+
+    // A scenario with no baseline entry has been compared against nothing. It
+    // must never read as a pass — that is how a harness quietly stops testing.
+    if (BASELINE && !b) unblessed++;
 
     const hashOk = b ? a.hash === b.hash : null;
     if (hashOk === false) failures++;
@@ -79,23 +84,30 @@
         : `${k}=${shown}`;
     }).join('<br>');
 
+    const isNew = BASELINE && !b;
     tr.innerHTML =
       `<td class="name">${name}</td>` +
-      `<td class="${hashOk === null ? '' : hashOk ? 'ok' : 'bad'}">${a.hash}` +
+      `<td class="${isNew ? 'new' : hashOk === null ? '' : hashOk ? 'ok' : 'bad'}">${a.hash}` +
+        `${isNew ? '<br><span class="diff">NOT IN BASELINE — compared against nothing</span>' : ''}` +
         `${hashOk === false ? `<br><span class="diff">want ${b.hash}</span>` : ''}</td>` +
       `<td class="scalars">${scalarCells}</td>`;
     tbody.appendChild(tr);
   }
 
+  const total = Object.keys(actual).length;
   if (!BASELINE) {
     verdict.className = 'unblessed';
     verdict.textContent = 'UNBLESSED — no baseline recorded. Paste the block below into baseline.js.';
-  } else if (failures === 0) {
-    verdict.className = 'pass';
-    verdict.textContent = `PASS — all ${Object.keys(actual).length} scenarios match the blessed fingerprint.`;
-  } else {
+  } else if (failures) {
     verdict.className = 'fail';
     verdict.textContent = `FAIL — ${failures} mismatch(es). Behaviour changed.`;
+  } else if (unblessed) {
+    verdict.className = 'unblessed';
+    verdict.textContent = `${unblessed} scenario(s) are NOT in the baseline — compared against nothing. ` +
+      `${total - unblessed} matched. Bless the new one(s) below before trusting this.`;
+  } else {
+    verdict.className = 'pass';
+    verdict.textContent = `PASS — all ${total} scenarios match the blessed fingerprint.`;
   }
 
   document.getElementById('bless').textContent =
