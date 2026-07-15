@@ -140,3 +140,59 @@ resolver, world pipeline, animator — do not change.
 
 Sprites load via `../mario/resource.js` (shared with the legacy `mario/` demo);
 `0xFF00FF` is the colorkey.
+
+## Verifying a change — the fingerprint harness
+
+Open `test/fingerprint.html`. It runs synchronously (no rAF, so it works even when
+the preview tab is hidden) and reports PASS/FAIL against a blessed baseline.
+
+It is a **characterization** harness: it pins what the physics *currently* does,
+not what it *should* do. Its only question is "did this change?" — which is what
+makes a behaviour-preserving restructure provable rather than hoped-for. It has no
+opinion on whether the physics is any good, and it will happily pin a bug.
+
+**Run it before and after any change meant to preserve behaviour.** Play-testing
+cannot do this job: a 3 px shift in jump height or a 2-tick shift in the skid is
+invisible to feel and would ship unnoticed.
+
+The harness pairs with the two things this file changes for, and which one you are
+making decides what the harness should do:
+
+- **A structure change** — a refactor (inverting the loop, moving movement onto the
+  type, hoisting gravity) — claims to change no behaviour, so it **must pass against
+  the existing baseline**. Red means the claim was false. The scenario code may have
+  to follow a changed API; the *baseline* must not move.
+- **A movement-design change** — retuning the jump, changing the friction model —
+  deliberately overwrites behaviour, so it **will** go red. Re-blessing is part of
+  the change, and the commit message says why the numbers moved.
+
+So the harness isn't only asking "did I break something" — it is checking the claim
+you made about which kind of change this is. If one commit moves *both* the scenario
+code and the baseline, treat it as a smell: you have either bundled two changes, or
+changed behaviour while calling it a refactor.
+
+Eight scenarios cover every phase of the tick, not just the physics — `qblock_bump`
+exercises the **react** phase (`TILES.onBump` → hop → `3` spends to `5`) and
+`anim_states` the **present** phase. A fingerprint covering only intent+collide
+would stay green while a restructure silently stopped dispatching block bumps.
+
+Each scenario reduces to a hash of its full per-tick trace (catches any drift, at
+full float precision) plus a few readable scalars (which say *what* moved when it
+fires). Comparison is exact: the physics is deterministic to the last bit, so drift
+is a bug, not noise.
+
+| File | Owns |
+|---|---|
+| `test/fingerprint.js` | the scenarios + runner |
+| `test/baseline.js` | data: the blessed fingerprint, and the commit + JS engine that blessed it |
+| `test/fingerprint.html` | runs, compares, renders, and emits a re-bless block |
+
+Two things to respect:
+
+- **Exact-match is only valid on the engine that blessed it.** `Math.pow` is
+  implementation-approximated by spec, and the jump's thrust divisor uses it with a
+  non-integer exponent. A different engine may go red with nothing actually wrong —
+  `baseline.js` records which one to re-bless on.
+- **To re-bless** — only ever for the second case above — paste the block the page
+  emits into `baseline.js`. Re-blessing to turn a red harness green is the one way
+  to make it worthless.

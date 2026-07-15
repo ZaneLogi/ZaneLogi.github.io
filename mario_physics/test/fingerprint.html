@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>mario_physics — fingerprint</title>
+  <style>
+    body {
+      margin: 0; padding: 20px 16px 40px;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #1c2733; color: #e8eef5;
+    }
+    main { max-width: 900px; margin: auto; }
+    h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+    .sub { font-size: 13px; color: #9fb0c3; margin: 0 0 20px; }
+    #verdict {
+      font-size: 15px; font-weight: 600; padding: 10px 14px;
+      border-radius: 6px; margin-bottom: 20px;
+    }
+    .pass { background: #17381f; color: #7ee08f; border: 1px solid #2c6b3d; }
+    .fail { background: #3b1a1a; color: #ff9d9d; border: 1px solid #7c2f2f; }
+    .unblessed { background: #3a3016; color: #f5cf6b; border: 1px solid #7a651f; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th, td {
+      text-align: left; padding: 7px 10px;
+      border-bottom: 1px solid #2c3b4c; vertical-align: top;
+    }
+    th { color: #9fb0c3; font-weight: 500; }
+    td.name { font-family: ui-monospace, monospace; color: #cdd9e6; white-space: nowrap; }
+    td.ok { color: #7ee08f; }
+    td.bad { color: #ff9d9d; }
+    .scalars { font-family: ui-monospace, monospace; font-size: 12px; color: #9fb0c3; }
+    .diff { color: #ff9d9d; }
+    pre {
+      background: #121a24; border: 1px solid #2c3b4c; border-radius: 6px;
+      padding: 12px; overflow-x: auto; font-size: 12px; color: #cdd9e6;
+      margin-top: 24px;
+    }
+    h2 { font-size: 14px; font-weight: 500; color: #9fb0c3; margin: 28px 0 6px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>mario_physics — fingerprint</h1>
+  <p class="sub">Characterization harness: pins current behaviour so a restructure can be proven a no-op. It does not test correctness.</p>
+  <div id="verdict">running…</div>
+  <table id="results">
+    <thead><tr><th>scenario</th><th>hash</th><th>scalars</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <h2>Blessed block — paste over <code>BASELINE</code> in baseline.js to re-bless</h2>
+  <pre id="bless"></pre>
+</main>
+
+<script type="module">
+  import { fingerprint } from './fingerprint.js';
+  import { BASELINE } from './baseline.js';
+
+  const actual = fingerprint();
+  const tbody = document.querySelector('#results tbody');
+  const verdict = document.getElementById('verdict');
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+  let failures = 0;
+  for (const name of Object.keys(actual)) {
+    const a = actual[name];
+    const b = BASELINE && BASELINE[name];
+    const tr = document.createElement('tr');
+
+    const hashOk = b ? a.hash === b.hash : null;
+    if (hashOk === false) failures++;
+
+    const scalarCells = Object.entries(a.scalars).map(([k, v]) => {
+      const want = b && b.scalars ? b.scalars[k] : undefined;
+      const bad = b && !eq(v, want);
+      if (bad) failures++;
+      const shown = JSON.stringify(v);
+      return bad
+        ? `<span class="diff">${k}=${shown} (want ${JSON.stringify(want)})</span>`
+        : `${k}=${shown}`;
+    }).join('<br>');
+
+    tr.innerHTML =
+      `<td class="name">${name}</td>` +
+      `<td class="${hashOk === null ? '' : hashOk ? 'ok' : 'bad'}">${a.hash}` +
+        `${hashOk === false ? `<br><span class="diff">want ${b.hash}</span>` : ''}</td>` +
+      `<td class="scalars">${scalarCells}</td>`;
+    tbody.appendChild(tr);
+  }
+
+  if (!BASELINE) {
+    verdict.className = 'unblessed';
+    verdict.textContent = 'UNBLESSED — no baseline recorded. Paste the block below into baseline.js.';
+  } else if (failures === 0) {
+    verdict.className = 'pass';
+    verdict.textContent = `PASS — all ${Object.keys(actual).length} scenarios match the blessed fingerprint.`;
+  } else {
+    verdict.className = 'fail';
+    verdict.textContent = `FAIL — ${failures} mismatch(es). Behaviour changed.`;
+  }
+
+  document.getElementById('bless').textContent =
+    'export const BASELINE = ' + JSON.stringify(actual, null, 2) + ';';
+
+  window.__fingerprint = actual;
+  window.__failures = failures;
+</script>
+</body>
+</html>
