@@ -102,14 +102,16 @@ function runloop() {
 }
 
 function update(dt) {
-  const input = {
+  // The player's intent source: written onto the actor, so only actors whose
+  // type names the `keyboard` controller ever see it.
+  player.input = {
     run: keys["ShiftLeft"] || keys["KeyZ"], // hold Shift or Z to run
     left: keys["ArrowLeft"],
     right: keys["ArrowRight"],
     jump: keys["Space"]
   };
 
-  world.update(input, dt);
+  world.update(dt);
   camera.follow(player, levelMap);
 }
 

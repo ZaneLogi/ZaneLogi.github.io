@@ -17,23 +17,34 @@ from `mini_mario_physics_demo.html` → `main.js`.
 then the frame is drawn once (an interpolation factor `alpha` is computed for the
 renderer). Physics is therefore decoupled from display refresh rate.
 
-**Inner pipeline** (`World.update`, per tick, for each actor):
+**Inner pipeline** (`World.update`, per tick). It is **phase-major**: every actor
+finishes a phase before any actor starts the next.
 
-1. **intent** — `actor.applyInput(input, dt)`: input + gravity + jump → velocity.
+1. **control** — `type.control(actor)`: perception → intent. A phase of its own so
+   that a controller which looks at the world sees a consistent snapshot, before
+   any movement has changed a velocity.
+2. **move** — `type.move(actor, intent, dt)`: intent + gravity + jump → velocity.
    Reads only *last* tick's `contacts`; never the map.
-2. **collide** — `actor.contacts = resolveCollision(actor, levelMap, dt)`:
+3. **collide** — `actor.contacts = resolveCollision(actor, levelMap, dt)`:
    integrate the velocity and resolve it against the tiles, returning a fresh
    `contacts`.
-3. **react** — `World.reactToContacts(actor)`: the world responds to the contact
+4. **react** — `World.reactToContacts(actor)`: the world responds to the contact
    (e.g. a bumped tile's `onBump`).
-4. **present** — `actor.updateAnimationState()` then `animator.update(state, dt)`:
+5. **present** — `actor.updateAnimationState()` then `animator.update(state, dt)`:
    velocity + contacts → animation.
+
+Phase-major is indistinguishable from per-actor while there is one actor, and
+load-bearing the moment there are two: comparing two actors is meaningless if the
+first has already integrated and the second has not, so anything actor-vs-actor can
+only live *between* phases. It also keeps every actor's view of the world a
+consistent snapshot of the last tick, instead of one that depends on array order.
 
 The world also advances tile animations and block-bump hops on this same tick clock.
 
 | Phase | Owner |
 |---|---|
-| intent (input/forces → velocity) | `Actor` |
+| control (perception → intent) | the type's `control` fn |
+| move (intent/forces → velocity) | the type's `move` fn |
 | integrate + detect + respond | collision resolver |
 | orchestration + world reaction | `World` |
 | presentation | `Animator` |
@@ -111,8 +122,14 @@ boost is the sole intended difference.
 A generic instance class plus a table of type definitions it is built from.
 **Adding a kind of thing is a table entry, not new engine code.**
 
-- **`ACTOR_TYPES[name] → { size, physics, sprites }`.** An `Actor` (the instance)
-  is constructed from one entry. `Actor` is the typed object; the entry is its type.
+- **`ACTOR_TYPES[name] → { size, control, move, physics, sprites }`.** An `Actor`
+  (the instance) is constructed from one entry. `Actor` is the typed object; the
+  entry is its type. Behaviour rides on the type in two layers: `control`
+  (perception → intent) may look at the world; `move` (intent + contacts →
+  velocity) may not. Splitting them lets an actor that must *see* — one tracking
+  the player, or probing for a ledge — exist without handing every actor the map.
+  The player is not special: its controller reads `actor.input`, which the
+  composition root writes, so no other actor ever sees it.
 - **`TILES[id] → { solid, look, onBump? }`.** A grid cell's type. `look` is either
   `{ color }` (flat) or `{ frames, fps }` (sprite / animated). `onBump(world, tx,
   ty, actor)` is the cell's optional response to a head-bump, driven through world

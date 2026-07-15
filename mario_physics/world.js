@@ -28,14 +28,39 @@ export class World {
     this.objects.push({actor: actor, animator: actorAnimator});
   }
 
-  update(input, dt) {
+  // Actors leave: a stomped enemy, a collected mushroom, a spent fireball.
+  removeActor(actor) {
+    const i = this.objects.findIndex((o) => o.actor === actor);
+    if (i >= 0) this.objects.splice(i, 1);
+  }
+
+  // Phase-major: every actor finishes a phase before any actor starts the next.
+  // With one actor this is identical to running all four phases per actor, but it
+  // is the only shape that can host actor-vs-actor work — comparing two actors is
+  // meaningless if the first has already integrated and the second has not — and it
+  // keeps every actor's view of the world a consistent snapshot of the last tick
+  // rather than one that depends on array order.
+  update(dt) {
+    // 1. control — the type's controller perceives and produces intent. Kept a
+    //    phase of its own so that a controller which looks at the world sees a
+    //    consistent snapshot, before any movement has changed a velocity.
+    for (const obj of this.objects) obj.intent = obj.actor.def.control(obj.actor);
+
+    // 2. move — the type's movement turns intent + last tick's contacts -> velocity
+    for (const obj of this.objects) obj.actor.def.move(obj.actor, obj.intent, dt);
+
+    // 3. collide — integrate and resolve against the tiles -> fresh contacts
     for (const obj of this.objects) {
-      const actor = obj.actor;
-      actor.applyInput(input, dt);                              // 1. intent  -> velocity
-      actor.contacts = resolveCollision(actor, this.levelMap, dt); // 2. integrate + collide + respond
-      this.reactToContacts(actor);                             // 3. world reacts to the contact
-      actor.updateAnimationState();                             // 4. velocity + contacts -> anim state
-      obj.animator.update(actor.currentState, dt);
+      obj.actor.contacts = resolveCollision(obj.actor, this.levelMap, dt);
+    }
+
+    // 4. react — the world responds to what was touched
+    for (const obj of this.objects) this.reactToContacts(obj.actor);
+
+    // 5. present — velocity + contacts -> animation
+    for (const obj of this.objects) {
+      obj.actor.updateAnimationState();
+      obj.animator.update(obj.actor.currentState, dt);
     }
 
     // Tile shimmer and block-bump hops run on the same fixed clock.
@@ -99,10 +124,10 @@ export class World {
       }
     }
 
-    const player = this.objects[0].actor; // assuming first actor is the player
-    const playerAnimator = this.objects[0].animator;
-    // Draw player
-    const { sx, sy } = camera.worldToScreen(player.x, player.y);
-    playerAnimator.draw(ctx, sx, sy, player.facing === -1);
+    // Every actor, in spawn order — the player is not special here.
+    for (const obj of this.objects) {
+      const { sx, sy } = camera.worldToScreen(obj.actor.x, obj.actor.y);
+      obj.animator.draw(ctx, sx, sy, obj.actor.facing === -1);
+    }
   }
 }

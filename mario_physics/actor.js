@@ -1,13 +1,14 @@
 // ----------------------
 // Actor
 // ----------------------
-// An Actor models a body's own intentions, not its place in the world. Each
-// step it produces two things and nothing more:
-//   applyInput()           input + gravity + jump -> velocity    (how it wants to move)
-//   updateAnimationState() velocity + contacts    -> currentState (how it wants to look)
+// An Actor is a body: its state, and the constants its behaviour reads. What it
+// *does* comes from its type — an ACTOR_TYPES entry names a `control` (perception
+// -> intent) and a `move` (intent + contacts -> velocity), and the world calls
+// them. The Actor itself only derives how it wants to look:
+//   updateAnimationState() velocity + contacts -> currentState
 // It holds no knowledge of tiles or geometry. Whatever the world permits comes
 // back through `this.contacts`, and that struct is the single place where the
-// results of collision (grounded / hit wall / hit ceiling) re-enter the actor's
+// results of collision (grounded / hit wall / hit ceiling) re-enter an actor's
 // own decisions.
 export class Actor {
   constructor(def, x, y) {
@@ -42,6 +43,11 @@ export class Actor {
     this.contacts = { ground: false, ceiling: false, left: false, right: false };
     this.prevJump = false;
 
+    // Intent source for a human-driven actor: the composition root writes this
+    // each tick and the `keyboard` controller hands it on. Actors whose type
+    // names a computed controller never read it.
+    this.input = {};
+
     // Jump state. `jumping` marks the rising phase in which a held jump adds
     // thrust; `jumpLev` counts the ticks it has been held, feeding the decaying
     // thrust curve.
@@ -53,77 +59,6 @@ export class Actor {
 
     this.facing = 1; // 1 = right, -1 = left
     this.currentState = "idle"; // main animation state
-  }
-
-  // How the actor wants to move this step: fold input and forces into a
-  // velocity. Reaches the world only through `this.contacts` (last step's
-  // result), never by inspecting tiles directly.
-  applyInput(input, dt) {
-    const grounded = this.contacts.ground;
-    const step = dt * 60;
-
-    // --- HORIZONTAL MOVEMENT ---
-    // Additive accel + multiplicative friction + a small linear decel. Top speed
-    // is the equilibrium of accel vs. friction, not a hard ramp. The same model
-    // runs grounded and airborne — full air control.
-    let decel;
-    if (input.left || input.right) {
-      const dir = input.right ? 1 : -1;
-      this.facing = dir;
-      const adder = this.runAccel * (input.run ? 2 : 1); // run key doubles the accel
-      this.vx += dir * adder * step;
-      this.vx *= Math.pow(this.friction, step);
-      decel = this.decelMoving;
-      this.isRunning = !!input.run;
-      // Skid = pressing against current motion (ground only, for the sprite).
-      this.isSkidding = grounded && ((dir > 0 && this.vx < 0) || (dir < 0 && this.vx > 0));
-    } else {
-      this.vx *= Math.pow(this.friction, step); // glide to a stop
-      decel = this.decelIdle;
-      this.isRunning = false;
-      this.isSkidding = false;
-    }
-    // Linear decel toward zero, then clamp to top speed.
-    if (this.vx > decel * step) this.vx -= decel * step;
-    else if (this.vx < -decel * step) this.vx += decel * step;
-    else this.vx = 0;
-    if (this.vx > this.maxSpeed) this.vx = this.maxSpeed;
-    else if (this.vx < -this.maxSpeed) this.vx = -this.maxSpeed;
-
-    // --- JUMP START ---  fresh press while on the ground
-    if (input.jump && !this.prevJump && grounded) {
-      this.jumping = true;
-      this.jumpLev = 0;
-    }
-
-    // --- GRAVITY ---
-    // While grounded the actor is treated as resting (vy held at 0, no gravity).
-    // Skipping gravity here keeps vy at 0 on the launch tick so the jump thrust
-    // below actually fires; airborne, gravity accumulates as usual.
-    if (!grounded) {
-      this.vy += this.gravity * step;
-      if (this.vy > this.maxFall) this.vy = this.maxFall;
-    }
-
-    // --- JUMP THRUST ---
-    // While the button is held and the actor is still rising, add a decaying
-    // upward impulse: the numerator is constant but the divisor grows each tick,
-    // so early ticks lift hard and later ticks barely — holding longer jumps
-    // higher, with diminishing returns. Faster horizontal *speed* lowers the
-    // exponent, raising the jump. We key it on |vx| so the boost is symmetric by
-    // speed — jump height shouldn't depend on which way you face. (A design call,
-    // not a fidelity one; see the movement model in CLAUDE.md.)
-    if (this.jumping && input.jump && this.vy <= 0) {
-      this.jumpLev += 1;
-      const mod = this.jumpMod - Math.abs(this.vx) * this.jumpModSpeed;
-      const dy = this.jumpUnit / Math.pow(this.jumpLev, mod);
-      this.vy = Math.max(this.vy - dy * step, this.maxRise);
-    }
-    // Releasing the button — or cresting into a fall — ends the thrust; a new
-    // jump then requires landing and a fresh press.
-    if (!input.jump || this.vy > 0) this.jumping = false;
-
-    this.prevJump = input.jump;
   }
 
   // How the actor wants to look, given the motion the world actually allowed.

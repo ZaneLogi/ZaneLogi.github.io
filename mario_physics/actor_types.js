@@ -10,9 +10,18 @@
 // motion is identical at any frame rate. Values are px per 1/60 s tick, and an
 // on-screen tile is 32 px (this project's TILE_SIZE). The design these encode —
 // and its lineage — is described under "Movement model" in CLAUDE.md.
+import { keyboard } from './controllers.js';
+import { marioMovement } from './movements.js';
+
 export const ACTOR_TYPES = {
   mario: {
     size: { w: 24, h: 32 },
+
+    // Behaviour, in two layers: `control` perceives and produces intent;
+    // `move` turns intent + contacts into velocity. Adding a kind of actor is
+    // naming a pair here, not writing engine code.
+    control: keyboard,
+    move: marioMovement,
 
     physics: {
       // Horizontal. Top speed is an *emergent* equilibrium of per-tick accel vs.

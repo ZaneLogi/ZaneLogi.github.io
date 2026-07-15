@@ -64,9 +64,16 @@ function spawn(level, x, y) {
   return { world, actor, map };
 }
 
+// Drive one tick with a given player intent. Intent reaches an actor through its
+// own `input` field, which only the `keyboard` controller reads.
+function tick(world, actor, input) {
+  actor.input = input;
+  world.update(DT);
+}
+
 // Let the actor fall to the floor and come to rest before the scenario starts.
-function settle(world, n = 150) {
-  for (let i = 0; i < n; i++) world.update({}, DT);
+function settle(world, actor, n = 150) {
+  for (let i = 0; i < n; i++) tick(world, actor, {});
 }
 
 const r3 = (v) => +v.toFixed(3);
@@ -75,10 +82,10 @@ const r3 = (v) => +v.toFixed(3);
 //    Accel -> friction equilibrium (top speed is emergent) -> glide stop.
 function runAndSettle() {
   const { world, actor } = spawn(makeLevel(16, 400), 160, 0);
-  settle(world);
+  settle(world, actor);
   const x0 = actor.x, vx = [], disp = [];
   for (let f = 0; f < 900; f++) {
-    world.update(f < 600 ? { right: true } : {}, DT);
+    tick(world, actor, f < 600 ? { right: true } : {});
     vx.push(actor.vx);
     disp.push(actor.x - x0);
   }
@@ -99,12 +106,12 @@ function runAndSettle() {
 //    Momentum overshoot, skid, turnaround.
 function runReverseSettle() {
   const { world, actor } = spawn(makeLevel(16, 600), 2000, 0);
-  settle(world);
+  settle(world, actor);
   const x0 = actor.x, vx = [], disp = [];
   let skidTicks = 0;
   for (let f = 0; f < 1050; f++) {
     const input = f < 600 ? { right: true } : f < 900 ? { left: true } : {};
-    world.update(input, DT);
+    tick(world, actor, input);
     vx.push(actor.vx);
     disp.push(actor.x - x0);
     if (actor.isSkidding) skidTicks++;
@@ -131,11 +138,11 @@ function jumpReleaseSweep() {
   const peaks = [], landTicks = [], trace = [];
   for (const release of [2, 4, 8, 14, 22, 999]) {
     const { world, actor } = spawn(makeLevel(20, 20), 160, 0);
-    settle(world);
+    settle(world, actor);
     const y0 = actor.y;
     let peak = 0, land = -1, airborne = false;
     for (let f = 0; f < 200; f++) {
-      world.update({ jump: f < release }, DT);
+      tick(world, actor, { jump: f < release });
       const h = y0 - actor.y;
       peak = Math.max(peak, h);
       trace.push(h);
@@ -154,7 +161,7 @@ function terminalFall() {
   const y0 = actor.y, vy = [], dist = [];
   let land = -1;
   for (let f = 0; f < 220; f++) {
-    world.update({}, DT);
+    tick(world, actor, {});
     vy.push(actor.vy);
     dist.push(actor.y - y0);
     if (actor.contacts.ground) { land = f; break; }
@@ -177,7 +184,7 @@ function airControl() {
   const vx = [], vy = [];
   let land = -1;
   for (let f = 0; f < 400; f++) {
-    world.update({ right: true }, DT);
+    tick(world, actor, { right: true });
     vx.push(actor.vx);
     vy.push(actor.vy);
     if (actor.contacts.ground && f > 2) { land = f; break; }
@@ -197,10 +204,10 @@ function airControl() {
 //    one case actually pinned by the maxSpeed clamp.
 function sprint() {
   const { world, actor } = spawn(makeLevel(16, 600), 160, 0);
-  settle(world);
+  settle(world, actor);
   const x0 = actor.x, vx = [], disp = [];
   for (let f = 0; f < 240; f++) {
-    world.update({ right: true, run: true }, DT);
+    tick(world, actor, { right: true, run: true });
     vx.push(actor.vx);
     disp.push(actor.x - x0);
   }
@@ -223,12 +230,12 @@ function qBlockBump() {
   // Spawn BELOW the block (row 10 spans y 320..352), or the actor falls onto its
   // roof during settle and jumps from there, never bumping it from underneath.
   const { world, actor, map } = spawn(level, 64, 400);
-  settle(world);
+  settle(world, actor);
   const tileBefore = map.tileData[10][2];
   const trace = [];
   let bumpTick = -1, hopSeen = false;
   for (let f = 0; f < 90; f++) {
-    world.update({ jump: true }, DT);
+    tick(world, actor, { jump: true });
     trace.push(r3(actor.y), map.tileData[10][2]);
     if (bumpTick < 0 && actor.contacts.ceiling) bumpTick = f;
     if (world.bumps.has('2,10')) hopSeen = true;
@@ -242,7 +249,7 @@ function qBlockBump() {
 // 8. PRESENT phase. The animation state derived each tick across a scripted run.
 function animStates() {
   const { world, actor } = spawn(makeLevel(16, 400), 160, 0);
-  settle(world);
+  settle(world, actor);
   const script = [
     [{}, 20],                          // idle
     [{ right: true }, 60],             // walk
@@ -254,7 +261,7 @@ function animStates() {
   const trace = [];
   for (const [input, n] of script) {
     for (let i = 0; i < n; i++) {
-      world.update(input, DT);
+      tick(world, actor, input);
       trace.push(actor.currentState);
     }
   }
