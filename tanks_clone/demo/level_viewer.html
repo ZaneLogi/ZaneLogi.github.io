@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tanks_clone — level viewer</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; padding: 24px;
+      font: 14px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace;
+      background: #0e0e14; color: #d7d7e0;
+      display: flex; flex-direction: column; align-items: center; gap: 14px;
+    }
+    h1 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: .5px; }
+    h1 small { color: #8a8a9a; font-weight: 400; }
+
+    .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+    .row > label { color: #8a8a9a; font-size: 12px; }
+
+    button, select, input[type=number] {
+      font: inherit; font-size: 12px; background: #23232f; color: #d7d7e0;
+      border: 1px solid #3a3a4a; border-radius: 6px; padding: 5px 10px; cursor: pointer;
+    }
+    button:hover, select:hover { background: #2d2d3c; }
+    button[aria-pressed="true"] { background: #34445c; border-color: #5578a8; color: #eaf2ff; }
+    input[type=number] { width: 3.6em; text-align: center; cursor: text; }
+    #label { min-width: 7.5em; text-align: center; color: #9a9aac; font-size: 12px; }
+
+    canvas { image-rendering: pixelated; border-radius: 3px; display: block; }
+    .stage { background: #14141c; border: 1px solid #24242f; border-radius: 8px; padding: 14px; }
+
+    .readout { color: #9a9aac; font-size: 12px; min-height: 1.5em; text-align: center; }
+    .readout b { color: #d7d7e0; font-weight: 600; }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 7px 12px; justify-content: center; max-width: 720px; }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; color: #8a8a9a; font-size: 11px; }
+    .legend canvas { border: 1px solid #00000060; }
+
+    .note {
+      color: #8a8a9a; font-size: 11.5px; line-height: 1.5; max-width: 720px; text-align: center;
+      border-top: 1px solid #24242f; padding-top: 12px;
+    }
+    code { color: #b8c8e0; }
+  </style>
+</head>
+<body>
+  <h1>tanks_clone <small>— level viewer · all 35 Battle City stages</small></h1>
+
+  <div class="row">
+    <button id="prev">◀ Prev</button>
+    <input id="num" type="number" min="1" max="35" value="1">
+    <span id="label">Stage 1/35</span>
+    <button id="next">Next ▶</button>
+    <button id="demo" aria-pressed="false">attract stage</button>
+  </div>
+
+  <div class="row">
+    <label for="zoom">zoom</label>
+    <select id="zoom">
+      <option value="2">2×</option>
+      <option value="3" selected>3×</option>
+      <option value="4">4×</option>
+    </select>
+    <label for="set">palette</label>
+    <select id="set"></select>
+    <button id="water" aria-pressed="true">animate water</button>
+    <button id="grid" aria-pressed="false">grid</button>
+  </div>
+
+  <div class="stage"><canvas id="view"></canvas></div>
+
+  <div class="readout" id="out">&nbsp;</div>
+  <div class="legend" id="legend"></div>
+
+  <p class="note">
+    ← / → to change stage. Each stage is <b>91 bytes</b> = 182 nibbles = 14×13, high-nibble first;
+    column 13 is padding (<code>$D</code> in all 468 rows), leaving <b>13×13</b> blocks of 16×16.
+    Each nibble indexes <code>tbl_DACB_block_data</code> ($DACB) for its 2×2 tiles and
+    <code>tbl_DABB_nametable_attribute</code> ($DABB) for its palette.
+    <br><br>
+    <b>The eagle is missing on purpose.</b> Row 12 is empty in every stage file — the HQ and its
+    walls are painted by code (<code>$C331</code> / <code>$E2A9</code>), not stored per stage. That
+    belongs to <code>Base</code>, not here.
+    <br><br>
+    <b>Water animation</b> is the real thing, not a loop: <code>sub_C31D</code> ($C31D) sets
+    <code>con_bg_pal_02</code> when <code>frm_cnt_lo &amp; $3F == 0</code> and
+    <code>con_bg_pal_01</code> at <code>== $20</code> — a 32-frame swap driven here by a
+    fixed-timestep 60.0988 Hz tick. The two sets differ <i>only</i> by swapping
+    <code>$3C</code>↔<code>$12</code> in palette 1.
+  </p>
+
+  <script type="module" src="./level_viewer.js"></script>
+</body>
+</html>

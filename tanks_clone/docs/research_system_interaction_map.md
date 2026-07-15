@@ -16,7 +16,14 @@ I cite by label (`sub_C2E6_main_battle_script`) or CPU address (`$C2E6`).
 
 **Decoded vs inferred:** claims marked **[D]** are read directly from the code.
 Claims marked **[?]** are inference (from layout, naming, or BC knowledge) and
-must be confirmed when the owning subsystem gets its own `research_*.md`.
+must be confirmed before anything is built on them.
+
+**Where a finding lands is decided by its size, not by a schedule.** There is no
+one-doc-per-subsystem rule. A few lines go in this map (or as a cited constant +
+a code comment, which is often the better home — `constants.js NTSC_FPS`). A real
+body of decoded data — a format, a ROM table, a per-site mechanism — earns its own
+`research_*.md`. Symmetry is not a reason to create a file; a doc that restates a
+map section is worse than no doc.
 
 ---
 
@@ -42,12 +49,27 @@ is no scheduler and no IRQ (`$FFFE → $C070`, "this game doesn't use IRQ").
   7. `sub_EA7E_sound_driver` — **the sound engine ticks once per frame here**.
   8. `INC ram_frm_cnt_lo` (and `ram_frm_cnt_hi` every 64 frames).
 
+**The rate is hardware, not a choice [D].** Nothing in the ROM sets a frame rate —
+the PPU's vblank NMI *is* the clock, and the main loop only sleeps on it. Famicom
+⇒ **NTSC, 60.0988 Hz**. `bra_C1F9_loop` calls `wait_1_frm` exactly **once** per
+pass, so *one logic pass = one frame*.
+
+**`ram_frm_cnt_hi` is not a high byte [D].** `$D43E` does `AND #$3F / BNE / INC`,
+so it ticks every **64** frames — the pair is a frame counter plus a coarse
+64-frame counter, not a 16-bit value. Both are load-bearing: the RNG mixes
+`frm_cnt_hi` in (`$D45A`), and the game *writes* it as a timer (`$C236` seeds
+`#$FE`, `$C24D` waits for `#$02` ⇒ 4 hi-ticks = 256 frames ≈ 4.3 s). A JS port
+that collapses them into one counter breaks both. → `constants.js NTSC_FPS`.
+
 **Port consequence.** In JS the NMI half mostly *dissolves*: OAM DMA + PPU-buffer
 flush are hardware plumbing. We keep the *responsibilities* (sample input once
 per frame, tick audio once per frame, advance the frame counter, then draw), but
 re-express them as a `requestAnimationFrame` tick, not a literal buffer flush.
 This is the sanctioned "re-derive the hardware abstraction in our own view"
 deviation — the mechanism (logic builds state, render ships it) is preserved.
+**rAF is the render pump only** — it runs at the *display* rate (60/120/144), not
+60.0988, so logic needs a fixed-timestep accumulator against `NTSC_FPS`. (Pattern:
+`block_stacker/main.js`; live example: `demo/level_viewer.js`.)
 
 ---
 
@@ -64,18 +86,29 @@ vec_C070_RESET
         ├─ 00 → 1 player      (5 enemy slots active: con_max_tanks-2)
         ├─ 01 → 2 players
         └─ 02 → construction
-  └─ STAGE LOOP (per mode) — the gameplay heartbeat:
-        repeat each frame:
-          JSR sub_C2E6_main_battle_script   ; LOGIC pipeline (§3)
+  └─ STAGE LOOP (per mode) — the gameplay heartbeat. 1P loop, bra_C1F9_loop [D]:
+        bra_C1F9_loop:
+          JSR sub_D8F6_wait_1_frm           ; sync to NMI — ONCE, at the TOP
+          LDA ram_pause_flag / BNE ---------┐  ; pause gates ONLY the pipeline
+          JSR sub_C2E6_main_battle_script   ; │ LOGIC pipeline (§3)
+        bra_C203_game_is_paused: <----------┘
+          JSR sub_E23B_display_bonus_on_screen
+          JSR sub_E0D8_bullets_status_handler
           JSR sub_DEA6_tanks_handler        ; DRAW all 8 tanks (state machine, §4)
-          JSR sub_D8F6_wait_1_frm           ; sync to NMI
+          ... Start-button pause toggle, sub_C8F9_display_pause_text ...
 ```
 
 `sub_C2E6_main_battle_script` is called from the 1P loop (`$C200`), the 2P loop
-(`$C23E`), and the demo loop (`$C429`) — always immediately followed by
-`sub_DEA6_tanks_handler` **[D]**. So **logic-then-draw-then-wait** is the fixed
-per-frame shape, and the demo/attract mode is literally the same loop with AI
-driving the "players."
+(`$C23E`), and the demo loop (`$C429`) **[D]** — the demo/attract mode is literally
+the same loop with AI driving the "players."
+
+Two things the shape above makes explicit, both easy to get wrong:
+
+- **The wait is at the TOP, not the bottom** — the pass is *sleep, then do a
+  frame's work*, so one `wait_1_frm` per iteration ⇒ 60.0988 Hz logic (§1).
+- **Pause (`$C1FC`) gates only `sub_C2E6`.** `$E23B` / `$E0D8` / `$DEA6` keep
+  running while paused — which is why sprites still animate on the pause screen.
+  A port that freezes everything on pause is wrong.
 
 `sub_C331_prepare_tanks_addresses_and_spawn_players_before_stage` (`$C331`) is
 the **stage-entry reset**: clears bullets/tanks, spawns surviving players,
@@ -163,12 +196,41 @@ Routines: reset, `tbl_CA69` mode dispatch, the stage loops, `C331` stage prep,
 `C728_check_condition_for_stage_ending`, `CCD4_score_after_stage_handler`.
 
 **S2 — Field / battlefield.** *The central shared structure.* The **field buffer
-`$0400–$07FF`** (nametable mirror) holds tile IDs **and** bit7 occupancy. Owns
-terrain semantics (brick/steel/water/trees/ice) via `tbl_DACB_block_data`.
-Routines: `F000_draw_stage`, `D80B_write_block_tiles_and_attribute_to_buffer`,
-`E181` (ice + occupancy), `E1FA` (occupancy writeback), `D706/D709/D713`
-(pixel→cell pointer), `E181_..._ice_detection`. Terrain collision for tanks and
+`$0400–$07FF`** mirrors a **whole nametable** [D]: `$0400–$07BF` = 960 tile IDs
+(32×30) carrying bit7 occupancy, `$07C0–$07FF` = the 64-byte **attribute table**
+(`ram_nmt_attr_buffer`), exactly like `$2000–$23FF`. Routines: `F000_draw_stage`,
+`D80B_write_block_tiles_and_attribute_to_buffer`, `E181` (ice + occupancy),
+`E1FA` (occupancy writeback), `D706/D709/D713` (pixel→cell pointer),
+`CC27_copy_nametable_attributes_to_ppu_buffer`. Terrain collision for tanks and
 bullets is *reads of this buffer*.
+
+**Two namespaces — do not mix them [D].** This is the trap:
+
+| | what it is | where it lives |
+|---|---|---|
+| **BLOCK code** `$0–$D` | one nibble per 16×16 block | `incbin/stages/*.bin` |
+| **TILE id** | 2×2 per block, what collision reads back | the field buffer |
+
+A stage decodes BLOCK → 4 TILEs at draw time; gameplay then reads TILEs
+(`E181` compares tile `$21` for ice; `DA2B` compares tile `$22` for forest;
+`con_block_type` = `$00`). Geometry (closes the old §8 `[?]`): **13×13 blocks of
+16×16 px** = 208×208, each block 2×2 tiles of 8×8 ⇒ 26×26 quarters.
+
+**Stage format [D]** — 91 bytes = 182 nibbles = **14 cols × 13 rows**, high-nibble
+first; column 13 is padding (`$D` in all 468 rows across all 36 files) ⇒ 13×13
+usable. `sub_F000_draw_stage` confirms the stride itself (`LDA #$5B` = 91) and
+dispatches `A = $FF` → the demo stage; `A ≥ $24` → `SBC #$23` (the 2nd-loop wrap).
+Verified against the legacy `../tanks/dat_levels.js` layouts.
+
+**Block → tiles + palette [D]** — one code drives *two* tables, both read by
+`sub_D80B`: `tbl_DACB_block_data` (`$DACB`, code×4 → TL,TR,BL,BR tile ids) and
+`tbl_DABB_nametable_attribute` (`$DABB`, code → BG palette 0–3). Brick→pal 0,
+steel/ice→3, water→1, forest→2. `$E`/`$F` unused. Values live in `constants.js`
+(`BLOCK` / `TILE`) and `assets/dat_chr.js`; this map stays at the coupling level.
+
+**The eagle is NOT in stage data [D]** — row 12 is empty in every stage file; the
+HQ and its walls are painted by code (`$C331` / `$E2A9`, which also hand-write
+attribute offsets `$33`/`$34`). That belongs to S6, not the stage format.
 
 **S3 — Tanks (roster).** 8 parallel arrays, `X = slot`: `tank_pos_X`($90),
 `_pos_Y`($98), `_flags`($A0), `_type`($A8), `_wheels`($B0),
@@ -215,6 +277,41 @@ Routines: NMI half, `DA2B_display_sprite`, `DA7B_display_2_sprites`,
 `DA93_hide_unused_sprites`, `D8FD_write_buffer_to_ppu`, `D6B3_fill_buffer_with_tiles`,
 `D85E`/`D8D2` "huge letter" text, `D771_write_to_ppu`.
 
+CHR/OAM facts, all from `$2000 = ram_base_nmt | $B0` (`$D41F`) **[D]**: bit 4 ⇒
+**BG pattern table at `$1000`** (tiles 256–511), bit 3 ⇒ sprites at `$0000`, bit 5
+⇒ **8×16 sprite mode** (a 16×16 tank is 2 sprites, not 4). *Caveat:* in 8×16 mode
+bit 3 is ignored — the OAM tile byte's own bit 0 picks the table, so sprites do
+draw from the BG table (`$C59C` loads `#$9D`). The two tables are not "sprites"
+and "tiles". The sprite table is essentially all tanks; the BG table is terrain
+**plus the whole text system** (alphabet, digits, PAUSE/STAGE/GAME OVER, `namcot`).
+
+**Sprite palette = who you are [D].** `$DFB6` splits on `CPX #$02`. Players:
+`$DFE8` is just `TXA` — the tank's **slot index IS its palette** (0 = P1 yellow,
+1 = P2 green); stunned players blink on `frm_cnt_lo & $08`. Enemies:
+`tbl_E003[((frm_cnt_lo*4) + tank_type) & 7]` = `{2,0,0,1,2,1,2,2}`, so most enemy
+types **flicker between two palettes every frame** (deliberate CRT blending; only
+type 0 is constant). A bonus tank (`tank_type & $04`, `$DFBA`) flashes palette
+**2↔3** every 8 frames. Palette 3 is also the sprite-text palette (`$C947` GAME
+OVER, `$C8FD` PAUSE, blinking on `& $10`).
+
+**BG text has no palette of its own [D].** `sub_D612` is the *only* per-item
+attribute writer and has exactly one caller — `$D81E`, inside `sub_D80B`. So text
+inherits the palette of the 32×32 attribute quad it lands in. Default is
+**palette 0** (`$D7E1` clears the whole `$07C0` shadow to `$00`); screens then
+hand-write regions (`sub_D0D9` for the score screen; the eagle for `$33`/`$34`).
+
+**`sub_DA2B` is not plumbing — it reads the field [D].** Before writing OAM it
+probes the field at *this sprite's own* `(x+3, y)`; if the tile is `$22` (forest)
+it OR's in the priority bit, i.e. the sprite draws *behind* the background — the
+tanks-hide-under-trees mechanic. It **writes the result back** into
+`spr_A_palette`, and `sub_DA7B` never resets it between the two halves, so if
+either half is on forest **both** go behind. That "hide as a unit" behaviour is an
+emergent side effect of the two-call structure — a port must draw 2×8×16 and not
+pre-compose a 16×16 bitmap, or the rule has to be hand-guessed (and the obvious
+guesses are wrong). This is a screen-RAM readback, but a **free** one: `Field` is
+already a real array in §7, so it ports as a plain read with no substitute — an
+argument *for* the locked routine-level architecture.
+
 **S10 — Input.** `D689_read_joy_regs` (in NMI) → `ram_btn_hold`($06),
 `ram_btn_press`($08), 2 bytes each (P1/P2). `E451_convert_Dpad_buttons`
 (Dpad → facing direction). Constants `con_btn_*` in `bank_val.inc`.
@@ -228,8 +325,11 @@ hardware — fully portable, but a good deferral candidate.
 zp[++index]` **[D]**. Consumed by S4 (movement, fire), S7 (bonus pos), spawn.
 
 **S13 — Construction (stage editor).** `loc_C0AE_construction_handler` + cursor
-movement + block paste + `stage_FF.bin` default. Ships in the retail ROM.
-Deferral candidate (not core gameplay).
+movement + block paste. Ships in the retail ROM. Deferral candidate (not core
+gameplay). *(Corrected: `stage_FF.bin` is **not** this — it is the **demo/attract**
+stage. `sub_F000_draw_stage`'s own header says "FF = demo stage" and dispatches
+`CMP #$FF` → entry 36; `bank_FF.asm:8670` comments the `.incbin` `; demo`. What,
+if anything, the editor loads by default is unverified.)*
 
 ---
 
@@ -316,22 +416,47 @@ per-subsystem docs, not before scaffolding.
 - The **§3 pipeline order** becomes the body of `Game.update()`. Keep it literal.
 - The **`tank_flags` state machine** becomes a `Tank` state enum + per-state
   handler (mirrors the `tbl_E4B8` jump table).
-- The **NMI/PPU buffer** does not survive as-is; `Renderer` draws directly. Input
-  sampling + audio tick + frame-counter bump move into the rAF tick, once per
-  frame, preserving their once-per-frame semantics.
+- The **NMI/PPU buffer** does not survive *as a buffer* — `Renderer` draws
+  directly. Input sampling + audio tick + frame-counter bump move into the rAF
+  tick, once per frame, preserving their once-per-frame semantics.
+- **…but the PPU buffer's *mechanism* must survive: it is a dirty-block queue.**
+  The NES never redraws the field — `D784_write_tile_to_buffer` queues one tile,
+  `D80B` writes one block when it changes, `D8FD` flushes in vblank. So `Renderer`
+  keeps a **persistent field canvas allocated once** (our `$2000` nametable
+  analog) and repaints only changed blocks: all 169 at stage start (`$F000`), one
+  block when a bullet breaks a brick (`$D80B`). Rebuilding the field per frame is
+  the obvious wrong default — measured at ~1 ms/frame (~6% of the budget) before
+  any tank, bullet, AI or collision exists, plus ~10 MB/s of allocation churn.
+  Allocate-once-and-mutate is both the C++ instinct and the NES's own model.
+  - The **water swap needs no redraw on hardware** (`$D50E` just re-uploads 16
+    palette bytes; the palette is a hardware indirection we don't reproduce). In
+    our view we must re-rasterize — but only the *water* blocks, not the field.
+    A view-space re-derivation, not a mechanism change.
+- **Sprites: 2×8×16 per tank, never a pre-composed 16×16** — see S9 (`sub_DA2B`'s
+  per-half forest probe + write-back). Cache at the *tile* level (`(tileId,
+  palette) → bitmap`), not the tank level: enemy palettes flicker per frame, so a
+  `(type, dir, frame, palette)` cache thrashes for no gain.
+- **Compositing order** follows the PPU: backdrop → behind-BG sprites → BG (colour
+  index 0 transparent) → front sprites. Exact, and no per-pixel masking needed.
 
 ---
 
-## 8. Open questions / to-verify (before locking §7)
+## 8. Open questions / to-verify
 
-- **[?]** Field cell geometry: play area is a 13×13 grid of 16×16 blocks (each
-  block = 2×2 tiles)? Confirm against `F000_draw_stage` + `tbl_DACB_block_data`.
 - **[?]** Enemy type model: `ram_enemy_type_stage_cnt` ($8B, 4 bytes) = the 4
   enemy tank types (basic/fast/power/armor) per stage? Confirm in `E42B`.
-- **[?]** `tank_type` bit layout: `& $C0 == $40` gates the 2-bullet upgrade
-  (seen in `E122`) — decode the full `tank_type` byte (armor levels, speed).
+- **[?]** `tank_type` bit layout — *partly decoded, still incomplete.* Known
+  **[D]**: bit 2 (`& $04`) = carries-a-bonus (`$DFBA`); bits 0–1 index `tbl_E003`
+  for the palette, so they are almost certainly the 4 enemy types; `& $C0 == $40`
+  gates the 2-bullet upgrade (`E122`). Still open: armour levels, speed.
 - **[?]** `E02E_bullets_status_handler` vs `E604_bullets_movement` split — which
-  owns terrain collision vs status transitions.
+  owns terrain collision vs status transitions. *(Note `E02E` is pipeline step 5;
+  `E0D8_bullets_status_handler` is a different routine called by the stage loop —
+  similar names, don't conflate.)*
 - **[?]** Exactly which power-ups exist and their `bonus_id` values (S7).
-- The per-subsystem `research_*.md` docs (Field, Tanks+AI, Bullets, Bonus) will
-  resolve these; this map intentionally stays at the coupling level.
+- **[?]** `$D7CE` fills the whole field buffer `$0400–$07FF` with **`$11`**, but
+  `tbl_DACB` says empty = tile `$00`. Those don't reconcile — what is `$11`?
+  (Surfaced while building the level viewer; belongs to Field.)
+These get resolved as the work reaches them — each finding landing wherever it
+fits (see "where a finding lands", top of this doc). This map intentionally stays
+at the coupling level, so anything with real bulk belongs elsewhere.

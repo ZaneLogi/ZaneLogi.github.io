@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tanks_clone — CHR viewer</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; padding: 24px;
+      font: 14px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace;
+      background: #0e0e14; color: #d7d7e0;
+      display: flex; flex-direction: column; align-items: center; gap: 18px;
+    }
+    h1 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: .5px; }
+    h1 small { color: #8a8a9a; font-weight: 400; }
+    h2 { font-size: 13px; font-weight: 600; margin: 0 0 2px; letter-spacing: .5px; }
+    h2 small { color: #8a8a9a; font-weight: 400; letter-spacing: 0; }
+
+    .sheets { display: flex; gap: 28px; flex-wrap: wrap; justify-content: center; align-items: flex-start; }
+    .panel {
+      display: flex; flex-direction: column; gap: 8px;
+      background: #14141c; border: 1px solid #24242f; border-radius: 8px; padding: 14px;
+    }
+    canvas { image-rendering: pixelated; display: block; border-radius: 3px; }
+
+    .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .row > label { color: #8a8a9a; font-size: 12px; }
+
+    button, select {
+      font: inherit; font-size: 12px; background: #23232f; color: #d7d7e0;
+      border: 1px solid #3a3a4a; border-radius: 6px; padding: 4px 9px; cursor: pointer;
+    }
+    button:hover, select:hover { background: #2d2d3c; }
+    button[aria-pressed="true"] { background: #34445c; border-color: #5578a8; color: #eaf2ff; }
+
+    /* a palette choice = its 4 real colours */
+    .pal { display: inline-flex; padding: 3px 5px; gap: 0; align-items: center; }
+    .pal .sw { width: 13px; height: 13px; border: 1px solid #00000070; }
+    .pal .sw:first-of-type { border-radius: 2px 0 0 2px; }
+    .pal .sw:last-of-type { border-radius: 0 2px 2px 0; }
+    .pal b { font-weight: 600; margin-right: 5px; color: #9a9aac; }
+    .pal[aria-pressed="true"] b { color: #eaf2ff; }
+
+    .warn { color: #c08a4a; }
+    .note {
+      color: #8a8a9a; font-size: 11.5px; line-height: 1.45;
+      border-left: 2px solid #34445c; padding-left: 8px; margin: 2px 0 0;
+    }
+    .readout { color: #9a9aac; font-size: 12px; min-height: 1.5em; }
+    .readout b { color: #d7d7e0; font-weight: 600; }
+    .hint { color: #6a6a7a; font-size: 12px; text-align: center; max-width: 680px; }
+    code { color: #b8c8e0; }
+  </style>
+</head>
+<body>
+  <h1>tanks_clone <small>— CHR viewer · Battle City (J), NROM, fixed 8 KB CHR</small></h1>
+
+  <div class="row">
+    <label for="zoom">zoom</label>
+    <select id="zoom">
+      <option value="2">2×</option>
+      <option value="3" selected>3×</option>
+      <option value="4">4×</option>
+      <option value="5">5×</option>
+    </select>
+    <button id="grid" aria-pressed="true">grid</button>
+    <button id="ids" aria-pressed="true">labels</button>
+  </div>
+
+  <div class="sheets">
+    <div class="panel">
+      <h2>Sprites <small>— tiles $00–$FF · CHR $0000–$0FFF</small></h2>
+      <div class="row" id="spritePals"></div>
+      <div class="row">
+        <label>size</label>
+        <button class="mode" data-mode="8x16" aria-pressed="true">8×16</button>
+        <button class="mode" data-mode="8x8" aria-pressed="false">8×8 <span class="warn">(raw)</span></button>
+      </div>
+      <canvas id="spriteCv"></canvas>
+      <div class="readout" id="spriteOut">&nbsp;</div>
+      <p class="note">
+        Every sprite is <b>8×16</b> ($2000 bit 5) — the 8×8 view is raw tile order and
+        reads as garbage. A 16×16 tank is <b>2</b> of these side by side.
+        Palette is per-slot: <code>$DFE8</code> does <code>TXA</code>, so the tank's
+        <i>slot index</i> IS its palette (0 = P1, 1 = P2). Enemies look up
+        <code>tbl_E003</code>; a bonus tank (<code>tank_type &amp; $04</code>) flashes
+        <b>2↔3</b> every 8 frames.
+      </p>
+    </div>
+
+    <div class="panel">
+      <h2>Background <small>— tiles $00–$FF · CHR $1000–$1FFF</small></h2>
+      <div class="row">
+        <label for="bgSet">set</label>
+        <select id="bgSet"></select>
+      </div>
+      <div class="row" id="bgPals"></div>
+      <canvas id="bgCv"></canvas>
+      <div class="readout" id="bgOut">&nbsp;</div>
+      <p class="note">
+        <b>These glyphs have no palette of their own.</b> The only per-item attribute write in the
+        game is <code>sub_D612</code>, called from exactly one site — <code>$D81E</code>, the
+        terrain-block writer. Text just inherits the palette of the 32×32 attribute quad it lands in.
+        The default is <b>palette 0</b> (<code>$D7E1</code> clears the whole attribute shadow at
+        <code>$07C0</code> to <code>$00</code>); screens then override regions by hand, e.g.
+        <code>sub_D0D9</code> for the score screen. So pick a palette below — the ROM has no single
+        right answer.
+      </p>
+    </div>
+  </div>
+
+  <div class="hint">
+    Table split is decoded, not assumed: the NMI writes <code>$2000 = ram_base_nmt | $B0</code>
+    (<code>vec_D400_NMI</code>, <code>$D41F</code>) — bit 4 = 1 puts the <b>background</b> at
+    <code>$1000</code>, bit 3 = 0 puts <b>sprites</b> at <code>$0000</code>, and bit 5 = 1 selects
+    <b>8×16 sprite mode</b>. Sprite colour index 0 is transparent (checkerboard); background index 0
+    is the universal backdrop.
+    <br><br>
+    <b>Caveat on the split:</b> in 8×16 mode bit 3 is ignored — the OAM tile byte's <i>own</i> bit 0
+    picks the table. So sprites can and do draw from the <b>background</b> table: <code>$C59C</code>
+    loads <code>#$9D</code> (bit 0 = 1) to render text as sprites. The two panels are the two
+    pattern tables, not "the sprites" and "the tiles."
+  </div>
+
+  <script type="module" src="./chr_viewer.js"></script>
+</body>
+</html>
