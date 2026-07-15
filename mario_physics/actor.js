@@ -19,17 +19,20 @@ export class Actor {
     this.vx = 0;
     this.vy = 0;
 
+    // Physics constants come from the type definition (see actor_types.js).
     const p = def.physics;
-    this.speedWalk = p.speedWalk;
-    this.speedRun = p.speedRun;
-    this.accelWalk = p.accelWalk;
-    this.accelRun = p.accelRun;
-    this.decel = p.decel;
-    this.airAccel = p.airAccel;
-    this.skidFriction = p.skidFriction;
+    this.runAccel = p.runAccel;
+    this.friction = p.friction;
+    this.decelMoving = p.decelMoving;
+    this.decelIdle = p.decelIdle;
+    this.maxSpeed = p.maxSpeed;
+    this.runAnimSpeed = p.runAnimSpeed;
 
-    this.jumpVel = -p.jumpVel;
-    this.jumpCut = p.jumpCut;
+    this.jumpUnit = p.jumpUnit;
+    this.jumpMod = p.jumpMod;
+    this.jumpModSpeed = p.jumpModSpeed;
+    this.maxRise = p.maxRise;
+
     this.gravity = p.gravity;
     this.maxFall = p.maxFall;
 
@@ -37,10 +40,16 @@ export class Actor {
     // Read as an input to this step's movement — jumping and ground traction are
     // only available when grounded.
     this.contacts = { ground: false, ceiling: false, left: false, right: false };
-    this.jumpHeld = false;
     this.prevJump = false;
 
+    // Jump state. `jumping` marks the rising phase in which a held jump adds
+    // thrust; `jumpLev` counts the ticks it has been held, feeding the decaying
+    // thrust curve.
+    this.jumping = false;
+    this.jumpLev = 0;
+
     this.isSkidding = false;
+    this.isRunning = false; // run key held while moving — drives the run animation
 
     this.facing = 1; // 1 = right, -1 = left
     this.currentState = "idle"; // main animation state
@@ -53,56 +62,68 @@ export class Actor {
     const grounded = this.contacts.ground;
     const step = dt * 60;
 
-    let desiredSpeed = input.run ? this.speedRun : this.speedWalk;
-    let accel = grounded ? (input.run ? this.accelRun : this.accelWalk) : this.airAccel;
-
-    this.isSkidding = false;
-
     // --- HORIZONTAL MOVEMENT ---
-    if (input.left) {
-      this.facing = -1;
-      if (this.vx > 0 && grounded) {
-        this.isSkidding = true;
-        this.vx -= this.skidFriction * step; // scaled
-        if (this.vx < 0) this.vx = 0;
-      } else {
-        this.vx -= accel * step; // scaled
-        if (this.vx < -desiredSpeed) this.vx = -desiredSpeed;
-      }
-    } else if (input.right) {
-      this.facing = 1;
-      if (this.vx < 0 && grounded) {
-        this.isSkidding = true;
-        this.vx += this.skidFriction * step; // scaled
-        if (this.vx > 0) this.vx = 0;
-      } else {
-        this.vx += accel * step; // scaled
-        if (this.vx > desiredSpeed) this.vx = desiredSpeed;
-      }
+    // Additive accel + multiplicative friction + a small linear decel. Top speed
+    // is the equilibrium of accel vs. friction, not a hard ramp. The same model
+    // runs grounded and airborne — full air control.
+    let decel;
+    if (input.left || input.right) {
+      const dir = input.right ? 1 : -1;
+      this.facing = dir;
+      const adder = this.runAccel * (input.run ? 2 : 1); // run key doubles the accel
+      this.vx += dir * adder * step;
+      this.vx *= Math.pow(this.friction, step);
+      decel = this.decelMoving;
+      this.isRunning = !!input.run;
+      // Skid = pressing against current motion (ground only, for the sprite).
+      this.isSkidding = grounded && ((dir > 0 && this.vx < 0) || (dir < 0 && this.vx > 0));
     } else {
-      // natural decel
-      this.vx *= Math.pow(this.decel, step); // framerate independent friction
+      this.vx *= Math.pow(this.friction, step); // glide to a stop
+      decel = this.decelIdle;
+      this.isRunning = false;
+      this.isSkidding = false;
     }
+    // Linear decel toward zero, then clamp to top speed.
+    if (this.vx > decel * step) this.vx -= decel * step;
+    else if (this.vx < -decel * step) this.vx += decel * step;
+    else this.vx = 0;
+    if (this.vx > this.maxSpeed) this.vx = this.maxSpeed;
+    else if (this.vx < -this.maxSpeed) this.vx = -this.maxSpeed;
 
-    // --- JUMPING ---
-    // Jump start (only on new key press AND on ground)
+    // --- JUMP START ---  fresh press while on the ground
     if (input.jump && !this.prevJump && grounded) {
-      this.vy = this.jumpVel;
-      this.jumpHeld = true;
+      this.jumping = true;
+      this.jumpLev = 0;
     }
-
-    // Short jump cut when releasing Space
-    if (!input.jump && this.jumpHeld && this.vy < -this.jumpCut) {
-      this.vy = -this.jumpCut;
-      this.jumpHeld = false;
-    }
-
-    // Update prevJump state for next frame
-    this.prevJump = input.jump;
 
     // --- GRAVITY ---
-    this.vy += this.gravity * step; // scaled
-    if (this.vy > this.maxFall) this.vy = this.maxFall;
+    // While grounded the actor is treated as resting (vy held at 0, no gravity).
+    // Skipping gravity here keeps vy at 0 on the launch tick so the jump thrust
+    // below actually fires; airborne, gravity accumulates as usual.
+    if (!grounded) {
+      this.vy += this.gravity * step;
+      if (this.vy > this.maxFall) this.vy = this.maxFall;
+    }
+
+    // --- JUMP THRUST ---
+    // While the button is held and the actor is still rising, add a decaying
+    // upward impulse: the numerator is constant but the divisor grows each tick,
+    // so early ticks lift hard and later ticks barely — holding longer jumps
+    // higher, with diminishing returns. Faster horizontal *speed* lowers the
+    // exponent, raising the jump. We key it on |vx| so the boost is symmetric by
+    // speed — jump height shouldn't depend on which way you face. (A design call,
+    // not a fidelity one; see the movement model in CLAUDE.md.)
+    if (this.jumping && input.jump && this.vy <= 0) {
+      this.jumpLev += 1;
+      const mod = this.jumpMod - Math.abs(this.vx) * this.jumpModSpeed;
+      const dy = this.jumpUnit / Math.pow(this.jumpLev, mod);
+      this.vy = Math.max(this.vy - dy * step, this.maxRise);
+    }
+    // Releasing the button — or cresting into a fall — ends the thrust; a new
+    // jump then requires landing and a fresh press.
+    if (!input.jump || this.vy > 0) this.jumping = false;
+
+    this.prevJump = input.jump;
   }
 
   // How the actor wants to look, given the motion the world actually allowed.
@@ -115,7 +136,9 @@ export class Actor {
       if (this.vy < 0) this.currentState = "jump";
       else this.currentState = "fall";
     } else if (Math.abs(this.vx) > 0.1) {
-      if (Math.abs(this.vx) > this.speedWalk + 0.1) this.currentState = "run";
+      // Run animation only when sprinting fast enough; walking tops out below
+      // runAnimSpeed, so it never trips the run frames.
+      if (this.isRunning && Math.abs(this.vx) > this.runAnimSpeed) this.currentState = "run";
       else this.currentState = "walk";
     } else {
       this.currentState = "idle";

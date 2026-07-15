@@ -7,18 +7,36 @@
 // enemy, a pickup) is a new entry here, not new Actor code.
 //
 // Physics constants are tuned for 60 FPS; the Actor scales them by (dt * 60) so
-// motion is identical at any frame rate.
+// motion is identical at any frame rate. Values are px per 1/60 s tick, and an
+// on-screen tile is 32 px (this project's TILE_SIZE). The design these encode —
+// and its lineage — is described under "Movement model" in CLAUDE.md.
 export const ACTOR_TYPES = {
   mario: {
     size: { w: 24, h: 32 },
 
     physics: {
-      speedWalk: 3.0,   speedRun: 6.0,     // horizontal top speeds
-      accelWalk: 0.4,   accelRun: 0.6,     // ground acceleration
-      airAccel:  0.2,                       // reduced control while airborne
-      decel:     0.8,   skidFriction: 0.2,  // release friction / turn-around brake
-      jumpVel:   12,    jumpCut: 3,         // launch impulse / released-early cutoff
-      gravity:   0.6,   maxFall: 6.0,       // downward accel / terminal fall speed
+      // Horizontal. Top speed is an *emergent* equilibrium of per-tick accel vs.
+      // multiplicative friction, not a linear ramp to a cap. The same model runs
+      // on the ground and in the air (full air control). Walking settles ≈4.77;
+      // sprinting overshoots and pins at the maxSpeed clamp.
+      runAccel:     0.098,  // velocity added per tick while a direction is held
+      friction:     0.98,   // multiplicative damping applied every tick
+      decelMoving:  0.0007, // linear decel while a direction is held
+      decelIdle:    0.035,  // linear decel while no direction is held (glide stop)
+      maxSpeed:     5.4,    // horizontal clamp
+      runAnimSpeed: 4.9,    // |vx| above this (while the run key is held) → run anim
+
+      // Jump. Not an impulse: each held tick adds a *decaying* upward thrust
+      // (jumpUnit / jumpLev^jumpMod), so holding longer jumps higher with
+      // diminishing returns. Faster running lowers the exponent, raising the jump.
+      jumpUnit:     4,      // numerator of the per-tick thrust
+      jumpMod:      1.056,  // exponent; scaled down by horizontal speed
+      jumpModSpeed: 0.0014, // how much |vx| lowers the exponent (raises the jump)
+      maxRise:     -14,     // upward-speed clamp (peak rise velocity)
+
+      // Gravity.
+      gravity:      0.48,   // downward accel per tick
+      maxFall:      8,      // terminal fall speed
     },
 
     sprites: {

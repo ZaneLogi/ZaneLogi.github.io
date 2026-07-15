@@ -1,10 +1,11 @@
 # mario_physics — engine architecture
 
 Guidance for working in this project. It describes the **system architecture —
-the substrate and its invariants — not what's in the game**. The registries
-(`actor_types.js`, `tiles.js`) and the level data are the catalogue of what
-exists; git is the history. This file only changes when the *structure* changes.
-Local guidance; overrides the root `CLAUDE.md`.
+the substrate, its invariants, and the movement model built on them** — not the
+catalogue of what's in the game. The registries (`actor_types.js`, `tiles.js`)
+and the level data are that catalogue; git is the history. This file changes when
+the *structure* or the *movement design* changes. Local guidance; overrides the
+root `CLAUDE.md`.
 
 A small fixed-timestep 2D platformer engine, ES6 modules, no build step. Boots
 from `mini_mario_physics_demo.html` → `main.js`.
@@ -48,7 +49,7 @@ Rules a change must not break:
   struct read next tick — not a within-tick call.
 - **`contacts` is the single feedback channel** from collision into movement
   (`{ ground, ceiling, left, right, bumped }`). Movement decisions (jump
-  eligibility, ground vs. air accel) read it; nothing else carries collision
+  eligibility, the grounded gravity skip) read it; nothing else carries collision
   results into an actor.
 - **The resolver detects; the world decides.** `resolveCollision` reports what was
   touched (including which tile was bumped) and stops motion, but runs no game
@@ -60,6 +61,50 @@ Rules a change must not break:
   touches physics.
 - **Axis-separated resolution.** The resolver integrates and resolves X, then Y,
   so tile collisions stay stable at corners.
+
+## Movement model
+
+The design the **intent** phase expresses. The feel is inspired by
+FullScreenMario, which is a reference here, not an authority — a deliberate design
+call outranks matching it. The numbers live in the `ACTOR_TYPES` physics entry;
+this section is the design they encode.
+
+**Horizontal — a friction equilibrium, not a ramp to a cap.** Holding a direction
+adds a fixed per-tick impulse; multiplicative friction then damps the result and a
+small linear decel bleeds it toward zero. Top speed is therefore *emergent* — the
+point where accel and friction balance (≈4.77 px/tick walking) — not a clamp. The
+run key doubles the accel impulse, overshooting that equilibrium, so sprinting is
+the one case actually pinned by the `maxSpeed` clamp. Releasing all direction keys
+swaps in a far larger decel: the actor glides to a stop over ~65 ticks rather than
+halting.
+
+**Air control is full.** The same horizontal model runs grounded and airborne —
+there is no reduced air acceleration. Mid-jump you can accelerate from rest to top
+speed, or reverse outright.
+
+**Jump — an accumulating thrust, not an impulse.** A jump has no launch velocity.
+While the button is held *and* the actor is still rising, each tick adds a decaying
+upward thrust (`jumpUnit / jumpLev^jumpMod`, `jumpLev` counting held ticks), so
+holding longer jumps higher with diminishing returns: a tap clears ~1.2 tiles, a
+full hold ~4.5. Releasing, or cresting into a fall, ends the thrust for good — a
+new jump needs a landing and a fresh press. The variable-height window is thus the
+ascent only (~30 ticks); releasing after the apex is indistinguishable from holding.
+
+**Running jumps go slightly higher.** Horizontal speed lowers the jump exponent,
+worth ~3 px at full sprint. We key it on `|vx|` so the boost is symmetric by
+speed: jump height shouldn't depend on which way you face. This is the one
+deliberate divergence from the reference, which keys it on *signed* velocity and
+so jumps ~6 px lower to the left. The symmetric choice is ours on design grounds —
+whether the original SMB is symmetric here is **unverified**, so this is not a
+fidelity claim, and the reference may well be faithful on it.
+
+**Gravity** is a constant per-tick downward accel clamped at a terminal fall speed
+(reached ~16 ticks into a fall). It is skipped while grounded, so `vy` rests at 0
+and a launch tick's thrust is not cancelled before it applies.
+
+Measured against the reference frame-for-frame: walk/run accel and clamp, skid
+reversal, terminal fall, and air control match exactly; the symmetric run-jump
+boost is the sole intended difference.
 
 ## Type-Object registries — how the system is extended
 

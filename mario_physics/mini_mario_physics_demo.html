@@ -4,11 +4,68 @@
   <meta charset="utf-8">
   <title>Mini Mario Physics Demo</title>
   <style>
-    canvas { background: #5ec0ff; display: block; margin: auto; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #1c2733;
+      color: #e8eef5;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      padding: 20px 12px 32px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
+    }
+    canvas {
+      background: #5ec0ff;
+      display: block;
+      max-width: 100%;
+      border-radius: 6px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px 22px;
+      font-size: 14px;
+    }
+    .controls span {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #cdd9e6;
+    }
+    kbd {
+      display: inline-block;
+      min-width: 12px;
+      padding: 3px 8px;
+      font-family: inherit;
+      font-size: 12px;
+      line-height: 1;
+      color: #f4f8fc;
+      background: #34445a;
+      border: 1px solid #46586f;
+      border-bottom-width: 2px;
+      border-radius: 5px;
+    }
   </style>
 </head>
 <body>
+  <h1>Mini Mario Physics Demo</h1>
+
   <canvas id="game" width="640" height="480"></canvas>
+
+  <div class="controls">
+    <span><kbd>&larr;</kbd><kbd>&rarr;</kbd> Move</span>
+    <span><kbd>Shift</kbd> or <kbd>Z</kbd> Run (hold)</span>
+    <span><kbd>Space</kbd> Jump &mdash; hold for height</span>
+  </div>
+
   <script type="module" src="./main.js"></script>
 </body>
 </html>
