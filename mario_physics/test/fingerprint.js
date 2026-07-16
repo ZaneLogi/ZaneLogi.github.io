@@ -16,11 +16,9 @@
 // restructure silently stopped dispatching block bumps.
 //
 // Deterministic: no rAF, no Date.now, no Math.random — it runs synchronously on
-// load, so it still works when the preview tab is hidden.
-//
-// Caveat: Math.pow is not guaranteed bit-identical across JS engines, and the
-// physics leans on it twice (friction^step, jumpLev^mod). Re-bless the baseline
-// on the engine recorded in baseline.js.
+// load, so it still works when the preview tab is hidden. The physics is integer-
+// style arithmetic, so a trace is reproducible to the last bit; any drift is a
+// real change, not float noise.
 
 import { Actor } from '../actor.js';
 import { ACTOR_TYPES } from '../actor_types.js';
@@ -78,8 +76,8 @@ function settle(world, actor, n = 150) {
 
 const r3 = (v) => +v.toFixed(3);
 
-// 1. Hold right 600 ticks, release, settle 300.
-//    Accel -> friction equilibrium (top speed is emergent) -> glide stop.
+// 1. Hold right 600 ticks (no run key), release, settle 300.
+//    Linear accel -> the walk clamp -> a linear bleed-down to a dead stop.
 function runAndSettle() {
   const { world, actor } = spawn(makeLevel(16, 400), 160, 0);
   settle(world, actor);
@@ -200,8 +198,9 @@ function airControl() {
   };
 }
 
-// 6. Hold right + run: doubled accel overshoots the equilibrium, so this is the
-//    one case actually pinned by the maxSpeed clamp.
+// 6. Hold right + run: the run rate and the run clamp, rather than the walk pair.
+//    `clampTick` reads the clamp off the actor — hardcoding it once left this
+//    scenario silently measuring nothing when the clamp moved.
 function sprint() {
   const { world, actor } = spawn(makeLevel(16, 600), 160, 0);
   settle(world, actor);
@@ -212,7 +211,7 @@ function sprint() {
     disp.push(actor.x - x0);
   }
   let clamp = -1;
-  for (let f = 0; f < 240; f++) if (vx[f] >= 5.4) { clamp = f; break; }
+  for (let f = 0; f < 240; f++) if (vx[f] >= actor.maxRunSpeed) { clamp = f; break; }
   return {
     trace: [...vx, ...disp],
     scalars: {

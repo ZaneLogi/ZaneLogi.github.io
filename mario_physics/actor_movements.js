@@ -38,9 +38,11 @@ export function constantWalk(a, intent, dt) {
 }
 
 /**
- * Mario's model. Not a linear ramp to a cap: an additive per-tick impulse is
- * damped by multiplicative friction, so top speed is the equilibrium of the two.
- * The jump is not an impulse either — see the thrust block below.
+ * Mario's model, ported from Super Mario Bros.' 6502 source. Horizontal is a
+ * linear adder toward the held direction stopped by a hard clamp (top speed is the
+ * clamp, not an equilibrium); the jump is an impulse whose height comes from
+ * *selecting* a gravity while rising, not from continued thrust. The step numbers
+ * below follow the source's per-frame order — see docs/research_smb_physics.md.
  *
  * @param {Actor}  a       the actor to move
  * @param {object} intent  { left, right, run, jump } from the type's controller
@@ -51,64 +53,170 @@ export function marioMovement(a, intent, dt) {
   const step = dt * 60;
 
   // --- HORIZONTAL MOVEMENT ---
-  // Additive accel + multiplicative friction + a small linear decel. The same
-  // model runs grounded and airborne — full air control.
-  let decel;
-  if (intent.left || intent.right) {
-    const dir = intent.right ? 1 : -1;
-    a.facing = dir;
-    const adder = a.runAccel * (intent.run ? 2 : 1); // run key doubles the accel
-    a.vx += dir * adder * step;
-    a.vx *= Math.pow(a.friction, step);
-    decel = a.decelMoving;
-    a.isRunning = !!intent.run;
-    // Skid = pressing against current motion (ground only, for the sprite).
-    a.isSkidding = grounded && ((dir > 0 && a.vx < 0) || (dir < 0 && a.vx > 0));
-  } else {
-    a.vx *= Math.pow(a.friction, step); // glide to a stop
-    decel = a.decelIdle;
-    a.isRunning = false;
-    a.isSkidding = false;
-  }
-  // Linear decel toward zero, then clamp to top speed.
-  if (a.vx > decel * step) a.vx -= decel * step;
-  else if (a.vx < -decel * step) a.vx += decel * step;
-  else a.vx = 0;
-  if (a.vx > a.maxSpeed) a.vx = a.maxSpeed;
-  else if (a.vx < -a.maxSpeed) a.vx = -a.maxSpeed;
+  // SMB's model, kept in the source's own order — because the order is load-
+  // bearing. Several reads below are one tick stale by construction, and SMB's
+  // routine names actively lie about which layer they belong to:
+  //
+  //   0. the frame timers tick     (DecTimers, in NMI, before any game logic)
+  //   1. CheckForJumping / InitJS  the launch — chosen from LAST tick's |vx|
+  //   2. X_Physics                 picks the clamp and the rate, from LAST tick
+  //   3. GetPlayerAnimSpeed        writes runningSpeed; a slow skid dead-stops
+  //   4. PlayerFacingDir           follows the held direction
+  //   5. ImposeFriction            applies the rate toward the (masked) direction
+  //   6. Player_MovingDir          tracks the sign of vx
+  //   7. JumpSwimSub / FallingSub  chooses which gravity is live
+  //   8. ImposeGravity             applies it
+  //
+  // Steps 3, 4 and 5 are dispatched by state (JumpEngine): OnGroundStateSub runs
+  // all three, while the airborne paths (JumpSwimSub / FallingSub) reach only
+  // step 5, and only when a direction is actually held. So in the air the anim-
+  // speed routine never fires and an un-held Mario does not decelerate at all.
+  //
+  // Integration is not here — the resolver owns it. SMB integrates inside movement
+  // (MovePlayerHorizontally / MovePlayerVertically); either way the sequence is
+  // velocity → integrate → resolve. Gravity being skipped while grounded is what
+  // makes the launch tick move the *full* launch velocity, exactly as SMB's first
+  // ImposeGravity does — its `y += vy` runs before that frame's `vy += g`.
 
-  // --- JUMP START ---  fresh press while on the ground
+  // 0. RunningTimer is a frame timer: SMB decrements it before any game logic.
+  if (a.runTimer > 0) a.runTimer = Math.max(0, a.runTimer - step);
+
+  // SMB reads the raw controller bits for the index derivation and for facing.
+  // Only ImposeFriction masks them (step 5) — a wall changes what Mario *does*
+  // without changing which way he is *trying* to go.
+  const inputDir = intent.right ? 1 : intent.left ? -1 : 0;
+
+  // 1. JUMP START — a fresh press (down now, up last tick) while grounded. SMB
+  //    runs this *before* the horizontal update, so the band is picked from last
+  //    tick's speed; reading it after would quietly use a fresher value.
   if (intent.jump && !a.prevJump && grounded) {
-    a.jumping = true;
-    a.jumpLev = 0;
+    const speed = Math.abs(a.vx);
+    let band = 0;
+    while (band < a.jumpSpeedBands.length && speed >= a.jumpSpeedBands[band]) band++;
+    a.vy = a.launchSpeeds[band];        // the impulse — the whole jump, right here
+    a.jumpGravity = a.jumpGravities[band];
+    a.fallGravity = a.fallGravities[band];
+    a.gravityLive = a.jumpGravity;      // weak, until released or cresting
+    a.jumpOriginY = a.y;
   }
 
-  // --- GRAVITY ---
-  // While grounded the actor is treated as resting (vy held at 0, no gravity).
-  // Skipping gravity here keeps vy at 0 on the launch tick so the jump thrust
-  // below actually fires; airborne, gravity accumulates as usual.
+  // 2. X_Physics — two *independent* indices: one for the clamp, one for the
+  //    rate. `movingDir` and `runningSpeed` are both last tick's values, because
+  //    SMB runs PlayerPhysicsSub before GetPlayerAnimSpeed (which writes
+  //    runningSpeed) and before the movingDir update at the tail of
+  //    PlayerCtrlRoutine. The staleness is the source's, and kept on purpose.
+  let clamp = a.maxRunSpeed;
+  let rate = a.runAccel;
+  let walk = false;
   if (!grounded) {
-    a.vy += a.gravity * step;
+    walk = Math.abs(a.vx) < a.airRunThreshold; // run physics persist in the air
+  } else if (inputDir !== 0 && inputDir === a.movingDir) {
+    if (intent.run) a.runTimer = a.runTimerFrames; // SetRTmr
+    else if (a.runTimer <= 0) walk = true;        // grace expired → walk physics
+  } else {
+    walk = true; // no input, or pressing against the way we are already moving
+  }
+  if (walk) {
+    clamp = a.maxWalkSpeed;
+    rate = a.walkAccel;
+    // Above walk speed, the walk rate is swapped for a faster bleed-down.
+    if (a.runningSpeed !== 0 || Math.abs(a.vx) >= a.overWalkThreshold) rate = a.overWalkDecel;
+  }
+  // Skid — facing against the way we are moving doubles the rate. Both reads are
+  // last tick's, as above.
+  const skidding = a.facing !== a.movingDir;
+  if (skidding) rate *= a.skidFactor;
+
+  // 3. GetPlayerAnimSpeed's physics half — GROUND ONLY. The SMB name lies twice:
+  //    it writes runningSpeed, rewrites movingDir and nullifies a slow skid (none
+  //    of which is presentation), and it is called from OnGroundStateSub, so the
+  //    airborne paths never reach it. Only its animation-timer write is really
+  //    presentation, and that is the half that does NOT live here.
+  const speedAbs = Math.abs(a.vx);
+  if (grounded) {
+    if (speedAbs >= a.runningSpeedThreshold) {
+      a.runningSpeed = speedAbs;
+    } else if (intent.left || intent.right || intent.run) {
+      if (inputDir !== 0 && inputDir === a.movingDir) {
+        a.runningSpeed = 0;
+      } else if (speedAbs < a.skidStopThreshold) {
+        // ProcSkid — a skid this slow snaps to a dead stop and re-aims movingDir
+        // at facing. The zeroed speed is precisely what protects that write from
+        // step 6, which holds while vx is 0.
+        a.movingDir = a.facing;
+        a.vx = 0;
+      }
+    }
+  }
+
+  // 4. Facing follows the held direction — but only on the ground. SMB sets
+  //    PlayerFacingDir in OnGroundStateSub; the airborne path (LRAir) never
+  //    touches it, so facing freezes for the whole jump.
+  if (grounded && inputDir !== 0) a.facing = inputDir;
+
+  // 5. ImposeFriction — one linear adder toward the held direction, then a hard
+  //    clamp. With no direction held, the same routine takes its sign from the
+  //    current speed and bleeds toward zero at that same rate.
+  //    Grounded it always runs (GndMove falls into it either way); airborne only
+  //    if a direction is held (LRAir gates on the controller bits). So letting go
+  //    mid-jump *preserves* horizontal speed rather than bleeding it.
+  //    The mask is SMB's `and Player_CollisionBits`: a blocked direction never
+  //    reaches the physics at all, so Mario does not accelerate into a wall and
+  //    get cancelled — as far as this code is concerned, he is not pressing.
+  if (grounded || inputDir !== 0) {
+    const pushRight = intent.right && !a.contacts.right;
+    const pushLeft = intent.left && !a.contacts.left;
+    if (pushRight) {
+      a.vx += rate * step;
+      if (a.vx > clamp) a.vx = clamp;
+    } else if (pushLeft) {
+      a.vx -= rate * step;
+      if (a.vx < -clamp) a.vx = -clamp;
+    } else if (a.vx > 0) {
+      // Bleeding down, SMB clamps against the *opposite* max — which never bites
+      // while the sign holds. So releasing everything at run speed coasts down;
+      // only holding a direction re-clamps (above), which snaps 5.0 → 3.0.
+      a.vx = Math.max(0, a.vx - rate * step);
+    } else if (a.vx < 0) {
+      a.vx = Math.min(0, a.vx + rate * step);
+    }
+    // The stops at zero are ours, not SMB's: its 8-bit speed steps by whole units,
+    // lands exactly on 0, and a `beq` parks it there. Float subtraction would sail
+    // past and oscillate. Same outcome, different arithmetic.
+  }
+
+  // 6. movingDir tracks the sign of vx — and *holds* while vx is exactly 0, which
+  //    is what lets ProcSkid's write in step 3 survive.
+  if (a.vx > 0) a.movingDir = 1;
+  else if (a.vx < 0) a.movingDir = -1;
+
+  // Presentation flags — read only by marioAnimation, never by physics.
+  a.isRunning = !!intent.run;
+  a.isSkidding = grounded && skidding;
+
+  // 7. Which gravity is live (JumpSwimSub for a jump, FallingSub for a plain
+  //    fall). This is the whole variable-height mechanism: holding the button
+  //    does not lift, it keeps the *weak* gravity while rising. Letting go swaps
+  //    in the strong one — and SMB never swaps back, because VerticalForce is
+  //    only re-seeded at the next launch. Re-pressing mid-air buys nothing.
+  if (a.vy >= 0) {
+    a.gravityLive = a.fallGravity;  // cresting into a fall, or never jumped
+  } else if (!(intent.jump && a.prevJump)) {
+    // Not held *continuously* (SMB ANDs this frame's button with last frame's).
+    // The grace exists for the launch tick specifically: on a fresh press the
+    // previous-frame bit is necessarily clear, so without it every jump would
+    // dump to fall gravity the instant it started. Once he has risen off the
+    // origin, the same test becomes the real early-release.
+    if (a.jumpOriginY - a.y >= a.jumpGraceRise) a.gravityLive = a.fallGravity;
+  }
+
+  // 8. ImposeGravity — skipped while grounded, which is what leaves vy at the
+  //    full launch velocity on the tick it is set. Clamped falling only: the
+  //    rise-limiting half of the routine is skipped for the player.
+  if (!grounded) {
+    a.vy += a.gravityLive * step;
     if (a.vy > a.maxFall) a.vy = a.maxFall;
   }
-
-  // --- JUMP THRUST ---
-  // While the button is held and the actor is still rising, add a decaying
-  // upward impulse: the numerator is constant but the divisor grows each tick,
-  // so early ticks lift hard and later ticks barely — holding longer jumps
-  // higher, with diminishing returns. Faster horizontal *speed* lowers the
-  // exponent, raising the jump. We key it on |vx| so the boost is symmetric by
-  // speed — jump height shouldn't depend on which way you face. (A design call,
-  // not a fidelity one; see the movement model in CLAUDE.md.)
-  if (a.jumping && intent.jump && a.vy <= 0) {
-    a.jumpLev += 1;
-    const mod = a.jumpMod - Math.abs(a.vx) * a.jumpModSpeed;
-    const dy = a.jumpUnit / Math.pow(a.jumpLev, mod);
-    a.vy = Math.max(a.vy - dy * step, a.maxRise);
-  }
-  // Releasing the button — or cresting into a fall — ends the thrust; a new
-  // jump then requires landing and a fresh press.
-  if (!intent.jump || a.vy > 0) a.jumping = false;
 
   a.prevJump = intent.jump;
 }

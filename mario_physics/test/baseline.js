@@ -10,68 +10,84 @@
 // numbers moved. Re-blessing to turn a red harness green defeats the point — at
 // that moment the harness is theatre.
 //
-// Blessed at: 20caad4 ("[mario_physics] port FullScreenMario movement feel")
-// Engine:     V8 (Chrome 148 / Electron 42). The comparison is exact-match, and
-//             Math.pow is not guaranteed bit-identical across JS engines — the
-//             physics uses it for friction^step and jumpLev^mod. Expect possible
-//             false failures on a non-V8 engine; re-bless there if you move.
+// Pins:   Super Mario Bros.' own movement, ported from the 6502 source —
+//         horizontal is a linear adder to a hard clamp, and the jump is an
+//         *impulse* launch (−8, or −10 above 3.125 px/tick) with variable height
+//         from gravity *selection* (0.25 rising with the button held, 0.875
+//         released). Every scalar is ROM-derived; the derivations, and the
+//         hand-checks that confirm them, live in docs/research_smb_physics.md.
+// Engine: V8 (Chrome 148 / Electron 42), which produced these numbers.
 
 export const BASELINE = {
   "run_and_settle": {
-    "hash": "4d42da9b",
+    "hash": "499ab556",
     "scalars": {
-      "plateauVx": 4.767,
-      "distAtRelease": 2626.618,
-      "distFinal": 2746.311,
-      "ticksToStopAfterRelease": 65
+      "plateauVx": 3,
+      "distAtRelease": 1740.859,
+      "distFinal": 1800,
+      "ticksToStopAfterRelease": 40
     }
   },
   "run_reverse_settle": {
-    "hash": "df77e7a0",
+    "hash": "c68d150c",
     "scalars": {
-      "peakDist": 2695.986,
-      "peakTick": 632,
-      "turnaroundTick": 633,
-      "skidTicks": 33,
-      "leftVxAtEnd": -4.745,
-      "distFinal": 1541.385
+      "peakDist": 1766.172,
+      "peakTick": 611,
+      "turnaroundTick": 612,
+      "skidTicks": 12,
+      "leftVxAtEnd": -3,
+      "distFinal": 899.246
     }
   },
   "jump_release_sweep": {
-    "hash": "17a88e6d",
+    "hash": "48fb9ff4",
     "scalars": {
-      "peaks": [37.646, 65.263, 98.462, 124.344, 139.88, 144.961],
-      "landTicks": [25, 33, 42, 49, 54, 57]
+      "peaks": [
+        46.25,
+        57,
+        76.25,
+        99.875,
+        121.25,
+        132
+      ],
+      "landTicks": [
+        20,
+        23,
+        28,
+        35,
+        44,
+        53
+      ]
     }
   },
   "terminal_fall": {
-    "hash": "a297d9d9",
+    "hash": "278d91e9",
     "scalars": {
-      "terminalTick": 16,
+      "terminalTick": 25,
       "terminalVy": 8,
-      "landTick": 127,
+      "landTick": 132,
       "fallDist": 959.99
     }
   },
   "air_control": {
-    "hash": "b14822bb",
+    "hash": "e859f2f6",
     "scalars": {
-      "airVxAtTick100": 4.147,
-      "airVxMax": 4.75,
+      "airVxAtTick100": 3,
+      "airVxMax": 3,
       "terminalVy": 8,
-      "landTick": 279
+      "landTick": 284
     }
   },
   "sprint": {
-    "hash": "e7a5c7d2",
+    "hash": "9228bc45",
     "scalars": {
-      "plateauVx": 5.4,
-      "clampTick": 41,
-      "distAtEnd": 1202.849
+      "plateauVx": 5,
+      "clampTick": 44,
+      "distAtEnd": 1090.215
     }
   },
   "qblock_bump": {
-    "hash": "6a2f22df",
+    "hash": "333ee3ab",
     "scalars": {
       "tileBefore": 3,
       "tileAfter": 5,
@@ -80,15 +96,19 @@ export const BASELINE = {
     }
   },
   "anim_states": {
-    "hash": "f2689def",
+    "hash": "fa44f978",
     "scalars": {
-      "statesSeen": ["idle", "walk", "run", "skid", "jump", "fall"],
+      "statesSeen": [
+        "idle",
+        "walk",
+        "run",
+        "skid",
+        "jump",
+        "fall"
+      ],
       "finalState": "walk"
     }
   },
-  // Added when the Goomba landed. Re-blessed once, deliberately: its speed went
-  // 1.0 -> 0.84 to match the reference. Mario's eight kept their hashes through
-  // both, so nothing else moved.
   "goomba_walks": {
     "hash": "f3bf2971",
     "scalars": {

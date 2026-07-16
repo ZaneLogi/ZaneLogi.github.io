@@ -37,16 +37,27 @@ export class Actor {
     // names a computed controller never read it.
     this.input = {};
 
-    // Jump state. `jumping` marks the rising phase in which a held jump adds
-    // thrust; `jumpLev` counts the ticks it has been held, feeding the decaying
-    // thrust curve.
-    this.jumping = false;
-    this.jumpLev = 0;
+    // Jump state. SMB's jump is an impulse, so there is no "am I jumping" flag —
+    // what persists is *which gravity is live*: a weak one while rising with the
+    // button held, a strong one otherwise. Once swapped to the strong one it
+    // stays swapped until the next launch. `jumpOriginY` is where that launch
+    // happened; the launch-tick grace measures rise against it.
+    this.jumpGravity = 0; // set at launch, from the |vx| band
+    this.fallGravity = def.physics.spawnFallGravity ?? 0;
+    this.gravityLive = this.fallGravity;
+    this.jumpOriginY = y;
 
     this.isSkidding = false;
     this.isRunning = false; // run key held while moving — drives the run animation
 
     this.facing = 1; // 1 = right, -1 = left
+    // SMB keeps *facing* and *moving direction* apart, and their disagreeing is
+    // what defines a skid: `facing` is where the input points, `movingDir` is the
+    // sign of the speed. movingDir holds its last value while vx is 0, which is
+    // what lets a dead-stopped skid keep the direction it snapped to.
+    this.movingDir = 1;
+    this.runTimer = 0;     // ticks of run physics still owed after the key drops
+    this.runningSpeed = 0; // last tick's |vx|, if it was above the gate; else 0
     this.currentState = "idle"; // main animation state
   }
 

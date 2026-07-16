@@ -75,47 +75,80 @@ Rules a change must not break:
 
 ## Movement model
 
-The design the **intent** phase expresses. The feel is inspired by
-FullScreenMario, which is a reference here, not an authority — a deliberate design
-call outranks matching it. The numbers live in the `ACTOR_TYPES` physics entry;
-this section is the design they encode.
+The design the **intent** phase expresses. The numbers live in the `ACTOR_TYPES`
+physics entry; this section is the design they encode.
 
-**Horizontal — a friction equilibrium, not a ramp to a cap.** Holding a direction
-adds a fixed per-tick impulse; multiplicative friction then damps the result and a
-small linear decel bleeds it toward zero. Top speed is therefore *emergent* — the
-point where accel and friction balance (≈4.77 px/tick walking) — not a clamp. The
-run key doubles the accel impulse, overshooting that equilibrium, so sprinting is
-the one case actually pinned by the `maxSpeed` clamp. Releasing all direction keys
-swaps in a far larger decel: the actor glides to a stop over ~65 ticks rather than
-halting.
+**This is Super Mario Bros.' physics**, decoded from the 6502 source — see
+`docs/research_smb_physics.md`, which carries the constants, their ROM labels, the
+unit derivations, and the scope: what is ported and what is deliberately not.
+Everything is scaled ×2: our tile is 32 px against SMB's 16 px brick, and every
+physics quantity is linear in distance, so ×2 is exact.
 
-**Air control is full.** The same horizontal model runs grounded and airborne —
-there is no reduced air acceleration. Mid-jump you can accelerate from rest to top
-speed, or reverse outright.
+Scope, in one line: **ground and air movement, horizontal and vertical**. Swimming,
+climbing, crouching, and the water/pipe speed clamps are decoded but not ported.
+**SMB's movement is size-independent** — every `PlayerSize` read is in collision
+geometry, block breakability, or graphics — so this covers a big Mario too, if one
+is ever added. Size lives in the *collision* layer, not here.
 
-**Jump — an accumulating thrust, not an impulse.** A jump has no launch velocity.
-While the button is held *and* the actor is still rising, each tick adds a decaying
-upward thrust (`jumpUnit / jumpLev^jumpMod`, `jumpLev` counting held ticks), so
-holding longer jumps higher with diminishing returns: a tap clears ~1.2 tiles, a
-full hold ~4.5. Releasing, or cresting into a fall, ends the thrust for good — a
-new jump needs a landing and a fresh press. The variable-height window is thus the
-ascent only (~30 ticks); releasing after the apex is indistinguishable from holding.
+**Horizontal — a linear adder to a hard clamp.** Holding a direction adds a fixed
+per-tick rate; the clamp stops it. Top speed *is* the clamp (walk 3.0, run 5.0) —
+not an equilibrium, and there is no multiplicative friction anywhere. One rate
+serves accel *and* decel: with no direction held, the same adder takes its sign
+from the current speed and bleeds to a dead stop (~40 ticks from walk speed).
 
-**Running jumps go slightly higher.** Horizontal speed lowers the jump exponent,
-worth ~3 px at full sprint. We key it on `|vx|` so the boost is symmetric by
-speed: jump height shouldn't depend on which way you face. This is the one
-deliberate divergence from the reference, which keys it on *signed* velocity and
-so jumps ~6 px lower to the left. The symmetric choice is ours on design grounds —
-whether the original SMB is symmetric here is **unverified**, so this is not a
-fidelity claim, and the reference may well be faithful on it.
+Two things make it SMB's rather than a generic ramp-and-clamp:
 
-**Gravity** is a constant per-tick downward accel clamped at a terminal fall speed
-(reached ~16 ticks into a fall). It is skipped while grounded, so `vy` rests at 0
-and a launch tick's thrust is not cancelled before it applies.
+- **Two independent indices.** One picks the clamp, the other the rate — they are
+  not the same choice. Run physics need the run key *and* input agreeing with the
+  direction of travel, and they linger 10 ticks after the key drops. Above walk
+  speed, the walk rate is swapped for a faster bleed-down.
+- **Several reads are one tick stale, on purpose.** SMB runs its physics sub
+  before the routine that writes `runningSpeed`, and before the `movingDir`
+  update at the tail of the frame. `marioMovement` keeps that order, and says so.
 
-Measured against the reference frame-for-frame: walk/run accel and clamp, skid
-reversal, terminal fall, and air control match exactly; the symmetric run-jump
-boost is the sole intended difference.
+**Skid is `facing ≠ movingDir`** — two separate concepts, which is why the Actor
+carries both. It doubles the rate, and below 1.375 px/tick a skid snaps to a dead
+stop and re-aims `movingDir` at `facing`.
+
+**A blocked direction never reaches the physics.** `marioMovement` masks its intent
+against `contacts.left/right` before using it, so Mario does not accelerate into a
+wall and get cancelled by the resolver — he is simply not pressing. That is SMB's
+`and Player_CollisionBits`, and `contacts` is the same one-tick-stale channel.
+
+**Air control is partial, and the gate is the point.** Airborne, run physics apply
+only above 3.125 px/tick. The walk clamp is 3.0 — *just below the gate* — so a
+standing jump can never reach run speed in the air no matter how long you hold a
+direction. Speed is something you carry into a jump, not something you build in
+one. Facing also freezes airborne: SMB sets it only on the ground.
+
+**Jump — an impulse, and holding does not lift.** The launch velocity is set once
+(−8, or −10 above 3.125 px/tick) and gravity does everything after. **Variable
+height comes from gravity *selection*, not thrust**: while rising with the button
+held, gravity is 0.25; release it and 0.875 swaps in — and never swaps back, so
+re-pressing mid-air buys nothing. Holding the button doesn't push Mario up, it
+makes him *lighter* while he is already rising. A tap clears ~1.4 tiles, a full
+hold ~4.1.
+
+**Five bands, indexed by `|vx|` at the moment of the press** — the launch, the held
+gravity, and the fall gravity all come from the band. The run-jump goes higher
+*despite* stronger gravity, because the bigger launch wins. Bands 0 and 1 are
+identical in the ROM: five entries, three distinct behaviours.
+
+**The boost is symmetric by speed**, because SMB indexes on
+`Player_XSpeedAbsolute` — an absolute value, so height depends on speed magnitude,
+not facing. The port keys on `|vx|`, matching it.
+
+**Gravity is skipped while grounded** — which is not a convenience, it is what makes
+the launch tick move the *full* launch velocity. SMB's `ImposeGravity` does
+`y += vy` before that frame's `vy += g`, and skipping the grounded tick reproduces
+that exactly. Terminal fall is 8; there is no *upward* clamp, because the
+rise-limiting half of `ImposeGravity` is skipped for the player — which is what
+lets the −10 launch stand.
+
+**A fall you never jumped into is gentler than any jump** (0.3125). SMB seeds
+`VerticalForceDown` at level entrance and only overwrites it at a launch, so
+walking off a ledge before your first jump uses the entrance value. Genuinely a
+quirk, faithfully kept.
 
 ## Type-Object registries — how the system is extended
 
@@ -140,8 +173,8 @@ A generic instance class plus a table of type definitions it is built from.
   yet — `contacts` cannot serve either, being retrospective by construction.
 
   Physics constants are copied onto the Actor wholesale, because *which* constants
-  exist is the type's business — a walker carries a `speed`; Mario carries a
-  friction model and a jump curve. An Actor that named them would know every type.
+  exist is the type's business — a walker carries a `speed`; Mario carries speed
+  clamps, accel rates, and jump bands. An Actor that named them would know every type.
 
   The player is not special: its controller reads `actor.input`, which the
   composition root writes, so no other actor ever sees it.
@@ -202,16 +235,16 @@ making decides what the harness should do:
   type, hoisting gravity) — claims to change no behaviour, so it **must pass against
   the existing baseline**. Red means the claim was false. The scenario code may have
   to follow a changed API; the *baseline* must not move.
-- **A movement-design change** — retuning the jump, changing the friction model —
-  deliberately overwrites behaviour, so it **will** go red. Re-blessing is part of
-  the change, and the commit message says why the numbers moved.
+- **A movement-design change** — retuning the jump, changing an accel rate or a
+  clamp — deliberately overwrites behaviour, so it **will** go red. Re-blessing is
+  part of the change, and the commit message says why the numbers moved.
 
 So the harness isn't only asking "did I break something" — it is checking the claim
 you made about which kind of change this is. If one commit moves *both* the scenario
 code and the baseline, treat it as a smell: you have either bundled two changes, or
 changed behaviour while calling it a refactor.
 
-Eight scenarios cover every phase of the tick, not just the physics — `qblock_bump`
+Nine scenarios cover every phase of the tick, not just the physics — `qblock_bump`
 exercises the **react** phase (`TILES.onBump` → hop → `3` spends to `5`) and
 `anim_states` the **present** phase. A fingerprint covering only intent+collide
 would stay green while a restructure silently stopped dispatching block bumps.
@@ -224,15 +257,9 @@ is a bug, not noise.
 | File | Owns |
 |---|---|
 | `test/fingerprint.js` | the scenarios + runner |
-| `test/baseline.js` | data: the blessed fingerprint, and the commit + JS engine that blessed it |
+| `test/baseline.js` | data: the blessed fingerprint, and the JS engine that produced it |
 | `test/fingerprint.html` | runs, compares, renders, and emits a re-bless block |
 
-Two things to respect:
-
-- **Exact-match is only valid on the engine that blessed it.** `Math.pow` is
-  implementation-approximated by spec, and the jump's thrust divisor uses it with a
-  non-integer exponent. A different engine may go red with nothing actually wrong —
-  `baseline.js` records which one to re-bless on.
-- **To re-bless** — only ever for the second case above — paste the block the page
-  emits into `baseline.js`. Re-blessing to turn a red harness green is the one way
-  to make it worthless.
+**To re-bless** — only ever for a deliberate movement-design change — paste the
+block the page emits into `baseline.js`. Re-blessing to turn a red harness green is
+the one way to make it worthless.

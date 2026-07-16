@@ -26,28 +26,53 @@ export const ACTOR_TYPES = {
     animate: marioAnimation,
 
     physics: {
-      // Horizontal. Top speed is an *emergent* equilibrium of per-tick accel vs.
-      // multiplicative friction, not a linear ramp to a cap. The same model runs
-      // on the ground and in the air (full air control). Walking settles ≈4.77;
-      // sprinting overshoots and pins at the maxSpeed clamp.
-      runAccel:     0.098,  // velocity added per tick while a direction is held
-      friction:     0.98,   // multiplicative damping applied every tick
-      decelMoving:  0.0007, // linear decel while a direction is held
-      decelIdle:    0.035,  // linear decel while no direction is held (glide stop)
-      maxSpeed:     5.4,    // horizontal clamp
+      // Horizontal — SMB's. Top speed is a hard *clamp*, not an equilibrium:
+      // one linear adder pushes toward the held direction and the clamp stops it.
+      // Two *independent* indices choose the clamp and the rate (X_Physics), and
+      // a single routine applies the rate for accel AND decel (ImposeFriction).
+      //
+      // The ROM's bytes, converted: a speed byte is 1/16 px/frame; a rate byte is
+      // 1/256 of a speed unit per frame. Both then ×2 for our 32 px tile against
+      // SMB's 16 px brick. Derivations live in docs/research_smb_physics.md.
+      maxWalkSpeed:   3.0,          // MaxRightXSpdData[1] $18=24 → 1.5 px/f
+      maxRunSpeed:    5.0,          // MaxRightXSpdData[0] $28=40 → 2.5 px/f
+      walkAccel:      0.07421875,   // FrictionData[1] $98=152
+      runAccel:       0.111328125,  // FrictionData[0] $e4=228
+      overWalkDecel:  0.1015625,    // FrictionData[2] $d0=208
+      skidFactor:     2,            // facing ≠ movingDir doubles the adder
+      runTimerFrames: 10,           // $0a — run physics linger after the key drops
+
+      // Thresholds, same speed-byte conversion (1/16 px/f, ×2).
+      airRunThreshold:       3.125, // $19=25 — airborne keeps run physics above this
+      overWalkThreshold:     4.125, // $21=33 — above this, the faster bleed-down
+      runningSpeedThreshold: 3.5,   // $1c=28 — gates runningSpeed
+      skidStopThreshold:     1.375, // $0b=11 — a skid below this snaps to a stop
+
       runAnimSpeed: 4.9,    // |vx| above this (while the run key is held) → run anim
 
-      // Jump. Not an impulse: each held tick adds a *decaying* upward thrust
-      // (jumpUnit / jumpLev^jumpMod), so holding longer jumps higher with
-      // diminishing returns. Faster running lowers the exponent, raising the jump.
-      jumpUnit:     4,      // numerator of the per-tick thrust
-      jumpMod:      1.056,  // exponent; scaled down by horizontal speed
-      jumpModSpeed: 0.0014, // how much |vx| lowers the exponent (raises the jump)
-      maxRise:     -14,     // upward-speed clamp (peak rise velocity)
+      // Jump — SMB's: an *impulse*, not a thrust. The launch velocity is set once
+      // and gravity does everything after. Holding the button does not push — it
+      // selects a *weaker gravity* while rising. Release, or crest into a fall,
+      // and the strong one swaps in permanently (re-pressing mid-air buys nothing).
+      //
+      // Five bands, indexed by |vx| at the moment of the press. SMB indexes on
+      // Player_XSpeedAbsolute — a two's-complement absolute value — which is what
+      // makes the run-jump boost symmetric by speed rather than by facing.
+      // Bands 0 and 1 are identical in the ROM; five entries, three behaviours.
+      //
+      // Vertical scales differently from horizontal: a speed byte here is a whole
+      // px/frame (not 1/16), a gravity byte is 1/256 px/frame². Both then ×2.
+      jumpSpeedBands: [1.125, 2.0, 3.125, 3.5],                // $09 $10 $19 $1c
+      launchSpeeds:   [-8, -8, -8, -10, -10],                  // PlayerYSpdData $fc/$fb
+      jumpGravities:  [0.25, 0.25, 0.234375, 0.3125, 0.3125],  // JumpMForceData — button held
+      fallGravities:  [0.875, 0.875, 0.75, 1.125, 1.125],      // FallMForceData — released
+      jumpGraceRise:  2,        // DiffToHaltJump $01 — protects the launch tick
+      spawnFallGravity: 0.3125, // Entrance_GameTimerSetup seeds VerticalForceDown = $28,
+                                // so a fall you never jumped into is gentler than any jump.
 
-      // Gravity.
-      gravity:      0.48,   // downward accel per tick
-      maxFall:      8,      // terminal fall speed
+      maxFall: 8, // $04 = 4 px/f. There is deliberately no *upward* clamp: the
+                  // rise-limiting half of ImposeGravity is skipped for the player
+                  // (it enters with A=0), which is what lets the −10 launch stand.
     },
 
     sprites: {
