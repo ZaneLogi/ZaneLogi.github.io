@@ -75,6 +75,10 @@ deviation — the mechanism (logic builds state, render ships it) is preserved.
 
 ## 2. Top-level flow
 
+**→ The screen-level flow is decoded in full in `research_game_flow.md`** — 11
+phases, the `PLA/PLA` transition mechanism, the gate variables, the endless
+70-stage cycle. This section keeps only the shape the rest of *this* map needs.
+
 ```
 vec_C070_RESET
   └─ init PPU, clear RAM, palettes
@@ -83,10 +87,10 @@ vec_C070_RESET
         ├─ sub_C41D_demo_handler           (attract-mode auto-play — reuses the battle loop)
         └─ loc_C0AE_construction_handler   (built-in stage editor)
   └─ game-mode dispatch  tbl_CA69_game_mode_handler
-        ├─ 00 → 1 player      (5 enemy slots active: con_max_tanks-2)
-        ├─ 01 → 2 players
+        ├─ 00 → 1 player      (enemy_limit = con_max_tanks-2 = 5)  ┐ both → JMP loc_C159
+        ├─ 01 → 2 players     (enemy_limit = con_max_tanks   = 7)  ┘ (the SAME loop)
         └─ 02 → construction
-  └─ STAGE LOOP (per mode) — the gameplay heartbeat. 1P loop, bra_C1F9_loop [D]:
+  └─ STAGE LOOP — the gameplay heartbeat, bra_C1F9_loop [D]:
         bra_C1F9_loop:
           JSR sub_D8F6_wait_1_frm           ; sync to NMI — ONCE, at the TOP
           LDA ram_pause_flag / BNE ---------┐  ; pause gates ONLY the pipeline
@@ -96,19 +100,30 @@ vec_C070_RESET
           JSR sub_E0D8_bullets_status_handler
           JSR sub_DEA6_tanks_handler        ; DRAW all 8 tanks (state machine, §4)
           ... Start-button pause toggle, sub_C8F9_display_pause_text ...
+          JSR sub_C728_check_condition_for_stage_ending   ; Z=0 ⇒ leave the loop
+        bra_C238_loop:                      ; the ENDING TAIL — still the battle,
+          ... sub_C2A2_disable_buttons_if_game_over       ; buttons off if game over,
+          JSR sub_C2E6_main_battle_script   ; runs on for 128 frm (256 if GAME OVER slides)
 ```
 
-`sub_C2E6_main_battle_script` is called from the 1P loop (`$C200`), the 2P loop
-(`$C23E`), and the demo loop (`$C429`) **[D]** — the demo/attract mode is literally
-the same loop with AI driving the "players."
+`sub_C2E6_main_battle_script` has **exactly three call sites [D]**: the battle
+loop (`$C200`), the **ending tail** (`$C23E`) and the demo loop (`$C429`) — the
+demo/attract mode is literally the same loop with AI driving the "players."
 
-Two things the shape above makes explicit, both easy to get wrong:
+Three things the shape above makes explicit, all easy to get wrong:
 
 - **The wait is at the TOP, not the bottom** — the pass is *sleep, then do a
   frame's work*, so one `wait_1_frm` per iteration ⇒ 60.0988 Hz logic (§1).
-- **Pause (`$C1FC`) gates only `sub_C2E6`.** `$E23B` / `$E0D8` / `$DEA6` keep
-  running while paused — which is why sprites still animate on the pause screen.
-  A port that freezes everything on pause is wrong.
+- **There is no separate 2P loop.** 1P and 2P share `loc_C159` entirely; the mode
+  handlers (`$CA6F`/`$CA74`) differ only in `ram_enemy_limit` (5 vs 7) before both
+  `JMP loc_C159`, plus a spawn-interval tweak (`$C3AD` subtracts `#$14` in 2P).
+  *(Corrected 2026-07-16: this section previously called `$C23E` "the 2P loop." It
+  is the stage-ending tail loop. Game flow doc §2/§3c.)*
+- **Pause (`$C1FC`) gates only `sub_C2E6` — within the stage loop.** `$E23B` /
+  `$E0D8` / `$DEA6` keep running while paused, which is why sprites still animate
+  on the pause screen; a port that freezes everything on pause is wrong. But
+  `ram_pause_flag` has a **second consumer outside this loop**: `sub_EA7E_sound_driver`
+  reads it (`$EA7E`) and mutes every sfx slot but the pause tone. Game flow doc §6e.
 
 `sub_C331_prepare_tanks_addresses_and_spawn_players_before_stage` (`$C331`) is
 the **stage-entry reset**: clears bullets/tanks, spawns surviving players,
@@ -122,7 +137,7 @@ clears power-up timers, draws the 20 enemy icons, and calls
 
 `sub_C2E6_main_battle_script` runs these **in this exact order** every frame
 **[D]**. The order is a **faithfulness invariant** — even though the OO port
-reorganizes the *data*, `Game.update()` must call the subsystems in this
+reorganizes the *data*, `mainBattleScript()` must call the subsystems in this
 sequence, or behavior drifts (e.g. collisions must run after movement).
 
 | # | Routine (`$addr`) | What it does | Reads | Writes |
@@ -215,6 +230,28 @@ A stage decodes BLOCK → 4 TILEs at draw time; gameplay then reads TILEs
 (`E181` compares tile `$21` for ice; `DA2B` compares tile `$22` for forest;
 `con_block_type` = `$00`). Geometry (closes the old §8 `[?]`): **13×13 blocks of
 16×16 px** = 208×208, each block 2×2 tiles of 8×8 ⇒ 26×26 quarters.
+
+**The default fill: `$11` is the border, `$00` is empty — they are different
+layers, not a contradiction [D].** `sub_D7CC_create_default_stage_field` (`$D7CC`,
+via `sub_C9B0`) does three things in a row, and reading only the first is what made
+this look like a puzzle:
+
+| | what | source comment |
+|---|---|---|
+| `$D7CC-$D7DD` | fill **all** of `$0400–$07FF` with tile **`$11`** | *"fill all stage will undestructable grey tile"* |
+| `$D7DF-$D7E7` | clear `$07C0–$07FF` (the attribute table) to `$00` | *"clear nametable"* / *"clear 07C0-07FF"* |
+| `$D7F4-…` | clear the **26×26 play grid** back to `$00` | *"clear 26x26 grid (decimal)"* |
+
+So `$11` is the **grey border surrounding the play field**, and `tbl_DACB`'s
+"empty = `$00`" applies *inside* the 26×26 grid the third loop carves back out.
+`sub_F000_draw_stage` then paints the stage into that grid. `$11` is reused as the
+curtain tile (`sub_CC90_close_grey_curtain`, `$CC90`: `LDA #$11 ; grey tile`) and
+as `" "` in text (`sub_CA91`, `$CAC7`) — one tile id whose colour follows its
+attribute quad, exactly per S9's "BG text has no palette of its own."
+**Do not confuse it with `sub_D47E_clear_0400_07FF`** (`$D47E`), a *different*
+routine that fills the same range with `$00`, used by the text screens
+(`sub_D16A`, `sub_D17F`, `sub_C5D9`, `sub_C44B`, `sub_C295`).
+*(Resolved 2026-07-16; was a §8 `[?]`.)*
 
 **Stage format [D]** — 91 bytes = 182 nibbles = **14 cols × 13 rows**, high-nibble
 first; column 13 is padding (`$D` in all 468 rows across all 36 files) ⇒ 13×13
@@ -321,6 +358,20 @@ interprets control bytes (`con_se_cb_*`: loops/stop/main-loop) from sfx data
 streams (`_off000_sfx_*` table at `$ED..`). This is *ported code*, not analog
 hardware — fully portable, but a good deferral candidate.
 
+**Audio is not purely an output — it gates two phase transitions and reads the
+pause flag [D].** Two corrections to the "passive per-frame tick" framing:
+
+- **The GAME OVER and HI-SCORE screens are timed by the sfx, not a frame counter.**
+  `$C630` spins on `ram_sfx_game_over_1`, `$C495` on `ram_sfx_hiscore_1`, both
+  commented *"wait until sound is played"*. With `Audio` a stub these two screens
+  hang forever or flash past — they need a substitute duration. (GAME OVER has a
+  Start/Select escape at `$C627`; HI-SCORE has none.)
+- **`sub_EA7E` reads `ram_pause_flag` (`$EA7E`)** and drops `ram_sfx_check_limit`
+  from `$1C` (all slots `$0300-$031B`) to `$01` (the pause tone only) — i.e. the
+  driver mutes itself. That is how the demo is silent (`$C3B7`).
+
+Detail: `research_game_flow.md` §6d/§6e.
+
 **S12 — RNG.** `D44D_generate_random_number`: `random = random*7 + frm_cnt_hi +
 zp[++index]` **[D]**. Consumed by S4 (movement, fire), S7 (bonus pos), spawn.
 
@@ -361,7 +412,13 @@ graph TD
   BULLETS --> RENDER
   SESSION --> RENDER
   AUDIO[S11 Audio] -.per-frame tick.- RENDER
+  AUDIO -->|sfx-finished gates GAME OVER + HI-SCORE| SESSION
+  SESSION -->|pause_flag mutes the driver| AUDIO
 ```
+
+**Audio is not a leaf [D].** The dotted per-frame tick is the *obvious* edge; the
+two solid ones are the ones a port forgets. `$C630`/`$C495` block a phase
+transition on the sfx finishing, and `$EA7E` reads `ram_pause_flag`. See S11.
 
 **The five shared structures:**
 
@@ -394,7 +451,7 @@ per-subsystem docs, not before scaffolding.
 
 | JS module / class | Responsibility | Absorbs (source) |
 |---|---|---|
-| `Game` | mode dispatch, stage loop, `update()` calling subsystems in the §3 order, session state (lives/stage/score/gameOver) | reset, `tbl_CA69`, stage loops, `C331`, `C728`, `CCD4` |
+| `Game` | **the phase machine** (11 phases, flow doc §1), mode dispatch, stage loop, `update()` calling subsystems in the §3 order, session state (lives/stage/score/gameOver) | reset, `tbl_CA69`, stage loops, `C331`, `C728`, `CCD4`, `C5D9`, `C44B` |
 | `Field` | tilemap + collision grid service; terrain types; block data; draw; pixel→cell; occupancy bit7; terrain queries | `F000`, `tbl_DACB`, `D80B`, `E181`, `E1FA`, `D706/D713` |
 | `Tank` | one tank: pos/dir/type/state(`flags`)/wheels; movement; the state-machine dispatch; per-tank render state | `DEB8`, `DC3D`, `DBF1`, `DB75`, tank-status handlers `DECD…` |
 | `TankRoster` | the 8 slots (0=P1,1=P2,2–7 enemies); the `DEA6` loop; spawn scheduling; invincibility; player/enemy distinction | `DEA6`, `E363`, `DB48`, `E42B`, `E27C` |
@@ -413,9 +470,21 @@ per-subsystem docs, not before scaffolding.
 - `Field` is deliberately a *shared service*, not owned by one entity — that
   matches the source, where the field buffer is the universal collision medium.
   The alternative (hiding cells inside `Tank`/`Bullet`) would fight the source.
-- The **§3 pipeline order** becomes the body of `Game.update()`. Keep it literal.
+- The **§3 pipeline order** becomes the body of `mainBattleScript()`. Keep it literal.
 - The **`tank_flags` state machine** becomes a `Tank` state enum + per-state
   handler (mirrors the `tbl_E4B8` jump table).
+- **`Game` is a mode machine — 5 modes, one nesting level. LOCKED; see flow doc §7.**
+  The source has no screen state variable and no dispatcher (unlike the `tank_flags`
+  machine): each phase is a subroutine owning a `wait_1_frm` loop, and the
+  non-linear transitions pop the return address off the stack (`PLA/PLA`) and `JMP`.
+  **That is 6502 plumbing, not the design** — it is re-expressed as
+  `Mode.enter/update/render/exit` + a central transition table, *not* mirrored. Flow
+  doc §7.1 carries the test that decides such calls (observable ⇒ faithful; CPU-only
+  ⇒ free) and §7.7 records what was rejected, so it isn't re-litigated.
+- **`sub_C2E6` is a shared body, not a tick.** Its only three call sites (`$C200`,
+  `$C23E`, `$C429`) are the `Battle` mode, the `Tail` mode and the demo. So the §3
+  order lives in `mainBattleScript()`, which those modes call — `Game.tick()` is the
+  mode driver. (P1's scaffold conflated the two under `Game.update()`.)
 - The **NMI/PPU buffer** does not survive *as a buffer* — `Renderer` draws
   directly. Input sampling + audio tick + frame-counter bump move into the rAF
   tick, once per frame, preserving their once-per-frame semantics.
@@ -443,6 +512,14 @@ per-subsystem docs, not before scaffolding.
 
 ## 8. Open questions / to-verify
 
+**When an item here is resolved, the answer goes into the section it belongs to
+and the item is DELETED from this list** (Zane's ruling 2026-07-16). Never leave an
+answered question sitting in the open list, and never let the answer live only
+here — an open-item list that still lists answered questions is worse than no
+list, and a finding parked in §8 is a finding nobody reads. Cross-reference the
+resolution with a short `*(Resolved YYYY-MM-DD; was a §8 [?].)*` note at its new
+home, so the history is recoverable without the list carrying it.
+
 - **[?]** Enemy type model: `ram_enemy_type_stage_cnt` ($8B, 4 bytes) = the 4
   enemy tank types (basic/fast/power/armor) per stage? Confirm in `E42B`.
 - **[?]** `tank_type` bit layout — *partly decoded, still incomplete.* Known
@@ -454,9 +531,21 @@ per-subsystem docs, not before scaffolding.
   `E0D8_bullets_status_handler` is a different routine called by the stage loop —
   similar names, don't conflate.)*
 - **[?]** Exactly which power-ups exist and their `bonus_id` values (S7).
-- **[?]** `$D7CE` fills the whole field buffer `$0400–$07FF` with **`$11`**, but
-  `tbl_DACB` says empty = tile `$00`. Those don't reconcile — what is `$11`?
-  (Surfaced while building the level viewer; belongs to Field.)
+- **[?]** **Is `Field` one thing or two?** S2 above treats the `$0400–$07FF` buffer as
+  a single structure — "the tilemap **and** the collision grid". But `$0400` is also
+  what `sub_D17F_draw_title_screen` ($D17F) draws BATTLE CITY into, what `sub_C5D9`
+  ($C5D9) draws GAME OVER into, and what `sub_D16A` clears for the title. So it is
+  really the **background layer**, and the battlefield is merely what occupies it
+  during gameplay; the NES conflates the two because it has exactly one nametable.
+  Under the flow doc's §7.1 test ("free with what only the CPU can observe") that
+  conflation looks like an **artifact**, which would split S2 into `Field` (the 13×13
+  terrain + occupancy, a gameplay object) and the BG layer (`Renderer`'s business) —
+  and would drop the attribute table from `Field` entirely. It would also dissolve
+  the "curtain is the field→PPU upload" oddity (§4 of the flow doc) into a plain
+  renderer wipe. **Deferred by Zane 2026-07-16** ("we can discuss Field later or refer
+  to the legacy `tanks` first" — start from `tanks/level.js` + `castle.js`). Resolve
+  when `Field` starts; until then don't build on either reading.
+
 These get resolved as the work reaches them — each finding landing wherever it
 fits (see "where a finding lands", top of this doc). This map intentionally stays
 at the coupling level, so anything with real bulk belongs elsewhere.

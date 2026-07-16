@@ -5,14 +5,40 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Battle City — tanks_clone</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #000; }
-    body { display: grid; place-items: center; }
-    /* NES is 256x240; scale up with nearest-neighbour */
-    #screen { width: 512px; height: 480px; image-rendering: pixelated; background: #000; }
+    html, body { margin: 0; min-height: 100%; background: #000; }
+    body { display: grid; place-items: center; padding: 12px; }
+
+    /* The page boundary. Also frames the canvas below — without a border the
+       #000 canvas is invisible against the #000 page, so at 1:1 with nothing
+       drawn yet you cannot tell where the 256x240 screen even is. */
+    #wrap {
+      display: grid; justify-items: center; gap: 10px;
+      padding: 12px; border: 1px solid #3a3f49; border-radius: 4px;
+    }
+
+    /* NES is 256x240, shown 1:1 with the canvas backing store — no scaling.
+       The border sits OUTSIDE the 256px content box, which is what `content-box`
+       (the CSS default, and there is no reset here) gives us. Do NOT add
+       `box-sizing: border-box` to this rule: it would fold the border inward, leave
+       a 254x238 content box, and silently resample every pixel at 0.992 scale —
+       the exact blur 1:1 exists to avoid. `pixelated` is a no-op while scale == 1,
+       kept so any future upscale stays nearest-neighbour. */
+    #screen { width: 256px; height: 240px; image-rendering: pixelated;
+              background: #000; border: 1px solid #3a3f49; }
+
+    /* Debug readout — NOT part of the game; see hud.js. The monospace font and
+       `white-space: pre` are load-bearing, not cosmetic: they are what make the
+       padded fields hold a constant width instead of jittering every frame. Being
+       unwrappable, the HUD is also what sets #wrap's width (448px > the canvas's
+       256px) — it is the widest thing on the page. */
+    #hud { font: 11px/1.6 ui-monospace, monospace; color: #8a8f99; white-space: pre; }
   </style>
 </head>
 <body>
-  <canvas id="screen" width="256" height="240"></canvas>
+  <div id="wrap">
+    <canvas id="screen" width="256" height="240"></canvas>
+    <div id="hud">booting…</div>
+  </div>
   <script type="module" src="./main.js"></script>
 </body>
 </html>

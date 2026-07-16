@@ -32,6 +32,23 @@ export const MAX_TANKS = 8;
 export const PLAYER_SLOTS = 2;
 export const ENEMIES_PER_STAGE = 0x14; // 20, seeded in $C331
 
+// --- ram_game_mode ($83) — the index into tbl_CA69_game_mode_handler ($CA69) ---
+// The handlers differ only in ram_enemy_limit: 1P = con_max_tanks - 2 = 5 ($CA6F),
+// 2P = con_max_tanks = 7 ($CA74). Both then JMP loc_C159 — there is no separate
+// 2P loop. See docs/research_game_flow.md §2.
+export const GAME_MODE = Object.freeze({
+  ONE_PLAYER: 0, TWO_PLAYERS: 1, CONSTRUCTION: 2,
+});
+
+// --- ram_2nd_loop_flag ($46) — THREE states, not a boolean ---
+// The name undersells it: bank_val.inc's `con_flag_demo = $02 ; stored in
+// ram_2nd_loop_flag` means one variable carries both "which loop" and "is this the
+// attract demo". $C391 tests `CMP #$01` specifically, so DEMO ($02) does NOT take
+// the 2nd-loop path. Flow doc §4 [9], §5.
+export const SECOND_LOOP = Object.freeze({
+  FIRST: 0, SECOND: 1, DEMO: 2,   // con_flag_demo = $02
+});
+
 // --- Terrain: TWO namespaces, do not mix them ---
 //
 // This is the trap the old TODO here was sitting on. A stage file and the live
