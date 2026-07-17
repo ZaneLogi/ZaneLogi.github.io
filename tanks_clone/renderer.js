@@ -1,11 +1,4 @@
-// renderer.js — S9 Renderer (the re-derived PPU)
-//
-// The ROM's render path is the NMI half: OAM DMA + a PPU write-buffer flush +
-// palettes + scroll (map §1). That hardware plumbing does NOT survive literally.
-// Renderer keeps the RESPONSIBILITIES — draw the tilemap, draw sprites, apply
-// palettes — but paints straight to a canvas. This is the sanctioned "re-derive the
-// hardware abstraction in our own view" deviation; the mechanism (logic builds
-// state, render ships it) is preserved.
+// renderer.js — Renderer
 //
 // Absorbs (as responsibilities, not byte-for-byte):
 //   vec_D400_NMI render half, sub_D8FD_write_buffer_to_ppu ($D8FD),
@@ -78,10 +71,10 @@ export class Renderer {
 
     for (let row = 0; row < TILEMAP_ROWS; row++) {
       for (let col = 0; col < TILEMAP_COLS; col++) {
-        const attr = tm.attribute(col, row);
+        const attr = tm.paletteAt(col, row);
         const palette = BG_PALETTE_SETS[set][attr];
         const tile = this.tiles.get(
-          CHR_BG_BASE + tm.getTile(col, row), palette, bgPaletteId(set, attr));
+          CHR_BG_BASE + tm.tileAt(col, row), palette, bgPaletteId(set, attr));
         c.ctx.drawImage(tile, col * TILE_W, row * TILE_H);
       }
     }

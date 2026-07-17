@@ -1,49 +1,45 @@
-// tilemap.js — the $0400-$07FF background buffer, as bytes.
+// tilemap.js — the screen's background data
 //
-// This is the RAM the ROM stages a whole nametable in: 32x30 tile ids at
-// $0400-$07BF, then the 64-byte attribute table at $07C0-$07FF.
-// sub_D7B4_copy_400h_to_nametable ($D7B4) ships all $400 of it to the PPU at
-// $2000 or $2800, chosen by ram_offset_for_2006_hi.
+//   tiles       — one tile id per 8x8 cell (32x30). The SHAPE to draw. A NES tile is
+//                 four pixel *indices* (0-3), not colours, so the same brick is
+//                 orange on the title and grey in a stage.
+//   palettes    — one palette (0-3) per cell, 1:1 with `tiles`. The COLOUR: which of
+//                 the 4 background palettes this cell uses. paletteAt() reads it.
 //
-// Absorbs the buffer PRIMITIVES, and nothing above them:
+// This is pure render data. `Field` (the battlefield) HAS-A `Tilemap` and adds terrain
+// semantics + occupancy on top; the title / GAME OVER screens use a bare `Tilemap` with
+// no `Field`.
+//
+// Byte PRIMITIVES only, each citing its source routine:
 //   sub_D47E_clear_0400_07FF ($D47E)                 -> clear()
 //   sub_D5FB_calculate_pointer ($D5FB)               -> index()
 //   sub_D6B3_fill_buffer_with_tiles ($D6B3)          -> writeTiles()
 //   sub_D71E/sub_D725 + sub_D74D/sub_D764            -> setQuadrant()
-//
-// SCOPE — this is deliberately NOT Field, and does not settle Field's open
-// question ("is $0400 one thing or two?", map §8, deferred 2026-07-16). It is the
-// part BOTH readings need: whatever Field turns out to be, the bytes need a
-// representation, and the title screen needs one before Field exists. If the answer
-// is "one thing", Field grows these methods; if "two things", Field holds one of
-// these. Nothing here forecloses either.
 
 export const TILEMAP_COLS = 32;
 export const TILEMAP_ROWS = 30;
-export const ATTR_BASE = 0x3C0;   // $07C0 - $0400
 
 export class Tilemap {
   constructor() {
-    this.bytes = new Uint8Array(0x400);   // $0400-$07FF
+    this.tiles    = new Uint8Array(TILEMAP_COLS * TILEMAP_ROWS);  // shape:  tile id per cell
+    this.palettes = new Uint8Array(TILEMAP_COLS * TILEMAP_ROWS);  // colour: palette 0-3 per cell
     // Bumped on every write. The renderer composes a tilemap into a persistent
-    // canvas and only repaints when this moves — the NES does the same thing for
-    // the same reason (it never redraws the background; its write buffer is a
-    // dirty-block queue). Map §7 design notes.
+    // canvas and only repaints when this moves
     this.version = 0;
   }
 
-  // sub_D47E_clear_0400_07FF ($D47E) — tiles AND attributes to $00.
+  // sub_D47E_clear_0400_07FF ($D47E) — tiles AND palettes to $00.
   // Note $D7CC_create_default_stage_field is a DIFFERENT routine that fills $11.
-  clear() { this.bytes.fill(0); this.version++; }
+  clear() { this.tiles.fill(0); this.palettes.fill(0); this.version++; }
 
   // sub_D5FB_calculate_pointer ($D5FB): "formula = Y * 20 + X + 0400" — $20 = 32
   // columns. The ROM builds it with a shift/ROR chain because it has no multiply.
   static index(col, row) { return row * TILEMAP_COLS + col; }
 
-  getTile(col, row) { return this.bytes[row * TILEMAP_COLS + col]; }
+  tileAt(col, row) { return this.tiles[row * TILEMAP_COLS + col]; }
 
   setTile(col, row, id) {
-    this.bytes[row * TILEMAP_COLS + col] = id;
+    this.tiles[row * TILEMAP_COLS + col] = id;
     this.version++;
   }
 
@@ -53,7 +49,7 @@ export class Tilemap {
   // version bump above.
   writeTiles(col, row, ids) {
     let i = Tilemap.index(col, row);
-    for (const id of ids) this.bytes[i++] = id;
+    for (const id of ids) this.tiles[i++] = id;
     this.version++;
   }
 
@@ -70,26 +66,31 @@ export class Tilemap {
   // The `& $F0` guard ($D74F / $D766) is why this is safe to scribble over a
   // populated buffer: a tile whose high nibble is set is NOT a brick tile (steel
   // $10, water $12, ice $21, forest $22...) and is left alone.
+  //
+  // Here is the mental model:
+  // one tile = 8x8 px = 2x2 quadrants, one brick block = 2x2 tiles = 4x4 quadrants.
+  // The NES PPU's atomic unit is the 8x8 tile — it cannot draw a quarter-tile.
+  // So a chippable-brick game has to enumerate the 16 combinations as 16 tiles up front;
+  // there's no other way to get 4x4 granularity out of hardware that only paints 8x8.
+  // Then "chip a brick" costs exactly one byte: change the nametable cell from $0F to $0E,
+  // and next frame the PPU redraws that one 8x8 tile showing the new shape
+  // — no pixel editing.
   setQuadrant(px, py, on) {
     const i = ((py >> 3) * TILEMAP_COLS) + (px >> 3);   // $D713 divide by 8, $D5FB
-    const cur = this.bytes[i];
+    const cur = this.tiles[i];
     if (cur & 0xF0) return;                            // $D74F / $D766 AND #$F0
     let bit = 1;                                       // $D725
     if (py & 0x04) bit <<= 2;                          //   -> $04
     if (px & 0x04) bit <<= 1;                          //   -> $02 / $08
-    this.bytes[i] = on
+    this.tiles[i] = on
       ? cur | bit                                      // $D76C ORA
       : cur & ~bit & 0xFF;                             // $D757 EOR #$FF + AND
     this.version++;
   }
 
-  // The attribute table at $07C0: one byte per 32x32px area (4x4 tiles), holding
-  // four 2-bit palette selectors, one per 16x16 quadrant of it. Standard PPU
-  // layout — the ROM never spells it out because the hardware does the decode;
-  // here we have to. sub_D80B ($D817) is what fills it during a stage.
-  attribute(col, row) {
-    const byte = this.bytes[ATTR_BASE + (row >> 2) * 8 + (col >> 2)];
-    const shift = ((row & 0x02) << 1) | (col & 0x02);   // 0=TL 2=TR 4=BL 6=BR
-    return (byte >> shift) & 0x03;
-  }
+  // The palette (0-3) this cell draws with — a plain 1:1 lookup. The ROM stored this
+  // as the packed attribute table at $07C0 and the hardware decoded it per 16x16
+  // quadrant; here it is one value per cell, so there is nothing to unpack.
+  // sub_D80B ($D817) is what fills it during a stage (via tbl_DABB, block -> palette).
+  paletteAt(col, row) { return this.palettes[row * TILEMAP_COLS + col]; }
 }

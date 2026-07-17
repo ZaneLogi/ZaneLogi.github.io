@@ -286,13 +286,14 @@ but because it described work that had not started yet.)*
   **fakes controller input** rather than driving tanks (flow doc §8). It then runs
   `mainBattleScript`, so it is really gated on `Field` + tank movement, not on
   ATTRACT.
-- **`Field`** — still opens with a design question, not code: is it one thing or two?
-  Map §8 — `$0400` is the collision grid *and* what the title/GAME OVER screens draw
-  into. Deferred by Zane 2026-07-16; start from legacy `tanks/level.js` +
-  `castle.js`. **P4 added evidence, not an answer:** the title exercises the tilemap
-  half (same buffer, same tile vocabulary) with *zero* collision semantics, and
-  `Tilemap` now isolates the byte primitives both readings need. Settle it before
-  building `Field` itself.
+- **`Field`** — the design question is **settled (2026-07-18):** `Field` HAS-A
+  `Tilemap`, the tile ids ARE the terrain state, occupancy moves to its own grid, and
+  the attribute table is now a 1:1 `palettes` array on `Tilemap` (render-only,
+  not `Field`'s data). Map §5 S2 carries the reasoning; §8's `[?]` is retired, and
+  `tilemap.js` was reworked to the two-array shape (`tiles`/`attributes`, `tileAt`/
+  `paletteAt`). What's left is the **build**: `loadStage` (`$F000`), pixel→cell
+  (`$D706`), terrain queries, and the occupancy mark/clear timing (`$E181`/`$E1FA`,
+  a build-time call). Start from legacy `tanks/level.js` + `castle.js`.
 - Docs are written when the content needs a home, sized to it — no one-doc-per-
   subsystem rule (map, "where a finding lands"). `Field` looks like it earns its
   own file (block/tile decode, occupancy, pixel→cell); a smaller subsystem may only

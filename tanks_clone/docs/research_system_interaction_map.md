@@ -219,6 +219,25 @@ Routines: reset, `tbl_CA69` mode dispatch, the stage loops, `C331` stage prep,
 `CC27_copy_nametable_attributes_to_ppu_buffer`. Terrain collision for tanks and
 bullets is *reads of this buffer*.
 
+**Resolved 2026-07-18 — `Field` HAS-A `Tilemap`; the tile ids ARE the terrain state
+[D].** The "one thing or two?" question (old §8 `[?]`) is settled. The `$0400` buffer
+is a general **background surface** — the title (`$D17F`) and GAME OVER (`$C5D9`) draw
+into a bare `Tilemap`, so the buffer is *not itself* `Field`. But terrain also cannot
+be lifted into a separate 13×13 block grid: a bullet chips a brick to a **4×4 quadrant
+mask** (`sub_D743` writes `(~quadbit) & tile` back), which only the tile id can hold —
+a block code (`$0-$D`) has no representation for "brick missing its top-left corner".
+So the **tile bytes ARE the terrain**, and `Field` *wraps* a `Tilemap` (the P4 render
+class) and adds the semantics — `loadStage`, pixel→cell, terrain queries. Two hardware
+artifacts are re-derived out under the governing test (faithful to observable terrain
+shape + cell colour; free with CPU-only packing):
+- **bit7 occupancy**, packed into the tile byte only to save RAM (`sub_E1F3` sets,
+  `sub_E234` clears), → a **separate occupancy grid**. The two-pass *timing*
+  (`$E181` marks all footprints → `$DBF1` moves → `$E1FA` clears, §3) may be an
+  observable rule, not just packing — left as a build-time call, not settled here.
+- the **packed 64-byte attribute table** → a **1:1 palette-per-cell array** on
+  `Tilemap`, render-only and *not* `Field`'s data. In Battle City one block = one
+  attribute quadrant = one palette, so per-cell resolution loses nothing.
+
 **Two namespaces — do not mix them [D].** This is the trap:
 
 | | what it is | where it lives |
@@ -531,20 +550,6 @@ home, so the history is recoverable without the list carrying it.
   `E0D8_bullets_status_handler` is a different routine called by the stage loop —
   similar names, don't conflate.)*
 - **[?]** Exactly which power-ups exist and their `bonus_id` values (S7).
-- **[?]** **Is `Field` one thing or two?** S2 above treats the `$0400–$07FF` buffer as
-  a single structure — "the tilemap **and** the collision grid". But `$0400` is also
-  what `sub_D17F_draw_title_screen` ($D17F) draws BATTLE CITY into, what `sub_C5D9`
-  ($C5D9) draws GAME OVER into, and what `sub_D16A` clears for the title. So it is
-  really the **background layer**, and the battlefield is merely what occupies it
-  during gameplay; the NES conflates the two because it has exactly one nametable.
-  Under the flow doc's §7.1 test ("free with what only the CPU can observe") that
-  conflation looks like an **artifact**, which would split S2 into `Field` (the 13×13
-  terrain + occupancy, a gameplay object) and the BG layer (`Renderer`'s business) —
-  and would drop the attribute table from `Field` entirely. It would also dissolve
-  the "curtain is the field→PPU upload" oddity (§4 of the flow doc) into a plain
-  renderer wipe. **Deferred by Zane 2026-07-16** ("we can discuss Field later or refer
-  to the legacy `tanks` first" — start from `tanks/level.js` + `castle.js`). Resolve
-  when `Field` starts; until then don't build on either reading.
 
 These get resolved as the work reaches them — each finding landing wherever it
 fits (see "where a finding lands", top of this doc). This map intentionally stays

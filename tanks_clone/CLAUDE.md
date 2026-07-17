@@ -57,16 +57,19 @@ don't let the answer live only in that list.
   `render()` must stay split (the fixed-timestep accumulator runs 0/1/2+ ticks per
   repaint), and transitions are decided centrally in `flow.js` (modes returning
   modes creates a real ES-module import cycle).
-- **The field is the collision grid.** `Field` ($0400-$07FF mirror) is a shared
-  service: tile ids = terrain, bit7 = tank occupancy. Movement/bullets/base query it.
-  It mirrors a *whole* nametable — `$07C0-$07FF` is the 64-byte attribute table.
-  - **`[?]` The "whole nametable" half is UNDER REVIEW — don't build on it yet.**
-    The governing test above may split this bullet in two: `$0400` is *also* where
-    the title screen ($D17F) and GAME OVER ($C5D9) are drawn, so it is really the
-    **background layer**, and the battlefield is merely what occupies it during
-    gameplay. The NES conflates them because it has exactly one nametable — which
-    smells like an artifact, not design. Deferred by Zane 2026-07-16 ("discuss Field
-    later"); tracked as map §8. Resolve it when `Field` starts.
+- **The field is the collision grid.** `Field` is a shared service: tile ids =
+  terrain, occupancy = a separate grid. Movement/bullets/base query it.
+  - **Settled 2026-07-18 — `Field` HAS-A `Tilemap`; the tile ids ARE the terrain
+    state.** The `$0400` buffer is a general background surface (the title `$D17F`
+    and GAME OVER `$C5D9` draw into a bare `Tilemap` too), so it is NOT itself
+    `Field` — `Field` wraps a `Tilemap` and adds terrain semantics. Terrain can't be
+    a 13×13 block grid: a bullet chips a brick to a 4×4 quadrant mask (`sub_D743`),
+    which only the tile id can hold (map §5 S2). Two hardware artifacts are dropped —
+    **bit7 occupancy** packed in the tile byte → its own grid (the two-pass
+    mark/clear timing, `$E181`/`$E1FA`, is a build-time call, not settled here); and
+    the **packed 64-byte attribute table** → a 1:1 palette-per-cell array on
+    `Tilemap`, which is render-only and NOT `Field`'s data (one block = one palette,
+    so nothing is lost). Governing test applied; was map §8's "one thing or two?".
 - **BLOCK codes and TILE ids are different namespaces — never mix them.** Stage
   files store BLOCK codes (`$0-$D`, one nibble per 16×16); the field stores TILE
   ids (2×2 per block) and that is what gameplay reads back (`$E181` tests tile
@@ -117,10 +120,10 @@ modes/attract.js    ATTRACT + Scroll/Menu/Demo    ($C095/$C09C/$C0A2)
 modes/session.js    SESSION + StageIntro/Battle/Tail/Tally  ($C159/$C1F9/$C238/$CCD4)
 modes/game_over.js  $C5D9    modes/hall_of_fame.js  $C44B
 modes/editor.js     $C0AE (deferred stub)
-tilemap.js          Tilemap: the $0400-$07FF background buffer as BYTES — clear
-                    ($D47E), writeTiles ($D6B3), setQuadrant ($D71E/$D725 +
-                    $D74D/$D764), attribute decode. NOT Field, and deliberately does
-                    not settle Field's open question — see the field bullet above
+tilemap.js          Tilemap: the screen background as two 1:1 arrays — tiles (shape)
+                    + palettes (0-3 per cell). clear ($D47E), writeTiles
+                    ($D6B3), setQuadrant ($D71E/$D725 + $D74D/$D764), tileAt,
+                    paletteAt. Field HAS-A Tilemap (settled 2026-07-18) — field bullet
 text.js             drawHugeText ($D8D2/$D85E — the glyph IS the huge letter),
                     writeText ($D6B3), drawNumber ($D934 + $D6DD)
 hud.js              NOT SOURCE — debug readout into an HTML element. Still the only
