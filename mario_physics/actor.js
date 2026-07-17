@@ -20,6 +20,12 @@ export class Actor {
     this.vx = 0;
     this.vy = 0;
 
+    // Where this body touches the world, in its own space. Separate from w/h: the
+    // box is the drawn extent, the probes are the collision geometry, and SMB keeps
+    // them apart (there is no hitbox in the source — see collision.js). A type that
+    // names none gets box-derived probes, which reproduce the box model exactly.
+    this.probes = def.probes;
+
     // Physics constants come from the type definition, copied wholesale: which
     // constants exist is the *type's* business, not the Actor's. A walker carries
     // a `speed`; Mario carries a friction model and a jump curve. Naming them here
@@ -49,6 +55,15 @@ export class Actor {
 
     this.isSkidding = false;
     this.isRunning = false; // run key held while moving — drives the run animation
+
+    // Did this actor leave the ground under its own power, or walk off an edge?
+    // SMB's Player_State: a launch sets $01 and it survives the WHOLE arc — rising
+    // and descending alike — while PlayerBGCollision only sets $02 (falling) from
+    // state $00. So the source splits jumped-vs-fell, NOT rising-vs-descending, and
+    // the two get different looks. The physics already honours this distinction:
+    // `spawnFallGravity` is the entrance-seeded VerticalForceDown a never-jumped
+    // fall uses, which is why a walked-off fall is gentler than any jump.
+    this.airborneByJump = false;
 
     this.facing = 1; // 1 = right, -1 = left
     // SMB keeps *facing* and *moving direction* apart, and their disagreeing is

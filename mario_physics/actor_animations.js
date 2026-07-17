@@ -13,12 +13,20 @@
 
 /**
  * Mario: skid beats airborne beats moving beats still.
+ *
+ * Airborne splits on JUMPED-vs-FELL, not rising-vs-descending — ProcessPlayerAction
+ * dispatches on Player_State, and a launch's $01 survives the whole arc while only a
+ * walk-off gets $02. So a jump keeps the jump frame all the way down, and only a
+ * walked-off fall gets the fall look. (Reading `vy` here instead would show a jump's
+ * descent as a fall — which happens to look identical, since both drew the jump
+ * frame, and hid the ledge case where they differ.)
+ *
  * @param {Actor} a
  * @returns {string} a key into the type's sprite-set
  */
 export function marioAnimation(a) {
   if (a.isSkidding) return "skid";
-  if (!a.contacts.ground) return a.vy < 0 ? "jump" : "fall";
+  if (!a.contacts.ground) return a.airborneByJump ? "jump" : "fall";
   if (Math.abs(a.vx) > 0.1) {
     // Run frames only when sprinting fast enough; walking tops out below
     // runAnimSpeed, so it never trips them.

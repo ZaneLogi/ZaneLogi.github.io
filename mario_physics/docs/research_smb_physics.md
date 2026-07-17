@@ -317,8 +317,20 @@ gets by without it. Green Koopa and Buzzy Beetle, by contrast, are pure
 
 ## Where the port stands
 
-**Mario's ground-and-air movement is this source's**, horizontal and vertical, at
-×2. This section is the port's scope and its deliberate deviations.
+**Mario's ground-and-air movement is this source's**, horizontal and vertical, **at
+1:1** — every constant in `ACTOR_TYPES` equals the ROM byte its comment cites, with
+no conversion step. `maxFall` is 4 because `$04` is 4; the launch is −4 because
+`PlayerYSpdData` is `$fc`.
+
+The **world** is not 1:1: a tile is 32 px against SMB's 16 px brick. That is a
+deliberate design choice, not an unfinished conversion — Mario moves at exactly SMB's
+speed through blocks twice SMB's size, so he is half a tile wide and a full-hold jump
+clears ~2 blocks rather than ~4.1. Three scales live in the port and only one is the
+world's: **physics** (these constants), **the actor** (16×32, fixed by the CHR, not a
+choice), and **the world** (`levelMap.tileSize`). See `research_smb_collision.md`
+§"Three scales".
+
+This section is the port's scope and its deliberate deviations.
 
 ### Scope — what "SMB's movement" does and does not cover
 
@@ -330,11 +342,12 @@ or graphics. **None is in `X_Physics`, `ImposeFriction`, `InitJS`, `GetYPhy`, or
 `ImposeGravity`.** Big and small Mario accelerate, clamp, jump and fall
 identically.
 
-So the port's single Mario (24×32 — small Mario at ×2) already carries the
-physics a big Mario would need. Size lives entirely in the **collision** layer:
-`ChkCollSize` chooses one of three probe sets from (size, crouching, swimming),
-and the head probe drops from +4 to +18 for small. Adding big Mario is a collision
-and presentation job, not a movement one.
+So the port's single Mario already carries the physics a big Mario would need. Size
+lives entirely in the **collision** layer: `ChkCollSize` chooses one of three probe
+sets from (size, crouching, swimming), and the head probe drops from +4 to +18 for
+small. Adding big Mario is a collision and presentation job, not a movement one — the
+`ACTOR_TYPES` entry's `probes` gains a second set and `size` becomes 16×32 vs 16×32
+(the block is the same; the ink and the probes differ). Nothing in this section moves.
 
 **Decoded but NOT ported** (all reachable from the same tables and routines):
 
@@ -369,31 +382,38 @@ in the code where it bites:
 - **The discrete integration is reproducible exactly.** `ImposeGravity` runs
   `y += vy` *before* `vy += g`. Skipping gravity while grounded gives the launch
   tick the full launch velocity and lines the port up with the ROM frame for frame
-  — a full-hold standing jump peaks at 66 NES px (132 at ×2), not the 64 that
-  `v²/2g` predicts.
+  — a full-hold standing jump peaks at 66 NES px, not the 64 that `v²/2g` predicts.
 - **`DiffToHaltJump` protects the launch tick, not an early release.** On a fresh
   press the previous-frame button bit is necessarily clear, so without the grace
   every jump would dump to fall gravity on the tick it started.
 
-At the port's 2× scale (32 px tile vs SMB's 16), Mario's movement matches the
-source:
+**In px, Mario's movement IS the source's** — the port carries the ROM's own numbers:
 
-| | SMB ×2 | port |
-|---|---|---|
-| terminal fall | 8.0 | 8.0 |
-| max run speed | 5.0 | 5.0 |
-| max walk speed | 3.0 | 3.0 |
-| tap jump | ~1.4 tiles | 1.45 |
-| held jump | 4.125 tiles | 4.125 |
-
-The Goomba, same scaling:
-
-| | SMB ×2 | port | |
+| | SMB | port | |
 |---|---|---|---|
-| walk speed | 1.0 | 0.84 | ~16% slow |
-| gravity | 0.477 | 0.48 | near-exact |
-| terminal fall | 6.0 | 8.0 | ~33% too fast |
-| walk anim | 7.5 fps | 6 | ~20% slow |
+| terminal fall | 4.0 px/f | 4.0 | `$04`, verbatim |
+| max run speed | 2.5 px/f | 2.5 | `$28`/16 |
+| max walk speed | 1.5 px/f | 1.5 | `$18`/16 |
+| tap jump peak | 23.1 px | 23.1 | measured, `test/fingerprint.html` |
+| full-hold jump peak | 66 px | 66 | |
+
+**In tiles it is deliberately half**, because the world is 32 px/tile against SMB's
+16 — the same motion through larger blocks:
+
+| | SMB | port |
+|---|---|---|
+| Mario's width | 1.0 tile | 0.5 |
+| tap jump | 1.45 tiles | 0.72 |
+| full-hold jump | 4.125 tiles | 2.06 |
+
+The Goomba, whose numbers are the port's own rather than derived:
+
+| | SMB | port | |
+|---|---|---|---|
+| walk speed | 0.5 px/f | 0.42 | ~16% slow |
+| gravity | 0.2385 | 0.24 | near-exact |
+| terminal fall | 3.0 | 4.0 | ~33% too fast |
+| walk anim | 7.5 fps | 6 | ~20% slow (fps does not scale) |
 
 Two structural notes on the Goomba beyond the numbers:
 

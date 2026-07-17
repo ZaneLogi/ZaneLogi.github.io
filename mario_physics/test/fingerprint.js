@@ -70,8 +70,16 @@ function tick(world, actor, input) {
 }
 
 // Let the actor fall to the floor and come to rest before the scenario starts.
-function settle(world, actor, n = 150) {
-  for (let i = 0; i < n; i++) tick(world, actor, {});
+//
+// Ticks until grounded rather than a fixed count: a fixed count is tied to the
+// physics scale (halve gravity and the same 150 ticks leave the actor still in
+// mid-air, so every scenario silently starts from the wrong state). `cap` only
+// exists to fail loudly instead of hanging.
+function settle(world, actor, cap = 5000) {
+  let i = 0;
+  while (!actor.contacts.ground && i++ < cap) tick(world, actor, {});
+  if (i >= cap) throw new Error('settle: never reached the ground');
+  for (let n = 0; n < 5; n++) tick(world, actor, {}); // let it come to rest
 }
 
 const r3 = (v) => +v.toFixed(3);
@@ -139,7 +147,7 @@ function jumpReleaseSweep() {
     settle(world, actor);
     const y0 = actor.y;
     let peak = 0, land = -1, airborne = false;
-    for (let f = 0; f < 200; f++) {
+    for (let f = 0; f < 600; f++) {
       tick(world, actor, { jump: f < release });
       const h = y0 - actor.y;
       peak = Math.max(peak, h);
@@ -158,7 +166,7 @@ function terminalFall() {
   const { world, actor } = spawn(makeLevel(32, 12), 160, 0);
   const y0 = actor.y, vy = [], dist = [];
   let land = -1;
-  for (let f = 0; f < 220; f++) {
+  for (let f = 0; f < 700; f++) {
     tick(world, actor, {});
     vy.push(actor.vy);
     dist.push(actor.y - y0);
@@ -167,7 +175,7 @@ function terminalFall() {
   return {
     trace: [...vy, ...dist],
     scalars: {
-      terminalTick: vy.findIndex((v) => v >= 8),
+      terminalTick: vy.findIndex((v) => v >= actor.maxFall),
       terminalVy: r3(Math.max(...vy)),
       landTick: land,
       fallDist: r3(dist[dist.length - 1]),
@@ -181,7 +189,7 @@ function airControl() {
   const { world, actor } = spawn(makeLevel(70, 60), 64, 0);
   const vx = [], vy = [];
   let land = -1;
-  for (let f = 0; f < 400; f++) {
+  for (let f = 0; f < 900; f++) {
     tick(world, actor, { right: true });
     vx.push(actor.vx);
     vy.push(actor.vy);
@@ -225,37 +233,51 @@ function sprint() {
 // 7. REACT phase. Head-bump a ? block: the resolver reports `bumped`, the world
 //    dispatches TILES[3].onBump, which starts the hop and spends the block (3 -> 5).
 function qBlockBump() {
-  const level = makeLevel(16, 20, (lv) => { lv[10][2] = 3; });
-  // Spawn BELOW the block (row 10 spans y 320..352), or the actor falls onto its
+  // Block on row 12: the actor rests with his head at y=448, the block's underside is
+  // at y=416, so the rise needed is 32 px against a ~66 px full-hold jump. The gap
+  // must stay inside the jump's reach or this scenario silently measures nothing
+  // (bumpTick = -1) — it is the react phase's only cover.
+  const level = makeLevel(16, 20, (lv) => { lv[12][2] = 3; });
+  // Spawn BELOW the block (row 12 spans y 384..416), or the actor falls onto its
   // roof during settle and jumps from there, never bumping it from underneath.
-  const { world, actor, map } = spawn(level, 64, 400);
+  const { world, actor, map } = spawn(level, 64, 430);
   settle(world, actor);
-  const tileBefore = map.tileData[10][2];
+  const tileBefore = map.tileData[12][2];
   const trace = [];
   let bumpTick = -1, hopSeen = false;
   for (let f = 0; f < 90; f++) {
     tick(world, actor, { jump: true });
-    trace.push(r3(actor.y), map.tileData[10][2]);
+    trace.push(r3(actor.y), map.tileData[12][2]);
     if (bumpTick < 0 && actor.contacts.ceiling) bumpTick = f;
-    if (world.bumps.has('2,10')) hopSeen = true;
+    if (world.bumps.has('2,12')) hopSeen = true;
   }
   return {
     trace,
-    scalars: { tileBefore, tileAfter: map.tileData[10][2], bumpTick, hopSeen },
+    scalars: { tileBefore, tileAfter: map.tileData[12][2], bumpTick, hopSeen },
   };
 }
 
 // 8. PRESENT phase. The animation state derived each tick across a scripted run.
+//
+// `fall` needs a LEDGE, not a jump. SMB splits jumped-vs-fell (Player_State $01 vs
+// $02), so a jump shows the jump frame for its whole arc and never falls — reaching
+// `fall` by jumping and waiting only worked while the port split on rising-vs-
+// descending, which was the bug. The floor stops at col 30 so walking off it is a
+// real fall; out-of-bounds is solid (tiles.js), so he lands on the level's own edge
+// a row down rather than dropping forever.
 function animStates() {
-  const { world, actor } = spawn(makeLevel(16, 400), 160, 0);
+  const level = makeLevel(16, 400, (lv) => {
+    for (let c = 30; c < 400; c++) lv[15][c] = 0;
+  });
+  const { world, actor } = spawn(level, 160, 0);
   settle(world, actor);
   const script = [
     [{}, 20],                          // idle
     [{ right: true }, 60],             // walk
     [{ right: true, run: true }, 120], // run
     [{ left: true }, 8],               // skid
-    [{ jump: true, right: true }, 20], // jump
-    [{ right: true }, 60],             // fall, then land
+    [{ jump: true, right: true }, 20], // jump — stays `jump` all the way down
+    [{ right: true, run: true }, 240], // run off the ledge at col 30 -> fall, then land
   ];
   const trace = [];
   for (const [input, n] of script) {

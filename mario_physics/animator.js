@@ -13,16 +13,22 @@ import { Sprite } from "../mario/sprite.js";
 // which state to show each step, and the animator advances frames over time.
 // Frame-cycling lives here and nowhere else, so a new thing's animation is a
 // sprite-set passed in, not new animator code.
+//
+// A frame is either a NAME (a BMP, resolved through the resource loader) or a
+// DRAWABLE the caller already built — anything with `draw(ctx, x, y, mirror)`.
+// Mario's frames are composed from the ROM's CHR synchronously and arrive as
+// drawables; the Goomba and the animated tiles are still BMPs by name.
 export class Animator {
   constructor(spriteSet) {
     this.set = spriteSet;
 
-    // One drawable Sprite per unique frame name, built once up front (this also
-    // registers each image with the resource loader, as the old animator did).
+    // One Sprite per unique frame NAME, built once up front (this also registers
+    // each image with the resource loader, as the old animator did). Drawables are
+    // already built and need no entry.
     this.frames = {};
     for (const state in spriteSet) {
-      for (const name of spriteSet[state].frames) {
-        if (!this.frames[name]) this.frames[name] = new Sprite([name], [0], true);
+      for (const f of spriteSet[state].frames) {
+        if (typeof f === 'string' && !this.frames[f]) this.frames[f] = new Sprite([f], [0], true);
       }
     }
 
@@ -35,10 +41,21 @@ export class Animator {
 
   // Show `state` this step. On a state change, restart at its first frame;
   // otherwise advance the cycle by `dt` at the state's fps (default 10).
+  //
+  // A state marked `freeze: true` does NEITHER — it keeps the frame index the
+  // previous state left behind, and holds it. That is a third behaviour, not a
+  // variant of the other two, and SMB has all three: AnimationControl advances the
+  // counter, NonAnimatedActs zeroes it, and GetCurrentAnimOffset only reads it.
+  // Mario's fall is the third — the walk cycle stopped mid-stride.
   update(state, dt) {
     const def = this.set[state] ?? this.set.idle;
 
-    if (state !== this.state) {
+    if (def.freeze) {
+      this.state = state;
+      // Guard the borrowed index: a frozen state need not be as long as the one it
+      // inherited from.
+      this.frameIndex = Math.min(this.frameIndex, def.frames.length - 1);
+    } else if (state !== this.state) {
       this.state = state;
       this.frameIndex = 0;
       this.timer = 0;
@@ -55,6 +72,8 @@ export class Animator {
   }
 
   draw(ctx, x, y, flip = false) {
-    this.frames[this.current].image.draw(ctx, x, y, flip);
+    const f = this.current;
+    const d = typeof f === 'string' ? this.frames[f].image : f;
+    d.draw(ctx, x, y, flip);
   }
 }

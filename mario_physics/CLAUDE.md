@@ -71,7 +71,19 @@ Rules a change must not break:
   post-collision velocity + contacts; the `Animator` only plays frames — it never
   touches physics.
 - **Axis-separated resolution.** The resolver integrates and resolves X, then Y,
-  so tile collisions stay stable at corners.
+  so tile collisions stay stable at corners. This is also what lets SMB's `$05`
+  penetration-depth gate be skipped: the source is single-pass, so a foot probe
+  finding solid is ambiguous there and depth disambiguates it — resolving per axis
+  answers the same question structurally (a hit in the X pass IS a wall, a hit in
+  the Y pass IS a floor). The gate is that constraint's solution, not a behaviour.
+- **Collision point-samples; it does not test a box.** A type names its `probes` in
+  the actor's own space and `LevelMap.isSolidAt` is a point query — SMB's model, in
+  which no hitbox exists anywhere. **Two foot probes is the load-bearing part**: an
+  actor is supported if *either* foot finds solid, which is ledge forgiveness and
+  which a bounding box cannot express. `size` is the drawn extent; `probes` is the
+  collision geometry; they are different things and must not be conflated again. A
+  type naming no probes gets box-derived ones, which reproduce the box model exactly.
+  Offsets are **actor space** — they do not scale with the tile.
 
 ## Movement model
 
@@ -81,8 +93,28 @@ physics entry; this section is the design they encode.
 **This is Super Mario Bros.' physics**, decoded from the 6502 source — see
 `docs/research_smb_physics.md`, which carries the constants, their ROM labels, the
 unit derivations, and the scope: what is ported and what is deliberately not.
-Everything is scaled ×2: our tile is 32 px against SMB's 16 px brick, and every
-physics quantity is linear in distance, so ×2 is exact.
+**The physics is 1:1 with the ROM — every constant IS the byte its comment cites.**
+`maxFall` is 4 because `$04` is 4; the launch is −4 because `PlayerYSpdData` is `$fc`.
+There is no conversion step to get wrong.
+
+**The world is not.** A tile is 32 px against SMB's 16 px brick, and that is a
+**deliberate design choice, not a half-finished conversion**: Mario moves at exactly
+SMB's speed through blocks twice SMB's size. He is half a tile wide rather than one,
+and a full-hold jump clears ~2 blocks rather than ~4.1. His own motion is SMB's — the
+world around it is larger.
+
+Three scales live here and only two of them are the world's. Keeping them apart is
+what lets the tile size change without touching anything else:
+
+| quantity | scales with | where it comes from |
+|---|---|---|
+| speeds, accels, gravity | **physics** | this section's constants — the ROM's bytes |
+| sprite + collision-probe offsets | **the actor** | fixed at 16×32 by the CHR; not a choice |
+| tile snapping, the block grid | **the world** | `levelMap.tileSize` |
+
+A uniform scale hides the difference; changing one alone is what exposes it. See
+`docs/research_smb_collision.md` §"Three scales" — it is the same split, and the
+reason the collision port survives a `LevelMap` block-size change.
 
 Scope, in one line: **ground and air movement, horizontal and vertical**. Swimming,
 climbing, crouching, and the water/pipe speed clamps are decoded but not ported.
@@ -213,24 +245,32 @@ check that the data is right.
 | `actor_controllers.js` | `control` fns: perception → intent (`keyboard`, `reactiveWalker`) |
 | `actor_movements.js` | `move` fns: intent + contacts → velocity (`marioMovement`, `constantWalk`) |
 | `actor_animations.js` | `animate` fns: velocity + contacts → a state name (`marioAnimation`, `alwaysWalk`) |
-| `collision.js` | `resolveCollision`: per-axis integrate + tile detect + respond; returns `contacts` |
+| `collision.js` | `resolveCollision`: per-axis integrate + point-sample the type's `probes` + respond; returns `contacts` |
 | `world.js` | `World`: owns the actor list (`addActor`/`removeActor`) + map; runs the pipeline and the react step; owns tile animations + block-bump hops; draws every actor |
 | `animator.js` | `Animator`: plays a sprite-set; owns all frame-cycling. Distinct from `actor_animations.js`, which only *names* the state to show |
 | `tiles.js` | `TILES` registry + `isSolid`. Level-grid cell types — nothing to do with CHR tiles |
-| `chr_decoder.js` | CHR bytes → pixel indices → blitted tiles (`decodeTiles`, `paintTile`) |
+| `chr_decoder.js` | CHR bytes → pixel indices → blitted tiles (`decodeTiles`, `paintTile`). No SMB knowledge |
+| `sprite_frames.js` | a graphics table's rows → drawable frames. Everything SMB-specific about assembling tiles into a sprite: the 2-wide row, rows-per-table, the mirror rules |
 | `palette.js` | the 2C02 master table; `nesRgb` / `nesHex` |
 | `assets/dat_tiles.js` | GENERATED: CHR + `FRAMES` + `GFX_TBL_OFFSETS` + `PLAYER_COLORS` + `AREA_PALETTES` |
 | `tools/build_sprite_data.py` | the generator — reads ROM + asm, writes `assets/dat_tiles.js` |
 | `level_map.js` | `LevelMap`: tile-grid queries (`isSolidAt`, `setTile`, `worldToTile`, `getTileRect`) |
 | `camera.js` | smooth follow, world→screen, map clamp |
+| `demo/chr_viewer.html` | browses all 512 CHR tiles in the ROM's own palettes |
 
-Sprites load via `../mario/resource.js` (shared with the legacy `mario/` demo);
+**Mario's frames come from the ROM and are built synchronously** — `sprite_frames.js`
+composes them at module load, so they need no resource loader. A sprite-set frame is
+either a **drawable** (anything with `draw(ctx, x, y, mirror)`, which is what those
+are) or a **name**, resolved as a BMP.
+
+The names go via `../mario/resource.js` (shared with the legacy `mario/` demo);
 `0xFF00FF` is the colorkey. That module is an explicit **registry**, not a
 directory scan: `res_loader` fetches only the paths listed in it, so **a new
 sprite must be added there or it never loads** — the file sits on disk, and you
 get a `No resource …` assert when something first tries to draw it. A frame name
 in a sprite-set is the registry key minus `res/images/` (`"goomba/goombas_0"` →
-`'res/images/goomba/goombas_0'`).
+`'res/images/goomba/goombas_0'`). The Goomba and the animated tiles are still on
+this path; Mario is not.
 
 ## Verifying a change — the fingerprint harness
 
@@ -246,8 +286,8 @@ opinion on whether the physics is any good, and it will happily pin a bug.
 cannot do this job: a 3 px shift in jump height or a 2-tick shift in the skid is
 invisible to feel and would ship unnoticed.
 
-The harness pairs with the two things this file changes for, and which one you are
-making decides what the harness should do:
+Which *kind* of change you are making decides what the harness should do, and each
+kind has a signature. Naming the kind first turns red from a verdict into evidence:
 
 - **A structure change** — a refactor (inverting the loop, moving movement onto the
   type, hoisting gravity) — claims to change no behaviour, so it **must pass against
@@ -256,11 +296,30 @@ making decides what the harness should do:
 - **A movement-design change** — retuning the jump, changing an accel rate or a
   clamp — deliberately overwrites behaviour, so it **will** go red. Re-blessing is
   part of the change, and the commit message says why the numbers moved.
+- **A presentation change** — an `animate` fn, `isSkidding`, a sprite-set. Signature:
+  **every trace hash stays put** and only readable scalars move, because the traces
+  are `vx`/`vy`/position. *A hash that moves means the change reached the physics and
+  is wrong* — that is a sharper check than the PASS/FAIL line.
+- **A unit change** — rescaling the physics. Neither of the first two: behaviour is
+  identical, the ruler moved. It is **provable**, so prove it rather than re-blessing
+  on faith: physics-*generated* distances scale exactly (jump peaks, stopping
+  distance), every **tick count stays identical** (`v/a` is scale-free), and
+  *level*-determined distances do NOT scale — the floor did not move, so the time to
+  fall to it changes instead.
 
-So the harness isn't only asking "did I break something" — it is checking the claim
-you made about which kind of change this is. If one commit moves *both* the scenario
-code and the baseline, treat it as a smell: you have either bundled two changes, or
-changed behaviour while calling it a refactor.
+**Scaffolding must be scale-independent, and fixing it is its own step.** `settle()`
+ticks until grounded and `terminalTick` reads `actor.maxFall` for a reason: a fixed
+tick count or a literal `8` silently ties the harness to one physics scale, and then
+a unit change fails for reasons that have nothing to do with the physics. Fix the
+scaffolding *first*, prove it green at the old scale, and only then change behaviour.
+
+If one commit moves *both* the scenario code and the baseline, treat it as a smell —
+you have bundled two changes, or changed behaviour while calling it a refactor. The
+**one legitimate exception**: a scenario's *level* can be tuned to the old behaviour
+(`qblock_bump`'s block was 96 px up, out of reach once the jump halved). Then it must
+move or the scenario measures nothing — and `bumpTick = -1` is what that looks like.
+Check the scenario still exercises its phase; a scalar quietly going -1 or a state
+vanishing from `statesSeen` is coverage loss wearing a passing test's clothes.
 
 Nine scenarios cover every phase of the tick, not just the physics — `qblock_bump`
 exercises the **react** phase (`TILES.onBump` → hop → `3` spends to `5`) and

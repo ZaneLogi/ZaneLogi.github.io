@@ -89,6 +89,10 @@ export function marioMovement(a, intent, dt) {
   // 1. JUMP START — a fresh press (down now, up last tick) while grounded. SMB
   //    runs this *before* the horizontal update, so the band is picked from last
   //    tick's speed; reading it after would quietly use a fresher value.
+  // Player_State: on the ground is $00, so a landing clears it. This must precede
+  // the launch below, which is the thing that sets it.
+  if (grounded) a.airborneByJump = false;
+
   if (intent.jump && !a.prevJump && grounded) {
     const speed = Math.abs(a.vx);
     let band = 0;
@@ -98,6 +102,7 @@ export function marioMovement(a, intent, dt) {
     a.fallGravity = a.fallGravities[band];
     a.gravityLive = a.jumpGravity;      // weak, until released or cresting
     a.jumpOriginY = a.y;
+    a.airborneByJump = true;            // Player_State $01 — holds for the whole arc
   }
 
   // 2. X_Physics — two *independent* indices: one for the clamp, one for the
@@ -191,8 +196,25 @@ export function marioMovement(a, intent, dt) {
   else if (a.vx < 0) a.movingDir = -1;
 
   // Presentation flags — read only by marioAnimation, never by physics.
+  //
+  // SMB asks the skid question TWICE, with different answers, and the port needs
+  // both. The *physics* skid (`skidding` above, X_Physics) is bare
+  // facing ≠ movingDir with no speed gate — that one doubles the adder. The *sprite*
+  // gets three more conditions from ProcOnGroundActs:
+  //
+  //   lda Player_X_Speed / ora Left_Right_Buttons / beq NonAnimatedActs  -> standing
+  //   lda Player_XSpeedAbsolute / cmp #$09 / bcc ActionWalkRun           -> walk, too slow
+  //   lda Player_MovingDir / and PlayerFacingDir / bne ActionWalkRun     -> same way, no skid
+  //
+  // Without the first, the flag LATCHES: coast to a dead stop after tapping the
+  // opposite way and facing ≠ movingDir can never reconverge — facing only moves on
+  // held input, movingDir only while vx ≠ 0 — so Mario stands still skidding forever.
+  // (ProcSkid would re-aim movingDir, but it needs a button held, so releasing early
+  // skips it.) The second is the $09 gate; it costs about a tick.
   a.isRunning = !!intent.run;
-  a.isSkidding = grounded && skidding;
+  a.isSkidding = grounded && skidding
+    && (a.vx !== 0 || inputDir !== 0)
+    && Math.abs(a.vx) >= a.skidAnimSpeed;
 
   // 7. Which gravity is live (JumpSwimSub for a jump, FallingSub for a plain
   //    fall). This is the whole variable-height mechanism: holding the button
