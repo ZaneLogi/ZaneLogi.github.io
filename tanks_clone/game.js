@@ -19,6 +19,7 @@
 // See docs/research_system_interaction_map.md §2, §3, §5 (S1).
 
 import { Field } from './field.js';
+import { Tilemap } from './tilemap.js';
 import { TankRoster } from './tank_roster.js';
 import { EnemyAI } from './enemy_ai.js';
 import { BulletManager } from './bullet.js';
@@ -100,6 +101,15 @@ export class Game {
     // --- persistent: outlives a run ---
     this.hiScore = 20000;
     this.constrUsageCnt = 0;   // ram_constr_usage_cnt ($4B) — the editor's memory (§6c)
+    this.hiddenCutsceneCnt = 0;   // ram_hidden_cutscene_action_cnt ($4A) — $C9E0 clears
+                                  // it on every menu entry; $CA4F fires at $74 (§6c)
+
+    // The title screen, standing analog of PPU nametable $2800. It lives here, not
+    // on Attract, because the ROM draws it ONCE (sub_D17F at $C095) and then loops
+    // back in at $C09C — so it survives every menu -> demo -> scroll cycle, and the
+    // editor's $C0A2 re-entry finds it still there. An Attract-owned map would be
+    // rebuilt on each setMode and lost on the editor path. Flow doc §4 [1].
+    this.titleMap = new Tilemap();
 
     // --- session state: cleared by resetSession() ($C2B3) ---
     // It lives on Game, not on a Session object (the map's §7 lock), which is what

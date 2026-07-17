@@ -622,3 +622,14 @@ export const BLOCK_TILES = [
   [0x00, 0x00, 0x00, 0x00], // $E
   [0x00, 0x00, 0x00, 0x00], // $F
 ];
+
+// tbl_E003_spr_A_palette ($E003): the ENEMY tank colour flicker.
+// ofs_001_DFB6 ($DFCD-$DFDA) indexes it with
+//   (ram_frm_cnt_lo * 4 + ram_tank_type) & $07
+// so an enemy's palette changes every frame, and its ARMOUR LEVEL (which
+// lives in tank_type) shifts the phase -- that is how a damaged heavy tank
+// cycles a different colour set as it degrades. Players do NOT use this:
+// their palette is simply the slot index ($DFE8 TXA).
+export const TANK_PALETTE_FLICKER = [
+  0x02, 0x00, 0x00, 0x01, 0x02, 0x01, 0x02, 0x02,
+];

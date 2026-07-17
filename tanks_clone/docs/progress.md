@@ -122,9 +122,9 @@ but because it described work that had not started yet.)*
     **ported, not stubbed**; the stubs are the subsystems under it. `mode.js` (the
     `Mode` contract + `DONE`), `flow.js` (`MODE` + the `NEXT` table), the five
     `modes/*.js`, `game.js` reshaped, `main.js` given the accumulator, plus `hud.js`
-    (a **NOT SOURCE** debug readout — an HTML element, not canvas-drawn; it exists
-    only because Renderer/Input are stubs, so the machine is otherwise invisible
-    behind a black canvas. Retire it once Renderer draws).
+    (a **NOT SOURCE** debug readout — an HTML element, not canvas-drawn; *at the time*
+    Renderer and Input were both stubs, so the machine was otherwise invisible behind
+    a black canvas. P4 gave it pixels; hud.js's live status is in "Debt" below).
   - **`main.js` had no accumulator** (P1 shipped one `tick()` per rAF, which map §1
     already said was wrong). Now fixed-timestep vs `NTSC_FPS`, `render()` once.
   - **`Game.frame` was a single counter** — map §1 explicitly says lo/hi must not
@@ -161,14 +161,138 @@ but because it described work that had not started yet.)*
   - **Known stub artifact:** with nothing able to kill a tank yet, `Battle` and the
     demo never end on their own. Correct given the subsystems below them.
 
+- **P4 — Attract mode: input, title, scroll, menu.** ☑ Done **except `Demo`**
+  (Zane's scope call, 2026-07-17). The first real pixels: one arc from "the machine
+  is invisible behind a black canvas" to a scrolling, selectable title screen. Order
+  was Input → SCROLL → MENU — Input first because it is the only piece with no
+  design risk and everything else needs it.
+  - **`Input`, ported whole.** `sample()` `$D689` (`press = new & ~hold`,
+    `$D6A3-$D6A9`), `dpadToDirection()` `$E451`, `clear()` `$C2AA`. Two findings
+    shaped the code: `con_btn_*`'s bit layout already **is** the pad's shift order
+    (A→bit0 … Right→bit7), so the mask IS the byte and nothing needs reordering; and
+    `$E451` is a **priority decoder** (Right > Left > Down > Up), so this port needs
+    no SOCD filter — a d-pad cannot press Left+Right, a keyboard can, and the ROM
+    already answers it. The pad latch is level-based and re-strobed every NMI, so a
+    press-and-release between samples is invisible to the ROM too: that is why DOM
+    events accumulate into a `Set` rather than a queue. Re-derived, not mimicked —
+    there is no shift register here.
+  - **`Tilemap` (`tilemap.js`) — the `$0400-$07FF` buffer, and deliberately NOT
+    `Field`.** Byte primitives only: `clear` `$D47E`, `index` `$D5FB`, `writeTiles`
+    `$D6B3`, `setQuadrant` (`$D71E`/`$D725` + `$D74D`/`$D764`), attribute decode.
+    **It does not settle the map's §8 `[?]`** — whatever `Field` turns out to be, the
+    bytes need a representation, and the title needed one before `Field` exists. If
+    "one thing", `Field` grows these methods; if "two things", it holds one. Neither
+    is foreclosed.
+  - **The huge letters are BRICK WALLS (`text.js` — `$D8D2`/`$D85E`).** There is no
+    huge font in the ROM: `$D85E` reads the letter's *ordinary* 8x8 glyph out of the
+    BG pattern table and expands each glyph BIT into a 4x4 brick quadrant — the same
+    `$00-$0F` low-nibble vocabulary `BLOCK_TILES[$4]` (`[0F,0F,0F,0F]`) uses and that
+    a bullet will chip. One glyph → 32x32 px → 4x4 tiles. That is why the ROM's whole
+    huge-text set is five short ASCII strings and not one byte of letter artwork.
+    **Verified 64/64 quadrants** against `CHR[]`. Not ported (pure PPU plumbing): the
+    `$2007` read with its `$D884` dummy; the plane-1 skip (`$D85E` reads bytes 0-7
+    only — for a 2-colour glyph plane 0 IS the shape); and the `$D88B`/`$D897`
+    PHA/PLA reversal (the PPU reads forward while the routine walks the screen
+    *upward*; the two reversals cancel to `plane0[r]` at `y + 4 + 4*r`).
+  - **`Renderer` — two caches, different jobs.** `TileCache` (`tiles.js`) is **lazy**
+    and keyed by **(tile, palette)**, because a NES tile is four pixel *indices*, not
+    colours — the same brick is orange on the title (`con_bg_pal_03`) and grey in a
+    stage. 512 tiles × 36 BG palettes = >18000 possible canvases; a title screen
+    touches **52**. Eager decode is 512 — **90% wasted**. On top, each `Tilemap`
+    composes into a persistent canvas repainted only when its `version` moves, so a
+    scroll frame is ONE `drawImage` of an unchanged picture — exactly what the PPU's
+    scroll register does. (Zane's design call: cache decoded tiles and `drawImage`;
+    don't bit-blit per draw the way `demo/level_viewer` does.)
+  - **`drawSprite` carries two coordinate quirks**, in the PPU analog where they
+    belong: `$DA34` stores OAM Y = `sprY - 8` (so the ROM's `sprY` is the sprite's
+    **centre**), and the PPU renders sprites one scanline late, so OAM Y is "top
+    minus one". Net top = `sprY - 7` — that single pixel is what lands the menu
+    cursor level with its text row. 8x16 mode also makes the tile byte not an index:
+    bit 0 picks the *pattern table*, bits 7..1 the pair, which is why sprites can
+    draw BG glyphs.
+  - **`$D17F` draws the WHOLE title screen** — logo, scores, all three menu options,
+    the Namco credits — once, at `$C095`, *before* the scroll. So it all scrolls up
+    together, and `sub_C9C0` (Menu) adds no background at all. **This corrected a
+    scoping error:** the small text had been deferred "to Menu", which would have
+    left the title scrolling up half-empty (Zane caught it — *"is the drawing of the
+    menu along with the title screen?"*). The ROM's `$D212`/`$D242`/`$D263`
+    `wait_1_frm` calls spread the writes over four frames because the PPU write
+    buffer has a size limit — invisible, spent before the scroll starts. We write one
+    `Tilemap`.
+  - **The scroll needs no second nametable.** The ROM scrolls a nametable PAIR
+    (`$2800` title, `$2000` blanked, `ram_scroll_Y` walking between); we need one
+    tilemap and an offset, because the outgoing screen is **provably always blank** —
+    `$C09F` is `sub_C7AB`'s only caller and `$C09C`'s `sub_D16A` clears `$2000`
+    immediately before it, every time. A faithful re-derivation, not a
+    simplification. The pair's other job is equally invisible: `$C9DE`/`$C9E4` set
+    `scroll_Y = 0` **and** `base_nmt = 2` on reaching the menu — same pixels, rebased
+    so the counter needn't climb. Nobody sees it. (§7.1's artifact test, applied.)
+  - **The menu cursor IS a tank** — roster slot 0 (`$C9C7-$C9E4`), pushed through the
+    ordinary `sub_DEA6_tanks_handler` the battle loop calls. It gets the P1 palette
+    for free (the palette **is** the slot index, `$DFE8 TXA`) and the menu owns no
+    drawing code. **And there is no selection variable:** `sub_CA85` is
+    `game_mode * $10 + $8B` → y 139/155/171, recomputed every frame at `$CA2F` with
+    no "did it change?" test. `game_mode` *is* the selection. Treads roll via
+    `wheels ^= 4` every 4th frame (`$C9E9`) — the ROM animating a parked tank purely
+    so the screen looks alive.
+  - **Ported with it:** `Tank.handle` `$DEB8` + `Tank.draw` `$DFB6`/`$DFE9` (whole,
+    including the enemy `tbl_E003` flicker and the stun blink — not half a routine),
+    `TankRoster.handleAll` `$DEA6` / `clearAll` `$E413`, `drawNumber` `$D934`+`$D6DD`.
+    `$DEB8`'s `(flags >> 3) & $FE` into `tbl_E4B8` is just **the flags' high nibble**
+    once the 2-byte entries are divided back out — 16 states, 16 handlers.
+  - **`sub_DEA6` is the RENDER half, and the ROM says so:** it sits OUTSIDE the
+    `$C2E6` pipeline and is called from each screen's own loop (`$C9F5` menu /
+    `$C20C` battle / `$C42F` demo). The split our `Mode` contract forces already
+    exists upstream; nothing in the draw path mutates game state.
+  - **New data (`tools/extract.py`):** `assets/dat_text.js` (the 9 title text tables)
+    and `TANK_PALETTE_FLICKER` (`tbl_E003`). The extractor previously **skipped
+    `.byte "STRING"` directives by design** — and the text tables are exactly those,
+    so it now parses them. `ord()` is the correct decode, not a guess: the font is
+    ASCII-indexed, and `00:D299: 42  .byte "BATTLE"` shows `$42` = 'B'.
+  - **The disassembly's LABEL NAMES lie — trust the address column + operand bytes.**
+    `tbl_D30F_text___1980_1985_namco_ltd` sits at **`$D2F8`** (the `$D258` operand is
+    `$F8`); `tbl_D2A0_text___I_` at **`$D2A5`**; `tbl_D341_tile___dot` at **`$D33F`**.
+    `TEXT_TABLES` in `extract.py` uses real addresses, names demoted to comments.
+  - **The hidden cutscene is decoded** (flow doc §4 [11]) — the programmer's love
+    letter, revealed one line per 64 frames. Its trigger is a **two-controller**
+    combo: P1 *holds* the direction (`$CA04`/`$CA17`, `ram_btn_hold`) while P2
+    *presses* the button (`$CA0A`/`$CA1D`, `ram_btn_press + $01`). The port's own
+    TODO said "all on controller 2" and was **wrong** — reading `$CA0A` alone misses
+    `$CA04` two instructions earlier. Flow doc §8's `[?]` on it is closed + deleted.
+  - **Verified deterministically** (headless `Game`, synthetic `KeyboardEvent`s,
+    canvas pixels — never a screenshot): Input 38/38, incl. the live page reacting to
+    real keys; Tilemap/text/TileCache 23/23, incl. the 64/64 glyph match and a
+    cache-hit / palette-miss check; scroll by pixel (`scrollY` 0 → empty, 60 → 120 →
+    ink rises exactly 60px, 240 → parked at `dy=0`); Menu 12/12 state + 9/9 pixel.
+    The cursor measured **122 lit px at x 65..77, y 133..145** — and decoding tiles
+    `$18/$19/$1A/$1B` out of CHR gives an art ink-box of 1..13 with **122** lit px,
+    so `cell(64,132) + art(1,1)` predicts the drawn position exactly.
+  - **Three test failures were MY assertions, not the code** — the 7px-tall font in
+    an 8px cell; bounding all ink in `x < 88` (which caught BG text); bounding the
+    sprite *cell* instead of its *artwork*. Meanwhile the one real bug — `W S A D`
+    instead of `W A S D` — **passed every assertion** and was caught only by *reading
+    the rendered output*. Lesson kept in the tests: assert the literal string, and
+    look at what was drawn.
+  - **`controls.js` (NOT SOURCE)** — an on-page key legend **generated from
+    `input.js`'s `KEYMAP`**, so it cannot drift; a test rebinds a key and asserts the
+    legend follows. The ROM prints no control help because a Famicom player is
+    holding the pad — a keyboard carries no such labelling, so the pad's own markings
+    are re-derived in our view. P2's Start/Select are bound but never read (every
+    menu/pause site is a non-indexed `LDA ram_btn_press`), and the legend says so.
+
 ## Next
-- Fill stubs subsystem-by-subsystem, starting with `Field` (the central service),
-  resolving the §8 `[?]` items as the work reaches them.
-  - **`Field` opens with a design question, not code:** is it one thing or two? Map
-    §8 — `$0400` is the collision grid *and* what the title/GAME OVER screens draw
-    into, so the "whole nametable" reading may be an artifact the §7.1 test splits
-    apart. Deferred by Zane 2026-07-16; start from legacy `tanks/level.js` +
-    `castle.js`. Settle it before building.
+- **`Demo`** — the last piece of ATTRACT, deferred by scope. `sub_C642_demo_players_
+  ai_handler` (`$C642`) writes `ram_btn_hold,X`/`ram_btn_press,X` directly: the demo
+  **fakes controller input** rather than driving tanks (flow doc §8). It then runs
+  `mainBattleScript`, so it is really gated on `Field` + tank movement, not on
+  ATTRACT.
+- **`Field`** — still opens with a design question, not code: is it one thing or two?
+  Map §8 — `$0400` is the collision grid *and* what the title/GAME OVER screens draw
+  into. Deferred by Zane 2026-07-16; start from legacy `tanks/level.js` +
+  `castle.js`. **P4 added evidence, not an answer:** the title exercises the tilemap
+  half (same buffer, same tile vocabulary) with *zero* collision semantics, and
+  `Tilemap` now isolates the byte primitives both readings need. Settle it before
+  building `Field` itself.
 - Docs are written when the content needs a home, sized to it — no one-doc-per-
   subsystem rule (map, "where a finding lands"). `Field` looks like it earns its
   own file (block/tile decode, occupancy, pixel→cell); a smaller subsystem may only
@@ -180,5 +304,17 @@ but because it described work that had not started yet.)*
   `NOT SOURCE`; replace with `audio.isPlaying(...)` when `$EA7E` is ported. This is
   why "Audio: low priority" undersells it — it gates two modes (flow doc §6d/§7.8).
 - **`Tally` is a flat 180-frame placeholder** — `$CCD4`'s real count-out is unported.
-- **`hud.js`** is a development instrument, not part of the game. Retire it once
-  `Renderer` draws something.
+- **`drawNumber`'s `minDigits = 2` is the boot behaviour only.** `ram_006B_flag`
+  ($6B) decides whether an all-zero score prints `00` or `0` (`$D942`); `$D491` sets
+  it to 0 at RESET but `sub_C7C8_print_lives_handler` sets it to **1** every battle
+  frame, and `$D17F` never sets it itself — so after a game the title may print `0`.
+  Flow doc §8 `[?]`. Resolve when `Score`/`GameOver` land.
+- **The sprite forest-priority probe is unported** — `$DA3B-$DA45` reads the field at
+  (`sprX + 3`, `sprY`) and, on tile `$22`, ORs `ram_priority_spr_A` (`$20`) to put
+  the sprite BEHIND the background. Needs `Field` **and** the backdrop → behind-BG →
+  BG → front composite (CLAUDE.md "Rendering follows the PPU"). Nothing reaches it
+  yet: the title has no forest, so the probe's answer is always "no".
+- **`hud.js`** is a development instrument, not part of the game. `Renderer` now
+  draws, so its original retirement condition is technically met — but it is still
+  the only view of the mode machine's internals (mode/sub/frm/lives), which the
+  canvas never shows. Retire it when that stops being useful, not on the technicality.

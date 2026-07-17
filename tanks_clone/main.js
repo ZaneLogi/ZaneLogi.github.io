@@ -12,6 +12,7 @@
 import { Game } from './game.js';
 import { NTSC_FPS } from './constants.js';
 import { hudText } from './hud.js';
+import { renderControls } from './controls.js';
 
 const canvas = document.getElementById('screen');
 const game = new Game(canvas);
@@ -20,6 +21,10 @@ game.boot();
 // Debug instrument, NOT part of the game — it lives in main.js so Game stays clean
 // and knows nothing about it. Retire it once Renderer draws. See hud.js.
 const hud = document.getElementById('hud');
+
+// The key legend. Painted once: KEYMAP is fixed at module load, so re-rendering it
+// per frame would be 60 Hz of identical DOM writes. See controls.js.
+renderControls(document.getElementById('controls'));
 
 const FIXED_DT = 1 / NTSC_FPS;
 const MAX_CATCHUP = 0.25;   // clamp after a hidden/throttled gap, so we don't

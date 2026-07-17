@@ -30,8 +30,27 @@ export class TankRoster {
   get players() { return this.tanks.slice(0, 2); }
   get enemies() { return this.tanks.slice(2); }
 
-  // draw + state-machine pass for all 8 tanks ($DEA6)
-  handleAll(renderer) { /* TODO: for X in 0..7: tanks[X].handle() */ }
+  // sub_DEA6_tanks_handler ($DEA6) — every slot, 0..7, unconditionally ($DEB3
+  // CMP #$08). Empty slots cost a dispatch and return; the ROM does not track
+  // which are live.
+  //
+  // This is the RENDER half, not a pipeline step — see Tank.handle(). frameLo is
+  // ram_frm_cnt_lo, which the draw needs for the enemy flicker and the stun blink.
+  handleAll(renderer, frameLo) {
+    for (const tank of this.tanks) tank.handle(renderer, frameLo);
+  }
+
+  // sub_E413_clear_some_tank_addresses ($E413) — zero every slot's flags.
+  //
+  // The ROM's loop also writes ram_0103_plr_flags,X for X = 0..7, and the
+  // disassembly flags that as a bug: ram_0103 + 8 runs off the end of the array and
+  // clobbers ram_game_over_msg_pos_X/_Y/_timer, ram_debug_address_index and
+  // ram_010A. That overrun is a zero-page LAYOUT accident with no counterpart in an
+  // object model — not ported, and nothing depends on it (the menu has no game-over
+  // message to corrupt).
+  clearAll() {
+    for (const tank of this.tanks) { tank.state = 0; tank.dir = 0; }
+  }
 
   // pipeline: step 2 ($DB75) slide tanks flagged on ice; step 3 ($DBF1) move all
   // tanks — players by input, enemies delegate to EnemyAI. Both loop the roster.

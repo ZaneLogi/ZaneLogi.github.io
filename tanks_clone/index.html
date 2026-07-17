@@ -32,12 +32,27 @@
        unwrappable, the HUD is also what sets #wrap's width (448px > the canvas's
        256px) — it is the widest thing on the page. */
     #hud { font: 11px/1.6 ui-monospace, monospace; color: #8a8f99; white-space: pre; }
+
+    /* Key legend — NOT part of the game either; see controls.js, which GENERATES
+       it from input.js's KEYMAP. Full width so it lines up under the HUD (the
+       widest element) rather than sitting centred and ragged beneath it. */
+    #controls { font: 11px/1.5 ui-monospace, monospace; color: #8a8f99;
+                width: 100%; border-top: 1px solid #23262c; padding-top: 8px; }
+    #controls table { border-collapse: collapse; width: 100%; }
+    #controls th, #controls td { text-align: left; font-weight: normal; padding: 1px 0; }
+    #controls thead td, #controls thead th { color: #5b606a; padding-bottom: 3px; }
+    #controls .does { color: #5b606a; }        /* what the ROM does with it */
+    #controls .key { color: #cdd2db; }         /* the actual keys — the payload */
+    #controls th, #controls .key { white-space: nowrap; }
+    #controls .key { width: 24%; }
+    #controls p { margin: 6px 0 0; color: #5b606a; }
   </style>
 </head>
 <body>
   <div id="wrap">
     <canvas id="screen" width="256" height="240"></canvas>
     <div id="hud">booting…</div>
+    <div id="controls"></div>
   </div>
   <script type="module" src="./main.js"></script>
 </body>

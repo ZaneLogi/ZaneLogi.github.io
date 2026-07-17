@@ -76,12 +76,25 @@ don't let the answer live only in that list.
   render pump only — logic runs on a fixed-timestep accumulator. And
   `ram_frm_cnt_hi` is *not* a high byte: it ticks every **64** frames and the game
   writes it as a timer, so don't collapse lo/hi into one counter. Map §1.
-- **Rendering follows the PPU, not convenience.** The NES never redraws the field
-  (its write buffer is a dirty-block queue), so keep a persistent field canvas
-  allocated once and repaint only changed blocks. Draw tanks as **2×8×16 sprites**,
-  never a pre-composed 16×16 (`$DA2B` probes the field per half). Composite
-  backdrop → behind-BG sprites → BG (index 0 transparent) → front sprites.
-  Map §7 design notes.
+- **Rendering follows the PPU, not convenience.** Map §7 design notes. Built in P4
+  (`renderer.js`, `tiles.js`) — what holds today, and what is still only a plan:
+  - **Two caches.** `TileCache` is **lazy** and keyed by **(tile, palette)** — a NES
+    tile is four pixel *indices*, not colours, so the same brick is orange on the
+    title and grey in a stage; keying on the tile alone hands back wrong colours.
+    Separately, each `Tilemap` composes into a persistent canvas repainted only when
+    its `version` moves — the NES never redraws the background either (its write
+    buffer is a dirty-block queue). A scroll is then one `drawImage` of an unchanged
+    picture, which is what the PPU's scroll register does. *(Whole-map repaint for
+    now; per-cell dirty tracking is what the battlefield will want.)*
+  - **Tanks are 2×8×16 sprites**, never a pre-composed 16×16 — `$DA2B` probes the
+    field per half. In 8×16 mode the OAM tile byte's **bit 0 picks the pattern
+    table**, so sprites can draw BG glyphs (`$C59C` → `#$9D`).
+  - **Two coordinate quirks live in `drawSprite`**, not in callers: `$DA34` stores
+    OAM Y = `sprY - 8` (so `sprY` is the sprite's **centre**), and the PPU renders
+    sprites one scanline late. Net top = `sprY - 7`.
+  - **Still a plan:** the backdrop → behind-BG sprites → BG (index 0 transparent) →
+    front sprites composite, and with it `$DA3B-$DA45`'s forest-priority probe. Needs
+    `Field`; nothing reaches it yet (the title has no forest). progress.md "Debt".
 - Deferred (stub-only): `Audio` ($EA7E sfx engine — portable), `Construction`
   (stage editor). ES6 modules, no build step; `index.html` boots `main.js`.
   - **`Audio` is not as low-priority as it looks: it GATES two modes.** `GameOver`
@@ -104,8 +117,16 @@ modes/attract.js    ATTRACT + Scroll/Menu/Demo    ($C095/$C09C/$C0A2)
 modes/session.js    SESSION + StageIntro/Battle/Tail/Tally  ($C159/$C1F9/$C238/$CCD4)
 modes/game_over.js  $C5D9    modes/hall_of_fame.js  $C44B
 modes/editor.js     $C0AE (deferred stub)
-hud.js              NOT SOURCE — debug readout into an HTML element. Exists only
-                    because Renderer/Input are stubs; retire it once Renderer draws
+tilemap.js          Tilemap: the $0400-$07FF background buffer as BYTES — clear
+                    ($D47E), writeTiles ($D6B3), setQuadrant ($D71E/$D725 +
+                    $D74D/$D764), attribute decode. NOT Field, and deliberately does
+                    not settle Field's open question — see the field bullet above
+text.js             drawHugeText ($D8D2/$D85E — the glyph IS the huge letter),
+                    writeText ($D6B3), drawNumber ($D934 + $D6DD)
+hud.js              NOT SOURCE — debug readout into an HTML element. Still the only
+                    view of the mode machine's internals; see progress.md "Debt"
+controls.js         NOT SOURCE — the on-page key legend, GENERATED from input.js's
+                    KEYMAP so it cannot drift. Painted once from main.js
 <subsystem>.js      field / tank / tank_roster / bullet / base / bonus / enemy_ai /
                     score / renderer / input / audio / rng / construction — §7 classes
 ```
@@ -117,11 +138,18 @@ tools/extract.py    build-time: parses bank_FF.asm + reads CHR_ROM.chr + the 36
                     stage files; decodes and VALIDATES, then emits ES modules.
                     Runtime never decodes.  `python tanks_clone/tools/extract.py`
 assets/dat_chr.js   CHR (8192 B = 512 tiles) + SPRITE_PALETTES (4) +
-                    BG_PALETTE_SETS (9) + BLOCK_TILES + BLOCK_ATTRIBUTE
+                    BG_PALETTE_SETS (9) + BLOCK_TILES + BLOCK_ATTRIBUTE +
+                    TANK_PALETTE_FLICKER (tbl_E003 — the enemy colour cycle)
 assets/dat_levels.js LEVELS = 35 × grid[13][13] of block codes, + DEMO_STAGE
+assets/dat_text.js  the 9 title-screen text tables ($D17F draws every one), as BG
+                    tile ids at their ROM cell. The extractor SKIPPED .byte "STRING"
+                    directives by design until these needed it
 palette.js          NES 2C02 master palette — hardware, not ROM (the ayumi
                     precedent in block_breaker: vendor the chip, port the driver)
-tiles.js            decodeTiles (2bpp planar → indices) + paintTile
+tiles.js            decodeTile / decodeTiles (2bpp planar → indices), paintTile, and
+                    TileCache — LAZY, keyed by (tile, PALETTE): a tile is four pixel
+                    indices, not colours, so the same brick is orange on the title
+                    and grey in a stage. Title screen = 52 decodes, not 512
 demo/chr_viewer.*   all 512 tiles, both tables, real palettes, 8×16 default
 demo/level_viewer.* all 35 stages + attract, real tiles, live $C31D water swap
 ```

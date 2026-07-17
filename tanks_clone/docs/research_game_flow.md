@@ -223,9 +223,41 @@ the "players" and then the ordinary `sub_C2E6` runs — the attract mode *is* th
 redrawn and the counter is not reset. That accumulation is what feeds §6c.
 
 **[11] Hidden cutscene** — `sub_C49C_play_hidden_cutscene` (`$C49C`), fired from `$CA4F`
-when `constr_usage_cnt == $07` **and** `hidden_cutscene_action_cnt == $74`. The counter is
-fed at the menu by Down+A (`+$10`, `$CA10`) and Right+B (`-$01`, `$CA23`) on **controller 2**
-(`ram_btn_press + $01`). See <https://tcrf.net/Battle_City_(NES)>.
+when `constr_usage_cnt == $07` **and** `hidden_cutscene_action_cnt == $74`.
+See <https://tcrf.net/Battle_City_(NES)>.
+
+**What it is (decoded 2026-07-17):** a secret credit — the programmer's love letter.
+It blanks the screen (`$C4A9` clears `$0400`, `$C4AC` ships it) and reveals one line
+per `sub_C567_wait_64_frm` (`$C567`: zero `frm_cnt_lo`, spin until `& $3F` — 64 frames
+≈ 1.07 s). Ten of those, so ~11 s:
+
+| when | cell | table | text |
+|---|---|---|---|
+| after 2 waits | row 8, col 8 | `$D30F` | `THIS PROGRAM WAS` |
+| +1 wait | row 10, col 8 | `$D284` | `WRITTEN BY` |
+| +1 | row 12, col 8 | `$D334` | `OPEN` `$6B` `REACH` — one run, dash in the middle |
+| +1 | row 14, col 8 | `$D34D` | `WHO LOVES NORIKO` |
+| +1 each | row 16, cols 8-12 | `$D33F` | `.` `.` `.` `.` `.` — **one dot per second** |
+
+The five dots are five separate `sub_D6B3` calls to `$2208`-`$220C`, each after its own
+64-frame wait: an ellipsis typed out slowly, letting the confession sit. Then `$C55D`
+rebuilds the default stage field and it `RTS`es back to `$CA52` — the game just starts.
+
+**The trigger's counter is a TWO-CONTROLLER combo**, and the usual shorthand
+("Down+A on controller 2") is wrong: the **D-pad half is player 1's HOLD** and the
+**button half is player 2's PRESS**.
+
+| step | source | effect |
+|---|---|---|
+| `$CA04` `hold[0] & Down` + `$CA0A` `press[1] & A` | P1 holds, P2 presses | `cnt += $10` |
+| `$CA17` `hold[0] & Right` + `$CA1D` `press[1] & B` | P1 holds, P2 presses | `cnt -= 1` |
+
+So `$74` = 8×(Down+A) then 12×(Right+B). Reading `$CA0A`/`$CA1D` alone and inferring
+"controller 2" misses `$CA04`/`$CA17` two instructions earlier — the port's own TODO
+had it wrong until this was re-derived.
+
+Note the counter reaching 7 also **suppresses the demo entirely** (`$CA38`), so once
+the editor half of the ritual is done the attract loop stops cycling and waits.
 
 ---
 
@@ -566,11 +598,17 @@ Only `game.js`/`flow.js` import the modes; modes import none of each other (7.4(
 
 ## 8. Open questions / to-verify
 
-- **[?]** `sub_C49C_play_hidden_cutscene` (`$C49C`) — contents not decoded; only
-  its trigger (`$CA4F`) is. Out of scope until someone cares.
 - **[?]** `sub_C642_demo_players_ai_handler` (`$C642`) — how the attract mode
-  drives the two player slots. Belongs to `EnemyAI`/`TankRoster` when the demo is
-  ported.
+  drives the two player slots. It writes `ram_btn_hold,X` / `ram_btn_press,X`
+  directly (`$C6AD`/`$C6AF`), i.e. the demo fakes controller input rather than
+  driving tanks. Belongs to `EnemyAI`/`TankRoster` when the demo is ported.
+- **[?]** `ram_006B_flag` (`$6B`) on the way back to the title. It is a shared
+  "minimum digits" scratch read by `sub_D934` (`$D942`): 0 → a zero score prints
+  `00`, 1 → it prints `0`. `$D491` sets it to 0 at RESET, but
+  `sub_C7C8_print_lives_handler` sets it to **1** every battle frame (`$C7CC`) and
+  `$D17F` never sets it itself — so after a game the title may print `0`. Ported as
+  `minDigits = 2` (the boot behaviour, which is what is observable today); see
+  `text.js drawNumber`. Resolve when `Score`/`GameOver` land.
 
 *(Resolved items are moved into the section they belong to and deleted from this
 list — an open-item list that still lists answered questions is worse than no

@@ -13,6 +13,7 @@ Default disasm path: C:\\Z_Temp\\NES-Games-Disassembly\\Battle City
 Emits:
     assets/dat_chr.js     CHR tiles + palettes + the block tables
     assets/dat_levels.js  the 35 stage grids (+ the attract-mode stage)
+    assets/dat_text.js    the title screen's text tables
 """
 
 import os
@@ -28,32 +29,93 @@ ASSETS = os.path.join(PROJECT, "assets")
 # Disasm lines read:  <CDL flags> <file offset> <bank:addr>: <bytes> <instruction>
 # e.g.  "- D 2 - - - 0x001565 00:D555: 0F        .byte $0F, $18, $27, $38   ;"
 BYTE_LINE = re.compile(r"\b00:([0-9A-Fa-f]{4}):\s+\S+\s+\.byte\s+([^;]+)")
-# A literal operand, e.g. "$0F". The bank also holds strings (.byte "COPYRIGHT..")
-# and computed expressions (.byte $06 * $04 + $03); neither appears in the tables
-# we extract, so lines carrying them are skipped rather than half-parsed.
+# A literal operand, e.g. "$0F".
 HEX_BYTE = re.compile(r"^\$[0-9A-Fa-f]{1,2}$")
+# A whole-operand string, e.g. `.byte "BATTLE"`. The ROM's font is ASCII-indexed --
+# tile id == character code -- which is why the disassembler can write text this way
+# and why `ord()` below is the correct decode, not a guess: the byte column of
+# `00:D299: 42  .byte "BATTLE"` shows $42, and $42 is 'B'.
+STRING_BYTES = re.compile(r'^"([^"]*)"$')
+
+
+def parse_operands(text):
+    """One .byte directive's operands -> [byte, ...], or None if not plain data.
+
+    Returns None for computed expressions (`.byte $06 * $04 + $03`) so the caller
+    skips the line wholesale rather than half-parsing it into a wrong-length run.
+    """
+    text = text.strip()
+    m = STRING_BYTES.match(text)          # checked FIRST: a string may contain commas
+    if m:
+        out = [ord(c) for c in m.group(1)]
+        if any(b > 0xFF for b in out):
+            raise SystemExit(f"extract: non-8-bit character in .byte {text}")
+        return out
+    toks = [t.strip() for t in text.split(",")]
+    toks = [t for t in toks if t]
+    if not toks or not all(HEX_BYTE.match(t) for t in toks):
+        return None
+    return [int(t[1:], 16) for t in toks]
 
 
 def parse_byte_tables(asm_path):
-    """Build {cpu_addr: [byte, ...]} from the numeric .byte directives in the bank.
-
-    Only `$hh`-style operands are kept. The bank also holds string directives
-    (e.g. `.byte "COPYRIGHT 1981 1"` -- packed text for PrintPackedMsg); none of
-    the tables we extract are strings, so those lines are skipped wholesale
-    rather than half-parsed into a wrong-length run.
-    """
+    """Build {cpu_addr: [byte, ...]} from the .byte directives in the bank."""
     table = {}
     with open(asm_path, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             m = BYTE_LINE.search(line)
             if not m:
                 continue
-            toks = [t.strip() for t in m.group(2).split(",")]
-            toks = [t for t in toks if t]
-            if not toks or not all(HEX_BYTE.match(t) for t in toks):
+            vals = parse_operands(m.group(2))
+            if vals is None:
                 continue
-            table[int(m.group(1), 16)] = [int(t[1:], 16) for t in toks]
+            table[int(m.group(1), 16)] = vals
     return table
+
+
+def read_until_ff(table, start, limit=64):
+    """Flatten bytes from `start` until the ROM's own $FF terminator (exclusive).
+
+    This is the text tables' real length mechanism -- sub_D6B3 ($D6D0) and
+    sub_D8D2 ($D8D8) both stop on $FF -- so it beats hardcoding lengths here.
+    """
+    out = []
+    addr = start
+    while len(out) <= limit:
+        if addr not in table:
+            raise SystemExit(f"extract: no .byte directive at ${addr:04X} "
+                             f"(reading a text table from ${start:04X})")
+        for b in table[addr]:
+            if b == 0xFF:
+                return out
+            out.append(b)
+        addr += len(table[addr])
+    raise SystemExit(f"extract: no $FF terminator within {limit} bytes of ${start:04X}")
+
+
+# --- title-screen text ($D17F draws every one of these) ----------------------
+#
+# Addresses are the REAL ones, taken from the address column and cross-checked
+# against the operand bytes at the load sites. The disassembly's LABEL NAMES are
+# not reliable here and must not be used to locate a table:
+#   `tbl_D2A0_text___I_`                  actually sits at $D2A5
+#   `tbl_D30F_text___1980_1985_namco_ltd` actually sits at $D2F8
+# (the $D258 operand is $F8, and $D1BD's is $A5 -- the bytes settle it).
+#
+# Cells are the ROM's own arithmetic, e.g. $D21D/$D21F for 1 PLAYER:
+#   LDX #($062B & $001F)      -> col 11
+#   LDY #($062B - $0400) / $20 -> row 17
+TEXT_TABLES = [
+    ("I_DASH",          0xD2A5, 3,  2,  "$D1C5 -> $0462. $5E = the 'I' glyph, $6B = dash"),
+    ("HI_DASH",         0xD2B1, 3,  11, "$D1E0 -> $046B"),
+    ("II_DASH",         0xD2A8, 3,  21, "$D1FF -> $0475. 2P only ($D1EF tests ram_game_mode)"),
+    ("ONE_PLAYER",      0xD2C6, 17, 11, "$D21D -> $062B"),
+    ("TWO_PLAYERS",     0xD2CF, 19, 11, "$D22C -> $066B"),
+    ("CONSTRUCTION",    0xD2EB, 21, 11, "$D23B -> $06AB"),
+    ("LOGO_NAMCOT",     0xD28F, 23, 11, "$D24D -> $06EB. $60-$68, nine custom glyphs"),
+    ("NAMCO_COPYRIGHT", 0xD2F8, 25, 4,  "$D25C -> $0724. $40 = the (c) glyph, $69 = dot"),
+    ("ALL_RIGHTS",      0xD320, 27, 6,  "$D26E -> $0766"),
+]
 
 
 def read_bytes(table, start, count):
@@ -144,6 +206,9 @@ def main():
     block_attr = read_bytes(tables, 0xDABB, 16)          # code -> palette 0..3
     block_tiles = read_bytes(tables, 0xDACB, 16 * 4)     # code -> TL,TR,BL,BR tile ids
 
+    # --- enemy palette flicker ($E003) -------------------------------------
+    tank_flicker = read_bytes(tables, 0xE003, 8)         # -> sprite palette 0..3
+
     # --- stages ------------------------------------------------------------
     names = [f"stage_{i:02d}.bin" for i in range(1, 36)] + ["stage_FF.bin"]
     grids = []
@@ -205,7 +270,18 @@ def main():
         for i in range(16):
             row = block_tiles[i * 4:(i + 1) * 4]
             f.write("  [" + ", ".join(f"0x{v:02X}" for v in row) + f"], // ${i:X}\n")
-        f.write("];\n")
+        f.write("];\n\n")
+
+        f.write("// tbl_E003_spr_A_palette ($E003): the ENEMY tank colour flicker.\n"
+                "// ofs_001_DFB6 ($DFCD-$DFDA) indexes it with\n"
+                "//   (ram_frm_cnt_lo * 4 + ram_tank_type) & $07\n"
+                "// so an enemy's palette changes every frame, and its ARMOUR LEVEL (which\n"
+                "// lives in tank_type) shifts the phase -- that is how a damaged heavy tank\n"
+                "// cycles a different colour set as it degrades. Players do NOT use this:\n"
+                "// their palette is simply the slot index ($DFE8 TXA).\n")
+        f.write("export const TANK_PALETTE_FLICKER = [\n")
+        f.write(js_array(tank_flicker, 8, 2, lambda v: f"0x{v:02X}"))
+        f.write("\n];\n")
 
     # --- emit assets/dat_levels.js ----------------------------------------
     with open(os.path.join(ASSETS, "dat_levels.js"), "w", encoding="utf-8") as f:
@@ -241,14 +317,62 @@ def main():
             f.write("  [" + ", ".join(f"0x{v:X}" for v in row) + "],\n")
         f.write("];\n")
 
+    # --- emit assets/dat_text.js ------------------------------------------
+    texts = [(name, addr, row, col, note, read_until_ff(tables, addr))
+             for name, addr, row, col, note in TEXT_TABLES]
+
+    # INVARIANT: the ROM's font is ASCII-indexed, so every byte is either a
+    # printable ASCII code or one of the custom glyphs above $7F is impossible
+    # here -- these tables are all < $80. A byte outside that means the table
+    # start is wrong (a mislabelled address read as data).
+    for name, addr, _, _, _, ids in texts:
+        if not ids:
+            raise SystemExit(f"extract: {name} at ${addr:04X} is empty")
+        bad = [b for b in ids if b > 0x7F]
+        if bad:
+            raise SystemExit(f"extract: {name} at ${addr:04X} has non-tile bytes "
+                             f"{['$%02X' % b for b in bad]} -- wrong start address?")
+
+    with open(os.path.join(ASSETS, "dat_text.js"), "w", encoding="utf-8") as f:
+        f.write(
+            "// GENERATED by tools/extract.py -- do not edit by hand.\n"
+            "// Source: cyneprepou4uk Battle City disassembly (external).\n"
+            "//\n"
+            "// The title screen's text, as BACKGROUND TILE IDS -- index CHR at\n"
+            "// CHR_BG_BASE + id. The ROM's font is ASCII-indexed, so 'B' really is $42;\n"
+            "// the ids above the letters are custom glyphs ($5E = 'I', $5F = 'II',\n"
+            "// $60-$68 = the NAMCOT logo, $69 = dot, $6B = dash, $40 = the (c) sign).\n"
+            "//\n"
+            "// Every one of these is drawn by sub_D17F_draw_title_screen ($D17F), which\n"
+            "// runs ONCE at $C095 -- before the scroll. So the whole screen, scores and\n"
+            "// menu options included, scrolls up together; sub_C9C0 (the menu) adds only\n"
+            "// the cursor tank, as a sprite.\n"
+            "//\n"
+            "// The ROM's $FF terminator is DROPPED: sub_D6B3 stops on it ($D6D0), a JS\n"
+            "// array has a length. Same normalisation as dat_levels.js dropping the pad\n"
+            "// column. ROW/COL are the ROM's own $D6B3 arguments, not a re-layout.\n"
+            "\n"
+            "export const TEXT = {\n"
+        )
+        for name, addr, row, col, note, ids in texts:
+            ascii_ = "".join(chr(b) if 0x20 <= b < 0x7F else "." for b in ids)
+            f.write(f"  // ${addr:04X} {note}\n")
+            f.write(f"  //   row {row}, col {col} -> \"{ascii_}\"\n")
+            f.write(f"  {name}: {{ row: {row}, col: {col}, ids: ["
+                    + ", ".join(f"0x{v:02X}" for v in ids) + "] },\n")
+        f.write("};\n")
+
     codes = sorted({v for g in grids for row in g for v in row})
     print(f"extract: CHR 8192 B -> 512 tiles (sprites 0-255 @ $0000, BG 256-511 @ $1000)")
     print(f"extract: palettes  4 sprite, 9 bg sets x 4")
     print(f"extract: blocks    16 attribute + 16 x 4 tile ids")
     print(f"extract: stages    {len(grids)} decoded ({COLS}x{ROWS}), "
           f"codes used: {', '.join(f'${c:X}' for c in codes)}")
+    print(f"extract: text      {len(texts)} title tables, "
+          f"{sum(len(t[5]) for t in texts)} tile ids total")
     print(f"extract: wrote     {os.path.join(ASSETS, 'dat_chr.js')}")
     print(f"extract: wrote     {os.path.join(ASSETS, 'dat_levels.js')}")
+    print(f"extract: wrote     {os.path.join(ASSETS, 'dat_text.js')}")
 
 
 if __name__ == "__main__":

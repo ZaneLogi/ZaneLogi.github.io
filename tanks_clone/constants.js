@@ -11,6 +11,16 @@ export const BTN = Object.freeze({
 });
 export const BTN_DPAD = BTN.Right | BTN.Left | BTN.Down | BTN.Up; // $F0
 export const BTN_AB = BTN.A | BTN.B;                              // $03
+export const BTN_SS = BTN.Start | BTN.Select;                     // $0C con_btns_SS
+
+// --- Facing — the low nibble of ram_tank_flags ---
+// bank_val.inc names the BUTTONS but not the directions; these values are
+// sub_E451_convert_Dpad_buttons' own returns ($E466/$E45A/$E460/$E454), and $C9CE
+// seeds the menu cursor with con_tank_flag_80 + $03, i.e. alive + facing RIGHT.
+export const DIR = Object.freeze({
+  UP: 0, LEFT: 1, DOWN: 2, RIGHT: 3,
+  NONE: -1,   // $E469 returns $FF and callers test N; `< 0` is the JS equivalent.
+});
 
 // --- Tank state — high nibble of ram_tank_flags (con_tank_flag_*) ---
 // tank_handler ($DEB8) dispatches on (flags >> 3) & $FE via tbl_E4B8.
