@@ -189,6 +189,20 @@ The seam: a new tile or actor type is a registry entry, with any per-type
 behaviour attached to that entry (tiles carry `onBump`). The generic mechanisms —
 resolver, world pipeline, animator — do not change.
 
+## ROM data — tiles and palette
+
+`assets/dat_tiles.js` is **generated** (`python tools/build_sprite_data.py emit`,
+from the SMB ROM + SMBDIS.ASM): the whole 8K CHR as base64 — tiles 0-255 sprites at
+PPU `$0000`, 256-511 background at `$1000`, a split `Start` sets once and never
+rewrites — plus the tables parsed out of the asm. Nothing is retyped; don't hand-edit.
+
+`palette.js` is **neither generated nor from the ROM.** The cartridge holds 6-bit
+colour *indices* and the PPU turns each into an analog signal, so index→RGB is
+hardware, not data. It is a hand-supplied standard 2C02 table.
+
+`demo/chr_viewer.html` renders all 512 tiles in the ROM's own palettes — the eyeball
+check that the data is right.
+
 ## Module map
 
 | File | Owns |
@@ -202,7 +216,11 @@ resolver, world pipeline, animator — do not change.
 | `collision.js` | `resolveCollision`: per-axis integrate + tile detect + respond; returns `contacts` |
 | `world.js` | `World`: owns the actor list (`addActor`/`removeActor`) + map; runs the pipeline and the react step; owns tile animations + block-bump hops; draws every actor |
 | `animator.js` | `Animator`: plays a sprite-set; owns all frame-cycling. Distinct from `actor_animations.js`, which only *names* the state to show |
-| `tiles.js` | `TILES` registry + `isSolid` |
+| `tiles.js` | `TILES` registry + `isSolid`. Level-grid cell types — nothing to do with CHR tiles |
+| `chr_decoder.js` | CHR bytes → pixel indices → blitted tiles (`decodeTiles`, `paintTile`) |
+| `palette.js` | the 2C02 master table; `nesRgb` / `nesHex` |
+| `assets/dat_tiles.js` | GENERATED: CHR + `FRAMES` + `GFX_TBL_OFFSETS` + `PLAYER_COLORS` + `AREA_PALETTES` |
+| `tools/build_sprite_data.py` | the generator — reads ROM + asm, writes `assets/dat_tiles.js` |
 | `level_map.js` | `LevelMap`: tile-grid queries (`isSolidAt`, `setTile`, `worldToTile`, `getTileRect`) |
 | `camera.js` | smooth follow, world→screen, map clamp |
 

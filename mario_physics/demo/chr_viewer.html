@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CHR viewer</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; padding: 24px;
+      font: 14px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace;
+      background: #0e0e14; color: #d7d7e0;
+      display: flex; flex-direction: column; align-items: center; gap: 18px;
+    }
+    h1 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: .5px; }
+    h2 { font-size: 13px; font-weight: 600; margin: 0 0 2px; letter-spacing: .5px; }
+    h2 small { color: #8a8a9a; font-weight: 400; letter-spacing: 0; }
+
+    .sheets { display: flex; gap: 28px; flex-wrap: wrap; justify-content: center; align-items: flex-start; }
+    .panel {
+      display: flex; flex-direction: column; gap: 8px;
+      background: #14141c; border: 1px solid #24242f; border-radius: 8px; padding: 14px;
+    }
+    /* align-self keeps the canvas at its attribute size: the column's default
+       align-items:stretch would widen it to the panel and resample the pixels. */
+    canvas { image-rendering: pixelated; display: block; border-radius: 3px; align-self: start; }
+
+    .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .row > label { color: #8a8a9a; font-size: 12px; }
+
+    button, select {
+      font: inherit; font-size: 12px; background: #23232f; color: #d7d7e0;
+      border: 1px solid #3a3a4a; border-radius: 6px; padding: 4px 9px; cursor: pointer;
+    }
+    button:hover, select:hover { background: #2d2d3c; }
+    button[aria-pressed="true"] { background: #34445c; border-color: #5578a8; color: #eaf2ff; }
+
+    .pal { display: inline-flex; padding: 3px 5px; gap: 0; align-items: center; }
+    .pal .sw { width: 13px; height: 13px; border: 1px solid #00000070; }
+    .pal .sw:first-of-type { border-radius: 2px 0 0 2px; }
+    .pal .sw:last-of-type { border-radius: 0 2px 2px 0; }
+    .pal b { font-weight: 600; margin-right: 5px; color: #9a9aac; }
+    .pal[aria-pressed="true"] b { color: #eaf2ff; }
+
+    .readout { color: #9a9aac; font-size: 12px; min-height: 1.5em; }
+    .readout b { color: #d7d7e0; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>CHR viewer</h1>
+
+  <div class="row">
+    <label for="zoom">zoom</label>
+    <select id="zoom">
+      <option value="2">2×</option>
+      <option value="3" selected>3×</option>
+      <option value="4">4×</option>
+      <option value="5">5×</option>
+    </select>
+    <button id="grid" aria-pressed="true">grid</button>
+    <button id="ids" aria-pressed="true">labels</button>
+  </div>
+
+  <div class="sheets">
+    <div class="panel">
+      <h2>Sprites <small>— tiles $00–$FF · CHR $0000–$0FFF</small></h2>
+      <div class="row" id="spritePals"></div>
+      <canvas id="spriteCv"></canvas>
+      <div class="readout" id="spriteOut">&nbsp;</div>
+    </div>
+
+    <div class="panel">
+      <h2>Background <small>— tiles $00–$FF · CHR $1000–$1FFF</small></h2>
+      <div class="row">
+        <label for="bgSet">area</label>
+        <select id="bgSet"></select>
+      </div>
+      <div class="row" id="bgPals"></div>
+      <canvas id="bgCv"></canvas>
+      <div class="readout" id="bgOut">&nbsp;</div>
+    </div>
+  </div>
+
+  <script type="module" src="./chr_viewer.js"></script>
+</body>
+</html>
