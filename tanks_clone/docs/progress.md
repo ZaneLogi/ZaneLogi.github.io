@@ -379,16 +379,59 @@ but because it described work that had not started yet.)*
     (0 on ground) stopping at walls; and the **real flow** Menu→1P→SELECT→Battle spawns
     P1 and drives, `render()` clean. Pixels: star 105, tank 166, +shield 23.
 
+- **P7 — Bullets: fire, movement + terrain collision, brick chip, explosion, and the
+  player-vs-player FREEZE.** ☑ Done. Scope 2 (the other half of the P6 split). The
+  battlefield is now interactive: players shoot, bricks chip, bullets explode, and P1's
+  bullet freezes P2 / P2's freezes P1. Full decode + citations + verification:
+  `docs/research_bullets.md`. Pipeline steps 5/8/11/12/13 filled; step 9 (enemy fire)
+  stubbed. `bullet.js` rewritten from stub; `field.js`/`constants.js`/`game.js`/
+  `modes/session.js` touched.
+  - **10 flat bullet slots** — 0-7 each tank's primary (bullet i ↔ tank i), 8-9 the
+    players' 2nd bullets (the 2-shot upgrade). The ROM lays the 2nd arrays right after
+    the primaries so one loop `9→0` covers both; the flat-10 array IS that faithful model
+    (the `& $06`/`& $07` loop masks are observable "which bullet hits which", named as
+    predicates, not a zero-page mirror). Data-model rule, §0. The packed `ram_bullet_status`
+    byte (hi nibble state / low 2 bits dir / low nibble explosion counter) is **split** into
+    `state`/`dir`/`explosionPhase`/`phaseFrame`, like `Tank`'s flags and `Base`'s
+    game-over byte (research doc dev #4 — done in review, was an inconsistency).
+  - **Fire `$E122`/`$E08C`** — A/B → spawn into the tank's own primary (one per tank);
+    the 2-shot upgrade promotes a busy primary into the 2nd slot. `property` from the
+    tank type (fast/power) is ported but always 0 today (players spawn `type=0`;
+    upgrades are the bonus scope). Speed `$E063`: normal 2px/frame, fast 4.
+  - **Terrain `$E604`/`$E69A`** — a 4-sample **cross-section** sweep (perpendicular to
+    travel), the far edge sampled only when the near one chipped a brick — so a bullet
+    flies down a 1-wide corridor without chipping its walls. Per point: eagle→`Base.onHit`
+    (dormant until Base draws the eagle); `≥$12` (water/ice/forest) fly over; border/steel
+    stop; brick chips the quadrant (`chipQuadrant`, already `$D743`); a POWER bullet
+    clears the whole tile. §3.
+  - **Explosion `$E076`/`$DEE2`** — `$33 → 0` over 9 frames, 3 sprite phases
+    ($F1/$F5/$F9, palette 3). **Bullet-vs-bullet `$E910`** — player bullets cancel any
+    other bullet within 6px, silently.
+  - **The FREEZE `$E70C` Part 3 (`$E83F`)** — a player hit by the OTHER player's bullet
+    (`(p^bi)&1`) gets `stun_timer = $C8` (200); shielded → absorb, already-stunned →
+    skip, demo → skip. The countdown + can't-move + blink already existed (P6, `$DB8F`/
+    `$DFDD`); this adds the **set**. **`$E70C` Parts 1&2 (enemy kills / player kills
+    enemy + score/bonus) deferred** to the enemy scope — cited stubs; no enemy exists,
+    and they need the tank-explosion render + respawn + Score/Bonus.
+  - **Render `$E0D8`** — flying = one 8×16 sprite `$B1+dir·2` (palette 2); front layer,
+    enqueued between tanks and shields (OAM order shields < bullets < tanks).
+  - **Verified deterministically** (headless `Game`, `getImageData`; 32 checks): fire /
+    2px+4px speed / brick chip `$0F`→`$0A` + corridor passthrough / steel+border stop /
+    water flyover / POWER clear / 9-frame explosion / bullet-vs-bullet / **the freeze
+    both ways through the real `mainBattleScript`** (stunned player can't move) + no
+    self-freeze + shield absorb + demo exempt / the full flow Menu→1P→Battle fires a
+    visible bullet, `render()` clean.
+
 ## Next
-Following the gameplay line, **Scope 2 (the other half of the split): bullets** —
-1/ fire (`$E122` + `$E08C` spawn, one per tank; A or B), 2/ bullet movement + terrain
-collision (`$E604`/`$E69A` point probe), 3/ **brick chip** (`$D743` quadrant, the
-`chipQuadrant` Field method already exists), 4/ bullet **explosion** (`$E02E` status
-countdown + `$E0D8`/`$DEE2` render). Then **`Demo`** (`$C642` fakes input into
-`mainBattleScript` — unblocks now that tanks move) and enemy AI/spawn.
+Following the gameplay line: **`Demo`** (`$C642` fakes input into `mainBattleScript` —
+now unblocked: tanks move and shoot) and then **enemy AI / spawn** (`$DB48` spawn,
+`$E162` enemy fire, the `tbl_E498` AI states), which also unblocks `$E70C` Parts 1&2
+(bullet-vs-enemy kill / score / bonus) and the tank-explosion render.
 
 `StageIntro` is done (curtain wipe + "STAGE N" + A/B select + reveal); its remaining
-base-draw / sfx / editor hooks land with Base / Audio / Construction.
+base-draw / sfx / editor hooks land with Base / Audio / Construction. The **eagle-hit →
+game over** path is ported in `Bullet.checkPoint` but dormant until Base draws the eagle
+(`$C1DC`).
 
 ## Debt (NOT SOURCE — delete when its owner lands)
 - **`GameOver` / `HallOfFame` wait on a frame constant**, because the ROM waits on

@@ -79,7 +79,9 @@ export class Tank {
     // $E0/$F0 -> ofs_001_E00B — the materializing spawn star.
     if (this.state >= 0xE0) { this.drawRespawnStar(renderer, field); return; }
     // TODO: $10 kill-points ($DEFD); $20/$30/$40 ($DF33/$DF46) and $50/$60/$70
-    // ($DECD) explosions — reached only once bullets/enemies can kill a tank.
+    // ($DECD) explosions — reached only when a tank is DESTROYED: an enemy bullet
+    // ($E70C Part 1) or a killed enemy (Part 2), both enemy-scope. P7's player-vs-
+    // player bullet only FREEZES (Part 3), so it never reaches these.
   }
 
   // sub_DA2B's forest-priority probe ($DA3B-$DA45): a sprite half is drawn BEHIND the

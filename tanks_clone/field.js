@@ -78,8 +78,21 @@ export class Field {
   // sub_E181 ($E181) compares the tile under a player to $21.
   isIce(col, row) { return this.terrainAt(col, row) === TILE.ICE; }
 
-  // --- terrain mutation (the terrain edit; the DECISION to make it is bullet logic,
-  // $E604, step 4) ---
+  // sub_D725 ($D725) + sub_D73C ($D73C) — the bullet-collision QUADRANT pre-test, in
+  // pixels. $D725 turns (px & 4, py & 4) into a quadrant bit (TL 1 / TR 2 / BL 4 / BR 8);
+  // $D73C returns (bit | $F0) & tile. The $F0 makes any tile with a non-zero HIGH nibble
+  // (steel $10, border $11, water $12, ice $21, forest $22, eagle $C8..) register a hit
+  // whatever the quadrant, while a BRICK ($01-$0F) only hits on the quadrant still solid
+  // — which is exactly why a bullet flies clean through a hole it (or another) chipped.
+  quadrantHit(px, py) {
+    let bit = 1;                                  // $D725
+    if (py & 0x04) bit <<= 2;                     //   -> $04
+    if (px & 0x04) bit <<= 1;                     //   -> $02 / $08
+    return ((bit | 0xF0) & this.terrainAt(px >> 3, py >> 3)) !== 0;   // $D73E-$D742
+  }
+
+  // --- terrain mutation (the terrain edit; the DECISION to make it is bullet logic —
+  // Bullet.checkPoint / $E604 / $E69A, pipeline step 11, ported in P7) ---
 
   // A normal bullet chips ONE 4x4 quadrant of a brick — sub_D743 ($D743).
   chipQuadrant(px, py) { this.tilemap.setQuadrant(px, py, false); }

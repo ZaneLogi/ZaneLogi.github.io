@@ -144,6 +144,62 @@ export const BLOCK_PX = 16;
 export const FIELD_ORIGIN_COL = 2;
 export const FIELD_ORIGIN_ROW = 2;
 
+// --- Bullets (S5) — the $CC..$D5 zero-page arrays + the $E0xx/$E6xx routines ---
+//
+// 10 FLAT slots: 0-7 = each tank's primary bullet (bullet i belongs to tank i);
+// 8-9 = the two players' 2nd bullets (the "2 shots on screen" upgrade, players only).
+// The ROM lays the 2nd-bullet arrays right after the primaries so one loop 0..9 covers
+// both ($E02E/$E604/$E910 all count 9->0); the flat array IS that faithful model. The
+// membership tests the loops do with & masks are named in bullet.js, not spelled here.
+export const BULLET_SLOTS = 10;
+export const SECOND_BULLET_BASE = 8;   // bullets[8 + p] = player p's 2nd bullet
+
+// Bullet lifecycle state. The ROM packs this (+ direction + the explosion counter) into
+// the HIGH/LOW nibbles of one byte, ram_bullet_status ($CC); we split it into named
+// fields (Bullet.state / .dir / .explosionPhase / .phaseFrame) the way Tank splits
+// ram_tank_flags and Base splits ram_game_over_flag — see research_bullets.md dev #4.
+// String enum to match BASE_STATE / the StageIntro seq (readable in the debugger).
+export const BULLET_STATE = Object.freeze({
+  INACTIVE: 'inactive',   // status $00 — empty slot
+  FLYING: 'flying',       // status $40 — a live bullet in flight
+  EXPLODING: 'exploding', // status $30/$20/$10 — the hit-explosion animation
+});
+
+// ram_bullet_property ($D6) — set from the firing tank's type ($E0BC-$E0D5).
+export const BULLET_PROPERTY = Object.freeze({
+  FAST: 0x01,   // advance twice per frame ($E05D) AND move every frame ($E614)
+  POWER: 0x02,  // destroys steel + clears the WHOLE tile, not one quadrant ($E6DA)
+});
+
+// Bullet collision boxes — half-open, hit when |d| < range on BOTH axes.
+export const BULLET_TANK_RANGE = 0x0A;     // vs a tank centre ($E739/$E74A/$E87A/$E88B)
+export const BULLET_BULLET_RANGE = 0x06;   // vs another bullet ($E94D/$E95E)
+
+// Flying-bullet sprite (sub_DA64): ONE 8x16 sprite, tile $B1 + dir*2, palette 2, at
+// (pos_X - 5, pos_Y). $B0-$B7 are the four facings in the BG pattern table.
+export const BULLET_SPRITE_BASE = 0xB1;      // $E109 LDA #$B1
+export const BULLET_SPRITE_X_OFFSET = 0x05;  // $DA6C SBC #$05
+export const BULLET_SPRITE_PALETTE = 0x02;   // $E107 STA spr_A_palette
+export const BULLET_EXPLOSION_PALETTE = 0x03; // $DEF5 — sub_DEE2's palette
+
+// Hit-explosion animation ($E076 countdown + sub_DEE2 tiles). The ROM seeds status $33
+// and walks it $33->$23->$13->0: three shrinking blast sprites, each shown for 3 frames
+// (the low nibble counting 3->0, reloaded via ORA #$03). Split from the packed byte:
+export const BULLET_EXPLOSION_PHASES = 3;                 // the three $30/$20/$10 sizes
+export const BULLET_PHASE_FRAMES = 3;                     // frames each phase shows ($E087 -> 3)
+export const BULLET_EXPLOSION_SPRITES = [0xF1, 0xF5, 0xF9]; // sub_DEE2 spr_T, phase 3/2/1
+
+// Bullet-vs-terrain thresholds ($E6A6-$E6EF), each relative to a live TILE id. A bullet
+// PASSES over any tile >= $12 (water $12, ice $21, forest $22, blank-steel $20); every
+// solid it stops at is $01-$11. The eagle is the four tiles $C8-$CB (tile & $FC == $C8).
+export const BULLET_PASS_MIN = 0x12;   // $E6C8 CMP #$12 / BCS -> pass over
+export const EAGLE_TILE_BASE = 0xC8;   // $E6A4 AND #$FC / $E6A6 CMP #$C8
+
+// ram_plr_stun_timer ($6F) — THE FREEZE. $E8AA writes $C8 to a player hit by the OTHER
+// player's bullet; sub_DB75 ($DB8F) DECs it and holds the tank stopped + blinking
+// ($DFDD) until 0. Cleared on spawn ($E377) and at stage prep ($C363). See Tank.control.
+export const STUN_TIMER_INIT = 0xC8;   // $E8AA LDA #$C8 — 200 control-ticks (~4.4 s)
+
 // --- Bonus / power-up ids (ram_bonus_id) ---
 // TODO: decode from E8BE_spawn_bonus / E972_try_to_pick_up_bonus.
 

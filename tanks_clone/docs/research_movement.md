@@ -26,8 +26,9 @@ theirs from AI. Players only, gate = 3 of every 4 frames (`$DB77-$DB7F`, the sam
 cadence as the move step). Per player:
 
 - exploding (`<$80`) / respawning (`>=$E0`) → skip (`$DB85/$DB89`).
-- stunned (`ram_plr_stun_timer` `$6F`) → DEC + stop (`$DB8B-$DB91`). No enemy/bullet
-  sets stun yet, so it never fires this step, but the branch is ported.
+- stunned (`ram_plr_stun_timer` `$6F`) → DEC + stop (`$DB8B-$DB91`). Set by P7's
+  player-vs-player **freeze** (`$E70C` Part 3): a player shot by the OTHER player freezes
+  here for `$C8` ticks. (Until P7 nothing set it, so this branch ran dry.)
 - read the d-pad (`sub_E451`, `Input.dpadToDirection`): no direction → state `$80`
   (stopped, `$DBA6`); a direction → state `$A0 | dir` (`$DBE9`).
 - **Turn-snap** (`$DBC7-$DBE5`): a **perpendicular** turn (not same, not the

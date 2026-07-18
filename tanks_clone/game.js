@@ -290,9 +290,9 @@ export class Game {
     this.bullets.playerFire(this.roster, this.input);             // 8  $E122 player fire
     this.bullets.enemyFire(this.roster, this.ai, this.clockTimer);// 9  $E162 enemy fire
     this.roster.spawnEnemyTick();                                 // 10 $DB48 enemy_spawn
-    this.bullets.move(this.field, this.base);                     // 11 $E604 bullets_movement
+    this.bullets.move(this.field, this.base, this.frm.lo);        // 11 $E604 bullets_movement
     this.bullets.collideWithBullets();                            // 12 $E910
-    this.bullets.collideWithTanks(this.roster, this.score);       // 13 $E70C
+    this.bullets.collideWithTanks(this.roster, this.secondLoop);  // 13 $E70C (Part 3 freeze)
     this.bonus.tryPickup(this.roster, this.base, this, this.score);// 14 $E972
     this.updateGameOverText();                                    // 15 $C972
     this.audio.movementSfx(this.roster);                          // 16 $DB0B (deferred)

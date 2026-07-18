@@ -127,7 +127,8 @@ modes/editor.js     $C0AE (deferred stub)
 tilemap.js          Tilemap: the screen background as two 1:1 arrays — tiles (shape)
                     + palettes (0-3 per cell). clear ($D47E), writeTiles
                     ($D6B3), setQuadrant ($D71E/$D725 + $D74D/$D764), tileAt,
-                    paletteAt. Field HAS-A Tilemap (settled 2026-07-18) — field bullet
+                    paletteAt. Field HAS-A Tilemap (settled 2026-07-18); its setQuadrant is
+                    the bullet brick-chip (Field.chipQuadrant, ported P7).
 text.js             drawHugeText ($D8D2/$D85E — the glyph IS the huge letter),
                     writeText ($D6B3), drawNumber ($D934 + $D6DD)
 hud.js              NOT SOURCE — debug readout into an HTML element. Still the only

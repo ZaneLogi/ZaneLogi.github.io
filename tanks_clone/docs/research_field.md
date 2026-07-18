@@ -77,11 +77,12 @@ until re-marked — a faithful quirk. We store the marked-cell list per tank ins
 the ROM's packed base-pointer + two neighbor-flag bits (`$E1D2`/`$E1E3`), which is the
 same cell set without the packing.
 
-## 5. Terrain mutation (bullets — step 4)  [D]
+## 5. Terrain mutation (bullets — step 11)  [D]
 
-Thin edits Field owns; the *decision* to make them is bullet logic (`$E604`, a later
-step): `chipQuadrant(px,py)` = `sub_D743` (a normal bullet clears one 4×4 quadrant via
-`setQuadrant`); `clearTile(col,row)` = `$E6DE`'s whole-tile clear (a power bullet).
+Thin edits Field owns; the *decision* to make them is bullet logic (`Bullet.checkPoint`,
+`$E604`/`$E69A` — ported in P7): `chipQuadrant(px,py)` = `sub_D743` (a normal bullet clears
+one 4×4 quadrant via `setQuadrant`); `clearTile(col,row)` = `$E6DE`'s whole-tile clear (a
+power bullet). `Field.quadrantHit` (`$D725`/`$D73C`) is the collision pre-test they read.
 
 ## Verified (P5)
 

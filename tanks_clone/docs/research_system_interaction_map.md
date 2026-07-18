@@ -314,6 +314,10 @@ per stage in `ram_enemy_type_stage_cnt` ($8B, 4 bytes = 4 types) **[?]** and
 (spawn), `E02E_bullets_status_handler`, `E604_bullets_movement`,
 `E70C` (vs tanks), `E910` (vs bullets), terrain hit inside `E604`,
 `DEE2_draw_bullet_explosion`, `E409_clear_bullet_status`.
+**Ported P7** — the three-handler split (§8's old `[?]`) is resolved: `E02E` (step 5)
+advances flying bullets + counts the explosion down; `E604` (step 11) moves + does the
+terrain collision (`E69A`); `E0D8` is the separate **render** half. Full decode +
+citations + the packed-`status`-byte split: `docs/research_bullets.md`.
 
 **S6 — Base / HQ (eagle).** `E2A9_HQ_handler`, `ram_shovel_timer`($45) fortify,
 eagle draw routines (`CAF5`/`CB5D`/`CB9E`/`CC08`), destruction → sets
@@ -552,10 +556,6 @@ home, so the history is recoverable without the list carrying it.
   **[D]**: bit 2 (`& $04`) = carries-a-bonus (`$DFBA`); bits 0–1 index `tbl_E003`
   for the palette, so they are almost certainly the 4 enemy types; `& $C0 == $40`
   gates the 2-bullet upgrade (`E122`). Still open: armour levels, speed.
-- **[?]** `E02E_bullets_status_handler` vs `E604_bullets_movement` split — which
-  owns terrain collision vs status transitions. *(Note `E02E` is pipeline step 5;
-  `E0D8_bullets_status_handler` is a different routine called by the stage loop —
-  similar names, don't conflate.)*
 - **[?]** Exactly which power-ups exist and their `bonus_id` values (S7).
 
 These get resolved as the work reaches them — each finding landing wherever it

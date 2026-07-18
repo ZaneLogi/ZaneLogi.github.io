@@ -162,11 +162,12 @@ export class Renderer {
    * sprite-table bit is ignored. That is exactly why sprites here can draw
    * BACKGROUND glyphs ($C59C loads #$9D) — see assets/dat_chr.js.
    *
-   * NOT ported yet: $DA3B-$DA45 probes the field at (sprX + 3, sprY) and, on tile
-   * $22 (forest), ORs ram_priority_spr_A ($20) into the attribute to put the sprite
-   * BEHIND the background. That needs Field, and needs the backdrop -> behind-BG
-   * sprites -> BG -> front sprites composite (CLAUDE.md). Nothing reaches it today:
-   * the title screen has no forest, so the probe's answer is always "no".
+   * $DA3B-$DA45 probes the field at (sprX + 3, sprY) and, on tile $22 (forest), ORs
+   * ram_priority_spr_A ($20) into the attribute to put the sprite BEHIND the background.
+   * Ported in P6 as the `behind` flag below + the backdrop -> behind-BG sprites -> BG ->
+   * front sprites composite (beginSpriteLayers/flushSprites; CLAUDE.md); the field probe
+   * itself lives in the caller (Tank.onForest). The menu has no field, so its sprites
+   * paint on top (behind = false).
    *
    * @param {number} tileByte  the OAM tile byte, 8x16-encoded (see above).
    * @param {number} sprX  $DA2B's X in-param -> OAM X directly.

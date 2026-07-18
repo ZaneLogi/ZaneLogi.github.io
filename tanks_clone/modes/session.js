@@ -226,7 +226,11 @@ class Battle extends Mode {
     // rides the live bgPaletteId ($C31D swaps it 02<->01 every 32 frames).
     renderer.beginSpriteLayers();
     g.roster.render(renderer, g.frm.lo, g.field);      // $C209 sub_DEA6 — tanks + spawn star
+    g.bullets.render(renderer);                        // $C206 sub_E0D8 — bullet + hit sprites
     g.roster.drawShields(renderer, g.frm.lo);          // $E27C draw half — spawn helmet, front
+    // OAM priority (lowest index = front-most): shields (step 7) > bullets ($C206) > tanks
+    // ($C209); the front list paints in enqueue order, so tanks -> bullets -> shields puts
+    // shields over bullets over tanks — the ROM's order.
     renderer.flushSprites(true);                       // behind-BG (forest-covered) sprites
     renderer.drawTilemap(g.field.tilemap, g.bgPaletteId, 0, 0, true);   // BG, transparent index 0
     renderer.flushSprites(false);                      // front sprites, on top
