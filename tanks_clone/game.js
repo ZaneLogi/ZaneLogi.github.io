@@ -121,6 +121,8 @@ export class Game {
     this.clockTimer = 0;                   // ram_clock_timer ($0100) — enemy freeze
     this.paused = false;                   // ram_pause_flag ($6D)
     this.scrollY = 0;                      // ram_scroll_Y ($4F)
+    this.bgPaletteId = 0x02;               // ram_bg_palette_id ($4D) — con_bg_pal_02 at
+                                           // stage start; $C31D swaps it 02<->01 (water)
 
     // --- the mode machine ---
     this.modeId = null;
@@ -251,16 +253,21 @@ export class Game {
 
   // sub_C331_prepare_tanks_addresses_and_spawn_players_before_stage ($C331).
   prepareStage() {
+    this.bullets.clearAll();                // $C331 sub_E409_clear_bullet_status
+    this.roster.clearAll();                 // $C334 sub_E413 — zero every slot's flags
     this.enemiesLeft = ENEMIES_PER_STAGE;   // $C355/$C357 — 20 ($14)
     this.frm.hi = 0;                        // $C35D
     this.constrUsageCnt = 0;                // $C35F — a constructed stage plays ONCE (§6c)
+    // $C341-$C353 — spawn each player who still has lives (2P-aware). Absence of
+    // lives IS the disable: a player with 0 lives simply is not spawned.
+    if (this.lives[0] > 0) this.roster.spawnPlayer(0);   // $C343-$C347
+    if (this.lives[1] > 0) this.roster.spawnPlayer(1);   // $C34A-$C350
     this.base.reset();                      // $C386-$C388 game_over_flag = con_not_game_over
     this.stageSelectUsed = true;            // $C38F ram_004C_flag = 1 (§6a)
-    // TODO: the rest of $C331 — clear bullets/tanks, spawn surviving players,
-    //   ram_enemy_spawn_cnt, clear the power-up timers ($C361-$C367), draw the 20
-    //   enemy icons ($C377 sub_C8C0), sub_C830/sub_C859 HUD icons,
-    //   sub_E42B_prepare_enemy_tanks_for_stage ($C383);
-    //   the spawn interval $BE - stage*4, minus $14 in 2P ($C391-$C3B2).
+    // TODO: the rest of $C331 — ram_enemy_spawn_cnt, clear the power-up timers
+    //   ($C361-$C367), draw the 20 enemy icons ($C377 sub_C8C0), sub_C830/sub_C859
+    //   HUD icons, sub_E42B_prepare_enemy_tanks_for_stage ($C383); the spawn
+    //   interval $BE - stage*4, minus $14 in 2P ($C391-$C3B2).
   }
 
   // sub_D97D_check_hiscore_beaten ($D97D).
@@ -274,12 +281,12 @@ export class Game {
   // literal.
   mainBattleScript() {
     this.field.iceDetectAndMarkOccupancy(this.roster);            // 1  $E181 ice_detection
-    this.roster.iceMovement(this.field);                          // 2  $DB75 ice_movement
-    this.roster.movement(this.input, this.ai, this.field);        // 3  $DBF1 tank_movement
+    this.roster.controlPlayers(this.input, this.frm.lo);          // 2  $DB75 player control
+    this.roster.moveTanks(this.field, this.frm.lo);               // 3  $DBF1 tank_movement
     this.field.occupancyWriteback(this.roster);                   // 4  $E1FA
     this.bullets.updateStatus();                                  // 5  $E02E
     this.base.update(this.field, this);                           // 6  $E2A9 HQ_handler
-    this.roster.updateInvincibility();                            // 7  $E27C
+    this.roster.updateInvincibility(this.frm.lo);                 // 7  $E27C
     this.bullets.playerFire(this.roster, this.input);             // 8  $E122 player fire
     this.bullets.enemyFire(this.roster, this.ai, this.clockTimer);// 9  $E162 enemy fire
     this.roster.spawnEnemyTick();                                 // 10 $DB48 enemy_spawn
@@ -298,5 +305,13 @@ export class Game {
   // never shows GAME OVER. Flow doc §6f.
   updateGameOverText() { /* TODO: port $C972 */ }
 
-  waterPaletteSwap() { /* TODO: port $C31D — swap bg palette every 32 frames */ }
+  // sub_C31D_water_palette_swap_handler ($C31D), pipeline step 18 — the water shimmer.
+  // ram_bg_palette_id is con_bg_pal_02 for frames lo%64 in [0,31] and con_bg_pal_01 for
+  // [32,63]; it HOLDS between the two switch points. The water tile ($12) is the only
+  // one whose colour differs between those two BG palette sets, so only it animates.
+  waterPaletteSwap() {
+    const a = this.frm.lo & 0x3F;                   // $C31D AND #$3F
+    if (a === 0x00) this.bgPaletteId = 0x02;        // $C32C con_bg_pal_02
+    else if (a === 0x20) this.bgPaletteId = 0x01;   // $C327 con_bg_pal_01
+  }
 }

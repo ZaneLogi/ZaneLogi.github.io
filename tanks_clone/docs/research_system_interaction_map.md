@@ -522,9 +522,11 @@ per-subsystem docs, not before scaffolding.
   any tank, bullet, AI or collision exists, plus ~10 MB/s of allocation churn.
   Allocate-once-and-mutate is both the C++ instinct and the NES's own model.
   - The **water swap needs no redraw on hardware** (`$D50E` just re-uploads 16
-    palette bytes; the palette is a hardware indirection we don't reproduce). In
-    our view we must re-rasterize — but only the *water* blocks, not the field.
-    A view-space re-derivation, not a mechanism change.
+    palette bytes; the palette is a hardware indirection we don't reproduce). In our
+    view we must re-rasterize; P6 recomposes the whole field on the set swap (the
+    compose caches on `set`), which is cheap at the 2 Hz swap rate. Repainting only the
+    *water* blocks is a deferred optimization (it needs per-cell dirty tracking). A
+    view-space re-derivation, not a mechanism change.
 - **Sprites: 2×8×16 per tank, never a pre-composed 16×16** — see S9 (`sub_DA2B`'s
   per-half forest probe + write-back). Cache at the *tile* level (`(tileId,
   palette) → bitmap`), not the tank level: enemy palettes flicker per frame, so a

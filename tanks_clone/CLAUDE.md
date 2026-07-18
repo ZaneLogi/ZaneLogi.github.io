@@ -80,25 +80,28 @@ don't let the answer live only in that list.
   `ram_frm_cnt_hi` is *not* a high byte: it ticks every **64** frames and the game
   writes it as a timer, so don't collapse lo/hi into one counter. Map §1.
 - **Rendering follows the PPU, not convenience.** Map §7 design notes. Built in P4
-  (`renderer.js`, `tiles.js`) — what holds today, and what is still only a plan:
+  (`renderer.js`, `tiles.js`), completed in P6 (sprites + the 4-layer composite):
   - **Two caches.** `TileCache` is **lazy** and keyed by **(tile, palette)** — a NES
     tile is four pixel *indices*, not colours, so the same brick is orange on the
     title and grey in a stage; keying on the tile alone hands back wrong colours.
     Separately, each `Tilemap` composes into a persistent canvas repainted only when
     its `version` moves — the NES never redraws the background either (its write
     buffer is a dirty-block queue). A scroll is then one `drawImage` of an unchanged
-    picture, which is what the PPU's scroll register does. *(Whole-map repaint for
-    now; per-cell dirty tracking is what the battlefield will want.)*
+    picture, which is what the PPU's scroll register does. *(Whole-map repaint on a
+    version/set change — cheap, since the field only changes at stage load and on the
+    2 Hz water-palette swap; per-cell dirty tracking is a later optimization for when
+    brick-chipping churns it every frame.)*
   - **Tanks are 2×8×16 sprites**, never a pre-composed 16×16 — `$DA2B` probes the
     field per half. In 8×16 mode the OAM tile byte's **bit 0 picks the pattern
     table**, so sprites can draw BG glyphs (`$C59C` → `#$9D`).
   - **Two coordinate quirks live in `drawSprite`**, not in callers: `$DA34` stores
     OAM Y = `sprY - 8` (so `sprY` is the sprite's **centre**), and the PPU renders
     sprites one scanline late. Net top = `sprY - 7`.
-  - **Still a plan:** the backdrop → behind-BG sprites → BG (index 0 transparent) →
-    front sprites composite, and with it `$DA3B-$DA45`'s forest-priority probe. `Field`
-    exists now (P5), but `Battle` draws only the BG tilemap so far — the sprite layers
-    and the forest probe arrive with tank rendering. progress.md "Debt".
+  - **The 4-layer composite is BUILT (P6):** backdrop → behind-BG sprites → BG
+    (colour-0 transparent) → front sprites, with `$DA3B-$DA45`'s forest-priority probe.
+    `Battle.render` uses `renderer.beginSpriteLayers()` + `flushSprites(behind)` around
+    `drawTilemap(..., transparent)`; a sprite half over forest (`$22`) draws behind the
+    grass. The menu (no field, no `beginSpriteLayers`) still paints sprites on top.
 - Deferred (stub-only): `Audio` ($EA7E sfx engine — portable), `Construction`
   (stage editor). ES6 modules, no build step; `index.html` boots `main.js`.
   - **`Audio` is not as low-priority as it looks: it GATES two modes.** `GameOver`

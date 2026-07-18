@@ -1,11 +1,13 @@
 // hud.js — a debug readout for the mode machine.
 //
-// NOT SOURCE. The NES has no such display; this is a development instrument. It
-// exists because Renderer and Input are still stubs, so the mode machine — which
-// IS ported and tested (flow doc §7, progress.md P3) — is otherwise invisible
-// behind a black canvas. It writes to an HTML element rather than the canvas, so
-// it costs the frame nothing and can never be mistaken for something the PPU would
-// have produced. Retire it once Renderer draws.
+// NOT SOURCE. The NES has no such display; this is a development instrument. It began
+// as the only window on the mode machine (flow doc §7, progress.md P3) back when
+// Renderer/Input were stubs and the canvas was black. Since P4-P6 the canvas shows the
+// real game, but the HUD stays: it is still the only view of the mode machine's
+// INTERNALS — mode/sub/frm/lives — which the canvas never surfaces. It writes to an
+// HTML element rather than the canvas, so it costs the frame nothing and can never be
+// mistaken for something the PPU would have produced. Retire it when that internal
+// state stops being useful, not on the technicality that Renderer now draws (progress.md "Debt").
 //
 // FIXED-WIDTH FIELDS — root CLAUDE.md, "UI conventions — HUD / on-screen readouts".
 // A readout that updates every frame shifts every field to the right of any value

@@ -235,9 +235,10 @@ but because it described work that had not started yet.)*
     no "did it change?" test. `game_mode` *is* the selection. Treads roll via
     `wheels ^= 4` every 4th frame (`$C9E9`) — the ROM animating a parked tank purely
     so the screen looks alive.
-  - **Ported with it:** `Tank.handle` `$DEB8` + `Tank.draw` `$DFB6`/`$DFE9` (whole,
-    including the enemy `tbl_E003` flicker and the stun blink — not half a routine),
-    `TankRoster.handleAll` `$DEA6` / `clearAll` `$E413`, `drawNumber` `$D934`+`$D6DD`.
+  - **Ported with it:** `Tank.render` (`$DEB8`, named `handle` in P4; renamed P6) +
+    `Tank.draw` `$DFB6`/`$DFE9` (whole, including the enemy `tbl_E003` flicker and the
+    stun blink — not half a routine), `TankRoster.render` `$DEA6` / `clearAll` `$E413`,
+    `drawNumber` `$D934`+`$D6DD`.
     `$DEB8`'s `(flags >> 3) & $FE` into `tbl_E4B8` is just **the flags' high nibble**
     once the 2-byte entries are divided back out — 16 states, 16 handlers.
   - **`sub_DEA6` is the RENDER half, and the ROM says so:** it sits OUTSIDE the
@@ -335,15 +336,56 @@ but because it described work that had not started yet.)*
     header and `@param`s on its class-typed params, so VS Code resolves them (F12 /
     autocomplete). Comment-only; no runtime effect.
 
+- **P6 — Player tank: spawn, movement, terrain + tank collision, ice.** ☑ Done. The
+  first gameplay on the field — a drivable player. **Bullets are a separate scope**
+  (Zane split the step, 2026-07-18: player-tank slice now, bullets next). Full decode +
+  citations + verification record: `docs/research_movement.md`. The `$C2E6` pipeline
+  steps 2/3/7 are filled; steps 1/4 (occupancy) were P5.
+  - **Movement** — `$DB75` player control (`Tank.control`: d-pad → facing/state, the
+    perpendicular-turn 8px grid-snap) + `$DBF1`/`loc_DC97` move step (`Tank.moveStep`:
+    1px at the 3/4-frame gate, the **two leading-corner** terrain probe, wheel toggle).
+    Method names corrected from the P1 stub's wrong mental model: `iceMovement`/`movement`
+    → `controlPlayers`/`moveTanks` (the disasm's "ice_movement" label is a misnomer —
+    `$DB75` is the input routine).
+  - **Tank-vs-tank collision is free** — the P5 occupancy grid (`$E181` marks all,
+    `$DBF1` reads bit7). No new code; it just needed two live tanks. Verified 2P.
+  - **Spawn** — `$C331` spawns surviving players (2P-aware; absence of lives = the
+    disable) → `$E363` places them in `$F0`; the move step runs the **respawn star**
+    (`$DE55`/`$DE64` INC → `$E00B` pulsing star) → `sub_E3B8` drivable + helmet.
+    `Tank.respawnFrame` is the packed low-nibble counter, made an explicit field.
+  - **Spawn invincibility** — `$E27C` DEC (step 7) + the flickering shield, split into
+    `updateInvincibility` (update) and `drawShields` (render) per the `Mode` contract.
+  - **Ice** — `$E181` on-ice flag + `$DB75` slide-arm + `$DC52` `$80`-handler slide.
+    The `$0103` quad-purpose byte re-derived into `onIce` + `Tank.slideTimer` (mapping
+    in the research doc §6). Ice stages: 17/24/28/32 (A/B-selectable from stage 1).
+  - **Three flagged deviations** (governing test): (1) player state simplified to
+    `$80`/`$A0` — the `$88/$84` `SBC #$04` coast is unobservable (verified 0px drift on
+    release); (2) ice's packed `$0103` byte → explicit fields; (3) `$E27C`'s DEC/draw
+    split. Nothing load-bearing dropped.
+  - **`Battle.render`** now draws the real 4-layer PPU composite: backdrop →
+    behind-BG sprites → BG (colour-0 transparent) → front sprites. Two rendering fixes
+    Zane required in this step (not deferred as polish), decode in research §7:
+    - **Water shimmer** (`$C31D`, `waterPaletteSwap`) — Battle draws with the live
+      `bgPaletteId` (02↔01 every 32 frames), so the water animates like the level
+      viewer (76/256 px of a water block differ between the sets).
+    - **Forest priority** (`$DA3B-$DA45`) — a tank half over forest (`$22`) draws
+      **behind** the grass (partial obstacle, not a cover). `Renderer` gained a sprite
+      queue (`beginSpriteLayers`/`flushSprites`) + a transparent-0 `_compose`;
+      `Tank.draw` probes per half. Retires the "forest-priority probe unported" debt.
+  - **Verified deterministically** (headless `Game`, `getImageData` — never a
+    screenshot): spawn `$F0`→`$A0` ~37 frames; move ~3px/4frames + immediate stop on
+    release; turn-snap; terrain (solids block flush, passables pass); **2P tank collision
+    flush from all 4 approaches, no pass-through**; helmet 3→0 + shield; ice 15px slide
+    (0 on ground) stopping at walls; and the **real flow** Menu→1P→SELECT→Battle spawns
+    P1 and drives, `render()` clean. Pixels: star 105, tank 166, +shield 23.
+
 ## Next
-Following the gameplay line (SESSION: StageIntro → Battle → Tail → Tally), on top of
-the field just built:
-- **Player `Tank` movement** — the next visible slice: `$DBF1` movement + `$DB75` ice,
-  driven by `Input` (built), querying `Field` for walls/ice/occupancy. Drive a tank
-  around stage 1. Needs player spawn in `prepareStage` (`$C331`); draw via the already-
-  ported `TankRoster.handleAll` / `Tank.draw`.
-- **`Demo`** — the last ATTRACT piece, now only gated on tank movement: `$C642` fakes
-  controller input and runs `mainBattleScript`, so it unblocks once tanks move.
+Following the gameplay line, **Scope 2 (the other half of the split): bullets** —
+1/ fire (`$E122` + `$E08C` spawn, one per tank; A or B), 2/ bullet movement + terrain
+collision (`$E604`/`$E69A` point probe), 3/ **brick chip** (`$D743` quadrant, the
+`chipQuadrant` Field method already exists), 4/ bullet **explosion** (`$E02E` status
+countdown + `$E0D8`/`$DEE2` render). Then **`Demo`** (`$C642` fakes input into
+`mainBattleScript` — unblocks now that tanks move) and enemy AI/spawn.
 
 `StageIntro` is done (curtain wipe + "STAGE N" + A/B select + reveal); its remaining
 base-draw / sfx / editor hooks land with Base / Audio / Construction.
@@ -359,11 +401,6 @@ base-draw / sfx / editor hooks land with Base / Audio / Construction.
   it to 0 at RESET but `sub_C7C8_print_lives_handler` sets it to **1** every battle
   frame, and `$D17F` never sets it itself — so after a game the title may print `0`.
   Flow doc §8 `[?]`. Resolve when `Score`/`GameOver` land.
-- **The sprite forest-priority probe is unported** — `$DA3B-$DA45` reads the field at
-  (`sprX + 3`, `sprY`) and, on tile `$22`, ORs `ram_priority_spr_A` (`$20`) to put
-  the sprite BEHIND the background. Needs `Field` **and** the backdrop → behind-BG →
-  BG → front composite (CLAUDE.md "Rendering follows the PPU"). Nothing reaches it
-  yet: the title has no forest, so the probe's answer is always "no".
 - **`hud.js`** is a development instrument, not part of the game. `Renderer` now
   draws, so its original retirement condition is technically met — but it is still
   the only view of the mode machine's internals (mode/sub/frm/lives), which the

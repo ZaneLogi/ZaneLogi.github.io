@@ -232,7 +232,7 @@ class Menu extends Mode {
   /** @param {Renderer} renderer */
   render(renderer) {
     renderer.drawTilemap(this.parent.titleMap, BG_PAL_TITLE, 0, 0);
-    this.game.roster.handleAll(renderer, this.game.frm.lo);   // $C9F5
+    this.game.roster.render(renderer, this.game.frm.lo);   // $C9F5 sub_DEA6
   }
 }
 

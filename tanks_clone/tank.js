@@ -21,6 +21,10 @@
 // See docs/research_system_interaction_map.md §4, §5 (S3).
 
 import { TANK_PALETTE_FLICKER } from './assets/dat_chr.js';
+import { Input } from './input.js';
+import {
+  DIR, DIR_DX, DIR_DY, TILE, TANK_STATE, HELMET_TIMER_INIT, SLIDE_ARM, SLIDE_LOCK_BIT,
+} from './constants.js';
 
 /**
  * @typedef {import('./renderer.js').Renderer} Renderer
@@ -39,9 +43,16 @@ export class Tank {
     this.stunTimer = 0;          // ram_plr_stun_timer ($6F) — players only
     this.stageCell = 0;
     this.onIce = false;          // player standing on ice — $E181 sets $0103 bit7
+    // Ice-slide budget — the counter re-derived from ram_0103_plr_flags's low 7
+    // bits (the packed $0103 byte is split into onIce + this per the data-model rule).
+    this.slideTimer = 0;
     this.occupancyCells = null;  // cells this tank marked in Field.occupancy ($E181);
                                  // Field.occupancyWriteback ($E1FA) clears them
     this.ai = null;              // EnemyAI instance for enemy slots
+    // Respawn-in counter (the low nibble of ram_tank_flags while state is $F0/$E0,
+    // an explicit field here). Drives the spawn star; INC'd by the move step.
+    this.respawnFrame = 0;
+    this.helmetTimer = 0;        // ram_helmet_timer ($89) — spawn invincibility
   }
 
   get isPlayer() { return this.slot < 2; }
@@ -58,20 +69,45 @@ export class Tank {
   // calls it separately from each screen's loop ($C9F5 menu / $C20C battle /
   // $C42F demo) — the split our Mode contract requires already exists upstream. So
   // nothing in here may mutate game state (mode.js).
-  /** @param {Renderer} renderer  @param {number} frameLo */
-  handle(renderer, frameLo) {
+  /** @param {Renderer} renderer  @param {number} frameLo  @param {Field} [field] */
+  render(renderer, frameLo, field) {
     // $00 -> ofs_001_DBF0_00_RTS. An empty slot draws nothing.
     if (this.state === 0) return;
     // $80..$D0 -> ofs_001_DFB6. Six table entries ($80/$90/$A0 + the three enemy
     // follow-bias states) share one body: they differ in AI, not in appearance.
-    if (this.state >= 0x80 && this.state < 0xE0) { this.draw(renderer, frameLo); return; }
+    if (this.state >= 0x80 && this.state < 0xE0) { this.draw(renderer, frameLo, field); return; }
+    // $E0/$F0 -> ofs_001_E00B — the materializing spawn star.
+    if (this.state >= 0xE0) { this.drawRespawnStar(renderer, field); return; }
     // TODO: $10 kill-points ($DEFD); $20/$30/$40 ($DF33/$DF46) and $50/$60/$70
-    // ($DECD) explosions; $E0/$F0 respawn ($E00B). None reachable from the menu.
+    // ($DECD) explosions — reached only once bullets/enemies can kill a tank.
+  }
+
+  // sub_DA2B's forest-priority probe ($DA3B-$DA45): a sprite half is drawn BEHIND the
+  // background when the field tile at (sprX + 3, sprY) is forest ($22). sub_DA2B reads
+  // the tile at the sprite's own X+3 and the tank's centre Y. No field -> never behind
+  // (the menu draws its cursor with no field).
+  /** @param {Field} [field] */
+  onForest(field, sprX) {
+    return !!field && field.terrainAt((sprX + 3) >> 3, this.y >> 3) === TILE.FOREST;
+  }
+
+  // ofs_001_E00B ($E00B) — the spawn-in star, drawn for both respawn states ($F0
+  // and $E0). The tile pulses with |counter - 7|: the star is at its edges (tile
+  // $AD) at the ends of each phase and brightest ($A1) in the middle. Two 8x16
+  // sprites (sub_DA7B), palette 3. This is our stand-in for the ROM's $0F spawn
+  // block too (loc_E3A9's field write, not ported — the sprite is the visual).
+  /** @param {Renderer} renderer  @param {Field} [field] */
+  drawRespawnStar(renderer, field) {
+    const n = this.respawnFrame;                    // flags & $0F ($E00D)
+    const t = Math.abs(n - 7);                      // $E010-$E018 SBC #$07, negate if <0
+    const tile = ((t << 1) & 0xFC) + 0xA1;          // $E019-$E01D ASL / AND #$FC / ADC #$A1
+    renderer.drawSprite(tile, this.x - 8, this.y, 3, this.onForest(field, this.x - 8));  // left ($E025 sub_DA7B)
+    renderer.drawSprite(tile + 2, this.x, this.y, 3, this.onForest(field, this.x));      // right (INC INC spr_T)
   }
 
   // ofs_001_DFB6 ($DFB6) + loc_DFE9_display_sprites ($DFE9) — draw a live tank.
-  /** @param {Renderer} renderer  @param {number} frameLo */
-  draw(renderer, frameLo) {
+  /** @param {Renderer} renderer  @param {number} frameLo  @param {Field} [field] */
+  draw(renderer, frameLo, field) {
     let palette;
     if (this.isPlayer) {                             // $DFB6 CPX #$02 / BCC
       // $DFDD-$DFE7 — a stunned player BLINKS: invisible while frm_cnt_lo & $08,
@@ -97,15 +133,154 @@ export class Tank {
     // sub_DA7B_display_2_sprites ($DA7B) — a tank is TWO 8x16 sprites, never one
     // pre-composed 16x16: the left half sits 8px back ($DA81) and the right half
     // takes the next tile pair ($DA87-$DA89 INC INC). Keeping them separate is what
-    // lets $DA2B probe the field under each half independently (CLAUDE.md).
-    renderer.drawSprite(tileByte, this.x - 8, this.y, palette);
-    renderer.drawSprite(tileByte + 2, this.x, this.y, palette);
+    // lets $DA2B probe the field under each half INDEPENDENTLY — so a tank straddling
+    // a forest edge has just the half over grass drawn behind it.
+    renderer.drawSprite(tileByte, this.x - 8, this.y, palette, this.onForest(field, this.x - 8));
+    renderer.drawSprite(tileByte + 2, this.x, this.y, palette, this.onForest(field, this.x));
   }
 
-  // movement step ($DBF1); players use input, enemies delegate to this.ai
-  /** @param {Input} input  @param {Field} field */
-  move(input, field) { /* TODO: port $DBF1 */ }
+  // loc_E3A9 ($E3A9) — enter the RESPAWN state. Position/type are set by the
+  // roster (sub_E363); this is the state reset the move step then animates in.
+  spawn() {
+    this.state = TANK_STATE.RESPAWN;   // $F0 con_tank_flag_respawn
+    this.dir = DIR.UP;
+    this.respawnFrame = 0;
+    this.wheels = 0;
+    this.helmetTimer = 0;
+    this.onIce = false;
+    this.slideTimer = 0;
+    this.occupancyCells = null;
+  }
 
+  // sub_DB75 ($DB75, "ice_movement" — misnamed; this is PLAYER CONTROL). Reads the
+  // pad, sets facing + drive/stop state. Runs before the move step, players only.
+  //
+  // Simplified per the governing test: the ROM's stopped state is $88 and it decays
+  // $88->$84 via SBC #$04 ($DC6B), but $DB75 rewrites the state every processed
+  // frame on the SAME 3/4 gate as the move step, so that coast never advances a
+  // player — it is CPU-shaped and unobservable. We model just $80 (stopped) / $A0
+  // (moving). Ice-slide arming is folded in below.
+  /** @param {Input} input */
+  control(input) {
+    if (!this.isDrivable) return;                       // $DB85/$DB89 exploding/respawning
+    if (this.stunTimer !== 0) {                         // $DB8B-$DB91 stunned: stop
+      this.stunTimer--;
+      this.state = TANK_STATE.NORMAL_80;
+      return;
+    }
+    // $DB94-$DB9B — on ice, while the slide LOCK is engaged (the counter's bit4) the
+    // pad is ignored: the tank commits to sliding in its current direction, and the
+    // $80 handler carries the motion. This is what makes turning on ice feel sluggish.
+    if (this.onIce && (this.slideTimer & SLIDE_LOCK_BIT) !== 0) {   // $DB95 BPL / $DB99 AND #$10
+      this.state = TANK_STATE.NORMAL_80;                // $DBA6 loc_DBA6
+      return;
+    }
+    const dir = Input.dpadToDirection(input.hold[this.slot]);   // $DB9D/$DB9F sub_E451
+    if (dir < 0) {                                      // $DBA4 — no d-pad -> stop
+      this.state = TANK_STATE.NORMAL_80;                // $DBA6 loc_DBA6
+      return;
+    }
+    // $DBB4-$DBC4 — pressing on ice from a SETTLED state (counter back to 0) arms a
+    // fresh slide budget, so releasing keeps the tank moving (momentum).
+    if (this.onIce && this.slideTimer === 0) {          // $DBB7 BPL / $DBB9 AND #$1F
+      this.slideTimer = SLIDE_ARM;                      // $DBBD LDA #$9C (counter $1C)
+      // TODO: ram_sfx_movement_ice ($DBC4) when Audio lands.
+    }
+    // $DBC7-$DBE5 — a PERPENDICULAR turn snaps position to the 8px grid so the tank
+    // lines up with corridors. Same or opposite (EOR #$02) direction does not snap.
+    if (dir !== this.dir && dir !== (this.dir ^ 0x02)) {
+      this.x = (this.x + 4) & 0xF8;                     // $DBD5-$DBDC (pos + 4) & $F8
+      this.y = (this.y + 4) & 0xF8;                     // $DBDE-$DBE5
+    }
+    this.dir = dir;                                     // $DBE7 flags low nibble
+    this.state = TANK_STATE.NORMAL_A0;                  // $DBE9 ORA #con_tank_flag_A0
+  }
+
+  // sub_DBF1 / sub_DC3D / loc_DC97 ($DBF1) — the per-tank move step, dispatched on
+  // the state. The roster applies the 3/4-frame player speed gate before calling.
   /** @param {Field} field */
-  iceMove(field) { /* TODO: port $DB75 */ }
+  moveStep(field) {
+    switch (this.state) {
+      case TANK_STATE.RESPAWN:                          // $F0 ofs_000_DE55
+        this.respawnTick(TANK_STATE.E0);                // $F0..$FE -> $E0
+        return;
+      case TANK_STATE.E0:                               // $E0 ofs_000_DE64
+        this.respawnTick(null);                         // $E0..$EE -> become drivable
+        return;
+      case TANK_STATE.NORMAL_80:                        // $80 ofs_000_DC52 — stopped/slide
+        this.stopped(field);
+        return;
+      case TANK_STATE.NORMAL_A0:                        // $A0 ofs_000_DC7C -> loc_DC97
+        this.drive(field);
+        return;
+      default:
+        return;                                         // enemy AI states — deferred
+    }
+  }
+
+  // ofs_000_DE55 / ofs_000_DE64 ($DE55/$DE64) — the two respawn phases both just INC
+  // the low-nibble counter each processed frame; at $0E the phase ends.
+  respawnTick(nextState) {
+    if (++this.respawnFrame >= 0x0E) {                  // $DE59 AND #$0F / CMP #$0E
+      this.respawnFrame = 0;
+      if (nextState !== null) this.state = nextState;   // $DE5F $F0 -> $E0
+      else this.becomeDrivable();                       // $DE6E sub_E3B8
+    }
+  }
+
+  // sub_E3B8 ($E3B8), player path — the tank finishes materializing: state $A0
+  // facing up (tbl_E47E[slot] = $A0), and the spawn helmet arms.
+  becomeDrivable() {
+    this.state = TANK_STATE.NORMAL_A0;   // $A0 (dir 0 = UP)
+    this.dir = DIR.UP;
+    this.wheels = 0;                      // $E406
+    this.helmetTimer = HELMET_TIMER_INIT; // $E3C1-$E3C3
+    // TODO (deferred): tank_upgrade -> type ($E3C5), the enemy type/spawn branch.
+  }
+
+  // ofs_000_DC52 ($DC52), player path — a stopped player normally does nothing, but
+  // on ICE it keeps sliding in its current direction while the slide budget lasts
+  // (and stops the instant it leaves the ice or the counter runs out). The two wheel
+  // toggles ($DC62 here + loc_DD29 inside drive) cancel, so a sliding tank's treads
+  // freeze — faithful. The ROM's non-ice $88->$84 coast ($DC6B) is dropped (dev. #1).
+  /** @param {Field} field */
+  stopped(field) {
+    if (this.onIce && this.slideTimer !== 0) {   // $DC56 BPL / $DC5B AND #$7F
+      this.slideTimer--;                          // $DC5F DEC ram_0103_plr_flags
+      this.wheels ^= 0x04;                        // $DC62-$DC66
+      this.drive(field);                          // $DC68 JMP loc_DC97 — slide in `dir`
+    }
+  }
+
+  // loc_DC97 ($DC97) — try a 1px step in `dir`. Probe the destination's two LEADING
+  // corners; if both are passable (terrain) and unoccupied (another tank), commit.
+  // The wheels toggle either way (the treads roll even while pushing a wall).
+  /** @param {Field} field */
+  drive(field) {
+    const dx = DIR_DX[this.dir], dy = DIR_DY[this.dir];   // tbl_E46C / tbl_E470
+    const newX = (this.x + dx) & 0xFF;                    // $DCB4-$DCBA
+    const newY = (this.y + dy) & 0xFF;
+    // probe 1 at +(dx+dy)*8 on both axes ($DCBC-$DCC0); probe 2 at the mirror
+    // ($DCDF-$DCF0). Corner pixels are fixed up by sub_DD6E/DD76 inside cornerClear.
+    const a = (dx + dy) * 8;
+    const clear =
+      this.cornerClear(field, newX + a, newY + a, newX, newY) &&
+      this.cornerClear(field, newX + dx * 8 - dy * 8, newY + dy * 8 - dx * 8, newX, newY);
+    if (clear) { this.x = newX; this.y = newY; }          // $DD04-$DD0C commit
+    this.wheels ^= 0x04;                                  // $DD29 loc_DD29
+  }
+
+  // One collision corner ($DCC2-$DCDD): sub_DD6E/DD76 subtract 1 when the probe is
+  // on the tank's FAR side (so a 16px tank samples the tile it is entering, not the
+  // one past it), then block on occupancy (the ROM's bit7) or a solid tile ($01-$1F).
+  /** @param {Field} field */
+  cornerClear(field, px, py, newX, newY) {
+    let cx = px & 0xFF;                                      // A is 8-bit in the ROM
+    if (cx >= newX) cx = (cx - 1) & 0xFF;                    // sub_DD6E: BCC skip else SBC #$01
+    let cy = py & 0xFF;                                      // sub_DD76 ($DD76)
+    if (cy >= newY) cy = (cy - 1) & 0xFF;
+    const col = cx >> 3, row = cy >> 3;                      // sub_D706
+    if (field.isOccupied(col, row)) return false;           // $DCD7 BMI (bit7)
+    return field.isPassable(col, row);                      // $DCD9 BEQ / $DCDB CMP #$20
+  }
 }

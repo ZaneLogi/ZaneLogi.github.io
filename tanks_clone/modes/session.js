@@ -199,8 +199,10 @@ class Battle extends Mode {
     // port that freezes everything on pause is wrong. Map §2.
     if (!g.paused) g.mainBattleScript();   // $C200
 
-    // TODO: $C203 $E23B display_bonus, $C206 $E0D8 bullets_status,
-    //       $C209 $DEA6 tanks_handler — all OUTSIDE the pause gate.
+    // The ROM's Battle loop runs three RENDER-half calls after the pipeline, all
+    // OUTSIDE the pause gate: $C203 $E23B display_bonus, $C206 $E0D8 bullets_status,
+    // $C209 $DEA6 tanks. Tanks are drawn in render() now (roster.render); bonus + bullet
+    // sprites join it when Bonus / Bullet rendering land.
 
     if (g.input.pressed(0, BTN.Start)) {   // $C210
       g.paused = !g.paused;                // $C212-$C216
@@ -212,11 +214,22 @@ class Battle extends Mode {
     return g.checkStageEnding() ? DONE : null;   // $C21E / $C221
   }
 
-  // The battlefield: draw the loaded field (our $0400 buffer). Sprites/HUD are the
-  // stubbed subsystems' job and come later; for now Battle IS the field on screen.
+  // The battlefield: the field ($0400 buffer) with the tank sprites on top. The
+  // tank draw ($C209 sub_DEA6) sits OUTSIDE the $C2E6 pipeline in the ROM too — it
+  // is the render half — so it belongs here, not in update(). Bullets/HUD/shields
+  // land as their subsystems arrive.
   /** @param {Renderer} renderer */
   render(renderer) {
-    renderer.drawTilemap(this.game.field.tilemap, BG_PAL_STAGE, 0, 0);
+    const g = this.game;
+    // Four PPU layers: backdrop (beginFrame) -> behind-BG sprites (tanks on forest,
+    // $DA3B) -> BG (field, colour-0 transparent) -> front sprites. The water shimmer
+    // rides the live bgPaletteId ($C31D swaps it 02<->01 every 32 frames).
+    renderer.beginSpriteLayers();
+    g.roster.render(renderer, g.frm.lo, g.field);      // $C209 sub_DEA6 — tanks + spawn star
+    g.roster.drawShields(renderer, g.frm.lo);          // $E27C draw half — spawn helmet, front
+    renderer.flushSprites(true);                       // behind-BG (forest-covered) sprites
+    renderer.drawTilemap(g.field.tilemap, g.bgPaletteId, 0, 0, true);   // BG, transparent index 0
+    renderer.flushSprites(false);                      // front sprites, on top
   }
 }
 

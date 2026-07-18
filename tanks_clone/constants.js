@@ -22,6 +22,11 @@ export const DIR = Object.freeze({
   NONE: -1,   // $E469 returns $FF and callers test N; `< 0` is the JS equivalent.
 });
 
+// Per-direction step, indexed by DIR — tbl_E46C (dx, $E46C) / tbl_E470 (dy, $E470).
+// A tank moves ONE pixel per processed move step; a bullet scales these up.
+export const DIR_DX = [0, -1, 0, 1];   // UP 0, LEFT $FF, DOWN 0, RIGHT $01
+export const DIR_DY = [-1, 0, 1, 0];   // UP $FF, LEFT 0, DOWN $01, RIGHT 0
+
 // --- Tank state — high nibble of ram_tank_flags (con_tank_flag_*) ---
 // tank_handler ($DEB8) dispatches on (flags >> 3) & $FE via tbl_E4B8.
 // "live & drivable" == flags >= $80 && flags < $E0 (see map §4).
@@ -41,6 +46,25 @@ export const TANK_STATE = Object.freeze({
 export const MAX_TANKS = 8;
 export const PLAYER_SLOTS = 2;
 export const ENEMIES_PER_STAGE = 0x14; // 20, seeded in $C331
+
+// Player spawn points — tbl_E47A_player_spawn_pos_X / tbl_E47C_player_spawn_pos_Y
+// ($E47A/$E47C), read by sub_E363. These are tank CENTRE coords (the sprite spans
+// x-8..x+7, y-8..y+7), so P1 sits just left of the eagle at ($78,$D8).
+export const PLAYER_SPAWN = [
+  { x: 0x58, y: 0xD8 },   // P1
+  { x: 0x98, y: 0xD8 },   // P2
+];
+
+// Spawn (helmet) invincibility: sub_E3B8 ($E3C1-$E3C3) seeds 3; sub_E27C DECs it
+// every 64 frames, so ~192 frames (~3.2 s) of shield after materializing.
+export const HELMET_TIMER_INIT = 0x03;
+
+// Ice slide budget — the low 7 bits of the $9C the ROM writes to ram_0103_plr_flags
+// when a player presses on ice ($DBBD). The counter DECs one per processed slide
+// frame ($DC5F) until 0; its bit4 ($10) is the input LOCK — while set the pad is
+// ignored and the tank commits to sliding ($DB99). Re-derived into Tank.slideTimer.
+export const SLIDE_ARM = 0x1C;      // $9C & $7F
+export const SLIDE_LOCK_BIT = 0x10; // $DB99 AND #$10 — bit4
 
 // --- ram_game_mode ($83) — the index into tbl_CA69_game_mode_handler ($CA69) ---
 // The handlers differ only in ram_enemy_limit: 1P = con_max_tanks - 2 = 5 ($CA6F),
