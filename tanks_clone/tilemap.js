@@ -93,4 +93,11 @@ export class Tilemap {
   // quadrant; here it is one value per cell, so there is nothing to unpack.
   // sub_D80B ($D817) is what fills it during a stage (via tbl_DABB, block -> palette).
   paletteAt(col, row) { return this.palettes[row * TILEMAP_COLS + col]; }
+
+  // The writer paired with paletteAt — Field.loadStage sets each cell's palette from
+  // BLOCK_ATTRIBUTE (tbl_DABB) as it draws a stage. sub_D80B ($D817).
+  setPalette(col, row, pal) {
+    this.palettes[row * TILEMAP_COLS + col] = pal;
+    this.version++;
+  }
 }

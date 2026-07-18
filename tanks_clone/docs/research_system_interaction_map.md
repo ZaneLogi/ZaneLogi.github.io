@@ -231,12 +231,17 @@ class) and adds the semantics — `loadStage`, pixel→cell, terrain queries. Tw
 artifacts are re-derived out under the governing test (faithful to observable terrain
 shape + cell colour; free with CPU-only packing):
 - **bit7 occupancy**, packed into the tile byte only to save RAM (`sub_E1F3` sets,
-  `sub_E234` clears), → a **separate occupancy grid**. The two-pass *timing*
-  (`$E181` marks all footprints → `$DBF1` moves → `$E1FA` clears, §3) may be an
-  observable rule, not just packing — left as a build-time call, not settled here.
+  `sub_E234` clears), → a **separate occupancy grid**. P5 kept the two-pass *timing*
+  (`$E181` marks all footprints → `$DBF1` moves → `$E1FA` clears, §3) as a faithful
+  rule, since marking every tank before any moves is player-observable.
 - the **packed 64-byte attribute table** → a **1:1 palette-per-cell array** on
   `Tilemap`, render-only and *not* `Field`'s data. In Battle City one block = one
   attribute quadrant = one palette, so per-cell resolution loses nothing.
+
+The Field mechanism itself — the (2,2)/26×26 geometry, the `$F000`/`$D7CC`/`$D80B`
+decode, `pixelToCell` = `$D706`, and the `$E181`/`$E1FA` occupancy footprint — is
+built and documented in **`docs/research_field.md`** (P5). This map stays at the
+coupling level.
 
 **Two namespaces — do not mix them [D].** This is the trap:
 

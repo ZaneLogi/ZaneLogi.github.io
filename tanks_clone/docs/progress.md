@@ -280,24 +280,73 @@ but because it described work that had not started yet.)*
     are re-derived in our view. P2's Start/Select are bound but never read (every
     menu/pause site is a non-indexed `LDA ram_btn_press`), and the legend says so.
 
+- **P5 — Field: terrain substrate + occupancy, first battlefield on screen.** ☑ Done.
+  The substrate every Battle subsystem stands on, built AND wired through the real flow
+  so it is **visible**: Menu → 1P → `StageIntro` loads the stage into `Field` → `Battle`
+  draws it. Battle's own subsystems stay stub (Zane, 2026-07-18: *"reach the Battle sub
+  mode, I can see it works for field.js"*). Full decode: `docs/research_field.md`.
+  - **Cell model — `Field` HAS-A a full 32×30 `Tilemap`.** Play grid at tile (2,2)
+    (pixel (16,16), from `$F000`), `$11` grey border around it; `pixelToCell =
+    (x>>3, y>>3)` matches `$D706` with no offset (tank coords already include it), so
+    the border and eagle live in the same buffer as collision cells.
+  - **`loadStage` reuses the P2-verified decode** — `$D80B` == `level_viewer`'s
+    `paintBlock` (`BLOCK_TILES`/`BLOCK_ATTRIBUTE` = `tbl_DACB`/`tbl_DABB`); fill `$11` +
+    169 blocks. Takes the decoded grid; `$F009`'s 36→70 wrap lives in `Game.stageGrid()`.
+  - **#3 resolved — `isPassable` is the `< $20` compare** (`t==0 || t>=$20`), the ids
+    arranged so one branch classifies terrain; named `TILE_DRIVE_OVER_MIN`, not an enum.
+  - **Occupancy in scope; #2 resolved by building it faithfully.** The ROM's bit7
+    packing → a separate grid; the two-pass timing (`$E181` mark all → move → `$E1FA`
+    clear) is preserved because marking every tank before moving any is player-
+    observable. Footprint = base cell + straddle neighbors (`$E1C9-$E1EB`); a destroyed
+    tank's marks leak (`$E1FA` skip), faithfully. `Tank` gained `onIce`/`occupancyCells`;
+    `Tilemap` gained `setPalette`.
+  - **Wiring + intro screen:** `StageIntro.START_STAGE` → `field.loadStage(stageGrid())`;
+    `Battle.render` (and `StageIntro` at CURTAIN_OPEN) draw `field.tilemap` at
+    con_bg_pal_02. CURTAIN_CLOSE/SELECT now show a grey `$11` curtain + **"STAGE  N"**
+    (`sub_CC90` fill + `sub_CA91`, con_bg_pal_04) — the font is hardcoded tiles
+    `$23-$27` (S T A G E) + digit base `$6E`, at buffer `$05CC` = tile (12,14). The
+    curtain WIPES like the ROM: grey closes from the top/bottom edges (`$CC90`), the
+    field reveals from the centre outward (`$CCB2`), as a horizontal band clip
+    (`Renderer.drawTilemapRows`). SELECT is fully ported: **A/B step the stage 1..35** (fresh press, or every 8th frame while
+    held — `$C17F-$C1C2`, the auto-repeat resetting `frm_cnt_lo`), the number tracking;
+    Start confirms; the screen shows only on stage 1 (`stageSelectUsed` gates it, §6a).
+    `$C2E6` already called the two occupancy entry points — they slot in; the stub
+    roster (state 0 → not drivable) makes them no-op, so Battle runs clean.
+  - **Verified** — deterministic (169/169 blocks vs `LEVELS[0]`; `isPassable`/`isIce`
+    logic; occupancy aligned/unaligned/skip/writeback/two-pass) + full headless flow
+    drive (Menu→1P→SELECT shows "STAGE 1"→Start→Battle, field loaded, persists, 32256
+    lit px) + screenshots of both the "STAGE 1" curtain and stage 1 rendering in `Battle`.
+  - **`titleMap` moved `Game` → `Attract`** (Zane, 2026-07-18 — it was weird for `Game`
+    to hold a title-only buffer while `StageIntro`/`Field` own their screens). The rule:
+    a screen `Tilemap` lives at the **narrowest scope its drawers share** — the title's
+    drawers are Attract's sub-modes, so it belongs to `Attract`; `Field`'s battlefield to
+    `Field`; the curtain to `StageIntro`. `Game` now holds NO screen surface. `mode.js`
+    gained a `parent` ref (set in `setSub`) so `Scroll`/`Menu` reach `this.parent.titleMap`.
+    The MENU re-entry (`loc_C0A2`) now REDRAWS the title — the ROM relied on the title
+    persisting in nametable `$2800`, a CPU-only mechanism; a fresh Attract's redraw is
+    byte-identical (reads live scores), and the real MENU-vs-SCROLL distinction
+    (`constrUsageCnt`, §6c) is untouched.
+  - **`StageIntro` is complete** — close wipe → "STAGE N" + A/B select → open wipe. What
+    remains are only hooks into subsystems that don't exist yet, each cited in
+    `START_STAGE`: the **default base draw** (`$C1DC sub_CAF5` — Base/S6; why the
+    fortification shows but the eagle doesn't), the **stage-load jingle** (`$C1C7` —
+    Audio), and the **editor path** (`$C1D0` — Construction). Plus Battle's subsystems.
+  - **JSDoc types** — each touched file (+ `text.js`) carries a `@typedef {import('…')}`
+    header and `@param`s on its class-typed params, so VS Code resolves them (F12 /
+    autocomplete). Comment-only; no runtime effect.
+
 ## Next
-- **`Demo`** — the last piece of ATTRACT, deferred by scope. `sub_C642_demo_players_
-  ai_handler` (`$C642`) writes `ram_btn_hold,X`/`ram_btn_press,X` directly: the demo
-  **fakes controller input** rather than driving tanks (flow doc §8). It then runs
-  `mainBattleScript`, so it is really gated on `Field` + tank movement, not on
-  ATTRACT.
-- **`Field`** — the design question is **settled (2026-07-18):** `Field` HAS-A
-  `Tilemap`, the tile ids ARE the terrain state, occupancy moves to its own grid, and
-  the attribute table is now a 1:1 `palettes` array on `Tilemap` (render-only,
-  not `Field`'s data). Map §5 S2 carries the reasoning; §8's `[?]` is retired, and
-  `tilemap.js` was reworked to the two-array shape (`tiles`/`attributes`, `tileAt`/
-  `paletteAt`). What's left is the **build**: `loadStage` (`$F000`), pixel→cell
-  (`$D706`), terrain queries, and the occupancy mark/clear timing (`$E181`/`$E1FA`,
-  a build-time call). Start from legacy `tanks/level.js` + `castle.js`.
-- Docs are written when the content needs a home, sized to it — no one-doc-per-
-  subsystem rule (map, "where a finding lands"). `Field` looks like it earns its
-  own file (block/tile decode, occupancy, pixel→cell); a smaller subsystem may only
-  need a map section, a cited constant, or a code comment.
+Following the gameplay line (SESSION: StageIntro → Battle → Tail → Tally), on top of
+the field just built:
+- **Player `Tank` movement** — the next visible slice: `$DBF1` movement + `$DB75` ice,
+  driven by `Input` (built), querying `Field` for walls/ice/occupancy. Drive a tank
+  around stage 1. Needs player spawn in `prepareStage` (`$C331`); draw via the already-
+  ported `TankRoster.handleAll` / `Tank.draw`.
+- **`Demo`** — the last ATTRACT piece, now only gated on tank movement: `$C642` fakes
+  controller input and runs `mainBattleScript`, so it unblocks once tanks move.
+
+`StageIntro` is done (curtain wipe + "STAGE N" + A/B select + reveal); its remaining
+base-draw / sfx / editor hooks land with Base / Audio / Construction.
 
 ## Debt (NOT SOURCE — delete when its owner lands)
 - **`GameOver` / `HallOfFame` wait on a frame constant**, because the ROM waits on

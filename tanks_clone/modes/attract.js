@@ -13,10 +13,16 @@
 // Here that is one line per case — which is the whole of what the stack trick bought.
 
 import { Mode, DONE } from '../mode.js';
+import { Tilemap } from '../tilemap.js';
 import { drawHugeText, writeText, drawNumber } from '../text.js';
 import { TEXT } from '../assets/dat_text.js';
 import { BTN, BTN_SS, GAME_MODE, SECOND_LOOP, SCREEN_H, TANK_STATE, DIR }
   from '../constants.js';
+
+/**
+ * @typedef {import('../game.js').Game} Game
+ * @typedef {import('../renderer.js').Renderer} Renderer
+ */
 
 // Where Attract starts when it is entered. This is the loc_C095-vs-loc_C0A2
 // distinction, and it is LOAD-BEARING — see enter(). Flow doc §6c/§7.5.
@@ -43,6 +49,7 @@ const CURSOR_ROW_PX = 0x10;     // $CA87-$CA8A ASL x4 — 16px between menu opti
 // 139 / 155 / 171. The option rows are 17/19/21 (y = 136/152/168), and a tank
 // centred on 139 spans 132..147 (Renderer.drawSprite), so it lands level with its
 // text line. $CA2F runs this EVERY frame, not only when Select is pressed.
+/** @param {Game} game */
 function writeCursorPosition(game) {
   game.roster.tanks[0].y = (game.gameMode * CURSOR_ROW_PX) + CURSOR_Y_BASE;
 }
@@ -54,13 +61,7 @@ function writeCursorPosition(game) {
 // scrolls up together, and by the time sub_C9C0 (Menu) runs, every word is already
 // there: the menu's only visual contribution is the cursor tank, a sprite.
 //
-// The ROM builds it in two ways and we build it in one, because the split is
-// hardware bookkeeping. The huge letters go into $0400 and are bulk-shipped to
-// nametable $2800 by $D1AF; everything after $D1B2 (which re-enables NMI) streams
-// through the PPU write buffer instead. That buffer has a size limit, which is why
-// $D212 / $D242 / $D263 sprinkle JSR sub_D8F6_wait_1_frm through the routine to
-// spread the writes over four frames. Same picture either way, and nobody sees the
-// four frames — they are spent before the scroll starts. Here: one Tilemap.
+/** @param {Tilemap} tm  @param {Game} game */
 function drawTitleScreen(tm, game) {
   tm.clear();                                // $D186 sub_D47E_clear_0400_07FF
   drawHugeText(tm, 'BATTLE', 0x1A, 0x2E);    // $D189-$D199, tbl_D299
@@ -90,19 +91,21 @@ function drawTitleScreen(tm, game) {
 
 export class Attract extends Mode {
   enter() {
-    // loc_C095 ($C095) — a FRESH arrival (boot, or back from game over): redraw the
-    // title and zero ram_constr_usage_cnt ($C09A).
-    //
-    // The EDITOR deliberately returns to loc_C0A2 instead ($C156), skipping this.
-    // That is what lets constr_usage_cnt survive editor -> menu -> editor and reach
-    // the 7 the hidden cutscene needs ($CA43). Collapse the two entries into one
-    // and the easter egg dies silently. Flow doc §6c.
-    if (this.args.at === ATTRACT_AT.MENU) {
+    // The title lives on Attract — the narrowest scope its sub-modes (Scroll/Menu)
+    // share — so a fresh Attract (re)draws it on BOTH entries. Flow doc §7.1.
+    this.titleMap = new Tilemap();
+    drawTitleScreen(this.titleMap, this.game);   // $D17F
+
+    // The REAL SCROLL-vs-MENU distinction is ram_constr_usage_cnt ($C09A): loc_C095
+    // (a FRESH arrival — boot, or back from game over) zeroes it, while the EDITOR
+    // returns to loc_C0A2 ($C156) PRESERVING it — which is what lets constr_usage_cnt
+    // survive editor -> menu -> editor and reach the 7 the hidden cutscene needs
+    // ($CA43). Collapse the distinction and the easter egg dies silently. Flow §6c.
+    if (this.args.at === ATTRACT_AT.MENU) {   // loc_C0A2 — counter preserved
       this.setSub(Menu);
       return;
     }
-    this.game.constrUsageCnt = 0;             // $C09A
-    drawTitleScreen(this.game.titleMap, this.game);   // $C095 JSR $D17F
+    this.game.constrUsageCnt = 0;             // $C09A — loc_C095 zeroes it
     this.setSub(Scroll);
   }
 
@@ -146,20 +149,10 @@ class Scroll extends Mode {
   }
 
   // The title rises from below over 240 frames (~4.0 s), onto an empty screen.
-  //
-  // NOT the ROM's mechanism, and deliberately: it scrolls a NAMETABLE PAIR — the
-  // title sits in $2800, $D16A blanks $2000, and ram_scroll_Y walks the PPU's view
-  // from one into the other. We need no second tilemap, because the outgoing screen
-  // is ALWAYS blank: $C09F is sub_C7AB's only caller and $C09C's sub_D16A clears
-  // $2000 immediately before it, every single time. So "what scrolls off" is
-  // provably the backdrop, and this is a faithful re-derivation rather than a
-  // simplification.
-  //
-  // The pair's other job is equally invisible: on reaching the menu, $C9DE/$C9E4
-  // set scroll_Y = 0 AND base_nmt = 2 ($2800) — the same pixels, rebased so the
-  // counter needn't keep climbing. The player sees nothing happen. Flow doc §7.1.
+  // Flow doc §7.1.
+  /** @param {Renderer} renderer */
   render(renderer) {
-    renderer.drawTilemap(this.game.titleMap, BG_PAL_TITLE, 0, SCREEN_H - this.game.scrollY);
+    renderer.drawTilemap(this.parent.titleMap, BG_PAL_TITLE, 0, SCREEN_H - this.game.scrollY);
   }
 }
 
@@ -236,8 +229,9 @@ class Menu extends Mode {
   // plus the roster — which on this screen is just the cursor. $C9F5 calls
   // sub_DEA6_tanks_handler from the menu's own loop, the same routine the battle
   // loop calls; the menu is not a special case anywhere in the drawing path.
+  /** @param {Renderer} renderer */
   render(renderer) {
-    renderer.drawTilemap(this.game.titleMap, BG_PAL_TITLE, 0, 0);
+    renderer.drawTilemap(this.parent.titleMap, BG_PAL_TITLE, 0, 0);
     this.game.roster.handleAll(renderer, this.game.frm.lo);   // $C9F5
   }
 }

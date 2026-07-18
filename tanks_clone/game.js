@@ -19,7 +19,6 @@
 // See docs/research_system_interaction_map.md §2, §3, §5 (S1).
 
 import { Field } from './field.js';
-import { Tilemap } from './tilemap.js';
 import { TankRoster } from './tank_roster.js';
 import { EnemyAI } from './enemy_ai.js';
 import { BulletManager } from './bullet.js';
@@ -40,6 +39,7 @@ import { HallOfFame } from './modes/hall_of_fame.js';
 import { Editor } from './modes/editor.js';
 
 import { GAME_MODE, SECOND_LOOP, ENEMIES_PER_STAGE } from './constants.js';
+import { LEVELS } from './assets/dat_levels.js';
 
 const MODES = Object.freeze({
   [MODE.ATTRACT]: Attract,
@@ -82,6 +82,7 @@ class GameOverMessage {
 }
 
 export class Game {
+  /** @param {HTMLCanvasElement} canvas */
   constructor(canvas) {
     this.rng = new Rng();
     this.input = new Input();
@@ -103,13 +104,6 @@ export class Game {
     this.constrUsageCnt = 0;   // ram_constr_usage_cnt ($4B) — the editor's memory (§6c)
     this.hiddenCutsceneCnt = 0;   // ram_hidden_cutscene_action_cnt ($4A) — $C9E0 clears
                                   // it on every menu entry; $CA4F fires at $74 (§6c)
-
-    // The title screen, standing analog of PPU nametable $2800. It lives here, not
-    // on Attract, because the ROM draws it ONCE (sub_D17F at $C095) and then loops
-    // back in at $C09C — so it survives every menu -> demo -> scroll cycle, and the
-    // editor's $C0A2 re-entry finds it still there. An Attract-owned map would be
-    // rebuilt on each setMode and lost on the editor path. Flow doc §4 [1].
-    this.titleMap = new Tilemap();
 
     // --- session state: cleared by resetSession() ($C2B3) ---
     // It lives on Game, not on a Session object (the map's §7 lock), which is what
@@ -244,6 +238,15 @@ export class Game {
     // BEHAVIOUR — the eagle must not have finished exploding — but not the
     // tri-state byte; Base owns its own state + timer. Flow doc §6b/§7.8.
     return !this.base.isDestroyed();
+  }
+
+  // The block grid for the current stage — sub_F000's dispatch ($F009-$F00E). Stages
+  // 36-70 are the 2nd loop, drawn as 1-35 (SBC #$23). StageIntro hands the result to
+  // Field.loadStage. (The attract demo's $FF -> DEMO_STAGE is the Demo mode's own
+  // call, not this path.)
+  stageGrid() {
+    const n = this.stage >= 0x24 ? this.stage - 0x23 : this.stage;   // $F009 / $F00E
+    return LEVELS[n - 1];
   }
 
   // sub_C331_prepare_tanks_addresses_and_spawn_players_before_stage ($C331).

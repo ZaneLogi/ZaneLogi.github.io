@@ -26,6 +26,8 @@
 
 import { CHR, CHR_BG_BASE } from './assets/dat_chr.js';
 
+/** @typedef {import('./tilemap.js').Tilemap} Tilemap */
+
 const LETTER_PX = 0x20;   // $D8EC ADC #$20 — 8 glyph bits x 4px = 32px per letter
 
 // $D1B5 LDA #$30 -> ram_0060_tile_id_offset. The font is ASCII-indexed, so adding
@@ -75,7 +77,11 @@ export function drawHugeText(tm, str, x, y, tileIdOffset = 0) {
   }
 }
 
-/** sub_D6B3_fill_buffer_with_tiles ($D6B3) against a table from dat_text.js. */
+/**
+ * sub_D6B3_fill_buffer_with_tiles ($D6B3) against a table from dat_text.js.
+ * @param {Tilemap} tm
+ * @param {{col: number, row: number, ids: number[]}} t
+ */
 export function writeText(tm, t) { tm.writeTiles(t.col, t.row, t.ids); }
 
 /** The ROM's 7-digit array for `value`, most significant first ($D9FE's layout). */

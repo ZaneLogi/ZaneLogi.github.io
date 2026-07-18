@@ -22,6 +22,12 @@
 
 import { TANK_PALETTE_FLICKER } from './assets/dat_chr.js';
 
+/**
+ * @typedef {import('./renderer.js').Renderer} Renderer
+ * @typedef {import('./input.js').Input} Input
+ * @typedef {import('./field.js').Field} Field
+ */
+
 export class Tank {
   constructor(slot) {
     this.slot = slot;            // 0=P1, 1=P2, 2..7=enemy
@@ -32,6 +38,9 @@ export class Tank {
     this.wheels = 0;
     this.stunTimer = 0;          // ram_plr_stun_timer ($6F) — players only
     this.stageCell = 0;
+    this.onIce = false;          // player standing on ice — $E181 sets $0103 bit7
+    this.occupancyCells = null;  // cells this tank marked in Field.occupancy ($E181);
+                                 // Field.occupancyWriteback ($E1FA) clears them
     this.ai = null;              // EnemyAI instance for enemy slots
   }
 
@@ -49,6 +58,7 @@ export class Tank {
   // calls it separately from each screen's loop ($C9F5 menu / $C20C battle /
   // $C42F demo) — the split our Mode contract requires already exists upstream. So
   // nothing in here may mutate game state (mode.js).
+  /** @param {Renderer} renderer  @param {number} frameLo */
   handle(renderer, frameLo) {
     // $00 -> ofs_001_DBF0_00_RTS. An empty slot draws nothing.
     if (this.state === 0) return;
@@ -60,6 +70,7 @@ export class Tank {
   }
 
   // ofs_001_DFB6 ($DFB6) + loc_DFE9_display_sprites ($DFE9) — draw a live tank.
+  /** @param {Renderer} renderer  @param {number} frameLo */
   draw(renderer, frameLo) {
     let palette;
     if (this.isPlayer) {                             // $DFB6 CPX #$02 / BCC
@@ -92,7 +103,9 @@ export class Tank {
   }
 
   // movement step ($DBF1); players use input, enemies delegate to this.ai
+  /** @param {Input} input  @param {Field} field */
   move(input, field) { /* TODO: port $DBF1 */ }
 
+  /** @param {Field} field */
   iceMove(field) { /* TODO: port $DB75 */ }
 }

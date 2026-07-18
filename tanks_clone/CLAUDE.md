@@ -65,8 +65,8 @@ don't let the answer live only in that list.
     `Field` — `Field` wraps a `Tilemap` and adds terrain semantics. Terrain can't be
     a 13×13 block grid: a bullet chips a brick to a 4×4 quadrant mask (`sub_D743`),
     which only the tile id can hold (map §5 S2). Two hardware artifacts are dropped —
-    **bit7 occupancy** packed in the tile byte → its own grid (the two-pass
-    mark/clear timing, `$E181`/`$E1FA`, is a build-time call, not settled here); and
+    **bit7 occupancy** packed in the tile byte → its own grid (P5 kept the ROM's
+    two-pass mark-all-before-move-any timing, `$E181`/`$E1FA`, as a faithful rule); and
     the **packed 64-byte attribute table** → a 1:1 palette-per-cell array on
     `Tilemap`, which is render-only and NOT `Field`'s data (one block = one palette,
     so nothing is lost). Governing test applied; was map §8's "one thing or two?".
@@ -96,8 +96,9 @@ don't let the answer live only in that list.
     OAM Y = `sprY - 8` (so `sprY` is the sprite's **centre**), and the PPU renders
     sprites one scanline late. Net top = `sprY - 7`.
   - **Still a plan:** the backdrop → behind-BG sprites → BG (index 0 transparent) →
-    front sprites composite, and with it `$DA3B-$DA45`'s forest-priority probe. Needs
-    `Field`; nothing reaches it yet (the title has no forest). progress.md "Debt".
+    front sprites composite, and with it `$DA3B-$DA45`'s forest-priority probe. `Field`
+    exists now (P5), but `Battle` draws only the BG tilemap so far — the sprite layers
+    and the forest probe arrive with tank rendering. progress.md "Debt".
 - Deferred (stub-only): `Audio` ($EA7E sfx engine — portable), `Construction`
   (stage editor). ES6 modules, no build step; `index.html` boots `main.js`.
   - **`Audio` is not as low-priority as it looks: it GATES two modes.** `GameOver`

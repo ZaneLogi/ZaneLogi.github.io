@@ -80,6 +80,9 @@ export const TILE = Object.freeze({
   BLANK: 0x00,        // used for the empty quarters of a half-BRICK block
   BRICK: 0x0F,
   STEEL: 0x10,        // "concrete" in the tbl_DACB comments
+  BORDER: 0x11,       // the indestructible grey tile $D7CC fills the field with; it
+                      // surrounds the 26x26 play grid and is reused as the curtain
+                      // ($CC90) and " " in text. Solid ($11 < $20) -> blocks tanks.
   WATER: 0x12,
   BLANK_STEEL: 0x20,  // the empty quarters of a half-STEEL block. Byte-identical
                       // to BLANK ($00) in CHR -- both all-zero. Colour index 0 is
@@ -88,6 +91,12 @@ export const TILE = Object.freeze({
   ICE: 0x21,
   FOREST: 0x22,
 });
+
+// isPassable threshold ($DCD5). A tank drives over $00 (empty) and anything >= $20
+// (BLANK_STEEL $20, ICE $21, FOREST $22); every SOLID tile sits in $01-$1F (brick
+// $01-$0F, steel $10, grey border $11, water $12). The tile ids were ARRANGED so a
+// single magnitude compare classifies terrain — see field.js isPassable.
+export const TILE_DRIVE_OVER_MIN = 0x20;
 
 // Block codes, in tbl_DACB order. Half-blocks name the half that is SOLID.
 export const BLOCK = Object.freeze({
@@ -103,6 +112,13 @@ export const BLOCK = Object.freeze({
 export const STAGE_COLS = 13;
 export const STAGE_ROWS = 13;
 export const BLOCK_PX = 16;
+
+// Where the play grid sits in the 32x30 nametable. sub_F000_draw_stage draws the
+// first block at pixel (16,16), i.e. tile (2,2) (ram_0056/ram_0057 init $10, step
+// $10); sub_D7CC clears the 26x26 grid from pointer $0442 = row 2, col 2. Everything
+// outside is the $11 grey border.
+export const FIELD_ORIGIN_COL = 2;
+export const FIELD_ORIGIN_ROW = 2;
 
 // --- Bonus / power-up ids (ram_bonus_id) ---
 // TODO: decode from E8BE_spawn_bonus / E972_try_to_pick_up_bonus.

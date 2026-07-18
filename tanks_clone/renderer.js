@@ -26,6 +26,8 @@ import { TILEMAP_COLS, TILEMAP_ROWS } from './tilemap.js';
 import { nesRgb } from './palette.js';
 import { SCREEN_W, SCREEN_H } from './constants.js';
 
+/** @typedef {import('./tilemap.js').Tilemap} Tilemap */
+
 // $3F00, the universal backdrop. The PPU mirrors $3F04/$3F08/$3F0C onto it, so
 // every BG palette's entry 0 is this colour whatever its table says — and in this
 // ROM every entry 0 is $0F anyway, so the two agree. See tiles.js.
@@ -38,6 +40,7 @@ const bgPaletteId = (set, attr) => set * 4 + attr;
 const SPRITE_PALETTE_ID = 36;
 
 export class Renderer {
+  /** @param {HTMLCanvasElement} canvas */
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
@@ -92,6 +95,24 @@ export class Renderer {
    */
   drawTilemap(tm, set, dx = 0, dy = 0) {
     this.ctx.drawImage(this._compose(tm, set), dx, dy);
+  }
+
+  /**
+   * drawTilemap, but only tile rows [row0, row1) — the stage-intro curtain wipe
+   * composites horizontal bands of grey and field ($CC90/$CCB2 draw it row by row).
+   * Same composed canvas, clipped to the band's source rectangle.
+   * @param {Tilemap} tm
+   * @param {number} set  ram_bg_palette_id ($4D), a con_bg_pal_* index 0..8.
+   * @param {number} dx
+   * @param {number} dy
+   * @param {number} row0  first tile row, inclusive.
+   * @param {number} row1  last tile row, exclusive.
+   */
+  drawTilemapRows(tm, set, dx, dy, row0, row1) {
+    if (row1 <= row0) return;
+    const y = row0 * TILE_H;
+    const h = (row1 - row0) * TILE_H;
+    this.ctx.drawImage(this._compose(tm, set), 0, y, SCREEN_W, h, dx, dy + y, SCREEN_W, h);
   }
 
   /**
