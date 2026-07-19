@@ -422,16 +422,56 @@ but because it described work that had not started yet.)*
     self-freeze + shield absorb + demo exempt / the full flow Menu→1P→Battle fires a
     visible bullet, `render()` clean.
 
+- **P8 — Base / HQ: the eagle appears, is destroyed → game over, with the explosion +
+  shovel fortify.** ☑ Done. The stage now has an HQ to defend: `StageIntro` stamps the
+  eagle + walls into the field, a bullet (incl. the player's own) destroys it, the
+  39-frame countdown + explosion play, and `checkStageEnding` ends the run. Full decode +
+  citations + verification: `docs/research_base.md`. `base.js` rewritten from stub;
+  `field.js`/`constants.js`/`game.js`/`modes/session.js`/`bullet.js` touched. Pipeline
+  step 6 (`$E2A9`) filled; the eagle-hit path (P7, dormant) now live.
+  - **The base is field TILES, not sprites** (the one fact everything follows from) — walls
+    brick `$0F` / steel `$10`, eagle `$C8-$CB`, destroyed `$CC-$CF`, a fixed 6×4 stamp at
+    the bottom-centre (`sub_CAF5` etc.). Only the game-over **explosion is sprites**
+    (`$E2D8-$E362`). So `Base` owns no surface — it edits `Field`'s tilemap. The base
+    region is empty in every stage (verified vs `LEVELS[0]`), so the stamp fills space.
+  - **Found + fixed a latent P6 bug — `field.isPassable`.** `$DCD5` blocks on `BMI`
+    (tile ≥ `$80`) *before* the `< $20` compare; that `BMI` did double duty (occupancy
+    bit7 **and** the eagle `$C8-$CB`). The port split occupancy into its own grid, so the
+    eagle reached only `isPassable`, which returned true for `$C8` → tanks drove through
+    the eagle. Latent because no ≥`$80` tile was in the field until now. Fix:
+    `t === 0 || (t >= $20 && t < $80)`. Only the eagle / destroyed eagle change; all real
+    terrain is `< $80`. research_base.md §3.
+  - **`sub_E2A9` ported whole** (Zane's scope call, 2026-07-19): the shovel fortify/blink/
+    expiry branch (`$E2A9-$E2CF`, gated on `frm.lo` 16/64-frame gates) **then** the
+    countdown. The shovel is **dormant** — nothing sets `shovelTimer` until Bonus; ported
+    as `Base.applyShovel(field)` (`$E9FB`, drawProtected + `$14`) for Bonus to call, and
+    tested directly.
+  - **The explosion is a triangle wave** — index `= | |(count>>2)-5| - 5 |` (`$E2DE-$E2F6`),
+    sweeping `1→2→3→4→5→…→0` over the 39 frames: one 16×16 blast (`$F1/$F5/$F9`) growing to
+    a 32×32 four-group blast (`$D1…`/`$E1…`), palette 3. `Base.render`, front-most (step 6
+    fills OAM before the tanks/bullets drawn after the pipeline).
+  - **Wiring:** `StageIntro.START_STAGE` → `base.drawDefault(field)` (`$C1DC`, resolves the
+    P5/P7 TODO); `Battle.render` → `base.render(renderer)` last; `Bullet.checkPoint` →
+    `base.onHit(field)` (draws the destroyed eagle); `base.reset()` also clears `shovelTimer`.
+  - **Deferred, cited:** the stage-load jingle (`$C1C7`) + eagle-hit sfx (`$E6B4/$E6B7`) —
+    Audio; the editor draw-just-eagle path (`$C1E2 sub_CB5D`) — Construction; the demo base
+    draw (`$C412`) — Demo.
+  - **Verified** — 66/66 deterministic in-browser (headless `Game`, `getImageData`): draw /
+    passability (incl. the fix + an A/B drive-through) / destruction full-flow (39-frame
+    countdown → game over) / explosion phase sweep + sprite emission / shovel blink+expiry.
+    Visual (preview pane): stage 1 renders the eagle in its fortification (alive `$c8`,
+    122 px); destruction shows the blast (destroyed `$cc`, 245 px; blast 1525 px).
+    Screenshot in the P8 session.
+
 ## Next
 Following the gameplay line: **`Demo`** (`$C642` fakes input into `mainBattleScript` —
 now unblocked: tanks move and shoot) and then **enemy AI / spawn** (`$DB48` spawn,
 `$E162` enemy fire, the `tbl_E498` AI states), which also unblocks `$E70C` Parts 1&2
 (bullet-vs-enemy kill / score / bonus) and the tank-explosion render.
 
-`StageIntro` is done (curtain wipe + "STAGE N" + A/B select + reveal); its remaining
-base-draw / sfx / editor hooks land with Base / Audio / Construction. The **eagle-hit →
-game over** path is ported in `Bullet.checkPoint` but dormant until Base draws the eagle
-(`$C1DC`).
+`StageIntro` is done (curtain wipe + "STAGE N" + A/B select + reveal + the base draw,
+P8); its remaining sfx / editor hooks land with Audio / Construction. The **eagle-hit →
+game over** path (`Bullet.checkPoint`) is now **live** — Base draws the eagle (P8).
 
 ## Debt (NOT SOURCE — delete when its owner lands)
 - **`GameOver` / `HallOfFame` wait on a frame constant**, because the ROM waits on

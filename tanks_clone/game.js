@@ -1,4 +1,4 @@
-// game.js — S1 Session / mode / stage flow  (the orchestrator)
+// game.js — Session / mode / stage flow  (the orchestrator)
 //
 // Owns every subsystem, drives the MODE MACHINE, and holds session state.
 //
@@ -262,12 +262,13 @@ export class Game {
     // lives IS the disable: a player with 0 lives simply is not spawned.
     if (this.lives[0] > 0) this.roster.spawnPlayer(0);   // $C343-$C347
     if (this.lives[1] > 0) this.roster.spawnPlayer(1);   // $C34A-$C350
-    this.base.reset();                      // $C386-$C388 game_over_flag = con_not_game_over
+    this.base.reset();                      // $C386-$C388 game_over_flag = alive; also
+                                            // clears ram_shovel_timer ($C361, part of below)
     this.stageSelectUsed = true;            // $C38F ram_004C_flag = 1 (§6a)
-    // TODO: the rest of $C331 — ram_enemy_spawn_cnt, clear the power-up timers
-    //   ($C361-$C367), draw the 20 enemy icons ($C377 sub_C8C0), sub_C830/sub_C859
-    //   HUD icons, sub_E42B_prepare_enemy_tanks_for_stage ($C383); the spawn
-    //   interval $BE - stage*4, minus $14 in 2P ($C391-$C3B2).
+    // TODO: the rest of $C331 — ram_enemy_spawn_cnt, the OTHER power-up timers
+    //   ($C363-$C367: clock/helmet), draw the 20 enemy icons ($C377 sub_C8C0),
+    //   sub_C830/sub_C859 HUD icons, sub_E42B_prepare_enemy_tanks_for_stage ($C383);
+    //   the spawn interval $BE - stage*4, minus $14 in 2P ($C391-$C3B2).
   }
 
   // sub_D97D_check_hiscore_beaten ($D97D).

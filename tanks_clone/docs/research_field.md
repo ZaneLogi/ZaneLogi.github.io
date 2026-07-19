@@ -92,5 +92,5 @@ power bullet). `Field.quadrantHit` (`$D725`/`$D73C`) is the collision pre-test t
   marks 1; non-drivable tank skipped; writeback clears exactly the marks; two-pass
   marks all tanks before clearing any.
 - **Visible:** Menu → 1P → Start → `StageIntro` → `Battle` renders stage 1's terrain
-  (grey border, brick columns, central + side steel, eagle fortification; the eagle
-  itself absent — `Base` is still stub). Screenshot in the P5 session.
+  (grey border, brick columns, central + side steel, eagle fortification; at P5 the eagle
+  itself was absent — `Base` drew it in **P8**, `research_base.md`). Screenshot in the P5 session.

@@ -200,6 +200,12 @@ export const EAGLE_TILE_BASE = 0xC8;   // $E6A4 AND #$FC / $E6A6 CMP #$C8
 // ($DFDD) until 0. Cleared on spawn ($E377) and at stage prep ($C363). See Tank.control.
 export const STUN_TIMER_INIT = 0xC8;   // $E8AA LDA #$C8 — 200 control-ticks (~4.4 s)
 
+// --- Base / HQ (S6) ---
+// ram_shovel_timer ($45) — the shovel power-up fortifies the base walls (brick->steel)
+// for this many units. sub_E2A9 DECs it every 64 frames while acting every 16 ($E2A9).
+// Set by the shovel bonus ($EA02 LDA #$14); dormant until Bonus lands. See base.js.
+export const SHOVEL_TIMER_INIT = 0x14;   // $EA02 LDA #$14
+
 // --- Bonus / power-up ids (ram_bonus_id) ---
 // TODO: decode from E8BE_spawn_bonus / E972_try_to_pick_up_bonus.
 

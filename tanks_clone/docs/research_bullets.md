@@ -107,7 +107,7 @@ a bullet flies clean through a chipped hole.** Then, on the tile value:
 
 | tile | result |
 |---|---|
-| eagle (`& $FC == $C8`, `$C8-$CB`) | `Base.onHit` (once) + bullet explodes → game over follows. **Dormant** until Base draws the eagle. |
+| eagle (`& $FC == $C8`, `$C8-$CB`) | `Base.onHit(field)` (once) + bullet explodes → game over follows. **Live since P8** — Base draws the eagle (`research_base.md`). |
 | `≥ $12` (water `$12`, ice `$21`, forest `$22`, blank-steel `$20`) | pass — bullets **fly over** |
 | border `$11` | bullet explodes (`$33`), tile unchanged |
 | POWER bullet, any solid | clear the **whole** tile (`$D784` A=0) + explode |

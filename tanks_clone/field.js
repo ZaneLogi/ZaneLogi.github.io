@@ -66,13 +66,20 @@ export class Field {
   // --- terrain queries (read by tank movement & bullet collision) ---
   terrainAt(col, row) { return this.tilemap.tileAt(col, row); }
 
-  // sub_DCD5 ($DCD5): a tank passes on $00 (BEQ) or tile >= $20 (CMP #$20 / BCC
-  // blocks); every solid tile is $01-$1F. One compare classifies terrain because the
-  // ids were arranged for it (#3; constants.js TILE_DRIVE_OVER_MIN). Occupancy is a
-  // separate grid, so nothing to mask here.
+  // sub_DCD5 ($DCD5), in ROM order: $DCD7 BMI (tile >= $80) BLOCKS, $DCD9 BEQ ($00)
+  // passes, $DCDB CMP #$20 / BCC (< $20) blocks; else ($20-$7F) passes. The ids were
+  // arranged so magnitude classifies terrain (#3; constants.js TILE_DRIVE_OVER_MIN).
+  //
+  // The $DCD7 BMI did DOUBLE DUTY in the ROM: occupancy (bit7, packed into the tile
+  // byte) AND the eagle, whose tiles $C8-$CB have bit7 set. The port split occupancy
+  // into its own grid (checked in Tank.cornerClear), so the eagle reaches here only via
+  // the tile id — hence the `< $80` bound, or a tank drives straight through the eagle
+  // (latent through P6: no tile >= $80 was in the field until Base draws the eagle).
+  // Only the eagle / destroyed eagle ($C8-$CF) are >= $80; all real terrain is < $80.
+  // research_base.md §3.
   isPassable(col, row) {
     const t = this.terrainAt(col, row);
-    return t === 0 || t >= TILE_DRIVE_OVER_MIN;
+    return t === 0 || (t >= TILE_DRIVE_OVER_MIN && t < 0x80);
   }
 
   // sub_E181 ($E181) compares the tile under a player to $21.

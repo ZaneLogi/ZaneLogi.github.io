@@ -123,12 +123,13 @@ class StageIntro extends Mode {
       case INTRO.START_STAGE:
         // $C1D4/$C1D9: sub_C9B0 + sub_F000_draw_stage build the field.
         g.field.loadStage(g.stageGrid());
+        // $C1DC sub_CAF5_draw_default_base — stamp the eagle + HQ walls over the
+        // freshly-drawn field (Base/S6). The base region is empty in stage data.
+        g.base.drawDefault(g.field);
         // TODO, each waiting on another subsystem:
         //   $C1C7-$C1CD ram_sfx_stage_load_* — the load jingle (Audio, deferred).
-        //   $C1DC sub_CAF5_draw_default_base — the eagle + HQ walls into the field
-        //     (Base/S6). This is why the fortification shows but the eagle does not.
         //   $C1D0/$C1E2 the editor path — keep the constructed field, draw just the
-        //     eagle (Construction mode, deferred; §6c).
+        //     eagle (sub_CB5D_draw_default_eagle; Construction mode, deferred; §6c).
         this.seq = INTRO.CURTAIN_OPEN;
         this.t = 0;
         return null;
@@ -228,9 +229,11 @@ class Battle extends Mode {
     g.roster.render(renderer, g.frm.lo, g.field);      // $C209 sub_DEA6 — tanks + spawn star
     g.bullets.render(renderer);                        // $C206 sub_E0D8 — bullet + hit sprites
     g.roster.drawShields(renderer, g.frm.lo);          // $E27C draw half — spawn helmet, front
-    // OAM priority (lowest index = front-most): shields (step 7) > bullets ($C206) > tanks
-    // ($C209); the front list paints in enqueue order, so tanks -> bullets -> shields puts
-    // shields over bullets over tanks — the ROM's order.
+    g.base.render(renderer);                           // $E2A9 step 6 — the eagle explosion
+    // OAM priority (lowest index = front-most): the eagle explosion (step 6) > shields
+    // (step 7) > bullets ($C206) > tanks ($C209); the front list paints in enqueue order,
+    // so enqueuing tanks -> bullets -> shields -> explosion paints them back-to-front —
+    // the ROM's OAM order (earlier pipeline step = lower index = drawn on top).
     renderer.flushSprites(true);                       // behind-BG (forest-covered) sprites
     renderer.drawTilemap(g.field.tilemap, g.bgPaletteId, 0, 0, true);   // BG, transparent index 0
     renderer.flushSprites(false);                      // front sprites, on top

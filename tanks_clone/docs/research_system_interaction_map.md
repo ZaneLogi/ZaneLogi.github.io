@@ -322,6 +322,11 @@ citations + the packed-`status`-byte split: `docs/research_bullets.md`.
 **S6 — Base / HQ (eagle).** `E2A9_HQ_handler`, `ram_shovel_timer`($45) fortify,
 eagle draw routines (`CAF5`/`CB5D`/`CB9E`/`CC08`), destruction → sets
 `game_over_flag`. Reads/writes S2 field (the walls around the eagle).
+**Ported P8** — the base is field TILES (walls `$0F`/`$10`, eagle `$C8-$CB`, destroyed
+`$CC-$CF`), only the game-over explosion is sprites; the eagle-hit → 39-frame countdown →
+game over is now live, and `sub_E2A9`'s shovel branch is ported dormant (Bonus). This also
+exposed + fixed a latent `isPassable` bug (`$DCD5 BMI`; the eagle would let tanks through).
+Full decode: `docs/research_base.md`.
 
 **S7 — Bonus / power-ups.** `ram_bonus_pos_X/Y/id`($86/$87/$88),
 `ram_bonus_timer`($62). Effects touch many subsystems: helmet/star

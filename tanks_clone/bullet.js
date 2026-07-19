@@ -112,10 +112,10 @@ export class Bullet {
     const tile = field.terrainAt(col, row);
 
     // $E6A2-$E6C3 — the eagle ($C8-$CB). Destroy it once; sub_C728 turns that into game
-    // over a few frames later (Base owns the countdown). Dormant until Base draws the eagle.
+    // over a few frames later (Base owns the countdown). Now live — Base draws the eagle.
     if ((tile & 0xFC) === EAGLE_TILE_BASE) {           // $E6A4 AND #$FC / $E6A6 CMP #$C8
       if (!base.isDestroyed()) {                       // $E6AC BEQ — already gone, ignore
-        base.onHit();                                  // $E6AE-$E6BA
+        base.onHit(field);                             // $E6AE-$E6BA (draws the destroyed eagle)
         this.explode();                                // $E6C0 LDA #$33
       }
       return false;                                    // $E6C3 -> loc_E709
