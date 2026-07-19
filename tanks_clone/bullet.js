@@ -17,7 +17,7 @@
 // See docs/research_bullets.md and docs/research_system_interaction_map.md §3, §5 (S5).
 
 import {
-  DIR_DX, DIR_DY, TILE, BTN_AB, SECOND_LOOP,
+  DIR_DX, DIR_DY, TILE, BTN_AB, SECOND_LOOP, MAX_TANKS,
   BULLET_STATE, BULLET_PROPERTY, BULLET_SLOTS, SECOND_BULLET_BASE,
   BULLET_TANK_RANGE, BULLET_BULLET_RANGE,
   BULLET_SPRITE_BASE, BULLET_SPRITE_X_OFFSET, BULLET_SPRITE_PALETTE,
@@ -43,6 +43,15 @@ function bulletPropertyForType(type) {
   if (hi === 0x60) return BULLET_PROPERTY.FAST | BULLET_PROPERTY.POWER;   // $E0C8 -> $E0D3
   if (hi & 0x80) return 0;                                                // $E0CC BNE
   return BULLET_PROPERTY.FAST;                                            // $E0CE fall-through
+}
+
+// The bullet-vs-tank hit box ($E72C-$E74C etc.): |dx| < $0A and |dy| < $0A. Plain abs
+// (not the ROM's 8-bit two's-complement fold) — a bullet and its target are always
+// within a few pixels, well clear of the 0/255 wrap, so the two agree. Same shape the
+// P7 freeze (Part 3) uses.
+function boxHit(bullet, tank) {
+  return Math.abs(bullet.x - tank.x) < BULLET_TANK_RANGE &&
+         Math.abs(bullet.y - tank.y) < BULLET_TANK_RANGE;
 }
 
 export class Bullet {
@@ -198,9 +207,19 @@ export class BulletManager {
   }
 
   // --- pipeline step 9: sub_E162 ($E162) — enemy fire ---
-  // 1/32 RNG per enemy per frame, frozen while the clock power-up is active. Deferred to
-  // the enemy scope — no enemy tank exists to fire yet.
-  enemyFire(roster, ai, clockFrozen) { /* TODO: port $E162 */ }
+  // 1/32 RNG per drivable enemy per frame, frozen while the clock power-up is active.
+  // One primary bullet each (no 2-shot upgrade — that is players only). shouldFire uses
+  // the same LFSR that drives AI movement, so it takes frm_cnt_hi. research_enemy_combat §1.
+  /** @param {TankRoster} roster  @param {import('./enemy_ai.js').EnemyAI} ai */
+  enemyFire(roster, ai, clockTimer, frameHi) {
+    if (clockTimer !== 0) return;                        // $E162-$E165 frozen
+    for (let x = MAX_TANKS - 1; x >= 2; x--) {           // $E167-$E17E enemies 7..2
+      const tank = roster.tanks[x];
+      if (!tank.isDrivable) continue;                    // $E16B/$E16F exploding/respawning
+      if (!ai.shouldFire(frameHi)) continue;             // $E171-$E176 random & $1F == 0
+      this.spawn(tank);                                  // $E178 sub_E08C
+    }
+  }
 
   // --- pipeline step 11: sub_E604_bullets_movement ($E604) — move + terrain collision ---
   /** @param {Field} field  @param {Base} base  @param {number} frameLo */
@@ -253,12 +272,62 @@ export class BulletManager {
   }
 
   // --- pipeline step 13: sub_E70C ($E70C) — bullet vs tank ---
-  // $E710 Part 1 (enemy bullets 2-7 -> players -> kill) and $E782 Part 2 (player bullets ->
-  // enemies -> damage/kill/score/bonus) are DEFERRED to the enemy scope: no enemy tank or
-  // bullet exists, and both need the tank-explosion render (Tank.render TODO), player
-  // respawn, and Score/Bonus. Only Part 3 is player-observable now.
-  /** @param {TankRoster} roster  @param {number} secondLoop  ram_2nd_loop_flag ($46) */
-  collideWithTanks(roster, secondLoop) {
+  // Three parts, in the ROM's order. Part 1 (enemy bullet -> player -> kill) and Part 2
+  // (player bullet -> enemy -> damage/kill) are P10; Part 3 (player bullet -> the OTHER
+  // player -> FREEZE) was P7. The kill's score-visible consequences (score, per-type
+  // counters, kill-points popup) are Game.awardKill (S8-B); only the bonus drop is deferred
+  // (Bonus/S7). research_enemy_combat.md §2/§7. Hit box: |dx| < $0A and |dy| < $0A per axis.
+  /** @param {TankRoster} roster  @param {number} secondLoop  @param {import('./game.js').Game} game */
+  collideWithTanks(roster, secondLoop, game) {
+    // $E710 Part 1 — enemy bullet kills a player. For each player, scan the enemy bullets
+    // (slots 2-7); a hit explodes the bullet, then a helmet absorbs it or the player dies.
+    for (let p = 1; p >= 0; p--) {                            // $E710 players 1,0
+      const player = roster.tanks[p];
+      if (!player.isDrivable) continue;                       // $E712-$E71B exploding/respawning
+      for (let bi = MAX_TANKS - 1; bi >= 2; bi--) {           // $E721 enemy bullets 7..2
+        const b = this.bullets[bi];
+        if (!b.flying) continue;                              // $E723-$E72A status $40
+        if (!boxHit(b, player)) continue;                     // $E72C-$E74C
+        b.explode();                                          // $E74E-$E750 status $33
+        if (player.helmetTimer !== 0) { b.deactivate(); continue; } // $E753-$E75C helmet clears it, $E75C -> next bullet
+        player.explode();                                     // $E75F-$E761 flags = $73
+        player.type = 0;                                      // $E76D — star tier lost on death
+        // TODO: ram_tank_upgrade[p] = 0 ($E76A) — Bonus/S7 (always 0 today);
+        //       ram_sfx_explosion_player ($E765) — Audio.
+        break;                                                // $E76F -> next player
+      }
+    }
+
+    // $E782 Part 2 — a player bullet kills an enemy. For each enemy, scan the PLAYER
+    // bullets (slots 0/1/8/9); armour survives with a decremented hit counter, otherwise
+    // the enemy explodes.
+    for (let x = MAX_TANKS - 1; x >= 2; x--) {                // $E782 enemies 7..2
+      const tank = roster.tanks[x];
+      if (!tank.isDrivable) continue;                         // $E784-$E78C exploding/respawning
+      for (let bi = BULLET_SLOTS - 1; bi >= 0; bi--) {        // $E793 bullets 9..0
+        const b = this.bullets[bi];
+        if (!b.isPlayerBullet) continue;                      // $E795 AND #$06 — player bullets only
+        if (!b.flying) continue;                              // $E79E-$E7A5 status $40
+        if (!boxHit(b, tank)) continue;                       // $E7AA-$E7CA
+        b.explode();                                          // $E7CC-$E7CE status $33
+        if (tank.type & 0x04) {                               // $E7D1-$E7D5 bonus carrier
+          // TODO: sub_E8BE_spawn_bonus ($E7D7) — Bonus/S7 (P10 defers the drop).
+          if (tank.type === 0xE4) tank.type--;                // $E7DA-$E7E0 armour+bonus -> $E3
+        }
+        if ((tank.type & 0x03) !== 0) {                       // $E7E2-$E7E6 armour still alive
+          tank.type--;                                        // $E7E8 one hit off; survive
+          // TODO: ram_sfx_bullet_hit_tank ($E7EA) — Audio.
+          continue;                                           // $E7EF -> next bullet
+        }
+        tank.explode();                                       // $E7F2-$E7F4 flags = $73
+        // $E7FB-$E827 (S8-B) — the score-visible half: per-type kill count + points to
+        // the bullet's owner. The bullet slot's low bit is which player fired it ($E806).
+        // ram_sfx_explosion_enemy ($E7F8) — Audio, deferred.
+        game.awardKill(tank, bi & 1, secondLoop === SECOND_LOOP.DEMO);
+        break;                                                // done with this enemy
+      }
+    }
+
     // $E83F Part 3 — THE FREEZE. A player hit by the OTHER player's bullet is STUNNED, not
     // killed (unless shielded / already stunned / in the demo). The whole P-vs-P rule.
     for (let p = 1; p >= 0; p--) {                            // $E841 players 1,0

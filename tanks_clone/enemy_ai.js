@@ -31,9 +31,10 @@ export class EnemyAI {
     this.rng = rng;
   }
 
-  // sub_DC3D dispatch, enemy states. Respawn ($E0/$F0) reuses the shared Tank tick;
-  // the movement states are handled below. Explosion/kill-points states ($10-$70) are
-  // ticked in combat scope (no enemy can be destroyed yet), so they no-op here.
+  // sub_DC3D dispatch, enemy states. Respawn ($E0/$F0) and the explosion tick ($70..$10)
+  // reuse the shared Tank handlers; the movement states are handled below. This runs
+  // under the enemy speed gate (roster.moveTanks), so an exploding enemy's tick is
+  // speed-gated exactly like its movement — the ROM dispatches both through sub_DC3D.
   /** @param {Tank} tank  @param {Field} field  @param {AiContext} ctx */
   drive(tank, field, ctx) {
     switch (tank.state) {
@@ -47,7 +48,12 @@ export class EnemyAI {
       case TANK_STATE.FOLLOW_P2:                        // $C0
       case TANK_STATE.FOLLOW_P1:                        // $D0
         this.followTarget(tank, ctx); return;
-      default: return;                                  // exploding — combat scope
+      default:                                          // $70..$10 exploding -> $DDEA
+        // $10 (KILL_POINTS) must tick to reach death, though its popup isn't drawn.
+        if (tank.state >= TANK_STATE.KILL_POINTS && tank.state <= TANK_STATE.EXPLOSION) {
+          tank.tickExplosion(ctx.game);
+        }
+        return;
     }
   }
 

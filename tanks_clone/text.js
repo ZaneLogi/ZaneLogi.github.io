@@ -117,15 +117,19 @@ function digitsOf(value) {
  *   sub_C7C8_print_lives_handler sets it to 1 every battle frame (lives show "0").
  *   $D17F never sets it itself, so its value on the path BACK to the title after a
  *   game is [?] unresolved — 2 is the boot behaviour, which is what is observable
- *   today. Revisit when Score and GameOver land.
+ *   today. A GameOver-flow concern; revisit when GameOver lands.
+ * @param {number} digitBase  ram_0060_tile_id_offset ($D6F5 ADC): the '0' glyph of
+ *   the digit font. $30 (ASCII) for the title score; the sidebar HUD passes $6E,
+ *   the small digit font ($C7CE lives / $C87A stage number). research_hud.md §4.
  */
-export function drawNumber(tm, value, col, row, { first = 1, minDigits = 2 } = {}) {
+export function drawNumber(tm, value, col, row,
+                           { first = 1, minDigits = 2, digitBase = DIGIT_TILE } = {}) {
   const d = digitsOf(value);
   let i = first;
   let x = col;
   while (i < SCORE_DIGITS && d[i] === 0) { i++; x++; }        // $D934-$D93B
   if (i === SCORE_DIGITS) { i -= minDigits; x -= minDigits; } // $D93E-$D949
   const ids = [];
-  for (let k = i; k < SCORE_DIGITS; k++) ids.push(DIGIT_TILE + d[k]);   // $D6F5
+  for (let k = i; k < SCORE_DIGITS; k++) ids.push(digitBase + d[k]);   // $D6F5
   tm.writeTiles(x, row, ids);                                 // $D6F7 into the buffer
 }

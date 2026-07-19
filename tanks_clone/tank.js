@@ -24,6 +24,8 @@ import { TANK_PALETTE_FLICKER } from './assets/dat_chr.js';
 import { Input } from './input.js';
 import {
   DIR, DIR_DX, DIR_DY, TILE, TANK_STATE, HELMET_TIMER_INIT, SLIDE_ARM, SLIDE_LOCK_BIT,
+  TANK_EXPLOSION_FRAMES, EXPLOSION_PHASE_TICKS, KILL_POINTS_TICKS, EXPLOSION_PALETTE,
+  KILL_POINTS_SPRITE_BASE,
 } from './constants.js';
 
 /**
@@ -58,6 +60,10 @@ export class Tank {
     // an explicit field here). Drives the spawn star; INC'd by the move step.
     this.respawnFrame = 0;
     this.helmetTimer = 0;        // ram_helmet_timer ($89) — spawn invincibility
+    // Explosion phase countdown (the low nibble of ram_tank_flags while state is
+    // $70..$10, an explicit field like respawnFrame / slideTimer — the packed byte
+    // is split). Set to 3 per phase, 6 at the $10 kill-points phase. See tickExplosion.
+    this.explosionTimer = 0;
   }
 
   get isPlayer() { return this.slot < 2; }
@@ -83,10 +89,41 @@ export class Tank {
     if (this.state >= 0x80 && this.state < 0xE0) { this.draw(renderer, frameLo, field); return; }
     // $E0/$F0 -> ofs_001_E00B — the materializing spawn star.
     if (this.state >= 0xE0) { this.drawRespawnStar(renderer, field); return; }
-    // TODO: $10 kill-points ($DEFD); $20/$30/$40 ($DF33/$DF46) and $50/$60/$70
-    // ($DECD) explosions — reached only when a tank is DESTROYED: an enemy bullet
-    // ($E70C Part 1) or a killed enemy (Part 2), both enemy-scope. P7's player-vs-
-    // player bullet only FREEZES (Part 3), so it never reaches these.
+    // $70..$20 -> ofs_001_DECD/DF33/DF46 — the destruction blast.
+    if (this.state >= TANK_STATE.EXPLODE_20 && this.state <= TANK_STATE.EXPLOSION) {
+      this.drawExplosion(renderer);
+      return;
+    }
+    // $10 -> ofs_001_DEFD — the kill-points popup (S8-B).
+    if (this.state === TANK_STATE.KILL_POINTS) { this.drawKillPoints(renderer); return; }
+  }
+
+  // ofs_001_DEFD ($DEFD) — the kill-points popup, drawn during the $10 phase. An enemy
+  // (type != 0) shows its point value as a 2-tile number sprite (tile = ((type>>3) &
+  // $FC) - $10 + $B9 -> $B9/$BD/$C1/$C5 for $80/$A0/$C0/$E0); a killed player (type 0)
+  // shows a plain $F1 blast instead ($DF03 BEQ). Palette 3, 2 sprites (sub_DA7B). S8-B.
+  /** @param {Renderer} renderer */
+  drawKillPoints(renderer) {
+    const tile = this.type === 0
+      ? 0xF1                                                   // $DF23 sub_DEF0(0) — player blast
+      : ((this.type >> 3) & 0xFC) - 0x10 + KILL_POINTS_SPRITE_BASE;   // $DF05-$DF10
+    renderer.drawSprite(tile, (this.x - 8) & 0xFF, this.y, EXPLOSION_PALETTE);
+    renderer.drawSprite(tile + 2, this.x, this.y, EXPLOSION_PALETTE);
+  }
+
+  // ofs_001_DECD / DF33 / DF46 ($DECD/$DF33/$DF46) — the tank destruction blast for the
+  // explosion states. TANK_EXPLOSION_FRAMES maps the state to [dx,dy,tile] groups around
+  // the tank centre; each is two 8x16 sprites (sub_DA7B: tile @ gx-8, tile+2 @ gx),
+  // palette 3, front layer (the ROM zeroes priority_spr_A). Same blast as the P8 base.
+  /** @param {Renderer} renderer */
+  drawExplosion(renderer) {
+    const groups = TANK_EXPLOSION_FRAMES[this.state];
+    if (!groups) return;
+    for (const [dx, dy, tile] of groups) {
+      const gx = (this.x + dx) & 0xFF, gy = this.y + dy;
+      renderer.drawSprite(tile, (gx - 8) & 0xFF, gy, EXPLOSION_PALETTE);
+      renderer.drawSprite(tile + 2, gx, gy, EXPLOSION_PALETTE);
+    }
   }
 
   // sub_DA2B's forest-priority probe ($DA3B-$DA45): a sprite half is drawn BEHIND the
@@ -205,8 +242,8 @@ export class Tank {
 
   // sub_DBF1 / sub_DC3D / loc_DC97 ($DBF1) — the per-tank move step, dispatched on
   // the state. The roster applies the 3/4-frame player speed gate before calling.
-  /** @param {Field} field */
-  moveStep(field) {
+  /** @param {Field} field  @param {import('./game.js').Game} [game] */
+  moveStep(field, game) {
     switch (this.state) {
       case TANK_STATE.RESPAWN:                          // $F0 ofs_000_DE55
         this.respawnTick(TANK_STATE.E0);                // $F0..$FE -> $E0
@@ -221,8 +258,46 @@ export class Tank {
         this.drive(field);
         return;
       default:
-        return;                                         // enemy AI states — deferred
+        // $70..$10 explosion states -> ofs_000_DDEA (the tick). Players reach here via
+        // the 3/4 move gate; a return covers empty ($00) and any unhandled state. The
+        // lower bound is $10 (KILL_POINTS), not $20 — the $10 phase must tick to reach
+        // death even though its popup is not drawn.
+        if (this.state >= TANK_STATE.KILL_POINTS && this.state <= TANK_STATE.EXPLOSION) {
+          this.tickExplosion(game);
+        }
+        return;
     }
+  }
+
+  // ofs at $E75F/$E7F2 — a tank is hit: flags = $73 (explosion state $70, low nibble 3).
+  explode() {
+    this.state = TANK_STATE.EXPLOSION;                  // $70
+    this.explosionTimer = EXPLOSION_PHASE_TICKS;        // low nibble 3
+  }
+
+  // ofs_000_DDEA ($DDEA) — advance the explosion one tick. The ROM DECs the flags byte
+  // and steps a phase ($70->$60..->$20->$10->dead) when the low nibble hits 0, longer at
+  // the $10 kill-points phase (ORA #$06). Here the low nibble is the explicit
+  // explosionTimer; at the last phase the tank dies -> game.destroyTank. Dispatched under
+  // the same gate as movement (player 3/4, enemy speed), so the caller owns the gating.
+  // research_enemy_combat.md §3.
+  /** @param {import('./game.js').Game} game */
+  tickExplosion(game) {
+    if (this.explosionTimer > 1) { this.explosionTimer--; return; }   // $DDEA-$DDF0 still in phase
+    // low nibble reaches 0 -> next phase ($DDF2 SBC #$10)
+    if (this.state === TANK_STATE.KILL_POINTS) {        // $10 -> 0: dead ($DDF7 -> $DE07)
+      this.state = 0;
+      this.explosionTimer = 0;
+      game?.destroyTank(this);
+      return;
+    }
+    if (this.state === TANK_STATE.EXPLODE_20) {         // $20 -> $10 kill-points ($DDFD ORA #$06)
+      this.state = TANK_STATE.KILL_POINTS;
+      this.explosionTimer = KILL_POINTS_TICKS;
+      return;
+    }
+    this.state -= 0x10;                                 // $70..$30 -> next phase ($DE02 ORA #$03)
+    this.explosionTimer = EXPLOSION_PHASE_TICKS;
   }
 
   // ofs_000_DE55 / ofs_000_DE64 ($DE55/$DE64) — the two respawn phases both just INC

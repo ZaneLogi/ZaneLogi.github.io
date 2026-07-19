@@ -33,7 +33,8 @@ export const DIR_DY = [-1, 0, 1, 0];   // UP $FF, LEFT 0, DOWN $01, RIGHT 0
 export const TANK_STATE = Object.freeze({
   KILL_POINTS: 0x10,       // points popup after a kill
   EXPLODE_20: 0x20, EXPLODE_30: 0x30, EXPLODE_40: 0x40,
-  EXPLOSION: 0x70,         // con_tank_flag_explosion
+  EXPLODE_50: 0x50, EXPLODE_60: 0x60,
+  EXPLOSION: 0x70,         // con_tank_flag_explosion — the hit sets flags = $73
   NORMAL_80: 0x80, NORMAL_90: 0x90, NORMAL_A0: 0xA0,
   FOLLOW_HQ: 0xB0,         // enemy AI target bias
   FOLLOW_P2: 0xC0,
@@ -41,6 +42,38 @@ export const TANK_STATE = Object.freeze({
   E0: 0xE0,
   RESPAWN: 0xF0,           // con_tank_flag_respawn
 });
+
+// --- Tank explosion (P10) — research_enemy_combat.md §3/§4 ---
+// The blast drawn per explosion state, as [dx, dy, tile] groups relative to the tank
+// centre (x, y). Each group is two 8x16 sprites (sub_DA7B: tile @ gx-8, tile+2 @ gx),
+// palette 3. Same tile family as the P8 base explosion (base.js), centred on the tank
+// instead of the eagle: $F1/$F5/$F9 single (sub_DEE2, $70/$60/$50 & $20), $D1../$E1..
+// four-group (sub_DF99, $40/$30). $10 is the kill-points popup (S8-B), drawn separately.
+export const TANK_EXPLOSION_FRAMES = {
+  0x70: [[0, 0, 0xF1]],
+  0x60: [[0, 0, 0xF5]],
+  0x50: [[0, 0, 0xF9]],
+  0x40: [[-8, -8, 0xD1], [8, -8, 0xD5], [-8, 8, 0xD9], [8, 8, 0xDD]],
+  0x30: [[-8, -8, 0xE1], [8, -8, 0xE5], [-8, 8, 0xE9], [8, 8, 0xED]],
+  0x20: [[0, 0, 0xF9]],
+};
+// ofs_000_DDEA phase countdown (the flags byte's low nibble): 3 ticks per phase,
+// 6 at the $10 kill-points phase (ORA #$03 / ORA #$06). The hit sets flags = $73.
+export const EXPLOSION_PHASE_TICKS = 3;
+export const KILL_POINTS_TICKS = 6;
+export const EXPLOSION_PALETTE = 0x03;   // $DEF5 / $DF16 STA spr_A_palette
+// Points a kill awards, per enemy-type index (basic/fast/power/armour). tbl_E8BA
+// ($E8BA) stores these as $10/$20/$30/$40; sub_D9E1 decodes each byte as hundreds
+// (hi nibble) + tens (lo), so $10 -> 100. The port keeps scores as ints, so we store
+// the decimal value directly. Indexed by (type>>5)-4 ($E7FD). S8-B.
+export const ENEMY_KILL_POINTS = [100, 200, 300, 400];
+// The one-time extra life at 20000 points ($D138: ram_score+$02 >= 2 = the ten-
+// thousands digit >= 2). Granted once per player, gated on ram_p1/p2_extra_life.
+export const EXTRA_LIFE_SCORE = 20000;
+// The kill-points popup sprites ($DF05-$DF10): an enemy's $10 phase shows its value as
+// a 2-tile number sprite, tile = ((type>>3) & $FC) - $10 + $B9 -> $B9/$BD/$C1/$C5 for
+// type $80/$A0/$C0/$E0. A killed player (type 0) shows a plain $F1 blast instead.
+export const KILL_POINTS_SPRITE_BASE = 0xB9;
 
 // Slot roster (decoded): 0=P1, 1=P2, 2..7=enemies. con_max_tanks=$07.
 export const MAX_TANKS = 8;
@@ -191,6 +224,30 @@ export const BLOCK_PX = 16;
 // outside is the $11 grey border.
 export const FIELD_ORIGIN_COL = 2;
 export const FIELD_ORIGIN_ROW = 2;
+
+// --- Sidebar HUD (S8-A) — tiles + positions in the right border strip (cols 28-31,
+// palette 0). Literal tile ids: sub_D6B3 copies them verbatim (no ram_0060 offset),
+// unlike the digit path (sub_D6DD adds it). See docs/research_hud.md §3/§4.
+export const HUD_TILE = Object.freeze({
+  PLAYER_ICON: 0x14,   // tbl_D341 — the mini player-tank icon
+  ENEMY_ICON:  0x6A,   // tbl_D362 — one reserve-enemy icon (drawn in pairs by $C8C0)
+  GRAY:        0x11,   // tbl_D36B — erase an icon back to the grey border (= TILE.BORDER)
+  DIGIT_BASE:  0x6E,   // ram_0060 = $6E: the small sidebar digit font's '0' glyph
+});
+// Two-tile labels ($C830 / $C859), each drawn at cols 29-30 of its row.
+export const HUD_LABEL = Object.freeze({
+  IP:    [0x58, 0x13],   // tbl_D2AB — "I"  + "P"
+  IIP:   [0x5A, 0x13],   // tbl_D2AE — "II" + "P"
+  FLAG1: [0x6C, 0xFC],   // tbl_D365 — flag, top row
+  FLAG2: [0x6D, 0xFD],   // tbl_D368 — flag, bottom row
+});
+// Sidebar cell geometry (research_hud.md §1). All in the col 29-30 strip.
+export const HUD_COL = 29;                 // icons / labels start here; digit right of it
+export const HUD_ENEMY_ROW0 = 3;           // $C894: reserve grid rows 3..12
+export const HUD_LIVES_ROW0 = 18;          // $C7C8: P1 row 18, +3 per player
+export const HUD_LABEL_ROW0 = 17;          // $C830: Ip row 17, +3 per player
+export const HUD_FLAG_ROW = 23;            // $C859: flag rows 23-24, stage number row 25
+export const HUD_NUM_COL = 25;             // $C7C8/$C859: D934 start col, ones lands at 30
 
 // --- Bullets (S5) — the $CC..$D5 zero-page arrays + the $E0xx/$E6xx routines ---
 //

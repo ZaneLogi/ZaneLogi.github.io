@@ -93,13 +93,15 @@ export class TankRoster {
    * @param {Field} field  @param {number} frameLo  @param {number} clockTimer
    * @param {import('./enemy_ai.js').EnemyAI} enemyAI  @param {number} frameHi
    */
-  moveTanks(field, frameLo, clockTimer, enemyAI, frameHi) {
+  moveTanks(field, frameLo, clockTimer, enemyAI, frameHi, game) {
     const playerGated = (frameLo & 1) === 0 && (frameLo & 3) !== 0;   // $DC09-$DC13
-    const ctx = { frameHi, spawnInterval: this.spawnInterval, players: [this.tanks[0], this.tanks[1]] };
+    const ctx = { frameHi, spawnInterval: this.spawnInterval, players: [this.tanks[0], this.tanks[1]], game };
     for (let slot = MAX_TANKS - 1; slot >= 0; slot--) {
       const tank = this.tanks[slot];
       if (tank.isPlayer) {
-        if (!playerGated) tank.moveStep(field);
+        // Under the 3/4 gate: drive, or (when exploding) tick the explosion — moveStep
+        // dispatches both. game is needed only for the explosion's death branch.
+        if (!playerGated) tank.moveStep(field, game);
         continue;
       }
       // --- enemy ($DC18) ---
@@ -149,7 +151,8 @@ export class TankRoster {
   // timer elapses and enemies remain, spawn the next one into the first FREE enemy
   // slot (scanning DOWN from enemyLimit to 2). No free slot -> nothing this frame,
   // which is the "max N enemies on screen" rule (4 in 1P, 6 in 2P).
-  spawnEnemyTick() {
+  /** @param {import('./field.js').Field} field @param {import('./score.js').Score} score */
+  spawnEnemyTick(field, score) {
     if (this.spawnTimer > 0) { this.spawnTimer--; return; }   // $DB4A-$DB4E
     if (this.enemySpawnCount === 0) return;                   // $DB4F-$DB51 all spawned
     for (let slot = this.enemyLimit; slot >= 2; slot--) {     // $DB53-$DB72 scan enemy slots
@@ -157,7 +160,9 @@ export class TankRoster {
       this.spawnTimer = this.spawnInterval;                   // $DB5D-$DB5F reload
       this.spawnEnemy(slot);                                  // $DB61 sub_E363
       this.enemySpawnCount--;                                 // $DB64
-      // TODO: sub_C8B1_erase_enemy_icon ($DB68) when the enemy-icon HUD lands (Score/S8).
+      // $DB66-$DB68: erase the reserve icon indexed by the post-decrement count
+      // (drains the column bottom-up). S8-A / research_hud.md §2.
+      score.eraseEnemyIcon(field, this.enemySpawnCount);
       return;
     }
   }

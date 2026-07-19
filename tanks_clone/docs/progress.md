@@ -520,20 +520,128 @@ but because it described work that had not started yet.)*
     render diff (405 enemy sprite px) + a live screenshot of 4 enemies roaming stage 1
     (bonus tank flashing) via the `window.game` handle.
 
-## Next
-**P10 — enemy combat: fire + kill + explode** (Zane, 2026-07-19). The jump from a
-diorama to a playable battle. `$E162` enemy fire (trivial; `EnemyAI.shouldFire` exists);
-**`$E70C` Parts 1&2** — enemy bullet kills player / player bullet kills enemy — the core,
-well teed-up because **Part 3 (the P-vs-P freeze) is already done (P7)**, same routine;
-the **tank explosion** render (`$20`-`$70` states — the TODOs already sit in `Tank.render`;
-directly analogous to the base's P8 explosion) + the `$DDEA` explosion tick in the move
-step; **death handling** (enemy → `enemiesLeft--`, the stage-end check already reads it;
-player → lose a life → respawn/game-over, both already built). Deferred even then: the
-kill-points popup (`$10`/`$DEFD`) + `Score` (S8), and the **bonus-tank drop** (Bonus S7 —
-a bonus tank just explodes without dropping the power-up).
+- **P10 — enemy combat + Score/HUD (S8).** ☑ Done. Three pieces built as a 3-step plan
+  (Zane, 2026-07-19: **1/ S8-A HUD · 2/ P10 combat · 3/ S8-B score**) and then **folded into
+  one P10 phase** (Zane's call): the sidebar HUD (**S8-A**), enemy fire/kill/explode/death,
+  and score accumulation (**S8-B**). A diorama becomes a playable battle with a live
+  scoreboard. Docs: `docs/research_hud.md` (HUD) + `docs/research_enemy_combat.md` (combat
+  + score). The three sub-parts and their verification records follow.
 
-`Demo` (`$C642`) remains available but was skipped for the gameplay line. `StageIntro`'s
-remaining sfx / editor hooks land with Audio / Construction.
+  **(a) The sidebar HUD (S8-A).** The empty grey right sidebar becomes the real Battle City
+  status column — **no combat dependency**, since every element reads state the game already
+  has. `score.js` rewritten from stub; `constants.js`/`text.js`/`game.js`/`tank_roster.js`
+  touched. Pipeline step 17 (`$C7C8`); the stage-entry HUD (`$C377`/`$C37D`/`$C380`) wired.
+  - **Score is the HUD RENDERER; the state stays on `Game`** (the map's §7 lock — lives/
+    scores/stage live on `Game`). The stub's duplicated `p1/p2/hi` fields were removed (a §7
+    violation in waiting); `Score` now holds only a NOT-SOURCE render cache plus the S8-B
+    logic (`add`; `checkHiscore` is a stub — see (c)).
+  - **Lives show the RESERVE count** — `max(lives-1, 0)` (`$C805` `SBC #$01`): the tank in
+    play isn't counted, so 3 lives prints "2". P1 always (row 18); P2 (row 21) in 2P **or
+    demo**, the same gate as the IIp label.
+  - **The reserve column drains on SPAWN, not kill** (`$C8B1` from the spawn handler `$DB68`,
+    indexed by the post-decrement `enemy_spawn_cnt`) — bottom-up, cell = `{29+(i&1), 3+(i>>1)}`.
+    This is exactly why it needs P9 (done) and not P10. Distinct from `enemiesLeft` (the
+    kill counter, unchanged at 20 with no kills) — the debug HUD's `enemies=20` next to a
+    visibly-drained column is that two-counter split, working.
+  - **The `ram_0060` offset finding** — `$D6B3` (tile-list fill) copies tiles **verbatim**,
+    but `$D6DD` (digit draw) **adds** the offset per digit. It selects the digit font: the
+    title score uses `$30` (ASCII), the sidebar uses **`$6E`** (a smaller font). The ported
+    `drawNumber` had `$30` hard-wired; it now takes a `digitBase` param. research_hud.md §4.
+  - **Write-on-change deviation** (governing test) — the ROM re-fills its transient PPU
+    buffer every frame; `drawLives` instead writes only when a player's displayed reserve
+    changes, so the persistent field canvas isn't repainted each frame (same shape as the
+    scroll/water-swap; CLAUDE.md rendering notes). On a change it re-draws **icon then
+    digit** (the ROM's order), which self-heals the rare 2→1-digit shrink.
+  - **Verified** — deterministic (headless `Game` + a fresh `Field`/`Score`): the full
+    Menu→1P→Battle drive lands the sidebar cells (Ip `[58,13]`, flag `[[6c,fc],[6d,fd]]`,
+    stage `6f`='1', P1 icon `14` + reserve digit `70`='2', no P2 column in 1P); 2P adds IIp
+    `[5a,13]` + P2 icon/digit; reserve full-20 → bottom-up drain (19→(30,12), 18→(29,12),
+    0→(29,3)); `version` stable on a no-op `drawLives`, bumps on a change; reserve-0 prints
+    `6e`='0'. Render path: every HUD cell composes distinct ink vs a uniform border cell
+    (`colors:1,lit:0`) — the `$6E` font renders legible glyphs ('2'=30 lit px, '1'=19,
+    different per value. Plus a live stage-1 screenshot (pane visible): reserve column, IP+2,
+    flag+1, all readable.
+
+  **(b) Enemy combat.** Enemies shoot, a bullet destroys a tank, the tank explodes and dies,
+  and the stage ends on the 20th kill or the last life lost. Bonus pickups deferred (Zane's
+  split). Full decode: `docs/research_enemy_combat.md`. `bullet.js`/`tank.js`/`enemy_ai.js`/
+  `game.js`/`tank_roster.js`/`constants.js` touched. Pipeline steps 9 (`$E162`) + 13 (`$E70C`
+  Parts 1&2); the explosion tick (`$DDEA`) + death (`$DE07`) + render (`$DECD`/`DF33`/`DF46`).
+  The kill EVENT is here; its score-visible consequences are (c).
+  - **Enemy fire (`$E162`)** — 1/32 per drivable enemy via the existing `EnemyAI.shouldFire`
+    (same LFSR as AI movement, so `frm_cnt_hi` is threaded in); frozen while `clock_timer`
+    (stays 0 until Bonus). One primary each — no 2-shot upgrade.
+  - **`$E70C` Parts 1&2** — Part 1 (enemy bullet → player: helmet absorbs, else the player
+    explodes and loses its star tier); Part 2 (player bullet → enemy: armour `DEC`s and
+    survives — a `$E3` heavy takes 4 hits — else explodes). Part 3 (the P-vs-P freeze) was
+    P7, unchanged; the three run in ROM order. Deferred with citations: the bonus drop
+    (`$E8BE` — Bonus/S7), and the kill's score/`kill_cnt`/extra-life (`$E7FB-$E827` — S8-B).
+    The armour/`$E4→$E3` type math **stays**, so bonus-armour tanks still take the right
+    hits — they just drop nothing. `boxHit` = the `|d| < $0A` box, shared with Part 3.
+  - **Explosion tick (`$DDEA`)** — the ROM packs the phase countdown into the flags byte;
+    the port splits it into `Tank.explosionTimer` (the same data-shape deviation as
+    `Base.explosionTimer` / `Bullet.phaseFrame` / the enemy `coast`). `$70→$60..→$20`
+    (3 ticks each) → `$10` (6) → dead. **Dispatched by the normal move step**, so it
+    inherits the gate: a player's blast ticks on the 3/4 gate (measured 24 ticks), a
+    non-fast enemy's on its speed gate (**48 frames** vs a fast enemy's **24** — verified).
+    Both `Tank.moveStep` (players) and `EnemyAI.drive` (enemies) tick it. **The tick guard
+    is `$10..$70`, not `$20..$70`** — a bug caught in verification: with `$20` as the
+    floor the explosion stuck at `$10` forever (it never reached death); the `$10` phase
+    must tick even though its popup isn't drawn.
+  - **Death (`$DE07`, `Game.destroyTank`)** — player: `lives--`, respawn (`spawnPlayer`) if
+    any remain; enemy: `enemiesLeft--`. The state it edits lives on `Game` (respawn is the
+    roster's), so the tick reaches back via `game` — threaded through `moveTanks`, the
+    shape `Base.update(field, game)` already uses. **Stage-end is already built**:
+    `checkStageEnding` (every Battle frame) returns DONE on `enemiesLeft==0` (clear) or
+    all-lives-0 (game over). The per-player 2P GAME OVER slide (`$DE18`) is deferred
+    (unreached in 1P; needs the still-stubbed `$C972`).
+  - **Explosion render (`$70..$20`)** — `TANK_EXPLOSION_FRAMES`: `$F1/$F5/$F9` single +
+    `$D1../$E1..` four-group, the **same blast tiles as the P8 base**, re-centred on the
+    tank (base's groups are eagle-fixed). `$10` draws nothing (popup deferred). `TANK_STATE`
+    gained `EXPLODE_50/60`.
+  - **Verified** — deterministic (headless `Game`, `getImageData`, sprite-emit spy): player
+    kills enemy (phase sweep `70→60→50→40→30→20→10→0`, 24 ticks, `enemiesLeft 20→19`);
+    armour `$E3` survives 3 hits, explodes on the 4th (`$E2/$E1/$E0` → `$70`); enemy kills
+    player (`lives 3→2`, respawns `$F0`); helmet absorbs (no death, bullet cleared); stage
+    clear at `enemiesLeft==0`; 1P game over at last life (`lives [0,0]`, no respawn,
+    `checkStageEnding` DONE); the explosion completing **through the real pipeline** (48
+    frames speed-gated / 24 fast); render emits the right sprites per state (`$70`→`[F1,F3]`,
+    `$40`→8 big-blast, `$20`→`[F9,FB]`, `$10`/`$00`→none). Live screenshot: a four-group
+    blast rendering amid roaming enemies, the kill decrementing `enemies` in the HUD.
+
+  **(c) Score accumulation (S8-B).** The kill's score-visible consequences, hung off (b)'s
+  kill event. `score.js`/`game.js`/`bullet.js`/`tank.js`/`constants.js` touched.
+  - **`Score.add(game, player, points)`** — `$D9BE` add (plain int, not the ROM's 7-digit
+    BCD — the digit math is CPU-only, the VALUE is faithful) + `$D138` the one-time extra
+    life at 20000 (per player, gated on `extraLife[]`). **Scope call (Zane):** the
+    hi-score-beaten (`$D97D`) and its HALL_OF_FAME routing are the **GAME OVER flow, a
+    separate step** — pulled back out; `checkHiscore` stays a stub, and `$D138`'s
+    game-over-flag guard (`$D13A`) is dropped here (belongs with GAME OVER).
+  - **`Game.awardKill(enemy, owner, isDemo)`** at the `$E70C` Part 2 kill (`$E7FB-$E827`):
+    `idx = (type>>5)-4` (`$80/$A0/$C0/$E0` → 0..3), `killCounts[owner][idx]++` (the per-type
+    counter the P11 Tally consumes; `owner` = the bullet slot's low bit), then — unless the
+    attract demo — `score.add(owner, ENEMY_KILL_POINTS[idx])`. `ENEMY_KILL_POINTS` is the
+    decimal `[100,200,300,400]` (`sub_D9E1` reads `tbl_E8BA`'s `$10..$40` as hundreds).
+    `Game.killCounts` cleared per stage (`$C374 sub_C71E`).
+  - **Kill-points popup (`$10` / `ofs_001_DEFD`)** — the `$10` phase P10 left blank now draws
+    the value: an enemy's `((type>>3)&$FC)-$10+$B9` number sprite (`$B9/$BD/$C1/$C5` =
+    100/200/300/400), a killed player (type 0) a plain `$F1` blast.
+  - **Verified** — deterministic: score rises 100/200/300/400 by type (`1000` after one of
+    each); `killCounts` `[1,1,1,1]`; a P2 bullet (slot 1) credits player 2 `[0,300]`;
+    extra-life at 20000 once (`lives 3→4→4`); the demo adds 0 but still counts the kill
+    (`[0,0,0,1]`); the popup emits the right sprite (`$B9`=100 … `$C5`=400, player→`$F1`).
+    Live screenshot: **100 / 200 / 300 / 400** floating where the four enemy types died.
+
+## Next
+**P11 — Tally + stage advance** (`$CEF7`/`$CCD4` count-out). The between-stage screen that
+counts out each player's per-type kills × points into the running score — it consumes the
+`killCounts` P10 now records. Its score-add path reuses `Score.add`. `Tally` is currently a
+flat 180-frame placeholder (Debt).
+
+Adjacent, still deferred: **GAME OVER / HALL OF FAME** — the hi-score-beaten (`$D97D` /
+`Score.checkHiscore`) + the `$C972` game-over-message animation + the jingle gates (Audio);
+**Bonus** (S7) — the bonus-tank power-up drop; **Demo** (`$C642`); `StageIntro`'s sfx /
+editor hooks (Audio / Construction).
 
 ## Debt (NOT SOURCE — delete when its owner lands)
 - **`GameOver` / `HallOfFame` wait on a frame constant**, because the ROM waits on
@@ -548,8 +656,9 @@ remaining sfx / editor hooks land with Audio / Construction.
   Flow doc §8 `[?]`. Resolve when `Score`/`GameOver` land.
 - **`hud.js`** is a development instrument, not part of the game. `Renderer` now
   draws, so its original retirement condition is technically met — but it is still
-  the only view of the mode machine's internals (mode/sub/frm/lives), which the
-  canvas never shows. Retire it when that stops being useful, not on the technicality.
+  the only view of the mode machine's internals (mode/sub/frm/stage/enemies/base),
+  which the canvas never shows. (Lives left this list in S8-A — the sidebar shows
+  them now.) Retire it when that stops being useful, not on the technicality.
 - **`window.game`** (main.js, P9) is a NOT-SOURCE debug handle on the live instance —
   same category as `hud.js`, no "owner" to land against. Drop it if it ever gets in
   the way; it costs nothing and makes live inspection / screenshots a two-call job.

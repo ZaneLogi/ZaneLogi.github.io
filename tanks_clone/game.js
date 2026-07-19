@@ -39,7 +39,7 @@ import { HallOfFame } from './modes/hall_of_fame.js';
 import { Editor } from './modes/editor.js';
 
 import {
-  GAME_MODE, SECOND_LOOP, ENEMIES_PER_STAGE,
+  GAME_MODE, SECOND_LOOP, ENEMIES_PER_STAGE, ENEMY_KILL_POINTS,
   SPAWN_INTERVAL_BASE, SPAWN_INTERVAL_2P_ADJ, SECOND_LOOP_STAGE,
 } from './constants.js';
 import { LEVELS } from './assets/dat_levels.js';
@@ -119,6 +119,10 @@ export class Game {
     this.stageSelectUsed = false;          // ram_004C_flag ($4C) — see §6a for the name
     this.tankUpgrade = [0, 0];             // ram_tank_upgrade ($0101)
     this.extraLife = [0, 0];               // ram_p1/p2_extra_life ($66/$67)
+    // Per-player, per-type kill counters (ram_p1/p2_enemy_type_kill_cnt $73-$76/$77-$7A):
+    // [basic, fast, power, armour]. Recorded at each kill (S8-B); cleared per stage
+    // (sub_C71E, $C374); the P11 Tally count-out consumes them.
+    this.killCounts = [[0, 0, 0, 0], [0, 0, 0, 0]];
     this.enemyLimit = 5;                   // ram_enemy_limit ($6C)
     this.enemiesLeft = 0;                  // ram_enemies_left_cnt ($80)
     this.clockTimer = 0;                   // ram_clock_timer ($0100) — enemy freeze
@@ -224,6 +228,39 @@ export class Game {
     this.frm.lo = 0;            // $C74B
   }
 
+  // $DE07 — an explosion finished (Tank.tickExplosion calls this at the last phase).
+  // Player: lose a life and respawn if any remain; enemy: one fewer left. The state
+  // this touches (lives / enemiesLeft) lives on Game, and respawn is the roster's —
+  // so the tick reaches back here, the shape Base.update already uses. research §3.
+  /** @param {import('./tank.js').Tank} tank */
+  destroyTank(tank) {
+    if (tank.isPlayer) {
+      this.lives[tank.slot]--;                       // $DE0D DEC ram_lives,X
+      if (this.lives[tank.slot] > 0) {               // $DE0F
+        this.roster.spawnPlayer(tank.slot);          // $DE11 sub_E363 — respawn
+      }
+      // else 0 lives -> no respawn. The game over is checkStageEnding's all-lives-0
+      // test ($C730), already built. The ROM's per-player GAME OVER slide message
+      // ($DE18-$DE42) is deferred: 2P-only (unreached in 1P) and it needs the
+      // still-stubbed $C972 animation.
+    } else {
+      this.enemiesLeft--;                            // $DE15 DEC ram_enemies_left_cnt
+    }
+  }
+
+  // $E7FB-$E827 — the score-visible half of a player-bullet enemy kill (S8-B). The kill
+  // EVENT (explode) is bullet.js; this records the consequences. idx = the enemy-type
+  // index (basic/fast/power/armour); owner = the bullet's player. The per-type counter
+  // always ticks (P11 Tally reads it); points are added unless it's the attract demo.
+  /** @param {import('./tank.js').Tank} enemy  @param {number} owner  0/1 */
+  awardKill(enemy, owner, isDemo) {
+    const idx = (enemy.type >> 5) - 4;               // $E7FD-$E805: $80/$A0/$C0/$E0 -> 0..3
+    this.killCounts[owner][idx]++;                    // $E80E/$E813 INC kill_cnt
+    if (!isDemo) {                                    // $E815-$E819 no score in the demo
+      this.score.add(this, owner, ENEMY_KILL_POINTS[idx]);   // $E81B-$E827 add_score + extra life
+    }
+  }
+
   // $C259-$C280 — after the tally. Returns true to run another stage.
   //
   // There is no ending: 1..35 is the 1st loop, 36..70 the 2nd (drawn as 1..35 via
@@ -280,8 +317,13 @@ export class Game {
       stage: this.stage, secondLoop: this.secondLoop,
       enemyLimit: this.enemyLimit, spawnInterval,
     });
-    // TODO: the OTHER power-up timers ($C363-$C367: helmet), the enemy-icon HUD
-    //   ($C377 sub_C8C0 + sub_C830/sub_C859) — Score/S8.
+    // $C374 sub_C71E_clear_kill_counters — this stage's per-type kill tally starts at 0.
+    this.killCounts = [[0, 0, 0, 0], [0, 0, 0, 0]];
+    // The sidebar HUD drawn once per stage ($C377 sub_C8C0 + $C37D sub_C830 +
+    // $C380 sub_C859): the 20-enemy reserve column, the Ip/IIp labels, the flag +
+    // stage number. Into field.tilemap, which is what Battle renders. (S8-A.)
+    this.score.drawStageHud(this.field, this.gameMode, this.secondLoop, this.stage);
+    // TODO: the OTHER power-up timers ($C363-$C367: helmet) — Bonus/S7.
   }
 
   // sub_D97D_check_hiscore_beaten ($D97D).
@@ -296,21 +338,21 @@ export class Game {
   mainBattleScript() {
     this.field.iceDetectAndMarkOccupancy(this.roster);            // 1  $E181 ice_detection
     this.roster.controlPlayers(this.input, this.frm.lo);          // 2  $DB75 player control
-    this.roster.moveTanks(this.field, this.frm.lo, this.clockTimer, this.ai, this.frm.hi); // 3  $DBF1
+    this.roster.moveTanks(this.field, this.frm.lo, this.clockTimer, this.ai, this.frm.hi, this); // 3 $DBF1
     this.field.occupancyWriteback(this.roster);                   // 4  $E1FA
     this.bullets.updateStatus();                                  // 5  $E02E
     this.base.update(this.field, this);                           // 6  $E2A9 HQ_handler
     this.roster.updateInvincibility(this.frm.lo);                 // 7  $E27C
     this.bullets.playerFire(this.roster, this.input);             // 8  $E122 player fire
-    this.bullets.enemyFire(this.roster, this.ai, this.clockTimer);// 9  $E162 enemy fire
-    this.roster.spawnEnemyTick();                                 // 10 $DB48 enemy_spawn
+    this.bullets.enemyFire(this.roster, this.ai, this.clockTimer, this.frm.hi); // 9 $E162
+    this.roster.spawnEnemyTick(this.field, this.score);           // 10 $DB48 enemy_spawn
     this.bullets.move(this.field, this.base, this.frm.lo);        // 11 $E604 bullets_movement
     this.bullets.collideWithBullets();                            // 12 $E910
-    this.bullets.collideWithTanks(this.roster, this.secondLoop);  // 13 $E70C (Part 3 freeze)
+    this.bullets.collideWithTanks(this.roster, this.secondLoop, this); // 13 $E70C P1-3
     this.bonus.tryPickup(this.roster, this.base, this, this.score);// 14 $E972
     this.updateGameOverText();                                    // 15 $C972
     this.audio.movementSfx(this.roster);                          // 16 $DB0B (deferred)
-    this.score.drawLives(this.renderer, this.lives);              // 17 $C7C8
+    this.score.drawLives(this.field, this.lives, this.gameMode, this.secondLoop); // 17 $C7C8
     this.waterPaletteSwap();                                      // 18 $C31D
   }
 
