@@ -5,7 +5,8 @@
 // S8-B — score ACCUMULATION: add_score ($D9BE) + extra-life ($D138), driven by
 //   P10 kills (Game.awardKill) and, when S7 lands, Bonus pickups. hi-score-beaten
 //   ($D97D / checkHiscore) is a stub — it belongs with the GAME OVER flow. The Tally
-//   count-out screen ($CEF7) is P11.
+//   count-out screen ($CEF7) is P11 (docs/research_tally.md); it reads killCounts but
+//   adds only to a display subtotal, never re-crediting the score this file owns.
 //
 // Score is the HUD RENDERER + the score logic; the STATE it reads/mutates (lives /
 // scores / stage / gameMode) lives on Game (the map's §7 lock — which is what lets

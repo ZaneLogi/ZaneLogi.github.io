@@ -249,6 +249,86 @@ export const HUD_LABEL_ROW0 = 17;          // $C830: Ip row 17, +3 per player
 export const HUD_FLAG_ROW = 23;            // $C859: flag rows 23-24, stage number row 25
 export const HUD_NUM_COL = 25;             // $C7C8/$C859: D934 start col, ones lands at 30
 
+// --- Tally / score-count screen (P11) — sub_CCD4 ($CCD4) + sub_CEF7 ($CEF7) ---
+//
+// The between-stage screen: each player's per-type kills are counted out ONE AT A
+// TIME into a per-type TEMP subtotal (display only — the real score was already
+// credited at kill time, $E824/P10; the tally never re-adds to it), then the totals,
+// then a 2P "killed-more-and-survived" 1000-pt bonus. Full decode: research_tally.md.
+//
+// The ROM draws this into nametable $2800 with digit offset $30 and bg_palette 03
+// ($CEFC-$CF10). Those are our render params, not persistent state: we build a fresh
+// Tilemap and draw it with these. Positions are the ROM's own sub_D6B3 (col,row) and
+// sub_D934/sub_D6DD (posX,posY) arguments, transcribed 1:1.
+export const TALLY = Object.freeze({
+  BG_PAL: 0x03,        // con_bg_pal_03 ($CF0E)
+  DIGIT_BASE: 0x30,    // ram_0060 = $30 ($CF0A) — the ASCII digit font, not the HUD's $6E
+  // 006B_flag = 1 ($CEFC) -> an all-zero number prints a single '0' (minDigits 1).
+  MIN_DIGITS: 1,
+  BONUS_POINTS: 1000,  // sub_D9E1(#$00) sets the thousands digit -> 1000 ($CE3C-$CE43)
+
+  // Frame waits (sub_D276 / sub_D8F6), all player-observable timing -> verbatim frames.
+  PRE_WAIT: 0x1E,        // $CCD7 — before the first type counts
+  KILL_STEP: 0x08,       // $CDDA — between each kill tallied
+  BETWEEN_TYPES: 0x14,   // $CDEE — after a type is exhausted, before the next
+  TOTALS_WAIT: 0x1E,     // $CDF4 — before the totals are drawn
+  POST_TOTALS_WAIT: 0x0F,// $CE21 — after totals, before the bonus/exit
+  FINAL_HOLD: 0x78,      // $CEE5 — the closing hold before returning to the flow
+
+  // Static BG text — literal tile ids (the font is ASCII: 'H'=$48 ... 'Z'=$5A, ' '=$20;
+  // custom glyphs $5E='I' $5F='II' $6B=dash $5B=<- $5D=-> $15='!'). sub_D6B3 copies
+  // verbatim, like HUD_LABEL. Each { col, row, ids }.
+  HI_SCORE: { col: 0x08, row: 0x03, ids: [0x48, 0x49, 0x6B, 0x53, 0x43, 0x4F, 0x52, 0x45] }, // "HI-SCORE" tbl_D2BD, $0468
+  STAGE:    { col: 0x0C, row: 0x05, ids: [0x53, 0x54, 0x41, 0x47, 0x45] },                   // "STAGE"    tbl_D3CB, $04AC
+  I_PLAYER: { col: 0x03, row: 0x07, ids: [0x5E, 0x6B, 0x50, 0x4C, 0x41, 0x59, 0x45, 0x52] }, // "I-PLAYER" tbl_D2D9, $04E3
+  II_PLAYER:{ col: 0x15, row: 0x07, ids: [0x5F, 0x6B, 0x50, 0x4C, 0x41, 0x59, 0x45, 0x52] }, // "II-PLAYER" tbl_D2E2, $04F5
+  ARROW_LEFT:  0x5B,   // tbl_D3B1 — P1 rows point right-to-left at the icon column
+  ARROW_RIGHT: 0x5D,   // tbl_D3B3 — P2 rows
+  PTS: [0x50, 0x54, 0x53],                          // "PTS" tbl_D35E
+  BONUS: [0x42, 0x4F, 0x4E, 0x55, 0x53, 0x15],      // "BONUS!" tbl_D3C4
+
+  // Column of the four per-type rows (rows = TYPE_ROW0 + type*3), $CD74's ASL/ADC #$0C.
+  TYPE_ROW0: 0x0C,   // 12; rows 12/15/18/21
+  ARROW_COL_L: 0x0E, // 14  ($058E) — P1 <- arrow
+  ARROW_COL_R: 0x11, // 17  ($0591) — P2 -> arrow
+  PTS_COL_L: 0x08,   // 8   ($0588) — P1 "PTS"
+  PTS_COL_R: 0x1A,   // 26  ($059A) — P2 "PTS"
+
+  // Number positions (posX,posY) — drawNumber(col=posX, row=posY).
+  HI_NUM:   { col: 0x12, row: 0x03 },   // $CF32/$CF37 hi-score value
+  STAGE_NUM:{ col: 0x0E, row: 0x05 },   // $CF52/$CF57 stage number
+  P1_SCORE: { col: 0x05, row: 0x09 },   // $CD62/$CD67 (also CEF7) — static during the count
+  P2_SCORE: { col: 0x17, row: 0x09 },   // $CDA1/$CDA6
+  P1_TEMP_COL: 0x01,    // $CD6E — P1 per-type subtotal, row = type*3+12
+  P1_COUNT_COL: 0x08,   // $CD87 — P1 per-type kill count
+  P2_TEMP_COL: 0x13,    // $CDAD — 19
+  P2_COUNT_COL: 0x0E,   // $CDC6 — 14
+  P1_TOTAL: { col: 0x08, row: 0x17 },   // $CE00/$CE07 — P1 total kills, row 23
+  P2_TOTAL: { col: 0x0E, row: 0x17 },   // $CE15/$CE1C
+
+  // The 2P bonus block, drawn on the winner's side ($CE46-$CE79 / $CEA1-$CED4).
+  BONUS_P1: { scoreCol: 0x05, numCol: 0x01, numRow: 0x1A, textCol: 0x03, textRow: 0x19, ptsCol: 0x08, ptsRow: 0x1A },
+  BONUS_P2: { scoreCol: 0x17, numCol: 0x14, numRow: 0x1A, textCol: 0x16, textRow: 0x19, ptsCol: 0x1B, ptsRow: 0x1A },
+
+  // The four enemy-type icons — sprites redrawn every frame (sub_D0B8/sub_D130), NOT BG.
+  // spr_X = $81 centre, spr_Y per type, spr_T = the type's base tank tile, palette 2.
+  ICON_X: 0x81,
+  ICON_Y: [0x64, 0x7C, 0x94, 0xAC],       // 100/124/148/172 ($D0BC/$D0C3/$D0CA/$D0D1)
+  ICON_TILE: [0x80, 0xA0, 0xC0, 0xE0],    // $D0BE/$D0C5/$D0CC/$D0D3 — basic/fast/power/armour
+  ICON_PALETTE: 0x02,                      // $D0B8 LDA #$02
+
+  // sub_D0D9_prepare_nametable_attributes ($D0D9) — the per-16x16-quad BG sub-palette.
+  // Decoded to tile-cell palette regions (our Tilemap stores one palette per cell):
+  // headers (HI-SCORE / I-PLAYER / II-PLAYER / BONUS) -> pal 1, the scores -> pal 2,
+  // everything else -> pal 0. Each entry [rowStart, rowEnd, colStart, colEnd, pal] inclusive.
+  ATTR_REGIONS: [
+    [2, 3, 0, 15, 1],   [2, 3, 16, 31, 2],   // $00-03 = $50 (rows 2-3 pal1), $04-07 = $A0 (pal2)
+    [6, 7, 0, 11, 1],   [6, 7, 20, 31, 1],   // $08-0A / $0D-0F = $50 (rows 6-7 pal1)
+    [8, 9, 0, 11, 2],   [8, 9, 20, 31, 2],   // $10-12 / $15-17 = $0A (rows 8-9 pal2)
+    [24, 25, 0, 11, 1], [24, 25, 20, 31, 1], // $30-32 / $35-37 = $05 (rows 24-25 pal1)
+  ],
+});
+
 // --- Bullets (S5) — the $CC..$D5 zero-page arrays + the $E0xx/$E6xx routines ---
 //
 // 10 FLAT slots: 0-7 = each tank's primary bullet (bullet i belongs to tank i);

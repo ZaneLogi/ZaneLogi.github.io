@@ -632,23 +632,61 @@ but because it described work that had not started yet.)*
     (`[0,0,0,1]`); the popup emits the right sprite (`$B9`=100 … `$C5`=400, player→`$F1`).
     Live screenshot: **100 / 200 / 300 / 400** floating where the four enemy types died.
 
-## Next
-**P11 — Tally + stage advance** (`$CEF7`/`$CCD4` count-out). The between-stage screen that
-counts out each player's per-type kills × points into the running score — it consumes the
-`killCounts` P10 now records. Its score-add path reuses `Score.add`. `Tally` is currently a
-flat 180-frame placeholder (Debt).
+- **P11 — Tally: the between-stage score count-out.** ☑ Done. The stage-clear screen
+  animates: each player's per-type kills are counted out one at a time into a subtotal,
+  then the totals, then a 2P survivor bonus — replacing the 180-frame `Tally` stub. Full
+  decode + citations + verification: `docs/research_tally.md`. `sub_CCD4` (`$CCD4`, the
+  count-out) + `sub_CEF7` (`$CEF7`, the screen). `modes/session.js` (`Tally` rewritten) +
+  `constants.js` (`TALLY`) touched; `stage advance` was already built.
+  - **The one load-bearing correction to the pre-impl plan** — the "Next" note said the
+    tally counts kills "into the running score." **It doesn't.** The real score is
+    credited **at kill time** (`$E824`, P10 `awardKill`); the tally's inner add (`$CD34
+    LDX #$02`) targets a **display-only temp subtotal** (idx 2/3), cleared per type. The
+    tally **never re-adds to the running score** — its only real-score write is the 2P
+    bonus. `sub_D138`'s extra-life check during the count is a no-op (20000 already
+    crossed at kill time). research_tally.md §1.
+  - **Consumes `Game.killCounts` (P10)** — the loop DECs it one per pass (`$CD30`/`$CD4E`),
+    exactly as the ROM DECs `ram_p1_enemy_type_kill_cnt`. Ported as a paced phase machine
+    (`PRE → KILL ↔ BETWEEN → TOTALS → POST_TOTALS → BONUS? → FINAL`). Points `tbl_D3D1` =
+    `tbl_E8BA` = `ENEMY_KILL_POINTS [100,200,300,400]`.
+  - **The 2P `[?]` settled** — the survivor bonus is **+1000**: `sub_D9E1(#$00)` takes
+    `bra_D9F9` and sets the thousands digit (`$CE3C-$CE43`). Gate: skip in 1P; skip in 2P
+    once the base is destroyed (`game_over_flag == 0`); else the strictly-higher killer,
+    if still alive, gets 1000 on the **real** score (via `Score.add`). §5.
+  - **Its own screen, faithfully coloured** — a fresh `Tilemap` (digit font `$30`, bg
+    palette `03`); `sub_D0D9`'s attribute table ported to per-cell palettes (headers →
+    pal 1 red, scores → pal 2 orange, rest → pal 0 white). The four enemy-type icons are
+    **sprites** (`sub_D0B8`, palette 2, x $81 / y $64·$7C·$94·$AC), redrawn each frame.
+  - **Deviations** (governing test, §7): the count **cadence** holds `KILL_STEP = 8`
+    frames/pass — the ROM's extra per-pass housekeeping frame is CPU-shaped precision not
+    reproduced (the ~6 s / kill-every-8-frames *rhythm* is faithful); the temp subtotal is
+    a display accumulator; `$2800`/`base_nmt`/`$0060`/`$006B` are CPU-only, so the digit
+    font + `minDigits 1` (`006B = 1`) are passed **per `drawNumber` call** and `loc_CEE5`'s
+    reset carries only `bgPaletteId = 0`.
+  - **Stage advance was already built** — `advanceStage` (`$C259-$C280`, the 35→36 / 70→1
+    wrap) is P3-verified; P11 adds the tally's exit reset and the end-to-end drive through
+    a *real* tally. Deferred (cited): the count/bonus **sfx** (Audio); hi-score-beaten +
+    HALL OF FAME (the GAME OVER flow).
+  - **Verified** — 26/26 deterministic in-browser (headless `Game`, the real
+    Menu→1P→Battle(clear)→Tail→Tally flow, `getImageData` / sprite-emit spy): 1P
+    `[3,2,1,4]` counts out over 367 frames, consumed to 0, monotonic; totals `[10,0]`;
+    per-type peak 4; type-0 subtotal 300; then `advanceStage` → next `StageIntro`, stage
+    3→4; the "10" total drawn; 8 icon sprites (`80,82,a0,a2,c0,c2,e0,e2`, palette 2). 2P
+    bonus P1 +1000 (800→1800), P2 unchanged; the game-over skip (900→900). Live screenshot
+    (pane visible): "HI-SCORE 20000" (red/orange), "STAGE 3", "I-PLAYER 12300", the
+    count-out mid-progress — `300 PTS 3←`, `400 PTS 2←`, two rows still 0.
 
-Adjacent, still deferred: **GAME OVER / HALL OF FAME** — the hi-score-beaten (`$D97D` /
-`Score.checkHiscore`) + the `$C972` game-over-message animation + the jingle gates (Audio);
-**Bonus** (S7) — the bonus-tank power-up drop; **Demo** (`$C642`); `StageIntro`'s sfx /
-editor hooks (Audio / Construction).
+## Next
+**GAME OVER / HALL OF FAME** — the hi-score-beaten (`$D97D` / `Score.checkHiscore`) + the
+`$C972` game-over-message animation + the jingle gates (Audio). Then **Bonus** (S7) — the
+bonus-tank power-up drop; **Demo** (`$C642`); `StageIntro`'s sfx / editor hooks (Audio /
+Construction).
 
 ## Debt (NOT SOURCE — delete when its owner lands)
 - **`GameOver` / `HallOfFame` wait on a frame constant**, because the ROM waits on
   the *jingle* (`$C630` / `$C495`) and `Audio` is a stub. Both are commented
   `NOT SOURCE`; replace with `audio.isPlaying(...)` when `$EA7E` is ported. This is
   why "Audio: low priority" undersells it — it gates two modes (flow doc §6d/§7.8).
-- **`Tally` is a flat 180-frame placeholder** — `$CCD4`'s real count-out is unported.
 - **`drawNumber`'s `minDigits = 2` is the boot behaviour only.** `ram_006B_flag`
   ($6B) decides whether an all-zero score prints `00` or `0` (`$D942`); `$D491` sets
   it to 0 at RESET but `sub_C7C8_print_lives_handler` sets it to **1** every battle

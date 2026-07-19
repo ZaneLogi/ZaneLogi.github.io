@@ -16,8 +16,11 @@
 // loop to write.
 
 import { Mode, DONE } from '../mode.js';
-import { BTN, GAME_MODE, TILE } from '../constants.js';
+import {
+  BTN, GAME_MODE, SECOND_LOOP, TILE, TALLY, ENEMY_KILL_POINTS,
+} from '../constants.js';
 import { Tilemap, TILEMAP_ROWS } from '../tilemap.js';
+import { drawNumber, writeText } from '../text.js';
 
 /** @typedef {import('../renderer.js').Renderer} Renderer */
 
@@ -38,9 +41,6 @@ const STAGE_NUM_COL = 19;                             // after "STAGE" + two spa
 const DIGIT_BASE_STAGE = 0x6E;
 const TAIL_END_HI = 0x02;      // $C24F CMP #$02
 const TAIL_GAME_OVER_SEED = 0xFE;  // $C234 LDA #$FE — buys 2 extra hi-ticks
-
-// TODO: placeholder until $CCD4 is ported. NOT SOURCE.
-const TALLY_STUB_FRAMES = 180;
 
 export class Session extends Mode {
   // ofs_000_CA6F_00_1_player ($CA6F) / ofs_000_CA74_01_2_players ($CA74) — the
@@ -270,20 +270,219 @@ class Tail extends Mode {
 }
 
 // --- sub_CCD4_score_after_stage_handler ($CCD4) — the tally ------------------
+// The between-stage count-out. sub_CEF7 ($CEF7) draws a fresh screen (header, the four
+// enemy-type rows, the players' scores); sub_CCD4 then tallies each player's per-type
+// kills ONE AT A TIME into a per-type TEMP subtotal — display only, because the real
+// score was already credited at kill time ($E824, P10). The tally NEVER re-adds to the
+// running score; its only real-score write is the 2P survivor bonus. Full decode:
+// docs/research_tally.md.
+//
+// A paced phase machine. game.killCounts (P10) is consumed here — DEC'd one kill per
+// pass the way the ROM does ($CD30/$CD4E) — while the running subtotal + killed count
+// are Tally's own display fields. The waits are player-observable timing (frames ->
+// frames); the ROM's exact per-pass housekeeping frame is not reproduced (a ~1-frame
+// cadence detail an emulator does better), same class as the curtain-wipe band clip.
+const TALLY_PHASE = Object.freeze({
+  PRE: 'PRE',                // $CCD7 — wait, then total the per-type counts
+  KILL: 'KILL',              // loc_CD10 — tally one kill (each player) per KILL_STEP
+  BETWEEN: 'BETWEEN',        // $CDEE — wait between exhausted types
+  TOTALS: 'TOTALS',          // bra_CDF4 — draw the totals
+  POST_TOTALS: 'POST_TOTALS',// $CE21 — wait, then decide bonus vs exit
+  BONUS: 'BONUS',            // bra_CE2B — the 2P survivor's 1000-pt bonus
+  FINAL: 'FINAL',            // loc_CEE5 — the closing hold, then the exit reset
+});
+
+// ram_0060 = $30, con_bg_pal_03, ram_006B_flag = 1 -> a per-call number-print spec (the
+// ROM's $2800/$0060/$006B are CPU-only render state; we pass the equivalents each call).
+const TALLY_NUM = { first: 1, minDigits: TALLY.MIN_DIGITS, digitBase: TALLY.DIGIT_BASE };
+
+const sum4 = (a) => a[0] + a[1] + a[2] + a[3];
+
 class Tally extends Mode {
   enter() {
-    this.game.audio.clear();   // $C253 sub_EA51
+    const g = this.game;
+    g.audio.clear();   // $C253 sub_EA51
+    // ram_game_mode / ram_2nd_loop_flag — 2P OR the attract demo shows player 2's column.
+    this.two = g.gameMode === GAME_MODE.TWO_PLAYERS || g.secondLoop === SECOND_LOOP.DEMO;
+    this.screen = buildTallyScreen(g, this.two);   // sub_CEF7 — the static screen, once
+    this.tempScore = [0, 0];      // ram_p1/p2_temp_score ($25/$2D) — reset per type
+    this.killedCount = [0, 0];    // ram_005D/005E_killed_enemies_cnt — reset per type
+    this.totalKills = [0, 0];     // ram_p1/p2_total_kills ($7D/$7E)
+    this.type = 0;                // ram_005A_t22_enemy_type_counter
+    this.didKill = false;         // ram_007C_flag — did this pass tally anything?
+    this.phase = TALLY_PHASE.PRE;
     this.t = 0;
-    // TODO: sub_CEF7_draw_screen_with_score_count ($CEF7), drawn into $2800.
   }
 
   update() {
-    // TODO: port $CCD4. Count each enemy type's kills out ONE AT A TIME against
-    // tbl_D3D1_points_for_killing_enemy, with sub_D276 waits between ($CCD9 $1E,
-    // $CDDA $08, $CDEE $14, $CDF6 $1E, $CE21 $0F, $CEE5 $78), calling
-    // sub_D138_gain_extra_life_for_20000_pts as it goes; then the totals and the
-    // 2P bonus comparison ($CE2B). Flow doc §4[6].
-    // NOT SOURCE: a flat placeholder until the above lands.
-    return ++this.t >= TALLY_STUB_FRAMES ? DONE : null;
+    const g = this.game;
+    switch (this.phase) {
+      case TALLY_PHASE.PRE:
+        if (++this.t < TALLY.PRE_WAIT) return null;                   // $CCD7 wait $1E
+        // $CCDC-$CCF4 — total kills = the four per-type counts summed, per player. Read
+        // BEFORE the count DECs them.
+        this.totalKills = [sum4(g.killCounts[0]), sum4(g.killCounts[1])];
+        this.type = 0;                                                // $CCF8
+        this._resetType();                                            // loc_CCFA clears
+        this.phase = TALLY_PHASE.KILL;
+        this.t = 0;
+        return null;
+
+      // loc_CD10 — one pass: tally one kill for each player with kills of this type left,
+      // then hold KILL_STEP frames; repeat while a kill was tallied, else next type.
+      case TALLY_PHASE.KILL:
+        if (this.t === 0) this._tallyPass();                          // $CD1A-$CD5B
+        if (++this.t < TALLY.KILL_STEP) return null;                  // $CDDA wait $08
+        this.t = 0;
+        if (this.didKill) return null;                                // $CDDF -> loc_CD10
+        if (++this.type >= 4) { this.phase = TALLY_PHASE.TOTALS; return null; } // $CDE8 CMP #$04
+        this.phase = TALLY_PHASE.BETWEEN;                             // $CDEC wait $14 next
+        return null;
+
+      case TALLY_PHASE.BETWEEN:
+        if (++this.t < TALLY.BETWEEN_TYPES) return null;              // $CDEE wait $14
+        this.t = 0;
+        this._resetType();                                           // loc_CCFA
+        this.phase = TALLY_PHASE.KILL;
+        return null;
+
+      case TALLY_PHASE.TOTALS:
+        if (++this.t < TALLY.TOTALS_WAIT) return null;                // $CDF4 wait $1E
+        this.t = 0;
+        drawNumber(this.screen, this.totalKills[0], TALLY.P1_TOTAL.col, TALLY.P1_TOTAL.row, TALLY_NUM); // $CE02/$CE07
+        if (this.two) {
+          drawNumber(this.screen, this.totalKills[1], TALLY.P2_TOTAL.col, TALLY.P2_TOTAL.row, TALLY_NUM); // $CE17/$CE1C
+        }
+        this.phase = TALLY_PHASE.POST_TOTALS;
+        return null;
+
+      case TALLY_PHASE.POST_TOTALS:
+        if (++this.t < TALLY.POST_TOTALS_WAIT) return null;           // $CE21 wait $0F
+        this.t = 0;
+        // $CE24-$CE2F — 1P skips the bonus; 2P skips it once the base is destroyed
+        // (game_over_flag == 0). The survivor bonus only makes sense mid-run.
+        this.phase = (this.two && !g.base.isDestroyed())
+          ? TALLY_PHASE.BONUS : TALLY_PHASE.FINAL;
+        return null;
+
+      case TALLY_PHASE.BONUS:
+        this._awardBonus();
+        this.phase = TALLY_PHASE.FINAL;
+        return null;
+
+      case TALLY_PHASE.FINAL:
+        if (++this.t < TALLY.FINAL_HOLD) return null;                 // $CEE5 wait $78
+        // $CEEA-$CEF4 — the exit reset. base_nmt / ram_0060 / ram_006B are CPU-only
+        // render state (we pass their equivalents per-call), so only the palette carries.
+        g.bgPaletteId = 0x00;                                         // $CEF4 con_bg_pal_00
+        return DONE;
+    }
+    return null;
   }
+
+  // loc_CD10's body: DEC one kill for each player who has kills of this type left, add its
+  // points to that player's TEMP subtotal (idx 2/3, NOT the real score), bump the killed
+  // count. didKill drives whether another pass runs. Points are tbl_D3D1 == ENEMY_KILL_POINTS.
+  _tallyPass() {
+    const g = this.game;
+    const type = this.type;
+    const pts = ENEMY_KILL_POINTS[type];
+    this.didKill = false;
+    for (let p = 0; p < 2; p++) {
+      if (g.killCounts[p][type] > 0) {   // $CD24 / $CD42 BEQ — skip when this type is done
+        g.killCounts[p][type]--;         // $CD30 / $CD4E DEC ram_p1/p2_enemy_type_kill_cnt
+        this.killedCount[p]++;           // $CD32 / $CD50 INC killed_enemies_cnt
+        this.tempScore[p] += pts;        // $CD34-$CD36 / $CD52-$CD54 add_score -> TEMP idx 2/3
+        this.didKill = true;             // $CD3B / $CD59 ram_007C_flag = 1
+        // TODO: ram_sfx_score_count ($CD2A) — Audio (deferred).
+        // sub_D138 ($CD3D/$CD5B): the extra-life check is a NO-OP here — the real score
+        // was credited at kill time (P10), so 20000 was already crossed. Not called.
+      }
+    }
+    this._redrawCounters();
+  }
+
+  // loc_CCFA — clear this type's subtotal + killed count for both players, and redraw the
+  // now-zero cells. The ROM clears the BCD temp score ($CD00) and killed_enemies_cnt ($CD0C).
+  _resetType() {
+    this.tempScore = [0, 0];
+    this.killedCount = [0, 0];
+    this._redrawCounters();
+  }
+
+  // Redraw the current type row's dynamic numbers (the scores are static, drawn once). P1's
+  // subtotal + count on the left; P2's on the right in 2P. Positions are the ROM's posX/posY.
+  _redrawCounters() {
+    const row = TALLY.TYPE_ROW0 + this.type * 3;                      // $CD74 ASL/ADC #$0C
+    drawNumber(this.screen, this.tempScore[0], TALLY.P1_TEMP_COL, row, TALLY_NUM);   // $CD6E
+    drawNumber(this.screen, this.killedCount[0], TALLY.P1_COUNT_COL, row, TALLY_NUM); // $CD89
+    if (this.two) {
+      drawNumber(this.screen, this.tempScore[1], TALLY.P2_TEMP_COL, row, TALLY_NUM);   // $CDAD
+      drawNumber(this.screen, this.killedCount[1], TALLY.P2_COUNT_COL, row, TALLY_NUM); // $CDC8
+    }
+  }
+
+  // bra_CE32-$CED4 — the higher total-kills scorer, if still alive, gets +1000 on the real
+  // score (this IS the only real-score write in the tally). A tie awards nobody.
+  _awardBonus() {
+    const g = this.game;
+    const [k1, k2] = this.totalKills;
+    if (k2 < k1 && g.lives[0] > 0) this._payBonus(0, TALLY.BONUS_P1);       // $CE34-$CE8A
+    else if (k1 < k2 && g.lives[1] > 0) this._payBonus(1, TALLY.BONUS_P2);  // $CE8D-$CED4
+  }
+
+  _payBonus(player, pos) {
+    const g = this.game;
+    g.score.add(g, player, TALLY.BONUS_POINTS);   // $CE43/$CE9E add 1000 (+extra life at 20000)
+    drawNumber(this.screen, g.scores[player], pos.scoreCol, TALLY.P1_SCORE.row, TALLY_NUM); // redraw score, row 9
+    drawNumber(this.screen, TALLY.BONUS_POINTS, pos.numCol, pos.numRow, TALLY_NUM);          // the "1000"
+    this.screen.writeTiles(pos.textCol, pos.textRow, TALLY.BONUS);   // "BONUS!" tbl_D3C4
+    this.screen.writeTiles(pos.ptsCol, pos.ptsRow, TALLY.PTS);        // "PTS"    tbl_D35E
+    // TODO: ram_sfx_bonus_1000 ($CE7C) — Audio (deferred).
+  }
+
+  // sub_CEF7 draws the score screen; sub_D0B8 redraws the four enemy-type icons as SPRITES
+  // (palette 2) every frame. The BG is a persistent Tilemap; the icons are drawn here.
+  /** @param {Renderer} renderer */
+  render(renderer) {
+    renderer.drawTilemap(this.screen, TALLY.BG_PAL, 0, 0);
+    for (let type = 0; type < 4; type++) {                            // sub_D0B8
+      const tile = TALLY.ICON_TILE[type];
+      const y = TALLY.ICON_Y[type];
+      renderer.drawSprite(tile, (TALLY.ICON_X - 8) & 0xFF, y, TALLY.ICON_PALETTE);
+      renderer.drawSprite(tile + 2, TALLY.ICON_X, y, TALLY.ICON_PALETTE);
+    }
+  }
+}
+
+// sub_CEF7_draw_screen_with_score_count ($CEF7) — the static tally screen, built once as a
+// Tilemap: the sub_D0D9 attribute regions, the header (HI-SCORE / STAGE / I-PLAYER [/ II-
+// PLAYER]), and each type row's arrow + "PTS". The dynamic numbers are drawn by Tally.
+function buildTallyScreen(g, two) {
+  const tm = new Tilemap();
+  // sub_D0D9_prepare_nametable_attributes ($D0D9) — per-cell BG sub-palette regions.
+  for (const [r0, r1, c0, c1, pal] of TALLY.ATTR_REGIONS) {
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) tm.setPalette(c, r, pal);
+  }
+  writeText(tm, TALLY.HI_SCORE);                                              // $CF2D
+  drawNumber(tm, g.hiScore, TALLY.HI_NUM.col, TALLY.HI_NUM.row, TALLY_NUM);   // $CF34/$CF39
+  writeText(tm, TALLY.STAGE);                                                 // $CF48
+  drawNumber(tm, g.stage, TALLY.STAGE_NUM.col, TALLY.STAGE_NUM.row, TALLY_NUM); // $CF54/$CF59
+  writeText(tm, TALLY.I_PLAYER);                                              // $CF6B
+  drawNumber(tm, g.scores[0], TALLY.P1_SCORE.col, TALLY.P1_SCORE.row, TALLY_NUM); // $CF72/$CF77
+  if (two) {
+    writeText(tm, TALLY.II_PLAYER);                                           // $CFC9
+    drawNumber(tm, g.scores[1], TALLY.P2_SCORE.col, TALLY.P2_SCORE.row, TALLY_NUM); // $CFD0/$CFD5
+  }
+  // The four type rows: P1 <- arrow + "PTS" ($CF86..); P2 -> arrow + "PTS" ($CFE4..) in 2P.
+  for (let type = 0; type < 4; type++) {
+    const row = TALLY.TYPE_ROW0 + type * 3;
+    tm.setTile(TALLY.ARROW_COL_L, row, TALLY.ARROW_LEFT);
+    tm.writeTiles(TALLY.PTS_COL_L, row, TALLY.PTS);
+    if (two) {
+      tm.setTile(TALLY.ARROW_COL_R, row, TALLY.ARROW_RIGHT);
+      tm.writeTiles(TALLY.PTS_COL_R, row, TALLY.PTS);
+    }
+  }
+  return tm;
 }

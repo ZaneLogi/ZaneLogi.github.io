@@ -12,8 +12,9 @@ This is the first slice of S8 (Score/HUD).
 - **Elsewhere — S8-B** (score *accumulation*: `add_score` $D9BE, extra-life $D138):
   built with its data source in P10 (`research_enemy_combat.md` §7). `hi-score-beaten`
   ($D97D) is deferred with the GAME OVER flow.
-- **Elsewhere — P11:** the between-stage Tally count-out (`$CEF7`), which reads the
-  per-type kill counters P10 records.
+- **Elsewhere — P11** (`research_tally.md`): the between-stage Tally count-out
+  (`$CEF7`), which reads the per-type kill counters P10 records (and only counts them
+  into a display subtotal — the real score was already credited at kill time).
 
 Everything here reads state the game **already** has (`lives`, `stage`,
 `gameMode`, `secondLoop`, the enemy-spawn counter) — that is exactly why the HUD had
