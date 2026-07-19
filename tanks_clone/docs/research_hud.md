@@ -152,6 +152,7 @@ hard-wired (correct only for the title); it now takes a `digitBase` param
 
 ## §7 Open / deferred
 
-- **`$6E` digit font** — the disasm is unambiguous that the offset is `$6E`; that
-  it renders as legible digits is confirmed in the screenshot step, not asserted
-  blind here.
+*(None.)* The one item that had been open — whether the `$6E` digit-font offset
+renders as legible digits — was confirmed in P10's verification (§6 step 5): the
+sidebar digits render as distinct glyphs both deterministically (`'2'` = 30 lit px,
+`'1'` = 19) and in the live stage-1 screenshot.

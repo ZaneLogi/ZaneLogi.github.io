@@ -334,7 +334,8 @@ export class Game {
     if (this.lives[1] > 0) this.roster.spawnPlayer(1);   // $C34A-$C350
     this.base.reset();                      // $C386-$C388 game_over_flag = alive; also
                                             // clears ram_shovel_timer ($C361, part of below)
-    this.clockTimer = 0;                    // $C36F — enemy-freeze timer (Bonus arms it)
+    this.bonus.reset();                     // $C36D — no bonus pending on a fresh stage
+    this.clockTimer = 0;                    // $C36F — enemy-freeze timer (the clock bonus arms it)
     this.stageSelectUsed = true;            // $C38F ram_004C_flag = 1 (§6a)
     // Enemy spawn: seed the spawn machinery + this stage's type schedule ($C383
     // sub_E42B + $C355-$C372). The spawn interval ($C391-$C3B2 loc_C39E): base $BE
@@ -353,7 +354,8 @@ export class Game {
     // $C380 sub_C859): the 20-enemy reserve column, the Ip/IIp labels, the flag +
     // stage number. Into field.tilemap, which is what Battle renders. (S8-A.)
     this.score.drawStageHud(this.field, this.gameMode, this.secondLoop, this.stage);
-    // TODO: the OTHER power-up timers ($C363-$C367: helmet) — Bonus/S7.
+    // $C363-$C369 zero the stun + helmet timers here; our spawn path already clears them
+    // (spawnPlayer -> Tank.spawn sets both to 0), so no separate write is needed.
   }
 
   // sub_D97D_check_hiscore_beaten ($D97D) — the $C286 branch flow.js decides on. Score
@@ -376,11 +378,11 @@ export class Game {
     this.roster.updateInvincibility(this.frm.lo);                 // 7  $E27C
     this.bullets.playerFire(this.roster, this.input);             // 8  $E122 player fire
     this.bullets.enemyFire(this.roster, this.ai, this.clockTimer, this.frm.hi); // 9 $E162
-    this.roster.spawnEnemyTick(this.field, this.score);           // 10 $DB48 enemy_spawn
+    this.roster.spawnEnemyTick(this.field, this.score, this.bonus); // 10 $DB48 enemy_spawn
     this.bullets.move(this.field, this.base, this.frm.lo);        // 11 $E604 bullets_movement
     this.bullets.collideWithBullets();                            // 12 $E910
     this.bullets.collideWithTanks(this.roster, this.secondLoop, this); // 13 $E70C P1-3
-    this.bonus.tryPickup(this.roster, this.base, this, this.score);// 14 $E972
+    this.bonus.tryPickup(this);                                   // 14 $E972 try_to_pick_up_bonus
     this.updateGameOverText();                                    // 15 $C972
     this.audio.movementSfx(this.roster);                          // 16 $DB0B (deferred)
     this.score.drawLives(this.field, this.lives, this.gameMode, this.secondLoop); // 17 $C7C8

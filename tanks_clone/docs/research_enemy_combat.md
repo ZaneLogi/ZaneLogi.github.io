@@ -26,12 +26,13 @@ the kill-points popup (`$10` state / `ofs_001_DEFD`). See §7.
 `sub_D97D`) + its HALL OF FAME routing, and the `$C972` game-over-message animation.
 S8-B's `add` therefore drops `$D138`'s game-over-flag guard (`$D13A`).
 
-**Out — Bonus (S7):** the bonus-tank power-up drop (`$E7D7` `sub_E8BE_spawn_bonus`).
-The bonus tank still **explodes** in P10 — only the drop is deferred.
+**Out — Bonus (S7):** the bonus-tank power-up drop (`$E7D7` `sub_E8BE_spawn_bonus`) was
+out of P10 scope — the bonus tank still **explodes** here; only the drop was deferred.
+*(Since built: P14, `research_bonus.md`.)*
 
 ## §1 Enemy fire — `sub_E162` (step 9)
 
-Trivial. If `clock_timer != 0` → return (the freeze power-up; stays 0 until Bonus).
+Trivial. If `clock_timer != 0` → return (the freeze power-up, armed by the clock bonus — P14).
 Else for each enemy slot `X = 7..2`: skip if exploding (`flags < $80`) or respawning
 (`flags >= $E0`); else roll `random & $1F` — on 0 (1/32) fire via `sub_E08C`
 (`Bullet.spawn`, already ported for player fire). One primary bullet per enemy;
@@ -56,7 +57,7 @@ hi-nibble `$40`), if `|bx−tx| < $0A` and `|by−ty| < $0A`:
 if exploding/respawning): for each **player** bullet `Y` (where `Y & $06 == 0`, i.e.
 slots 0/1/8/9) that is flying, on the same `< $0A` box:
 - the bullet explodes (status `$33`);
-- **bonus carrier** (`type & $04`): `sub_E8BE_spawn_bonus` **[DEFER — Bonus/S7]**;
+- **bonus carrier** (`type & $04`): `sub_E8BE_spawn_bonus` *(built P14, `research_bonus.md`)*;
   if `type == $E4` (armour+bonus) `DEC type` → `$E3` so the armour counter engages;
 - **armour** (`type & $03 != 0`): `DEC type` (survive), `sfx_bullet_hit_tank` → next.
   So a `$E3` heavy tank takes 4 hits ($E3→$E2→$E1→$E0, then explodes);
@@ -71,10 +72,10 @@ Note the loop bound: Part 2's `X` runs `7..2` (`$E838` `CMP #$01 BEQ` exits at 1
 **enemies only**; players are handled by Part 3 (freeze). And `Y & $06 == 0` selects
 only the four **player** bullet slots, so enemy bullets never damage enemies.
 
-**Deviation (deferrals):** the kill *event* (bullet→$33, armour DEC, explode) is
-ported; the bonus spawn and every score-visible consequence are cited stubs. The
-armour/`$E4→$E3` type math **stays** even with bonus deferred, so a bonus-armour tank
-still takes the right number of hits and explodes — it just drops no power-up.
+**Note:** the kill *event* (bullet→$33, armour DEC, explode) and its score-visible
+consequences (S8-B) land here; the bonus **drop** (`$E7D7`) was deferred to P14 (built —
+`research_bonus.md`). The armour/`$E4→$E3` type math holds, so a bonus-armour tank takes
+the right number of hits before it explodes and drops its power-up.
 
 ## §3 The explosion tick — `ofs_000_DDEA` (states $70..$20)
 
@@ -183,8 +184,5 @@ OVER flow, a separate step (built in P12) — `checkHiscore` was left a stub her
 
 ## §8 Open / deferred
 
-- **GAME OVER flow — BUILT** (`Score.checkHiscore` `$D97D`, both boards, the sliding
-  `updateGameOverText` `$C972` in P12; the per-player 2P death slide `$DE18`/`$DE46` in
-  P13; see research_game_over.md). Still deferred from it: the jingle gates (Audio).
-- **Bonus (S7):** the bonus-tank power-up drop (`sub_E8BE`).
-- **Audio:** every `sfx_*` write (explosion / hit / fire / gain-life).
+- **Audio:** every `sfx_*` write (explosion / hit / fire / gain-life). The GAME OVER
+  flow's jingle gates (which block the GameOver / HallOfFame exits) are part of this.

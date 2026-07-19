@@ -275,8 +275,8 @@ export class BulletManager {
   // Three parts, in the ROM's order. Part 1 (enemy bullet -> player -> kill) and Part 2
   // (player bullet -> enemy -> damage/kill) are P10; Part 3 (player bullet -> the OTHER
   // player -> FREEZE) was P7. The kill's score-visible consequences (score, per-type
-  // counters, kill-points popup) are Game.awardKill (S8-B); only the bonus drop is deferred
-  // (Bonus/S7). research_enemy_combat.md §2/§7. Hit box: |dx| < $0A and |dy| < $0A per axis.
+  // counters, kill-points popup) are Game.awardKill (S8-B); the bonus drop ($E7D7) is
+  // Bonus/S7 (built P14). research_enemy_combat.md §2/§7. Hit box: |dx| < $0A and |dy| < $0A per axis.
   /** @param {TankRoster} roster  @param {number} secondLoop  @param {import('./game.js').Game} game */
   collideWithTanks(roster, secondLoop, game) {
     // $E710 Part 1 — enemy bullet kills a player. For each player, scan the enemy bullets
@@ -291,9 +291,9 @@ export class BulletManager {
         b.explode();                                          // $E74E-$E750 status $33
         if (player.helmetTimer !== 0) { b.deactivate(); continue; } // $E753-$E75C helmet clears it, $E75C -> next bullet
         player.explode();                                     // $E75F-$E761 flags = $73
-        player.type = 0;                                      // $E76D — star tier lost on death
-        // TODO: ram_tank_upgrade[p] = 0 ($E76A) — Bonus/S7 (always 0 today);
-        //       ram_sfx_explosion_player ($E765) — Audio.
+        game.tankUpgrade[p] = 0;                              // $E76A — the persistent star tier is lost
+        player.type = 0;                                      // $E76D — and the live type reset
+        // TODO: ram_sfx_explosion_player ($E765) — Audio.
         break;                                                // $E76F -> next player
       }
     }
@@ -311,7 +311,7 @@ export class BulletManager {
         if (!boxHit(b, tank)) continue;                       // $E7AA-$E7CA
         b.explode();                                          // $E7CC-$E7CE status $33
         if (tank.type & 0x04) {                               // $E7D1-$E7D5 bonus carrier
-          // TODO: sub_E8BE_spawn_bonus ($E7D7) — Bonus/S7 (P10 defers the drop).
+          game.bonus.spawn(game);                             // $E7D7 sub_E8BE — drop the power-up
           if (tank.type === 0xE4) tank.type--;                // $E7DA-$E7E0 armour+bonus -> $E3
         }
         if ((tank.type & 0x03) !== 0) {                       // $E7E2-$E7E6 armour still alive

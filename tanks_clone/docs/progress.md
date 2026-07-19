@@ -762,10 +762,60 @@ but because it described work that had not started yet.)*
     constant) + hide at `timer 0`; the 4 sprites at `posY $D8`; 1P regression (no slide). Live
     screenshot: the banner sliding along the bottom of a 2P battlefield.
 
+- **P14 — Bonus / power-ups (S7).** ☑ Done. The last Battle-loop subsystem: a bonus-carrier
+  enemy (the 4th/11th/18th) drops a flashing power-up when killed; a player driving over it
+  gets 500 pts + one of **7 effects**. Full decode + citations + verification:
+  `docs/research_bonus.md`. Pipeline step 14 (`$E972`) filled; `bonus.js` rewritten from
+  stub; `bullet.js`/`tank.js`/`tank_roster.js`/`game.js`/`modes/session.js`/`constants.js`
+  touched. Most of the plumbing already existed **dormant** — S7 is the `Bonus` class + the
+  wiring that flips those hooks live.
+  - **Spawn (`$E8BE`/`$E902`)** — a random 4×4-grid position `{$30,$60,$90,$C0}²` re-picked
+    off any player (the `id=$FF` **probe** reuses `sub_E972` as a position check — a faithful
+    mechanism, kept), then a weighted-random id from `tbl_E8FA`: grenade & star **2/8** each,
+    helmet/clock/shovel/tank 1/8, **pistol never spawns**. Triggered at `$E7D7` in the P10
+    kill path; an armour+bonus `$E4` carrier drops one then steps to `$E3` (flag cleared, so
+    it doesn't drop again on later hits).
+  - **Display (`$E23B`) — update/render split** (Mode contract, like `sub_DEA6`). Runs
+    OUTSIDE the pause gate (`$C203`/`$C241`), so `updateDisplay()` (the `$32`-frame pickup-
+    flash countdown) sits in `Battle`/`Tail` `update()` after `mainBattleScript`; the sprite
+    (blinking `id*4+$81` icon, or the "500" `$3B` flash) is `render()` in `renderBattlefield`,
+    at the `$C203` OAM slot (front of bullets/tanks, behind shields/base).
+  - **Pickup (`$E972`, step 14)** — the `|d| < $0C` box, scan players **1,0** (P2 wins a tie),
+    +500 (`Score.add`, unless the attract demo), then dispatch the id.
+  - **The 7 effects** — helmet (`helmetTimer=$0A`, the roster already draws it); clock
+    (`clockTimer=$0A`, freezing enemy move+fire — **the P9/P10 gates were dormant**, now armed,
+    plus the `$DBFA-$DC00` **countdown**); shovel (**P8's `Base.applyShovel`**, alive-only);
+    star (upgrade — see below); grenade (explode every enemy, **no score / no kill count**);
+    tank (extra life); pistol (no-op). The clock/shovel/helmet effects are the dormant hooks
+    going live.
+  - **The star lifecycle (cross-subsystem S3/S5).** `$EA07` steps `tank_type` `$20/$40/$60`
+    (capped), which the **P7 bullet code already reads** — so 1★→FAST bullet, 2★→FAST+2-shot,
+    3★→FAST+POWER+2-shot, no new bullet code. `game.tankUpgrade` (`$0101`) persists the tier
+    across the per-stage respawn (restored at `becomeDrivable` `$E3C5`, threaded via
+    `moveStep→respawnTick`), zeroed on death (`$E76A`); **not** cleared per stage — that's how
+    Battle City's tank power carries between stages and is lost only on death.
+  - **Deviations** (governing test, research §7): the `$FF` spawn-probe (faithful, kept); the
+    RNG call-count matches but the sequence is our LFSR; the `$E23B` update/render split;
+    `tank_upgrade` modelled as `Game.tankUpgrade[]` (session state on `Game`, the §7 lock);
+    the bonus's `$C203` OAM slot (near-unobservable). **Deferred, cited:** all sfx (Audio);
+    the demo follow-bonus AI (`$C648`, Demo mode).
+  - **Resolved + deleted the map's last two §8 `[?]`s** — the bonus-id values (S7) and the
+    `tank_type` bit layout (its last-open piece, armour damage-decrement, was P10; S7 adds the
+    player star tiers). §8 is now empty.
+  - **Verified** — 43/43 deterministic in-browser (headless `Game`, `getImageData` /
+    `drawSprite` spy, the real Menu→1P→Battle flow): spawn grid+weights+retry; display
+    flash/blink/expire; pickup box+P2-priority+demo; each of the 7 effects (incl. grenade
+    leaving no kill count, shovel no-op when destroyed); star tiers→bullet property/2-shot +
+    persist-across-respawn + zero-on-death; carrier drop through the real pipeline + `$E4→$E2`;
+    new-carrier-hides-bonus; clock countdown (DEC at %64, no underflow). Live: the bonus star
+    renders on the real canvas (icon box +95 lit px) — screenshot of the star on the stage-1
+    battlefield (`enemies=20`, `base=ALIVE`).
+
 ## Next
-**Bonus** (S7) — the bonus-tank power-up drop (`$E8BE`/`$E972`); then **Demo** (`$C642`);
-`StageIntro`'s sfx / editor hooks (Audio / Construction). **Audio** (`$EA7E`) is the biggest
-single lever left — it gates the two P12 boards' exits (see Debt) and mutes on pause/demo.
+**Demo** (`$C642`/`$C41D` — the attract auto-play, reusing the battle loop with the AI
+driving the "players"; incl. the `$C648` follow-bonus steering); `StageIntro`'s sfx / editor
+hooks (Audio / Construction). **Audio** (`$EA7E`) is the biggest single lever left — it gates
+the two P12 boards' exits (see Debt) and mutes on pause/demo.
 
 ## Debt (NOT SOURCE — delete when its owner lands)
 - **`GameOver` / `HallOfFame` now DRAW their real screens (P12); only the EXIT WAIT is

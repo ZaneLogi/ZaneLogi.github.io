@@ -181,8 +181,8 @@ validated at build time (`tools/extract.py`: types ∈ {80,A0,C0,E0}, counts sum
 
 - **Clock freeze (`$DC18-$DC23`).** A live drivable enemy (`$80 <= state < $E0`) is
   frozen while `clock_timer != 0`; exploding (`state < $80`) and respawning (`>= $E0`)
-  enemies proceed. `clock_timer` is a Bonus power-up, always 0 until Bonus lands, so
-  this is a no-op today (the countdown DEC `$DC00` is deferred with Bonus).
+  enemies proceed. `clock_timer` is armed by the clock bonus (P14); its countdown DEC
+  (`$DC00`) lives at the top of `moveTanks`, so the freeze holds enemies for its duration.
 - **Speed gate (`$DC25-$DC33`).** A **fast** tank (`type & $F0 == $A0`) moves every
   frame; any other enemy moves only when `(slot ^ frm_cnt_lo) & 1 != 0` — alternate
   frames, staggered by slot so enemies do not step in lockstep. (This also makes the

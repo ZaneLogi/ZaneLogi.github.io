@@ -100,8 +100,8 @@ unchanged. Bullets are unaffected — they read the eagle via `quadrantHit` +
 
 Two jobs, in order: shovel fortify (only while active), then the game-over countdown.
 
-**Shovel fortify (`$E2A9-$E2CF`).** Gated on `ram_shovel_timer` (`$45`, dormant until
-Bonus). Acts only every 16 frames (`frm_cnt_lo & $0F == 0`):
+**Shovel fortify (`$E2A9-$E2CF`).** Gated on `ram_shovel_timer` (`$45`, set by the shovel
+bonus — P14). Acts only every 16 frames (`frm_cnt_lo & $0F == 0`):
 
 - every 64 frames (`& $3F == 0`): `DEC shovel_timer`; if it hits 0 → `draw_default_base`
   (revert steel→brick).
@@ -183,9 +183,9 @@ Deterministic, headless (66/66 in-browser — construct `Field`/`Base`/`Game`,
 - **Explosion animation:** the phase index sweeps `1→2→3→4→5→…→0`; `render` emits the right
   sprite pairs (phase 1 = `$F1`/`$F3` at (`$70`/`$78`,`$D8`) pal 3; phase 5 = 8 sprites,
   first `$E1`; phase 0 / alive = none).
-- **Shovel (dormant):** `applyShovel` → steel walls + `$14`; the 64-frame DEC gate; the
-  `< 4` blink (protected on `& $10`, else default); expiry reverts to brick; refused when
-  not alive.
+- **Shovel (ported P8, wired live P14):** `applyShovel` → steel walls + `$14`; the 64-frame
+  DEC gate; the `< 4` blink (protected on `& $10`, else default); expiry reverts to brick;
+  refused when not alive.
 
 Visual (preview pane, pixels via `getImageData` + a screenshot): stage 1 renders the eagle
 emblem inside its brick fortification (alive eagle `$c8`, 122 lit px); destruction shows the

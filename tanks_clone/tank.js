@@ -1,4 +1,4 @@
-// tank.js — S3 Tank (one tank entity)
+// tank.js — Tank (one tank entity)
 //
 // One slot of the 8-wide roster. In the ROM a tank is spread across parallel
 // zero-page arrays indexed by slot; here it's one object (idiomatic OO — data
@@ -246,10 +246,10 @@ export class Tank {
   moveStep(field, game) {
     switch (this.state) {
       case TANK_STATE.RESPAWN:                          // $F0 ofs_000_DE55
-        this.respawnTick(TANK_STATE.E0);                // $F0..$FE -> $E0
+        this.respawnTick(TANK_STATE.E0, game);          // $F0..$FE -> $E0
         return;
       case TANK_STATE.E0:                               // $E0 ofs_000_DE64
-        this.respawnTick(null);                         // $E0..$EE -> become drivable
+        this.respawnTick(null, game);                   // $E0..$EE -> become drivable
         return;
       case TANK_STATE.NORMAL_80:                        // $80 ofs_000_DC52 — stopped/slide
         this.stopped(field);
@@ -302,25 +302,30 @@ export class Tank {
 
   // ofs_000_DE55 / ofs_000_DE64 ($DE55/$DE64) — the two respawn phases both just INC
   // the low-nibble counter each processed frame; at $0E the phase ends.
-  respawnTick(nextState) {
+  /** @param {import('./game.js').Game} [game] */
+  respawnTick(nextState, game) {
     if (++this.respawnFrame >= 0x0E) {                  // $DE59 AND #$0F / CMP #$0E
       this.respawnFrame = 0;
       if (nextState !== null) this.state = nextState;   // $DE5F $F0 -> $E0
-      else this.becomeDrivable();                       // $DE6E sub_E3B8
+      else this.becomeDrivable(game);                   // $DE6E sub_E3B8
     }
   }
 
   // sub_E3B8 ($E3B8) — the tank finishes materializing. tbl_E47E[slot] ($E47E) is
   // the resulting state: players $A0 (face UP), enemies $A2 (face DOWN, toward the
-  // base). Then the player path arms the helmet; the enemy path assigns the tank
-  // type from the stage tables + clears wheels.
-  becomeDrivable() {
+  // base). Then the player path arms the helmet + restores the star upgrade; the enemy
+  // path assigns the tank type from the stage tables + clears wheels.
+  /** @param {import('./game.js').Game} [game] */
+  becomeDrivable(game) {
     this.state = TANK_STATE.NORMAL_A0;             // tbl_E47E high nibble = $A0
     this.dir = this.isPlayer ? DIR.UP : DIR.DOWN;  // tbl_E47E low nibble: 0 / 2
     this.wheels = 0;                               // $E406 (enemy) / players unchanged
     if (this.isPlayer) {
       this.helmetTimer = HELMET_TIMER_INIT;        // $E3C1-$E3C3
-      // TODO (deferred): tank_upgrade -> type ($E3C5).
+      // $E3C5-$E3C8 — restore the persistent star tier (0 for a fresh life, since death
+      // zeroes it; carried across stages for a player who did not die). spawnPlayer reset
+      // type to 0 ($E365), so this ORA-with-0 is just tank_type = tank_upgrade.
+      if (game) this.type = game.tankUpgrade[this.slot];
     }
     // Enemy: ram_tank_type was assigned at spawn (TankRoster.spawnEnemy). The ROM
     // sets it here in $E3B8's enemy branch, but the type is unobservable during the

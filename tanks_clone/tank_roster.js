@@ -94,6 +94,12 @@ export class TankRoster {
    * @param {import('./enemy_ai.js').EnemyAI} enemyAI  @param {number} frameHi
    */
   moveTanks(field, frameLo, clockTimer, enemyAI, frameHi, game) {
+    // $DBF5-$DC00 — the clock-freeze countdown: while a clock power-up is armed, DEC it
+    // once every 64 frames. (The clock bonus arms clock_timer; otherwise it is 0, a no-op.) The
+    // freeze gate below and enemy fire (step 9) then read the post-DEC value.
+    if (clockTimer !== 0 && (frameLo & 0x3F) === 0 && game) {
+      clockTimer = game.clockTimer = (clockTimer - 1) & 0xFF;   // $DC00 DEC ram_clock_timer
+    }
     const playerGated = (frameLo & 1) === 0 && (frameLo & 3) !== 0;   // $DC09-$DC13
     const ctx = { frameHi, spawnInterval: this.spawnInterval, players: [this.tanks[0], this.tanks[1]], game };
     for (let slot = MAX_TANKS - 1; slot >= 0; slot--) {
@@ -115,8 +121,6 @@ export class TankRoster {
       if (!fast && ((slot ^ frameLo) & 1) === 0) continue;   // $DC2D-$DC33
       enemyAI.drive(tank, field, ctx);                       // $DC35 sub_DC3D dispatch
     }
-    // TODO: clock_timer countdown ($DBFA-$DC00, DEC once/64 frames while frozen) —
-    //   with Bonus; clock_timer stays 0 until the clock power-up exists.
   }
 
   // sub_E363_tank_spawn_handler ($E363), player path — place a player at its spawn
@@ -151,14 +155,17 @@ export class TankRoster {
   // timer elapses and enemies remain, spawn the next one into the first FREE enemy
   // slot (scanning DOWN from enemyLimit to 2). No free slot -> nothing this frame,
   // which is the "max N enemies on screen" rule (4 in 1P, 6 in 2P).
-  /** @param {import('./field.js').Field} field @param {import('./score.js').Score} score */
-  spawnEnemyTick(field, score) {
+  /**
+   * @param {import('./field.js').Field} field  @param {import('./score.js').Score} score
+   * @param {import('./bonus.js').Bonus} [bonus]  — a new bonus-carrier hides any live bonus
+   */
+  spawnEnemyTick(field, score, bonus) {
     if (this.spawnTimer > 0) { this.spawnTimer--; return; }   // $DB4A-$DB4E
     if (this.enemySpawnCount === 0) return;                   // $DB4F-$DB51 all spawned
     for (let slot = this.enemyLimit; slot >= 2; slot--) {     // $DB53-$DB72 scan enemy slots
       if (this.tanks[slot].state !== 0) continue;             // $DB59-$DB5B occupied
       this.spawnTimer = this.spawnInterval;                   // $DB5D-$DB5F reload
-      this.spawnEnemy(slot);                                  // $DB61 sub_E363
+      this.spawnEnemy(slot, bonus);                           // $DB61 sub_E363
       this.enemySpawnCount--;                                 // $DB64
       // $DB66-$DB68: erase the reserve icon indexed by the post-decrement count
       // (drains the column bottom-up). S8-A / research_hud.md §2.
@@ -171,14 +178,15 @@ export class TankRoster {
   // the three top spawn points, mark the bonus-carriers, and assign its type, then
   // enter the RESPAWN state (Tank.spawn animates it in). The type write is sub_E3B8's
   // in the ROM; it is moved here (governing-test deviation, see Tank.becomeDrivable).
-  spawnEnemy(slot) {
+  /** @param {number} slot  @param {import('./bonus.js').Bonus} [bonus] */
+  spawnEnemy(slot, bonus) {
     const tank = this.tanks[slot];
     this.spawnPosIndex = (this.spawnPosIndex + 1) % 3;   // $E37C-$E388 cycle 0/1/2
     const pos = ENEMY_SPAWN[this.spawnPosIndex];         // tbl_E474/E477
     tank.x = pos.x; tank.y = pos.y;                      // $E38A-$E391
-    const bonus = BONUS_SPAWN_COUNTS.includes(this.enemySpawnCount);  // $E393-$E39F 4th/11th/18th
-    tank.type = this._nextEnemyType(bonus ? TANK_TYPE.BONUS_FLAG : 0);
-    // TODO: bonus tank hides the current bonus pickup ($E3A5-$E3A7) — Bonus/S7.
+    const carrier = BONUS_SPAWN_COUNTS.includes(this.enemySpawnCount);  // $E393-$E39F 4th/11th/18th
+    tank.type = this._nextEnemyType(carrier ? TANK_TYPE.BONUS_FLAG : 0);
+    if (carrier) bonus?.hide();                          // $E3A5-$E3A7 a new carrier hides any live bonus
     tank.spawn();                                        // $E3A9 loc_E3A9 -> RESPAWN ($F0)
   }
 

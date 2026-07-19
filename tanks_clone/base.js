@@ -93,7 +93,7 @@ export class Base {
   constructor() {
     this.state = BASE_STATE.ALIVE;
     this.explosionTimer = 0;
-    this.shovelTimer = 0;   // ram_shovel_timer ($45) — set by the shovel bonus (dormant)
+    this.shovelTimer = 0;   // ram_shovel_timer ($45) — set by the shovel bonus (Bonus.applyShovel)
   }
 
   isAlive() { return this.state === BASE_STATE.ALIVE; }
@@ -148,8 +148,8 @@ export class Base {
 
   // ofs_bonus_E9FB_02_shovel ($E9FB) — the SHOVEL pickup effect. Fortify to steel and
   // arm the timer, but only while the base is alive ($E9FB BPL). The Bonus subsystem
-  // (S7, deferred) calls this; nothing sets shovelTimer until then, so the fortify
-  // branch of update() is dormant.
+  // (S7/P14) calls this when the shovel power-up is picked up, arming update()'s
+  // fortify branch.
   /** @param {Field} field */
   applyShovel(field) {
     if (!this.isAlive()) return;              // $E9FB LDA game_over_flag / BPL
@@ -169,8 +169,8 @@ export class Base {
     this.drawDestroyedEagle(field);                // $E6BA sub_CC08
   }
 
-  // sub_E2A9_HQ_handler ($E2A9) — pipeline step 6. Shovel fortify (dormant) first,
-  // then the game-over countdown.
+  // sub_E2A9_HQ_handler ($E2A9) — pipeline step 6. Shovel fortify (armed by the shovel
+  // bonus) first, then the game-over countdown.
   /** @param {Field} field  @param {import('./game.js').Game} game */
   update(field, game) {
     this._fortifyTick(field, game.frm.lo);   // $E2A9-$E2CF

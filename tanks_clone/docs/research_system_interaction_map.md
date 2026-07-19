@@ -314,7 +314,11 @@ biased direction chooser (`sub_DDA2` + `tbl_E486`). Enemy **types/counts** per s
 are decoded: `ram_enemy_type_stage_cnt` ($8B, 4 bytes) = the *counts* of the 4 type-
 slots (`tbl_E578`, summing to 20), and `tbl_E4EC` = their type bytes ($80 basic / $A0
 fast / $C0 power / $E0 armour). Full decode: `docs/research_enemy_ai.md`.
-*(Resolved 2026-07-19; the "4 types per stage" [?] was a §8 item.)*
+*(Resolved 2026-07-19: two §8 [?] items — the "4 types per stage" question, and the full
+`tank_type` bit-layout. The layout: the enemy type bytes here + the 2-bullet gate
+(`$C0==$40`) in S5, the bonus flag (`$04`) in S7, the armour damage-DEC (`$E3→$E2`) in
+`research_enemy_combat.md`, the player star tiers (`$20/$40/$60`) in `research_bonus.md` §5;
+canonical in `constants.js` `TANK_TYPE`.)*
 
 **S5 — Bullets.** Per-tank arrays (8 wide) + 2nd bullet (players only, 2 wide)
 **[D]**: `bullet_pos_X`($B8)/`_Y`($C2), `bullet_status`($CC),
@@ -332,16 +336,24 @@ eagle draw routines (`CAF5`/`CB5D`/`CB9E`/`CC08`), destruction → sets
 `game_over_flag`. Reads/writes S2 field (the walls around the eagle).
 **Ported P8** — the base is field TILES (walls `$0F`/`$10`, eagle `$C8-$CB`, destroyed
 `$CC-$CF`), only the game-over explosion is sprites; the eagle-hit → 39-frame countdown →
-game over is now live, and `sub_E2A9`'s shovel branch is ported dormant (Bonus). This also
+game over is now live, and `sub_E2A9`'s shovel branch is wired to the shovel bonus (P14). This also
 exposed + fixed a latent `isPassable` bug (`$DCD5 BMI`; the eagle would let tanks through).
 Full decode: `docs/research_base.md`.
 
 **S7 — Bonus / power-ups.** `ram_bonus_pos_X/Y/id`($86/$87/$88),
-`ram_bonus_timer`($62). Effects touch many subsystems: helmet/star
-(`ram_helmet_timer` $89), clock/freeze (`ram_clock_timer` $0100 → gates S4 fire),
-shovel (S6), grenade/tank/star-upgrade. Routines: `E8BE_spawn_bonus`,
-`E23B_display_bonus_on_screen`, `E972_try_to_pick_up_bonus`,
-`E902_convert_random_number_to_position`.
+`ram_bonus_timer`($62). Routines: `E8BE_spawn_bonus`, `E23B_display_bonus_on_screen`,
+`E972_try_to_pick_up_bonus`, `E902_convert_random_number_to_position`.
+**Ported P14.** A bonus-carrier enemy (4th/11th/18th, `TANK_TYPE.BONUS_FLAG`) drops a
+power-up when killed (`$E7D7`); a player driving over it gets 500 pts + one of **7
+effects** (`tbl_E9E2`): 0 helmet ($89), 1 clock/freeze ($0100 → gates S4 move+fire),
+2 shovel (S6 `Base.applyShovel`), 3 star (upgrade → S5 bullet FAST/POWER/2-shot),
+4 grenade (explode all enemies, no score), 5 tank (extra life), 6 pistol (no-op, never
+spawned). Spawn picks a 4×4-grid position off any player + a weighted-random id (grenade
+& star 2/8 each). The **star lifecycle** spans S3/S5: `tank_upgrade`($0101) persists the
+tier across stages, zeroed on death (`$E76A`), restored on respawn (`$E3C5`). The
+clock-freeze **countdown** (`$DBFA-$DC00`) and the dormant P8 shovel / P9-P10 freeze gates
+went live here. Full decode: `docs/research_bonus.md`.
+*(Resolved 2026-07-19; the "which power-ups exist + their `bonus_id` values" [?] was a §8 item.)*
 
 **S8 — Score / HUD.** BCD scores `p1_score`($15)/`p2_score`($1D)/`hi_score`($3D),
 `com_dec_*` digit fields ($35–$3B). Routines: `D9BE_add_score`,
@@ -490,8 +502,8 @@ into another's data except through the `Field` service (which is *meant* to be
 shared). **Locked per Zane 2026-07-15:** build the classes as proposed; if a
 boundary proves wrong during implementation, revise then — don't block the
 scaffold on it. `Audio` and `Construction` are **stub-only (deferred, low
-priority)**. The §8 `[?]` items are resolved during implementation / in the
-per-subsystem docs, not before scaffolding.
+priority)**. The §8 `[?]` items were resolved during implementation / in the
+per-subsystem docs, not before scaffolding (§8 is now empty).
 
 | JS module / class | Responsibility | Absorbs (source) |
 |---|---|---|
@@ -566,15 +578,6 @@ list, and a finding parked in §8 is a finding nobody reads. Cross-reference the
 resolution with a short `*(Resolved YYYY-MM-DD; was a §8 [?].)*` note at its new
 home, so the history is recoverable without the list carrying it.
 
-- **[?]** `tank_type` bit layout — *mostly decoded.* Known **[D]**: the four enemy
-  types are `$80` basic / `$A0` fast / `$C0` power / `$E0` armour (`tbl_E4EC`); a
-  **fast** tank is `type & $F0 == $A0` and moves every frame (`$DC29` speed gate, P9);
-  **armour** spawns as `$E3`, a 3-in-the-low-bits hit counter (`$E3F6`, P9); bit 2
-  (`& $04`) = carries-a-bonus (`$DFBA`/`$E3A1`); `& $C0 == $40` gates the players'
-  2-bullet upgrade (`E122`). Still open: the armour **damage-decrement** mechanic
-  ($E3→$E2→… on hits) — P10 combat.
-- **[?]** Exactly which power-ups exist and their `bonus_id` values (S7).
-
-These get resolved as the work reaches them — each finding landing wherever it
-fits (see "where a finding lands", top of this doc). This map intentionally stays
-at the coupling level, so anything with real bulk belongs elsewhere.
+Any future finding lands wherever it fits (see "where a finding lands", top of this doc).
+This map intentionally stays at the coupling level, so anything with real bulk belongs
+elsewhere.

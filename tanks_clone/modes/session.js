@@ -203,13 +203,15 @@ function renderBattlefield(g, renderer, { pause = false } = {}) {
   renderer.beginSpriteLayers();
   g.roster.render(renderer, g.frm.lo, g.field);      // $C209/$C244 sub_DEA6 — tanks + spawn star
   g.bullets.render(renderer);                        // $C206/$C247 sub_E0D8 — bullet + hit sprites
+  g.bonus.render(renderer, g.frm.lo);                // $C203/$C241 sub_E23B — the bonus icon / flash
   g.roster.drawShields(renderer, g.frm.lo);          // $E27C draw half — spawn helmet
   g.base.render(renderer);                           // $E2A9 step 6 — the eagle explosion
   g.drawGameOverText(renderer);                      // $C310 / sub_C947 — the sliding message (gated)
   if (pause) drawPauseText(g, renderer);             // $C21B sub_C8F9 — Battle only
   // OAM priority (lowest index = front-most): the message/PAUSE > eagle explosion (step 6)
-  // > shields (step 7) > bullets > tanks. The front list paints in enqueue order (last on
-  // top), so enqueuing tanks..message paints them back-to-front — the ROM's OAM order.
+  // > shields (step 7) > bonus ($C203) > bullets > tanks. The front list paints in enqueue
+  // order (last on top), so enqueuing tanks..message paints them back-to-front — the ROM's
+  // OAM order (bonus sits between bullets and shields, its $C203 slot).
   renderer.flushSprites(true);                       // behind-BG (forest-covered) sprites
   renderer.drawTilemap(g.field.tilemap, g.bgPaletteId, 0, 0, true);   // BG, transparent index 0
   renderer.flushSprites(false);                      // front sprites, on top
@@ -232,15 +234,16 @@ class Battle extends Mode {
   update() {
     const g = this.game;
 
-    // $C1FC: pause gates ONLY the pipeline. The three handlers below keep running
-    // while paused — which is why sprites still animate on the pause screen. A
-    // port that freezes everything on pause is wrong. Map §2.
+    // $C1FC: pause gates ONLY the pipeline. The handlers below keep running while
+    // paused — which is why sprites still animate on the pause screen. A port that
+    // freezes everything on pause is wrong. Map §2.
     if (!g.paused) g.mainBattleScript();   // $C200
 
-    // The ROM's Battle loop runs three RENDER-half calls after the pipeline, all
-    // OUTSIDE the pause gate: $C203 $E23B display_bonus, $C206 $E0D8 bullets_status,
-    // $C209 $DEA6 tanks. Tanks are drawn in render() now (roster.render); bonus + bullet
-    // sprites join it when Bonus / Bullet rendering land.
+    // $C203 sub_E23B_display_bonus_on_screen — its STATE half (the pickup-flash timer
+    // countdown) runs OUTSIDE the pause gate too, so the flash keeps ticking while
+    // paused. Its sprite is emitted in render() (renderBattlefield). The other two
+    // post-pipeline calls ($C206 bullets / $C209 tanks) are pure render() now.
+    g.bonus.updateDisplay();               // $C203
 
     if (g.input.pressed(0, BTN.Start)) {   // $C210
       g.paused = !g.paused;                // $C212-$C216
@@ -288,10 +291,11 @@ class Tail extends Mode {
     // TODO: $C23B sub_C2A2_disable_buttons_if_game_over — zeroes btn_press so the
     // player cannot act while the message slides.
     g.mainBattleScript();   // $C23E — the SAME body Battle and the demo run
+    g.bonus.updateDisplay();  // $C241 sub_E23B — the pickup-flash timer keeps ticking in the tail
     // The render-half calls that follow in the ROM's Tail loop: $C244 $DEA6 tanks +
     // $C247 $E0D8 bullets are drawn in render() (shared renderBattlefield); $C24A $C31D
     // is a redundant SECOND water swap (mainBattleScript step 18 already ran it this
-    // frame — idempotent). $C241 $E23B display_bonus is still deferred (Bonus/S7).
+    // frame — idempotent).
     return g.frm.hi === TAIL_END_HI ? DONE : null;   // $C24D-$C251
   }
 

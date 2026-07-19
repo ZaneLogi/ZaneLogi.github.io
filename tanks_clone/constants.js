@@ -388,11 +388,46 @@ export const STUN_TIMER_INIT = 0xC8;   // $E8AA LDA #$C8 — 200 control-ticks (
 // --- Base / HQ (S6) ---
 // ram_shovel_timer ($45) — the shovel power-up fortifies the base walls (brick->steel)
 // for this many units. sub_E2A9 DECs it every 64 frames while acting every 16 ($E2A9).
-// Set by the shovel bonus ($EA02 LDA #$14); dormant until Bonus lands. See base.js.
+// Set by the shovel bonus ($EA02 LDA #$14; Bonus.applyShovel — P14). See base.js.
 export const SHOVEL_TIMER_INIT = 0x14;   // $EA02 LDA #$14
 
-// --- Bonus / power-up ids (ram_bonus_id) ---
-// TODO: decode from E8BE_spawn_bonus / E972_try_to_pick_up_bonus.
+// --- Bonus / power-ups (S7) — sub_E8BE / sub_E23B / sub_E972 ($E8BE/$E23B/$E972) ---
+//
+// A single on-field bonus: ram_bonus_pos_X/Y ($86/$87 — the CENTRE, like a tank),
+// ram_bonus_id ($88), ram_0062_bonus_timer ($62). A bonus-carrier enemy (the 4th/11th/
+// 18th of the stage — TANK_TYPE.BONUS_FLAG) drops one when its bullet-death is dealt
+// ($E7D7). Full decode: docs/research_bonus.md.
+
+// The 7 power-up ids — tbl_E9E2 ($E9E2) handler order. 6 (pistol) is a no-op RTS and is
+// never spawned (not in BONUS_ID_TABLE), but the slot exists in the dispatch table.
+export const BONUS_ID = Object.freeze({
+  HELMET: 0, CLOCK: 1, SHOVEL: 2, STAR: 3, GRENADE: 4, TANK: 5, PISTOL: 6,
+});
+
+// tbl_E8FA ($E8FA) — spawn rolls (random & $07) and indexes this: GRENADE (4) and STAR
+// (3) each appear TWICE (2/8); helmet/clock/shovel/tank are 1/8 each; pistol never.
+export const BONUS_ID_TABLE = [0, 1, 2, 3, 4, 5, 4, 3];
+
+// sub_E902 ($E902) — a random 0-3 maps to a pixel on the 4x4 spawn grid via
+// ((n*3)*2 + 6) << 3, i.e. these four values in both X and Y.
+export const BONUS_POS = [0x30, 0x60, 0x90, 0xC0];
+
+export const BONUS_PICKUP_RANGE = 0x0C;    // $E994/$E9A4 — |player - bonus| < $0C to grab
+export const BONUS_FLASH_TIMER = 0x32;     // $E9A8 — the picked-up "500" flash lasts $32 frames
+export const BONUS_PICKUP_POINTS = 500;    // $E9B6 sub_D9E1(#$50) — 500 pts on pickup
+export const BONUS_HELMET_TIMER = 0x0A;    // $E9F0 — helmet bonus: 10 units (DEC'd every 64 frm)
+export const BONUS_CLOCK_TIMER = 0x0A;     // $E9F5 — clock/freeze: 10 units
+export const BONUS_STAR_STEP = 0x20;       // $EA0F — each star bumps tank_type by $20
+export const BONUS_STAR_MAX = 0x60;        // $EA0A — capped at $60 (3 stars)
+export const BONUS_SENTINEL_ID = 0xFF;     // $E8D9 — the spawn-search probe id ($E9AE BMI skips)
+
+// Bonus sprites (sub_E23B). The on-field icon is bonus_id*4 + $81 ($E265-$E268), a
+// 2x8x16 pair (sub_DA7B), palette 2, blinking every 8 frames while it waits ($E259
+// frm_cnt_lo & $08). The picked-up "500" flash is the number tile $3B ($E252-$E254).
+export const BONUS_SPRITE_BASE = 0x81;     // $E268 — icon tile = id*4 + $81
+export const BONUS_SCORE_SPRITE = 0x3B;    // $E252 — the "500" pickup-flash tile
+export const BONUS_PALETTE = 0x02;         // $E250 spr_A_palette
+export const BONUS_BLINK_MASK = 0x08;      // $E25B AND #$08 — the on-field blink
 
 // --- End-of-run screens & PAUSE (P12) — sub_C5D9 / sub_C44B / sub_C972 / sub_C8F9 ---
 //
