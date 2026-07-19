@@ -409,16 +409,18 @@ argument *for* the locked routine-level architecture.
 **S11 — Audio.** Bytecode sound engine: `EA7E_sound_driver` (ticked in NMI)
 interprets control bytes (`con_se_cb_*`: loops/stop/main-loop) from sfx data
 streams (`_off000_sfx_*` table at `$ED..`). This is *ported code*, not analog
-hardware — fully portable, but a good deferral candidate.
+hardware — fully portable. Deferred at scaffold time, **ported in P15**
+(`audio.js` + `assets/dat_sfx.js`; decode + verdicts in `research_audio.md`).
 
 **Audio is not purely an output — it gates two phase transitions and reads the
 pause flag [D].** Two corrections to the "passive per-frame tick" framing:
 
 - **The GAME OVER and HI-SCORE screens are timed by the sfx, not a frame counter.**
   `$C630` spins on `ram_sfx_game_over_1`, `$C495` on `ram_sfx_hiscore_1`, both
-  commented *"wait until sound is played"*. With `Audio` a stub these two screens
-  hang forever or flash past — they need a substitute duration. (GAME OVER has a
-  Start/Select escape at `$C627`; HI-SCORE has none.)
+  commented *"wait until sound is played"*. While `Audio` was a stub these two screens
+  needed a substitute duration; since P15 they wait on the real
+  `audio.isPlaying(...)`. (GAME OVER has a Start/Select escape at `$C627`; HI-SCORE
+  has none.)
 - **`sub_EA7E` reads `ram_pause_flag` (`$EA7E`)** and drops `ram_sfx_check_limit`
   from `$1C` (all slots `$0300-$031B`) to `$01` (the pause tone only) — i.e. the
   driver mutes itself. That is how the demo is silent (`$C3B7`).
@@ -501,8 +503,9 @@ it will absorb. Boundaries follow the coupling graph, so a class rarely reaches
 into another's data except through the `Field` service (which is *meant* to be
 shared). **Locked per Zane 2026-07-15:** build the classes as proposed; if a
 boundary proves wrong during implementation, revise then — don't block the
-scaffold on it. `Audio` and `Construction` are **stub-only (deferred, low
-priority)**. The §8 `[?]` items were resolved during implementation / in the
+scaffold on it. `Audio` and `Construction` started **stub-only (deferred, low
+priority)** — `Audio` was **ported in P15**; `Construction` is still a stub.
+The §8 `[?]` items were resolved during implementation / in the
 per-subsystem docs, not before scaffolding (§8 is now empty).
 
 | JS module / class | Responsibility | Absorbs (source) |
@@ -518,7 +521,7 @@ per-subsystem docs, not before scaffolding (§8 is now empty).
 | `Score` / `Hud` | BCD score, extra-life, hi-score, lives + enemy-icon HUD | `D9BE`, `D138`, `D97D`, `C7C8`, icon counters |
 | `Renderer` | canvas draw of field + sprites + text + palettes; the re-derived "NMI render" responsibilities | NMI half, `DA2B`/`DA7B`, palettes, `D8FD`, huge-text |
 | `Input` | joypad state (hold/press, 2 players) + Dpad→direction | `D689`, `E451` |
-| `Audio` | bytecode sfx engine (deferral candidate) | `EA7E` + sfx data |
+| `Audio` | bytecode sfx engine (**built, P15**) | `EA7E` + sfx data |
 | `Rng` | the `D44D` mixer | `D44D` |
 | `Construction` | stage editor (deferral candidate) | `C0AE` + cursor/paste |
 

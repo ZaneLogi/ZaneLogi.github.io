@@ -21,6 +21,7 @@ import {
 } from '../constants.js';
 import { Tilemap, TILEMAP_ROWS } from '../tilemap.js';
 import { drawNumber, writeText } from '../text.js';
+import { SFX } from '../assets/dat_sfx.js';
 
 /** @typedef {import('../renderer.js').Renderer} Renderer */
 
@@ -126,10 +127,13 @@ class StageIntro extends Mode {
         // $C1DC sub_CAF5_draw_default_base — stamp the eagle + HQ walls over the
         // freshly-drawn field (Base/S6). The base region is empty in stage data.
         g.base.drawDefault(g.field);
-        // TODO, each waiting on another subsystem:
-        //   $C1C7-$C1CD ram_sfx_stage_load_* — the load jingle (Audio, deferred).
-        //   $C1D0/$C1E2 the editor path — keep the constructed field, draw just the
-        //     eagle (sub_CB5D_draw_default_eagle; Construction mode, deferred; §6c).
+        // $C1C7-$C1CD — the 3-part stage-load jingle (pulse1 + triangle + pulse2), started
+        // behind the closed curtain so it plays over the wipe-open.
+        g.audio.play(SFX.STAGE_LOAD_1);   // $C1C7
+        g.audio.play(SFX.STAGE_LOAD_2);   // $C1CA
+        g.audio.play(SFX.STAGE_LOAD_3);   // $C1CD
+        // TODO: $C1D0/$C1E2 the editor path — keep the constructed field, draw just the
+        //   eagle (sub_CB5D_draw_default_eagle; Construction mode, deferred; §6c).
         this.seq = INTRO.CURTAIN_OPEN;
         this.t = 0;
         return null;
@@ -247,8 +251,12 @@ class Battle extends Mode {
 
     if (g.input.pressed(0, BTN.Start)) {   // $C210
       g.paused = !g.paused;                // $C212-$C216
-      // TODO: $C218 ram_sfx_pause. Pausing MUTES ($EA7E reads the flag) — that is
-      // Battle's fact, separate from the demo's silence. Flow doc §6e.
+      g.audio.play(SFX.PAUSE);             // $C218 ram_sfx_pause — the pause/unpause blip
+      // The ROM's $EA7E mutes all but the pause blip while paused; the only continuous
+      // sounds are the two movement hums, so stop them here and restart the enemy hum on
+      // unpause (movement_player returns via step 16 the moment a player moves again).
+      if (g.paused) { g.audio.stop(SFX.MOVEMENT_PLAYER); g.audio.stop(SFX.MOVEMENT_ENEMY); }
+      else g.audio.play(SFX.MOVEMENT_ENEMY);
     }
     // $C21B sub_C8F9_display_pause_text — the blinking PAUSE text, now drawn in render()
     // (drawPauseText, the render half) since it emits sprites.
@@ -277,7 +285,8 @@ class Tail extends Mode {
   enter() {
     const g = this.game;
     g.frm.reset();   // $C223-$C227 — both lo and hi
-    // TODO: $C229/$C22C silence ram_sfx_movement_player / _enemy.
+    g.audio.stop(SFX.MOVEMENT_PLAYER);   // $C229 ram_sfx_movement_player = 0
+    g.audio.stop(SFX.MOVEMENT_ENEMY);    // $C22C ram_sfx_movement_enemy = 0 — the stage ended
 
     // $C22F-$C236: if a GAME OVER message is sliding, seed hi = $FE to buy two
     // extra hi-ticks — 256 frames instead of 128, so the message can arrive and
@@ -288,8 +297,15 @@ class Tail extends Mode {
 
   update() {
     const g = this.game;
-    // TODO: $C23B sub_C2A2_disable_buttons_if_game_over — zeroes btn_press so the
-    // player cannot act while the message slides.
+    // $C23B sub_C2A2_disable_buttons_if_game_over. The GATE lives here (the caller),
+    // the BODY is Input.clear() ($C2AA-$C2B0). $C2A4 tests `flag != con_not_game_over`
+    // — i.e. the eagle is no longer ALIVE — which is Base.state in this port (the flag
+    // IS that tri-state byte; flow doc §6b). The test covers EXPLODING as well as
+    // DESTROYED; that only shows when the Tail is entered while the countdown is still
+    // running (the stage ended for some OTHER reason mid-explosion), since $C23B is the
+    // only call site — Battle ($C1F9) never runs it, so the player keeps control both
+    // during the 39-frame explosion and through the tail of a normal stage clear.
+    if (!g.base.isAlive()) g.input.clear();
     g.mainBattleScript();   // $C23E — the SAME body Battle and the demo run
     g.bonus.updateDisplay();  // $C241 sub_E23B — the pickup-flash timer keeps ticking in the tail
     // The render-half calls that follow in the ROM's Tail loop: $C244 $DEA6 tanks +
@@ -434,7 +450,8 @@ class Tally extends Mode {
         this.killedCount[p]++;           // $CD32 / $CD50 INC killed_enemies_cnt
         this.tempScore[p] += pts;        // $CD34-$CD36 / $CD52-$CD54 add_score -> TEMP idx 2/3
         this.didKill = true;             // $CD3B / $CD59 ram_007C_flag = 1
-        // TODO: ram_sfx_score_count ($CD2A) — Audio (deferred).
+        g.audio.play(SFX.SCORE_COUNT_1); // $CD2A ram_sfx_score_count_1 (pulse2)
+        g.audio.play(SFX.SCORE_COUNT_2); // $CD2D ram_sfx_score_count_2 (noise) — the count "tick"
         // sub_D138 ($CD3D/$CD5B): the extra-life check is a NO-OP here — the real score
         // was credited at kill time (P10), so 20000 was already crossed. Not called.
       }
@@ -478,7 +495,7 @@ class Tally extends Mode {
     drawNumber(this.screen, TALLY.BONUS_POINTS, pos.numCol, pos.numRow, TALLY_NUM);          // the "1000"
     this.screen.writeTiles(pos.textCol, pos.textRow, TALLY.BONUS);   // "BONUS!" tbl_D3C4
     this.screen.writeTiles(pos.ptsCol, pos.ptsRow, TALLY.PTS);        // "PTS"    tbl_D35E
-    // TODO: ram_sfx_bonus_1000 ($CE7C) — Audio (deferred).
+    g.audio.play(SFX.BONUS_1000);   // $CE7C ram_sfx_bonus_1000 — the survivor-bonus fanfare
   }
 
   // sub_CEF7 draws the score screen; sub_D0B8 redraws the four enemy-type icons as SPRITES

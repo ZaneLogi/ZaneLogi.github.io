@@ -565,11 +565,11 @@ state object**; `SESSION` is a mode, not a data owner.
 
 Per the root `CLAUDE.md`: mark deviations, don't hide them.
 
-- **`Audio` is stubbed, and it gates two modes (§6d).** `GameOver`/`HallOfFame` must
-  wait on a constant until `$EA7E` is ported, commented
-  `// NOT SOURCE: $C630 waits on ram_sfx_game_over_1; Audio is stubbed`. The line
-  deletes itself when the driver lands. Note the asymmetry: GAME OVER has a
-  Start/Select escape (`$C627`), HI-SCORE has none.
+- ~~**`Audio` is stubbed, and it gates two modes (§6d).**~~ **Retired in P15** — `$EA7E`
+  is ported, so `GameOver`/`HallOfFame` wait on the real `audio.isPlaying(GAME_OVER_1 /
+  HISCORE_1)`; the frame constant survives only as a fallback for when audio never
+  unlocked (no user gesture — a browser fact, not a source one). The asymmetry still
+  holds: GAME OVER has a Start/Select escape (`$C627`), HI-SCORE has none.
 - **The demo's silence is a design fact, not `pause_flag` plumbing (§6e).** `Attract`
   simply plays no sfx. "Pausing mutes" is a *separate* fact that `Battle` owns. The
   source expresses both through one byte; we don't.

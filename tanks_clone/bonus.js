@@ -26,6 +26,7 @@ import {
   BONUS_STAR_MAX, BONUS_SENTINEL_ID, BONUS_SPRITE_BASE, BONUS_SCORE_SPRITE,
   BONUS_PALETTE, BONUS_BLINK_MASK,
 } from './constants.js';
+import { SFX } from './assets/dat_sfx.js';
 
 /**
  * @typedef {import('./game.js').Game} Game
@@ -61,7 +62,7 @@ export class Bonus {
   // position that is NOT on top of a player (the retry loop), then a weighted-random id.
   /** @param {Game} game */
   spawn(game) {
-    // TODO: ram_sfx_bonus_appear ($E8C0) when Audio lands.
+    game.audio.play(SFX.BONUS_APPEAR);              // $E8C0 ram_sfx_bonus_appear
     const { rng, frm } = game;
     do {                                            // bra_E8C3_loop
       this.x = bonusPos(rng, frm.hi);               // $E8C3-$E8CB
@@ -122,7 +123,7 @@ export class Bonus {
       if (this.id & 0x80) return;                        // $E9AE BMI — the $FF spawn probe: no effect
       if (game.secondLoop !== SECOND_LOOP.DEMO) {        // $E9B0-$E9B4 the demo scores nothing
         game.score.add(game, p, BONUS_PICKUP_POINTS);    // $E9B6-$E9C0 +500 (+ extra life at 20000)
-        // TODO: ram_sfx_bonus_pickup ($E9C7) when Audio lands.
+        game.audio.play(SFX.BONUS_PICKUP);               // $E9C7 ram_sfx_bonus_pickup
       }
       this._applyEffect(game, player);                   // $E9CA-$E9DA tbl_E9E2 dispatch
       return;                                            // handler RTS -> return to the caller
@@ -161,7 +162,7 @@ export class Bonus {
   // enemiesLeft as each finishes, but game.awardKill is never called.
   /** @param {Game} game */
   _grenade(game) {
-    // TODO: ram_sfx_explosion_enemy ($EA1D) when Audio lands.
+    game.audio.play(SFX.EXPLOSION_ENEMY);                // $EA1D ram_sfx_explosion_enemy
     for (let x = MAX_TANKS - 1; x >= 2; x--) {           // $EA17-$EA3B enemies 7..2
       const enemy = game.roster.tanks[x];
       if (!enemy.isDrivable) continue;                   // $EA25 BPL / $EA29 >= $E0 skip

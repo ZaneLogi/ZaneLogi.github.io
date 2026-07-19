@@ -155,7 +155,8 @@ in P7): `(tile & $FC) == $C8` → if the base is alive, `Base.onHit(field)`:
 1. `state = EXPLODING`, `explosionTimer = $27` (`$E6B0`).
 2. `draw_destroyed_eagle(field)` — eagle → `$CC-$CF` (`$E6BA`). The crater shows
    immediately; the sprite blast animates on top for 39 frames.
-3. sfx `ram_sfx_explosion_hq`/`_player` (`$E6B4/$E6B7`) — Audio, deferred.
+3. sfx `ram_sfx_explosion_hq`/`_player` (`$E6B4/$E6B7`) — was Audio-deferred;
+   **wired in P15** (`base.js` `onHit`, `research_audio.md`).
 
 Then the countdown (§4) runs to DESTROYED, and `Game.checkStageEnding` (`$C72A BEQ`)
 sees `base.isDestroyed()` → ends the stage **with** the GAME OVER message (already

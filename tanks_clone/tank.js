@@ -22,6 +22,7 @@
 
 import { TANK_PALETTE_FLICKER } from './assets/dat_chr.js';
 import { Input } from './input.js';
+import { SFX } from './assets/dat_sfx.js';
 import {
   DIR, DIR_DX, DIR_DY, TILE, TANK_STATE, HELMET_TIMER_INIT, SLIDE_ARM, SLIDE_LOCK_BIT,
   TANK_EXPLOSION_FRAMES, EXPLOSION_PHASE_TICKS, KILL_POINTS_TICKS, EXPLOSION_PALETTE,
@@ -204,8 +205,8 @@ export class Tank {
   // frame on the SAME 3/4 gate as the move step, so that coast never advances a
   // player — it is CPU-shaped and unobservable. We model just $80 (stopped) / $A0
   // (moving). Ice-slide arming is folded in below.
-  /** @param {Input} input */
-  control(input) {
+  /** @param {Input} input  @param {import('./audio.js').Audio} [audio] */
+  control(input, audio) {
     if (!this.isDrivable) return;                       // $DB85/$DB89 exploding/respawning
     if (this.stunTimer !== 0) {                         // $DB8B-$DB91 stunned: stop
       this.stunTimer--;
@@ -228,7 +229,7 @@ export class Tank {
     // fresh slide budget, so releasing keeps the tank moving (momentum).
     if (this.onIce && this.slideTimer === 0) {          // $DBB7 BPL / $DBB9 AND #$1F
       this.slideTimer = SLIDE_ARM;                      // $DBBD LDA #$9C (counter $1C)
-      // TODO: ram_sfx_movement_ice ($DBC4) when Audio lands.
+      audio?.play(SFX.MOVEMENT_ICE);                    // $DBC4 — the slide "skid" (one-shot)
     }
     // $DBC7-$DBE5 — a PERPENDICULAR turn snaps position to the 8px grid so the tank
     // lines up with corridors. Same or opposite (EOR #$02) direction does not snap.

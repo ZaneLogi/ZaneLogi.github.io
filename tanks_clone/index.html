@@ -46,12 +46,22 @@
     #controls th, #controls .key { white-space: nowrap; }
     #controls .key { width: 24%; }
     #controls p { margin: 6px 0 0; color: #5b606a; }
+
+    /* Sound toggle — NOT part of the game (see main.js). A web build needs a mute
+       control the Famicom never had; also the visible "click to enable" affordance
+       for browsers that block audio until a gesture. */
+    #sound { font: 11px/1 ui-monospace, monospace; color: #cdd2db; cursor: pointer;
+             background: #23262c; border: 1px solid #3a3f49; border-radius: 4px;
+             padding: 5px 10px; align-self: start; }
+    #sound:hover { border-color: #5b606a; }
+    #sound.muted { color: #8a8f99; }
   </style>
 </head>
 <body>
   <div id="wrap">
     <canvas id="screen" width="256" height="240"></canvas>
     <div id="hud">booting…</div>
+    <button id="sound" type="button">🔊 Enable sound · M</button>
     <div id="controls"></div>
   </div>
   <script type="module" src="./main.js"></script>

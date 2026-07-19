@@ -124,7 +124,7 @@ but because it described work that had not started yet.)*
     `modes/*.js`, `game.js` reshaped, `main.js` given the accumulator, plus `hud.js`
     (a **NOT SOURCE** debug readout — an HTML element, not canvas-drawn; *at the time*
     Renderer and Input were both stubs, so the machine was otherwise invisible behind
-    a black canvas. P4 gave it pixels; hud.js's live status is in "Debt" below).
+    a black canvas. P4 gave it pixels; hud.js's live status is in "NOT SOURCE" below).
   - **`main.js` had no accumulator** (P1 shipped one `tick()` per rAF, which map §1
     already said was wrong). Now fixed-timestep vs `NTSC_FPS`, `render()` once.
   - **`Game.frame` was a single counter** — map §1 explicitly says lo/hi must not
@@ -454,7 +454,7 @@ but because it described work that had not started yet.)*
     P5/P7 TODO); `Battle.render` → `base.render(renderer)` last; `Bullet.checkPoint` →
     `base.onHit(field)` (draws the destroyed eagle); `base.reset()` also clears `shovelTimer`.
   - **Deferred, cited:** the stage-load jingle (`$C1C7`) + eagle-hit sfx (`$E6B4/$E6B7`) —
-    Audio; the editor draw-just-eagle path (`$C1E2 sub_CB5D`) — Construction; the demo base
+    Audio, **built in P15**; the editor draw-just-eagle path (`$C1E2 sub_CB5D`) — Construction; the demo base
     draw (`$C412`) — Demo.
   - **Verified** — 66/66 deterministic in-browser (headless `Game`, `getImageData`): draw /
     passability (incl. the fix + an A/B drive-through) / destruction full-flow (39-frame
@@ -666,7 +666,8 @@ but because it described work that had not started yet.)*
     reset carries only `bgPaletteId = 0`.
   - **Stage advance was already built** — `advanceStage` (`$C259-$C280`, the 35→36 / 70→1
     wrap) is P3-verified; P11 adds the tally's exit reset and the end-to-end drive through
-    a *real* tally. Deferred (cited): the count/bonus **sfx** (Audio); hi-score-beaten +
+    a *real* tally. Deferred (cited): the count/bonus **sfx** (Audio — since built in P15);
+    hi-score-beaten +
     HALL OF FAME (the GAME OVER flow — since built in P12).
   - **Verified** — 26/26 deterministic in-browser (headless `Game`, the real
     Menu→1P→Battle(clear)→Tail→Tally flow, `getImageData` / sprite-emit spy): 1P
@@ -718,10 +719,12 @@ but because it described work that had not started yet.)*
     only (the Tail loop omits it). `drawPauseText` in `renderBattlefield({pause})`.
   - **Deviations** (governing test, research §7): the **jingle gates stay stubbed** — both
     boards spin until their jingle finishes (`$C630`/`$C495`) and `Audio` is a deferred
-    stub, so each waits a `NOT SOURCE` frame constant (Debt, below); int hi-score (not
-    7-digit BCD); the message move/draw split; PPU-plumbing clears dropped.
+    stub, so each waits a `NOT SOURCE` frame constant (retired in P15 — see the
+    NOT-SOURCE list at the end of this file); int hi-score (not 7-digit BCD); the
+    message move/draw split; PPU-plumbing clears dropped.
   - **Deferred, cited:** the 2P per-player "player N out" slide (`$DE18`/`sub_DE46`) — 2P-
-    only, mid-run; **built in P13** (research §5a). And all sfx/jingles (Audio).
+    only, mid-run; **built in P13** (research §5a). And all sfx/jingles (Audio — **built
+    in P15**, which also replaced this step's two `NOT SOURCE` gate constants).
   - **Closed the `ram_006B_flag` open item** (flow doc §8 / an old Debt entry — GameOver was
     its trigger). The worry was that a zero score on the title prints `0` after a game
     instead of `00`. It doesn't: the shared `$6B` "min-digits" byte is cleared to 0 by the
@@ -797,7 +800,8 @@ but because it described work that had not started yet.)*
   - **Deviations** (governing test, research §7): the `$FF` spawn-probe (faithful, kept); the
     RNG call-count matches but the sequence is our LFSR; the `$E23B` update/render split;
     `tank_upgrade` modelled as `Game.tankUpgrade[]` (session state on `Game`, the §7 lock);
-    the bonus's `$C203` OAM slot (near-unobservable). **Deferred, cited:** all sfx (Audio);
+    the bonus's `$C203` OAM slot (near-unobservable). **Deferred, cited:** all sfx (Audio —
+    built in P15);
     the demo follow-bonus AI (`$C648`, Demo mode).
   - **Resolved + deleted the map's last two §8 `[?]`s** — the bonus-id values (S7) and the
     `tank_type` bit layout (its last-open piece, armour damage-decrement, was P10; S7 adds the
@@ -811,18 +815,110 @@ but because it described work that had not started yet.)*
     renders on the real canvas (icon box +95 lit px) — screenshot of the star on the stage-1
     battlefield (`enemies=20`, `base=ALIVE`).
 
+- **P15 — Audio (S11): the `$EA7E` sound engine, ported end to end.** ☑ Done. The ROM's
+  bytecode SFX engine, rebuilt as a small Web Audio "APU," extracted + interpreted + wired
+  into every gameplay site and the two mode-gates. Zane-approved by ear. Full decode +
+  citations + verdicts: `docs/research_audio.md`.
+  Architecture-first: Layer 1 (the voice backend) was validated in `demo/audio_test.html`
+  before Layer 2 (the interpreter) existed. New/rewritten: `tools/extract.py` (+SFX),
+  `assets/dat_sfx.js`, `audio.js`, `demo/audio_test.{html,js}`. Wired: `main.js`/`index.html`/
+  `game.js`/`bullet.js`/`base.js`/`bonus.js`/`score.js`/`tank.js`/`tank_roster.js`/
+  `modes/{session,game_over,hall_of_fame}.js`.
+  - **Two layers, "faithful to what the player can hear."** The NES 2A03's waveforms ARE what
+    Web Audio gives free (unlike pacman's Namco WSG, which needs a worklet), so Layer 1 is a
+    node graph: pulse×2 = `OscillatorNode(PeriodicWave, 4 duties)`, triangle = `'triangle'`,
+    noise = `AudioBufferSourceNode(15-bit LFSR)`, each → `GainNode`. Layer 2 ports the
+    `$EA7E` bytecode interpreter (note/duration/loop/`$F9` tokens, the 8-byte per-sound state
+    → fields) and **decodes the register bytes to voice params** — we drop the `STA $4000,X`
+    pokes and the 4-channel priority arbitration (Zane's **unlimited-voices** add-on: one voice
+    per active id, no cutoff). research §7 sorts every verdict.
+  - **The data (`extract.py` → `dat_sfx.js`).** 28 SFX bytecode streams (575 B) + the 12-entry
+    pitch table `tbl_ECE6`, parsed from the disasm's byte column (hidden 2-byte-line operands
+    evaluated + cross-checked; contiguity validates the byte counts). type byte = channel+1;
+    **not genre** — HQ-explosion is pulse2, brick-hit is triangle; only 3 sounds use noise.
+    id `$08` is a dead unused stream. Runtime never decodes.
+  - **The sweep unit — a diagnosis, not a plan (Zane's catch).** The shot first played a flat
+    beep and sounded wrong. Register-trace tests + an offline render said it was *clean and
+    correct per my model* — the tell to **distrust the model, re-derive from the raw bytes**:
+    the shot's regB = `$82` **enables the `$4001` sweep**, which I'd dropped as "unused." The
+    real shot descends 1165→66 Hz over 117 ms then mutes — the "pew." Ported the sweep as a
+    scheduled frequency trajectory (`SWEEP_CLOCK_HZ`, tunable); it also drives the tank-engine
+    warble (`$94`). research §6 (corrected — regB was NOT unused). *A dropped-mechanism bug the
+    trace tests structurally can't catch — only the ear + a re-read of the 7 bytes found it.*
+  - **Enable + mute (NOT SOURCE, the DOM/UX layer).** An `AudioContext` unlocks only inside a
+    user gesture, so audio enables lazily on the **first key/pointer** (the attract screens are
+    silent, so nothing's wanted before that). **Mute** = master gain to 0 (NOT a stop — the
+    engine keeps running so the mode-gates still time), via the **M key** + an on-page toggle
+    (`main.js`, `#sound` in `index.html`).
+  - **Wired at every `ram_sfx_*` site + the two mode-gates.** shot (player-primary only,
+    `$E094`), brick/wall hits (player-primary, `$E6F1/$E700 CPX #$02`), explosions player/
+    enemy/HQ + hit-tank, bonus appear/pickup/grenade, extra-life, the stage-load jingle, pause
+    blip, tally count + survivor-bonus. `GameOver`/`HallOfFame` now **wait on
+    `audio.isPlaying(GAME_OVER_1 / HISCORE_1)`** — the jingle IS each board's timer — with a
+    frame-count fallback only if audio never unlocked. **Retires the P12 jingle-gate debt.**
+  - **Movement hums + the unlimited-voices decision.** `movementSfx` (`$DB0B`, step 16) is a
+    level flag: play while a player holds a direction on a live tank, stop otherwise (managed
+    on the edge so the `$F9` loop isn't retriggered). The enemy hum starts at `prepareStage`
+    (`$C38C`), stops at the Tail (`$C22C`); the ice skid fires at the slide-arm (`$DBC4`).
+    Pause mutes both (the ROM's `$EA7E` pause gate). movement_player + movement_enemy are
+    **both pulse2** — with unlimited voices they stack where the ROM ducks one under the other;
+    **Zane judged the overlap fine, so arbitration stays dropped.**
+  - **The audit (Zane's push — generalize the sweep lesson).** Scanned all 28 streams for any
+    register/bit *set in data but dropped/approximated in synthesis* (the sweep's bug class):
+    the sweep is used by exactly shot + the 2 hums (nothing lurking, regB never changed
+    mid-stream); the **triangle linear counter** (`stage_load_2`/`bullet_hit_brick`/
+    `game_over_3`) and a **looping envelope** (`gain_life_1`/`bonus_appear`/`explosion_hq`) are
+    approximated as gate-on/off and one-shot decay — both **ear-confirmed fine** (the notes are
+    shorter than the decay, so the loop never bites). Safe drops, governing test.
+  - **Verified** — deterministic in-browser throughout (headless `Game` + instrumented
+    `play`/`_applyVoice`, `OfflineAudioContext` renders, never a screenshot): the interpreter
+    trace of every stream (all 28 run to a terminal state, no runaway); shot=1 note+envelope,
+    explosion_player's `$1E→$18` volume ramp byte-exact, movement loops forever; the terrain
+    hits' player-primary gating; the GameOver gate blocks 108 frames then exits; mute gain
+    0↔0.3; the movement level-flag edges + the enemy-hum start + both-hums-concurrent; the
+    sweep's 1165→66 Hz descent. Plus the **by-ear pass (Zane)** on the demo's 28 buttons and
+    real play — the ground truth for audio, since the trace tests can't hear a dropped register.
+  - **Post-port sweep (same commit).** Every doc that still called `Audio` a deferred stub was
+    corrected (8 research docs + the per-step deferral bullets above); `SFX_STUB_FRAMES` was
+    renamed `NO_AUDIO_FALLBACK_FRAMES` (it is the never-unlocked fallback now, not debt); and
+    `score.js`'s "when S7 lands" comments were retired (Bonus pickups have credited score since
+    P14). The sweep also surfaced one unrelated **unported call site**, fixed here rather than
+    deferred: **`$C23B sub_C2A2_disable_buttons_if_game_over`** — the BODY was ported at P12
+    (`Input.clear`) but nothing ever called it, so the player could keep driving and firing
+    while the GAME OVER message slid up. `Tail.update` now runs it, gated on `!base.isAlive()`
+    (`$C2A4`'s `flag != con_not_game_over`; the flag IS `Base.state`, flow doc §6b). Battle
+    ($C1F9) still never calls it — a normal stage clear leaves the player in control.
+    **Verified** A/B in-browser through the real Menu→1P→Battle→Tail flow: eagle ALIVE +
+    Right held 40 frames → `hold = $80`, tank moves +8px; eagle DESTROYED in the Tail +
+    Right held 60 frames → `hold`/`press` never leave 0, tank never moves.
+
 ## Next
 **Demo** (`$C642`/`$C41D` — the attract auto-play, reusing the battle loop with the AI
-driving the "players"; incl. the `$C648` follow-bonus steering); `StageIntro`'s sfx / editor
-hooks (Audio / Construction). **Audio** (`$EA7E`) is the biggest single lever left — it gates
-the two P12 boards' exits (see Debt) and mutes on pause/demo.
+driving the "players"; incl. the `$C648` follow-bonus steering) is the last major subsystem.
+Smaller cited hooks: `StageIntro`'s editor path (`$C1D0`/`$C1E2` — Construction), and the
+demo's own silence (the `$EA7E` pause-flag path) when Demo lands. **Audio is done** — the
+biggest lever is now pulled; only Demo + the editor remain before the port is feature-complete.
 
-## Debt (NOT SOURCE — delete when its owner lands)
-- **`GameOver` / `HallOfFame` now DRAW their real screens (P12); only the EXIT WAIT is
-  stubbed on a frame constant**, because the ROM waits on the *jingle* (`$C630` / `$C495`)
-  and `Audio` is a stub — the sound IS each board's timer. Both waits are commented
-  `NOT SOURCE`; replace with `audio.isPlaying(...)` when `$EA7E` is ported. This is why
-  "Audio: low priority" undersells it — it gates two modes (flow doc §6d/§7.8).
+## NOT SOURCE — deliberate, kept on purpose
+
+The project-scope twin of `research_game_flow.md` §7.8's honesty ledger: additions the
+ROM has no counterpart for, kept because we want them. **None of these has an "owner"
+whose landing retires it** — this list was called "Debt" until 2026-07-20, but a debt is
+temporary by definition and all three of these are permanent by choice. Real debt (a stub
+waiting on a subsystem) gets its own heading when Demo / the editor start creating some.
+
+- **The `NO_AUDIO_FALLBACK_FRAMES` exit-wait** in `GameOver` / `HallOfFame` (200 / 240).
+  *Was* real debt — a `NOT SOURCE` frame constant standing in for `$C630`/`$C495` while
+  Audio was a stub — and that debt was **retired in P15**: both boards now wait on the
+  real `audio.isPlaying(GAME_OVER_1 / HISCORE_1)` jingle gate. The constant survives as a
+  deliberate fallback for `audio.enabled === false`, i.e. **the AudioContext was never
+  unlocked** — a page driven with no user gesture (our own headless/scripted verification
+  does exactly this), or a browser that blocks audio outright. Without it `isPlaying` is
+  permanently false and both screens would collapse in a single frame.
+  **Not the mute toggle:** `muted` is a separate flag that only zeroes `master.gain`, so
+  a muted game still interprets the stream and still gates on the real jingle — muted and
+  unmuted play run on the same clock. The fallback is unreachable in normal play, since
+  leaving the menu requires a keypress, which unlocks audio.
 - **`hud.js`** is a development instrument, not part of the game. `Renderer` now
   draws, so its original retirement condition is technically met — but it is still
   the only view of the mode machine's internals (mode/sub/frm/stage/enemies/base),

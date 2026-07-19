@@ -149,10 +149,8 @@ hard-wired (correct only for the title); it now takes a `digitBase` param
 5. **Pixels / palette** — screenshot stage 1 (pane open) and confirm the sidebar
    renders lives, the reserve column, Ip, the flag and the stage number in a
    readable palette (verifies the `$6E` digit font actually renders as digits).
-
-## §7 Open / deferred
-
-*(None.)* The one item that had been open — whether the `$6E` digit-font offset
-renders as legible digits — was confirmed in P10's verification (§6 step 5): the
-sidebar digits render as distinct glyphs both deterministically (`'2'` = 30 lit px,
-`'1'` = 19) and in the live stage-1 screenshot.
+   **Confirmed in P10:** the sidebar digits come out as distinct glyphs both
+   deterministically (`'2'` = 30 lit px, `'1'` = 19) and in the live stage-1
+   screenshot — so the `$6E` offset does select a real digit font.
+   *(Resolved during P10; was this doc's only open `[?]`, and the §7 that held it
+   is gone — an emptied open-list is deleted, not kept as "(None.)".)*

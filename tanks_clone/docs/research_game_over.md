@@ -55,7 +55,8 @@ The huge letters are the brick-glyph letters `text.js` already ports (`drawHugeT
 quadrant. `tbl_D343`/`tbl_D348` verified against the bytes ("labels lie"): `$D343 =
 "GAME"`, `$D348 = "OVER"`. Port: [`modes/game_over.js`](../modes/game_over.js) —
 `enter()` builds the `Tilemap`, `render()` draws it at `g.bgPaletteId`, `update()`
-keeps the Start/Select skip + the **NOT-SOURCE jingle frame stub** (Audio deferred; §7).
+keeps the Start/Select skip + the jingle gate — a real `audio.isPlaying(GAME_OVER_1)`
+since P15 (the NOT-SOURCE frame constant is now only the never-unlocked fallback; §7).
 
 ## §3 — HALL OF FAME (HI-SCORE) board: `sub_C44B` (`$C44B`)
 
@@ -218,12 +219,13 @@ blink-off → none; unpaused → none.
 
 ## §7 — Deviations (governing test)
 
-1. **Jingle gates STAY stubbed.** `sub_C5D9` (`$C630`) and `sub_C44B` (`$C495`) each
-   spin until their jingle finishes — the sound IS the timer. `Audio` (`$EA7E`) is a
-   deferred stub, so both modes wait a `NOT SOURCE` frame constant (200 / 240) instead.
-   Not a shortcut we chose — it is the one subsystem below this that isn't built. Both
-   are commented `NOT SOURCE`; replace with `audio.isPlaying(...)` when Audio lands.
-   (This is why "Audio: low priority" undersells it — it gates two whole modes.)
+1. ~~**Jingle gates STAY stubbed.**~~ **Resolved in P15 — the gates are real.**
+   `sub_C5D9` (`$C630`) and `sub_C44B` (`$C495`) each spin until their jingle finishes —
+   the sound IS the timer. At P12 `Audio` (`$EA7E`) was still a stub, so both modes
+   waited a `NOT SOURCE` frame constant (200 / 240). P15 ported the driver and both now
+   wait on `audio.isPlaying(GAME_OVER_1 / HISCORE_1)`; the frame constant remains **only**
+   as the fallback for a page where audio never unlocked (no user gesture yet).
+   (This is why "Audio: low priority" undersold it — it gates two whole modes.)
 2. **hi-score / huge hi-score are ints, not 7-digit BCD.** The digit-array math is
    CPU-only; the VALUE and the right-alignment are faithful (data-model rule).
 3. **The message move/draw split** (§5): `update()` moves, `render()` draws — forced by
@@ -237,5 +239,7 @@ blink-off → none; unpaused → none.
 
 ## §8 — Deferred / open
 
-- **All jingles / sfx** — Audio: `$C1C7` stage-load, `$C218` pause, `$C61B`/`$C47D`
-  the two boards' jingles (the gates in §7.1), `$CD2A`/`$CE7C` the tally sfx.
+- ~~**All jingles / sfx** — Audio: `$C1C7` stage-load, `$C218` pause, `$C61B`/`$C47D`
+  the two boards' jingles (the gates in §7.1), `$CD2A`/`$CE7C` the tally sfx.~~
+  **All built in P15** — every one of those five sites is wired (`modes/session.js`,
+  `modes/game_over.js`, `modes/hall_of_fame.js`). See `research_audio.md`.

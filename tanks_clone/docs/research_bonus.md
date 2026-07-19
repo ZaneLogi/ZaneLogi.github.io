@@ -23,8 +23,11 @@ class (spawn / display / pickup) plus wiring those dormant hooks live.
   (`$DBFA-$DC00`), and the **star-upgrade lifecycle** (`$EA07` set / `$E76A` reset on
   death / `$E3C5` restore on respawn).
 
-**Deferred, cited:** every sfx (`ram_sfx_bonus_appear` `$E8C0`, `_bonus_pickup` `$E9C7`,
-`_explosion_enemy` `$EA1D`, `_gain_life` `$EA42`) — Audio. The **demo** follow-bonus AI
+**Was deferred, now built:** every sfx (`ram_sfx_bonus_appear` `$E8C0`, `_bonus_pickup`
+`$E9C7`, `_explosion_enemy` `$EA1D`, `_gain_life` `$EA42`) — deferred to Audio here,
+**wired in P15** (`bonus.js`, `score.js`; `research_audio.md`).
+
+**Deferred, cited:** The **demo** follow-bonus AI
 (`$C648`, the demo steers a player toward the bonus) — Demo mode. The bonus's own OAM /
 priority plumbing — Renderer's job (S9).
 

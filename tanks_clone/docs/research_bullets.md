@@ -64,7 +64,8 @@ and A **or** B is freshly pressed (`ram_btn_press & $03`), fire.
   bullet is a plain `property 0` until upgrades (bonus pickup) land — the branch is
   ported so it's correct then.
 
-`ram_sfx_shot` (`$E094`) is a cited TODO (Audio stub).
+`ram_sfx_shot` (`$E094`) was a cited TODO against the Audio stub; **wired in P15**
+(`bullet.js` `fire`, player-primary only — `research_audio.md`).
 
 ## 2. Movement + speed — `$E02E` / `$E063`  [D]
 

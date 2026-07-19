@@ -102,12 +102,14 @@ don't let the answer live only in that list.
     `Battle.render` uses `renderer.beginSpriteLayers()` + `flushSprites(behind)` around
     `drawTilemap(..., transparent)`; a sprite half over forest (`$22`) draws behind the
     grass. The menu (no field, no `beginSpriteLayers`) still paints sprites on top.
-- Deferred (stub-only): `Audio` ($EA7E sfx engine — portable), `Construction`
-  (stage editor). ES6 modules, no build step; `index.html` boots `main.js`.
-  - **`Audio` is not as low-priority as it looks: it GATES two modes.** `GameOver`
-    ($C630) and `HallOfFame` ($C495) each spin until their jingle finishes — the
-    sound *is* their timer. Both currently wait on a `NOT SOURCE` frame constant.
-    See progress.md "Debt" and flow doc §6d/§7.8.
+- Deferred (stub-only): `Construction` (stage editor). ES6 modules, no build step;
+  `index.html` boots `main.js`.
+  - **`Audio` (S11, the `$EA7E` sfx engine) is DONE — P15.** A small Web Audio "APU"
+    (Layer 1) + the ported bytecode interpreter (Layer 2), extracted to `assets/dat_sfx.js`
+    and wired into every `ram_sfx_*` site. It GATES two modes — `GameOver` ($C630) and
+    `HallOfFame` ($C495) now wait on `audio.isPlaying(...)`, the jingle being each board's
+    timer (P12 debt retired). **Unlimited voices** (no 4-channel arbitration) — Zane's
+    add-on, judged fine by ear. Full decode + verdicts: `docs/research_audio.md`.
 
 ## Layout
 
@@ -132,7 +134,7 @@ tilemap.js          Tilemap: the screen background as two 1:1 arrays — tiles (
 text.js             drawHugeText ($D8D2/$D85E — the glyph IS the huge letter),
                     writeText ($D6B3), drawNumber ($D934 + $D6DD)
 hud.js              NOT SOURCE — debug readout into an HTML element. Still the only
-                    view of the mode machine's internals; see progress.md "Debt"
+                    view of the mode machine's internals; see progress.md "NOT SOURCE"
 controls.js         NOT SOURCE — the on-page key legend, GENERATED from input.js's
                     KEYMAP so it cannot drift. Painted once from main.js
 <subsystem>.js      field / tank / tank_roster / bullet / base / bonus / enemy_ai /

@@ -44,6 +44,7 @@ import {
   GAME_OVER_MSG, GAME_OVER_MSG_DX, GAME_OVER_MSG_DY,
 } from './constants.js';
 import { LEVELS } from './assets/dat_levels.js';
+import { SFX } from './assets/dat_sfx.js';
 
 const MODES = Object.freeze({
   [MODE.ATTRACT]: Attract,
@@ -334,6 +335,8 @@ export class Game {
     if (this.lives[1] > 0) this.roster.spawnPlayer(1);   // $C34A-$C350
     this.base.reset();                      // $C386-$C388 game_over_flag = alive; also
                                             // clears ram_shovel_timer ($C361, part of below)
+    this.audio.play(SFX.MOVEMENT_ENEMY);    // $C38C — the enemy engine hum, on for the stage
+                                            // (stopped at the Tail; muted while paused)
     this.bonus.reset();                     // $C36D — no bonus pending on a fresh stage
     this.clockTimer = 0;                    // $C36F — enemy-freeze timer (the clock bonus arms it)
     this.stageSelectUsed = true;            // $C38F ram_004C_flag = 1 (§6a)
@@ -370,21 +373,21 @@ export class Game {
   // literal.
   mainBattleScript() {
     this.field.iceDetectAndMarkOccupancy(this.roster);            // 1  $E181 ice_detection
-    this.roster.controlPlayers(this.input, this.frm.lo);          // 2  $DB75 player control
+    this.roster.controlPlayers(this.input, this.frm.lo, this.audio); // 2 $DB75 player control
     this.roster.moveTanks(this.field, this.frm.lo, this.clockTimer, this.ai, this.frm.hi, this); // 3 $DBF1
     this.field.occupancyWriteback(this.roster);                   // 4  $E1FA
     this.bullets.updateStatus();                                  // 5  $E02E
     this.base.update(this.field, this);                           // 6  $E2A9 HQ_handler
     this.roster.updateInvincibility(this.frm.lo);                 // 7  $E27C
-    this.bullets.playerFire(this.roster, this.input);             // 8  $E122 player fire
+    this.bullets.playerFire(this.roster, this.input, this.audio); // 8  $E122 player fire
     this.bullets.enemyFire(this.roster, this.ai, this.clockTimer, this.frm.hi); // 9 $E162
     this.roster.spawnEnemyTick(this.field, this.score, this.bonus); // 10 $DB48 enemy_spawn
-    this.bullets.move(this.field, this.base, this.frm.lo);        // 11 $E604 bullets_movement
+    this.bullets.move(this.field, this.base, this.frm.lo, this.audio); // 11 $E604 bullets_movement
     this.bullets.collideWithBullets();                            // 12 $E910
     this.bullets.collideWithTanks(this.roster, this.secondLoop, this); // 13 $E70C P1-3
     this.bonus.tryPickup(this);                                   // 14 $E972 try_to_pick_up_bonus
     this.updateGameOverText();                                    // 15 $C972
-    this.audio.movementSfx(this.roster);                          // 16 $DB0B (deferred)
+    this.audio.movementSfx(this.roster, this.input);              // 16 $DB0B player-move hum
     this.score.drawLives(this.field, this.lives, this.gameMode, this.secondLoop); // 17 $C7C8
     this.waterPaletteSwap();                                      // 18 $C31D
   }

@@ -8,9 +8,10 @@ import { Mode, DONE } from '../mode.js';
 import { HUGE_TEXT, HUGE_HISCORE, HOF_PAL_BASE, HOF_PAL_MASK, BG_PAL_TITLE } from '../constants.js';
 import { Tilemap } from '../tilemap.js';
 import { drawHugeText } from '../text.js';
+import { SFX } from '../assets/dat_sfx.js';
 
-// NOT SOURCE — see update(). Flow doc §6d/§7.8; docs/progress.md "Debt".
-const SFX_STUB_FRAMES = 240;
+// Fallback only, if audio never unlocked — see update(). Flow doc §6d/§7.8.
+const NO_AUDIO_FALLBACK_FRAMES = 240;
 
 export class HallOfFame extends Mode {
   enter() {
@@ -22,7 +23,10 @@ export class HallOfFame extends Mode {
     this.screen = new Tilemap();
     drawHugeText(this.screen, HUGE_TEXT.HISCORE.str, HUGE_TEXT.HISCORE.x, HUGE_TEXT.HISCORE.y); // $C45B-$C46B
     drawHugeHiscore(this.screen, g.hiScore);   // $C46E sub_D951_draw_huge_hiscore
-    // TODO: $C47D-$C483 ram_sfx_hiscore_1/2/3 — Audio (deferred; the wait below stubs it).
+    // $C47D-$C483 — the 3-part hi-score jingle. hiscore_1 is the exit gate ($C492).
+    g.audio.play(SFX.HISCORE_1);   // $C47D
+    g.audio.play(SFX.HISCORE_2);   // $C480
+    g.audio.play(SFX.HISCORE_3);   // $C483
   }
 
   update() {
@@ -33,11 +37,10 @@ export class HallOfFame extends Mode {
 
     // $C492-$C495: waits on ram_sfx_hiscore_1 — "wait until sound is played". NOTE THE
     // ASYMMETRY with GameOver: there is NO skip button here ($C627 has one, this loop
-    // does not). The jingle is the ONLY exit — which is exactly why stubbing Audio would
-    // otherwise hang this screen forever.
-    // NOT SOURCE: replace with `if (g.audio.isPlaying(SFX.HISCORE)) return null`. Flow doc
-    // §6d/§7.8; docs/progress.md "Debt".
-    return ++this.t >= SFX_STUB_FRAMES ? DONE : null;
+    // does not). The jingle is the ONLY exit. Fall back to a fixed wait only if audio
+    // never unlocked (else isPlaying stays false and this screen would flash past).
+    if (!g.audio.enabled) return ++this.t >= NO_AUDIO_FALLBACK_FRAMES ? DONE : null;
+    return g.audio.isPlaying(SFX.HISCORE_1) ? null : DONE;
   }
 
   // $C46B/$C471 draw into $0400 and ship it up; here that is one drawTilemap of the
@@ -51,6 +54,7 @@ export class HallOfFame extends Mode {
     // $C497 bg_palette_id = con_bg_pal_00 — stop the flash before the title. sub_C295
     // ($C295: clear $0400 + ship it up) is plumbing: the next mode (title) redraws anyway.
     this.game.bgPaletteId = BG_PAL_TITLE;
+    this.game.audio.clear();   // silence any hiscore parts still ringing past hiscore_1
     super.exit();
   }
 }

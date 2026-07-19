@@ -19,6 +19,7 @@
 // See docs/research_base.md and docs/research_system_interaction_map.md §5 (S6).
 
 import { TILE, SHOVEL_TIMER_INIT } from './constants.js';
+import { SFX } from './assets/dat_sfx.js';
 
 /** @typedef {import('./field.js').Field} Field */
 /** @typedef {import('./renderer.js').Renderer} Renderer */
@@ -160,12 +161,13 @@ export class Base {
   // $E6AA-$E6BA — a bullet reached the eagle (called from Bullet.checkPoint). Start
   // the countdown and swap the eagle to its destroyed tiles right away; the sprite
   // blast animates on top for the 39 frames.
-  /** @param {Field} field */
-  onHit(field) {
+  /** @param {Field} field  @param {import('./audio.js').Audio} [audio] */
+  onHit(field, audio) {
     if (this.state !== BASE_STATE.ALIVE) return;   // $E6AC BEQ — don't re-trigger
     this.state = BASE_STATE.EXPLODING;
     this.explosionTimer = EAGLE_EXPLOSION_FRAMES;  // $E6AE-$E6B0 LDA #$27 / STA
-    // TODO: ram_sfx_explosion_hq / _player ($E6B4/$E6B7) when Audio lands.
+    audio?.play(SFX.EXPLOSION_HQ);                 // $E6B4 ram_sfx_explosion_hq
+    audio?.play(SFX.EXPLOSION_PLAYER);             // $E6B7 ram_sfx_explosion_player (the big blast)
     this.drawDestroyedEagle(field);                // $E6BA sub_CC08
   }
 

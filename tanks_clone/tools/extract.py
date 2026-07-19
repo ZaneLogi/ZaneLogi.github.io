@@ -14,6 +14,7 @@ Emits:
     assets/dat_chr.js     CHR tiles + palettes + the block tables
     assets/dat_levels.js  the 35 stage grids (+ the attract-mode stage)
     assets/dat_text.js    the title screen's text tables
+    assets/dat_sfx.js     the $EA7E sound engine's 28 SFX streams + pitch table
 """
 
 import os
@@ -168,6 +169,122 @@ def decode_stage(raw, name):
                                  "outside the $0-$D block-code range")
         grid.append(row[:COLS])
     return grid
+
+
+# --- $EA7E sound engine (S11 / Audio) ---------------------------------------
+# The SFX streams are a bytecode, NOT plain data -- their lines carry computed
+# expressions (`.byte $06 * $04 + $03`) and symbolic control bytes
+# (`.byte con_se_cb_stop`), which parse_byte_tables() deliberately skips. So this
+# reads them differently: byte 0 of every line is the assembled BYTE COLUMN
+# (ground truth); a 2-operand line (`con_se_cb_EA, $1E`) hides its 2nd byte from
+# that column, so subsequent operands are evaluated. Contiguity (no gaps, no
+# overlaps across the region) validates the per-line byte counts exactly.
+# Format decoded in docs/research_audio.md.
+SE_CONSTS = {                         # bank_val.inc:63-93
+    "con_se_index_00": 0x00, "con_se_index_01": 0x01, "con_se_index_02": 0x02,
+    "con_se_index_03": 0x03, "con_se_index_04": 0x04,
+    "con_se_index_05_data_pointer": 0x05, "con_se_index_06": 0x06,
+    "con_se_index_07": 0x07,
+    "con_se_cb_60": 0x60, "con_se_cb_stop": 0xE8, "con_se_cb_EA": 0xEA,
+    "con_se_cb_EE": 0xEE, "con_se_cb_clear_loop_counters": 0xEF,
+    "con_se_cb_loop_1": 0xF0, "con_se_cb_loop_2": 0xF1, "con_se_cb_loop_3": 0xF2,
+    "con_se_cb_main_loop": 0xF9,
+}
+SFX_LABEL = re.compile(r"^_off000_sfx_([0-9A-Fa-f]{4})_([0-9A-Fa-f]{2})(?:_(\w+))?:")
+# 00:ADDR: <byte col (1+ hex)> .byte|.word <operands> [; comment]
+SFX_DATA = re.compile(
+    r"00:([0-9A-Fa-f]{4}):\s+((?:[0-9A-Fa-f]{2}\s+)*[0-9A-Fa-f]{2})\s+"
+    r"\.(byte|word)\s+([^;]+?)\s*(?:;.*)?$")
+SFX_STREAMS_END = 0xF000               # sub_F000_draw_stage follows the streams
+
+
+def eval_se_operand(op):
+    """Evaluate one SFX operand (the hidden 2nd+ byte of a multi-operand line).
+
+    In practice these are always `$XX` literals or con_se_* names; a note token's
+    `$06 * $04 + $03` arithmetic is handled for completeness. Label-difference
+    operands (loop targets) only ever appear as operand 0, which is read from the
+    byte column, so they never reach here.
+    """
+    op = op.strip()
+    if op in SE_CONSTS:
+        return SE_CONSTS[op]
+    expr = re.sub(r"\$([0-9A-Fa-f]+)", lambda m: str(int(m.group(1), 16)), op)
+    if not re.fullmatch(r"[0-9+\-*() ]+", expr):
+        raise SystemExit(f"extract: cannot evaluate SFX operand {op!r}")
+    return eval(expr) & 0xFF           # trusted disasm; guarded to arithmetic only
+
+
+def parse_sfx_streams(asm_path):
+    """-> (labels, bytemap): the 28 `_off000_sfx_*` (addr, id, name), and a
+    contiguous {addr: byte} over the stream region [first stream, $F000)."""
+    labels = []
+    bytemap = {}
+    pending = []
+    in_region = False
+    with open(asm_path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            s = line.strip()
+            ml = SFX_LABEL.match(s)
+            if ml:
+                in_region = True
+                pending.append((int(ml.group(1), 16), int(ml.group(2), 16),
+                                ml.group(3) or f"unused_{ml.group(2).lower()}"))
+                continue
+            if not in_region:
+                continue
+            md = SFX_DATA.search(line)
+            if not md:
+                continue
+            addr = int(md.group(1), 16)
+            if addr >= SFX_STREAMS_END:
+                break
+            bytecol = [int(x, 16) for x in md.group(2).split()]
+            operands = [o.strip() for o in md.group(4).split(",")]
+            if md.group(3) == "word":
+                bs = bytecol[:]                 # .word shows both bytes
+            else:
+                bs = [bytecol[0]] + [eval_se_operand(o) for o in operands[1:]]
+            for la, lid, lname in pending:
+                if la != addr:
+                    raise SystemExit(f"extract: sfx label ${la:04X} != data ${addr:04X}")
+                labels.append((addr, lid, lname))
+            pending = []
+            for i, b in enumerate(bs):
+                if addr + i in bytemap:
+                    raise SystemExit(f"extract: sfx byte overlap at ${addr + i:04X}")
+                bytemap[addr + i] = b
+    lo, hi = min(bytemap), max(bytemap)
+    for a in range(lo, hi + 1):
+        if a not in bytemap:
+            raise SystemExit(f"extract: gap in sfx byte map at ${a:04X}")
+    return sorted(labels), bytemap
+
+
+def slice_sfx(labels, bytemap):
+    """-> [(id, name, [bytes]), ...] in id order; last stream's trailing $FF pad
+    trimmed (bank_FF.asm's `; bzk garbage` after game_over_3)."""
+    hi = max(bytemap)
+    out = []
+    for i, (addr, sid, name) in enumerate(labels):
+        end = labels[i + 1][0] if i + 1 < len(labels) else hi + 1
+        bs = [bytemap[a] for a in range(addr, end)]
+        if i + 1 == len(labels):
+            while bs and bs[-1] == 0xFF:
+                bs.pop()
+        out.append((sid, name, bs))
+    ids = [sid for sid, _, _ in out]
+    if sorted(ids) != list(range(28)):
+        raise SystemExit(f"extract: sfx ids {sorted(ids)} != 0x00..0x1B")
+    for sid, name, bs in out:
+        if not bs:
+            raise SystemExit(f"extract: sfx {name} (${sid:02X}) is empty")
+        if bs[0] not in (1, 2, 3, 4):
+            raise SystemExit(f"extract: sfx {name} type ${bs[0]:02X} not 1-4 (channel+1)")
+        # every stream must terminate: $E8 stop, or a $F9 main-loop (sustained)
+        if 0xE8 not in bs and 0xF9 not in bs:
+            raise SystemExit(f"extract: sfx {name} has no $E8/$F9 terminator")
+    return sorted(out)
 
 
 def js_array(vals, per_line, indent, fmt=lambda v: str(v)):
@@ -403,6 +520,57 @@ def main():
                     + ", ".join(f"0x{v:02X}" for v in ids) + "] },\n")
         f.write("};\n")
 
+    # --- emit assets/dat_sfx.js -------------------------------------------
+    # tbl_ECE6 ($ECE6): 12 base periods, big-endian (.byte hi, lo). These lines
+    # are plain hex, so parse_byte_tables() already has them.
+    pitch_raw = read_bytes(tables, 0xECE6, 12 * 2)
+    pitch = [(pitch_raw[i * 2] << 8) | pitch_raw[i * 2 + 1] for i in range(12)]
+    if not all(0 < p < 0x0800 for p in pitch):
+        raise SystemExit(f"extract: pitch table {['$%04X' % p for p in pitch]} "
+                         "not all 11-bit -- wrong tbl_ECE6 address?")
+
+    sfx_labels, sfx_bytemap = parse_sfx_streams(asm)
+    sfx = slice_sfx(sfx_labels, sfx_bytemap)     # [(id, name, bytes), ...] id order
+
+    with open(os.path.join(ASSETS, "dat_sfx.js"), "w", encoding="utf-8") as f:
+        f.write(
+            "// GENERATED by tools/extract.py -- do not edit by hand.\n"
+            "// Source: cyneprepou4uk Battle City disassembly (external).\n"
+            "//\n"
+            "// The sub_EA7E_sound_driver ($EA7E) data: 28 SFX bytecode streams +\n"
+            "// the pitch table. Format decoded in docs/research_audio.md. These are\n"
+            "// RAW ROM bytes -- audio.js's SoundEngine interprets them at runtime;\n"
+            "// nothing is decoded here (same discipline as the stage/CHR data).\n"
+            "//\n"
+            "// A stream = a header then a body of note / duration / loop tokens:\n"
+            "//   header = {type, regA, regB, regD [, regC]}  (regC only if type==4)\n"
+            "//   type   = channel+1: 1 pulse1, 2 pulse2, 3 triangle, 4 noise\n"
+            "//   note $00-$5F = semitone*4+octave -> PITCH_TABLE[(b&$F8)>>2] >> (b&7)\n"
+            "//   dur  $61-$E7 = frames per following note (b-$60)\n"
+            "//   $E8 stop  $F9 loop  $F0-$F2 loop 1/2/3  $EA/$EE set regA  $EF clr loops\n"
+            "\n"
+            "// tbl_ECE6 ($ECE6): 12 base periods (one octave, high notes first). A\n"
+            "// note token's low 3 bits right-shift the chosen period (octave down).\n"
+            "export const PITCH_TABLE = [\n  "
+        )
+        f.write(", ".join(f"0x{p:04X}" for p in pitch))
+        f.write("\n];\n\n")
+
+        f.write("// tbl_ECFE ($ECFE) order = sound id = the ram_sfx_* request slot.\n"
+                "// id 0x08 is unused (a dead shot variant, never triggered).\n"
+                "export const SFX = {\n")
+        for sid, name, _ in sfx:
+            f.write(f"  {name.upper()}: 0x{sid:02X},\n")
+        f.write("};\n\n")
+
+        f.write("// SFX_STREAMS[id] = { name, type, bytes }. type = channel+1.\n"
+                "export const SFX_STREAMS = [\n")
+        for sid, name, bs in sfx:
+            body = ", ".join(f"0x{b:02X}" for b in bs)
+            f.write(f"  {{ name: '{name}', type: {bs[0]}, bytes: [{body}] }}, "
+                    f"// ${sid:02X}\n")
+        f.write("];\n")
+
     codes = sorted({v for g in grids for row in g for v in row})
     print(f"extract: CHR 8192 B -> 512 tiles (sprites 0-255 @ $0000, BG 256-511 @ $1000)")
     print(f"extract: palettes  4 sprite, 9 bg sets x 4")
@@ -413,9 +581,12 @@ def main():
           "{{$80,$A0,$C0,$E0}})")
     print(f"extract: text      {len(texts)} title tables, "
           f"{sum(len(t[5]) for t in texts)} tile ids total")
+    print(f"extract: sfx       {len(sfx)} streams, {sum(len(b) for _, _, b in sfx)} "
+          f"bytes; pitch table 12 periods")
     print(f"extract: wrote     {os.path.join(ASSETS, 'dat_chr.js')}")
     print(f"extract: wrote     {os.path.join(ASSETS, 'dat_levels.js')}")
     print(f"extract: wrote     {os.path.join(ASSETS, 'dat_text.js')}")
+    print(f"extract: wrote     {os.path.join(ASSETS, 'dat_sfx.js')}")
 
 
 if __name__ == "__main__":

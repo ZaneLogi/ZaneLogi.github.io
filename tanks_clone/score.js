@@ -3,7 +3,7 @@
 // S8-A — the battle sidebar HUD: lives, the 20-enemy reserve column, the Ip/IIp
 //   labels, the flag + stage number. Full decode: docs/research_hud.md.
 // S8-B — score ACCUMULATION: add_score ($D9BE) + extra-life ($D138), driven by
-//   P10 kills (Game.awardKill) and, when S7 lands, Bonus pickups. hi-score-beaten
+//   P10 kills (Game.awardKill) and, since P14 (S7), Bonus pickups. hi-score-beaten
 //   ($D97D / checkHiscore) is ported in P12 (the GAME OVER flow, docs/research_game_over.md
 //   §4) — it raises the hi-score at game over and routes to HALL OF FAME. The Tally
 //   count-out screen ($CEF7) is P11 (docs/research_tally.md); it reads killCounts but
@@ -28,6 +28,7 @@ import {
   HUD_TILE, HUD_LABEL, HUD_COL, HUD_ENEMY_ROW0,
   HUD_LIVES_ROW0, HUD_LABEL_ROW0, HUD_FLAG_ROW, HUD_NUM_COL,
 } from './constants.js';
+import { SFX } from './assets/dat_sfx.js';
 
 /** @typedef {import('./field.js').Field} Field */
 
@@ -134,7 +135,7 @@ export class Score {
     drawHudNumber(field, display, row);                           // $C801-$C822 digit at col 30
   }
 
-  // --- S8-B: score accumulation (driven by P10 kills; Bonus pickups when S7 lands) ---
+  // --- S8-B: score accumulation (driven by P10 kills + P14 Bonus pickups, $E9B6) ---
   // State lives on Game (§7 lock); Score owns the logic and mutates it. Scores are ints,
   // not the ROM's 7-digit BCD arrays — the digit math is CPU-only, the VALUE is faithful.
 
@@ -146,7 +147,8 @@ export class Score {
     if (!game.extraLife[player] && game.scores[player] >= EXTRA_LIFE_SCORE) {  // $D13E-$D146
       game.lives[player]++;                                     // $D148 INC ram_lives
       game.extraLife[player] = 1;                               // $D14A INC ram_p1_extra_life
-      // TODO: ram_sfx_gain_life ($D161) — Audio.
+      game.audio.play(SFX.GAIN_LIFE_1);                         // $D163 ram_sfx_gain_life_1
+      game.audio.play(SFX.GAIN_LIFE_2);                         // $D166 ram_sfx_gain_life_2 (2-part)
     }
     // NOTE: $D138's game-over-flag guard ($D13A) is dropped here — it belongs with the
     // GAME OVER flow (a separate step); at a normal kill the eagle still stands.

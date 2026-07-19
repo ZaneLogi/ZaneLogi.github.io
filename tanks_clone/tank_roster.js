@@ -76,9 +76,9 @@ export class TankRoster {
   // the SAME 3/4-frame cadence as the move step ($DB77-$DB7F): process every frame
   // whose lo is odd or a multiple of 4 — i.e. skip only lo % 4 == 2.
   /** @param {Input} input  @param {number} frameLo */
-  controlPlayers(input, frameLo) {
+  controlPlayers(input, frameLo, audio) {
     if ((frameLo & 1) === 0 && (frameLo & 3) !== 0) return;   // $DB77-$DB7F
-    for (const tank of this.players) tank.control(input);
+    for (const tank of this.players) tank.control(input, audio);
   }
 
   // sub_DBF1_tank_movement ($DBF1) — the move step (pipeline step 3). Loops 7->0.

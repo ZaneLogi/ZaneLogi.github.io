@@ -24,6 +24,7 @@ import {
   BULLET_EXPLOSION_PALETTE, BULLET_EXPLOSION_PHASES, BULLET_PHASE_FRAMES,
   BULLET_EXPLOSION_SPRITES, BULLET_PASS_MIN, EAGLE_TILE_BASE, STUN_TIMER_INIT,
 } from './constants.js';
+import { SFX } from './assets/dat_sfx.js';
 
 /**
  * @typedef {import('./field.js').Field} Field
@@ -114,17 +115,20 @@ export class Bullet {
   // when the bullet hits a solid, and returns whether it chipped a BRICK (which is what
   // tells move() to also sample the far edge). px/py are 8-bit like the ROM.
   /** @param {Field} field  @param {Base} base */
-  checkPoint(field, base, px, py) {
+  checkPoint(field, base, px, py, audio) {
     px &= 0xFF; py &= 0xFF;
     if (!field.quadrantHit(px, py)) return false;      // $E69D-$E6A0 — nothing solid here
     const col = px >> 3, row = py >> 3;
     const tile = field.terrainAt(col, row);
+    // $E6F1/$E700 CPX #$02 — only a player's PRIMARY bullet (index 0/1) makes the hit
+    // sound; enemy bullets and the players' 2nd bullets (8/9) strike terrain silently.
+    const playerShot = this.index < 2;
 
     // $E6A2-$E6C3 — the eagle ($C8-$CB). Destroy it once; sub_C728 turns that into game
     // over a few frames later (Base owns the countdown). Now live — Base draws the eagle.
     if ((tile & 0xFC) === EAGLE_TILE_BASE) {           // $E6A4 AND #$FC / $E6A6 CMP #$C8
       if (!base.isDestroyed()) {                       // $E6AC BEQ — already gone, ignore
-        base.onHit(field);                             // $E6AE-$E6BA (draws the destroyed eagle)
+        base.onHit(field, audio);                      // $E6AE-$E6BA (+ the HQ explosion sfx)
         this.explode();                                // $E6C0 LDA #$33
       }
       return false;                                    // $E6C3 -> loc_E709
@@ -133,12 +137,20 @@ export class Bullet {
 
     // $E6CC-$E6FF — a solid ($01-$11): the bullet explodes wherever it landed.
     this.explode();                                    // $E6CE-$E6D0 LDA #$33
-    if (tile === TILE.BORDER) return false;            // $E6D4 CMP #$11 — indestructible wall
-    if (this.property & BULLET_PROPERTY.POWER) {       // $E6D8 AND #$02
-      field.clearTile(col, row);                       // $E6DE sub_D784 A=$00 — whole tile gone
+    if (tile === TILE.BORDER) {                        // $E6D4 CMP #$11 — indestructible wall
+      if (playerShot) audio?.play(SFX.BULLET_HIT_WALL); // $E700-$E706 — the clang
       return false;
     }
-    if (tile === TILE.STEEL) return false;             // $E6ED CMP #$10 — steel needs POWER
+    if (this.property & BULLET_PROPERTY.POWER) {       // $E6D8 AND #$02
+      field.clearTile(col, row);                       // $E6DE sub_D784 A=$00 — whole tile gone
+      audio?.play(SFX.BULLET_HIT_BRICK);               // $E6E5 (no player gate on the POWER path)
+      return false;
+    }
+    if (tile === TILE.STEEL) {                         // $E6ED CMP #$10 — steel needs POWER
+      if (playerShot) audio?.play(SFX.BULLET_HIT_WALL); // $E700-$E706 — the clang
+      return false;
+    }
+    if (playerShot) audio?.play(SFX.BULLET_HIT_BRICK); // $E6F7 — brick chip
     field.chipQuadrant(px, py);                        // $E6FA sub_D743 — chip this brick quadrant
     return true;                                       // $E6FD LDA #$01 — chipped a brick
   }
@@ -175,7 +187,7 @@ export class BulletManager {
 
   // --- pipeline step 8: sub_E122 ($E122) — player fire ---
   /** @param {TankRoster} roster  @param {Input} input */
-  playerFire(roster, input) {
+  playerFire(roster, input, audio) {
     for (let x = 1; x >= 0; x--) {                            // $E124 players 1,0
       const tank = roster.tanks[x];
       if (!tank.isDrivable) continue;                         // $E128-$E12E exploding/respawning
@@ -188,16 +200,17 @@ export class BulletManager {
         this.bullets[SECOND_BULLET_BASE + x].copyFrom(this.bullets[x]);    // $E146-$E154 promote
         this.bullets[x].deactivate();                                      // $E156-$E158 free primary
       }
-      this.spawn(tank);                                       // $E15A sub_E08C (no-op if still busy)
+      this.spawn(tank, audio);                                // $E15A sub_E08C (no-op if still busy)
     }
   }
 
   // sub_E08C_bullets ($E08C) — spawn into the tank's OWN primary slot (index == tank.slot).
+  // `audio` is passed only on the player-fire path; enemy fire is silent ($E094 players only).
   /** @param {import('./tank.js').Tank} tank */
-  spawn(tank) {
+  spawn(tank, audio) {
     const b = this.bullets[tank.slot];
     if (b.active) return;                           // $E08E already active
-    // TODO: ram_sfx_shot ($E094, players only) when Audio lands.
+    if (tank.isPlayer) audio?.play(SFX.SHOT);       // $E094 — players only, on an actual spawn
     const dir = tank.dir & 0x03;                    // $E099 tank_flags & $03
     b.state = BULLET_STATE.FLYING;                  // $E09E-$E0A0 ORA #$40
     b.dir = dir;
@@ -223,7 +236,7 @@ export class BulletManager {
 
   // --- pipeline step 11: sub_E604_bullets_movement ($E604) — move + terrain collision ---
   /** @param {Field} field  @param {Base} base  @param {number} frameLo */
-  move(field, base, frameLo) {
+  move(field, base, frameLo, audio) {
     for (let i = BULLET_SLOTS - 1; i >= 0; i--) {             // $E606 loop 9->0
       const b = this.bullets[i];
       if (!b.flying) continue;                                // $E60C AND #$F0 / CMP #$40
@@ -242,12 +255,12 @@ export class BulletManager {
       // Sample A at the centre; ONLY if it chipped a brick, sample B at the far +edge. The
       // conditional far-sample is what lets a bullet fly down a 1-wide corridor without
       // chipping the walls its edges brush. $E642-$E65C.
-      if (b.checkPoint(field, base, b.x, b.y)) {
-        b.checkPoint(field, base, b.x + nextX, b.y + nextY);
+      if (b.checkPoint(field, base, b.x, b.y, audio)) {
+        b.checkPoint(field, base, b.x + nextX, b.y + nextY, audio);
       }
       // Sample C at the near -edge; if it chipped, sample D at the far -edge. $E65F-$E688.
-      if (b.checkPoint(field, base, b.x - spdX, b.y - spdY)) {
-        b.checkPoint(field, base, b.x - nextX - spdX, b.y - nextY - spdY);
+      if (b.checkPoint(field, base, b.x - spdX, b.y - spdY, audio)) {
+        b.checkPoint(field, base, b.x - nextX - spdX, b.y - nextY - spdY, audio);
       }
     }
   }
@@ -291,9 +304,9 @@ export class BulletManager {
         b.explode();                                          // $E74E-$E750 status $33
         if (player.helmetTimer !== 0) { b.deactivate(); continue; } // $E753-$E75C helmet clears it, $E75C -> next bullet
         player.explode();                                     // $E75F-$E761 flags = $73
+        game.audio.play(SFX.EXPLOSION_PLAYER);                // $E765 ram_sfx_explosion_player
         game.tankUpgrade[p] = 0;                              // $E76A — the persistent star tier is lost
         player.type = 0;                                      // $E76D — and the live type reset
-        // TODO: ram_sfx_explosion_player ($E765) — Audio.
         break;                                                // $E76F -> next player
       }
     }
@@ -316,13 +329,13 @@ export class BulletManager {
         }
         if ((tank.type & 0x03) !== 0) {                       // $E7E2-$E7E6 armour still alive
           tank.type--;                                        // $E7E8 one hit off; survive
-          // TODO: ram_sfx_bullet_hit_tank ($E7EA) — Audio.
+          game.audio.play(SFX.BULLET_HIT_TANK);               // $E7EA ram_sfx_bullet_hit_tank
           continue;                                           // $E7EF -> next bullet
         }
         tank.explode();                                       // $E7F2-$E7F4 flags = $73
+        game.audio.play(SFX.EXPLOSION_ENEMY);                 // $E7F8 ram_sfx_explosion_enemy
         // $E7FB-$E827 (S8-B) — the score-visible half: per-type kill count + points to
         // the bullet's owner. The bullet slot's low bit is which player fired it ($E806).
-        // ram_sfx_explosion_enemy ($E7F8) — Audio, deferred.
         game.awardKill(tank, bi & 1, secondLoop === SECOND_LOOP.DEMO);
         break;                                                // done with this enemy
       }

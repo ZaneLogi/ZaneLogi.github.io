@@ -14,9 +14,11 @@ the static screen it animates over. Called once per stage end from `$C256`, betw
 - **Reused, not re-derived:** `drawNumber` (`$D934`/`$D6DD`, P4/P10), `writeText`
   (`$D6B3`), `Score.add` (`$D9BE`/`$D138`, P10), `Tilemap.setPalette` (P5), the sprite
   path (`drawSprite`, P6).
-- **Deferred (cited stubs):** the count/bonus **sfx** (`ram_sfx_score_count` `$CD2A`,
-  `ram_sfx_bonus_1000` `$CE7C`) — Audio. The **hi-score-beaten** raise + HALL OF FAME
-  routing is the GAME OVER flow (a separate step), untouched here.
+- **Was deferred, now built:** the count/bonus **sfx** (`ram_sfx_score_count` `$CD2A`,
+  `ram_sfx_bonus_1000` `$CE7C`) — cited stubs here, **wired in P15**
+  (`modes/session.js`; `research_audio.md`).
+- **Out of scope here:** the **hi-score-beaten** raise + HALL OF FAME routing is the
+  GAME OVER flow (a separate step), untouched here.
 
 ## §1 The one load-bearing fact — the count is DISPLAY, the score is already banked
 

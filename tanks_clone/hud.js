@@ -7,7 +7,8 @@
 // INTERNALS — mode/sub/frm/lives — which the canvas never surfaces. It writes to an
 // HTML element rather than the canvas, so it costs the frame nothing and can never be
 // mistaken for something the PPU would have produced. Retire it when that internal
-// state stops being useful, not on the technicality that Renderer now draws (progress.md "Debt").
+// state stops being useful, not on the technicality that Renderer now draws
+// (progress.md, "NOT SOURCE — deliberate, kept on purpose").
 //
 // FIXED-WIDTH FIELDS — root CLAUDE.md, "UI conventions — HUD / on-screen readouts".
 // A readout that updates every frame shifts every field to the right of any value

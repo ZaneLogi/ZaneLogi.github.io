@@ -184,5 +184,7 @@ OVER flow, a separate step (built in P12) — `checkHiscore` was left a stub her
 
 ## §8 Open / deferred
 
-- **Audio:** every `sfx_*` write (explosion / hit / fire / gain-life). The GAME OVER
-  flow's jingle gates (which block the GameOver / HallOfFame exits) are part of this.
+- ~~**Audio:** every `sfx_*` write (explosion / hit / fire / gain-life). The GAME OVER
+  flow's jingle gates (which block the GameOver / HallOfFame exits) are part of this.~~
+  **Built in P15** — every write is wired (`bullet.js`, `score.js`) and both jingle
+  gates are real `audio.isPlaying(...)` waits. See `research_audio.md`.
