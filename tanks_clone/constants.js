@@ -435,6 +435,16 @@ export const GAME_OVER_MSG = Object.freeze({
   // sub_C947 -> two sub_DA7B groups at (posX, $79) and (posX+$10, $7D); each draws
   // tile @ x-8 and tile+2 @ x. Net 4 sprites at these [dx, tile] from posX:
   SPRITES: [[-8, 0x79], [0, 0x7B], [8, 0x7D], [0x10, 0x7F]],
+  // The 2P per-player "player N is out" slide ($DE18-$DE54): the partner plays on, so it
+  // enters horizontally from the eliminated player's side along the bottom (posY $D8) and
+  // does NOT end the stage. movType reuses the animator's DX/DY indices (1=left, 3=right):
+  // P1 (left player) enters from $20 moving RIGHT; P2 (right) from $C0 moving LEFT.
+  PLAYER_OUT: {
+    P1: { movType: 0x03, x: 0x20 },   // $DE26 mov right / $DE2B posX
+    P2: { movType: 0x01, x: 0xC0 },   // $DE38 mov left  / $DE3D posX
+    TIMER: 0x0D,                       // $DE46
+    Y: 0xD8,                           // $DE4B posY — the bottom of the field (by the HQ)
+  },
 });
 // tbl_D3D5_game_over_message_spd_X ($D3D5) / tbl_D3D9_..._spd_Y ($D3D9), indexed by
 // movType (Up/Left/Down/Right). Stored signed here ($FF -> -1).

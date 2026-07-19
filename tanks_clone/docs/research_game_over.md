@@ -128,7 +128,8 @@ modelled as `GameOverMessage` on [`game.js`](../game.js). Three sites touch it:
   fresh stage has no message. **This clear was MISSING** from the port — without it a
   prior run's leftover timer would draw "GAME OVER" over the next run's first battle
   (`sub_C972` draws while `timer != 0`). Now `prepareStage()` calls `gameOverMsg.clear()`.
-- **`sub_DE46` `$DE48`** (2P per-player "player N is out"): DEFERRED — §8.
+- **`beginPlayerOut` `$DE1E-$DE54`** (in the `$DE07` death handler): the 2P per-player
+  "player N is out" slide — built P13, see §5a.
 
 ### Animate — `sub_C972` (`$C972`), pipeline step 15
 
@@ -166,6 +167,34 @@ Palette 3, front. Two `sub_DA7B` groups: `(posX, $79)` and `(posX+$10, $7D)`. Ea
 The one frame the ROM draws at `posY=$F0` (timer just hit 0) is simply not drawn — it
 is off-screen, so unobservable. The battlefield the message rides over is drawn by
 `Battle`/`Tail` render (`renderBattlefield`, [`modes/session.js`](../modes/session.js)).
+
+### §5a — the 2P per-player "player N is out" slide (`$DE18`-`$DE54`, built P13)
+
+The SAME animator/draw, aimed differently. In a 2-player game, when one player loses their
+last life (`$DE0D DEC` → `$DE0F BEQ`) but the run should CONTINUE, the death handler shows
+a per-player "GAME OVER" that slides in from that player's side along the bottom — it does
+**not** end the stage. `Game.destroyTank`'s 0-lives arm ports `bra_DE18_no_more_lives_left`
+with two gates (ROM order):
+
+1. `$DE18` — skip if the **base is already destroyed** (`game_over_flag != con_not_game_over`
+   → `!base.isDestroyed()`).
+2. `$DE22` (P1) / `$DE34` (P2) — skip if the **partner is also out** (`lives[1-slot] > 0`).
+
+Either skip → the *real* game over runs instead (`checkStageEnding`'s all-lives-0 /
+base-destroyed test). Otherwise `GameOverMessage.beginPlayerOut(slot)` sets the slide, and
+`destroyTank` resets `frm.lo` (`$DE52`):
+
+| Player out | `movType` | `posX` | site |
+|---|---|---|---|
+| P1 (slot 0, left) | `3` = right (dx +1) | `$20` | `$DE26`/`$DE2B` |
+| P2 (slot 1, right) | `1` = left (dx −1) | `$C0` | `$DE38`/`$DE3D` |
+
+`sub_DE46` (`$DE46`) finishes both: `timer=$0D`, `posY=$D8` (the bottom row, by the HQ).
+The banner slides horizontally toward centre while `timer >= $0A`, holds, hides at 0 —
+`posY` stays `$D8` throughout (movType 1/3 have `dy 0`). It's **structurally 1P-unreachable**
+(P2's lives are 0 from the start, so gate 2 always fails in 1P). Verified deterministically
+in 2P: both sides' setup, both gates, the horizontal slide (`$20`→`$5F`, Y constant) + hide
+at `timer 0`, the 4 sprites at `posY $D8`, and that the stage does not end.
 
 ## §6 — PAUSE text: `sub_C8F9` (`$C8F9`)
 
@@ -208,11 +237,5 @@ blink-off → none; unpaused → none.
 
 ## §8 — Deferred / open
 
-- **2P per-player "player N is out" slide** — `$DE18` → `sub_DE46` (`$DE48`: timer=$0D,
-  posY=$D8), driven by the SAME `sub_C972` animator that lands here (movType still 0).
-  It is 2P-only and MID-run (a player loses their last life but the other plays on — it
-  does NOT end the stage), so it is orthogonal to the run-ending message. Stays deferred
-  in `Game.destroyTank` with its citation; it needs the 2P GAME OVER handling (`$C972`
-  is now ready for it, `$DE18`/`sub_DE46` is not).
 - **All jingles / sfx** — Audio: `$C1C7` stage-load, `$C218` pause, `$C61B`/`$C47D`
   the two boards' jingles (the gates in §7.1), `$CD2A`/`$CE7C` the tally sfx.

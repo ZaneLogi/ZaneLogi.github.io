@@ -13,10 +13,10 @@ The `sub_C2E6` pipeline steps this covers (order is a faithfulness invariant):
 |---|---|---|
 | 5  | `$E02E` bullets_status_handler | `BulletManager.updateStatus` — advance + explosion countdown |
 | 8  | `$E122` player fire | `BulletManager.playerFire` → `spawn` (`$E08C`) |
-| 9  | `$E162` enemy fire | `BulletManager.enemyFire` — **stub** (enemy scope) |
+| 9  | `$E162` enemy fire | `BulletManager.enemyFire` — built P10 (enemy scope) |
 | 11 | `$E604` bullets_movement | `BulletManager.move` → `Bullet.checkPoint` (`$E69A`) |
 | 12 | `$E910` vs bullets | `BulletManager.collideWithBullets` |
-| 13 | `$E70C` vs tanks | `BulletManager.collideWithTanks` — **Part 3 (freeze)**; 1&2 deferred |
+| 13 | `$E70C` vs tanks | `BulletManager.collideWithTanks` — Part 3 (freeze) P7, Parts 1&2 P10 |
 
 The render half `$E0D8` (`BulletManager.render`) sits **outside** the pipeline, in each
 battle screen's own draw loop (`$C206`), exactly like `sub_DEA6` for tanks. `clearAll`
@@ -152,9 +152,9 @@ never cancel — only a player-involved pair does.
 ## 6. Bullet vs tank — `$E70C`  [D]
 
 Three parts share the hit box `|dx| < $0A && |dy| < $0A` and set the hitting bullet to
-`$33`. **Parts 1 & 2 are deferred to the enemy scope** (no enemy tank/bullet exists, and
-they need the tank-explosion render (a `Tank.render` TODO), player respawn, and
-Score/Bonus); they are cited stubs:
+`$33`. **Parts 1 & 2 were deferred to the enemy scope at P7** (they needed the tank-
+explosion render, player respawn, and Score/Bonus) and were **built in P10**
+(`research_enemy_combat.md`); the mechanism:
 
 - Part 1 (`$E710`) — enemy bullets (2-7) vs players → kill (unless shielded).
 - Part 2 (`$E782`) — player bullets vs enemies → armour damage / kill / score / bonus.

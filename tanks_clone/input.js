@@ -82,7 +82,8 @@ export class Input {
 
   // $C2AA-$C2B0 — the body of sub_C2A2_disable_buttons_if_game_over.
   // The GATE (only once the eagle is gone) belongs to the caller: Tail runs it
-  // every frame at $C23B. Not wired up yet — Tail is still a stub.
+  // every frame at $C23B. That $C23B call is still a Tail-update TODO (P12 gave Tail
+  // its battlefield render, but not this button gate).
   clear() { this.hold = [0, 0]; this.press = [0, 0]; }
 
   // sub_E451_convert_Dpad_buttons ($E451) — a PRIORITY decoder, not a bitmask test.

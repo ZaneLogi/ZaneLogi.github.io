@@ -92,6 +92,18 @@ class GameOverMessage {
     this.posY = GAME_OVER_MSG.HIDE_Y;   // $C337-$C339
     this.timer = 0;                     // $C33C-$C33E
   }
+
+  // $DE1E-$DE54 — the 2P per-player "player N is out" slide (the partner plays on, so the
+  // stage CONTINUES). It reuses the same $C972 animator + sub_C947 sprites as begin(), but
+  // enters horizontally from the eliminated player's side along the bottom (posY $D8) and
+  // stops, instead of climbing from the bottom. The caller resets frm.lo ($DE52).
+  beginPlayerOut(slot) {
+    const side = slot === 0 ? GAME_OVER_MSG.PLAYER_OUT.P1 : GAME_OVER_MSG.PLAYER_OUT.P2;
+    this.movType = side.movType;                   // $DE26 (P1 right) / $DE38 (P2 left)
+    this.posX = side.x;                            // $DE2B ($20) / $DE3D ($C0)
+    this.timer = GAME_OVER_MSG.PLAYER_OUT.TIMER;   // $DE46 #$0D
+    this.posY = GAME_OVER_MSG.PLAYER_OUT.Y;        // $DE4B #$D8
+  }
 }
 
 export class Game {
@@ -248,11 +260,18 @@ export class Game {
       this.lives[tank.slot]--;                       // $DE0D DEC ram_lives,X
       if (this.lives[tank.slot] > 0) {               // $DE0F
         this.roster.spawnPlayer(tank.slot);          // $DE11 sub_E363 — respawn
+      } else if (!this.base.isDestroyed() && this.lives[1 - tank.slot] > 0) {
+        // $DE18-$DE42 — the 2P per-player GAME OVER slide. Only when the base still
+        // stands ($DE18) AND the partner is still alive ($DE22 P1 / $DE34 P2): the run
+        // CONTINUES, so this is a per-player notice, not the run's end. Gates in the
+        // ROM's order (base, then partner); if either fails, the real game over runs
+        // instead (checkStageEnding's all-lives-0 / base-destroyed test, $C730).
+        this.gameOverMsg.beginPlayerOut(tank.slot);  // $DE26-$DE42 + sub_DE46
+        this.frm.lo = 0;                             // $DE52
       }
-      // else 0 lives -> no respawn. The game over is checkStageEnding's all-lives-0
-      // test ($C730), already built. The ROM's per-player GAME OVER slide message
-      // ($DE18-$DE42) is deferred: 2P-only (unreached in 1P) and it needs the
-      // still-stubbed $C972 animation.
+      // else (partner also out, or the base is gone): no per-player message — the real
+      // game over is checkStageEnding's all-lives-0 test ($C730), already built. In 1P
+      // this arm is always taken (P2's lives are 0), so no slide ever shows in 1P.
     } else {
       this.enemiesLeft--;                            // $DE15 DEC ram_enemies_left_cnt
     }

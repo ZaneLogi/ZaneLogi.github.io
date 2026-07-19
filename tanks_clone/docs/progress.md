@@ -534,7 +534,7 @@ but because it described work that had not started yet.)*
   - **Score is the HUD RENDERER; the state stays on `Game`** (the map's §7 lock — lives/
     scores/stage live on `Game`). The stub's duplicated `p1/p2/hi` fields were removed (a §7
     violation in waiting); `Score` now holds only a NOT-SOURCE render cache plus the S8-B
-    logic (`add`; `checkHiscore` is a stub — see (c)).
+    logic (`add`; `checkHiscore` stubbed here, built later in P12 — see (c)).
   - **Lives show the RESERVE count** — `max(lives-1, 0)` (`$C805` `SBC #$01`): the tank in
     play isn't counted, so 3 lives prints "2". P1 always (row 18); P2 (row 21) in 2P **or
     demo**, the same gate as the IIp label.
@@ -593,8 +593,9 @@ but because it described work that had not started yet.)*
     roster's), so the tick reaches back via `game` — threaded through `moveTanks`, the
     shape `Base.update(field, game)` already uses. **Stage-end is already built**:
     `checkStageEnding` (every Battle frame) returns DONE on `enemiesLeft==0` (clear) or
-    all-lives-0 (game over). The per-player 2P GAME OVER slide (`$DE18`) is deferred
-    (unreached in 1P; needs the still-stubbed `$C972`).
+    all-lives-0 (game over). The per-player 2P GAME OVER slide (`$DE18`) is deferred here
+    (2P-only, unreached in 1P) — the message animator (`$C972`) landed in P12, the slide
+    itself in P13.
   - **Explosion render (`$70..$20`)** — `TANK_EXPLOSION_FRAMES`: `$F1/$F5/$F9` single +
     `$D1../$E1..` four-group, the **same blast tiles as the P8 base**, re-centred on the
     tank (base's groups are eagle-fixed). `$10` draws nothing (popup deferred). `TANK_STATE`
@@ -615,8 +616,8 @@ but because it described work that had not started yet.)*
     BCD — the digit math is CPU-only, the VALUE is faithful) + `$D138` the one-time extra
     life at 20000 (per player, gated on `extraLife[]`). **Scope call (Zane):** the
     hi-score-beaten (`$D97D`) and its HALL_OF_FAME routing are the **GAME OVER flow, a
-    separate step** — pulled back out; `checkHiscore` stays a stub, and `$D138`'s
-    game-over-flag guard (`$D13A`) is dropped here (belongs with GAME OVER).
+    separate step** — pulled back out (built in P12); `checkHiscore` was left a stub here,
+    and `$D138`'s game-over-flag guard (`$D13A`) is dropped here (belongs with GAME OVER).
   - **`Game.awardKill(enemy, owner, isDemo)`** at the `$E70C` Part 2 kill (`$E7FB-$E827`):
     `idx = (type>>5)-4` (`$80/$A0/$C0/$E0` → 0..3), `killCounts[owner][idx]++` (the per-type
     counter the P11 Tally consumes; `owner` = the bullet slot's low bit), then — unless the
@@ -666,7 +667,7 @@ but because it described work that had not started yet.)*
   - **Stage advance was already built** — `advanceStage` (`$C259-$C280`, the 35→36 / 70→1
     wrap) is P3-verified; P11 adds the tally's exit reset and the end-to-end drive through
     a *real* tally. Deferred (cited): the count/bonus **sfx** (Audio); hi-score-beaten +
-    HALL OF FAME (the GAME OVER flow).
+    HALL OF FAME (the GAME OVER flow — since built in P12).
   - **Verified** — 26/26 deterministic in-browser (headless `Game`, the real
     Menu→1P→Battle(clear)→Tail→Tally flow, `getImageData` / sprite-emit spy): 1P
     `[3,2,1,4]` counts out over 367 frames, consumed to 0, monotonic; totals `[10,0]`;
@@ -720,8 +721,7 @@ but because it described work that had not started yet.)*
     stub, so each waits a `NOT SOURCE` frame constant (Debt, below); int hi-score (not
     7-digit BCD); the message move/draw split; PPU-plumbing clears dropped.
   - **Deferred, cited:** the 2P per-player "player N out" slide (`$DE18`/`sub_DE46`) — 2P-
-    only, mid-run, shares the now-ready `$C972` animator (research §8); all sfx/jingles
-    (Audio).
+    only, mid-run; **built in P13** (research §5a). And all sfx/jingles (Audio).
   - **Closed the `ram_006B_flag` open item** (flow doc §8 / an old Debt entry — GameOver was
     its trigger). The worry was that a zero score on the title prints `0` after a game
     instead of `00`. It doesn't: the shared `$6B` "min-digits" byte is cleared to 0 by the
@@ -740,11 +740,32 @@ but because it described work that had not started yet.)*
     visible): the GAME OVER board, the HI-SCORE board ("HISCORE" + "31400" right-aligned,
     flashing), and "PAUSE" mid-battle.
 
+- **P13 — 2P per-player GAME OVER slide (`$DE18`/`sub_DE46`).** ☑ Done. Closes P12's last
+  deferred item. In a 2-player game, when one player loses their last life while the partner
+  is still alive and the base stands, a "GAME OVER" banner slides in from that player's side
+  along the bottom (`posY $D8`) and the run **continues** — it does NOT end the stage. Reuses
+  P12's animator (`$C972`) + draw (`sub_C947`) unchanged; only the death-handler SETUP branch
+  was missing. `game.js` + `constants.js` touched. Decode: research_game_over.md §5a.
+  - **`Game.destroyTank`'s 0-lives arm ports `bra_DE18` with two gates** (ROM order): skip if
+    the base is destroyed (`$DE18`), then skip if the partner is also out (`$DE22`/`$DE34`) —
+    either → the real game over runs instead (`checkStageEnding`). Otherwise
+    `GameOverMessage.beginPlayerOut(slot)` sets the side (P1 from `$20` moving right / P2 from
+    `$C0` moving left, movType 3/1) + `sub_DE46` (`timer $0D`, `posY $D8`); `destroyTank`
+    resets `frm.lo` (`$DE52`). No render/animator change — it's just another live message.
+  - **Structurally 1P-unreachable** — in 1P, P2's lives are 0 from the start, so the partner
+    gate always fails; no slide ever shows in 1P (which is why P12 deferred it as untestable
+    then). Now verified in real 2P.
+  - **Verified** — deterministic in 2P (headless `Game`, `getImageData` / sprite-emit spy):
+    both sides' setup (`{movType 3, $20}` / `{movType 1, $C0}`, `timer $0D`, `posY $D8`,
+    `frm.lo 0`); the stage does NOT end (`checkStageEnding` false); both gates (base destroyed
+    / partner out → no message); enemy death unaffected; the horizontal slide (`$20`→`$5F`, Y
+    constant) + hide at `timer 0`; the 4 sprites at `posY $D8`; 1P regression (no slide). Live
+    screenshot: the banner sliding along the bottom of a 2P battlefield.
+
 ## Next
 **Bonus** (S7) — the bonus-tank power-up drop (`$E8BE`/`$E972`); then **Demo** (`$C642`);
-`StageIntro`'s sfx / editor hooks (Audio / Construction); the 2P per-player GAME OVER slide
-(`$DE18`/`sub_DE46`). **Audio** (`$EA7E`) is the biggest single lever left — it gates the
-two P12 boards' exits (see Debt) and mutes on pause/demo.
+`StageIntro`'s sfx / editor hooks (Audio / Construction). **Audio** (`$EA7E`) is the biggest
+single lever left — it gates the two P12 boards' exits (see Debt) and mutes on pause/demo.
 
 ## Debt (NOT SOURCE — delete when its owner lands)
 - **`GameOver` / `HallOfFame` now DRAW their real screens (P12); only the EXIT WAIT is

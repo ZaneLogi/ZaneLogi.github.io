@@ -152,8 +152,8 @@ export class EnemyAI {
     return AIM_DIR[index];                                            // tbl_E486 low nibble
   }
 
-  // sub_E162 ($E162) — an enemy fires on a 1/32 roll per frame. Deferred wiring: the
-  // enemy-fire pipeline step is a later sub-step (bullets + kill resolution).
+  // sub_E162 ($E162) — an enemy fires on a 1/32 roll per frame. Used by both the AI
+  // movement decisions and the enemy-fire pipeline step (BulletManager.enemyFire, P10).
   /** @param {number} frameHi */
   shouldFire(frameHi) { return (this.rng.next(frameHi) & 0x1F) === 0; }
 }

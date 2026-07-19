@@ -163,8 +163,8 @@ The score-visible half of a kill, hung off §2's kill event (`$E70C` Part 2).
 plain ints, not the ROM's 7-digit BCD arrays (the digit math is CPU-only; the VALUE
 is faithful). The extra life is a one-time grant at 20000 per player (`extraLife[]`).
 **Scope (Zane):** the hi-score-beaten (`$D97D`) + HALL OF FAME routing are the GAME
-OVER flow, a separate step — `checkHiscore` stays a stub, and `$D138`'s
-game-over-flag guard (`$D13A`) is dropped here.
+OVER flow, a separate step (built in P12) — `checkHiscore` was left a stub here, and
+`$D138`'s game-over-flag guard (`$D13A`) is dropped here.
 
 **`Game.awardKill(enemy, owner, isDemo)`** at the kill (`$E7FB-$E827`):
 - `idx = (type>>5) − 4` — the enemy types `$80/$A0/$C0/$E0` map to `0..3`
@@ -183,8 +183,8 @@ game-over-flag guard (`$D13A`) is dropped here.
 
 ## §8 Open / deferred
 
-- **GAME OVER flow — BUILT in P12** (`Score.checkHiscore` `$D97D`, both boards, the
-  sliding `updateGameOverText` `$C972`; see research_game_over.md). Still deferred from
-  it: the jingle gates (Audio) and the per-player 2P death message (`$DE18`/`$DE46`).
+- **GAME OVER flow — BUILT** (`Score.checkHiscore` `$D97D`, both boards, the sliding
+  `updateGameOverText` `$C972` in P12; the per-player 2P death slide `$DE18`/`$DE46` in
+  P13; see research_game_over.md). Still deferred from it: the jingle gates (Audio).
 - **Bonus (S7):** the bonus-tank power-up drop (`sub_E8BE`).
 - **Audio:** every `sfx_*` write (explosion / hit / fire / gain-life).

@@ -7,7 +7,7 @@
 // Absorbs:
 //   sub_E08C_bullets ($E08C)                       — spawn a bullet            -> spawn
 //   sub_E122 ($E122)                               — player fire (+ 2nd-bullet) -> playerFire
-//   sub_E162 ($E162)                               — enemy fire (deferred)      -> enemyFire
+//   sub_E162 ($E162)                               — enemy fire (built P10)     -> enemyFire
 //   sub_E02E_bullets_status_handler ($E02E)        — advance / explosion count  -> updateStatus
 //   sub_E604_bullets_movement ($E604) + sub_E69A   — move + terrain collision   -> move/checkPoint
 //   sub_E910_...collision_with_bullets ($E910)                                  -> collideWithBullets

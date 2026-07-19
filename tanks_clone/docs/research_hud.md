@@ -11,7 +11,7 @@ This is the first slice of S8 (Score/HUD).
   column), `sub_C830` (Ip/IIp), `sub_C859` (flag + stage number).
 - **Elsewhere — S8-B** (score *accumulation*: `add_score` $D9BE, extra-life $D138):
   built with its data source in P10 (`research_enemy_combat.md` §7). `hi-score-beaten`
-  ($D97D) is deferred with the GAME OVER flow.
+  ($D97D) landed later with the GAME OVER flow (P12).
 - **Elsewhere — P11** (`research_tally.md`): the between-stage Tally count-out
   (`$CEF7`), which reads the per-type kill counters P10 records (and only counts them
   into a display subtotal — the real score was already credited at kill time).
