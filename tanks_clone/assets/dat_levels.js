@@ -559,3 +559,85 @@ export const DEMO_STAGE = [
   [0x9, 0xB, 0xB, 0xD, 0xD, 0xD, 0xD, 0xD, 0xD, 0xD, 0xB, 0xB, 0x9],
   [0x9, 0x9, 0xB, 0xB, 0xD, 0xD, 0xD, 0xD, 0xD, 0xB, 0xB, 0x9, 0x9],
 ];
+
+// Per-stage enemy roster. STAGE_ENEMY_TYPES[s] = the four type BYTES
+// ($80 basic / $A0 fast / $C0 power / $E0 armour), in spawn order
+// (tbl_E4EC $E4EC, read by sub_E3B8). STAGE_ENEMY_COUNTS[s] = how many
+// of each of those four spawn that stage (tbl_E578 $E578, loaded by
+// sub_E42B). The four counts sum to 20 (con_enemies_per_stage), asserted
+// at build time. Indexed 0..34 = stages 1..35 (2nd loop reuses stage 35).
+export const STAGE_ENEMY_TYPES = [
+  [0x80, 0xA0, 0xC0, 0xE0], // stage 1
+  [0xE0, 0xA0, 0xC0, 0x80], // stage 2
+  [0x80, 0xA0, 0xC0, 0xE0], // stage 3
+  [0xC0, 0xA0, 0x80, 0xE0], // stage 4
+  [0xC0, 0xE0, 0x80, 0xA0], // stage 5
+  [0xC0, 0xA0, 0x80, 0xE0], // stage 6
+  [0x80, 0xA0, 0xC0, 0x80], // stage 7
+  [0xC0, 0xE0, 0xA0, 0x80], // stage 8
+  [0x80, 0xA0, 0xC0, 0xE0], // stage 9
+  [0x80, 0xA0, 0xC0, 0xE0], // stage 10
+  [0xA0, 0xE0, 0xC0, 0xA0], // stage 11
+  [0xC0, 0xA0, 0x80, 0xE0], // stage 12
+  [0xC0, 0xA0, 0x80, 0xE0], // stage 13
+  [0xC0, 0xA0, 0x80, 0xE0], // stage 14
+  [0x80, 0xC0, 0xA0, 0xE0], // stage 15
+  [0x80, 0xC0, 0xA0, 0xE0], // stage 16
+  [0xE0, 0xA0, 0xC0, 0x80], // stage 17
+  [0xE0, 0x80, 0xC0, 0xA0], // stage 18
+  [0xA0, 0xE0, 0x80, 0xC0], // stage 19
+  [0xA0, 0x80, 0xC0, 0xE0], // stage 20
+  [0xC0, 0xA0, 0x80, 0xE0], // stage 21
+  [0xA0, 0x80, 0xC0, 0xE0], // stage 22
+  [0xE0, 0x80, 0xC0, 0xA0], // stage 23
+  [0xC0, 0xE0, 0xA0, 0x80], // stage 24
+  [0xC0, 0xA0, 0x80, 0xE0], // stage 25
+  [0xA0, 0xE0, 0x80, 0xC0], // stage 26
+  [0xC0, 0xE0, 0xA0, 0x80], // stage 27
+  [0xA0, 0xE0, 0x80, 0xC0], // stage 28
+  [0xC0, 0xA0, 0x80, 0xE0], // stage 29
+  [0x80, 0xA0, 0xC0, 0xE0], // stage 30
+  [0xC0, 0xA0, 0xE0, 0xC0], // stage 31
+  [0xE0, 0x80, 0xC0, 0xA0], // stage 32
+  [0xA0, 0xE0, 0xC0, 0xA0], // stage 33
+  [0xC0, 0xA0, 0x80, 0xE0], // stage 34
+  [0xC0, 0xA0, 0x80, 0xE0], // stage 35
+];
+
+export const STAGE_ENEMY_COUNTS = [
+  [18, 2, 0, 0], // stage 1 (sum 20)
+  [2, 4, 0, 14], // stage 2 (sum 20)
+  [14, 4, 0, 2], // stage 3 (sum 20)
+  [10, 5, 2, 3], // stage 4 (sum 20)
+  [5, 2, 8, 5], // stage 5 (sum 20)
+  [7, 2, 9, 2], // stage 6 (sum 20)
+  [3, 4, 6, 7], // stage 7 (sum 20)
+  [7, 2, 4, 7], // stage 8 (sum 20)
+  [6, 4, 7, 3], // stage 9 (sum 20)
+  [12, 2, 4, 2], // stage 10 (sum 20)
+  [5, 6, 4, 5], // stage 11 (sum 20)
+  [8, 6, 0, 6], // stage 12 (sum 20)
+  [8, 8, 0, 4], // stage 13 (sum 20)
+  [10, 4, 0, 6], // stage 14 (sum 20)
+  [2, 0, 10, 8], // stage 15 (sum 20)
+  [16, 0, 2, 2], // stage 16 (sum 20)
+  [2, 2, 8, 8], // stage 17 (sum 20)
+  [4, 2, 6, 8], // stage 18 (sum 20)
+  [4, 8, 4, 4], // stage 19 (sum 20)
+  [8, 2, 2, 8], // stage 20 (sum 20)
+  [8, 2, 6, 4], // stage 21 (sum 20)
+  [8, 6, 2, 4], // stage 22 (sum 20)
+  [6, 0, 4, 10], // stage 23 (sum 20)
+  [4, 2, 4, 10], // stage 24 (sum 20)
+  [2, 8, 0, 10], // stage 25 (sum 20)
+  [6, 6, 4, 4], // stage 26 (sum 20)
+  [2, 8, 8, 2], // stage 27 (sum 20)
+  [2, 1, 15, 2], // stage 28 (sum 20)
+  [10, 4, 0, 6], // stage 29 (sum 20)
+  [4, 8, 4, 4], // stage 30 (sum 20)
+  [3, 8, 6, 3], // stage 31 (sum 20)
+  [8, 6, 2, 4], // stage 32 (sum 20)
+  [4, 8, 4, 4], // stage 33 (sum 20)
+  [4, 10, 0, 6], // stage 34 (sum 20)
+  [4, 6, 0, 10], // stage 35 (sum 20)
+];

@@ -463,15 +463,77 @@ but because it described work that had not started yet.)*
     122 px); destruction shows the blast (destroyed `$cc`, 245 px; blast 1525 px).
     Screenshot in the P8 session.
 
-## Next
-Following the gameplay line: **`Demo`** (`$C642` fakes input into `mainBattleScript` —
-now unblocked: tanks move and shoot) and then **enemy AI / spawn** (`$DB48` spawn,
-`$E162` enemy fire, the `tbl_E498` AI states), which also unblocks `$E70C` Parts 1&2
-(bullet-vs-enemy kill / score / bonus) and the tank-explosion render.
+- **P9 — Enemy AI + spawn: enemies come alive and drive.** ☑ Done. Scope = **spawn +
+  movement** (Zane's split, 2026-07-19: enemy *fire* + *kill/explode* are **P10**;
+  **`Demo` was skipped** as the entry point in favour of real enemies). Enemies now
+  materialise on the spawn interval and drive stage 1 with real Battle City AI —
+  target-seeking that drifts from wander to player-chase to base-rush over the stage.
+  Full decode + citations + verification: `docs/research_enemy_ai.md`. Pipeline steps 3
+  (enemy branch) + 10 filled; the RNG (S12) and the S3 spawn machinery are ported.
+  - **The finding that shaped it — the "AI" is not a separable decider; it IS the enemy
+    half of the tank state machine.** `sub_DC3D` dispatches the flag high-nibble via
+    `tbl_E498`; the `$80`/`$90`/`$A0` + follow states `$B0`/`$C0`/`$D0` **are** the
+    movement handlers, decision interleaved with the move (the "turn when blocked"
+    branch is inside `loc_DC97`). So the shared step is `Tank.tryStep`; the state
+    handlers live in `EnemyAI` (the decision layer), which is **stateless** — one shared
+    instance, not per-tank. The scaffold's `decideMovement`/`shouldFire` model was wrong
+    and was revised (the §7 lock allows a boundary correction in implementation). At the
+    roster it reads as agreed: **players by input, enemies via `enemyAI.drive`** — but a
+    literal `controlEnemies` *pre-pass* is not faithful (enemy decide+move is fused; the
+    turn-on-block needs the move result), so the routing lives inside `moveTanks`.
+  - **RNG (S12, `$D44D`) → a 16-bit Galois LFSR + `frm_cnt_hi`.** The ROM's `random*7`
+    is a weak mixer that leans on `zp[++index]` — a rolling read of the whole zero page,
+    i.e. **live game state** (positions, frame counters). Governing test: the *sequence*
+    is CPU-only, so we keep the role and replace the core + the 256-byte stir with a
+    maximal-period LFSR (`0xB400`, period 65535), keeping `+ frm_cnt_hi`. Reconstructing
+    the zero page is max plumbing that *still* would not match the ROM's sequence, so it
+    is dropped. Bonus: the LFSR is reproducible → deterministic movement tests. (Zane's
+    calls: LFSR, keep `+ frm_cnt_hi`, drop the 256-byte entropy, no cross-project
+    references in the comments.)
+  - **The state machine (S4).** `$A0` drives forward (1/16 grid re-pick → target;
+    blocked → 1/4 turn / 3/4 recoil); `$90` turns (1/2 re-pick, else rotate ±1); `$80`
+    is the recoil coast; `$B0`/`$C0`/`$D0` resolve a destination to a biased direction
+    and become `$A0`. Target **drifts with `frm_cnt_hi`** (`sub_DE72`): early wander →
+    mid follow-a-player (even slot→P1, odd→P2) → late rush the HQ. Direction toward a
+    target (`sub_DDA2` + `tbl_E486` → `AIM_DIR`): a primary vertical-biased table, a
+    coin-flip to the horizontal-biased half, so enemies wander toward rather than beeline.
+  - **Spawn (S3).** `$DB48` spawns into the first free enemy slot (scan `enemy_limit`→2)
+    on the interval → **max 4 concurrent in 1P** (6 in 2P); `$E42B`/`$E3B8` assign the
+    per-stage type from two extracted+validated ROM tables (`STAGE_ENEMY_TYPES` `tbl_E4EC`
+    / `STAGE_ENEMY_COUNTS` `tbl_E578`, counts sum to 20); `$E363` cycles the three top
+    spawn points and flags the 4th/11th/18th as bonus carriers. Interval `= $BE − stage*4`
+    (`−$14` in 2P). `extract.py` gained the two tables; `dat_levels.js` regenerated.
+  - **`moveTanks` (`$DBF1`) enemy gates:** the clock-freeze gate (no-op until Bonus arms
+    `clock_timer`; the DEC countdown deferred with it) + the per-type speed gate (fast
+    tanks move every frame, others on `(slot ^ frm_cnt_lo) & 1`).
+  - **Three flagged deviations** (governing test, all in `research_enemy_ai.md §7`): the
+    RNG LFSR; the enemy **type assigned at spawn** not at `$E3B8` (unobservable during
+    the respawn star, and it keeps the roster the single type owner); the `$88`→`$80`
+    recoil coast → an explicit `Tank.coast` counter (the flag byte's bits 2-3 have no
+    home in the state/dir split).
+  - **`window.game`** — a NOT-SOURCE debug handle on the live instance (main.js, same
+    category as `hud.js`), so a console/test session can force a Battle for a screenshot.
+    Added at Zane's suggestion.
+  - **Verified** — 63/63 deterministic in-browser (RNG 10, spawn 31, AI decisions 18,
+    integration 6 through the real `$C2E6` body: enemies drive up to 206 px from spawn,
+    deterministic across runs, head toward the base in the forced late-game) + a headless
+    render diff (405 enemy sprite px) + a live screenshot of 4 enemies roaming stage 1
+    (bonus tank flashing) via the `window.game` handle.
 
-`StageIntro` is done (curtain wipe + "STAGE N" + A/B select + reveal + the base draw,
-P8); its remaining sfx / editor hooks land with Audio / Construction. The **eagle-hit →
-game over** path (`Bullet.checkPoint`) is now **live** — Base draws the eagle (P8).
+## Next
+**P10 — enemy combat: fire + kill + explode** (Zane, 2026-07-19). The jump from a
+diorama to a playable battle. `$E162` enemy fire (trivial; `EnemyAI.shouldFire` exists);
+**`$E70C` Parts 1&2** — enemy bullet kills player / player bullet kills enemy — the core,
+well teed-up because **Part 3 (the P-vs-P freeze) is already done (P7)**, same routine;
+the **tank explosion** render (`$20`-`$70` states — the TODOs already sit in `Tank.render`;
+directly analogous to the base's P8 explosion) + the `$DDEA` explosion tick in the move
+step; **death handling** (enemy → `enemiesLeft--`, the stage-end check already reads it;
+player → lose a life → respawn/game-over, both already built). Deferred even then: the
+kill-points popup (`$10`/`$DEFD`) + `Score` (S8), and the **bonus-tank drop** (Bonus S7 —
+a bonus tank just explodes without dropping the power-up).
+
+`Demo` (`$C642`) remains available but was skipped for the gameplay line. `StageIntro`'s
+remaining sfx / editor hooks land with Audio / Construction.
 
 ## Debt (NOT SOURCE — delete when its owner lands)
 - **`GameOver` / `HallOfFame` wait on a frame constant**, because the ROM waits on
@@ -488,3 +550,6 @@ game over** path (`Bullet.checkPoint`) is now **live** — Base draws the eagle 
   draws, so its original retirement condition is technically met — but it is still
   the only view of the mode machine's internals (mode/sub/frm/lives), which the
   canvas never shows. Retire it when that stops being useful, not on the technicality.
+- **`window.game`** (main.js, P9) is a NOT-SOURCE debug handle on the live instance —
+  same category as `hud.js`, no "owner" to land against. Drop it if it ever gets in
+  the way; it costs nothing and makes live inspection / screenshots a two-call job.

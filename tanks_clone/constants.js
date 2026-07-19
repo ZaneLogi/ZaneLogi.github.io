@@ -55,6 +55,54 @@ export const PLAYER_SPAWN = [
   { x: 0x98, y: 0xD8 },   // P2
 ];
 
+// Enemy spawn points — tbl_E474_enemy_spawn_pos_X / tbl_E477_enemy_spawn_pos_Y
+// ($E474/$E477), read by sub_E363. Three fixed slots along the TOP edge; sub_E363
+// cycles ram_enemy_spawn_pos_index 0->1->2->0 each enemy spawned ($E37C-$E388).
+export const ENEMY_SPAWN = [
+  { x: 0x18, y: 0x18 },   // 0 left
+  { x: 0x78, y: 0x18 },   // 1 center
+  { x: 0xD8, y: 0x18 },   // 2 right
+];
+
+// tbl_E486 ($E486) — the enemy targeting direction lookup, indexed by
+// 3*dySign + dxSign (each sign 0=target is up/left, 1=aligned, 2=down/right).
+// The first 9 entries bias toward VERTICAL for a diagonal target; sub_DDA2 adds 9
+// on a coin-flip to reach the second 9, which bias toward HORIZONTAL — so an enemy
+// wanders toward its target rather than beelining. Values are the low nibble (dir)
+// of the ROM's $A0|dir bytes: A0 A0 A0 A1 A0 A3 A2 A2 A2 / A1 A0 A3 A1 A0 A3 A1 A2 A3.
+export const AIM_DIR = [
+  0, 0, 0, 1, 0, 3, 2, 2, 2,   // primary   ($E486): up-biased on diagonals
+  1, 0, 3, 1, 0, 3, 1, 2, 3,   // alternate ($E48F): side-biased on diagonals
+];
+
+// The eagle/HQ, the enemies' late-game target (ofs_000_DD94: $DD94 loads $78/$D8).
+export const HQ_TARGET = Object.freeze({ x: 0x78, y: 0xD8 });
+
+// The 4 enemy tank TYPE bytes (high nibble), from tbl_E4EC. A fast tank is
+// type & $F0 == $A0 (it moves every frame, sub_DBF1 $DC29); armour is $E0, which
+// sub_E3B8 turns into $E3 (low bits = a 4-hit counter). Bit 2 ($04) is the
+// carries-a-bonus flag (sub_E363 marks the 4th/11th/18th enemy). Types drive the
+// palette flicker (Tank.draw, tbl_E003) and the fast-tank speed gate.
+export const TANK_TYPE = Object.freeze({
+  BASIC: 0x80, FAST: 0xA0, POWER: 0xC0, ARMOR: 0xE0,
+  ARMOR_HP: 0x03,       // $E0 -> $E3: armour spawns with 3 in its low-bit hit counter
+  BONUS_FLAG: 0x04,     // ram_tank_type & $04 — this enemy drops a bonus when killed
+  FAST_HI: 0xA0,        // type & $F0 == $A0 -> fast (moves every frame)
+});
+
+// Bonus-tank markers: sub_E363 flags the enemy as bonus-carrying when
+// ram_enemy_spawn_cnt (counting DOWN from 20) hits these — i.e. the 4th, 11th and
+// 18th enemy of the stage ($E395/$E39B/$E39F: CMP #$11 / #$0A / #$03).
+export const BONUS_SPAWN_COUNTS = Object.freeze([0x11, 0x0A, 0x03]);
+
+// Enemy spawn interval (frames between spawns), sub_C331 loc_C39E: base $BE minus
+// stage*4, so later stages spawn faster; the 2nd loop uses a fixed stage $23; 2P
+// mode subtracts $14 more ($C3AD). Also feeds the AI target bias (sub_DE72).
+export const SPAWN_INTERVAL_BASE = 0xBE;      // $C3A2
+export const SPAWN_INTERVAL_2P_ADJ = 0x14;    // $C3B0 (2P: even faster)
+export const SECOND_LOOP_STAGE = 0x23;        // 35 — the 2nd loop's enemy schedule +
+                                              // spawn interval use this fixed stage
+
 // Spawn (helmet) invincibility: sub_E3B8 ($E3C1-$E3C3) seeds 3; sub_E27C DECs it
 // every 64 frames, so ~192 frames (~3.2 s) of shield after materializing.
 export const HELMET_TIMER_INIT = 0x03;

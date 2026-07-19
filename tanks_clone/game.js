@@ -38,7 +38,10 @@ import { GameOver } from './modes/game_over.js';
 import { HallOfFame } from './modes/hall_of_fame.js';
 import { Editor } from './modes/editor.js';
 
-import { GAME_MODE, SECOND_LOOP, ENEMIES_PER_STAGE } from './constants.js';
+import {
+  GAME_MODE, SECOND_LOOP, ENEMIES_PER_STAGE,
+  SPAWN_INTERVAL_BASE, SPAWN_INTERVAL_2P_ADJ, SECOND_LOOP_STAGE,
+} from './constants.js';
 import { LEVELS } from './assets/dat_levels.js';
 
 const MODES = Object.freeze({
@@ -264,11 +267,21 @@ export class Game {
     if (this.lives[1] > 0) this.roster.spawnPlayer(1);   // $C34A-$C350
     this.base.reset();                      // $C386-$C388 game_over_flag = alive; also
                                             // clears ram_shovel_timer ($C361, part of below)
+    this.clockTimer = 0;                    // $C36F — enemy-freeze timer (Bonus arms it)
     this.stageSelectUsed = true;            // $C38F ram_004C_flag = 1 (§6a)
-    // TODO: the rest of $C331 — ram_enemy_spawn_cnt, the OTHER power-up timers
-    //   ($C363-$C367: clock/helmet), draw the 20 enemy icons ($C377 sub_C8C0),
-    //   sub_C830/sub_C859 HUD icons, sub_E42B_prepare_enemy_tanks_for_stage ($C383);
-    //   the spawn interval $BE - stage*4, minus $14 in 2P ($C391-$C3B2).
+    // Enemy spawn: seed the spawn machinery + this stage's type schedule ($C383
+    // sub_E42B + $C355-$C372). The spawn interval ($C391-$C3B2 loc_C39E): base $BE
+    // minus stage*4 (later stages spawn faster; the 2nd loop is fixed at stage $23),
+    // then $14 less in 2P.
+    const base = this.secondLoop === SECOND_LOOP.SECOND ? SECOND_LOOP_STAGE : this.stage;
+    let spawnInterval = (SPAWN_INTERVAL_BASE - base * 4) & 0xFF;   // $C39E-$C3A7
+    if (this.gameMode === GAME_MODE.TWO_PLAYERS) spawnInterval -= SPAWN_INTERVAL_2P_ADJ; // $C3AD-$C3B2
+    this.roster.prepareForStage({
+      stage: this.stage, secondLoop: this.secondLoop,
+      enemyLimit: this.enemyLimit, spawnInterval,
+    });
+    // TODO: the OTHER power-up timers ($C363-$C367: helmet), the enemy-icon HUD
+    //   ($C377 sub_C8C0 + sub_C830/sub_C859) — Score/S8.
   }
 
   // sub_D97D_check_hiscore_beaten ($D97D).
@@ -283,7 +296,7 @@ export class Game {
   mainBattleScript() {
     this.field.iceDetectAndMarkOccupancy(this.roster);            // 1  $E181 ice_detection
     this.roster.controlPlayers(this.input, this.frm.lo);          // 2  $DB75 player control
-    this.roster.moveTanks(this.field, this.frm.lo);               // 3  $DBF1 tank_movement
+    this.roster.moveTanks(this.field, this.frm.lo, this.clockTimer, this.ai, this.frm.hi); // 3  $DBF1
     this.field.occupancyWriteback(this.roster);                   // 4  $E1FA
     this.bullets.updateStatus();                                  // 5  $E02E
     this.base.update(this.field, this);                           // 6  $E2A9 HQ_handler

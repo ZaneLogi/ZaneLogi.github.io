@@ -209,6 +209,27 @@ def main():
     # --- enemy palette flicker ($E003) -------------------------------------
     tank_flicker = read_bytes(tables, 0xE003, 8)         # -> sprite palette 0..3
 
+    # --- per-stage enemy roster (35 stages x 4 type-slots) -----------------
+    # tbl_E4EC ($E4EC): the TYPE BYTE for each of a stage's 4 type-slots, in spawn
+    #   order (sub_E3B8 reads tbl_E4EC[(stage-1)*4 + offset]).
+    # tbl_E578 ($E578): how many enemies of each type-slot spawn that stage
+    #   (sub_E42B loads it into ram_enemy_type_stage_cnt; sub_E3B8 consumes it).
+    # The 4 type bytes are the enemy tank types: $80 basic, $A0 fast, $C0 power,
+    # $E0 armour. Each stage's four counts sum to con_enemies_per_stage (20).
+    enemy_types = read_bytes(tables, 0xE4EC, 35 * 4)
+    enemy_counts = read_bytes(tables, 0xE578, 35 * 4)
+    ENEMY_TYPE_BYTES = {0x80, 0xA0, 0xC0, 0xE0}
+    for s in range(35):
+        row_t = enemy_types[s * 4:s * 4 + 4]
+        row_c = enemy_counts[s * 4:s * 4 + 4]
+        bad = [b for b in row_t if b not in ENEMY_TYPE_BYTES]
+        if bad:
+            raise SystemExit(f"extract: stage {s + 1} enemy types {['$%02X' % b for b in bad]} "
+                             "not in {$80,$A0,$C0,$E0} -- wrong tbl_E4EC address?")
+        if sum(row_c) != 20:
+            raise SystemExit(f"extract: stage {s + 1} enemy counts {row_c} sum to "
+                             f"{sum(row_c)}, expected 20 -- wrong tbl_E578 address?")
+
     # --- stages ------------------------------------------------------------
     names = [f"stage_{i:02d}.bin" for i in range(1, 36)] + ["stage_FF.bin"]
     grids = []
@@ -315,6 +336,26 @@ def main():
         f.write("export const DEMO_STAGE = [\n")
         for row in grids[35]:
             f.write("  [" + ", ".join(f"0x{v:X}" for v in row) + "],\n")
+        f.write("];\n\n")
+
+        # --- per-stage enemy roster -----------------------------------------
+        f.write(
+            "// Per-stage enemy roster. STAGE_ENEMY_TYPES[s] = the four type BYTES\n"
+            "// ($80 basic / $A0 fast / $C0 power / $E0 armour), in spawn order\n"
+            "// (tbl_E4EC $E4EC, read by sub_E3B8). STAGE_ENEMY_COUNTS[s] = how many\n"
+            "// of each of those four spawn that stage (tbl_E578 $E578, loaded by\n"
+            "// sub_E42B). The four counts sum to 20 (con_enemies_per_stage), asserted\n"
+            "// at build time. Indexed 0..34 = stages 1..35 (2nd loop reuses stage 35).\n"
+            "export const STAGE_ENEMY_TYPES = [\n"
+        )
+        for s in range(35):
+            row = enemy_types[s * 4:s * 4 + 4]
+            f.write(f"  [{', '.join(f'0x{v:02X}' for v in row)}], // stage {s + 1}\n")
+        f.write("];\n\n")
+        f.write("export const STAGE_ENEMY_COUNTS = [\n")
+        for s in range(35):
+            row = enemy_counts[s * 4:s * 4 + 4]
+            f.write(f"  [{', '.join(str(v) for v in row)}], // stage {s + 1} (sum 20)\n")
         f.write("];\n")
 
     # --- emit assets/dat_text.js ------------------------------------------
@@ -368,6 +409,8 @@ def main():
     print(f"extract: blocks    16 attribute + 16 x 4 tile ids")
     print(f"extract: stages    {len(grids)} decoded ({COLS}x{ROWS}), "
           f"codes used: {', '.join(f'${c:X}' for c in codes)}")
+    print(f"extract: enemies   35 x 4 type/count (all sums == 20, types in "
+          "{{$80,$A0,$C0,$E0}})")
     print(f"extract: text      {len(texts)} title tables, "
           f"{sum(len(t[5]) for t in texts)} tile ids total")
     print(f"extract: wrote     {os.path.join(ASSETS, 'dat_chr.js')}")

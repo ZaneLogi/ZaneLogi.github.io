@@ -48,7 +48,12 @@ export class Tank {
     this.slideTimer = 0;
     this.occupancyCells = null;  // cells this tank marked in Field.occupancy ($E181);
                                  // Field.occupancyWriteback ($E1FA) clears them
-    this.ai = null;              // EnemyAI instance for enemy slots
+    // Enemy recoil coast — the re-derived ram_tank_flags bits 2-3 ($88->$84->$80).
+    // The ROM packs a 2-step "pause after bumping a wall" counter into the flag
+    // byte's mid nibble; our state/dir split has no room for it, so it is an explicit
+    // field (like slideTimer for ice). Set to 2 on a blocked recoil; the $80 handler
+    // counts it down, then resumes $A0. See EnemyAI.recoil.
+    this.coast = 0;
     // Respawn-in counter (the low nibble of ram_tank_flags while state is $F0/$E0,
     // an explicit field here). Drives the spawn star; INC'd by the move step.
     this.respawnFrame = 0;
@@ -230,14 +235,23 @@ export class Tank {
     }
   }
 
-  // sub_E3B8 ($E3B8), player path — the tank finishes materializing: state $A0
-  // facing up (tbl_E47E[slot] = $A0), and the spawn helmet arms.
+  // sub_E3B8 ($E3B8) — the tank finishes materializing. tbl_E47E[slot] ($E47E) is
+  // the resulting state: players $A0 (face UP), enemies $A2 (face DOWN, toward the
+  // base). Then the player path arms the helmet; the enemy path assigns the tank
+  // type from the stage tables + clears wheels.
   becomeDrivable() {
-    this.state = TANK_STATE.NORMAL_A0;   // $A0 (dir 0 = UP)
-    this.dir = DIR.UP;
-    this.wheels = 0;                      // $E406
-    this.helmetTimer = HELMET_TIMER_INIT; // $E3C1-$E3C3
-    // TODO (deferred): tank_upgrade -> type ($E3C5), the enemy type/spawn branch.
+    this.state = TANK_STATE.NORMAL_A0;             // tbl_E47E high nibble = $A0
+    this.dir = this.isPlayer ? DIR.UP : DIR.DOWN;  // tbl_E47E low nibble: 0 / 2
+    this.wheels = 0;                               // $E406 (enemy) / players unchanged
+    if (this.isPlayer) {
+      this.helmetTimer = HELMET_TIMER_INIT;        // $E3C1-$E3C3
+      // TODO (deferred): tank_upgrade -> type ($E3C5).
+    }
+    // Enemy: ram_tank_type was assigned at spawn (TankRoster.spawnEnemy). The ROM
+    // sets it here in $E3B8's enemy branch, but the type is unobservable during the
+    // respawn star (its sprite ignores type), so moving the write to spawn — where
+    // the roster already holds the type counters + stage tables — is a governing-test
+    // deviation that avoids threading that context into the state machine.
   }
 
   // ofs_000_DC52 ($DC52), player path — a stopped player normally does nothing, but
@@ -256,9 +270,11 @@ export class Tank {
 
   // loc_DC97 ($DC97) — try a 1px step in `dir`. Probe the destination's two LEADING
   // corners; if both are passable (terrain) and unoccupied (another tank), commit.
-  // The wheels toggle either way (the treads roll even while pushing a wall).
+  // Returns whether it moved: players ignore it (blocked = stay put), enemies react
+  // to a block (recoil/turn — EnemyAI). No wheel toggle here; the caller owns that,
+  // because the enemy turn branch ($DD30) skips it while every other path toggles.
   /** @param {Field} field */
-  drive(field) {
+  tryStep(field) {
     const dx = DIR_DX[this.dir], dy = DIR_DY[this.dir];   // tbl_E46C / tbl_E470
     const newX = (this.x + dx) & 0xFF;                    // $DCB4-$DCBA
     const newY = (this.y + dy) & 0xFF;
@@ -269,6 +285,14 @@ export class Tank {
       this.cornerClear(field, newX + a, newY + a, newX, newY) &&
       this.cornerClear(field, newX + dx * 8 - dy * 8, newY + dy * 8 - dx * 8, newX, newY);
     if (clear) { this.x = newX; this.y = newY; }          // $DD04-$DD0C commit
+    return clear;
+  }
+
+  // Player $A0 drive: step then always toggle wheels (loc_DD29 is unconditional on
+  // the player path — the treads roll even while pushing a wall). $DD11 CPX #$02 BCC.
+  /** @param {Field} field */
+  drive(field) {
+    this.tryStep(field);
     this.wheels ^= 0x04;                                  // $DD29 loc_DD29
   }
 

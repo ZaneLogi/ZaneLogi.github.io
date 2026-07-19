@@ -1,4 +1,4 @@
-// tank_roster.js — S3 Tank roster (the 8 slots)
+// tank_roster.js — Tank roster (the 8 slots)
 //
 // Owns the 8 tanks (0=P1, 1=P2, 2..7 enemies — decoded), the per-frame draw+state
 // loop, enemy spawn scheduling, per-stage enemy setup, and player invincibility.
@@ -12,7 +12,11 @@
 //   sub_E413_clear_some_tank_addresses ($E413), sub_E420_change_tank_status ($E420)
 // See docs/research_system_interaction_map.md §5 (S3).
 
-import { MAX_TANKS, PLAYER_SPAWN } from './constants.js';
+import {
+  MAX_TANKS, PLAYER_SPAWN, ENEMY_SPAWN, ENEMIES_PER_STAGE, TANK_TYPE,
+  BONUS_SPAWN_COUNTS, SECOND_LOOP_STAGE, SECOND_LOOP,
+} from './constants.js';
+import { STAGE_ENEMY_TYPES, STAGE_ENEMY_COUNTS } from './assets/dat_levels.js';
 import { Tank } from './tank.js';
 
 /**
@@ -24,13 +28,18 @@ import { Tank } from './tank.js';
 export class TankRoster {
   constructor() {
     this.tanks = Array.from({ length: MAX_TANKS }, (_, i) => new Tank(i));
-    // enemy spawn bookkeeping
-    this.enemySpawnCount = 0;   // ram_enemy_spawn_cnt ($7F)
-    this.enemiesLeft = 0;       // ram_enemies_left_cnt ($80)
-    this.enemyLimit = 0;        // ram_enemy_limit ($6C)
-    this.spawnInterval = 0;     // ram_enemy_spawn_interval ($84)
+    // Enemy spawn bookkeeping. (ram_enemies_left_cnt $80, the DEFEAT counter, lives
+    // on Game — it gates stage ending and is decremented on enemy death; here we own
+    // the SPAWN machinery only.)
+    this.enemySpawnCount = 0;   // ram_enemy_spawn_cnt ($7F) — enemies left to spawn
+    this.enemyLimit = 0;        // ram_enemy_limit ($6C) — highest enemy slot (max concurrent)
+    this.spawnInterval = 0;     // ram_enemy_spawn_interval ($84) — frames between spawns
     this.spawnTimer = 0;        // ram_enemy_timer_before_spawn ($82)
-    this.spawnPosIndex = 0;     // ram_enemy_spawn_pos_index ($6A)
+    this.spawnPosIndex = 0;     // ram_enemy_spawn_pos_index ($6A) — cycles the 3 top slots
+    // Per-stage enemy type schedule (sub_E42B / sub_E3B8).
+    this.enemyTypes = STAGE_ENEMY_TYPES[0];        // the 4 type bytes for this stage
+    this.enemyTypeCount = [0, 0, 0, 0];            // ram_enemy_type_stage_cnt ($8B) — mutable
+    this.enemyTypeOffset = 0;                      // ram_enemy_type_offset ($8F)
   }
 
   get players() { return this.tanks.slice(0, 2); }
@@ -72,18 +81,40 @@ export class TankRoster {
     for (const tank of this.players) tank.control(input);
   }
 
-  // sub_DBF1 ($DBF1) — the move step (pipeline step 3). A player moves 3 of every 4
-  // frames ($DC09-$DC13, the same gate as control). Enemies (slots 2..7) get their
-  // move from EnemyAI (deferred) — none are drivable yet, so this is players only.
-  /** @param {Field} field  @param {number} frameLo */
-  moveTanks(field, frameLo) {
-    const playerGated = (frameLo & 1) === 0 && (frameLo & 3) !== 0;
-    for (const tank of this.tanks) {
+  // sub_DBF1_tank_movement ($DBF1) — the move step (pipeline step 3). Loops 7->0.
+  // Players move 3 of every 4 frames ($DC09-$DC13). Enemies are gated by the clock
+  // freeze then a per-type speed gate, and dispatched through their status handler.
+  //
+  // Players move on the 3/4-frame cadence; each live enemy passes the clock-freeze
+  // and per-type speed gates, then runs its status handler through enemyAI.drive
+  // (respawn included). The AI context is per-frame constant (the two players, the
+  // stage clock + spawn interval that bias the enemy's target choice).
+  /**
+   * @param {Field} field  @param {number} frameLo  @param {number} clockTimer
+   * @param {import('./enemy_ai.js').EnemyAI} enemyAI  @param {number} frameHi
+   */
+  moveTanks(field, frameLo, clockTimer, enemyAI, frameHi) {
+    const playerGated = (frameLo & 1) === 0 && (frameLo & 3) !== 0;   // $DC09-$DC13
+    const ctx = { frameHi, spawnInterval: this.spawnInterval, players: [this.tanks[0], this.tanks[1]] };
+    for (let slot = MAX_TANKS - 1; slot >= 0; slot--) {
+      const tank = this.tanks[slot];
       if (tank.isPlayer) {
         if (!playerGated) tank.moveStep(field);
+        continue;
       }
-      // TODO: enemy movement ($DC18 clock/type gate + EnemyAI) when EnemyAI lands.
+      // --- enemy ($DC18) ---
+      // Clock freeze: a live drivable enemy is frozen while clock_timer != 0;
+      // exploding ($DC1F BPL) and respawning ($DC21 CMP #$E0) enemies proceed.
+      if (clockTimer !== 0 && tank.state >= 0x80 && tank.state < 0xE0) continue;  // $DC1D-$DC23
+      // Speed gate ($DC25-$DC33): a FAST tank (type & $F0 == $A0) moves every frame;
+      // any other enemy moves only when (slot ^ frm_cnt_lo) & 1 != 0 — alternate
+      // frames, staggered by slot so the enemies don't all step in lockstep.
+      const fast = (tank.type & 0xF0) === TANK_TYPE.FAST_HI;
+      if (!fast && ((slot ^ frameLo) & 1) === 0) continue;   // $DC2D-$DC33
+      enemyAI.drive(tank, field, ctx);                       // $DC35 sub_DC3D dispatch
     }
+    // TODO: clock_timer countdown ($DBFA-$DC00, DEC once/64 frames while frozen) —
+    //   with Bonus; clock_timer stays 0 until the clock power-up exists.
   }
 
   // sub_E363_tank_spawn_handler ($E363), player path — place a player at its spawn
@@ -97,8 +128,68 @@ export class TankRoster {
     tank.spawn();                       // $E379 -> loc_E3A9
   }
 
-  spawnEnemyTick() { /* TODO: port $DB48 */ }
-  prepareForStage(stage) { /* TODO: port $E42B */ }
+  // sub_E42B_prepare_enemy_tanks_for_stage ($E42B) + the enemy slice of sub_C331
+  // ($C331). Load this stage's type counts and reset the spawn counters. The 2nd
+  // loop reuses stage $23's schedule ($E42F); `enemyLimit` (1P 5 / 2P 7) and
+  // `spawnInterval` are computed by Game.prepareStage and handed in.
+  /** @param {{stage:number, secondLoop:number, enemyLimit:number, spawnInterval:number}} p */
+  prepareForStage({ stage, secondLoop, enemyLimit, spawnInterval }) {
+    const idx = (secondLoop === SECOND_LOOP.SECOND ? SECOND_LOOP_STAGE : stage) - 1;
+    this.enemyTypes = STAGE_ENEMY_TYPES[idx];         // tbl_E4EC[stage]
+    this.enemyTypeCount = [...STAGE_ENEMY_COUNTS[idx]]; // tbl_E578[stage] -> $8B (copy: consumed)
+    this.enemyTypeOffset = 0;                         // $C35B
+    this.enemySpawnCount = ENEMIES_PER_STAGE;         // $C355 — 20 to spawn
+    this.spawnTimer = 0;                              // $C36B — first enemy spawns at once
+    this.spawnPosIndex = 0;                           // $C372
+    this.enemyLimit = enemyLimit;                     // $6C (mode-dependent)
+    this.spawnInterval = spawnInterval;               // $84 (stage/mode-dependent)
+  }
+
+  // sub_DB48_enemy_spawn_handler ($DB48), pipeline step 10. When the inter-spawn
+  // timer elapses and enemies remain, spawn the next one into the first FREE enemy
+  // slot (scanning DOWN from enemyLimit to 2). No free slot -> nothing this frame,
+  // which is the "max N enemies on screen" rule (4 in 1P, 6 in 2P).
+  spawnEnemyTick() {
+    if (this.spawnTimer > 0) { this.spawnTimer--; return; }   // $DB4A-$DB4E
+    if (this.enemySpawnCount === 0) return;                   // $DB4F-$DB51 all spawned
+    for (let slot = this.enemyLimit; slot >= 2; slot--) {     // $DB53-$DB72 scan enemy slots
+      if (this.tanks[slot].state !== 0) continue;             // $DB59-$DB5B occupied
+      this.spawnTimer = this.spawnInterval;                   // $DB5D-$DB5F reload
+      this.spawnEnemy(slot);                                  // $DB61 sub_E363
+      this.enemySpawnCount--;                                 // $DB64
+      // TODO: sub_C8B1_erase_enemy_icon ($DB68) when the enemy-icon HUD lands (Score/S8).
+      return;
+    }
+  }
+
+  // sub_E363_tank_spawn_handler ($E363), enemy path — place an enemy at the next of
+  // the three top spawn points, mark the bonus-carriers, and assign its type, then
+  // enter the RESPAWN state (Tank.spawn animates it in). The type write is sub_E3B8's
+  // in the ROM; it is moved here (governing-test deviation, see Tank.becomeDrivable).
+  spawnEnemy(slot) {
+    const tank = this.tanks[slot];
+    this.spawnPosIndex = (this.spawnPosIndex + 1) % 3;   // $E37C-$E388 cycle 0/1/2
+    const pos = ENEMY_SPAWN[this.spawnPosIndex];         // tbl_E474/E477
+    tank.x = pos.x; tank.y = pos.y;                      // $E38A-$E391
+    const bonus = BONUS_SPAWN_COUNTS.includes(this.enemySpawnCount);  // $E393-$E39F 4th/11th/18th
+    tank.type = this._nextEnemyType(bonus ? TANK_TYPE.BONUS_FLAG : 0);
+    // TODO: bonus tank hides the current bonus pickup ($E3A5-$E3A7) — Bonus/S7.
+    tank.spawn();                                        // $E3A9 loc_E3A9 -> RESPAWN ($F0)
+  }
+
+  // sub_E3B8 ($E3CB-$E408), enemy type assignment. Walk the type schedule: skip any
+  // type-slot whose count is exhausted, consume one from the current slot, and return
+  // its type byte. $E0 (armour) spawns as $E3 (a 3-hit counter in the low bits); the
+  // bonus flag is OR'd in, and $E7 (armour+bonus) clamps to $E4.
+  _nextEnemyType(bonusFlag) {
+    while (this.enemyTypeCount[this.enemyTypeOffset] === 0) this.enemyTypeOffset++;  // $E3CB-$E3D4
+    this.enemyTypeCount[this.enemyTypeOffset]--;                                     // $E3D7-$E3DA
+    let type = this.enemyTypes[this.enemyTypeOffset];                               // tbl_E4EC
+    if (type === TANK_TYPE.ARMOR) type |= TANK_TYPE.ARMOR_HP;                        // $E3F4-$E3F8 $E0->$E3
+    type |= bonusFlag;                                                               // $E3FA ORA type
+    if (type === 0xE7) type = 0xE4;                                                  // $E3FC-$E400
+    return type;
+  }
 
   // sub_E27C_players_invincibility_handler ($E27C), UPDATE half (pipeline step 7):
   // count the spawn helmet down one tick every 64 frames. The ROM routine also

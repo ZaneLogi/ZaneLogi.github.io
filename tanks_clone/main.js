@@ -18,6 +18,11 @@ const canvas = document.getElementById('screen');
 const game = new Game(canvas);
 game.boot();
 
+// NOT SOURCE — a debug handle on the live instance (same category as hud.js). Lets a
+// console / test session inspect and drive the running game (e.g. force a Battle with
+// enemies for a screenshot). The game never reads it back; it can be dropped anytime.
+window.game = game;
+
 // Debug instrument, NOT part of the game — it lives in main.js so Game stays clean
 // and knows nothing about it. Retire it once Renderer draws. See hud.js.
 const hud = document.getElementById('hud');

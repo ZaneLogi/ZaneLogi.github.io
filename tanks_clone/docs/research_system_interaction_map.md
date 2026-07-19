@@ -300,13 +300,21 @@ Routines: `DEA6`/`DEB8` (draw+state), `DC3D_tank_status_handler`,
 `DBF1_tank_movement`, `DB75_ice_movement`, `E363_tank_spawn_handler`,
 `DB48_enemy_spawn_handler`, `E42B_prepare_enemy_tanks_for_stage`,
 `E27C_players_invincibility_handler`, `E420_change_tank_status`.
+**Player movement ported P6; the enemy spawn machinery (`DB48`/`E42B`/`E363`/`E3B8`)
+ported P9** — `docs/research_enemy_ai.md §5`.
 
 **S4 — Enemy AI.** Not a separate routine block — woven into S3. Targeting bias
 lives in the `tank_flags` nibble (`$B0/$C0/$D0` follow HQ/p2/p1); movement
 decisions in `DBF1_tank_movement` using `D44D` RNG and
-`ram_enemy_destination_X/Y`; firing in `E162` (1/32 roll). Enemy *types/counts*
-per stage in `ram_enemy_type_stage_cnt` ($8B, 4 bytes = 4 types) **[?]** and
-`E42B`.
+`ram_enemy_destination_X/Y`; firing in `E162` (1/32 roll). **Ported P9** (movement
+only — fire is P10): the state machine (`$80`/`$90`/`$A0` + the follow states) is the
+enemy movement, so the port keeps the shared step on `Tank` and the decisions on a
+stateless `EnemyAI`; target selection drifts wander→player→HQ (`sub_DE72`) with a
+biased direction chooser (`sub_DDA2` + `tbl_E486`). Enemy **types/counts** per stage
+are decoded: `ram_enemy_type_stage_cnt` ($8B, 4 bytes) = the *counts* of the 4 type-
+slots (`tbl_E578`, summing to 20), and `tbl_E4EC` = their type bytes ($80 basic / $A0
+fast / $C0 power / $E0 armour). Full decode: `docs/research_enemy_ai.md`.
+*(Resolved 2026-07-19; the "4 types per stage" [?] was a §8 item.)*
 
 **S5 — Bullets.** Per-tank arrays (8 wide) + 2nd bullet (players only, 2 wide)
 **[D]**: `bullet_pos_X`($B8)/`_Y`($C2), `bullet_status`($CC),
@@ -407,6 +415,9 @@ Detail: `research_game_flow.md` §6d/§6e.
 
 **S12 — RNG.** `D44D_generate_random_number`: `random = random*7 + frm_cnt_hi +
 zp[++index]` **[D]**. Consumed by S4 (movement, fire), S7 (bonus pos), spawn.
+**Ported P9** — the `zp[++index]` stir is live game state (an entropy source the port
+does not reconstruct); re-derived as a 16-bit LFSR + `frm_cnt_hi`, which is
+reproducible (so movement tests are deterministic). `docs/research_enemy_ai.md §1`.
 
 **S13 — Construction (stage editor).** `loc_C0AE_construction_handler` + cursor
 movement + block paste. Ships in the retail ROM. Deferral candidate (not core
@@ -555,12 +566,13 @@ list, and a finding parked in §8 is a finding nobody reads. Cross-reference the
 resolution with a short `*(Resolved YYYY-MM-DD; was a §8 [?].)*` note at its new
 home, so the history is recoverable without the list carrying it.
 
-- **[?]** Enemy type model: `ram_enemy_type_stage_cnt` ($8B, 4 bytes) = the 4
-  enemy tank types (basic/fast/power/armor) per stage? Confirm in `E42B`.
-- **[?]** `tank_type` bit layout — *partly decoded, still incomplete.* Known
-  **[D]**: bit 2 (`& $04`) = carries-a-bonus (`$DFBA`); bits 0–1 index `tbl_E003`
-  for the palette, so they are almost certainly the 4 enemy types; `& $C0 == $40`
-  gates the 2-bullet upgrade (`E122`). Still open: armour levels, speed.
+- **[?]** `tank_type` bit layout — *mostly decoded.* Known **[D]**: the four enemy
+  types are `$80` basic / `$A0` fast / `$C0` power / `$E0` armour (`tbl_E4EC`); a
+  **fast** tank is `type & $F0 == $A0` and moves every frame (`$DC29` speed gate, P9);
+  **armour** spawns as `$E3`, a 3-in-the-low-bits hit counter (`$E3F6`, P9); bit 2
+  (`& $04`) = carries-a-bonus (`$DFBA`/`$E3A1`); `& $C0 == $40` gates the players'
+  2-bullet upgrade (`E122`). Still open: the armour **damage-decrement** mechanic
+  ($E3→$E2→… on hits) — P10 combat.
 - **[?]** Exactly which power-ups exist and their `bonus_id` values (S7).
 
 These get resolved as the work reaches them — each finding landing wherever it
