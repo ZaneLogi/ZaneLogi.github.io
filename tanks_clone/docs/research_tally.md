@@ -146,8 +146,9 @@ Verified on screen (§8): the header reads red, the scores orange, the count-out
 3. **`$2800` / `base_nmt` / `ram_0060` / `ram_006B`** are CPU-only render state: the
    port builds a `Tilemap` and passes the digit-font ($30) and leading-zero (`minDigits
    1`, i.e. `006B = 1`) params **per `drawNumber` call**. So `loc_CEE5`'s reset of those
-   bytes has no analog beyond `bgPaletteId = 0`; the §"Debt" `006B` item is moot here
-   (nothing global to leak).
+   bytes has no analog beyond `bgPaletteId = 0` — though that `006B = 0` reset is exactly
+   what makes a post-game *title* score print "00" (decoded in research_game_over.md §4a);
+   here it has nothing global to leak.
 4. **Icons drawn directly** as sprites at the four fixed positions, not routed through a
    `Tank` object (no state/dir/wheels — `sub_D130` uses the bare type tile).
 

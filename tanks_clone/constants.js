@@ -394,6 +394,64 @@ export const SHOVEL_TIMER_INIT = 0x14;   // $EA02 LDA #$14
 // --- Bonus / power-up ids (ram_bonus_id) ---
 // TODO: decode from E8BE_spawn_bonus / E972_try_to_pick_up_bonus.
 
+// --- End-of-run screens & PAUSE (P12) — sub_C5D9 / sub_C44B / sub_C972 / sub_C8F9 ---
+//
+// GAME OVER + HALL OF FAME are full-screen HUGE-text screens (drawHugeText, the brick-
+// glyph letters in text.js). The sliding "GAME OVER" message and the "PAUSE" readout are
+// front SPRITES. Full decode: docs/research_game_over.md.
+
+// The two huge-text screens. Strings verified against the ROM bytes ("labels lie"):
+// tbl_D2B5="HISCORE", tbl_D343="GAME", tbl_D348="OVER". Each { str, x, y } is the pixel
+// (X,Y) the screen loads into ram_0056/ram_0057 before sub_D8D2_draw_huge_letters.
+export const HUGE_TEXT = Object.freeze({
+  GAME:    { str: 'GAME',    x: 0x3C, y: 0x46 },   // $C5E9/$C5ED  tbl_D343
+  OVER:    { str: 'OVER',    x: 0x3C, y: 0x78 },   // $C5FC/$C600  tbl_D348
+  HISCORE: { str: 'HISCORE', x: 0x10, y: 0x32 },   // $C45B/$C45F  tbl_D2B5
+});
+
+// sub_D951_draw_huge_hiscore ($D951): the hi-score drawn HUGE, right-aligned in a
+// 7-digit field starting at px (0x10, 0x64). Each huge digit is 0x20 px wide; the ROM
+// skips leading-zero digits, advancing X by 0x20 per skip ($D965-$D96A) — so a right-
+// aligned draw is startX = 0x10 + (7 - digitCount) * 0x20.
+export const HUGE_HISCORE = Object.freeze({ x0: 0x10, y: 0x64, digitPx: 0x20, fieldDigits: 7 });
+
+// HALL OF FAME colour flash ($C489-$C490): bg_palette_id = (frm_cnt_lo & 3) + 5, i.e.
+// con_bg_pal_05..08 cycling; con_bg_pal_00 on the way out ($C497).
+export const HOF_PAL_BASE = 5;      // con_bg_pal_05
+export const HOF_PAL_MASK = 0x03;   // $C48B AND #$03
+export const BG_PAL_TITLE = 0x00;   // con_bg_pal_00 — GAME OVER / HALL OF FAME exit default
+
+// The sliding "GAME OVER" message — sub_C972 (animate) + sub_C947 (draw). Started by
+// $C737 (begin), cleared per stage by $C337-$C33E (clear). movType indexes the speed
+// tables below; the real game-over message uses UP.
+export const GAME_OVER_MSG = Object.freeze({
+  BEGIN_X: 0x70,      // $C737
+  HIDE_Y:  0xF0,      // $C33C / $C73C / $C988 — off-screen Y (per-stage clear + timer-0 hide)
+  MOV_UP:  0x00,      // movType 0 — tbl_D3D5[0]/tbl_D3D9[0]
+  TIMER_INIT: 0x11,   // $C746
+  MOVE_UNTIL: 0x0A,   // $C990 CMP #$0A — move only while timer >= this
+  DEC_MASK: 0x0F,     // $C97F AND #$0F — DEC the timer every 16 frames
+  PALETTE: 0x03,      // $C947 spr_A_palette
+  // sub_C947 -> two sub_DA7B groups at (posX, $79) and (posX+$10, $7D); each draws
+  // tile @ x-8 and tile+2 @ x. Net 4 sprites at these [dx, tile] from posX:
+  SPRITES: [[-8, 0x79], [0, 0x7B], [8, 0x7D], [0x10, 0x7F]],
+});
+// tbl_D3D5_game_over_message_spd_X ($D3D5) / tbl_D3D9_..._spd_Y ($D3D9), indexed by
+// movType (Up/Left/Down/Right). Stored signed here ($FF -> -1).
+export const GAME_OVER_MSG_DX = [0, -1, 0, 1];   // $D3D5: 00 FF 00 01
+export const GAME_OVER_MSG_DY = [-1, 0, 1, 0];   // $D3D9: FF 00 01 00
+
+// The blinking "PAUSE" readout — sub_C8F9_display_pause_text ($C8F9). Shown while paused
+// AND (frm_cnt_lo & 0x10) != 0 (16 frames on, 16 off). Five 8x16 front sprites (the BG-
+// glyph letters P A U S E), palette 3, all at Y=0x80, 8 px apart.
+export const PAUSE_TEXT = Object.freeze({
+  BLINK_MASK: 0x10,   // $C8FF AND #$10
+  Y: 0x80,            // $C90D
+  PALETTE: 0x03,      // $C903
+  // [spr_X, spr_T] per letter ($C90B-$C934): P A U S E.
+  SPRITES: [[0x64, 0x17], [0x6C, 0x19], [0x74, 0x1B], [0x7C, 0x1D], [0x84, 0x1F]],
+});
+
 // NES display geometry
 export const SCREEN_W = 256;
 export const SCREEN_H = 240;

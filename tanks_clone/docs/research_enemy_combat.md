@@ -183,8 +183,8 @@ game-over-flag guard (`$D13A`) is dropped here.
 
 ## §8 Open / deferred
 
-- **GAME OVER flow (separate step):** hi-score-beaten (`$D97D` / `Score.checkHiscore`,
-  a stub) + HALL OF FAME routing + `updateGameOverText` (`$C972`, a stub) + the jingle
-  gates (Audio). The per-player 2P death message (`$DE18`/`$DE46`) rides with it.
+- **GAME OVER flow — BUILT in P12** (`Score.checkHiscore` `$D97D`, both boards, the
+  sliding `updateGameOverText` `$C972`; see research_game_over.md). Still deferred from
+  it: the jingle gates (Audio) and the per-player 2P death message (`$DE18`/`$DE46`).
 - **Bonus (S7):** the bonus-tank power-up drop (`sub_E8BE`).
 - **Audio:** every `sfx_*` write (explosion / hit / fire / gain-life).

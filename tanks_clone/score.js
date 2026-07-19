@@ -4,7 +4,8 @@
 //   labels, the flag + stage number. Full decode: docs/research_hud.md.
 // S8-B — score ACCUMULATION: add_score ($D9BE) + extra-life ($D138), driven by
 //   P10 kills (Game.awardKill) and, when S7 lands, Bonus pickups. hi-score-beaten
-//   ($D97D / checkHiscore) is a stub — it belongs with the GAME OVER flow. The Tally
+//   ($D97D / checkHiscore) is ported in P12 (the GAME OVER flow, docs/research_game_over.md
+//   §4) — it raises the hi-score at game over and routes to HALL OF FAME. The Tally
 //   count-out screen ($CEF7) is P11 (docs/research_tally.md); it reads killCounts but
 //   adds only to a display subtotal, never re-crediting the score this file owns.
 //
@@ -151,8 +152,18 @@ export class Score {
     // GAME OVER flow (a separate step); at a normal kill the eagle still stands.
   }
 
-  // sub_D97D_check_hiscore_beaten ($D97D) — DEFERRED. It runs at GAME OVER ($C286) to
-  // raise the hi-score and route to HALL OF FAME; that's the game-over flow, a separate
-  // step. Score accumulation (add, above) does not need it.
-  checkHiscore() { /* TODO: port $D97D — with GAME OVER / HALL OF FAME */ }
+  // sub_D97D_check_hiscore_beaten ($D97D). Runs once at GAME OVER ($C286): compare each
+  // player's score to the hi-score and RAISE the hi-score to the higher one; return
+  // whether it was beaten (the caller then routes to HALL OF FAME). The ROM walks the
+  // 7-digit BCD arrays MSB-first ($D981 / $D9A0) and copies only on a strictly-greater
+  // digit (BMI = less -> not beaten, so an EQUAL score does not count); with int scores
+  // that is one `>`. P1 is checked first, then P2 against the possibly-raised value, so
+  // the net is hiScore = max(hiScore, s0, s1), beaten if either strictly exceeded it.
+  /** @param {import('./game.js').Game} game */
+  checkHiscore(game) {
+    let beaten = false;
+    if (game.scores[0] > game.hiScore) { game.hiScore = game.scores[0]; beaten = true; }  // $D981-$D99C (Y=1)
+    if (game.scores[1] > game.hiScore) { game.hiScore = game.scores[1]; beaten = true; }  // $D9A0-$D9BB (Y=$FF)
+    return beaten;
+  }
 }

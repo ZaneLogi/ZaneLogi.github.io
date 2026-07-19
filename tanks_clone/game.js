@@ -41,6 +41,7 @@ import { Editor } from './modes/editor.js';
 import {
   GAME_MODE, SECOND_LOOP, ENEMIES_PER_STAGE, ENEMY_KILL_POINTS,
   SPAWN_INTERVAL_BASE, SPAWN_INTERVAL_2P_ADJ, SECOND_LOOP_STAGE,
+  GAME_OVER_MSG, GAME_OVER_MSG_DX, GAME_OVER_MSG_DY,
 } from './constants.js';
 import { LEVELS } from './assets/dat_levels.js';
 
@@ -77,10 +78,19 @@ class GameOverMessage {
   // site — $DE18 -> sub_DE46 ($DE46) — which slides in from the side and does not
   // end the stage. Same four variables, same animator. Flow doc §6f.)
   begin() {
-    this.posX = 0x70;      // $C737
-    this.posY = 0xF0;      // $C73C
-    this.movType = 0;      // $C741 — move up
-    this.timer = 0x11;     // $C746
+    this.posX = GAME_OVER_MSG.BEGIN_X;      // $C737
+    this.posY = GAME_OVER_MSG.HIDE_Y;       // $C73C — starts off-screen (bottom), slides up
+    this.movType = GAME_OVER_MSG.MOV_UP;    // $C741 — move up
+    this.timer = GAME_OVER_MSG.TIMER_INIT;  // $C746
+  }
+
+  // $C337-$C33E, in sub_C331 (prepareStage): a fresh stage starts with no message —
+  // off-screen and inert. Without this, a prior game-over message's leftover timer would
+  // draw the "GAME OVER" sprites over the next run's first battle (sub_C972 draws while
+  // timer != 0).
+  clear() {
+    this.posY = GAME_OVER_MSG.HIDE_Y;   // $C337-$C339
+    this.timer = 0;                     // $C33C-$C33E
   }
 }
 
@@ -295,6 +305,7 @@ export class Game {
   prepareStage() {
     this.bullets.clearAll();                // $C331 sub_E409_clear_bullet_status
     this.roster.clearAll();                 // $C334 sub_E413 — zero every slot's flags
+    this.gameOverMsg.clear();               // $C337-$C33E — a fresh stage has no message pending
     this.enemiesLeft = ENEMIES_PER_STAGE;   // $C355/$C357 — 20 ($14)
     this.frm.hi = 0;                        // $C35D
     this.constrUsageCnt = 0;                // $C35F — a constructed stage plays ONCE (§6c)
@@ -326,8 +337,9 @@ export class Game {
     // TODO: the OTHER power-up timers ($C363-$C367: helmet) — Bonus/S7.
   }
 
-  // sub_D97D_check_hiscore_beaten ($D97D).
-  hiScoreBeaten() { /* TODO: port $D97D */ return false; }
+  // sub_D97D_check_hiscore_beaten ($D97D) — the $C286 branch flow.js decides on. Score
+  // owns the score logic + the hi-score it raises; this is the Game-level entry.
+  hiScoreBeaten() { return this.score.checkHiscore(this); }
 
   // ---- sub_C2E6_main_battle_script ($C2E6) — the 18-step pipeline, IN ORDER ----
   //
@@ -356,10 +368,36 @@ export class Game {
     this.waterPaletteSwap();                                      // 18 $C31D
   }
 
-  // sub_C972_game_over_text_handler ($C972) — animates gameOverMsg.
-  // Returns immediately in the demo ($C979 CMP #con_flag_demo) — the attract mode
-  // never shows GAME OVER. Flow doc §6f.
-  updateGameOverText() { /* TODO: port $C972 */ }
+  // sub_C972_game_over_text_handler ($C972), pipeline step 15 — the UPDATE half of the
+  // sliding "GAME OVER" message (the DRAW is drawGameOverText, the render half, per the
+  // Mode contract). No message (timer 0) or the attract demo -> nothing. Flow doc §6f.
+  updateGameOverText() {
+    const m = this.gameOverMsg;
+    if (m.timer === 0) return;                             // $C972-$C975 — no message
+    if (this.secondLoop === SECOND_LOOP.DEMO) return;      // $C977-$C97B — the demo never shows it
+    if ((this.frm.lo & GAME_OVER_MSG.DEC_MASK) === 0) {    // $C97D-$C981 — every 16 frames
+      if (--m.timer === 0) m.posY = GAME_OVER_MSG.HIDE_Y;  // $C983-$C98A — hide when it expires
+    }
+    if (m.timer >= GAME_OVER_MSG.MOVE_UNTIL) {             // $C98D-$C992 — move only while timer >= $0A
+      m.posX = (m.posX + GAME_OVER_MSG_DX[m.movType]) & 0xFF;  // $C994-$C99F  tbl_D3D5 spd_X
+      m.posY = (m.posY + GAME_OVER_MSG_DY[m.movType]) & 0xFF;  // $C9A2-$C9A9  tbl_D3D9 spd_Y
+    }
+  }
+
+  // sub_C947_display_game_over_text_with_sprites ($C947) — the RENDER half: 4 front
+  // sprites ($79/$7B/$7D/$7F, palette 3) at posX-8 / posX / posX+8 / posX+$10, all at
+  // posY. sub_C972 only reaches the draw while the message is live and not the demo
+  // (its two early returns), so this gates the same way — a no-op when there is no
+  // message, and the one invisible frame at posY=$F0 (timer just hit 0) is not drawn,
+  // which is unobservable.
+  /** @param {import('./renderer.js').Renderer} renderer */
+  drawGameOverText(renderer) {
+    const m = this.gameOverMsg;
+    if (m.timer === 0 || this.secondLoop === SECOND_LOOP.DEMO) return;
+    for (const [dx, tile] of GAME_OVER_MSG.SPRITES) {                // sub_C947 -> sub_DA7B x2
+      renderer.drawSprite(tile, (m.posX + dx) & 0xFF, m.posY, GAME_OVER_MSG.PALETTE);
+    }
+  }
 
   // sub_C31D_water_palette_swap_handler ($C31D), pipeline step 18 — the water shimmer.
   // ram_bg_palette_id is con_bg_pal_02 for frames lo%64 in [0,31] and con_bg_pal_01 for

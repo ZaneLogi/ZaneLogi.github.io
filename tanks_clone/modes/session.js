@@ -17,7 +17,7 @@
 
 import { Mode, DONE } from '../mode.js';
 import {
-  BTN, GAME_MODE, SECOND_LOOP, TILE, TALLY, ENEMY_KILL_POINTS,
+  BTN, GAME_MODE, SECOND_LOOP, TILE, TALLY, ENEMY_KILL_POINTS, PAUSE_TEXT,
 } from '../constants.js';
 import { Tilemap, TILEMAP_ROWS } from '../tilemap.js';
 import { drawNumber, writeText } from '../text.js';
@@ -190,6 +190,43 @@ function buildStageCurtain(stage) {
   return tm;
 }
 
+// The battlefield: the field ($0400 buffer) with every sprite layer on top — the four
+// PPU layers (backdrop -> behind-BG sprites -> BG (colour-0 transparent) -> front sprites).
+// SHARED by Battle ($C200 loop) and Tail ($C238 loop): both run mainBattleScript and both
+// draw the same world with the same sprite calls ($C206/$C209 in Battle, $C247/$C244 in
+// Tail), all OUTSIDE the $C2E6 pipeline — so they belong in render(). The sliding GAME
+// OVER message (sub_C947, gated) rides on top of everything; the blinking PAUSE text
+// ($C21B sub_C8F9) is Battle-only (the Tail loop does not call it).
+/** @param {import('../game.js').Game} g  @param {Renderer} renderer */
+function renderBattlefield(g, renderer, { pause = false } = {}) {
+  // The water shimmer rides the live bgPaletteId ($C31D swaps it 02<->01 every 32 frames).
+  renderer.beginSpriteLayers();
+  g.roster.render(renderer, g.frm.lo, g.field);      // $C209/$C244 sub_DEA6 — tanks + spawn star
+  g.bullets.render(renderer);                        // $C206/$C247 sub_E0D8 — bullet + hit sprites
+  g.roster.drawShields(renderer, g.frm.lo);          // $E27C draw half — spawn helmet
+  g.base.render(renderer);                           // $E2A9 step 6 — the eagle explosion
+  g.drawGameOverText(renderer);                      // $C310 / sub_C947 — the sliding message (gated)
+  if (pause) drawPauseText(g, renderer);             // $C21B sub_C8F9 — Battle only
+  // OAM priority (lowest index = front-most): the message/PAUSE > eagle explosion (step 6)
+  // > shields (step 7) > bullets > tanks. The front list paints in enqueue order (last on
+  // top), so enqueuing tanks..message paints them back-to-front — the ROM's OAM order.
+  renderer.flushSprites(true);                       // behind-BG (forest-covered) sprites
+  renderer.drawTilemap(g.field.tilemap, g.bgPaletteId, 0, 0, true);   // BG, transparent index 0
+  renderer.flushSprites(false);                      // front sprites, on top
+}
+
+// sub_C8F9_display_pause_text ($C8F9) — the blinking "PAUSE" readout, shown only while
+// paused AND (frm_cnt_lo & 0x10) != 0 (16 frames on, 16 off). Five 8x16 front sprites
+// (the BG-glyph letters P A U S E), palette 3, all at Y=0x80.
+/** @param {import('../game.js').Game} g  @param {Renderer} renderer */
+function drawPauseText(g, renderer) {
+  if (!g.paused) return;                                  // $C8F9-$C8FB
+  if ((g.frm.lo & PAUSE_TEXT.BLINK_MASK) === 0) return;   // $C8FD-$C901 — the blink
+  for (const [x, tile] of PAUSE_TEXT.SPRITES) {           // $C90B-$C934
+    renderer.drawSprite(tile, x, PAUSE_TEXT.Y, PAUSE_TEXT.PALETTE);
+  }
+}
+
 // --- bra_C1F9_loop ($C1F9) — the battle --------------------------------------
 class Battle extends Mode {
   update() {
@@ -210,33 +247,20 @@ class Battle extends Mode {
       // TODO: $C218 ram_sfx_pause. Pausing MUTES ($EA7E reads the flag) — that is
       // Battle's fact, separate from the demo's silence. Flow doc §6e.
     }
-    // TODO: $C21B sub_C8F9_display_pause_text.
+    // $C21B sub_C8F9_display_pause_text — the blinking PAUSE text, now drawn in render()
+    // (drawPauseText, the render half) since it emits sprites.
 
     return g.checkStageEnding() ? DONE : null;   // $C21E / $C221
   }
 
-  // The battlefield: the field ($0400 buffer) with the tank sprites on top. The
-  // tank draw ($C209 sub_DEA6) sits OUTSIDE the $C2E6 pipeline in the ROM too — it
-  // is the render half — so it belongs here, not in update(). Bullets/HUD/shields
-  // land as their subsystems arrive.
+  // The battlefield, via the shared renderBattlefield (Battle + Tail draw the same world).
+  // Battle also draws the blinking PAUSE text ($C21B). Both the tank/bullet sprite draws
+  // ($C206/$C209) and PAUSE sit OUTSIDE the $C2E6 pipeline in the ROM — the render half —
+  // so they are render(), not update(). They keep running even while paused (the ROM jumps
+  // past $C200 to $C203 on pause), which is why sprites still show on the pause screen.
   /** @param {Renderer} renderer */
   render(renderer) {
-    const g = this.game;
-    // Four PPU layers: backdrop (beginFrame) -> behind-BG sprites (tanks on forest,
-    // $DA3B) -> BG (field, colour-0 transparent) -> front sprites. The water shimmer
-    // rides the live bgPaletteId ($C31D swaps it 02<->01 every 32 frames).
-    renderer.beginSpriteLayers();
-    g.roster.render(renderer, g.frm.lo, g.field);      // $C209 sub_DEA6 — tanks + spawn star
-    g.bullets.render(renderer);                        // $C206 sub_E0D8 — bullet + hit sprites
-    g.roster.drawShields(renderer, g.frm.lo);          // $E27C draw half — spawn helmet, front
-    g.base.render(renderer);                           // $E2A9 step 6 — the eagle explosion
-    // OAM priority (lowest index = front-most): the eagle explosion (step 6) > shields
-    // (step 7) > bullets ($C206) > tanks ($C209); the front list paints in enqueue order,
-    // so enqueuing tanks -> bullets -> shields -> explosion paints them back-to-front —
-    // the ROM's OAM order (earlier pipeline step = lower index = drawn on top).
-    renderer.flushSprites(true);                       // behind-BG (forest-covered) sprites
-    renderer.drawTilemap(g.field.tilemap, g.bgPaletteId, 0, 0, true);   // BG, transparent index 0
-    renderer.flushSprites(false);                      // front sprites, on top
+    renderBattlefield(this.game, renderer, { pause: true });
   }
 }
 
@@ -264,8 +288,20 @@ class Tail extends Mode {
     // TODO: $C23B sub_C2A2_disable_buttons_if_game_over — zeroes btn_press so the
     // player cannot act while the message slides.
     g.mainBattleScript();   // $C23E — the SAME body Battle and the demo run
-    // TODO: $C241 $E23B, $C244 $DEA6, $C247 $E0D8, $C24A $C31D water swap.
+    // The render-half calls that follow in the ROM's Tail loop: $C244 $DEA6 tanks +
+    // $C247 $E0D8 bullets are drawn in render() (shared renderBattlefield); $C24A $C31D
+    // is a redundant SECOND water swap (mainBattleScript step 18 already ran it this
+    // frame — idempotent). $C241 $E23B display_bonus is still deferred (Bonus/S7).
     return g.frm.hi === TAIL_END_HI ? DONE : null;   // $C24D-$C251
+  }
+
+  // The frozen battlefield keeps rendering through the tail — explosions finish and the
+  // sliding GAME OVER message climbs over it. The ROM draws it with the same sprite calls
+  // Battle uses ($C244 $DEA6 tanks / $C247 $E0D8 bullets), outside the pipeline, so it is
+  // render() and shares renderBattlefield. No PAUSE here (the Tail loop omits sub_C8F9).
+  /** @param {Renderer} renderer */
+  render(renderer) {
+    renderBattlefield(this.game, renderer);
   }
 }
 

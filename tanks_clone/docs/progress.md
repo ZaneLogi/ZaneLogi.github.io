@@ -676,22 +676,82 @@ but because it described work that had not started yet.)*
     (pane visible): "HI-SCORE 20000" (red/orange), "STAGE 3", "I-PLAYER 12300", the
     count-out mid-progress — `300 PTS 3←`, `400 PTS 2←`, two rows still 0.
 
+- **P12 — GAME OVER / HALL OF FAME, + the sliding message + PAUSE text.** ☑ Done. A run
+  that ends now shows the real closing screens instead of a blank stub: the sliding "GAME
+  OVER" message climbs the battlefield during the tail, then the full-screen GAME OVER
+  board, then (if the hi-score fell) the HI-SCORE board. Plus Zane's add-on — the blinking
+  on-screen PAUSE text. Full decode + citations + verification: `docs/research_game_over.md`.
+  `modes/{game_over,hall_of_fame,session}.js` + `game.js` + `score.js` + `constants.js`
+  touched. Pipeline step 15 (`$C972`) filled; the `$C283-$C295` branch (already in `flow.js`)
+  is now backed by real screens.
+  - **The hi-score check `sub_D97D` — int `max`, strict `>`.** Ports to `Score.checkHiscore`
+    (`Game.hiScoreBeaten` delegates, the `$C286` branch `flow.js` decides on): raise
+    `hiScore` to `max(hi, s0, s1)`, beaten iff either strictly exceeded (a TIE does not
+    count — the ROM's `BMI` = less → not beaten, and equal falls through to not-beaten).
+    P1 is checked first, then P2 against the raised value — the ROM's own order.
+  - **Both boards are HUGE-text screens** (`sub_C5D9` / `sub_C44B`) built on the existing
+    `drawHugeText` (the brick-glyph letters, `text.js`): GAME/OVER (`tbl_D343`/`tbl_D348`)
+    and HISCORE (`tbl_D2B5`) + the huge hi-score NUMBER (`sub_D951`, right-aligned in a
+    7-digit field, `startX = 0x10 + (7-len)*0x20`). Strings verified against the bytes
+    ("labels lie"). A fresh `Tilemap` == `$D47E`'s cleared buffer; `render()` ships it with
+    `drawTilemap`. HALL OF FAME cycles `bg_palette_id = (frm.lo & 3) + 5` (con_bg_pal_05..08
+    flash) in `update()`, exits to `con_bg_pal_00`; GAME OVER inherits the Tally's `00`.
+  - **The sliding message = update/draw split** (`sub_C972` move + `sub_C947` draw). The
+    animator (`Game.updateGameOverText`, step 15) DECs `timer` every 16 frames (hide at 0),
+    and slides while `timer >= $0A` via `tbl_D3D5`/`tbl_D3D9` (movType 0 = up: dy −1); the
+    render half (`Game.drawGameOverText`) emits the 4 sprites `$79/$7B/$7D/$7F` at
+    posX−8/posX/+8/+$10. Demo-exempt (`$C979`). Measured: 240 → 113 over 127 frames, holds,
+    hides at frame 272.
+  - **Found + fixed a missing per-stage clear** — `sub_C331` (prepareStage) zeroes the
+    message at `$C337-$C33E` (`posY=$F0`, `timer=0`); the port lacked it, so a prior run's
+    leftover `timer` would have drawn "GAME OVER" over the next run's first battle. Added
+    `GameOverMessage.clear()` + the `prepareStage` call. research_game_over.md §5.
+  - **The Tail rendered BLANK** — it had no `render()` (inherited the no-op `Mode.render`),
+    so the 256-frame ending tail showed nothing. Factored the Battle 4-layer composite into
+    a shared `renderBattlefield` (session.js); `Tail.render` now draws the frozen
+    battlefield with the message climbing over it (retires the Tail's `$DEA6`/`$E0D8` render
+    TODOs). Battle additionally draws the PAUSE text.
+  - **PAUSE text `sub_C8F9`** (Zane's add-on) — the pause LOGIC already existed (P-toggle +
+    pipeline gate); this adds the readout: 5 blinking front sprites "PAUSE" (`$17/$19/$1B/
+    $1D/$1F`, palette 3), shown while paused AND `(frm.lo & $10)` (16 on / 16 off). Battle-
+    only (the Tail loop omits it). `drawPauseText` in `renderBattlefield({pause})`.
+  - **Deviations** (governing test, research §7): the **jingle gates stay stubbed** — both
+    boards spin until their jingle finishes (`$C630`/`$C495`) and `Audio` is a deferred
+    stub, so each waits a `NOT SOURCE` frame constant (Debt, below); int hi-score (not
+    7-digit BCD); the message move/draw split; PPU-plumbing clears dropped.
+  - **Deferred, cited:** the 2P per-player "player N out" slide (`$DE18`/`sub_DE46`) — 2P-
+    only, mid-run, shares the now-ready `$C972` animator (research §8); all sfx/jingles
+    (Audio).
+  - **Closed the `ram_006B_flag` open item** (flow doc §8 / an old Debt entry — GameOver was
+    its trigger). The worry was that a zero score on the title prints `0` after a game
+    instead of `00`. It doesn't: the shared `$6B` "min-digits" byte is cleared to 0 by the
+    Tally's exit reset (`loc_CEE5` / `$CEF0`), and game over ALWAYS routes through the Tally
+    before the title — so `$6B = 0` there, same as RESET at boot, and a zero score is `"00"`
+    in both cases. The port already produces this (attract.js's title `drawNumber` uses the
+    default `minDigits = 2`); the dropped `$CEF0` write is CPU-only render state whose effect
+    is re-expressed per call. Verified: a zero title score renders two `$30` glyphs. No code
+    change; the resolution lives in `text.js drawNumber`. research_game_over.md §4.
+  - **Verified** — deterministic in-browser (headless `Game`, `getImageData` / a sprite-emit
+    spy, the real Menu→1P→Battle flow): hi-score `max`/strict-`>` incl. the tie; GAME OVER
+    107 lit tiles + Start/Select skip; HALL OF FAME 141 lit tiles + palette cycle 5→8 + exit
+    0; the message slide/hold/hide trace + demo-exempt + the per-stage clear; the 4 message
+    sprites at the right offsets; PAUSE 5 sprites + blink-on/off + unpaused-none; the Tail
+    renders the battlefield (7 distinct colours) with a live message. Live screenshots (pane
+    visible): the GAME OVER board, the HI-SCORE board ("HISCORE" + "31400" right-aligned,
+    flashing), and "PAUSE" mid-battle.
+
 ## Next
-**GAME OVER / HALL OF FAME** — the hi-score-beaten (`$D97D` / `Score.checkHiscore`) + the
-`$C972` game-over-message animation + the jingle gates (Audio). Then **Bonus** (S7) — the
-bonus-tank power-up drop; **Demo** (`$C642`); `StageIntro`'s sfx / editor hooks (Audio /
-Construction).
+**Bonus** (S7) — the bonus-tank power-up drop (`$E8BE`/`$E972`); then **Demo** (`$C642`);
+`StageIntro`'s sfx / editor hooks (Audio / Construction); the 2P per-player GAME OVER slide
+(`$DE18`/`sub_DE46`). **Audio** (`$EA7E`) is the biggest single lever left — it gates the
+two P12 boards' exits (see Debt) and mutes on pause/demo.
 
 ## Debt (NOT SOURCE — delete when its owner lands)
-- **`GameOver` / `HallOfFame` wait on a frame constant**, because the ROM waits on
-  the *jingle* (`$C630` / `$C495`) and `Audio` is a stub. Both are commented
-  `NOT SOURCE`; replace with `audio.isPlaying(...)` when `$EA7E` is ported. This is
-  why "Audio: low priority" undersells it — it gates two modes (flow doc §6d/§7.8).
-- **`drawNumber`'s `minDigits = 2` is the boot behaviour only.** `ram_006B_flag`
-  ($6B) decides whether an all-zero score prints `00` or `0` (`$D942`); `$D491` sets
-  it to 0 at RESET but `sub_C7C8_print_lives_handler` sets it to **1** every battle
-  frame, and `$D17F` never sets it itself — so after a game the title may print `0`.
-  Flow doc §8 `[?]`. Resolve when `Score`/`GameOver` land.
+- **`GameOver` / `HallOfFame` now DRAW their real screens (P12); only the EXIT WAIT is
+  stubbed on a frame constant**, because the ROM waits on the *jingle* (`$C630` / `$C495`)
+  and `Audio` is a stub — the sound IS each board's timer. Both waits are commented
+  `NOT SOURCE`; replace with `audio.isPlaying(...)` when `$EA7E` is ported. This is why
+  "Audio: low priority" undersells it — it gates two modes (flow doc §6d/§7.8).
 - **`hud.js`** is a development instrument, not part of the game. `Renderer` now
   draws, so its original retirement condition is technically met — but it is still
   the only view of the mode machine's internals (mode/sub/frm/stage/enemies/base),

@@ -1,38 +1,68 @@
 // modes/hall_of_fame.js — the HI-SCORE screen.
 //
-// Absorbs: sub_C44B ($C44B), and sub_C295 ($C295) on the way out.
-// Reached only when sub_D97D_check_hiscore_beaten ($D97D) says so — the CALLER
-// decides ($C286-$C292), not this screen. See docs/research_game_flow.md §4 [8].
+// Absorbs: sub_C44B ($C44B), and sub_C295 ($C295) on the way out. Reached only when
+// sub_D97D_check_hiscore_beaten ($D97D) says so — the CALLER decides ($C286-$C292), not
+// this screen. Full decode: docs/research_game_over.md §3. See flow doc §4 [8].
 
 import { Mode, DONE } from '../mode.js';
+import { HUGE_TEXT, HUGE_HISCORE, HOF_PAL_BASE, HOF_PAL_MASK, BG_PAL_TITLE } from '../constants.js';
+import { Tilemap } from '../tilemap.js';
+import { drawHugeText } from '../text.js';
 
-// NOT SOURCE — see update(). Flow doc §6d/§7.8.
+// NOT SOURCE — see update(). Flow doc §6d/§7.8; docs/progress.md "Debt".
 const SFX_STUB_FRAMES = 240;
 
 export class HallOfFame extends Mode {
   enter() {
-    this.game.frm.hi = 0;   // $C479
+    const g = this.game;
+    g.frm.hi = 0;   // $C479
     this.t = 0;
-    // TODO: $C458 clear the BG; $C46B huge tbl_D2B5 "HISCORE" ($D8D2);
-    //       $C46E sub_D951_draw_huge_hiscore; $C471 sub_D7B4_copy_400h_to_nametable.
-    // TODO: $C47D-$C483 ram_sfx_hiscore_1/2/3.
+    // $C458 sub_D47E fills $00 -> a fresh (blank) Tilemap. $C46B huge "HISCORE" (sub_D8D2),
+    // $C46E the huge hi-score NUMBER (sub_D951). render() draws with the cycling palette.
+    this.screen = new Tilemap();
+    drawHugeText(this.screen, HUGE_TEXT.HISCORE.str, HUGE_TEXT.HISCORE.x, HUGE_TEXT.HISCORE.y); // $C45B-$C46B
+    drawHugeHiscore(this.screen, g.hiScore);   // $C46E sub_D951_draw_huge_hiscore
+    // TODO: $C47D-$C483 ram_sfx_hiscore_1/2/3 — Audio (deferred; the wait below stubs it).
   }
 
   update() {
-    // TODO: $C489-$C490 cycle bg_palette_id through con_bg_pal_05..08 on
-    //       (frm_cnt_lo & $03) + 5 — the colour cycle.
+    const g = this.game;
+    // $C489-$C490 — the colour flash: cycle bg_palette_id through con_bg_pal_05..08 on
+    // (frm_cnt_lo & 3) + 5. render() reads it, so the screen strobes.
+    g.bgPaletteId = (g.frm.lo & HOF_PAL_MASK) + HOF_PAL_BASE;
 
-    // $C492-$C495: waits on ram_sfx_hiscore_1 — "wait until sound is played".
-    // NOTE THE ASYMMETRY with GameOver: there is NO skip button here ($C627 has
-    // one, this loop does not). The jingle is the ONLY exit, which is exactly why
-    // stubbing Audio would otherwise hang this screen forever. Flow doc §6d/§7.8.
-    // NOT SOURCE: replace with `if (this.game.audio.isPlaying(SFX.HISCORE)) return null`.
+    // $C492-$C495: waits on ram_sfx_hiscore_1 — "wait until sound is played". NOTE THE
+    // ASYMMETRY with GameOver: there is NO skip button here ($C627 has one, this loop
+    // does not). The jingle is the ONLY exit — which is exactly why stubbing Audio would
+    // otherwise hang this screen forever.
+    // NOT SOURCE: replace with `if (g.audio.isPlaying(SFX.HISCORE)) return null`. Flow doc
+    // §6d/§7.8; docs/progress.md "Debt".
     return ++this.t >= SFX_STUB_FRAMES ? DONE : null;
   }
 
+  // $C46B/$C471 draw into $0400 and ship it up; here that is one drawTilemap of the
+  // screen built in enter(), with this frame's cycled palette.
+  /** @param {import('../renderer.js').Renderer} renderer */
+  render(renderer) {
+    renderer.drawTilemap(this.screen, this.game.bgPaletteId, 0, 0);
+  }
+
   exit() {
-    // TODO: $C497 bg_palette_id = con_bg_pal_00; then sub_C295 ($C295) clears
-    //       $0400 and copies it up, before loc_C095 redraws the title.
+    // $C497 bg_palette_id = con_bg_pal_00 — stop the flash before the title. sub_C295
+    // ($C295: clear $0400 + ship it up) is plumbing: the next mode (title) redraws anyway.
+    this.game.bgPaletteId = BG_PAL_TITLE;
     super.exit();
   }
+}
+
+// sub_D951_draw_huge_hiscore ($D951): the hi-score as HUGE digits, right-aligned in a
+// 7-digit field from px (0x10, 0x64). The ROM skips leading-zero digits, advancing X by
+// 0x20 per skip ($D965-$D96A); with an int score String() already has no leading zeros,
+// so the first digit lands at 0x10 + (7 - len) * 0x20. drawHugeText uses offset 0
+// because the font is ASCII-indexed — the '2' glyph is charCode $32, i.e. the ROM's
+// digit-value 2 + offset $30. (score is capped at 7 digits by the BCD array.)
+function drawHugeHiscore(tm, value) {
+  const digits = String(value).slice(-HUGE_HISCORE.fieldDigits);
+  const startX = HUGE_HISCORE.x0 + (HUGE_HISCORE.fieldDigits - digits.length) * HUGE_HISCORE.digitPx;
+  drawHugeText(tm, digits, startX, HUGE_HISCORE.y);
 }

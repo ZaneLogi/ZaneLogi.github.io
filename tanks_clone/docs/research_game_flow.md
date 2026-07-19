@@ -602,14 +602,6 @@ Only `game.js`/`flow.js` import the modes; modes import none of each other (7.4(
   drives the two player slots. It writes `ram_btn_hold,X` / `ram_btn_press,X`
   directly (`$C6AD`/`$C6AF`), i.e. the demo fakes controller input rather than
   driving tanks. Belongs to `EnemyAI`/`TankRoster` when the demo is ported.
-- **[?]** `ram_006B_flag` (`$6B`) on the way back to the title. It is a shared
-  "minimum digits" scratch read by `sub_D934` (`$D942`): 0 → a zero score prints
-  `00`, 1 → it prints `0`. `$D491` sets it to 0 at RESET, but
-  `sub_C7C8_print_lives_handler` sets it to **1** every battle frame (`$C7CC`) and
-  `$D17F` never sets it itself — so after a game the title may print `0`. Ported as
-  `minDigits = 2` (the boot behaviour, which is what is observable today); see
-  `text.js drawNumber`. Resolve when `Score`/`GameOver` land.
-
 *(Resolved items are moved into the section they belong to and deleted from this
 list — an open-item list that still lists answered questions is worse than no
 list. See the map's §8 preamble.)*

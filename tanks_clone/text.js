@@ -111,13 +111,15 @@ function digitsOf(value) {
  *   on the title screen at all, and a score of exactly 1000000 would print as
  *   "00". Faithful; unreachable in practice.
  * @param {number} minDigits  what to print when every digit is zero, and the walk
- *   runs into the $FF token instead ($D93E). The ROM backs up by 2 or by 1
- *   depending on ram_006B_flag ($D942) — a shared "minimum width" scratch byte:
- *   $D495 sets it to 0 at RESET (scores show "00") and
- *   sub_C7C8_print_lives_handler sets it to 1 every battle frame (lives show "0").
- *   $D17F never sets it itself, so its value on the path BACK to the title after a
- *   game is [?] unresolved — 2 is the boot behaviour, which is what is observable
- *   today. A GameOver-flow concern; revisit when GameOver lands.
+ *   runs into the $FF token instead ($D93E). The ROM backs up by 2 or by 1 depending
+ *   on ram_006B_flag ($D942) — a shared "minimum width" scratch byte: 0 -> "00",
+ *   nonzero -> "0". Each screen sets it for its OWN draws: RESET ($D495) and the
+ *   Tally's exit loc_CEE5 ($CEF0) set 0; sub_C7C8 (battle lives) and the Tally setup
+ *   ($CEFC) set 1. $D17F (the title) never sets it — but every path to the title
+ *   clears it to 0 first: RESET at boot, and the Tally's $CEF0 on the way back from a
+ *   game (game over ALWAYS routes through the Tally). So a zero title score is "00" in
+ *   BOTH cases (verified P12). The port drops the shared byte and passes minDigits per
+ *   call (title 2, HUD lives 1, tally 1); minDigits=2 here is faithful. Was flow doc §8.
  * @param {number} digitBase  ram_0060_tile_id_offset ($D6F5 ADC): the '0' glyph of
  *   the digit font. $30 (ASCII) for the title score; the sidebar HUD passes $6E,
  *   the small digit font ($C7CE lives / $C87A stage number). research_hud.md §4.

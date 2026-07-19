@@ -155,5 +155,3 @@ hard-wired (correct only for the title); it now takes a `digitBase` param
 - **`$6E` digit font** — the disasm is unambiguous that the offset is `$6E`; that
   it renders as legible digits is confirmed in the screenshot step, not asserted
   blind here.
-- **`ram_006B_flag` post-game title** — still the text.js `[?]` (title may print
-  `0` vs `00`); a GameOver-flow concern (unaffected by the score work here).
