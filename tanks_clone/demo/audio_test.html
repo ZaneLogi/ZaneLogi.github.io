@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tanks_clone — Audio: real ROM SFX (Web Audio APU)</title>
+<!--
+  audio_test.html — the Layer-2 harness.
+
+  Drives the REAL sound engine (../audio.js) on the REAL extracted ROM streams
+  (../assets/dat_sfx.js). Each button request()s a sound id; the engine runs the
+  $EA7E bytecode interpreter (docs/research_audio.md) once per frame and decodes
+  the register bytes to Web Audio voices (unlimited voices — one per active id,
+  no 4-channel cutoff). Grouped by channel so type -> waveform is visible.
+
+  Also keeps the Layer-1 interactive channel strips (poke a raw voice by decoded
+  param) — now sharing the engine's own AudioContext / duty waves.
+-->
+<style>
+  :root{
+    --bg:#0e0f13; --panel:#1a1c22; --panel2:#22242c; --ink:#e8e8ea;
+    --dim:#8a8d98; --accent:#e0b341; --accent2:#4fa3ff; --good:#5ad17a;
+    --hot:#ff6b57; --line:#31343d; --mono:'Consolas','SFMono-Regular',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:20px 20px 60px}
+  h1{font-size:18px;margin:0 0 2px}
+  .sub{color:var(--dim);font-size:12.5px;margin:0 0 16px;max-width:860px}
+  .sub code{color:var(--accent);font-family:var(--mono)}
+  button{font:inherit;color:var(--ink);background:var(--panel2);border:1px solid var(--line);
+    border-radius:7px;padding:7px 12px;cursor:pointer}
+  button:hover:not(:disabled){border-color:var(--accent);color:#fff}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.on{background:var(--good);color:#0b1a10;border-color:var(--good);font-weight:600}
+  .bigbtn{font-size:15px;padding:11px 18px;background:var(--accent);color:#231a03;
+    border-color:var(--accent);font-weight:700}
+  section{margin-top:22px}
+  section h3{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);
+    border-bottom:1px solid var(--line);padding-bottom:6px;margin:0 0 12px}
+  .chan-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+  .chan{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .chan h4{margin:0 0 10px;font-size:13px;display:flex;align-items:center;gap:8px}
+  .badge{font:10px var(--mono);color:#0b0c10;border-radius:4px;padding:1px 6px;font-weight:700}
+  .b1{background:#e0b341}.b2{background:#f2933c}.b3{background:#4fa3ff}.b4{background:#b98cff}
+  .sfxbtn{display:block;width:100%;text-align:left;margin:5px 0;font-size:12.5px;
+    padding:6px 10px;position:relative}
+  .sfxbtn .hz{float:right;color:var(--dim);font:11px var(--mono)}
+  .sfxbtn.on .hz{color:#0b1a10}
+  .sfxbtn .loop{color:var(--accent2);font-size:10px;margin-left:6px}
+  .sfxbtn.on .loop{color:#0b1a10}
+  .meter{display:flex;align-items:center;gap:18px;font:13px var(--mono);color:var(--dim);
+    margin-top:14px;flex-wrap:wrap}
+  .meter b{color:var(--good);font-size:16px}
+  .meter .peak b{color:var(--hot)}
+  /* interactive strips */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .card h2{font-size:14px;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+  .tag{font:11px var(--mono);color:var(--dim);background:var(--panel2);border:1px solid var(--line);
+    border-radius:5px;padding:1px 6px}
+  .row{display:flex;align-items:center;gap:10px;margin:8px 0}
+  .row label{width:64px;color:var(--dim);font-size:12px}
+  .row input[type=range]{flex:1;accent-color:var(--accent)}
+  .val{width:120px;text-align:right;font:12px var(--mono);color:var(--accent2)}
+  .duty{display:flex;gap:5px}
+  .duty button{padding:4px 8px;font:12px var(--mono)}
+  .regs{font:11.5px/1.5 var(--mono);color:var(--dim);background:#0b0c10;border:1px solid var(--line);
+    border-radius:6px;padding:7px 9px;margin-top:8px;white-space:pre}
+  .regs b{color:var(--ink)}
+  .note{color:var(--dim);font-size:12px;margin-top:8px;max-width:860px}
+  #log{font:11px/1.45 var(--mono);color:var(--dim);background:#0b0c10;border:1px solid var(--line);
+    border-radius:8px;padding:10px;height:120px;overflow:auto;white-space:pre-wrap;margin-top:8px}
+  .disabled-veil{opacity:.45;pointer-events:none}
+</style>
+</head>
+<body>
+  <h1>tanks_clone — Audio: real ROM SFX</h1>
+  <p class="sub">
+    The real <code>$EA7E</code> engine (<code>../audio.js</code>) playing the real extracted ROM
+    streams (<code>../assets/dat_sfx.js</code>) — 28 SFX, grouped by the channel their <b>type</b>
+    byte selects. <b>Unlimited voices</b>: hit several at once, nothing cuts off. Looping engine
+    sounds <span style="color:var(--accent2)">↻</span> toggle.
+  </p>
+
+  <div class="row" style="gap:14px;margin-bottom:14px">
+    <button id="enable" class="bigbtn">▶ Enable audio</button>
+    <button id="stopall">⏹ Stop all</button>
+    <span class="meter" style="margin:0">
+      <span>voices: <b id="v-now">0</b></span>
+      <span class="peak">peak <b id="v-peak">0</b></span>
+    </span>
+  </div>
+
+  <div id="stage" class="disabled-veil">
+
+    <!-- ── Real ROM SFX, by channel ─────────────────────────────────────── -->
+    <section>
+      <h3>Real ROM SFX — request(id) → the $EA7E interpreter</h3>
+      <div class="chan-grid" id="sfx-cols"></div>
+    </section>
+
+    <!-- ── Layer-1 interactive voices ───────────────────────────────────── -->
+    <section>
+      <h3>Layer-1 voices — poke a raw channel</h3>
+      <div class="grid">
+        <div class="card" id="c-p1">
+          <h2>Pulse 1 <span class="tag">$4000–$4003</span></h2>
+          <div class="row"><label>Duty</label><div class="duty" data-duty></div></div>
+          <div class="row"><label>Volume</label><input type="range" data-vol min="0" max="15" value="8"><span class="val" data-vol-v></span></div>
+          <div class="row"><label>Timer T</label><input type="range" data-timer min="8" max="2047" value="300"><span class="val" data-timer-v></span></div>
+          <div class="row"><label>Gate</label><button data-gate>OFF</button></div>
+          <div class="regs" data-regs></div>
+        </div>
+        <div class="card" id="c-tri">
+          <h2>Triangle <span class="tag">$4008–$400B</span></h2>
+          <div class="row"><label>Timer T</label><input type="range" data-timer min="2" max="2047" value="500"><span class="val" data-timer-v></span></div>
+          <div class="row"><label>Gate</label><button data-gate>OFF</button></div>
+          <div class="regs" data-regs></div>
+        </div>
+        <div class="card" id="c-noise">
+          <h2>Noise <span class="tag">$400C–$400F</span></h2>
+          <div class="row"><label>Period</label><input type="range" data-period min="0" max="15" value="6"><span class="val" data-period-v></span></div>
+          <div class="row"><label>Volume</label><input type="range" data-vol min="0" max="15" value="8"><span class="val" data-vol-v></span></div>
+          <div class="row"><label>Mode</label><button data-mode>LONG (tonal)</button></div>
+          <div class="row"><label>Gate</label><button data-gate>OFF</button></div>
+          <div class="regs" data-regs></div>
+        </div>
+      </div>
+      <p class="note">These poke the same voice backend the engine uses, on its AudioContext.</p>
+    </section>
+
+    <section>
+      <h3>Event log</h3>
+      <div id="log"></div>
+    </section>
+  </div>
+
+<script type="module" src="audio_test.js"></script>
+</body>
+</html>
