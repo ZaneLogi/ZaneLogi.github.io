@@ -2,6 +2,51 @@
 
 Guidance for Claude Code when working in this repository.
 
+## Rules at a glance
+
+The one-line form of every rule below. Each links to the section that carries the
+reasoning + the case that paid for it; read that before leaning on the rule.
+
+**Working across PCs & commits**
+- One PC at a time; pull at session start, push at end. → *Cross-PC workflow*
+- One-line commit subject when a doc carries the detail; code + its doc land
+  together. → *Commit conventions*
+- Repo-wide infra changes go on the branch chosen by *target*, not where you sit.
+  → *Cross-PC workflow*
+
+**Choosing the port architecture** (decide before coding)
+- Faithful to what the **player can observe**; free with what only the CPU can.
+  → *The governing test*
+- Routine-level vs screen-RAM mapping is set by the source's mechanism profile.
+  → *The two viable architectures*
+- Hardware-only subsystem (analog circuit, no CPU code) ⇒ **drop, not defer**.
+  → *When a subsystem is hardware-only*
+
+**When to stop, when to deviate** (you flag, the user rules)
+- Scale rigor to reversibility; start once the next step is cheap to undo.
+  → *Scale rigor to reversibility*
+- Work first, improve later. → *Scale rigor to reversibility*
+- A rule fighting the task ⇒ flag in one line, wait. → *Flag a rule*
+- A human command breaking a rule ⇒ flag in one line, don't adjudicate.
+  → *A human command that breaks a rule*
+- User's deliberate non-source add-ons are fine — build them, just mark them.
+  → *Faithful is a chosen default*
+
+**Not trusting stale knowledge**
+- A claim you didn't just verify is a suspect; re-derive from source, cite the
+  address. → *Research claims rot*
+- Sub-agents for breadth, never depth; demand address citations, re-grep them.
+  → *Delegating to sub-agents*
+
+**Implementation & verification**
+- A "defer" that hurts the current step is wrong — do it now. → *Re-evaluate
+  deferrals*
+- Multi-sub-step work = save-point commits, then squash. → *Sub-step plan*
+- Measure canvas pixels / rendered strings, never screenshots. → *rotoscoped
+  lessons #4*, *UI conventions*
+- Suspect the preview is being *driven* wrong before blaming the tool; check
+  `visibilityState` first. → *Verifying in the browser preview*
+
 ## What this repo is
 
 A personal collection of retro game projects (clones and originals) plus
@@ -26,34 +71,10 @@ to a project (e.g. `/galaga_clone/`,
 No build step, no npm, no dependencies — ES6 modules load directly in
 the browser.
 
-## Repository layout
-
-### Retro game projects
-
-| Directory          | Notes                                                |
-|--------------------|------------------------------------------------------|
-| `galaga/`          | Earlier Galaga port                                  |
-| `galaga_clone/`    | Faithful Z80-source port — see its own `CLAUDE.md`   |
-| `lunar_lander/`    | Faithful Atari **DVG** vector-display port (1979) — see its own `CLAUDE.md` |
-| `mario/`           | Original full-game implementation (legacy reference) |
-| `mario_physics/`   | Mini Mario physics-engine rewrite (fixed-timestep)   |
-| `pacman/`          |                                                      |
-| `lemmings/`        |                                                      |
-| `lode_runner/`     |                                                      |
-| `space_invaders/`  |                                                      |
-| `tanks/`           |                                                      |
-| `ultima6/`         |                                                      |
-| `ultima7/`         |                                                      |
-| `xrick/`           |                                                      |
-
-### Web / canvas experiments
-
-Small standalone demos used to validate techniques later reused in the
-games:
-
-`audio/`, `css_loading_animation/`, `drag_drawing/`, `framerate/`,
-`imagedata/`, `input/`, `lzw/`, `palette_rendering/`,
-`resizable_canvas/`, `set_color_key/`
+The top-level directories are the projects — retro-game ports plus small
+canvas experiments — discoverable with `ls`. Which one is active is set by the
+branch (one game per branch); if a project has its own `CLAUDE.md`, read it
+first.
 
 ## Cross-PC workflow
 
@@ -138,13 +159,38 @@ When a project has no local `CLAUDE.md`, default to:
 
 ## Architecture principle for retro ports
 
-A retro-game port from arcade/console source has **two viable
-architectures**. The choice should be made during the **research
-stage**, before coding starts — based on what the disassembly reveals
-about the original game's mechanism dependencies. Picking implicitly
-("I'll just draw to canvas and figure out problems as they come")
-leads to ad-hoc deviations that accumulate, and some end up
+A retro-game port has **two viable architectures**, and the choice is a
+**research-stage decision** — made before coding, from what the disassembly
+reveals about the source's mechanism dependencies. Picking implicitly ("I'll
+draw to canvas and figure it out as I go") accumulates ad-hoc deviations, some
 wrong-direction.
+
+### The governing test — faithful to what the *player* can observe
+
+*(Promoted from `tanks_clone/CLAUDE.md` on merge — Zane's ruling
+2026-07-16. Worked example + a sorted verdict table:
+`tanks_clone/docs/research_game_flow.md` §7.1.)*
+
+**Faithful to what the player can observe; free with what only the CPU
+can observe.** Do **not** mimic mechanisms that exist because of the
+CPU's hardware design. Routine-by-routine translation of *plumbing*
+buys only a byte-for-byte match, and **an emulator does that better
+than we ever will.** The source is the authority on *content, rules and
+timing* — never on *shape*.
+
+This is the sharp, usable form of the "is it the design's mechanism, or
+its coincidence?" test below, and it generalizes past *data layout* to
+control flow and everything else. A packed tri-state flag byte becomes
+a state enum plus a timer; an indirect `JMP (ptr)` through a jump table
+becomes a `switch` on the state it was dispatching; a screen-clearing
+curtain that doubles as a DMA becomes a renderer wipe. Behaviour
+identical, shape ours.
+
+**Watch the failure mode it was written from:** admiring a clever
+hardware trick — a curtain that doubles as a DMA, a coroutine
+hand-built out of `wait_1_frm`, a tri-state flag byte — and mistaking
+*cleverness* for *mechanism*. The question is never "is this clever?"
+but "can the player tell?"
 
 ### The two viable architectures
 
@@ -216,419 +262,251 @@ Before any code, the research docs should answer:
 
 ### Worked examples
 
-**phoenix_clone — routine-level translation.** Phoenix has 3
-screen-RAM-readback mechanisms: shield bullet-absorption (`L0CB4`),
-L2085 explosion region pre-clear, alien partial-sprite tile-
-persistence cycle. All three are coincidence-style, not mechanism-
-style — source uses screen-RAM readback because the display happens
-to be tile-buffered, not because gameplay logic *requires* tile-
-buffer state. State-driven substitutes (counter check, separate
-`scatteredDebris` Map, last-known-full `controlB` substitution) are
-small, local, and preserve visible behavior. **If upfront research
-had quantified this** (count = 3, all coincidence-style, no core
-mechanic depends on tile state), routine-level was the clear right
-call.
+- **phoenix_clone → routine-level.** 3 screen-RAM-readback mechanisms (shield
+  absorption `L0CB4`, L2085 explosion pre-clear, alien tile-persistence), **all
+  coincidence-style** — the display just happens to be tile-buffered. Small
+  local state-driven substitutes preserve behaviour. Count = 3, none core ⇒
+  routine-level was clearly right.
+- **galaga_clone → routine-level**, similar profile.
+- **space_invaders → screen-RAM (canvas-pixel-buffer).** Collision *is* a 1bpp
+  video-RAM pixel read — the pixel buffer IS the collision geometry, so this is
+  **mechanism, not coincidence.** The canvas is the screen-RAM analog: draw,
+  then `getImageData()` at shot positions. No substitutes needed; a parallel
+  collision buffer would be the expensive alternative. See
+  `space_invaders/game.js:handlePlayerShot`. Ref:
+  <https://www.computerarcheology.com/Arcade/SpaceInvaders/>.
 
-**galaga_clone — routine-level translation**, similar deviation
-profile to phoenix_clone.
+### The payoff: research depth buys coding calm
 
-**space_invaders — screen-RAM mapping (canvas-pixel-buffer flavor).**
-Source's collision detection is *literally* a video-RAM pixel read —
-the 8080 checks the 1bpp video memory to see if a player shot hit
-something or if an alien shot hit a shield. This is mechanism, not
-coincidence: the pixel buffer IS the collision geometry. The port
-uses the canvas as the screen-RAM analog: draw everything to canvas,
-then `getImageData()` at shot positions to detect collisions. No
-per-site state-driven substitutes needed — source's pixel-read
-semantics port directly to canvas pixel-read semantics. Routine-
-level translation would have required maintaining a parallel
-collision-geometry buffer mirroring every sprite blit; canvas-as-
-VRAM is free. See `space_invaders/game.js:handlePlayerShot` and
-`handleAlienShot`. Reference: <https://www.computerarcheology.com/Arcade/SpaceInvaders/>.
+**The more thoroughly research characterizes the source's mechanism profile,
+the fewer architectural surprises during coding** — no mid-project rewrites, no
+accumulating deviations. Research time before coding is the cheapest time in the
+project; the cost of skimping is paid back with interest in implementation
+drift.
 
-### The payoff: smoother coding from upfront investigation
+*Case — phoenix_clone: the L2085 explosion scatter was deferred ~6 weeks on the
+wrong assumption that it needed screen-RAM persistence. A closer read of `Code.md
+$2085-$20E2` would have shown L2085 is write-only, unblocking it immediately.*
 
-The shared lesson across all three projects: **the more thoroughly
-the research stage characterizes the source's mechanism profile, the
-fewer architectural surprises during coding.** Each gameplay
-subsystem ports without friction when the chosen architecture
-already fits — no mid-project rewrites, no accumulating deviations,
-no wrong-direction substitutes that later need to be undone.
+### When a subsystem is hardware-only — drop, not defer
 
-In phoenix_clone, the L2085 explosion scatter was deferred for ~6
-weeks under the (incorrect) assumption that source's mechanism
-required screen-RAM persistence; a deeper upfront read of `Code.md
-$2085-$20E2` would have shown L2085 is write-only (reads target ROM
-tables, writes target screen RAM) and unblocked the port
-immediately. The cost of skimping on research is paid in
-implementation drift. Time spent on research docs before coding is
-the cheapest time in the project.
+Some retro "code" is just a byte poked to a memory-mapped register, where a
+discrete analog circuit on the PCB (op-amps, VCOs, filters) turns it into audio
+or video. The byte write is the code; the rest is hardware.
 
-### When a subsystem has no software counterpart — drop, not defer
+**Ask: does the source *implement* the mechanism, or just *pulse-trigger* it?**
+If the latter, a "port" would be re-designing the analog circuit in JS — not a
+translation, and not in the spirit of the project. **Drop it, don't defer** — a
+defer says "later," a drop says "nothing here to port":
 
-Some retro source code includes mechanisms the CPU doesn't actually
-implement. The 6502 / Z80 / 8085 pokes a byte to a memory-mapped
-register, and a custom analog circuit on the PCB (op-amps, VCOs,
-filters, noise generators) converts that byte into continuous audio
-or visual output. The "code" is the byte write; the rest is
-hardware.
+- Write a short characterization-only research doc saying why.
+- Flip status to "dropped" across progress.md / project CLAUDE.md / doc index;
+  sweep code comments to "not ported (no software counterpart)."
+- Leave revisit references (MAME netlist + FPGA HDL + schematic).
 
-When you encounter such a subsystem, ask: **does the source code
-implement the mechanism, or just pulse-trigger it?** If the latter,
-a "port" is a re-design of the analog circuit in JavaScript — not a
-routine-level translation, and not in the spirit of an educational
-port.
+This applies **only** when the mechanism is genuinely hardware-only. When the
+source *does* implement it (e.g. phoenix_clone's sound, built by the 8085),
+defer + later-port is right.
 
-The honest call is to **drop the subsystem, not defer it.** A defer
-is "we'll do it later"; a drop is "there's nothing here to port."
-Write a short characterization-only research doc explaining why,
-flip status to "dropped" across progress.md / per-project CLAUDE.md
-/ DOCUMENTATION_INDEX.md, sweep deferred-to-later comments in code
-to say "not ported (no software counterpart)." Leave references for
-any future revisit (MAME netlist + FPGA HDL + original schematic).
+*Case — asteroids_clone sound: 9 registers (`$3600-$3E00`) drive discrete analog
+circuits; the CPU has no oscillator/wavetable code. Dropped via
+`research_sound.md` with MAME-netlist / FPGA-HDL / schematic references.*
 
-Example: **asteroids_clone R-G (sound)** — 9 memory-mapped
-registers (`$3600-$3E00`) drive discrete analog circuits on the
-cabinet PCB. Each byte write selects volume/frequency in the analog
-stage; the CPU has no oscillator or wavetable code. Dropped via
-`asteroids_clone/docs/research_sound.md` with references to MAME's
-discrete netlist + Mikstas's FPGA HDL + the Atari schematic.
+## Defaults bind until someone deviates deliberately — you flag, the user rules
 
-The drop-vs-defer transition only applies when the upstream
-mechanism is genuinely hardware-only. When the source DOES
-implement the subsystem (e.g. phoenix_clone's sound, which the
-8085 explicitly builds), defer + later-port is the right call.
+The research-first rigor above pushes one way — research harder, verify more,
+follow the source. That bias is right for *irreversible* work but has no brake;
+applied to everything it produces the opposite failure, **stalling**. This
+section is the brake. The through-line: a default holds until a deviation is
+*deliberate*, and the four subsections cover who gets to make it deliberate —
+you (by reversibility), you-flagging-a-rule, you-flagging-a-human-command, and
+the user by choice.
 
-## Matching rigor to reversibility — when to stop researching
+### Scale rigor to reversibility, not habit — when to stop researching
 
-The research-first lessons above (and the sub-agent / research-doc sections
-below) all push one way: research harder, verify more, re-derive from primary
-source. They were written from the pain of **under**-research — claims that
-shipped wrong and drifted for weeks. That bias is right for its target, but on
-its own it has no brake: applied literally it produces the *opposite* failure —
-**stalling**. Endless re-reading, re-verifying what's already known, treating
-"feel certain" as the entry ticket to writing any code. This section is the
-counterweight.
+**Exhaustive-up-front is for *irreversible* decisions only** (the architecture
+choice, a data format the port hangs off, a source claim later steps build on) —
+cheap to research, expensive to undo. **Anything with a fast check is cheap to
+reverse: build it, run it, let the result falsify you** rather than researching
+it to certainty first.
 
-**Scale rigor to how expensive the work is to reverse, not to habit.** The
-exhaustive-up-front discipline is for **irreversible** decisions — the
-faithful-port architecture choice (routine-level vs screen-RAM), a data format
-the whole port hangs off, a source claim later steps will build on. Those are
-cheap to research and expensive to undo, so front-load them. But a **build-time
-tool, a self-contained function, anything with a fast check** is cheap to
-reverse: build a piece, run it, let the result falsify you. Researching it to
-certainty first is precision the task doesn't need.
+- **Stopping condition:** once you can name the next concrete step and starting
+  it is cheap to undo, **start**. Research ends when the remaining uncertainty is
+  *load-bearing* (would change what you build) — not when you *feel* sure
+  (comfort uncertainty is not a reason to keep reading).
+- **Re-reading what's already in context is not research** — it's avoidance in
+  diligence's clothes. Act on what you hold.
+- **The tell:** if preparing to act cost more than attempt-and-check would,
+  you're past the line. Prefer the small reversible attempt — it produces
+  evidence; more reading produces a feeling.
+- **Work first, improve later** — the simple thing that works over the clever
+  thing that might.
 
-**A stopping condition.** Once you can name the next concrete step and starting
-it is cheap to undo, **start**. Research is finished not when you feel certain
-but when the remaining uncertainty is *load-bearing* — it would change what you
-build. Everything else is *comfort uncertainty* (wanting to feel sure), and it
-is not a reason to keep reading.
+*Case — 2026-07 sfx task: stalled re-reading source already in context, the
+research bias with no governor.*
 
-**Two specific anti-patterns, both real:**
-- **Re-reading what's already in context is not research.** If you read a file
-  earlier this session, re-opening it "to be thorough" adds nothing — it's
-  avoidance wearing diligence's clothes. Act on what you already hold.
-- **Over-verifying cheap-to-check work has a cost.** The address-citation /
-  re-grep discipline is for claims that land in docs or faithful-port code,
-  where a wrong one is expensive. It is not a tax to levy on every function you
-  could simply run and observe.
+### Flag a rule that's fighting the task — one line, then wait
 
-**The tell.** If you've spent more effort preparing to act than the action would
-take to attempt-and-check, you are past the stopping point. When unsure which
-side of the line you're on, prefer the small reversible attempt over more
-reading — the attempt produces evidence; more reading produces only a feeling.
+**This doc is a prior, not a straitjacket.** A rule pushing you toward a bad
+outcome (stalling, disproportionate effort, a wrong-direction pull) → **say so
+in one line and pause for a ruling.** Wanted, not insubordination.
 
-*(Surfaced 2026-07, a sound-effects task: stalled through repeated re-reading of
-source already in context — the research bias above with no governor. This
-section is the governor.)*
+> "Rule X is pushing me to Y, but this task looks like Z (cheap / known /
+> reversible). Relax it here?" → then wait; once ruled, don't re-litigate.
 
-### Flag the rulebook (this doc can be wrong for the case at hand)
+- **Flag the mismatch, not your discomfort** — the trigger is a rule genuinely
+  fighting reversibility/verifiability, not reluctance to do hard work.
+- **The user can invite it** — "doc check?" is the cue to raise anything awkward.
 
-This CLAUDE.md is a prior, not a straitjacket. When a rule here is pushing you
-toward a bad outcome for the task in front of you — stalling, disproportionate
-effort, a wrong-direction pull — **say so in one line and pause for a ruling.**
-This is wanted, not insubordination: a rule written from past pain can misfit
-the present case, and only the flag surfaces it.
+### A human command that breaks a rule — flag it, don't adjudicate
 
-The move (same shape as the flag-and-wait protocol under the rotoscoped-port
-lessons — you flag, the user rules):
+The mirror: a *human's instruction* crosses a rule here. **Name the break in one
+line and let them rule. Do NOT analyse whether the rule is right, weigh
+exceptions, or propose rewording** — that judgment is theirs.
 
-> "Rule X here is pushing me to Y, but this task looks like Z (cheap to check /
-> already known / reversible). Relax it here?"
+> "Heads up — X breaks rule Y. Your call." → then do as they say.
 
-Then wait for the call. Once ruled, proceed without re-litigating.
+Rewrite the rule only if explicitly asked, and keep it brief. Answering a plain
+instruction with an "is the rule too tight" essay is the failure this guards.
 
-Guardrails, so flagging doesn't become its own stall:
-- **One line, then stop.** Flagging is not a new place to deliberate. Name the
-  rule, the pull, the mismatch — don't write an essay.
-- **Flag the mismatch, not your discomfort.** The trigger is a rule genuinely
-  fighting the task's reversibility/verifiability (the section above), not
-  reluctance to do hard work. Don't use it to dodge rigor on irreversible things.
-- **The user can also invite it.** If they ask "doc check?" or "is a rule
-  fighting you?", that's the cue to raise anything the rulebook is making awkward.
+### Faithful is a chosen default — the user's deliberate add-ons are fine
 
-### A human command that breaks a rule — flag it in one line, don't adjudicate
+The follow-the-source rigor targets **accidental drift**, not user intent. When
+the user **deliberately chooses** a non-source feature (hard drop, ghost, a QoL
+toggle, an original mechanic), **that choice is the justification** — build it
+without agonizing, beyond a one-line heads-up. The flag-and-wait protocol is for
+*you* deviating on load-bearing mechanism, not for a feature they asked for.
 
-The mirror of the above: there a *rule* pushes you toward a bad outcome and you
-flag it; here a *human's instruction* crosses a rule in this doc. Same move —
-**name the break in one line and let the human rule. Do NOT analyse whether the
-rule is right, weigh the exceptions, or propose rewording it** — that judgment is
-the human's, not yours.
+- **Still mark it** in code and docs as a deliberate non-source deviation —
+  honesty about it is not resistance to it.
+- **The faithful default still binds the parts they want faithful** (the ported
+  core mechanics). This doesn't loosen those.
 
-> "Heads up — X breaks rule Y. Your call."
-
-Then do as they say. Evaluate or rewrite the rule only if they explicitly ask, and
-keep even that brief. Answering a plain instruction with an "is the rule too tight"
-essay is the failure this guards against.
-
-### Faithful is a chosen default, not an absolute — the user's deliberate add-ons are fine
-
-All the "follow the source / don't simplify" rigor above targets **accidental
-drift** — quietly weakening a mechanism because it's easier, or deviating without
-noticing. It is **not** a mandate that every line be faithful.
-
-When the user **deliberately chooses** a non-source feature — a modern add-on
-(hard drop, ghost, a scoring tweak), a QoL toggle, an original mechanic — that
-choice **is** the justification. It's their clone; faithfulness is the standard
-they apply **where they want it** (usually the core mechanics), not a gate their
-chosen features must pass.
-
-- **Build user-requested non-faithful features without agonizing.** Don't re-ask
-  "is this OK since it isn't faithful?" beyond a one-line heads-up. The
-  flag-and-wait protocol is for *you* deviating on load-bearing mechanism — not
-  for a feature the user asked for.
-- **Still be honest about it.** Mark the add-on in code and docs as a deliberate
-  non-source deviation, so the record stays clear about faithful-vs-invented.
-  Honesty about the deviation is not resistance to it.
-- **The faithful default still holds for the parts the user wants faithful** — the
-  ported core mechanics. This doesn't loosen those.
-
-(Surfaced 2026-07 on `block_stacker`, adding a hard-drop score bonus: *"we do
-faithfully only when I think we can... with extra innovation or add-on, we do it
-on purpose, we know it is not faithful. so what? this is our clone."*)
+*Case — block_stacker, a hard-drop score bonus: "we do faithfully only when I
+think we can... with extra innovation or add-on, we do it on purpose, we know
+it is not faithful. so what? this is our clone."*
 
 ## Delegating to sub-agents
 
-Sub-agents (Explore, general-purpose, etc.) are good for **bounded
-breadth-first scans** of source material — "find every collision routine",
-"list all callers of `$0CC4`", "audit which `Lxxxx` paths are ported."
-They are **not reliable for depth** — synthesis, judgment calls, or
-anything that needs context from the conversation. Use them as
-research instruments, not decision-makers.
+**Sub-agents are research instruments, not decision-makers.** Good for **bounded
+breadth-first scans** ("find every collision routine," "list all callers of
+`$0CC4`," "audit which `Lxxxx` paths are ported"); **unreliable for depth** —
+synthesis, judgment, anything needing conversation context.
 
-The address-citation convention (every claim cites a source line or
-label, e.g. `Lxxxx` for assembly-derived ports) is what makes sub-agent
-output recoverable. Always demand it in the prompt:
-
-> "Cite addresses for every claim. Group findings by source label.
-> Quote the relevant bytes when the claim is non-obvious."
-
-After the agent returns, **re-grep each cited region before relying
-on the claim**. A 5-second grep falsifies a wrong claim cheaply; a
-wrong claim that lands in code or docs is much more expensive to
-remove later.
-
-### Trip-wire moments
-
-When a sub-agent's claim feels too clean and you can't immediately
-see why it's true, **re-derive it from the primary source**.
-
-Example from phoenix_clone (DrawShields + collision audit, 2026-05-20):
-an audit agent flagged `$39F0` as the bird-vs-player path. Reading
-`$39F0` alone showed only a ShieldCount check + JP to `$0CC4` — no
-obvious collision detection. The trip-wire was correct: the actual
-trick is 100 bytes earlier at `$3980`, which repurposes the player
-bullet as a screen-RAM probe via `$3800`. Agent was right, but its
-pointer was off — re-deriving from the source listing found the real
-mechanism. Without the dig, the port would have copied the agent's
-pointer-only framing into the doc, propagating the gap.
-
-### Agents can write confidently wrong research docs
-
-The most expensive failure mode is a research doc claim that passes
-review at the time, lands in a `docs/research_*.md`, and only gets
-falsified when a later port step actually depends on it.
-
-From phoenix_clone, three such claims surfaced only when DrawShields
-was being implemented and the doc claims got tested against real
-gameplay:
-- `research_player_movement.md §3.4` carried "Shield duration: 255
-  frames ≈ 4.25 s" for weeks; correct figure is ~63 frames active
-  (the 255 figure is the full re-fire cycle).
-- `research_player_ship.md §5` claimed "source has no shield gate
-  for alien-body collisions" — wrong; `$0F00` dispatches on
-  ShieldCount before any tile scan.
-- A code comment carried `// TODO: $3980 (cosmetic)` for weeks;
-  `$3980` is the actual bird-kills-player path, not cosmetic.
-
-**The defense is the address-citation rule plus this skepticism: if a
-doc says something happens "always" or "never" in source, demand the
-address it doesn't happen at and re-check.**
+- **Demand address citations in the prompt** — "cite addresses for every claim,
+  group by source label, quote the bytes when non-obvious." That convention is
+  what makes the output recoverable.
+- **Re-grep each cited region before relying on it** — a sub-agent claim is a
+  research claim like any other (→ "Research claims rot").
 
 ### Cheap-recovery commit hygiene
 
-When sub-agent output influences a code change, keep the commits
-small enough that a wrong-agent revert costs one commit, not a
-session of work. For example, in phoenix_clone, DrawShields landed
-as two commits (mixin-refactor, then feature+audit) — if the audit
-had revealed DrawShields was fundamentally broken, the refactor
-would survive the revert.
+**When sub-agent output drives a code change, keep commits small enough that a
+wrong-agent revert costs one commit, not a session.**
 
-## When implementation surprises the research
+*Case — phoenix_clone: DrawShields landed as two commits (mixin-refactor, then
+feature+audit); had the audit exposed a broken DrawShields, the refactor would
+survive the revert.*
 
-Two lessons surfaced from asteroids_clone I-9's post-port fix
-arc. Both apply to retro-port work generally, not just to the
-specific project that produced them.
+## Research claims rot — verify before you build on them
 
-### Visual mismatch → suspect the research, not the code
+**A research claim you did not just verify is a suspect.** Docs, sub-agent
+findings, and your own past notes all decay the same way: written once from a
+quick read, inherited as settled, falsified weeks later by the port step that
+finally depends on them. The cost is asymmetric — a 5-second re-grep vs hours
+of unwinding a wrong claim that reached code.
 
-When ported code is source-faithful per the research doc but
-visual output disagrees with expectation (cabinet footage, user
-intuition, mechanic feel), the **research claim itself** is the
-default suspect — not the port code. Re-derive the relevant
-claim from primary source (disassembly, MAME, hardware spec)
-before patching the JS or proposing port deviations.
+**The defense, in every case: re-derive from primary source and cite the
+address.** If you write "X is un-disasm" or "the source never does Y," include
+the bytes that prove it; otherwise downgrade to "looks like … — verify before
+relying on."
 
-This generalizes the "Agents can write confidently wrong
-research docs" warning above: that section is scoped to
-sub-agent output, but the same pattern shows up with research
-the lead author wrote themselves. The trigger is different —
-not "an agent claim feels too clean" but "visual output
-disagrees with what the faithful port should produce."
+**Four triggers. Any one of them means stop and re-derive:**
 
-Three I-9 cases proved the pattern, all "code was correct
-relative to a wrong research claim":
+- **A claim feels too clean and you can't see *why* it's true.** Sub-agents are
+  usually right about *what* and wrong about *where* — check the pointer, not
+  just the conclusion. A wrong pointer copied into a doc becomes a real gap.
+- **Visual output disagrees with what the faithful port should produce.** When
+  code is source-faithful per the doc but the result contradicts cabinet
+  footage, user intuition, or feel, the **research claim is the default
+  suspect — not the port code.** Ask: what does the doc claim here, and when
+  was that claim last checked against primary source? Months-old or
+  verified-once ⇒ re-derive before patching the JS or accepting a "port
+  deviation."
+- **A claim of *absence*** — "this region is un-disasm," "that routine isn't
+  decoded," "the body is missing." These are systematically under-verified and
+  propagate as if confirmed. Grep the local source mirror for the specific
+  address; it takes seconds.
+- **The words "always" or "never."** Demand the address where it *doesn't*
+  happen, and re-check.
 
-1. **Collision felt too tight vs cabinet** → research had read
-   `$6A22-$6A25 LSR/ROR/ASL` as "extract sign bit into A; `$08
-   = |dx|`"; actually a 16-bit unsigned right shift, so `$08
-   = |dx|/2`. The CMP against the `$6A55` table thus tested
-   half-distances, meaning effective radii are 2× the table
-   values. Faithful port of the wrong reading produced
-   collision exactly half what cabinet does.
-2. **Explosion debris appeared to converge inward** → research
-   mapped status bits 2,3 → Shrapnel1..4 by incrementing
-   index. Source's `$50F8` jump table at `$10F8-$10FE`
-   actually maps 0→Pattern4, 3→Pattern1 (smallest-to-largest
-   spread, concentric patterns played smallest-first to grow
-   outward). VectorROM.md line 185 had this explicitly: "all
-   four patterns are the same just slightly spread out."
-3. **Explosion stayed static despite the shape-order fix** →
-   research treated `$7324-$7339`'s `$90`-byte emit loop as
-   the across-sweep scale mechanism (initially deferred as a
-   port deviation). MAME's `dvg_generate_vector_list`
-   confirmed those words are no-op VEC opcodes; the real gs
-   plumbing was upstream at `$7321`'s LABS emit, where
-   `(status & $F0) + $10` gets OR'd into the LABS word's gs
-   nibble. Research had missed that path entirely.
+*Case — phoenix_clone 2026-05-20: an agent named `$39F0` as the bird-vs-player
+path; `$39F0` holds only a ShieldCount check + `JP $0CC4`. The mechanism is 100
+bytes earlier at `$3980`, repurposing the player bullet as a screen-RAM probe
+via `$3800`. Right answer, wrong pointer.*
 
-**Defense:** when the user reports visual mismatch, "feels
-wrong," or "doesn't match cabinet," before patching the JS or
-accepting it as a port deviation, ask: *what does the
-research doc claim about this behavior, and have I verified
-that claim against the primary source recently?* If the claim
-is months old or was only verified once, re-derive with
-skepticism. "Unexpected output despite faithful port" is a
-strong signal the research is wrong, not the code.
+*Case — phoenix_clone DrawShields: three doc claims survived review for weeks
+and died on contact with implementation. "Shield duration 255 frames" (really
+~63 active; 255 is the re-fire cycle); "no shield gate for alien-body
+collisions" (`$0F00` dispatches on ShieldCount before any tile scan); a
+`// TODO: $3980 (cosmetic)` comment on what is actually the bird-kills-player
+path.*
 
-### Verify negative source claims (un-disasm, missing routines)
+*Case — asteroids_clone I-9, three visual mismatches, all "code correct
+relative to a wrong claim." Collision felt half-size: `$6A22-$6A25` was read as
+a sign-bit extract, but it is a 16-bit unsigned shift, so the `$6A55` table
+tests half-distances and real radii are 2×. Debris converged inward: the
+`$50F8` jump table maps 0→Pattern4, 3→Pattern1 (smallest-first, growing
+outward), not incrementing. Explosion stayed static: the scale plumbing is
+`$7321`'s LABS emit OR-ing `(status & $F0) + $10` into the gs nibble — research
+had missed the path entirely and blamed a `$90`-byte loop that MAME confirms is
+no-op VEC opcodes.*
 
-Claims of *absence* in source — "this region is un-disasm",
-"this routine isn't decoded", "the body is missing" — are
-systematically under-verified and propagate across research
-docs as if confirmed. The author writes it once based on a
-quick read; future-author inherits the claim; the wrong claim
-persists for weeks until a port step actually needs the region.
+*Case — asteroids_clone: a "~20% un-disasm" framing was falsified wholesale on
+one re-read. `$77B5` (RNG), `$75EC` (asteroid-hit), `$7168` (wave init),
+`$77D2-$77E8` (direction LUT), `$745A`/`$745C` (slot scanner), `$77F6`
+(PrintPackedMsg), `$7C03`/`$7CDE` (DVG list builders) were all fully visible.
+The genuinely-missing content was sound-routine internals (dropped anyway) plus
+small data tables.*
 
-asteroids_clone's pre-I-9 sweep falsified the "~20% un-disasm"
-framing wholesale: `$77B5` (RNG), `$75EC` (asteroid-hit handler),
-`$7168` (wave init), `$77D2-$77E8` (direction LUT), `$745A`/
-`$745C` (slot scanner), `$77F6` (PrintPackedMsg), `$7C03`/
-`$7CDE` (DVG list builders) — all claimed un-disasm in earlier
-docs, all fully visible on re-read of `Code.md`. The actual
-un-disasm content turned out to be mostly sound-routine
-internals (dropped anyway) plus small data tables.
-
-**Defense:** before asserting absence in a research doc, grep
-the local mirror of `Code.md` for the specific address. The
-check is seconds; the propagating wrong claim costs hours when
-a port step later inherits it. If you write "X is un-disasm,"
-include the addresses or bytes that prove the absence. Otherwise
-downgrade the phrasing to "X looks un-disasm at a glance — verify
-before relying on."
-
-This is parallel to "Agents can write confidently wrong research
-docs" under "Delegating to sub-agents" — same class of error,
-committed by the lead author rather than a sub-agent. Defense is
-the same: cite addresses, re-derive from primary source, demand
-the bytes.
+## Implementation process
 
 ### Re-evaluate deferrals against current-step impact
 
-When an item is flagged "out of scope, defer to later step"
-but turns out to affect the **current step's** quality,
-validation, or feel, fix it now rather than letting the
-original deferral stand. Deferral decisions made during
-planning should be re-evaluated against the actual impact
-discovered during implementation.
+**A "defer to later" that turns out to affect the *current* step's quality,
+validation, or feel is wrong — fix it now.** Planning-time deferral decisions
+get re-judged against what implementation actually reveals.
 
-The asteroids_clone I-9 collision-tightness item was
-originally classified as "defer until after I-9 + I-11
-complete, to revisit alongside other gameplay-feel tuning."
-The deferral assumed it was a polish-stage concern — but in
-practice the wrong (half-size) radii made shots feel
-unreliable, blocking confident validation of the I-9h
-collision kernel itself. Re-investigating it during I-9 both
-unblocked validation AND turned out to resolve a research-
-doc bug (see previous subsection).
+Before deferring, ask: does it block testing this step's other code paths?
+Cause visible friction when play-testing this step's output? Is the only reason
+to defer that it *spans* subsystems this step doesn't touch? **Yes to any ⇒ do
+it now.** Polish-stage deferrals (CRT glow, sound) are fine; gameplay-feel and
+validation-blocking ones are not.
 
-**Defense:** before deferring an item, ask:
-- Does it interfere with testing the current step's other
-  code paths?
-- Does it cause visible friction during play-testing of this
-  step's output?
-- Is the only "scope-conserving" reason for the deferral that
-  it spans subsystems the current step doesn't touch directly?
-
-If yes to any of these, the deferral is probably wrong — do
-the work now. Polish-stage deferrals (CRT glow rendering,
-sound) are fine; gameplay-feel and validation-blocking
-deferrals are not.
+*Case — asteroids_clone I-9: collision-tightness was filed as polish, "revisit
+after I-9 + I-11." But the wrong half-size radii made shots feel unreliable,
+which blocked validating the I-9h collision kernel itself. Doing it in-step
+unblocked validation *and* fixed the research-doc bug behind it.*
 
 ### Sub-step plan + save-point commits + final squash
 
-Single-commit implementation of a multi-sub-step subsystem leads
-to fragile, hard-to-validate work. **asteroids_clone I-11 v1** is
-the cautionary example: tried to land collisions + scoring + lives
-+ HUD as one diff (~600 lines, 10 files), spent 4 patch rounds on
-HUD coordinates and 3 on the ship explosion, still buggy at the
-end, rolled back entirely. Redone as 6 in-session save-point
-commits, then squashed — landed cleanly.
+**Don't land a multi-sub-step subsystem as one commit.** Break it up:
 
-The pattern that works:
+1. **Research doc for the trickiest sub-step first** — before any impl.
+2. **Sub-step plan** — an informal bullet list (scratch doc / comment block /
+   throwaway branch), each bullet ≈ one commit's worth (~50-200 lines).
+3. **Each sub-step = one save-point commit**, browser-verified before the next.
+   Wrong approach ⇒ `git reset --hard HEAD~1` rolls back clean.
+4. **Final squash** into one `impl I-N` commit. The per-sub-step + per-deviation
+   detail lives in progress.md, not the commit body (→ Commit conventions).
 
-1. **Pre-implementation research doc** for the trickiest sub-step
-   first. asteroids_clone I-11 had `research_hud_coords.md` +
-   `research_ship_explosion.md` land *before* impl started.
-2. **Sub-step plan** — informal: a short list of bullets in a
-   scratch doc, a comment block, or a throwaway plan-branch. The
-   sub-step list should be small enough that each bullet maps to
-   one commit's worth of work (~50-200 lines).
-3. **Each sub-step lands as one save-point commit.** Browser-
-   verify the change visually before moving to the next. If a
-   sub-step approach is wrong, `git reset --hard HEAD~1` rolls
-   back cleanly.
-4. **Final squash** at the end into one `impl I-N` commit. The
-   progress.md "I-N scope" subsection carries the per-sub-step
-   notes + per-deviation decode notes — the level of detail that
-   doesn't fit in a commit body but is needed for cross-PC
-   continuity.
+Save-point commits are developer safety, not for publishing — only the squash
+goes to origin.
 
-The save-point commits aren't meant to be published — they exist
-for the developer's safety during the work. Only the squash goes
-to origin. Commit-body convention: cite the research-doc sections
-that hold the details, don't restate them in the commit message.
+*Case — asteroids_clone I-11 v1: collisions + scoring + lives + HUD as one
+~600-line/10-file diff → 4 patch rounds on HUD coords, 3 on the ship explosion,
+still buggy, rolled back. Redone as 6 save-point commits then squashed — landed
+clean.*
 
 ## Lessons — porting a rotoscoped animation engine (from prince_of_persia)
 
@@ -661,48 +539,25 @@ was paid for in bugs.
    a change makes the change the prime suspect. When the user reports a
    mismatch and your reasoning "proves" it's fine, **measure** — the observer
    watching the real output beats reasoning from assumptions.
-6. **With a faithful RE source, follow it — don't simplify away without a
-   strong reason.** Deviating needs a *load-bearing* justification (a
-   hardware-only mechanism, §"When a subsystem has no software counterpart —
-   drop, not defer" above), never "this is simpler / enough for now." The trap
-   is that **shortcuts entangle**: the position substrate accumulated a
-   `curr_col` clamp *and* a front-only `getEdgeDistance` — each existed only
-   because the other did, so each looked individually harmless while together
-   they produced a wrong-direction bug (climbing into a wall at room edges).
-   Unwinding them later cost a full research pass + rework; the faithful port
-   up front would have been cheaper. Four corollaries: **(a)** prove the
-   entanglement before ripping it out — a quick A/B toggle (clamp on/off) both
-   *confirmed* the fix and *surfaced* the companion shortcut before the rework,
-   not mid-way; **(b)** don't offer the user short-term "let's stop here / make
-   it work for now" off-ramps on substrate code — take the long-term view and
-   port the whole coherent mechanism, deferring only separable *features*,
-   never the substrate; **(c)** *not everything in the source is mechanism.* A
-   quantity expressed in a **view / render space we deliberately don't
-   reproduce** is a **second legitimate deviation** (beyond hardware-only):
-   **re-derive it in our view, don't copy the number.** PoP's
-   `wall_dist_from_left` / `dist_from_wall_forward` insets a wall's collision
-   face ~10 units because the DOS room is drawn **pseudo-3D** (the visible wall
-   face sits inset from the abstract tile boundary); a **flat** clone draws the
-   wall at the tile cell, so the faithful stop is **flush**, and any face
-   offset is re-derived from *its own* render — not ported. Keep the collision
-   **logic** faithful (which tile blocks, which side, link-hop, bump/recoil,
-   the control latch); re-express only the **view-space number**. Reading
-   "follow the source" as an all-or-nothing binary *is itself the trap* — it
-   stalled a whole session on this exact x-bias (2026-07-09). The test: *is the
-   number in a coordinate/view space we chose not to reproduce?* If yes,
-   re-derive; if it's mechanism, still follow it.
-7. **The flag-and-wait protocol (binding — this is how corollary 6c gets
-   adjudicated).** "Follow the source, don't simplify" is the firm default.
-   When the user asks for something that looks like it breaks that rule, do
-   **NOT** grind trying to reconcile faithfulness with the request, and do
-   **NOT** silently decide for yourself whether the deviation is "legitimate" —
-   that self-adjudication is exactly what causes the stall / no-response loop
-   (paid for 2026-07-09 on `wall_dist`). Instead: **stop, state in one line
-   "this breaks follow-the-source, specifically X," and WAIT for the user's
-   call.** The assistant *flags* the break; the *user* decides whether to break
-   it (e.g. "yes — it's a view-space thing, do the flat version"). Once the
-   user authorises the deviation, implement it without further agonising.
-   Division of labour: I flag, you rule.
+6. **Follow a faithful source; deviating needs a *load-bearing* reason, never
+   "simpler for now."** Two reasons qualify: a hardware-only mechanism (drop,
+   above), and a **view-space number** — a quantity in a render space we chose
+   *not* to reproduce, which you **re-derive in our view, don't copy.** *(PoP
+   insets the collision face ~10 units because the DOS room is drawn pseudo-3D;
+   a flat clone stops flush and re-derives any offset from its own render. Keep
+   the collision *logic* faithful — which tile blocks, link-hop, bump/recoil,
+   the latch — re-express only the number.)* The trap in the other direction:
+   **shortcuts entangle** — a `curr_col` clamp and a front-only `getEdgeDistance`
+   each existed only because the other did, together producing a climb-into-wall
+   bug that cost a full rework to unwind. Corollaries: **(a)** prove entanglement
+   with an A/B toggle *before* ripping it out; **(b)** no "make it work for now"
+   off-ramps on *substrate* — defer separable features, never the substrate.
+7. **Flag-and-wait when the user's ask looks like it breaks follow-the-source.**
+   Don't grind to reconcile it, and don't self-adjudicate whether the deviation
+   is "legitimate" (that's the stall). This is the same protocol as "A human
+   command that breaks a rule" above — one line, then wait. *(Paid for
+   2026-07-09 on `wall_dist`: self-adjudication stalled a whole session on one
+   x-bias number.)*
 
 ## UI conventions — HUD / on-screen readouts
 
@@ -730,3 +585,64 @@ The rule, in three parts:
 
 Reference implementation: `prince_of_persia/demos/motion.js` — the `padN` /
 `padW` helpers and the HUD line that uses them.
+
+## Verifying in the browser preview
+
+*(Promoted from `tanks_clone/CLAUDE.md` on merge; paid for across
+`tanks_clone` and `prince_of_persia`. Each project keeps its own
+specifics — port number, server root, launch name — in its own doc.)*
+
+The preview pane is a **valid verification target**. Treat a failure as
+a bug in how it is being *driven* until the checks below say otherwise.
+
+**The ES-module cache trap.** Everything here is ES6 modules with no
+build step, so a cache-busted `import('./game.js?t=N')` re-fetches
+`game.js` — but *its* `./modes/session.js` import resolves to the
+already-cached URL, so you silently test stale code against fresh code.
+**Reload the document** after editing a module; don't hand-roll a
+cache-busted import and trust it.
+
+**Measure `document.visibilityState` before diagnosing anything.**
+Skipping this one check is what makes preview problems look mysterious
+and recur.
+
+| state | rAF | meaning |
+|---|---|---|
+| `"visible"` | 60 Hz, indefinitely | healthy |
+| `"visible"` | frozen | renderer **wedged** → stop + restart the preview |
+| `"hidden"` | frozen, timers ~1–2 Hz | pane not open. Correct browser behaviour (Page Visibility API + background-timer throttling) — **not fixable from app code** |
+
+- **rAF does NOT need driving.** While `"visible"` it ticks
+  indefinitely on its own (measured: 36 s untouched, 68 palette swaps
+  at the exact cadence). The belief that it "only ticks while actively
+  driven" was **wrong** — measured on a *closed* pane and blamed on the
+  wrong mechanism.
+- **A hidden pane is not a bug to fix — but you may ask for it to be
+  opened.** You cannot open it yourself: fronting a tab is in reach,
+  opening the *pane* is the user's UI action. Ask when a check needs
+  real pixels or feel; one line, then wait.
+- **Never conclude from a check that drove the page.** Scheduling your
+  own rAF wakes the loop and gives a false pass. Probe passively —
+  `setInterval` plus a state proxy.
+- **NEVER ask for a viewport bigger than the pane's real window.** The
+  resize is accepted silently, then *emulated and scaled*; with a
+  fractional dpr that mis-composites, and it is **sticky across
+  preview restarts** (so restarting looks like it didn't help). The
+  one-line check: `window.innerHeight > window.outerHeight` ⇒
+  impossible for a real window ⇒ you are being scaled. Best is not to
+  resize at all — pick a viewport that fits and zoom the *page*.
+- **Prefer deterministic verification when it suffices** — it usually
+  does, and it is the better test: construct the game headless, stub
+  input, drive ticks, assert on state or `getImageData`. This is the
+  same discipline as "Measure canvas pixels, not screenshots" (lesson
+  #4 of the rotoscoped-port section), approached from the other side.
+- **Keep the render loop unkillable** (always reschedule, never
+  conditionally stop) and paint one frame at load. Cheap insurance,
+  independent of everything above.
+
+**When the pane looks wrong, suspect your own manipulation first.** The
+2026-07-16 case was self-inflicted start to finish: four theories spent
+blaming the environment — hidden-tab throttling, a stale resize layer,
+a wedged renderer, a split-view toggle — while the disproof
+(`innerH > outerH`) sat unread in my own tool output. The pane behaved
+correctly given what it was asked for, and so did the browser.

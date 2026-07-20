@@ -29,7 +29,11 @@ don't let the answer live only in that list.
 
 ## Conventions specific to this port
 - **The governing test — faithful to what the player can observe; free with what
-  only the CPU can observe.** (Zane's ruling 2026-07-16.) We do **not** mimic
+  only the CPU can observe.** (Zane's ruling 2026-07-16.)
+  > **Promoted to the repo-root `CLAUDE.md`** (2026-07-20, with the park + merge
+  > into `main`) — it sits at the head of "Architecture principle for retro
+  > ports" there. Kept here too as the project-local version; the root copy is
+  > the general one. We do **not** mimic
   mechanisms that come from the 6502's hardware design. Routine-by-routine
   translation of *plumbing* buys only a byte-for-byte match, and **an emulator does
   that better than we ever will.** The source is the authority on *content, rules
@@ -169,6 +173,11 @@ Preview: `preview_start tanks_clone` (port **8089**). **The server root IS
 404s). And when re-testing a module edit, **reload the document** — `import(
 './game.js?t=N')` re-fetches game.js but its `./modes/session.js` resolves to the
 cached URL, so you silently test stale code.
+
+> **The general version of everything below is now in the repo-root `CLAUDE.md`**
+> ("Verifying in the browser preview" — promoted 2026-07-20 with the park + merge
+> into `main`). Kept here as the project-local record; what stays *only* here is
+> the tanks-specific setup above — port 8089 and the server-root gotcha.
 
 **Measure `document.visibilityState` before diagnosing anything.** Skipping that
 one check is what makes the rAF problem look mysterious and recur.
