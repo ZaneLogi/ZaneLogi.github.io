@@ -892,12 +892,90 @@ but because it described work that had not started yet.)*
     Right held 40 frames → `hold = $80`, tank moves +8px; eagle DESTROYED in the Tail +
     Right held 60 frames → `hold`/`press` never leave 0, tank never moves.
 
-## Next
-**Demo** (`$C642`/`$C41D` — the attract auto-play, reusing the battle loop with the AI
-driving the "players"; incl. the `$C648` follow-bonus steering) is the last major subsystem.
-Smaller cited hooks: `StageIntro`'s editor path (`$C1D0`/`$C1E2` — Construction), and the
-demo's own silence (the `$EA7E` pause-flag path) when Demo lands. **Audio is done** — the
-biggest lever is now pulled; only Demo + the editor remain before the port is feature-complete.
+## Future Plan
+
+**The port met its goal at P15 and is parked here (Zane, 2026-07-20).** Everything the
+player does when they press Start is built: 35 stages, 1P/2P, enemy AI, bullets, bonuses,
+score/HUD, tally, GAME OVER / HALL OF FAME, audio. The two items below sit **outside the
+play loop** — the cabinet's idle behaviour and a level editor — so they are nice-to-have,
+not unfinished business. Pick either up when it's interesting; neither blocks the other,
+with one exception noted in item 2.
+
+*Verified, not assumed:* a diff of all 126 `sub_XXXX` labels in `bank_FF.asm` against the
+`$XXXX` citations in the port's `.js` says exactly **two** ROM routines map to unbuilt work
+— `$C49C` and `$C567`, both the cutscene. Everything else is either cited in code or a
+documented deliberate drop. (The audit proves *citation* coverage, not correctness.)
+
+### 1. Demo mode — the attract auto-play
+
+**What it is.** `sub_C3B5_demo_settings` (`$C3B5`) + `sub_C41D_demo_handler` (`$C41D`).
+The attract mode **is** the battle loop: `$C642` forges controller bytes and the ordinary
+`sub_C2E6` pipeline plays the game. Full decode: **flow doc §4[9]** (mechanism, destination
+priority, the `tbl_C6C2` table, the don't-shoot-your-own-eagle guard).
+
+**Start here, in this order:**
+1. **Un-comment the entry gate** — `modes/attract.js:214` already holds the line:
+   `if (g.frm.hi === DEMO_TIMEOUT_HI && g.constrUsageCnt === 0) return DONE;` (`$CA3C`;
+   idle `frm_cnt_hi == $0A` ≈ 577-640 frames). Note the second condition: **once the
+   editor has been used the demo never starts** (`$CA38`).
+2. **Demo settings** (`$C3B5`) — draw stage `$FF` (`DEMO_STAGE` is already extracted in
+   `assets/dat_levels.js`), then `ram_stage = $1E` so the HUD *displays stage 30*;
+   `lives[1] = 3`; `enemy_limit = 5`; `2nd_loop_flag = con_flag_demo`; BATTLE/CITY huge
+   text over the field. The `attract.js` TODOs at `:255` (`$C3D5` drawStage) and `:269`
+   (`$C412` `base.drawDefault`) are these.
+3. **The AI** (`$C642`) — port it as a writer into `Input.hold`/`Input.press`, called from
+   the demo's update **after** `input.sample()` and **before** `mainBattleScript()`. That
+   slot is `$C426`, the same one the Tail's `$C23B` occupies, and P15 proved it works.
+4. **Reuse `EnemyAI.directionToward`, but take the PLAYER branch of `$DDA2`** — see the
+   comment block in `enemy_ai.js`. It is `(X*2) EOR frm_cnt_hi AND $02`, deterministic and
+   **draws no RNG**; the ported enemy branch calls `sub_D44D` and would perturb the shared
+   RNG stream every frame.
+5. **Silence** — `$C3B7` sets `ram_pause_flag = 1`, and `$EA7E` then scans only slot 0
+   (§6e). `audio.js` needs that pause-flag path; it is the one audio hook P15 left open,
+   deliberately, because it has no meaning until Demo exists.
+6. **Exit** — Start/Select at `$C420` returns to the menu (`$C43F` `PLA PLA` →
+   `loc_C0A2`); otherwise `sub_C728` ends the stage normally.
+
+*Already in place:* `mainBattleScript()` was built as a shared body with three call sites
+and `$C429` is the unused third; `DEMO_STAGE` data; the `Demo` sub-mode stub in
+`attract.js`; `flow.js`'s ATTRACT rows.
+
+### 2. Construction mode — the stage editor, and the easter eggs it gates
+
+**What it is.** `loc_C0AE` + `loc_C0EA_construction_loop` — cursor movement, the block
+palette, paste, and the save to `stage_FF.bin`. The largest remaining chunk and the least
+port-like: it is a tool being built, not a mechanism being decoded.
+
+**Start here:**
+1. `modes/editor.js:22` is the stub with the citation; `construction.js` is its subsystem
+   stub. `flow.js`'s EDITOR row already returns to `ATTRACT_AT.MENU` — `$C156 JMP loc_C0A2`,
+   deliberately **not** `loc_C095` — because that path **preserves `ram_constr_usage_cnt`**.
+   Do not "simplify" it into the SCROLL entry; the easter egg dies silently if you do.
+2. `$C150` `INC ram_constr_usage_cnt` on exit — `editor.js:35` already does this.
+3. **`StageIntro`'s editor path** (`$C1D0`/`$C1E2`, `modes/session.js:135`): keep the
+   constructed field instead of loading a stage, and draw **just the eagle**
+   (`sub_CB5D_draw_default_eagle` — `base.js:18` cites it as the editor-only path).
+
+**The hidden cutscene rides on this — it is not independent.** `$C49C`
+`sub_C49C_play_hidden_cutscene` (+ `$C567 sub_C567_wait_64_frm`) fires at `$CA4F` only when
+`constrUsageCnt == 7` **and** `hiddenCutsceneCnt == $74`, so **it cannot be reached without
+a working editor** (or by poking the counter). The counter is a **two-controller** combo,
+which the usual "Down+A on controller 2" shorthand gets wrong — the d-pad half is player
+**1's HOLD**, the button half is player **2's PRESS**:
+
+| site | condition | effect |
+|---|---|---|
+| `$CA04` + `$CA0A` | `hold[0] & Down` **and** `press[1] & A` | `cnt += $10` |
+| `$CA17` + `$CA1D` | `hold[0] & Right` **and** `press[1] & B` | `cnt -= 1` |
+
+`modes/attract.js:204` is the TODO; `game.js` already carries both counters, `attract.js:185`
+clears `hiddenCutsceneCnt` at `$C9E0`, and `attract.js:108` zeroes `constrUsageCnt` at
+`$C09A`.
+
+**Interaction worth remembering:** using the editor at all sets `constrUsageCnt != 0`, which
+**suppresses the demo** (`$CA38`). So on a real cabinet you get the attract demo *or* the
+easter-egg path, never both in one session — which is also why item 1's entry gate carries
+that second condition.
 
 ## NOT SOURCE — deliberate, kept on purpose
 

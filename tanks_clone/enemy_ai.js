@@ -141,8 +141,15 @@ export class EnemyAI {
   // sub_DDA2 ($DDA2), enemy branch — the biased direction toward (destX, destY).
   // sub_DAAF gives each axis a sign (0 target-is-less / 1 aligned / 2 greater);
   // index = 3*dySign + dxSign picks tbl_E486, and a coin flip adds 9 to reach the
-  // side-biased half so the approach wanders rather than beelines. (The player branch
-  // of DDA2 — frm_cnt_hi instead of RNG — is unreachable: players never follow.)
+  // side-biased half so the approach wanders rather than beelines.
+  //
+  // ONLY the enemy branch ($DDD4) is ported here. $DDA2 also has a PLAYER branch
+  // ($DDC5 CPX #$02 / $DDC9): `(X*2) EOR frm_cnt_hi AND $02` — a deterministic
+  // alternation that draws NO RNG. It is reached whenever DDA2 is called with X =
+  // a player slot, which the DEMO does every frame ($C642 steers the fake "players"
+  // through it). So it is unreached only because Demo is unported — NOT unreachable.
+  // Whoever ports Demo must take that branch: the enemy branch would both steer
+  // differently and pull the shared RNG stream every frame. Flow doc §4[9].
   /** @param {Tank} tank  @param {number} destX  @param {number} destY  @param {AiContext} ctx */
   directionToward(tank, destX, destY, ctx) {
     const dxSign = destX === tank.x ? 1 : (destX > tank.x ? 2 : 0);   // $DDA2-$DDAD

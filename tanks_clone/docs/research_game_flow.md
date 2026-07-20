@@ -218,6 +218,34 @@ BATTLE/CITY huge text over the field. `sub_C642_demo_players_ai_handler` (`$C642
 the "players" and then the ordinary `sub_C2E6` runs — the attract mode *is* the battle loop.
 **The demo is silent** because `$C3B7` sets `ram_pause_flag = 1` (§6e).
 
+**How `$C642` drives them — it forges controller input, it does not steer tanks [D].**
+Per player (X counts down from `con_max_players`, so both slots regardless of 1P/2P) it
+picks a destination, converts it to a direction, and **writes the result into both
+`ram_btn_hold,X` and `ram_btn_press,X`** (`loc_C6AB`, `$C6AD`/`$C6AF`). Everything
+downstream — movement, firing, collision — is the unmodified pipeline reading what it
+thinks is a pad. Destination priority:
+
+1. **The bonus**, if one is on screen (`bonus_pos_X != 0`) and its flash timer has expired
+   (`$C648-$C656`) — the follow-bonus steering.
+2. else **the first usable enemy** among slots `+2`, `+4`, `+3` relative to X — that order,
+   not 2/3/4 (`$C65E` / `$C674` / `$C68A`); a candidate is skipped while exploding (bit 7
+   clear) or respawning (`>= $E0`).
+3. else **`A = 0`** (`$C6A0`) — no buttons at all this frame.
+
+`sub_DDA2` then yields a direction, `AND #$03` indexes `tbl_C6C2` = `$13/$43/$23/$83` =
+the Up/Left/Down/Right d-pad bit **OR'd with A+B** — so a demo tank moves with fire always
+held. Except at `$C6B1-$C6BB`: if its Y `>= $C8` it masks `btn_press` to the d-pad only
+(`con_btns_Dpad`), and since firing gates on `press & AB` (`$E130`), that is a
+three-instruction **"don't shoot your own eagle"** guard for when it wanders onto the base.
+
+Two consequences for the port. **(a)** `$C426` sits in the same slot as the Tail's `$C23B`
+— after the joypad sample, before the pipeline consumes it — so the injection point already
+exists and is proven (P15 wired `$C23B` there). **(b)** `sub_DDA2`'s **player branch**
+(`$DDC9`) is what runs here, not the enemy branch: `(X·2) EOR frm_cnt_hi AND $02`, a
+deterministic alternation that draws **no RNG**, where the enemy path calls `sub_D44D`.
+Porting the demo on the enemy branch would both steer differently and pull the shared RNG
+stream every frame. *(Resolved 2026-07-20; was §8's last `[?]`, and §8 — emptied — is gone.)*
+
 **[10] Construction** — `loc_C0AE`. Exits via `$C150`: `INC ram_constr_usage_cnt` then
 `JMP loc_C0A2` — note it targets `loc_C0A2`, **not** `loc_C095`, so the title is not
 redrawn and the counter is not reset. That accumulation is what feeds §6c.
@@ -593,15 +621,3 @@ modes/editor.js        $C0AE (deferred stub)
 ```
 
 Only `game.js`/`flow.js` import the modes; modes import none of each other (7.4(2)).
-
----
-
-## 8. Open questions / to-verify
-
-- **[?]** `sub_C642_demo_players_ai_handler` (`$C642`) — how the attract mode
-  drives the two player slots. It writes `ram_btn_hold,X` / `ram_btn_press,X`
-  directly (`$C6AD`/`$C6AF`), i.e. the demo fakes controller input rather than
-  driving tanks. Belongs to `EnemyAI`/`TankRoster` when the demo is ported.
-*(Resolved items are moved into the section they belong to and deleted from this
-list — an open-item list that still lists answered questions is worse than no
-list. See the map's §8 preamble.)*
