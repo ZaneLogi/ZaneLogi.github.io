@@ -82,8 +82,8 @@ object type; the frog crosses ten lanes to reach the homes.
 | River 1 | **logs**; a **crocodile** replaces one from level 2 | → | `log_0/1/2`, `croc_0/1` | ride the log/croc **back**; the croc's open **mouth** kills |
 | River 2 | **turtles** (one group **dives**) | ← | `turtle_0/1/2`, `turtle_dive_*` | ride while surfaced; a **submerged** diver drowns its rider |
 | River 3 | **logs** (long) | → | `log_*` | ride; drifts right |
-| River 4 | **logs** | ← | `log_*` | ride; drifts left |
-| River 5 | **turtles** (one group **dives**) | → | `turtle_*`, `turtle_dive_*` | as River 2 |
+| River 4 | **logs** | → | `log_*` | ride; drifts right |
+| River 5 | **turtles** (one group **dives**) | ← | `turtle_*`, `turtle_dive_*` | as River 2 |
 | **Median** | safe strip; a **snake** patrols from level 2 | ← | `snake_0/1/2` | safe to stand; the snake kills on contact |
 | Road 1 | **trucks** | ← | `truck` | kills on contact |
 | Road 2 | **race cars** | → | `car_green` | kills |
@@ -92,10 +92,13 @@ object type; the frog crosses ten lanes to reach the homes.
 | Road 5 | **race cars** (fastest lane) | ← | `car_red` | kills |
 | **Start row** | safe grass; the frog spawns centered | — | — | safe |
 
-Adjacent lanes move in **opposite directions**. Each log lane has **one log size**
-(different lanes differ — see §3.2); a lane never mixes sizes. The per-lane object,
-direction, and sprite are **constants** (`constants.js`); the table is the default
-(arcade) arrangement. The **home-row hedge** is static background: `hedge_0` is a bay
+Lane direction is **constrained by sprite orientation**: the turtle sprite's head faces
+**left** (there is no right-facing variant), so every **turtle** lane drifts left; **logs**
+are symmetric (rounded left end / tree-ring right end, no "front") and take the opposite drift,
+**right**. Lanes therefore mostly alternate direction, the one exception being the two adjacent
+log lanes (River 3 · 4), which both drift right. Each log lane has **one log size** (different
+lanes differ — see §3.2); a lane never mixes sizes. The per-lane object, direction, and sprite
+are **constants** (`constants.js`); the table is the default (arcade) arrangement. The **home-row hedge** is static background: `hedge_0` is a bay
 unit (green hedge framing one bay opening), `hedge_1` the narrow filler between them —
 tiled across the top into a continuous hedge with the five bay openings. The **median**
 and **start-row** safe strips tile `bg_block` as their background.
@@ -130,8 +133,8 @@ tuned by feel, the *model* fixed.
 | River 1 | log | 48 | 3 | 80 | 0.35 | → | 0, 80, 160 | croc replaces one from L2 |
 | River 2 | turtle group | 48 | 3 | 80 | 0.30 | ← | 0, 80, 160 | one group dives |
 | River 3 | log | 64 | 2 | 120 | 0.20 | → | 0, 120 | |
-| River 4 | log | 32 | 4 | 60 | 0.45 | ← | 0, 60, 120, 180 | |
-| River 5 | turtle group | 32 | 4 | 60 | 0.30 | → | 0, 60, 120, 180 | one group dives |
+| River 4 | log | 32 | 4 | 60 | 0.45 | → | 0, 60, 120, 180 | |
+| River 5 | turtle group | 32 | 4 | 60 | 0.30 | ← | 0, 60, 120, 180 | one group dives |
 | Median | snake | 16 | 1 | — | 0.25 | ← | enters at edge | from L2; safe otherwise |
 | Road 1 | truck | 32 | 2 | 120 | 0.20 | ← | 0, 120 | |
 | Road 2 | car | 16 | 3 | 80 | 0.30 | → | 0, 80, 160 | race car |

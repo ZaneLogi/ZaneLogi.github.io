@@ -10,14 +10,14 @@ export class Playfield {
   constructor() { this.lanes = []; this.homes = new Homes(); }
 
   build(level) {
-    this.lanes = LANES.map((cfg) => new Lane(cfg, level));   // TODO(impl): apply the §3.3 schedule
+    this.lanes = LANES.map((cfg, i) => new Lane(cfg, level, i));   // TODO(step 8): §3.3 level schedule
     this.homes.reset();
   }
 
   update() { for (const lane of this.lanes) lane.advance(); }   // TODO(impl): + §3.4 timed events
 
-  /** @param {Renderer} renderer */
-  render(renderer) {
+  /** @param {Renderer} renderer @param {number} frame  the global tick counter (§3.5 animation) */
+  render(renderer, frame = 0) {
     // Static 16 px safe strips (§3.1): the median and the start row tile bg_block (16×16).
     // River/road bands stay the cleared black (water / asphalt).
     for (let x = 0; x < SCREEN.WIDTH; x += SCREEN.CELL) {
@@ -25,7 +25,8 @@ export class Playfield {
       renderer.drawSprite('bg_block', x, ROWS.START_Y);
     }
     if (DEBUG.ROW_GRID) this._grid(renderer);
-    // TODO(step 2): draw each lane's movers at its row y, between the strips and the homes.
+    // Each lane's movers at its row y (river 48… · median 128 · road 144…, §4 band layout).
+    this.lanes.forEach((lane, i) => lane.render(renderer, ROWS.FIRST_LANE_Y + i * SCREEN.CELL, frame));
     this.homes.render(renderer);
   }
 

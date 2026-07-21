@@ -25,9 +25,9 @@ export const FROG_FRAMES = {
 // One-cell unit steps per hop direction (multiplied by CELL).
 export const HOP_DIR = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 
-// Dev scaffolding (marked non-source): a faint per-row grid to make the lanes legible before
-// the movers exist (step 1). Turn off once the lanes fill the field.
-export const DEBUG = { ROW_GRID: true };
+// Dev scaffolding (marked non-source): a faint per-row grid to make the lanes legible. Off now
+// that the movers (step 2) fill the field; flip on to debug row geometry.
+export const DEBUG = { ROW_GRID: false };
 
 // Death = the 7-frame explosion death_0..5 → skull (§3.5); per-frame duration tunable.
 export const DEATH = { FRAME_HOLD: 8 };
@@ -49,20 +49,43 @@ export const TIMED = {
 
 export const WRAP_L = 240;   // shared off-screen wrap length (§3.2)
 
+// An object's sprite composition, laid out left→right across its width W: `body` fills the
+// middle (tiled at its own width), with optional 16 px end-cap sprites `left`/`right`. Each part
+// is a single sprite (static) OR a frame LIST that cosmetically cycles at ANIM.RATE (§3.5).
+// - A log is three static parts: rounded left end `log_0`, repeating body `log_1`, tree-ring
+//   right end `log_2` — a longer log just gets more body tiles (§3.1).
+// - A turtle group is a body-only animated swim loop; its diving group submerges to the lane's
+//   `dive` frames on the §3.4 dive timer (behavior lands in step 6; the frames live here now).
+// - The median snake is an animated 32 px body; it enters at an edge as a hazard from L2 (§3.3/
+//   §3.4) rather than as a fixed conveyor, so the median lane isn't seeded yet.
+const LOG = { left: 'log_0', body: 'log_1', right: 'log_2' };
+const TURTLE = { body: ['turtle_0', 'turtle_1', 'turtle_2'] };
+const TURTLE_DIVE = ['turtle_dive_0', 'turtle_dive_1'];
+const SNAKE = { body: ['snake_0', 'snake_1', 'snake_2'] };
+
+// Sprite orientation constrains lane direction: the turtle sprite's head faces LEFT (no
+// right-facing variant), so every turtle lane must drift **left**. Logs are symmetric (rounded
+// left end / tree-ring right end, no "front"), so they take the opposite drift — **right** —
+// keeping most adjacent lanes counter-flowing. Vehicles already face their lane's direction.
+
+// Cosmetic frame-cycle rate: advance an animated part every RATE ticks (§3.5).
+export const ANIM = { RATE: 8 };
+
 // Lanes top → bottom. dir +1 = drifts right, -1 = left. phase φ = index × 20 (§3.2).
-// w = object width px, n = count, v = px/frame at level 1.
+// w = object width px, n = count, v = px/frame at level 1. tiles = the §3.1 sprite composition;
+// dive = the diving group's submerged frames (§3.4); croc = a crocodile replaces a log from L2.
 export const LANES = [
-  { id: 'river1', band: 'river',  object: 'log',    sprite: 'log_2',     w: 48, n: 3, v: 0.35, dir: +1, croc: true },
-  { id: 'river2', band: 'river',  object: 'turtle', sprite: 'turtle_0',  w: 48, n: 3, v: 0.30, dir: -1, dives: true },
-  { id: 'river3', band: 'river',  object: 'log',    sprite: 'log_1',     w: 64, n: 2, v: 0.20, dir: +1 },
-  { id: 'river4', band: 'river',  object: 'log',    sprite: 'log_0',     w: 32, n: 4, v: 0.45, dir: -1 },
-  { id: 'river5', band: 'river',  object: 'turtle', sprite: 'turtle_0',  w: 32, n: 4, v: 0.30, dir: +1, dives: true },
-  { id: 'median', band: 'median', object: 'snake',  sprite: 'snake_0',   w: 16, n: 1, v: 0.25, dir: -1, safe: true },
-  { id: 'road1',  band: 'road',   object: 'truck',  sprite: 'truck',     w: 32, n: 2, v: 0.20, dir: -1 },
-  { id: 'road2',  band: 'road',   object: 'car',    sprite: 'car_green', w: 16, n: 3, v: 0.30, dir: +1 },
-  { id: 'road3',  band: 'road',   object: 'car',    sprite: 'car_pink',  w: 16, n: 3, v: 0.25, dir: -1 },
-  { id: 'road4',  band: 'road',   object: 'dozer',  sprite: 'dozer',     w: 16, n: 3, v: 0.20, dir: +1 },
-  { id: 'road5',  band: 'road',   object: 'car',    sprite: 'car_red',   w: 16, n: 2, v: 0.45, dir: -1 },
+  { id: 'river1', band: 'river',  object: 'log',    tiles: LOG,                  w: 48, n: 3, v: 0.35, dir: +1, croc: true },
+  { id: 'river2', band: 'river',  object: 'turtle', tiles: TURTLE,               w: 48, n: 3, v: 0.30, dir: -1, dive: TURTLE_DIVE },
+  { id: 'river3', band: 'river',  object: 'log',    tiles: LOG,                  w: 64, n: 2, v: 0.20, dir: +1 },
+  { id: 'river4', band: 'river',  object: 'log',    tiles: LOG,                  w: 32, n: 4, v: 0.45, dir: +1 },
+  { id: 'river5', band: 'river',  object: 'turtle', tiles: TURTLE,               w: 32, n: 4, v: 0.30, dir: -1, dive: TURTLE_DIVE },
+  { id: 'median', band: 'median', object: 'snake',  tiles: SNAKE,                w: 16, n: 1, v: 0.25, dir: -1, safe: true },
+  { id: 'road1',  band: 'road',   object: 'truck',  tiles: { body: 'truck' },    w: 32, n: 2, v: 0.20, dir: -1 },
+  { id: 'road2',  band: 'road',   object: 'car',    tiles: { body: 'car_green' },w: 16, n: 3, v: 0.30, dir: +1 },
+  { id: 'road3',  band: 'road',   object: 'car',    tiles: { body: 'car_pink' }, w: 16, n: 3, v: 0.25, dir: -1 },
+  { id: 'road4',  band: 'road',   object: 'dozer',  tiles: { body: 'dozer' },    w: 16, n: 3, v: 0.20, dir: +1 },
+  { id: 'road5',  band: 'road',   object: 'car',    tiles: { body: 'car_red' },  w: 16, n: 2, v: 0.45, dir: -1 },
 ];
 
 // Row geometry — the arcade's tile-aligned bands, measured from the arcade screenshot and

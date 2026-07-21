@@ -42,6 +42,17 @@ export class Renderer {
     this.ctx.drawImage(this.sprites.image, r.x, r.y, sw, sh, x | 0, y | 0, sw, sh);
   }
 
+  // Draw a horizontal object of width W at (x,y) from a tile spec {body, left?, right?}: the
+  // optional 16 px end caps at the two edges, `body` tiled (at its own width) between them.
+  // Logs use left/right rounded ends + a repeating body; turtles / vehicles are body-only (§3.1).
+  drawObject(spec, x, y, w) {
+    let x0 = x, x1 = x + w;
+    if (spec.left) { this.drawSprite(spec.left, x0, y); x0 += this.sprites.rect(spec.left).w; }
+    if (spec.right) { x1 -= this.sprites.rect(spec.right).w; this.drawSprite(spec.right, x1, y); }
+    const b = this.sprites.rect(spec.body);
+    if (b) for (let bx = x0; bx < x1; bx += b.w) this.drawSprite(spec.body, bx, y);
+  }
+
   // Monospace: advance penX by GLYPH_W per character (§5.1). Unknown chars = blank cell.
   drawText(str, x, y, color = '#fff') {
     const gw = this.sprites.GLYPH_W;

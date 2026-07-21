@@ -7,24 +7,22 @@ self-contained; progress.md is free to reference the spec's sections.
 
 ## Status
 
-**Step 1 — Frog hop + static field: DONE.** The frog hops one 16 px cell as a smooth 8-frame
-slide at 2 px/frame (`Frog.beginHop`/`update`) — a lane vertically (row-indexed) or a column
-horizontally — facing set per direction, input locked for the hop's duration; it renders
-`frog_0..7` by facing × rest/hop. The static field renders the arcade's bands: the 24 px home
-hedge (5 bays), the 16 px median + start-row `bg_block` safe strips, and a dev row grid.
-`Play.update` runs §7 steps 1–2 (input → frog); no movers/collision yet.
+**Step 2 — lanes + movers: DONE.** The ten conveyor lanes (5 river + 5 road) each seed their
+`Mover`s deterministically and advance every tick with a seamless edge wrap; `Playfield`
+renders the movers per row. The board now reads as Frogger — logs + swimming turtle groups drift
+the river, trucks / cars / dozers the road, between the hedge and the two safe strips. `Play.update`
+runs §7 steps 1 · 2 · 4 (input → frog → objects move); collision (3) and the timer (5) are
+still stubbed, so the frog hops over everything for now. Debug grid off (movers fill the field).
 
-The band layout was **measured from the arcade screenshot** and matches it to the pixel — see
-the *Band layout* decision below. The frog frame mapping was derived by inspecting the atlas.
+Verified deterministically: seed positions match `x_i = (φ + i·P) mod L` (φ = index·20,
+P = L/N) — e.g. river4 seeds `60,120,180,0`; each lane drifts `dir·V` per tick (river1 +0.35,
+river2 −0.30, …); a mover crossing the `L = 240` seam re-enters from the far edge and its wrap
+copy renders on both sides. No console errors; the populated board matches the arcade arrangement.
 
-Verified deterministically (drive `frog.update()` directly, cadence-independent): the slide
-steps 2 px/frame with the hop frame throughout → the rest frame on landing, snapped exact (no
-float drift); the row anchors walk `224→208→…→32`, every hop **16 px**; a direction pressed
-mid-hop is fully ignored (facing + position unchanged); spamming right clamps at `MAX_X = 200`.
-In the browser: boots clean (no console errors); the rendered bands (`hedge 24–44 · median
-128–143 · start 224–239`) match the arcade measurements exactly; real arrow keys drive the hops.
+Prior: **step 1** — the frog hop (8-frame slide, facing, input-lock) + the static arcade field
+(band layout measured from the arcade screenshot, matches to the pixel; frog frames from the atlas).
 
-Next up: **step 2 — lanes + movers** (§3.2 conveyors, wrap, per-lane rendering).
+Next up: **step 3 — collision** (safe / ride / drown / squash per row, §7.3) + the river carry.
 
 ## Steps (plan is provisional — adjusts as we build)
 
@@ -32,26 +30,29 @@ Next up: **step 2 — lanes + movers** (§3.2 conveyors, wrap, per-lane renderin
 |---|---|---|---|
 | — | Design — `architecture.md`, the self-contained spec | — | done |
 | 0 | Module scaffold — `main.js` + `src/*` + `modes/*`, boots into Attract | §9, §6 | done |
-| 1 | Frog — hop (8-frame slide), facing, input-lock; render the frog + the static background bands + the row grid; no moving objects / collision yet | §6, §7, §4 | **done** |
-| 2 | Lanes + movers — conveyors, wrap, rendering | §3.2 | next |
-| 3 | Collision — safe / ride / drown / squash per row | §7.3 | |
+| 1 | Frog — hop (8-frame slide), facing, input-lock; render the frog + the static background bands + the row grid; no moving objects / collision yet | §6, §7, §4 | done |
+| 2 | Lanes + movers — conveyors, wrap, rendering | §3.2 | **done** |
+| 3 | Collision — safe / ride / drown / squash per row | §7.3 | next |
 | 4 | Homes — bays, landing test, bonus insect / croc-head | §3.4, §6 | |
 | 5 | Timer + Score + HUD wiring (lives, timer bar, level) | §4.1, §6 | |
 | 6 | Timed events — dives, croc mouth, bay item, lady-frog, otter | §3.4 | |
 | 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | |
 | 8 | Level ramp | §3.3 | |
 
-## What's real vs stubbed (after step 1)
+## What's real vs stubbed (after step 2)
 
 - **Real / running:** the boot pump (`main.js`), `Game` + the mode machine
-  (`Mode`/`Flow`/5 modes), `Renderer` (drawSprite + a source/dest clip + `fillRect` +
+  (`Mode`/`Flow`/5 modes), `Renderer` (drawSprite + clip + `fillRect` + `drawSpriteTiled` +
   tinted monospace drawText), `Sprites` (atlas load), `Input` (edge-triggered),
   `constants.js` (the real §3/§4/§6 design data), `Score`/`Timer` logic, `Attract`, the
-  mode transition/timing, **`Frog` (hop/facing/lock/render)**, **`Playfield.render`** (safe
-  strips + dev grid), **`Homes.render`** (the hedge), and `Play`'s §7 steps 1–2.
-- **Stubbed** (class shell + documented §6 API + `TODO`): `Mover`, `Lane`
-  (seed/advance/render), `Collision`, `Homes.land`/occupancy visuals, `Playfield`'s lane
-  advance, and `Play`'s later tick steps (collision / objects / timer / audio).
+  mode transition/timing, **`Frog` (hop/facing/lock/render)**, **`Mover`**, **`Lane`
+  (seed/advance/render)**, **`Playfield` (build/update/render)**, `Homes.render` (the hedge),
+  and `Play`'s §7 steps 1 · 2 · 4. (`Renderer` gained `drawObject`; tile parts animate via
+  `Lane._frame` — turtles swim.)
+- **Stubbed** (class shell + documented §6 API + `TODO`): `Collision`, `Homes.land`/occupancy
+  visuals, the river **carry**, the turtle **dive** state + median **snake** entry + the rest of
+  §3.4 timed events (frames are in config), the L2 croc, the §3.3 level ramp, and `Play`'s
+  remaining tick steps (collision / timer / audio).
 
 ## Step-1 impl decisions
 
@@ -85,8 +86,44 @@ Next up: **step 2 — lanes + movers** (§3.2 conveyors, wrap, per-lane renderin
   in the 24 px hedge band (24…47). The exact bay snap + `frog_home_0` swap + the ±6 px landing
   test belong to `Homes` (step 4).
 - **Dev row grid** (`DEBUG.ROW_GRID`) — a marked non-source aid (a faint 16 px grid line per
-  lane boundary) so the rows read before the movers exist; turn it off once step 2 fills the
-  field.
+  lane boundary) so the rows read before the movers exist; turned **off** in step 2 now that
+  the movers fill the field (flip on to debug row geometry).
+
+## Step-2 impl decisions
+
+- **Deterministic conveyor seed** (`Lane._seed`) — N `Mover`s at left-edge `x_i = (φ + i·P) mod
+  L`, pitch `P = L/N`, phase `φ = laneIndex·20` (the §3.2 stagger), shared `L = WRAP_L = 240`.
+  No RNG — identical every run.
+- **Seamless wrap** (`Mover.advance` + `Lane.render`) — `x` stays in `[0, L)`; a mover is drawn
+  at `x` and, when it straddles the seam (`x + w > L`), a second copy at `x − L`. `L = 240` is
+  16 px wider than the 224 screen, so a lone 16 px object is fully hidden in that buffer for the
+  one frame it crosses — the wrap reads as continuous.
+- **Object composition** (`Renderer.drawObject`, `LANES[].tiles`) — a lane object is a tile spec
+  `{ body, left?, right? }` laid out left→right: optional 16 px end caps + `body` tiled between.
+  A **log** = rounded left end `log_0` + repeating body `log_1` + tree-ring right end `log_2`, so
+  its length scales the body count (W 48/64/32 → **1/2/0** body tiles). Turtle groups / vehicles
+  are body-only (`truck` a 32 px body; cars/dozers 16 px). (Was a single tiled sprite — wrong
+  for logs; corrected mid-step.)
+- **Animated vs static tile parts** (`Lane._frame`, `ANIM.RATE`) — each part is either a single
+  sprite (static: log parts, vehicles) **or** a frame LIST that cosmetically cycles every
+  `ANIM.RATE = 8` ticks off the global counter (§3.5). Turtles **swim** (`turtle_0/1/2`) — done;
+  the config also carries the diving group's submerged frames (`dive: turtle_dive_0/1`) and the
+  median snake's frames (`snake_0/1/2`) so the substrate is complete, but their **behavior** —
+  the §3.4 dive timer and the snake's edge-entry hazard — lands in step 6. The frame counter is
+  threaded `Play.render → Playfield.render → Lane.render`.
+- **Lane direction ↔ sprite orientation** — the turtle sprite's head faces **left** only, so
+  every turtle lane drifts left; logs are symmetric (no front) so they take the opposite drift,
+  **right**. This flipped River 4 (log → right) and River 5 (turtle → left) from the old spec;
+  all adjacent lanes still counter-flow except the two neighbouring log lanes (River 3 · 4).
+  Vehicles already face their lane's direction (car_green → right, car_red / truck → left), so
+  the road was left unchanged. (§3.1 updated.)
+- **Level-1 only** — lanes use `cfg.v` / `cfg.n` directly; the §3.3 ramp (V scaling + the N
+  schedule) is **step 8**. `Lane` already carries `level` for it.
+- **Deferred to their steps** — the river **carry** of a riding frog (needs the frog's ride
+  state → step 3); collision/kill (`Lane.carries`/`kills` are set but unread until step 3); the
+  turtle **dive** state + the median **snake** entry (§3.4 → step 6; their frames are in config);
+  the L2 **crocodile** (a wide single-sprite object replacing a river-1 log). The median lane
+  seeds **0 movers** at L1 (its snake enters at an edge from L2, not a fixed conveyor).
 
 ## Deferred
 
