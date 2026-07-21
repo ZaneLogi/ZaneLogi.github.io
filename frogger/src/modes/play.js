@@ -10,10 +10,12 @@ export class Play extends Mode {
     this.game.audio.playMusic();
   }
 
-  // TODO(impl): the §7 tick order — input → frog → collision → objects move → timer.
+  // The §7 tick order, built up by step. Step 1: input → the frog's hop, then advance it.
+  // TODO(later): collision (3), objects move (4), timer (5), audio (6).
   update() {
-    this.game.playfield.update();
-    if (this.game.timer.tick()) { /* TODO(impl): time-out → this.game.flow.to('death') */ }
+    const dir = this.game.input.hop();
+    if (dir) this.game.frog.beginHop(dir);
+    this.game.frog.update();
   }
 
   render() {

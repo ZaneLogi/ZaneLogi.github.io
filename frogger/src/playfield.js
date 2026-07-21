@@ -2,7 +2,7 @@
 // constants.js, advances the lanes each tick, and is the surface Collision/Play query (§6).
 import { Lane } from './lane.js';
 import { Homes } from './homes.js';
-import { LANES } from './constants.js';
+import { LANES, ROWS, SCREEN, DEBUG } from './constants.js';
 
 /** @typedef {import('./renderer.js').Renderer} Renderer */
 
@@ -18,7 +18,22 @@ export class Playfield {
 
   /** @param {Renderer} renderer */
   render(renderer) {
-    // TODO(impl): background bands, then each lane at its row y, then the homes (§4).
+    // Static 16 px safe strips (§3.1): the median and the start row tile bg_block (16×16).
+    // River/road bands stay the cleared black (water / asphalt).
+    for (let x = 0; x < SCREEN.WIDTH; x += SCREEN.CELL) {
+      renderer.drawSprite('bg_block', x, ROWS.MEDIAN_Y);
+      renderer.drawSprite('bg_block', x, ROWS.START_Y);
+    }
+    if (DEBUG.ROW_GRID) this._grid(renderer);
+    // TODO(step 2): draw each lane's movers at its row y, between the strips and the homes.
     this.homes.render(renderer);
+  }
+
+  // Dev aid (§ DEBUG): a faint line at every lane boundary (a uniform 16 px grid) so the rows
+  // read before the movers fill them.
+  _grid(renderer) {
+    for (let y = ROWS.FIRST_LANE_Y; y <= ROWS.START_Y + SCREEN.CELL; y += SCREEN.CELL) {
+      renderer.fillRect(0, y, SCREEN.WIDTH, 1, 'rgba(255,255,255,0.12)');
+    }
   }
 }

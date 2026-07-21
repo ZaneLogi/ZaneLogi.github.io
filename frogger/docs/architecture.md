@@ -253,7 +253,13 @@ Frame rates and the frame↔state windows are constants (`constants.js`).
   in these pixels. The backbuffer is **integer-scaled** to the display with
   nearest-neighbor (`image-rendering: pixelated`); the page never sub-pixel-scales.
 - **Screen layout (top→bottom):** score/HUD · five home bays · river lanes ·
-  median · road lanes · start row · timer bar. **Score at top, timer at bottom.**
+  median · road lanes · start row · bottom HUD. **Score at top, lives + timer at bottom.**
+  The bands are **tile-aligned and sum to 256 px**: score **24** · home hedge **24**
+  (y 24–47) · five river lanes 16 (48–127) · median 16
+  (128–143) · five road lanes 16 (144–223) · start row 16 (224–239) · bottom HUD 16
+  (240–255). Only the home hedge is 24 px; the ten moving lanes **and** both `bg_block`
+  safe strips (median, start) are **16 px**. Every playfield row below the hedge is 16 px,
+  so the frog hops a **uniform 16 px** per press (row-indexed: `y = 224 − row·16`).
 - **Sprites are 16×16**, drawn at any pixel coordinate. Every game object — each
   vehicle, log, turtle, and the frog — is an independent instance rendered with a
   single `drawImage`, and any number may be on screen at once. The playfield reads
@@ -269,26 +275,28 @@ Score at the **top**, lives and the timer at the **bottom** (the arcade
 arrangement); all text uses the monospace font (§5). Positions in px for the
 224×256 screen (tunable constants):
 
-**Top strip** (y 0–15):
+**Top strip** (y 0–23):
 
 | Element | Text | Position |
 |---|---|---|
 | Player label / score | `1-UP` / digits | `(16, 1)` / `(16, 9)` |
 | Hi-score label / value | `HI-SCORE` / digits | `(88, 1)` / `(88, 9)` |
 
-**Bottom strip** (y 232–255):
+**Bottom strip** (y 240–255) — lives, timer, and level in the 16 px band below the start row.
+The `blk_*` HUD tiles are **8×8**. Positions are provisional — finalized when the HUD is built
+(step 5):
 
 | Element | Position |
 |---|---|
-| **Lives** — one `blk_0` frog icon per reserve life | from **`(8, 234)`**, 16 px apart, left→right — the **bottom-left corner** |
-| **Timer bar** — shrinks as time drains; green normally, red in the warning phase (below) | `(8 … 184, 249)`, 6 px tall; `TIME` label at `(188, 248)` |
-| **Level** — `blk_1` markers, one per level | right side, ending near `(216, 234)` |
+| **Lives** — one `blk_0` frog icon per reserve life | from `(8, 240)`, left→right |
+| **Timer bar** — shrinks as time drains; green normally, red in the warning phase (below) | `(8 … 184, 248)`; `TIME` label at `(188, 248)` |
+| **Level** — `blk_1` markers, one per level | right side, near `(216, 240)` |
 
 The **timer bar** is a row of 8 px tiles: full green `blk_2` for the beats remaining, its
 draining end tile stepping `blk_3` → `blk_5` (narrowing) for the sub-tile fraction; in the
 warning phase the whole bar switches to the red set — `blk_6` (full) → `blk_9` (sliver).
 
-The play area (home bays → start row) fills the space between, **y 16–231**.
+The play area (home bays → start row) fills the space between, **y 24–239**.
 
 ---
 

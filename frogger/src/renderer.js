@@ -26,10 +26,20 @@ export class Renderer {
     this.ctx.fillRect(0, 0, SCREEN.WIDTH, SCREEN.HEIGHT);
   }
 
-  drawSprite(name, x, y) {
+  // A solid rectangle (bands, the timer bar, the dev grid). Colour may carry alpha (rgba).
+  fillRect(x, y, w, h, color) {
+    this.ctx.fillStyle = color;
+    this.ctx.fillRect(x | 0, y | 0, w, h);
+  }
+
+  // Optional w/h clip the sprite to its top-left w×h region (e.g. a 16 px slice of the 24 px
+  // bg_block strip). Omit them to draw the whole sprite.
+  drawSprite(name, x, y, w, h) {
     const r = this.sprites.rect(name);
     if (!r) return;
-    this.ctx.drawImage(this.sprites.image, r.x, r.y, r.w, r.h, x | 0, y | 0, r.w, r.h);
+    const sw = w == null ? r.w : Math.min(w, r.w);
+    const sh = h == null ? r.h : Math.min(h, r.h);
+    this.ctx.drawImage(this.sprites.image, r.x, r.y, sw, sh, x | 0, y | 0, sw, sh);
   }
 
   // Monospace: advance penX by GLYPH_W per character (§5.1). Unknown chars = blank cell.

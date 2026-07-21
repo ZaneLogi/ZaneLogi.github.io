@@ -2,7 +2,7 @@
 // crocodile-head hazard, the escorted lady-frog's arrival, and the win check (§6, §3.4).
 // A filled bay shows frog_home_0 (smile); on the win, RoundClear redraws all five as
 // frog_home_1 (laugh), one-by-one (§10).
-import { HOMES } from './constants.js';
+import { HOMES, SCREEN } from './constants.js';
 
 /** @typedef {import('./renderer.js').Renderer} Renderer */
 
@@ -17,8 +17,16 @@ export class Homes {
 
   allFilled() { return this.filled.every(Boolean); }
 
-  // TODO(impl): hedge (hedge_0 bay units + hedge_1 fillers), frog_home_0 per filled bay,
-  // the bay item (bonus insect / crochead_0·1), §3.4.
+  // The home-row hedge (§3.1): a hedge_0 bay unit (32 px, a bay opening in its middle) centred
+  // on each bay, the gaps filled with 8 px hedge_1. Each opening's black is transparent → a
+  // black bay until a landed frog fills it. (frog_home_0 per filled bay + the bay item arrive
+  // with steps 4 / 6.)
   /** @param {Renderer} renderer */
-  render(renderer) {}
+  render(renderer) {
+    const covered = (x) => HOMES.BAY_CENTERS.some((c) => x >= c - 16 && x < c + 16);
+    for (let x = 0; x < SCREEN.WIDTH; x += 8) {
+      if (!covered(x)) renderer.drawSprite('hedge_1', x, HOMES.BAY_Y);
+    }
+    for (const c of HOMES.BAY_CENTERS) renderer.drawSprite('hedge_0', c - 16, HOMES.BAY_Y);
+  }
 }
