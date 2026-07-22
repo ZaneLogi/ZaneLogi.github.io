@@ -5,13 +5,14 @@ import { Mode } from '../mode.js';
 export class Play extends Mode {
   enter() {
     this.game.frog.reset();
+    this.game.score.newFrog();                   // this frog re-earns its forward-hop points
     this.game.playfield.build(this.game.level);
     this.game.timer.reset();
     this.game.audio.playMusic();
   }
 
-  // The §7 tick order, built up by step. 1 input → 2 frog → 3 collision → 4 objects move.
-  // TODO(later): timer (5), audio (6 — Game.tick advances active sounds).
+  // The §7 tick order, built up by step. 1 input → 2 frog → 3 collision → 4 objects → 5 timer.
+  // TODO(later): audio (6 — Game.tick advances active sounds).
   update() {
     const g = this.game;
     const dir = g.input.hop();
@@ -23,14 +24,17 @@ export class Play extends Mode {
         g.flow.to('death'); return;
       }
       if (outcome === 'home' || outcome === 'pickup') {
-        g.score.home();                          // +50 (+ the time bonus once Timer is wired, step 5)
+        g.score.home();                          // +50 for the home
         if (outcome === 'pickup') g.score.bonus();                 // +200 for the bonus insect
+        g.score.add(g.timer.bonus());            // time bonus = remaining beats × 10 (§6)
         if (g.playfield.homes.allFilled()) { g.flow.to('roundclear'); return; }
-        g.frog.reset();                          // reaching a home costs no life — respawn for the next bay
-        g.timer.reset();
+        g.frog.reset(); g.score.newFrog(); g.timer.reset();        // respawn for the next bay (no life lost)
+      } else {
+        g.score.hop(g.frog.row);                 // +10 on a hop to a new furthest row (safe / ride)
       }
     }
     g.playfield.update(g.frame);                 // §7 step 4: lanes advance + the bay item walks
+    if (g.timer.tick()) { g.flow.to('death'); return; }            // §7 step 5: countdown → time-out death
   }
 
   render() {

@@ -9,6 +9,10 @@ export class Score {
 
   add(points) { this.value += points; this._checkExtra(); }
 
+  // A new frog re-earns its hop points from the start row — reset the furthest-row gate without
+  // touching the running total (unlike reset(), which is a whole new game).
+  newFrog() { this.furthestRow = 0; }
+
   hop(row) { if (row > this.furthestRow) { this.furthestRow = row; this.add(SCORE.HOP); } }
   home() { this.add(SCORE.HOME); }
   bonus() { this.add(SCORE.BONUS); }

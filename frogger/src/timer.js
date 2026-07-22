@@ -17,4 +17,9 @@ export class Timer {
 
   get warning() { return this.beats <= TIMER.WARNING_AT; }
   bonus() { return this.beats * TIMER.BONUS_PER_BEAT; }
+
+  // Continuous beats remaining (whole beats + the sub-beat drained so far) so the HUD bar creeps
+  // smoothly rather than jumping a whole beat every FRAMES_PER_BEAT frames.
+  remaining() { return this.beats > 0 ? (this.beats - 1) + this._frames / TIMER.FRAMES_PER_BEAT : 0; }
+  fraction() { return this.remaining() / TIMER.BEATS; }
 }

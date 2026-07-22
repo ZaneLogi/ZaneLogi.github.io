@@ -7,28 +7,28 @@ self-contained; progress.md is free to reference the spec's sections.
 
 ## Status
 
-**Step 4 — homes: DONE.** `Homes` runs the §6 landing test: the frog's centre must fall within
-±6 px of a bay centre **and** the bay be empty → it **fills** (`frog_home_0`, smile); landing there
-while the **bonus insect** occupies that bay is a **pickup** (home + bonus); a miss (a divider) or an
-occupied bay is **death**. The insect **walks** the five bays on the `T_BAY` timer in the fixed order
-`2, 0, 3, 1, 4`, skipping any filled bay (§3.4). `Collision.resolve` delegates the home row to
-`Homes.land` → `home` / `pickup` / `death`; `Play` awards `+50` (home) / `+200` (bonus) and **respawns
-the frog** for the next bay (a home costs no life), and on the **fifth** bay routes to `RoundClear` —
-which awards the `+1000` all-homes bonus and, after its fallback duration, advances the level with the
-bays cleared. **The game is now winnable.**
+**Step 5 — Timer + Score + HUD wiring: DONE.** `Play` now runs §7 step 5 — the per-life countdown
+ticks each frame and a **time-out** (`beats` → 0) fires `Flow.to('death')`. Reaching a home adds the
+**time bonus** (remaining beats × 10) on top of the +50 / +200 awards; each forward hop to a **new
+furthest row** scores **+10** (the furthest-row gate resets per frog via `Score.newFrog`, so a new
+frog re-earns it and never farms). The bottom HUD strip (§4.1) draws: **reserve lives** (one `blk_0`
+frog per `lives − 1`), the **timer bar** (8 px tiles, right-anchored by the TIME label and draining
+leftward — full `blk_2` green + a `blk_3→5` narrowing end tile, switching to the red `blk_6→9` set at
+the ≤ 12-beat warning), and one **level marker** (`blk_1`) per level. The single **extra life at
+20000** already flows through `Game.tick`, and `Attract` already resets score / lives / level for a
+fresh game.
 
-Verified deterministically — 15 `Homes` unit assertions + 12 end-to-end through `Game.tick` → `Play`
-→ `Flow`: the ±6 px tolerance boundary (home at +6, death at +7), occupied-bay + divider deaths, the
-pickup award (+250), the walk order + skip-filled, and the full win path (5th bay → RoundClear +1000
-→ level up → cleared bays). Render confirmed via `getImageData` (filled bays `rgb(29,195,0)`, empty
-openings black, the insect drawn); no console errors.
+Verified deterministically — 15 assertions (Timer `fraction` / `remaining` continuity + the warning
+gate, `Score.newFrog` resetting the furthest-row gate but not the total, and through `Game.tick` →
+`Play`: time-out → Death, home +50 + time-bonus +100, forward-hop +10 with the no-farm gate) + HUD
+render via `getImageData` (2 / 1 reserve icons, the full-green vs right-drained-red bar, per-level
+markers); no console errors.
 
-Prior: **step 3** — collision (safe / ride / drown / squash per row + the river carry). **Step 2** —
-the ten conveyor lanes (deterministic seed, seamless seam wrap). **Step 1** — the frog hop + the
-static arcade field.
+Prior: **step 4** — homes (landing test, occupancy fill, bonus insect, win → RoundClear). **Step 3**
+— collision + the river carry. **Steps 0–2** — scaffold, frog hop + static field, lane conveyors.
 
-Next up: **step 5 — Timer + Score + HUD wiring** (the per-life countdown + time-out death, the home
-**time bonus**, the forward-hop `+10`, and the bottom-HUD lives / timer bar / level, §4.1, §6).
+Next up: **step 6 — timed events** (turtle dives, the river-croc mouth, the median snake, the
+lady-frog escort, the roaming otter — the §3.4 hazards on their fixed timers).
 
 ## Steps (plan is provisional — adjusts as we build)
 
@@ -39,29 +39,32 @@ Next up: **step 5 — Timer + Score + HUD wiring** (the per-life countdown + tim
 | 1 | Frog — hop (8-frame slide), facing, input-lock; render the frog + the static background bands + the row grid; no moving objects / collision yet | §6, §7, §4 | done |
 | 2 | Lanes + movers — conveyors, wrap, rendering | §3.2 | done |
 | 3 | Collision — safe / ride / drown / squash per row + the river carry | §7.3 | done |
-| 4 | Homes — bays, landing test, occupancy fill, bonus insect, win check | §3.4, §6 | **done** |
-| 5 | Timer + Score + HUD wiring (lives, timer bar, level) | §4.1, §6 | next |
-| 6 | Timed events — dives, croc mouth, bay croc-head, lady-frog, otter (bonus insect done in step 4) | §3.4 | |
+| 4 | Homes — bays, landing test, occupancy fill, bonus insect, win check | §3.4, §6 | done |
+| 5 | Timer + Score + HUD wiring (lives, timer bar, level) | §4.1, §6 | **done** |
+| 6 | Timed events — dives, croc mouth, bay croc-head, lady-frog, otter (bonus insect done in step 4) | §3.4 | next |
 | 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | |
 | 8 | Level ramp | §3.3 | |
 
-## What's real vs stubbed (after step 4)
+## What's real vs stubbed (after step 5)
 
 - **Real / running:** the boot pump (`main.js`), `Game` + the mode machine
   (`Mode`/`Flow`/5 modes), `Renderer` (drawSprite + clip + `fillRect` + `drawObject` +
   tinted monospace drawText), `Sprites` (atlas load), `Input` (edge-triggered),
-  `constants.js` (the real §3/§4/§6 design data), `Score`/`Timer` logic, `Attract`, the
-  mode transition/timing, **`Frog` (hop/facing/lock/render + river carry)**, **`Mover`**,
-  **`Lane` (seed/advance/render)**, **`Playfield` (build/update/render)**, **`Homes` (landing
-  test / occupancy fill + smile render / bonus-insect walk / win check)**, **`Collision` (§7.3
-  safe / ride / drown / squash + carried-off-edge + home delegation)**, and `Play`'s §7 steps
-  1 · 2 · 3 · 4 (input → frog → collision → objects move), with drown / squash / home-miss →
-  `Death`, home / pickup → score + respawn, all-filled → `RoundClear` (+1000, level ramp).
+  `constants.js` (the real §3/§4/§6 design data), `Attract`, the mode transition/timing,
+  **`Frog` (hop/facing/lock/render + river carry)**, **`Mover`**, **`Lane` (seed/advance/render)**,
+  **`Playfield` (build/update/render)**, **`Homes` (landing test / occupancy fill + smile render /
+  bonus-insect walk / win check)**, **`Collision` (§7.3 safe / ride / drown / squash +
+  carried-off-edge + home delegation)**, **`Timer` (countdown + time-out + continuous bar
+  fraction)**, **`Score` (all awards + forward-hop gate + extra life)**, **`Hud` (top score/hi +
+  bottom lives / timer bar / level)**, and `Play`'s §7 steps 1 · 2 · 3 · 4 · 5 (input → frog →
+  collision → objects → timer): drown / squash / home-miss / time-out → `Death`, home / pickup →
+  score (+ time bonus) + respawn, all-filled → `RoundClear` (+1000, level ramp).
   (Tile parts animate via `Lane._frame` — turtles swim.)
 - **Stubbed** (class shell + documented §6 API + `TODO`): the turtle **dive** state + median
   **snake** entry + the **bay croc-head** / **lady-frog** / **otter** / **river-croc mouth** rest
-  of §3.4 (frames are in config), the §3.3 level ramp, the `RoundClear` **laugh-sweep** render
-  (step 7), and `Play`'s remaining tick steps (timer / audio + the forward-hop / time-bonus score).
+  of §3.4 (frames are in config), the §3.3 level ramp, the `RoundClear` **laugh-sweep** render and
+  the `Death` **explosion** render (step 7), the gameplay-event **sounds** (hop / plunk / squash /
+  hurry-up / time-out — no-op `Audio`, §5.2), and `Play`'s remaining tick step (audio, step 6 order).
 
 ## Step-1 impl decisions
 
@@ -189,6 +192,32 @@ Next up: **step 5 — Timer + Score + HUD wiring** (the per-life countdown + tim
 - **Deferred to their steps:** the **croc-head** bay hazard (L2-only — unreachable until the level
   ramp, step 8; frames `crochead_0/1` are in the atlas), the **lady-frog** river escort (step 6),
   and the `RoundClear` **laugh-sweep** render (`frog_home_1` across the bays — step 7).
+
+## Step-5 impl decisions
+
+- **Timer ticks in `Play` step 5** — after the objects move, every frame (including mid-hop, so time
+  passes during a slide); `tick()` returning true (`beats` → 0) routes to `Death` like any other
+  kill. Resets on each life start (`Play.enter`) and on reaching a home.
+- **Continuous bar fraction.** `Timer.fraction()` = `(beats−1 + _frames/FRAMES_PER_BEAT) / BEATS`, so
+  the HUD bar **creeps** smoothly instead of jumping a whole beat every 30 frames. The gameplay
+  countdown itself is still integer beats; the fraction is display-only.
+- **Time bonus is read before the timer resets.** On a home, `+50` / `+200` then `+beats×10` are
+  awarded off the beats *standing when the home is reached* — computed **before** the win check, so
+  the fifth (winning) home also banks its time bonus, then `RoundClear` adds `+1000`.
+- **Forward-hop `+10` is gated + per-frog.** Awarded only on a `safe` / `ride` landing to a **new
+  furthest row** (not on the home award, not on death); `Score.newFrog()` zeroes the gate at every
+  respawn (`Play.enter` + the home respawn) so each frog re-earns its hop points and can't farm one
+  row. `Score.reset()` (whole new game, from `Attract`) stays separate.
+- **Reserve lives = `lives − 1`** (the last life is the frog currently in play), per §4.1 "reserve
+  life" — so 3 lives shows 2 icons, the last life shows none.
+- **Timer bar is right-anchored, draining leftward** — derived from the `blk_*` sprites, not guessed:
+  the partial end tiles fill their **right** side (`blk_3` `..######` → `blk_5` `......##`) and the
+  `TIME` label sits to the bar's right, so the bar hugs the right edge and its draining (leftmost)
+  tile joins onto the full tiles. Length is continuous px; drawn as `⌊px/8⌋` full tiles + one
+  narrowing end tile chosen from the sub-tile remainder (2 / 4 / 6 px buckets).
+- **Gameplay-event sounds stay unwired** (hurry-up, time-out, hop, plunk, squash). `Audio` is a
+  no-op; these `request()` sites land with the §5.2 audio work, consistent with the other
+  gameplay sounds still unwired (only the mode-transition sounds call `request` today).
 
 ## Deferred
 

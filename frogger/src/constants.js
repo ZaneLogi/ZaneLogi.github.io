@@ -104,13 +104,14 @@ export const ROWS = {
 };
 
 // HUD positions in px for the 224×256 screen (§4.1), tunable. Top strip y0…23 (score); bottom
-// strip y240…255 (lives + timer + level). Bottom positions are provisional — finalized when the
-// HUD is built (step 5).
+// strip y240…255 (lives + timer + level). TILE is the fixed 8×8 blk_* tile width (an atlas fact,
+// not a layout knob); LIVES_STEP / LEVEL_STEP are the tunable marker spacings (both one tile now).
 export const HUD = {
   ONE_UP: [16, 1], SCORE: [16, 9], HI_LABEL: [88, 1], HI_VALUE: [88, 9],
-  LIVES: [8, 240], LIVES_STEP: 16,
+  TILE: 8,                                  // blk_* tile width (fixed by the atlas)
+  LIVES: [0, 240], LIVES_STEP: 8,
   TIMER_BAR: [8, 248], TIMER_W: 176, TIME_LABEL: [188, 248],
-  LEVEL_END: [216, 240],
+  LEVEL_END: [216, 240], LEVEL_STEP: 8,
 };
 
 // Five home bays, centres on the frog column grid (16-apart multiples) and symmetric about
