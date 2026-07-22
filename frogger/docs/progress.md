@@ -315,13 +315,40 @@ path + full render run clean (no console errors).
   this two-item design.
 - **The croc's level-2 gate is a deliberate choice.** It keeps early levels gentle; `Homes.level`
   (set in `Playfield.build`) is the gate.
-- **Both items are frame-derived — no new entity.** `Homes.update` sets `crocBay = BAY_ORDER[(s + 2)
-  mod 5]` (two steps ahead of the insect, so provably never its bay — `BAY_ORDER` is a permutation)
-  and `crocLethal` = the last third of `T_BAYCROC`. `land` gains two branches: croc bay + head-up →
-  death; croc bay + head-down → a normal `home` fill (which clears the croc). No RNG, no `LadyFrog`-
-  style class.
-- **The head-up window mirrors the river croc.** Both crocodile hazards use "the last third of a
-  120-frame cycle" (`T_BAYCROC` = `T_MOUTH` = 120) for the lethal phase — one consistent timing.
+- **Both items are frame-derived — no new entity.** `Homes.update` cycles the insect on `T_BAY`
+  (visible for `INSECT_SHOW`, then gone) and the croc head on its **own `T_BAYCROC` cycle**
+  (`crocBay = BAY_ORDER[(⌊frame/T_BAYCROC⌋ + 2) % 5]`,
+  the `+2` starting it clear of the insect), skipping a filled bay **or** the insect's current bay (so
+  they're never together). Within the cycle: sliver for `[0, CROC_SLIVER)`, lethal for
+  `[CROC_SLIVER, CROC_SLIVER + CROC_OPEN)`, gone after (see the fix). `land` gains two branches: croc
+  bay + head-up → death; croc bay + head-down → a normal `home` fill (which clears the croc). No RNG.
+- **The two crocodile hazards differ.** The river croc mouth is lethal in the last third of its
+  `T_MOUTH` cycle and is always present (riding a log). The bay croc-head runs a distinct three-phase
+  cycle — sliver → open → **disappear/wait** — so it is absent between appearances (see the fix below).
+
+### Step-6d fix (2026-07-22)
+
+**Bay items get appear → wait lifecycles (Zane).** Two original problems with the croc head: it
+stepped bays on the insect's `T_BAY` (`(s+2)`) while bobbing on `frame % T_BAYCROC`, so `≈ 2.13` bobs
+crammed into one bay visit and the two items moved in lockstep; and it was **always present**, hopping
+straight to the next bay with no gap. The insect, likewise, never left. Fix — each item now runs its
+own cycle: appear, then **disappear and wait** before re-appearing in the next bay.
+
+- **Croc head** — own `T_BAYCROC` cycle (default **324**, independent of `T_BAY`): head-down
+  **sliver** (safe) `CROC_SLIVER` (48) frames → head-up **lethal** `CROC_OPEN` (36) frames → **gone**
+  for the rest (~**240** frames ≈ 4 s: the wait). One snap per appearance. A `+2` bay offset keeps it
+  clear of the insect at startup; it still yields (skips a cycle) if it would land on the insect's or a
+  filled bay.
+- **Bonus insect** — own `T_BAY` cycle (default **350**): visible `INSECT_SHOW` (170) frames → **gone**
+  for the rest (~**180** frames ≈ 3 s: the wait), then the next bay.
+- **Different waits, on purpose** (Zane): croc **240** vs insect **180**, and the cycles (324 vs 350)
+  are non-multiples so the two never lock into a fixed collision pattern. Both were tuned **longer**
+  after a first pass (126 / 86) felt too short.
+
+The spec fixed only the old bob cycle, not the items' spawn rhythms, so this was a free design choice;
+§3.4 updated. Verified: steady-state timelines read insect `show 170 → wait 180 → …` and croc
+`sliver 48 → open 36 → wait 240 → …` from frame 0, both always with a wait, and the croc never shares
+the insect's bay.
 
 ## Step-6e impl decisions
 

@@ -49,12 +49,15 @@ export const SCORE = {
 
 // Timed events — fixed periods, no RNG (§3.4).
 export const TIMED = {
-  T_DIVE: 240, T_MOUTH: 120, T_BAY: 256, T_BAYCROC: 120, T_LADY: 512, T_OTTER: 256,
+  T_DIVE: 240, T_MOUTH: 120, T_BAY: 350, T_BAYCROC: 324, T_LADY: 512, T_OTTER: 256,
   BAY_ORDER: [2, 0, 3, 1, 4],            // the bay-item walk order
   OTTER_LANES: ['river1', 'river3', 'river4'],  // roams the log lanes, in order
   LADY_LANE: 'river4',                   // the lady-frog rides a log in this lane
   LADY_LOG: 0,                           // which of the lane's logs she sits on (she rides it until picked up)
   CROC_LOG: 0,                           // which River-1 log becomes the crocodile (from L2)
+  CROC_SLIVER: 48,                       // bay croc-head: head-down sliver (safe) frames at the start of each T_BAYCROC cycle
+  CROC_OPEN: 36,                         // bay croc-head: head-up (lethal) frames after the sliver; then it disappears until the next cycle
+  INSECT_SHOW: 170,                      // bonus insect: visible frames at the start of each T_BAY cycle; gone (waits) for the rest — a shorter wait (180) than the croc's (240)
   OTTER_V: 0.8,                          // otter traversal speed (absolute px/frame) — faster than every log lane (§3.4)
   OTTER_MIN_LEVEL: 3,                    // the otter is a level-3+ hazard (§3.3)
 };

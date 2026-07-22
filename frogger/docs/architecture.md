@@ -199,14 +199,22 @@ switch — identical on every playthrough:
   is lethal only while the mouth is open** (`croc_0` = closed, `croc_1` = open).
 - **Home-bay items — the bonus insect, and from level 2 the crocodile head.** Up to
   two items occupy the home row at once, always in **different** bays and never on a
-  filled one. The **bonus insect** (`bonus`) sits in one bay and steps to the next on
-  a `T_bay`-frame timer (default **256**) through a fixed bay order (`2, 0, 3, 1, 4`),
-  skipping filled bays; landing on it fills the home **and** scores a bonus. From
-  **level 2** a **crocodile head** takes a second bay — a **bobbing head** that cycles
-  `crochead_0` (head down: an emerging sliver, the bay **safe** and fillable) ↔
-  `crochead_1` (head up: **lethal**) on a `T_baycroc`-frame cycle (default **120**),
-  reared up during its last third. Landing on the croc bay **kills while the head is
-  up**; while it is down the frog fills the home normally (no bonus).
+  filled one. The **bonus insect** (`bonus`) appears in a bay for `INSECT_SHOW` frames
+  (default **170**) of each `T_bay`-frame cycle (default **350**), then **disappears** for
+  the rest — a wait before it re-appears in the next bay of the fixed order (`2, 0, 3, 1, 4`),
+  skipping filled bays; landing on it while present fills the home **and** scores a bonus. So
+  it too follows **appear → disappear → wait → repeat**, but with a **shorter wait than the
+  croc head's** (below), so the two rhythms differ. From
+  **level 2** a **crocodile head** appears in a bay on its **own `T_baycroc`-frame cycle**
+  (default **324**), **independent of the insect's `T_bay`** and walking the same bay order.
+  Each cycle it runs one lifecycle: `crochead_0` (head down: an emerging **sliver**, the bay
+  **safe** and fillable) for `CROC_SLIVER` frames (default **48**), then rears up to
+  `crochead_1` (head up: **lethal**) for `CROC_OPEN` frames (default **36**), then
+  **disappears** for the rest of the cycle — a wait before it re-appears in the next bay. So
+  the rhythm is **sliver → open → disappear → wait → repeat**, one snap per appearance with a
+  clear gap between. It never takes the insect's current bay or a filled one (it skips that
+  cycle). Landing on the croc bay **kills while the head is up**; while it is a sliver the frog
+  fills the home normally (no bonus).
 - **Lady-frog (river escort, River 4).** A **cyan lady-frog** (the player frog recoloured
   cyan, §5.1) rides a **River 4** log: she boards on a `T_lady`-frame timer (default **512**) and
   then **stays on that log, riding it continuously** (no vanish-and-return) until the player hops

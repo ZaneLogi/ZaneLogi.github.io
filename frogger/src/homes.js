@@ -39,21 +39,31 @@ export class Homes {
     return 'death';                                                     // between bays — a divider
   }
 
-  // The two home-bay items (§3.4), both derived from the frame counter. The bonus insect walks the
-  // bays on the T_BAY timer in the fixed BAY_ORDER, skipping filled bays. From level 2 the crocodile
-  // head takes a second bay — two steps ahead in the same order, so never the insect's — bobbing
-  // head-down (safe) ↔ head-up (lethal, the last third of the T_BAYCROC cycle).
+  // The two home-bay items (§3.4), both frame-derived but on INDEPENDENT timers. The bonus insect
+  // walks the bays on the T_BAY timer in the fixed BAY_ORDER, skipping filled bays. From level 2 the
+  // crocodile head runs its OWN T_BAYCROC cycle as a full lifecycle — head-down **sliver** (safe) for
+  // CROC_SLIVER frames, head-up **lethal** for CROC_OPEN frames, then it **disappears** for the rest
+  // of the cycle (the "wait") before re-appearing in the next bay: sliver → open → disappear → wait.
+  // It never takes the insect's current bay or a filled one (it skips that cycle).
   /** @param {number} frame  the global tick counter */
   update(frame) {
-    const s = Math.floor(frame / TIMED.T_BAY);
-    const ibay = TIMED.BAY_ORDER[s % HOMES.COUNT];
-    this.itemBay = this.filled[ibay] ? -1 : ibay;
-    if (this.level >= 2) {
-      const cbay = TIMED.BAY_ORDER[(s + 2) % HOMES.COUNT];
-      this.crocBay = this.filled[cbay] ? -1 : cbay;
-      this.crocLethal = frame % TIMED.T_BAYCROC >= TIMED.T_BAYCROC * 2 / 3;
+    // The bonus insect appears for INSECT_SHOW frames of each T_BAY cycle, then disappears (waits)
+    // for the rest before re-appearing in the next bay — a shorter wait than the croc head's.
+    if (frame % TIMED.T_BAY < TIMED.INSECT_SHOW) {
+      const ibay = TIMED.BAY_ORDER[Math.floor(frame / TIMED.T_BAY) % HOMES.COUNT];
+      this.itemBay = this.filled[ibay] ? -1 : ibay;
     } else {
-      this.crocBay = -1;
+      this.itemBay = -1;                                   // the insect's wait
+    }
+    const t = frame % TIMED.T_BAYCROC;                     // position within the croc's cycle
+    const showEnd = TIMED.CROC_SLIVER + TIMED.CROC_OPEN;   // present during [0, showEnd); gone after (the wait)
+    if (this.level >= 2 && t < showEnd) {
+      const cbay = TIMED.BAY_ORDER[(Math.floor(frame / TIMED.T_BAYCROC) + 2) % HOMES.COUNT];   // +2 offset: starts clear of the insect
+
+      this.crocBay = (this.filled[cbay] || cbay === this.itemBay) ? -1 : cbay;
+      this.crocLethal = this.crocBay >= 0 && t >= TIMED.CROC_SLIVER;   // open (lethal) during [CROC_SLIVER, showEnd)
+    } else {
+      this.crocBay = -1;                                   // below level 2, or the disappear/wait phase
       this.crocLethal = false;
     }
   }
