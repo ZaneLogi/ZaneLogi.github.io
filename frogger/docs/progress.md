@@ -7,22 +7,29 @@ self-contained; progress.md is free to reference the spec's sections.
 
 ## Status
 
-**Step 2 — lanes + movers: DONE.** The ten conveyor lanes (5 river + 5 road) each seed their
-`Mover`s deterministically and advance every tick with a seamless edge wrap; `Playfield`
-renders the movers per row. The board now reads as Frogger — logs + swimming turtle groups drift
-the river, trucks / cars / dozers the road, between the hedge and the two safe strips. `Play.update`
-runs §7 steps 1 · 2 · 4 (input → frog → objects move); collision (3) and the timer (5) are
-still stubbed, so the frog hops over everything for now. Debug grid off (movers fill the field).
+**Step 3 — collision: DONE.** `Collision.resolve` decides the frog's landed cell per §7.3 by span
+overlap against that row's movers: a **river** row is safe only while the frog's **centre** rides an
+object (it records `frog.riding` / `rideDx`), else it **drowns** — open water, or carried off a
+screen edge; a **road** row **squashes** on any overlap with a vehicle; the two safe strips (start,
+median) and the home band resolve **safe** (the bay landing test is step 4). `Frog.update` now
+**carries** a landed rider by `rideDx` (§7 step 2), and `Play.update` runs the full §7 order
+1 · 2 · **3** · 4 — collision resolves against last frame's drawn positions (before the lanes
+advance in step 4), and a drown / squash fires `Flow.to('death')`. The frog now dies on the road,
+rides logs and turtle groups down the river, and is carried off the edge.
 
-Verified deterministically: seed positions match `x_i = (φ + i·P) mod L` (φ = index·20,
-P = L/N) — e.g. river4 seeds `60,120,180,0`; each lane drifts `dir·V` per tick (river1 +0.35,
-river2 −0.30, …); a mover crossing the `L = 240` seam re-enters from the far edge and its wrap
-copy renders on both sides. No console errors; the populated board matches the arcade arrangement.
+Verified deterministically — 22 in-module assertions + 6 end-to-end through `Game.tick` → `Play` →
+`Flow`: river ride / drown / off-edge, road squash / safe / any-overlap, the safe strips + home
+band, the carry step, seam wrap-copy overlap, and a 31-tick "glued to the log" ride; car contact
+and open water both transition Play → Death, a ride keeps the frog in Play and carried at
+`dir·V`/tick. Live board renders clean (frog at spawn `rgb(224,224,0)`; river / road / hedge bands
+all lit); no console errors.
 
-Prior: **step 1** — the frog hop (8-frame slide, facing, input-lock) + the static arcade field
-(band layout measured from the arcade screenshot, matches to the pixel; frog frames from the atlas).
+Prior: **step 2** — the ten conveyor lanes seed deterministically (`x_i = (φ + i·P) mod L`) and
+advance each tick with a seamless `L = 240` seam wrap; `Playfield` renders logs / turtles / vehicles
+per row. **Step 1** — the frog hop (8-frame slide, facing, input-lock) + the static arcade field.
 
-Next up: **step 3 — collision** (safe / ride / drown / squash per row, §7.3) + the river carry.
+Next up: **step 4 — homes** (bays, the ±6 px landing test, occupancy fill, bonus insect /
+croc-head bay hazard) + the win check (§3.4, §6).
 
 ## Steps (plan is provisional — adjusts as we build)
 
@@ -31,28 +38,28 @@ Next up: **step 3 — collision** (safe / ride / drown / squash per row, §7.3) 
 | — | Design — `architecture.md`, the self-contained spec | — | done |
 | 0 | Module scaffold — `main.js` + `src/*` + `modes/*`, boots into Attract | §9, §6 | done |
 | 1 | Frog — hop (8-frame slide), facing, input-lock; render the frog + the static background bands + the row grid; no moving objects / collision yet | §6, §7, §4 | done |
-| 2 | Lanes + movers — conveyors, wrap, rendering | §3.2 | **done** |
-| 3 | Collision — safe / ride / drown / squash per row | §7.3 | next |
-| 4 | Homes — bays, landing test, bonus insect / croc-head | §3.4, §6 | |
+| 2 | Lanes + movers — conveyors, wrap, rendering | §3.2 | done |
+| 3 | Collision — safe / ride / drown / squash per row + the river carry | §7.3 | **done** |
+| 4 | Homes — bays, landing test, bonus insect / croc-head | §3.4, §6 | next |
 | 5 | Timer + Score + HUD wiring (lives, timer bar, level) | §4.1, §6 | |
 | 6 | Timed events — dives, croc mouth, bay item, lady-frog, otter | §3.4 | |
 | 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | |
 | 8 | Level ramp | §3.3 | |
 
-## What's real vs stubbed (after step 2)
+## What's real vs stubbed (after step 3)
 
 - **Real / running:** the boot pump (`main.js`), `Game` + the mode machine
-  (`Mode`/`Flow`/5 modes), `Renderer` (drawSprite + clip + `fillRect` + `drawSpriteTiled` +
+  (`Mode`/`Flow`/5 modes), `Renderer` (drawSprite + clip + `fillRect` + `drawObject` +
   tinted monospace drawText), `Sprites` (atlas load), `Input` (edge-triggered),
   `constants.js` (the real §3/§4/§6 design data), `Score`/`Timer` logic, `Attract`, the
-  mode transition/timing, **`Frog` (hop/facing/lock/render)**, **`Mover`**, **`Lane`
-  (seed/advance/render)**, **`Playfield` (build/update/render)**, `Homes.render` (the hedge),
-  and `Play`'s §7 steps 1 · 2 · 4. (`Renderer` gained `drawObject`; tile parts animate via
-  `Lane._frame` — turtles swim.)
-- **Stubbed** (class shell + documented §6 API + `TODO`): `Collision`, `Homes.land`/occupancy
-  visuals, the river **carry**, the turtle **dive** state + median **snake** entry + the rest of
-  §3.4 timed events (frames are in config), the L2 croc, the §3.3 level ramp, and `Play`'s
-  remaining tick steps (collision / timer / audio).
+  mode transition/timing, **`Frog` (hop/facing/lock/render + river carry)**, **`Mover`**,
+  **`Lane` (seed/advance/render)**, **`Playfield` (build/update/render)**, `Homes.render`
+  (the hedge), **`Collision` (§7.3 safe / ride / drown / squash + carried-off-edge)**, and
+  `Play`'s §7 steps 1 · 2 · 3 · 4 (input → frog → collision → objects move), drown / squash →
+  `Death`. (Tile parts animate via `Lane._frame` — turtles swim.)
+- **Stubbed** (class shell + documented §6 API + `TODO`): `Homes.land`/occupancy visuals, the
+  turtle **dive** state + median **snake** entry + the rest of §3.4 timed events (frames are in
+  config), the L2 croc, the §3.3 level ramp, and `Play`'s remaining tick steps (timer / audio).
 
 ## Step-1 impl decisions
 
@@ -124,6 +131,32 @@ Next up: **step 3 — collision** (safe / ride / drown / squash per row, §7.3) 
   turtle **dive** state + the median **snake** entry (§3.4 → step 6; their frames are in config);
   the L2 **crocodile** (a wide single-sprite object replacing a river-1 log). The median lane
   seeds **0 movers** at L1 (its snake enters at an edge from L2, not a fixed conveyor).
+
+## Step-3 impl decisions
+
+- **Row → lane, geometry-derived.** `Collision` finds the frog's band by equating the frog's row
+  anchor to a lane's render y: `i = (ROWS.ANCHOR_Y[row] − FIRST_LANE_Y) / CELL`. An out-of-range
+  `i` is a **safe strip** — the start row (below the lanes) or the home band (above) — so those
+  resolve `safe` with no special-casing. Chosen over a bare `11 − row` so the mapping stays tied
+  to the actual band geometry, not a magic constant.
+- **River = centre test, road = any-overlap test (a deliberate asymmetry).** A river ride needs
+  the frog's **centre** over a mover — you must be *on* the log, and drifting a hair off drowns
+  you (faithful feel). A road squash triggers on **any** span overlap with a vehicle — contact
+  kills, a generous hitbox. Both tests also check each mover's **seam wrap copy** (`m.x − WRAP_L`),
+  so collision geometry matches `Lane.render`'s wrap copy exactly.
+- **Carried-off-edge = frog centre outside `[0, 224)`** — a tunable feel constant (symmetric about
+  screen centre; the frog rides until more than half of it has left the screen, then drowns).
+- **Carry lives in `Frog.update` (§7 step 2), not in the lane advance.** `Collision` caches
+  `frog.rideDx = dir·V` when it confirms a ride; `Frog.update` applies it while landed. Because
+  step 2 uses *last* frame's ride and the movers advance in step 4, the frog trails its log by ≤ V
+  px (≤ 0.45) for one frame, corrected the next — sub-pixel, never enough to break the 16 px
+  overlap, and it keeps the §7 invariant "collide against last frame's drawn positions → move".
+- **Diving-turtle drown is step 6.** At L1 every turtle group is surfaced, so a turtle ride is
+  always safe now; the §3.4 dive timer flips a submerged rider to `drown` when it lands. The dive
+  frames are already in config.
+- **Death re-enters through `Play.enter`, which rebuilds the playfield** (re-seeds the conveyors)
+  each life. Deterministic and fine for now; keeping the board running across a life (resetting
+  only the frog) is a **step-7** (Death presentation) concern, not a step-3 one.
 
 ## Deferred
 

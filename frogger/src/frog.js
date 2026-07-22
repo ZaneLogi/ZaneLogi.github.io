@@ -2,7 +2,8 @@
 // A hop glides the frog one cell as a smooth HOP_FRAMES-frame slide, not a teleport: one lane
 // vertically (via the row index → ROWS.ANCHOR_Y, a uniform 16 px grid) or one 16 px column
 // horizontally. Input is locked for the hop's duration (one hop per press); collision resolves
-// when it lands (§7). Facing and river-carry ride on top (carry arrives with the lanes later).
+// when it lands (§7). While landed on a river object the frog is carried at the lane's drift
+// (`riding` / `rideDx`, set by Collision) — §7 step 2.
 import { FROG, FROG_FRAMES, ROWS, SCREEN } from './constants.js';
 
 /** @typedef {import('./renderer.js').Renderer} Renderer */
@@ -24,7 +25,8 @@ export class Frog {
     this.destRow = this.row;       // where the slide lands (snapped exactly on arrival)
     this.destX = this.x;
     this.destY = this.y;
-    this.riding = null;           // the Mover it stands on, if any
+    this.riding = null;           // the Mover it stands on, if any (a river object)
+    this.rideDx = 0;              // that mover's per-frame drift, carried while landed (§7 step 2)
   }
 
   // Begin a hop: face `dir`, then slide one cell if the target is on the field. A hop blocked
@@ -48,11 +50,12 @@ export class Frog {
     this.hopping = true;
   }
 
-  // Advance the current hop; snap to the target cell on the final frame. Landed frames apply
-  // the ride carry (none until the lanes carry — a later step) (§7 step 2).
+  // Advance the current hop; snap to the target cell on the final frame. While landed, a frog
+  // riding a river object is carried by last frame's lane drift (§7 step 2). No carry mid-hop
+  // (the frog is in transit) — the ride is re-resolved by Collision when it lands.
   update() {
     if (!this.hopping) {
-      // TODO(step 2+): if riding, carry x by the lane's drift this frame.
+      if (this.riding) this.x += this.rideDx;   // carried at the lane's speed while on an object
       return;
     }
     this.x += this.stepX;

@@ -10,13 +10,18 @@ export class Play extends Mode {
     this.game.audio.playMusic();
   }
 
-  // The §7 tick order, built up by step. 1 input → 2 frog → 4 objects move.
-  // TODO(later): collision (3, before objects move), timer (5), audio (6).
+  // The §7 tick order, built up by step. 1 input → 2 frog → 3 collision → 4 objects move.
+  // TODO(later): timer (5), audio (6 — Game.tick advances active sounds).
   update() {
-    const dir = this.game.input.hop();
-    if (dir) this.game.frog.beginHop(dir);
-    this.game.frog.update();
-    this.game.playfield.update();      // §7 step 4: each lane advances its movers
+    const g = this.game;
+    const dir = g.input.hop();
+    if (dir) g.frog.beginHop(dir);             // §7 step 1: input → pending hop
+    g.frog.update();                            // §7 step 2: advance the hop, or carry a rider
+    if (!g.frog.hopping) {                       // §7 step 3: collision, only while landed…
+      const outcome = g.collision.resolve(g.frog, g.playfield);   // …against last frame's positions
+      if (outcome === 'drown' || outcome === 'squash') { g.flow.to('death'); return; }
+    }
+    g.playfield.update();                        // §7 step 4: each lane advances its movers
   }
 
   render() {
