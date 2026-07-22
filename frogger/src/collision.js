@@ -13,7 +13,9 @@ const HALF = SCREEN.CELL / 2;   // the 16 px frog sprite's centre is 8 px in fro
 
 export class Collision {
   /**
-   * Resolve the frog's landed cell → 'safe' | 'ride' | 'drown' | 'squash'.
+   * Resolve the frog's landed cell → 'safe' | 'ride' | 'drown' | 'squash' | 'home' | 'pickup'.
+   * - **home band** (top row): delegated to `Homes.land` — 'home' (filled a bay), 'pickup' (bay +
+   *   bonus insect), or 'death'.
    * - **river** (`lane.carries`): safe *only while riding* an object; open water or being
    *   carried off a screen edge drowns. Riding is decided by the frog's **centre** over a
    *   mover (you must be on the log), and records the ride (`frog.riding` / `frog.rideDx`) so
@@ -25,9 +27,13 @@ export class Collision {
    * @param {Frog} frog @param {Playfield} playfield
    */
   resolve(frog, playfield) {
+    // The home band (top row) is Homes' business: it runs the bay landing test → home / pickup /
+    // death (§6, step 4). Everything below is a lane band.
+    if (frog.row === ROWS.MAX_ROW) { frog.riding = null; return playfield.homes.land(frog.x + HALF); }
+
     // Which lane's band does the frog stand in? Lanes render at FIRST_LANE_Y + i·CELL and the
     // frog's row anchors at ANCHOR_Y[row]; equate to recover i. Out of range ⇒ a safe strip
-    // (start row above the lanes, home band below) — no lane there.
+    // (start row above the lanes) — no lane there.
     const i = (ROWS.ANCHOR_Y[frog.row] - ROWS.FIRST_LANE_Y) / SCREEN.CELL;
     const lane = playfield.lanes[i];
     if (!lane || (!lane.carries && !lane.kills)) { frog.riding = null; return 'safe'; }

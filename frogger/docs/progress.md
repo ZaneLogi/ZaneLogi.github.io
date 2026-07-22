@@ -7,29 +7,28 @@ self-contained; progress.md is free to reference the spec's sections.
 
 ## Status
 
-**Step 3 — collision: DONE.** `Collision.resolve` decides the frog's landed cell per §7.3 by span
-overlap against that row's movers: a **river** row is safe only while the frog's **centre** rides an
-object (it records `frog.riding` / `rideDx`), else it **drowns** — open water, or carried off a
-screen edge; a **road** row **squashes** on any overlap with a vehicle; the two safe strips (start,
-median) and the home band resolve **safe** (the bay landing test is step 4). `Frog.update` now
-**carries** a landed rider by `rideDx` (§7 step 2), and `Play.update` runs the full §7 order
-1 · 2 · **3** · 4 — collision resolves against last frame's drawn positions (before the lanes
-advance in step 4), and a drown / squash fires `Flow.to('death')`. The frog now dies on the road,
-rides logs and turtle groups down the river, and is carried off the edge.
+**Step 4 — homes: DONE.** `Homes` runs the §6 landing test: the frog's centre must fall within
+±6 px of a bay centre **and** the bay be empty → it **fills** (`frog_home_0`, smile); landing there
+while the **bonus insect** occupies that bay is a **pickup** (home + bonus); a miss (a divider) or an
+occupied bay is **death**. The insect **walks** the five bays on the `T_BAY` timer in the fixed order
+`2, 0, 3, 1, 4`, skipping any filled bay (§3.4). `Collision.resolve` delegates the home row to
+`Homes.land` → `home` / `pickup` / `death`; `Play` awards `+50` (home) / `+200` (bonus) and **respawns
+the frog** for the next bay (a home costs no life), and on the **fifth** bay routes to `RoundClear` —
+which awards the `+1000` all-homes bonus and, after its fallback duration, advances the level with the
+bays cleared. **The game is now winnable.**
 
-Verified deterministically — 22 in-module assertions + 6 end-to-end through `Game.tick` → `Play` →
-`Flow`: river ride / drown / off-edge, road squash / safe / any-overlap, the safe strips + home
-band, the carry step, seam wrap-copy overlap, and a 31-tick "glued to the log" ride; car contact
-and open water both transition Play → Death, a ride keeps the frog in Play and carried at
-`dir·V`/tick. Live board renders clean (frog at spawn `rgb(224,224,0)`; river / road / hedge bands
-all lit); no console errors.
+Verified deterministically — 15 `Homes` unit assertions + 12 end-to-end through `Game.tick` → `Play`
+→ `Flow`: the ±6 px tolerance boundary (home at +6, death at +7), occupied-bay + divider deaths, the
+pickup award (+250), the walk order + skip-filled, and the full win path (5th bay → RoundClear +1000
+→ level up → cleared bays). Render confirmed via `getImageData` (filled bays `rgb(29,195,0)`, empty
+openings black, the insect drawn); no console errors.
 
-Prior: **step 2** — the ten conveyor lanes seed deterministically (`x_i = (φ + i·P) mod L`) and
-advance each tick with a seamless `L = 240` seam wrap; `Playfield` renders logs / turtles / vehicles
-per row. **Step 1** — the frog hop (8-frame slide, facing, input-lock) + the static arcade field.
+Prior: **step 3** — collision (safe / ride / drown / squash per row + the river carry). **Step 2** —
+the ten conveyor lanes (deterministic seed, seamless seam wrap). **Step 1** — the frog hop + the
+static arcade field.
 
-Next up: **step 4 — homes** (bays, the ±6 px landing test, occupancy fill, bonus insect /
-croc-head bay hazard) + the win check (§3.4, §6).
+Next up: **step 5 — Timer + Score + HUD wiring** (the per-life countdown + time-out death, the home
+**time bonus**, the forward-hop `+10`, and the bottom-HUD lives / timer bar / level, §4.1, §6).
 
 ## Steps (plan is provisional — adjusts as we build)
 
@@ -39,27 +38,30 @@ croc-head bay hazard) + the win check (§3.4, §6).
 | 0 | Module scaffold — `main.js` + `src/*` + `modes/*`, boots into Attract | §9, §6 | done |
 | 1 | Frog — hop (8-frame slide), facing, input-lock; render the frog + the static background bands + the row grid; no moving objects / collision yet | §6, §7, §4 | done |
 | 2 | Lanes + movers — conveyors, wrap, rendering | §3.2 | done |
-| 3 | Collision — safe / ride / drown / squash per row + the river carry | §7.3 | **done** |
-| 4 | Homes — bays, landing test, bonus insect / croc-head | §3.4, §6 | next |
-| 5 | Timer + Score + HUD wiring (lives, timer bar, level) | §4.1, §6 | |
-| 6 | Timed events — dives, croc mouth, bay item, lady-frog, otter | §3.4 | |
+| 3 | Collision — safe / ride / drown / squash per row + the river carry | §7.3 | done |
+| 4 | Homes — bays, landing test, occupancy fill, bonus insect, win check | §3.4, §6 | **done** |
+| 5 | Timer + Score + HUD wiring (lives, timer bar, level) | §4.1, §6 | next |
+| 6 | Timed events — dives, croc mouth, bay croc-head, lady-frog, otter (bonus insect done in step 4) | §3.4 | |
 | 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | |
 | 8 | Level ramp | §3.3 | |
 
-## What's real vs stubbed (after step 3)
+## What's real vs stubbed (after step 4)
 
 - **Real / running:** the boot pump (`main.js`), `Game` + the mode machine
   (`Mode`/`Flow`/5 modes), `Renderer` (drawSprite + clip + `fillRect` + `drawObject` +
   tinted monospace drawText), `Sprites` (atlas load), `Input` (edge-triggered),
   `constants.js` (the real §3/§4/§6 design data), `Score`/`Timer` logic, `Attract`, the
   mode transition/timing, **`Frog` (hop/facing/lock/render + river carry)**, **`Mover`**,
-  **`Lane` (seed/advance/render)**, **`Playfield` (build/update/render)**, `Homes.render`
-  (the hedge), **`Collision` (§7.3 safe / ride / drown / squash + carried-off-edge)**, and
-  `Play`'s §7 steps 1 · 2 · 3 · 4 (input → frog → collision → objects move), drown / squash →
-  `Death`. (Tile parts animate via `Lane._frame` — turtles swim.)
-- **Stubbed** (class shell + documented §6 API + `TODO`): `Homes.land`/occupancy visuals, the
-  turtle **dive** state + median **snake** entry + the rest of §3.4 timed events (frames are in
-  config), the L2 croc, the §3.3 level ramp, and `Play`'s remaining tick steps (timer / audio).
+  **`Lane` (seed/advance/render)**, **`Playfield` (build/update/render)**, **`Homes` (landing
+  test / occupancy fill + smile render / bonus-insect walk / win check)**, **`Collision` (§7.3
+  safe / ride / drown / squash + carried-off-edge + home delegation)**, and `Play`'s §7 steps
+  1 · 2 · 3 · 4 (input → frog → collision → objects move), with drown / squash / home-miss →
+  `Death`, home / pickup → score + respawn, all-filled → `RoundClear` (+1000, level ramp).
+  (Tile parts animate via `Lane._frame` — turtles swim.)
+- **Stubbed** (class shell + documented §6 API + `TODO`): the turtle **dive** state + median
+  **snake** entry + the **bay croc-head** / **lady-frog** / **otter** / **river-croc mouth** rest
+  of §3.4 (frames are in config), the §3.3 level ramp, the `RoundClear` **laugh-sweep** render
+  (step 7), and `Play`'s remaining tick steps (timer / audio + the forward-hop / time-bonus score).
 
 ## Step-1 impl decisions
 
@@ -157,6 +159,36 @@ croc-head bay hazard) + the win check (§3.4, §6).
 - **Death re-enters through `Play.enter`, which rebuilds the playfield** (re-seeds the conveyors)
   each life. Deterministic and fine for now; keeping the board running across a life (resetting
   only the frog) is a **step-7** (Death presentation) concern, not a step-3 one.
+
+## Step-4 impl decisions
+
+- **Home row via `Collision` delegation.** `Collision.resolve` routes row `MAX_ROW` to
+  `Homes.land` and returns its `home` / `pickup` / `death` outcome (the §6 outcome vocabulary);
+  `Play` maps those to score awards + respawn + the win transition. Collision stays the single
+  place the frog's landed cell is classified — the home band is just another band it dispatches.
+- **±6 px tolerance vs the 8 px column grid.** The frog lands only on 8-multiple centres and the
+  bays sit every 48 px, so in practice a landing is "exactly on a bay column or not" — the ±6 px
+  window (`LAND_TOLERANCE`) leaves headroom without ever admitting an off-column landing. Tested at
+  the boundary (centre +6 → home, +7 → death) so the constant's intent is pinned even though the
+  grid never produces +7.
+- **Bonus insect = the L1 bay item, owned by `Homes` (§6).** Its walk is derived from the frame
+  counter (`BAY_ORDER[⌊frame/T_BAY⌋ % 5]`) — no stored state, deterministic. "Skipping a filled
+  bay" is read as *no insect shown that step* (the simplest deterministic reading), not
+  advance-to-next-unfilled. `land` reads `itemBay` during collision (§7 step 3), i.e. **last tick's**
+  walk position — consistent with the "resolve against last frame's positions" invariant, since the
+  walk advances in step 4 (`Playfield.update`).
+- **Home content sits at the frog's landing y (32).** The filled `frog_home_0` and the insect draw
+  at `ANCHOR_Y[MAX_ROW]`, so the arriving frog "becomes" the smiling home frog in place. If the
+  hedge opening ever wants a different inset that's a one-constant tweak.
+- **Reaching a home costs no life** — `Play` respawns the frog (`frog.reset`) + resets the timer and
+  stays in `Play` for the next bay; only all-five-filled leaves `Play` (→ `RoundClear`).
+- **Homes-triggered score is wired here** (home `+50`, pickup `+200`; the `+1000` all-homes already
+  fires in `RoundClear.enter`) — the real data flow, cheap to wire when the event happens. The
+  forward-hop `+10`, the home **time bonus** (needs `Timer`), and the HUD display of
+  score / lives / timer / level are **step 5**.
+- **Deferred to their steps:** the **croc-head** bay hazard (L2-only — unreachable until the level
+  ramp, step 8; frames `crochead_0/1` are in the atlas), the **lady-frog** river escort (step 6),
+  and the `RoundClear` **laugh-sweep** render (`frog_home_1` across the bays — step 7).
 
 ## Deferred
 

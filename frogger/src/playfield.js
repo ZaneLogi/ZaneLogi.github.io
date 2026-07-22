@@ -14,7 +14,12 @@ export class Playfield {
     this.homes.reset();
   }
 
-  update() { for (const lane of this.lanes) lane.advance(); }   // TODO(impl): + §3.4 timed events
+  // §7 step 4: advance every lane's movers, and walk the home-bay item on its timer (§3.4).
+  /** @param {number} frame  the global tick counter */
+  update(frame = 0) {
+    for (const lane of this.lanes) lane.advance();
+    this.homes.update(frame);
+  }
 
   /** @param {Renderer} renderer @param {number} frame  the global tick counter (§3.5 animation) */
   render(renderer, frame = 0) {

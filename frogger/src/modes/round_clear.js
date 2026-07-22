@@ -14,7 +14,7 @@ export class RoundClear extends Mode {
 
   update() {
     this.timer++;
-    this.game.playfield.update();     // movers keep running; input is not read
+    this.game.playfield.update(this.game.frame);   // movers keep running; input is not read
     if (this.timer >= SWEEP && !this.game.audio.isPlaying('level_complete')) {
       this.game.level++;
       this.game.flow.to('play');

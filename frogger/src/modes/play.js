@@ -19,9 +19,18 @@ export class Play extends Mode {
     g.frog.update();                            // §7 step 2: advance the hop, or carry a rider
     if (!g.frog.hopping) {                       // §7 step 3: collision, only while landed…
       const outcome = g.collision.resolve(g.frog, g.playfield);   // …against last frame's positions
-      if (outcome === 'drown' || outcome === 'squash') { g.flow.to('death'); return; }
+      if (outcome === 'drown' || outcome === 'squash' || outcome === 'death') {
+        g.flow.to('death'); return;
+      }
+      if (outcome === 'home' || outcome === 'pickup') {
+        g.score.home();                          // +50 (+ the time bonus once Timer is wired, step 5)
+        if (outcome === 'pickup') g.score.bonus();                 // +200 for the bonus insect
+        if (g.playfield.homes.allFilled()) { g.flow.to('roundclear'); return; }
+        g.frog.reset();                          // reaching a home costs no life — respawn for the next bay
+        g.timer.reset();
+      }
     }
-    g.playfield.update();                        // §7 step 4: each lane advances its movers
+    g.playfield.update(g.frame);                 // §7 step 4: lanes advance + the bay item walks
   }
 
   render() {
