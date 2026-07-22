@@ -13,10 +13,12 @@ export class Lane {
     this.level = level;
     this.index = index;
     this.carries = cfg.band === 'river';
-    this.kills = cfg.band === 'road' || (cfg.band === 'median' && !cfg.safe);
     /** @type {Mover[]} */
     this.movers = [];
     this._seed();
+    // Road lanes always kill on contact; the median is safe grass until its snake is seeded
+    // (from level 2, §3.4) — then it kills like a road lane. So `kills` follows the seed.
+    this.kills = cfg.band === 'road' || (cfg.band === 'median' && this.movers.length > 0);
     // Diving turtles (§3.4): one fixed group in a turtle lane submerges on the T_DIVE cycle. The
     // diver is the first group; a per-lane phase (half a cycle apart) keeps the two turtle lanes
     // from diving in unison. Non-dive lanes leave `diver` null.
@@ -41,11 +43,12 @@ export class Lane {
   }
 
   // Seed N movers evenly along the wrap length: left edge x_i = (φ + i·P) mod L, pitch P = L/N,
-  // phase φ = index·20 staggers the lanes (§3.2). The median snake enters at an edge on a timer,
-  // not as a fixed conveyor, so it is seeded later (hazard step), not here.
+  // phase φ = index·20 staggers the lanes (§3.2). River/road lanes seed at every level; the median
+  // seeds its single snake only from level 2 (§3.4) — below that it is empty safe grass.
   _seed() {
     const { band, n, w } = this.cfg;
-    if (band !== 'river' && band !== 'road') return;
+    const seeded = band === 'river' || band === 'road' || (band === 'median' && this.level >= 2);
+    if (!seeded) return;
     const phi = this.index * 20;
     const P = WRAP_L / n;
     for (let i = 0; i < n; i++) this.movers.push(new Mover((phi + i * P) % WRAP_L, w));

@@ -135,7 +135,7 @@ tuned by feel, the *model* fixed.
 | River 3 | log | 64 | 2 | 120 | 0.20 | → | 0, 120 | |
 | River 4 | log | 32 | 4 | 60 | 0.45 | → | 0, 60, 120, 180 | |
 | River 5 | turtle group | 32 | 4 | 60 | 0.30 | ← | 0, 60, 120, 180 | one group dives |
-| Median | snake | 16 | 1 | — | 0.25 | ← | enters at edge | from L2; safe otherwise |
+| Median | snake | 32 | 1 | — | 0.25 | ← | enters at edge | from L2; safe otherwise |
 | Road 1 | truck | 32 | 2 | 120 | 0.20 | ← | 0, 120 | |
 | Road 2 | car | 16 | 3 | 80 | 0.30 | → | 0, 80, 160 | race car |
 | Road 3 | car | 16 | 3 | 80 | 0.25 | ← | 0, 80, 160 | sedan |
@@ -184,9 +184,9 @@ change across levels — rising speed and thinning platforms are the whole ramp.
 
 ### 3.4 Timed events — all on fixed timers (no RNG)
 
-These extras appear on a schedule instead of living permanently in a lane. Each runs
-off the frame counter with a fixed period, phase, and sequence — as deterministic as
-the conveyors:
+Beyond the plain conveyors, these special hazards and bonuses each run on fixed,
+deterministic rules off the frame counter — a state cycle, a spawn timer, or a level
+switch — identical on every playthrough:
 
 - **Diving turtles.** In each turtle lane, one **fixed group** (a set index) runs a
   `T_dive`-frame cycle (default **240**): **submerged during the last quarter**
@@ -217,6 +217,10 @@ the conveyors:
   frog on the **trailing edge of that log** when the otter arrives is **caught and
   killed**. It cannot be ridden. Present from level 1. Frames: `otter_0` swimming,
   `otter_1` on the catch (§3.5).
+- **Median snake (from level 2).** A single **snake** patrols the median strip: one
+  lethal object sweeping **left** at a slow lane speed and wrapping around the screen
+  (a lone slow conveyor), cycling `snake_0/1/2`. The median is otherwise safe to stand
+  on; **any contact with the snake kills**. Below level 2 the median is empty.
 
 Every period, phase, and order is a constant (`constants.js`); the sequence is
 identical on every playthrough — nothing here rolls dice.

@@ -83,7 +83,7 @@ export const LANES = [
   { id: 'river3', band: 'river',  object: 'log',    tiles: LOG,                  w: 64, n: 2, v: 0.20, dir: +1 },
   { id: 'river4', band: 'river',  object: 'log',    tiles: LOG,                  w: 32, n: 4, v: 0.45, dir: +1 },
   { id: 'river5', band: 'river',  object: 'turtle', tiles: TURTLE,               w: 32, n: 4, v: 0.30, dir: -1, dive: TURTLE_DIVE },
-  { id: 'median', band: 'median', object: 'snake',  tiles: SNAKE,                w: 16, n: 1, v: 0.25, dir: -1, safe: true },
+  { id: 'median', band: 'median', object: 'snake',  tiles: SNAKE,                w: 32, n: 1, v: 0.25, dir: -1, safe: true },
   { id: 'road1',  band: 'road',   object: 'truck',  tiles: { body: 'truck' },    w: 32, n: 2, v: 0.20, dir: -1 },
   { id: 'road2',  band: 'road',   object: 'car',    tiles: { body: 'car_green' },w: 16, n: 3, v: 0.30, dir: +1 },
   { id: 'road3',  band: 'road',   object: 'car',    tiles: { body: 'car_pink' }, w: 16, n: 3, v: 0.25, dir: -1 },

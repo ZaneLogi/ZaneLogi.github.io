@@ -7,31 +7,31 @@ self-contained; progress.md is free to reference the spec's sections.
 
 ## Status
 
-**Step 6d — bay crocodile head: DONE.** From **level 2** a **crocodile head** takes a home bay two
-steps ahead of the bonus insect in the walk order (so never the insect's, never a filled bay),
-bobbing `crochead_0` (head down — an emerging sliver, the bay **safe** and fillable) ↔ `crochead_1`
-(head up — **lethal**) during the last third of the `T_BAYCROC` cycle. Landing on the croc bay
-**kills while the head is up**; while it is down the frog fills the home normally. The insect (step 4)
-and the croc head **coexist** in different bays — a deliberate design choice (two independent items,
-rather than one item that swaps type by level). `architecture.md` §3.1 / §3.4 were rewritten to match;
-**the croc's level-2 gate is our deliberate choice.**
+**Step 6e — median snake: DONE.** From **level 2** the median strip carries a single **snake** — one
+lethal 32 px object sweeping **left** at the lane speed (`v 0.25`) and wrapping around, cycling
+`snake_0/1/2`. The median is otherwise safe grass; **any contact with the snake kills**. It reuses the
+lane conveyor (seed / advance / seam-wrap) and the road collision path: `Lane` now seeds the median's
+snake from level 2 and derives `kills` from the seed, so the median resolves like a hazard lane
+(overlap → death) only once the snake exists. Below level 2 the median is empty and safe.
 
-Verified at a forced level 2 — 15 assertions (level gate, the two items in different bays across the
-walk, the head-up window, and landing: croc-up → death / croc-down → home fill / insect → pickup) +
-a render diff (`crochead_0` vs `crochead_1`, both bay items drawn); no console errors.
+Verified at a forced level 2 — 14 assertions (level gate, one 32 px snake seeded, `kills` follows the
+seed, overlap → death / clear → safe, level-1 median safe, the left sweep + wrap, and a render check:
+the snake draws and animates); no console errors.
 
-Prior sub-steps — **6c** river-croc mouth (L2, open jaws drown, back rides) · **6b** lady-frog escort
-· **6a** diving turtles.
+Sprite-width correction: the `snake_*` sprites are 32 px, so the median `W` was 16 → **32** (hitbox
+matches the visible snake); §3.2 updated. §3.4 gained the self-contained median-snake entry.
 
-Step 6 sub-steps: **`6a` ✓ · `6b` ✓ · `6c` ✓ · `6d` bay croc-head ✓ · `6e` median snake · `6f`
-otter.** (The croc + snake appear **from level 2** — built here, verified by forcing the level; only
-the §3.3 speed/count ramp stays step 8.)
+Prior sub-steps — **6d** bay croc-head · **6c** river-croc mouth · **6b** lady-frog · **6a** dives.
+
+Step 6 sub-steps: **`6a` ✓ · `6b` ✓ · `6c` ✓ · `6d` ✓ · `6e` median snake ✓ · `6f` otter.** (The
+croc + snake appear **from level 2** — built here, verified by forcing the level; only the §3.3
+speed/count ramp stays step 8.)
 
 Prior steps: **5** Timer + Score + HUD · **4** homes · **3** collision + carry · **0–2** scaffold /
 frog / lanes.
 
-Next up: **6e — median snake** (from level 2): a snake enters the median at an edge and patrols;
-contact kills.
+Next up: **6f — otter** (the last §3.4 hazard): a roaming lethal otter sweeps the log lanes faster
+than the logs and catches a frog on the trailing edge of the log it reaches.
 
 ## Steps (plan is provisional — adjusts as we build)
 
@@ -48,21 +48,22 @@ contact kills.
 | 6b | Timed events — lady-frog escort (River 4, cyan recolor, +200 carry-home) | §3.4, §5.1 | **done** |
 | 6c | Timed events — river-crocodile mouth (River 1, from L2) | §3.4 | done |
 | 6d | Timed events — bay croc-head hazard (from L2) | §3.4 | done |
-| 6e | Timed events — median snake (from L2) | §3.1, §3.3 | next |
-| 6f | Timed events — roaming otter (log lanes 1→3→4) | §3.4 | |
+| 6e | Timed events — median snake (from L2) | §3.4 | done |
+| 6f | Timed events — roaming otter (log lanes 1→3→4) | §3.4 | next |
 | 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | |
 | 8 | Level ramp | §3.3 | |
 
 *(Bonus insect was done in step 4.)*
 
-## What's real vs stubbed (after step 6d)
+## What's real vs stubbed (after step 6e)
 
 - **Real / running:** the boot pump (`main.js`), `Game` + the mode machine
   (`Mode`/`Flow`/5 modes), `Renderer` (drawSprite + clip + `fillRect` + `drawObject` +
   tinted monospace drawText + **cached `recolored` / `drawSpriteFrom`**), `Sprites` (atlas load),
   `Input` (edge-triggered), `constants.js` (the real §3/§4/§6 design data), `Attract`, the mode
   transition/timing, **`Frog` (hop/facing/lock/render + river carry + lady-on-back)**, **`Mover`**,
-  **`Lane` (seed/advance/render + `submerged` diving turtles + `mouthOpen` river croc from L2)**,
+  **`Lane` (seed/advance/render + `submerged` diving turtles + `mouthOpen` river croc from L2 + L2
+  median snake)**,
   **`Playfield` (build/update/render)**, **`Homes` (landing test / occupancy fill + smile render /
   bonus-insect walk + L2 bobbing croc-head / win check)**, **`LadyFrog` (River 4 escort — board / pickup-on-her-log /
   carry-home +200)**, **`Collision` (§7.3 safe / ride / drown / squash + carried-off-edge + home
@@ -72,11 +73,10 @@ contact kills.
   level)**, and `Play`'s §7 steps 1 · 2 · 3 · 4 · 5 (input → frog → collision → objects → timer):
   drown / squash / home-miss / time-out → `Death`, home / pickup → score (+ time bonus + lady) +
   respawn, all-filled → `RoundClear` (+1000, level ramp). (Tile parts animate via `Lane._frame`.)
-- **Stubbed** (class shell + documented §6 API + `TODO`): the **median snake** (6e) / **otter** (6f)
-  rest of §3.4 (frames are in config), the §3.3 level ramp, the
-  `RoundClear` **laugh-sweep** render and the `Death` **explosion** render (step 7), the
-  gameplay-event **sounds** (hop / plunk / squash / hurry-up / time-out — no-op `Audio`, §5.2), and
-  `Play`'s remaining tick step (audio, step 6 order).
+- **Stubbed** (class shell + documented §6 API + `TODO`): the **otter** (6f) rest of §3.4 (frames are
+  in config), the §3.3 level ramp, the `RoundClear` **laugh-sweep** render and the `Death`
+  **explosion** render (step 7), the gameplay-event **sounds** (hop / plunk / squash / hurry-up /
+  time-out — no-op `Audio`, §5.2), and `Play`'s remaining tick step (audio, step 6 order).
 
 ## Step-1 impl decisions
 
@@ -292,6 +292,20 @@ contact kills.
   style class.
 - **The head-up window mirrors the river croc.** Both crocodile hazards use "the last third of a
   120-frame cycle" (`T_BAYCROC` = `T_MOUTH` = 120) for the lethal phase — one consistent timing.
+
+## Step-6e impl decisions
+
+- **The snake is a plain lane object, not a new timed entity.** It is a single median mover that
+  sweeps left and wraps like any conveyor — so `Lane._seed` just seeds the median (one mover) from
+  level 2, and the existing advance / seam-wrap / `_frame` animation carry it for free. No `LadyFrog`-
+  style class, no timer beyond the level gate.
+- **`kills` follows the seed.** `Lane.kills` is now computed *after* `_seed` as `road || (median &&
+  movers.length > 0)`, so the median resolves like a hazard lane (the road collision path: overlap →
+  death, else safe) exactly when it holds a snake — level 2+. Below that it is empty safe grass.
+- **Sprite-width correction: median `W` 16 → 32.** The `snake_*` sprites are 32 px; the lane's width
+  was 16, which would give the visible snake a half-width hitbox. Widened to 32 so the hitbox matches
+  what the player sees (§3.2 updated) — the same "faithful to what the player observes" fix as the
+  earlier atlas-size corrections.
 
 ## Deferred
 
