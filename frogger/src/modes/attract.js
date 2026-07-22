@@ -8,8 +8,9 @@ export class Attract extends Mode {
   update() {
     if (this.game.input.startPressed()) {
       this.game.score.reset();
-      this.game.lives = 3;
+      this.game.lives = DEV.START_LIVES;   // 3, or the ?lives= dev override (§ DEV)
       this.game.level = DEV.START_LEVEL;   // 1, or the ?level= dev override (§ DEV)
+      this.game.playfield.homes.reset();   // new game → clear the home bays (they persist across a death)
       this.game.flow.to('play');
     }
   }

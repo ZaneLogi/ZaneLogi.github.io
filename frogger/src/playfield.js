@@ -11,9 +11,11 @@ import { LANES, ROWS, SCREEN, DEBUG, TIMED } from './constants.js';
 export class Playfield {
   constructor() { this.lanes = []; this.homes = new Homes(); }
 
+  // Re-seeds the lanes / lady / otter for `level`. It does NOT reset the home bays — a death rebuilds
+  // the playfield but the filled bays must persist across a life; only a new game (`Attract`) or a new
+  // level (`RoundClear`) clears them, via `homes.reset()`.
   build(level) {
     this.lanes = LANES.map((cfg, i) => new Lane(cfg, level, i));   // TODO(step 8): §3.3 level schedule
-    this.homes.reset();
     this.homes.level = level;                                      // gates the L2 bay crocodile-head
     const li = this.lanes.findIndex((l) => l.cfg.id === TIMED.LADY_LANE);   // the lady-frog rides River 4
     this.lady = new LadyFrog(this.lanes[li], ROWS.FIRST_LANE_Y + li * SCREEN.CELL);

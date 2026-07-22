@@ -7,42 +7,27 @@ self-contained; progress.md is free to reference the spec's sections.
 
 ## Status
 
-**Step 6f — roaming otter: DONE.** A single otter roams the three log lanes (River 1 → 3 → 4), one lane at
-a time, **from level 3** (§3.3). It **enters at the lane's left edge and swims the whole width to the
-right** at `OTTER_V` (absolute, faster than the logs so it overtakes them). It is **surfaced** (visible)
-over open water and **submerged** (hidden) while a log is over it — so it **dives under each log it
-overtakes and re-surfaces in the next gap**, bobbing across the lane. It leaves by swimming off the right
-edge; a `T_OTTER` timer then brings it up at the left edge of the next lane. **Lethal only while surfaced**
-(`Otter.hits`, checked first in the river branch): a frog riding a log's **near edge** beside a surfaced
-otter is snatched (spans overlap), while a middle-of-log frog — or any frog while the otter is
-**submerged** — is safe. It only ever swims in water the lane already has and merely **hides itself** under
-a log, so **no log is spawned, hidden, or removed** — the log set is untouched. It shows `otter_0` while
-surfaced (nothing while submerged); the reared `otter_1` (the catch pose) is drawn by the death
-presentation (step 7). A two-state `idle → swimming` machine; it can't be ridden. **Step 6 is complete.**
+**Step 7 — Death explosion + RoundClear laugh-sweep: DONE.** On death, `Death` **freezes the field** and
+plays the **7-frame explosion** (`death_0..5 → skull`) at the frog's spot, then spends a life → `Play` /
+`GameOver`. On clearing all five homes, `RoundClear` runs the field on (no input) and flips the five bays
+**smile → laugh** (`frog_home_0` → `frog_home_1`) **left-to-right**, then advances the level after the hold.
+Detail in *Step-7 impl decisions*.
 
-Verified deterministically (drove `Playfield.update` 3000–4000 frames): **inert below level 3** (0 visits
-at L1 / L2); at L3 it **enters at x = 0, exits at x = 224**, **cycles River 1 → 3 → 4** in order, and every
-visit both **surfaces and submerges** (2–3 transitions each — it bobs between the logs). Lethality: a frog
-over a **surfaced** otter is killed, over a **submerged** otter is **not**, and a far frog misses. `otter_0`
-renders while surfaced without error. No console errors.
+Verified: the explosion renders `death_0×8 → … → death_5×8 → skull×8` then → `Play` with a life spent; the
+laugh-sweep flips 0→5 bays then → `Play` at the next level. Both sprite sequences confirmed on screen — the
+burst→skull art, and the red-mouthed laughing frog. No console errors.
 
-A **`?level=N` URL start-override** (dev-only, clamped [1, 20], default 1) sets the starting level so the
-level-3 otter — and any level's hazards — is reachable without grinding there (`DEV.START_LEVEL`, wired in
-`Game` + `Attract`).
+Prior steps: **6** all §3.4 timed events (6a diving turtles · 6b lady-frog · 6c river-croc mouth · 6d bay
+croc-head · 6e median snake · 6f roaming otter) · **5** Timer + Score + HUD · **4** homes · **3** collision
++ carry · **0–2** scaffold / frog / lanes. Per-step detail in the *Step-N impl decisions* below.
 
-**Left for a playtest:** the traversal speed (`OTTER_V`) and the `T_OTTER` cadence — how fast it crosses /
-how brief each surfacing is, and how often it visits.
+**Dev URL overrides** (`DEV`, wired into `Game` / `Attract` / `Timer`): `?level=N` [1, 20] sets the start
+level; `?lives=N` [1, 10] the start lives; `?beat=N` [1, 300] the timer's frames-per-beat (default 30 —
+lower drains the countdown faster). **Lives caps:** in play the count can pass 10 via the extra life,
+capped at `LIVES.MAX` = 99, with the HUD drawing ≤ `LIVES.HUD_MAX` = 10 reserve icons.
 
-Prior sub-steps — **6e** median snake · **6d** bay croc-head · **6c** river-croc mouth · **6b**
-lady-frog · **6a** dives.
-
-Step 6 sub-steps: **`6a` ✓ · `6b` ✓ · `6c` ✓ · `6d` ✓ · `6e` ✓ · `6f` ✓ — step 6 complete.**
-
-Prior steps: **5** Timer + Score + HUD · **4** homes · **3** collision + carry · **0–2** scaffold /
-frog / lanes.
-
-Next up: **step 7 — Death + RoundClear presentation** (the death explosion, the laugh-sweep), then the
-**step 8 level ramp** (§3.3).
+Next up: **step 8 — level ramp** (§3.3): the per-level speed scaling (`V × (1 + 0.10·(level−1))`, cap 2×)
+and the count/spacing schedule. Then remaining polish: audio (§5.2) and the Attract screen.
 
 ## Steps (plan is provisional — adjusts as we build)
 
@@ -61,12 +46,12 @@ Next up: **step 7 — Death + RoundClear presentation** (the death explosion, th
 | 6d | Timed events — bay croc-head hazard (from L2) | §3.4 | done |
 | 6e | Timed events — median snake (from L2) | §3.4 | done |
 | 6f | Timed events — roaming otter (log lanes 1→3→4, gap-model, from L3) | §3.4 | done |
-| 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | next |
-| 8 | Level ramp | §3.3 | |
+| 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | **done** |
+| 8 | Level ramp | §3.3 | next |
 
 *(Bonus insect was done in step 4.)*
 
-## What's real vs stubbed (after step 6f)
+## What's real vs stubbed (after step 7)
 
 - **Real / running:** the boot pump (`main.js`), `Game` + the mode machine
   (`Mode`/`Flow`/5 modes), `Renderer` (drawSprite + clip + `fillRect` + `drawObject` +
@@ -85,8 +70,10 @@ Next up: **step 7 — Death + RoundClear presentation** (the death explosion, th
   level)**, and `Play`'s §7 steps 1 · 2 · 3 · 4 · 5 (input → frog → collision → objects → timer):
   drown / squash / home-miss / time-out → `Death`, home / pickup → score (+ time bonus + lady) +
   respawn, all-filled → `RoundClear` (+1000, level ramp). (Tile parts animate via `Lane._frame`.)
+  **`Death` (frozen field + `death_0..5 → skull` explosion at the frog's spot → life spend → Play /
+  GameOver)** and **`RoundClear` (field runs; `frog_home_1` laugh-sweep left-to-right across the bays →
+  next level)** are now real (step 7).
 - **Stubbed** (class shell + documented §6 API + `TODO`): the §3.3 level ramp (step 8), the
-  `RoundClear` **laugh-sweep** render and the `Death` **explosion** render (step 7), the
   gameplay-event **sounds** (hop / plunk / squash / hurry-up / time-out — no-op `Audio`, §5.2), and
   `Play`'s remaining tick step (audio). **All §3.4 timed events are now real.**
 
@@ -184,8 +171,10 @@ Next up: **step 7 — Death + RoundClear presentation** (the death explosion, th
   always safe now; the §3.4 dive timer flips a submerged rider to `drown` when it lands. The dive
   frames are already in config.
 - **Death re-enters through `Play.enter`, which rebuilds the playfield** (re-seeds the conveyors)
-  each life. Deterministic and fine for now; keeping the board running across a life (resetting
-  only the frog) is a **step-7** (Death presentation) concern, not a step-3 one.
+  each life. Deterministic; re-seeding the conveyors on death is fine. **Fixed after step 7 (bug):**
+  `build()` used to also `homes.reset()`, so a death wiped the filled home bays — but they must
+  **persist across a life**. `homes.reset()` moved out of `build()` to the two fresh-start points
+  (`Attract` on Start = new game, `RoundClear` on advance = new level); a death now keeps the bays.
 
 ## Step-4 impl decisions
 
@@ -386,6 +375,25 @@ the insect's bay.
   [1, 20], default 1, wired in `Game` + `Attract`) so the otter is testable without grinding to level 3.
 - **Exit is at the right edge** (not a dive under a specific final log) — the simplest deterministic end;
   flag if a dive-out is wanted instead.
+
+## Step-7 impl decisions
+
+- **The death spot + frame are captured in `Death.enter`.** The frog isn't reset until the *next*
+  `Play.enter`, so its `x`/`y` are still the death position while `Death` runs — but `Death` snapshots
+  them (and `game.frame`) anyway, so the explosion draws at a fixed spot over a **frozen field** (the
+  playfield is rendered but **not** updated in `Death`). Freezing matches the arcade "everything stops,
+  the frog bursts" feel and avoids the movers sliding under the explosion.
+- **Explosion = a 7-frame array, index by `⌊timer / FRAME_HOLD⌋`.** `['death_0'..'death_5','skull']`,
+  each held `DEATH.FRAME_HOLD` (8) frames → 56 total; `update` transitions at 56. The frames are a real
+  burst→skull sequence in the atlas (verified on screen — their cells were once lady/fly names, but the
+  atlas was regenerated).
+- **Laugh-sweep = an overlay, no `Homes` change.** `RoundClear.render` draws the normal field (bays show
+  `frog_home_0`), then overlays `frog_home_1` on the first `⌊timer / LAUGH_PER_BAY⌋` bays **left-to-right**
+  — so smile → laugh sweeps across without touching `Homes`. `LAUGH_PER_BAY` (15) × 5 bays = 75 frames of
+  sweep inside the `SWEEP` (90) hold; the field keeps running (movers advance) behind it.
+- **The exit still honours the jingle.** `RoundClear` advances at `timer ≥ SWEEP` **and** `!isPlaying('level_complete')`;
+  with `Audio` a no-op `isPlaying` is false, so the fixed 90-frame hold governs — the §10 jingle path is
+  already wired for when audio lands.
 
 ## Deferred
 

@@ -11,7 +11,7 @@ import { Timer } from './timer.js';
 import { Score } from './score.js';
 import { Hud } from './hud.js';
 import { Flow } from './flow.js';
-import { SCORE, DEV } from './constants.js';
+import { DEV, LIVES } from './constants.js';
 
 /** @typedef {import('./mode.js').Mode} Mode */
 
@@ -25,7 +25,7 @@ export class Game {
     // session state
     this.score = new Score();
     this.hiScore = 0;
-    this.lives = SCORE.START_LIVES;
+    this.lives = DEV.START_LIVES;       // 3, or the ?lives= dev override (§ DEV)
     this.level = DEV.START_LEVEL;       // 1, or the ?level= dev override (§ DEV)
     this.frame = 0;                 // free-running frame counter (§3.4/§3.5)
     // gameplay subsystems
@@ -55,7 +55,7 @@ export class Game {
     this.frame++;
     this.input.beginFrame();
     if (this.mode) this.mode.update();
-    if (this.score.grantedLife) { this.lives++; this.score.grantedLife = false; }
+    if (this.score.grantedLife) { this.lives = Math.min(LIVES.MAX, this.lives + 1); this.score.grantedLife = false; }
     this.audio.tick();              // §7 step 6
   }
 

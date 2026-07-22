@@ -81,15 +81,16 @@ export class Renderer {
     if (b) for (let bx = x0; bx < x1; bx += b.w) this.drawSprite(spec.body, bx, y);
   }
 
-  // Monospace: advance penX by GLYPH_W per character (§5.1). Unknown chars = blank cell.
+  // Monospace: advance penX by GLYPH_W + 1 px per character (§5.1) — the +1 leaves a 1 px gap so the
+  // 7 px glyphs don't touch. The glyph itself still draws at its source width. Unknown chars = blank.
   drawText(str, x, y, color = '#fff') {
-    const gw = this.sprites.GLYPH_W;
+    const adv = this.sprites.GLYPH_W + 1;   // 7 px glyph + 1 px gap
     let penX = x | 0;
     for (const ch of String(str).toUpperCase()) {
       const key = ch === '-' ? 'dash' : ch;
       const r = this.sprites.glyph(key);
       if (r) this._glyph(r, penX, y | 0, color);
-      penX += gw;
+      penX += adv;
     }
   }
 

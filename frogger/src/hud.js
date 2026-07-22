@@ -1,7 +1,7 @@
 // hud.js — score / hi-score (top) + lives / timer bar / level (bottom), drawn in the monospace
 // font and the 8×8 blk_* tiles (§4.1). The bottom strip renders whenever Play / Death / RoundClear
 // show the live playfield.
-import { HUD } from './constants.js';
+import { HUD, LIVES } from './constants.js';
 
 /** @typedef {import('./game.js').Game} Game */
 /** @typedef {import('./renderer.js').Renderer} Renderer */
@@ -21,10 +21,12 @@ export class Hud {
     this._level(r, game.level);
   }
 
-  // One blk_0 frog icon per RESERVE life (lives − 1; the last life is the frog in play), left→right.
+  // One blk_0 frog icon per RESERVE life (lives − 1; the last life is the frog in play), left→right,
+  // capped at LIVES.HUD_MAX icons so a big stack can't overrun into the level markers (§4.1).
   /** @param {Renderer} r @param {number} lives */
   _lives(r, lives) {
-    for (let i = 0; i < lives - 1; i++) r.drawSprite('blk_0', HUD.LIVES[0] + i * HUD.LIVES_STEP, HUD.LIVES[1]);
+    const n = Math.min(lives - 1, LIVES.HUD_MAX);
+    for (let i = 0; i < n; i++) r.drawSprite('blk_0', HUD.LIVES[0] + i * HUD.LIVES_STEP, HUD.LIVES[1]);
   }
 
   // The timer bar (§4.1): 8 px tiles, right-anchored near the TIME label and draining leftward —

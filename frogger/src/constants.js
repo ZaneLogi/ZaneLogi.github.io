@@ -29,23 +29,34 @@ export const HOP_DIR = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0]
 // that the movers (step 2) fill the field; flip on to debug row geometry.
 export const DEBUG = { ROW_GRID: false };
 
-// Dev-only start-level override (marked non-source): `?level=N` sets the starting level, clamped
-// [1, 20], default 1 — a testing aid so a given level's hazards/ramp (e.g. the level-3 otter) are
-// reachable without grinding there. Guarded so a non-browser import (a headless test) doesn't
-// touch `location`.
-const _levelParam = typeof location !== 'undefined'
-  ? parseInt(new URLSearchParams(location.search).get('level'), 10) : NaN;
-export const DEV = { START_LEVEL: Math.min(20, Math.max(1, _levelParam || 1)) };
+// Dev-only overrides (marked non-source), from the URL query — testing aids. `?level=N` sets the
+// starting level (clamped [1, 20], default 1); `?lives=N` sets the STARTING lives (clamped [1, 10],
+// default 3 — the in-game count can still rise past 10 via the extra life, capped at LIVES.MAX below);
+// `?beat=N` sets the timer's FRAMES_PER_BEAT — how many frames drain one beat (clamped [1, 300],
+// default 30; lower = the countdown runs out faster). Guarded so a non-browser import doesn't touch
+// `location`.
+const _q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
+const _int = (k) => (_q ? parseInt(_q.get(k), 10) : NaN);
+export const DEV = {
+  START_LEVEL: Math.min(20, Math.max(1, _int('level') || 1)),
+  START_LIVES: Math.min(10, Math.max(1, _int('lives') || 3)),
+  FRAMES_PER_BEAT: Math.min(300, Math.max(1, _int('beat') || 30)),
+};
 
 // Death = the 7-frame explosion death_0..5 → skull (§3.5); per-frame duration tunable.
 export const DEATH = { FRAME_HOLD: 8 };
 
-// Timer: 60 beats, one drains every 30 frames (~30 s); red warning near the end (§6, §4.1).
-export const TIMER = { BEATS: 60, FRAMES_PER_BEAT: 30, WARNING_AT: 12, BONUS_PER_BEAT: 10 };
+// Timer: 60 beats, one drains every FRAMES_PER_BEAT frames (default 30 → ~30 s; the `?beat=` dev
+// override sets it); red warning near the end (§6, §4.1).
+export const TIMER = { BEATS: 60, FRAMES_PER_BEAT: DEV.FRAMES_PER_BEAT, WARNING_AT: 12, BONUS_PER_BEAT: 10 };
 
 export const SCORE = {
-  HOP: 10, HOME: 50, BONUS: 200, ALL_HOMES: 1000, EXTRA_LIFE: 20000, START_LIVES: 3,
+  HOP: 10, HOME: 50, BONUS: 200, ALL_HOMES: 1000, EXTRA_LIFE: 20000,
 };
+
+// Lives caps: the in-game count (start DEV.START_LIVES, plus the extra life at SCORE.EXTRA_LIFE) is
+// capped at MAX; the HUD draws at most HUD_MAX reserve icons (more would reach the level markers, §4.1).
+export const LIVES = { MAX: 99, HUD_MAX: 10 };
 
 // Timed events — fixed periods, no RNG (§3.4).
 export const TIMED = {

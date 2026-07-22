@@ -316,7 +316,7 @@ The `blk_*` HUD tiles are **8×8**. Positions are provisional — finalized when
 
 | Element | Position |
 |---|---|
-| **Lives** — one `blk_0` frog icon per reserve life | from `(8, 240)`, left→right |
+| **Lives** — one `blk_0` frog icon per reserve life, **up to 10 icons** (the count can exceed that in play; the HUD caps the drawn icons) | from `(8, 240)`, left→right |
 | **Timer bar** — shrinks as time drains; green normally, red in the warning phase (below) | `(8 … 184, 248)`; `TIME` label at `(188, 248)` |
 | **Level** — `blk_1` markers, one per level | right side, near `(216, 240)` |
 
@@ -349,9 +349,10 @@ Draw API (owned by the renderer):
 
 - **`drawSprite(name, x, y)`** — `drawImage` of the atlas rect. **Black is
   transparent** (the atlas keys it out).
-- **`drawText(str, x, y, color)`** — monospace: advance `x += GLYPH_W` per
-  character; the white glyphs are **tinted** to `color` via a cached source-in
-  fill. Fixed-width, so numeric HUD fields never jitter.
+- **`drawText(str, x, y, color)`** — monospace: advance `x += GLYPH_W + 1` per
+  character (the +1 leaves a 1 px gap so the 7 px glyphs don't touch); the white
+  glyphs are **tinted** to `color` via a cached source-in fill. Fixed-width, so
+  numeric HUD fields never jitter.
 - **`recolor(map)`** — frog only: a **palette remap** (swap each source color for a
   target), *not* a flat tint, because the frog is multi-color. Cached; used for the
   **cyan lady-frog**.
@@ -437,8 +438,9 @@ One object per entity; behavior in methods. The classes and their jobs:
   centre must fall within **±6 px** of a bay centre **and** the bay be empty, else it
   hit a divider or a filled bay and **dies**. A filled bay shows the **smiling** frog
   (`frog_home_0`); on the win `RoundClear` redraws all five as the **laughing** frog
-  (`frog_home_1`, §10). Also owns the bonus insect, the crocodile-head bay hazard, the
-  escorted lady-frog's arrival, and the win check.
+  (`frog_home_1`, §10). **Occupancy persists across a life** — a death does not clear the
+  filled bays; they reset only on a new level or a new game. Also owns the bonus insect, the
+  crocodile-head bay hazard, the escorted lady-frog's arrival, and the win check.
 - **`Timer`** — a per-life countdown. Starts at **60 beats**, losing one every
   **30 frames** (~30 s per full timer); the bar (§4.1) shows beats left, turns
   **warning-coloured at ≤ 12**, and at **0 triggers the time-out death**. Reaching a
@@ -447,7 +449,8 @@ One object per entity; behavior in methods. The classes and their jobs:
 - **`Score`** — the running total (displayed as ≥ 5 digits, top-left). Awards:
   **+10** per forward hop to a new furthest row; **+50** for reaching a home (plus
   the time bonus above); **+200** for the bonus insect or the lady-frog escort; **+1000** for
-  filling all five homes. A single **extra life at 20000**. All values tunable.
+  filling all five homes. A single **extra life at 20000** (the lives count is capped at **99**). All
+  values tunable.
 
 **Presentation**
 - **`Renderer`** — the 224×256 backbuffer + `drawSprite`/`drawText`; owns the atlas.
