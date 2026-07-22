@@ -7,31 +7,42 @@ self-contained; progress.md is free to reference the spec's sections.
 
 ## Status
 
-**Step 6e — median snake: DONE.** From **level 2** the median strip carries a single **snake** — one
-lethal 32 px object sweeping **left** at the lane speed (`v 0.25`) and wrapping around, cycling
-`snake_0/1/2`. The median is otherwise safe grass; **any contact with the snake kills**. It reuses the
-lane conveyor (seed / advance / seam-wrap) and the road collision path: `Lane` now seeds the median's
-snake from level 2 and derives `kills` from the seed, so the median resolves like a hazard lane
-(overlap → death) only once the snake exists. Below level 2 the median is empty and safe.
+**Step 6f — roaming otter: DONE.** A single otter roams the three log lanes (River 1 → 3 → 4), one lane at
+a time, **from level 3** (§3.3). It **enters at the lane's left edge and swims the whole width to the
+right** at `OTTER_V` (absolute, faster than the logs so it overtakes them). It is **surfaced** (visible)
+over open water and **submerged** (hidden) while a log is over it — so it **dives under each log it
+overtakes and re-surfaces in the next gap**, bobbing across the lane. It leaves by swimming off the right
+edge; a `T_OTTER` timer then brings it up at the left edge of the next lane. **Lethal only while surfaced**
+(`Otter.hits`, checked first in the river branch): a frog riding a log's **near edge** beside a surfaced
+otter is snatched (spans overlap), while a middle-of-log frog — or any frog while the otter is
+**submerged** — is safe. It only ever swims in water the lane already has and merely **hides itself** under
+a log, so **no log is spawned, hidden, or removed** — the log set is untouched. It shows `otter_0` while
+surfaced (nothing while submerged); the reared `otter_1` (the catch pose) is drawn by the death
+presentation (step 7). A two-state `idle → swimming` machine; it can't be ridden. **Step 6 is complete.**
 
-Verified at a forced level 2 — 14 assertions (level gate, one 32 px snake seeded, `kills` follows the
-seed, overlap → death / clear → safe, level-1 median safe, the left sweep + wrap, and a render check:
-the snake draws and animates); no console errors.
+Verified deterministically (drove `Playfield.update` 3000–4000 frames): **inert below level 3** (0 visits
+at L1 / L2); at L3 it **enters at x = 0, exits at x = 224**, **cycles River 1 → 3 → 4** in order, and every
+visit both **surfaces and submerges** (2–3 transitions each — it bobs between the logs). Lethality: a frog
+over a **surfaced** otter is killed, over a **submerged** otter is **not**, and a far frog misses. `otter_0`
+renders while surfaced without error. No console errors.
 
-Sprite-width correction: the `snake_*` sprites are 32 px, so the median `W` was 16 → **32** (hitbox
-matches the visible snake); §3.2 updated. §3.4 gained the self-contained median-snake entry.
+A **`?level=N` URL start-override** (dev-only, clamped [1, 20], default 1) sets the starting level so the
+level-3 otter — and any level's hazards — is reachable without grinding there (`DEV.START_LEVEL`, wired in
+`Game` + `Attract`).
 
-Prior sub-steps — **6d** bay croc-head · **6c** river-croc mouth · **6b** lady-frog · **6a** dives.
+**Left for a playtest:** the traversal speed (`OTTER_V`) and the `T_OTTER` cadence — how fast it crosses /
+how brief each surfacing is, and how often it visits.
 
-Step 6 sub-steps: **`6a` ✓ · `6b` ✓ · `6c` ✓ · `6d` ✓ · `6e` median snake ✓ · `6f` otter.** (The
-croc + snake appear **from level 2** — built here, verified by forcing the level; only the §3.3
-speed/count ramp stays step 8.)
+Prior sub-steps — **6e** median snake · **6d** bay croc-head · **6c** river-croc mouth · **6b**
+lady-frog · **6a** dives.
+
+Step 6 sub-steps: **`6a` ✓ · `6b` ✓ · `6c` ✓ · `6d` ✓ · `6e` ✓ · `6f` ✓ — step 6 complete.**
 
 Prior steps: **5** Timer + Score + HUD · **4** homes · **3** collision + carry · **0–2** scaffold /
 frog / lanes.
 
-Next up: **6f — otter** (the last §3.4 hazard): a roaming lethal otter sweeps the log lanes faster
-than the logs and catches a frog on the trailing edge of the log it reaches.
+Next up: **step 7 — Death + RoundClear presentation** (the death explosion, the laugh-sweep), then the
+**step 8 level ramp** (§3.3).
 
 ## Steps (plan is provisional — adjusts as we build)
 
@@ -49,13 +60,13 @@ than the logs and catches a frog on the trailing edge of the log it reaches.
 | 6c | Timed events — river-crocodile mouth (River 1, from L2) | §3.4 | done |
 | 6d | Timed events — bay croc-head hazard (from L2) | §3.4 | done |
 | 6e | Timed events — median snake (from L2) | §3.4 | done |
-| 6f | Timed events — roaming otter (log lanes 1→3→4) | §3.4 | next |
-| 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | |
+| 6f | Timed events — roaming otter (log lanes 1→3→4, gap-model, from L3) | §3.4 | done |
+| 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | next |
 | 8 | Level ramp | §3.3 | |
 
 *(Bonus insect was done in step 4.)*
 
-## What's real vs stubbed (after step 6e)
+## What's real vs stubbed (after step 6f)
 
 - **Real / running:** the boot pump (`main.js`), `Game` + the mode machine
   (`Mode`/`Flow`/5 modes), `Renderer` (drawSprite + clip + `fillRect` + `drawObject` +
@@ -65,18 +76,19 @@ than the logs and catches a frog on the trailing edge of the log it reaches.
   **`Lane` (seed/advance/render + `submerged` diving turtles + `mouthOpen` river croc from L2 + L2
   median snake)**,
   **`Playfield` (build/update/render)**, **`Homes` (landing test / occupancy fill + smile render /
-  bonus-insect walk + L2 bobbing croc-head / win check)**, **`LadyFrog` (River 4 escort — board / pickup-on-her-log /
-  carry-home +200)**, **`Collision` (§7.3 safe / ride / drown / squash + carried-off-edge + home
-  delegation + submerged-diver drown + lady pickup + croc-jaws drown)**, **`Timer` (countdown +
+  bonus-insect walk + L2 bobbing croc-head / win check)**, **`LadyFrog` (River 4 escort — board /
+  pickup-on-her-log / carry-home +200)**, **`Otter` (roams River 1/3/4 from L3 — traverses a
+  lane left→right, submerges under logs / surfaces in gaps, lethal only while surfaced)**, **`Collision` (§7.3 safe / ride / drown / squash + carried-off-edge + home
+  delegation + submerged-diver drown + lady pickup + croc-jaws drown + otter contact)**, **`Timer` (countdown +
   time-out + continuous bar fraction)**, **`Score` (all
   awards + forward-hop gate + extra life)**, **`Hud` (top score/hi + bottom lives / timer bar /
   level)**, and `Play`'s §7 steps 1 · 2 · 3 · 4 · 5 (input → frog → collision → objects → timer):
   drown / squash / home-miss / time-out → `Death`, home / pickup → score (+ time bonus + lady) +
   respawn, all-filled → `RoundClear` (+1000, level ramp). (Tile parts animate via `Lane._frame`.)
-- **Stubbed** (class shell + documented §6 API + `TODO`): the **otter** (6f) rest of §3.4 (frames are
-  in config), the §3.3 level ramp, the `RoundClear` **laugh-sweep** render and the `Death`
-  **explosion** render (step 7), the gameplay-event **sounds** (hop / plunk / squash / hurry-up /
-  time-out — no-op `Audio`, §5.2), and `Play`'s remaining tick step (audio, step 6 order).
+- **Stubbed** (class shell + documented §6 API + `TODO`): the §3.3 level ramp (step 8), the
+  `RoundClear` **laugh-sweep** render and the `Death` **explosion** render (step 7), the
+  gameplay-event **sounds** (hop / plunk / squash / hurry-up / time-out — no-op `Audio`, §5.2), and
+  `Play`'s remaining tick step (audio). **All §3.4 timed events are now real.**
 
 ## Step-1 impl decisions
 
@@ -306,6 +318,29 @@ than the logs and catches a frog on the trailing edge of the log it reaches.
   was 16, which would give the visible snake a half-width hitbox. Widened to 32 so the hitbox matches
   what the player sees (§3.2 updated) — the same "faithful to what the player observes" fix as the
   earlier atlas-size corrections.
+
+## Step-6f impl decisions
+
+- **The otter traverses the lane and submerges under logs — nothing is spawned or hidden.** It enters at
+  the left edge (`x = 0`) and swims right at `OTTER_V` (absolute, 0.8 px/frame — faster than every lane, so
+  it overtakes logs), leaving off the right edge (`x ≥ WIDTH`). Its `surfaced` flag is recomputed each
+  frame as **"no log span overlaps the otter"** (`_underLog`, checking each mover's span + its seam wrap
+  copy); any overlap ⇒ submerged, so the otter is only ever drawn in clear water, never on top of a log. It
+  toggles **its own** visibility — the lane's log set is untouched, so the `diver` / `croc` mover-index
+  refs stay valid.
+- **Lethal only while surfaced** (`Otter.hits`, checked first in the river branch): `hits` returns true
+  only when `active && surfaced` and the frog span overlaps. A frog on a log's **middle** clears the otter;
+  one riding within ~8 px of the **edge facing a surfaced otter** has its span poke into the gap and is
+  snatched; under a log the otter is harmless. So the "don't stay near a log edge next to a surfaced otter"
+  behaviour falls out of the overlap — no special rule.
+- **Render / state.** A two-state `idle → swimming` machine; `render` and `hits` both no-op unless
+  `active && surfaced`. `otter_1` (the rear-up catch pose) is the death presentation's (step 7); during
+  play the otter is always `otter_0`. Roam order River 1 → 3 → 4.
+- **From level 3** (`Otter` takes the level, gated on `OTTER_MIN_LEVEL`), per §3.3 — the last hazard to
+  switch on. Paired with a **`?level=N` URL start-override** (`DEV.START_LEVEL`, dev-only, clamped
+  [1, 20], default 1, wired in `Game` + `Attract`) so the otter is testable without grinding to level 3.
+- **Exit is at the right edge** (not a dive under a specific final log) — the simplest deterministic end;
+  flag if a dive-out is wanted instead.
 
 ## Deferred
 

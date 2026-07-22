@@ -11,7 +11,7 @@ import { Timer } from './timer.js';
 import { Score } from './score.js';
 import { Hud } from './hud.js';
 import { Flow } from './flow.js';
-import { SCORE } from './constants.js';
+import { SCORE, DEV } from './constants.js';
 
 /** @typedef {import('./mode.js').Mode} Mode */
 
@@ -26,7 +26,7 @@ export class Game {
     this.score = new Score();
     this.hiScore = 0;
     this.lives = SCORE.START_LIVES;
-    this.level = 1;
+    this.level = DEV.START_LEVEL;       // 1, or the ?level= dev override (§ DEV)
     this.frame = 0;                 // free-running frame counter (§3.4/§3.5)
     // gameplay subsystems
     this.frog = new Frog();

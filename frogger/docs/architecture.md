@@ -50,7 +50,7 @@ exists to serve them):
     The frog is safe **only while riding** an object and is **carried at its
     speed**. **Open water drowns** it; **diving turtles submerge** on a cycle and
     drown a rider; being **carried off the screen edge** kills it. An **otter** roams
-    the log lanes (lethal on contact), and a **cyan lady-frog** rides a lane — carry
+    the log lanes (lethal while surfaced), and a **cyan lady-frog** rides a lane — carry
     her home for a bonus.
   - **Median:** a safe strip between river and road (a snake patrols it from level 2).
   - **Road band:** several lanes of **vehicles moving horizontally**. Any contact
@@ -177,7 +177,8 @@ changes by a **fixed, level-indexed rule** (still no RNG):
   | Road 5 cars | 2 | 2 | 3 | 3 | 3 | 3 |
 
 - **Hazards switch on by level** — the **crocodile** (River 1) and **median snake**
-  from **level 2**; a **second diving turtle group** per turtle lane from **level 3**.
+  from **level 2**; a **second diving turtle group** per turtle lane, and the **roaming
+  otter** (§3.4), from **level 3**.
 
 The **timer** length, **lives**, and the single **extra-life** threshold do **not**
 change across levels — rising speed and thinning platforms are the whole ramp.
@@ -210,13 +211,20 @@ switch — identical on every playthrough:
   **cyan lady-frog** (the player frog recoloured cyan, §5.1) boards **River 4** at its
   edge and rides along; hop onto her and carry her home for a bonus. Uncollected, she
   rides off-screen and the timer repeats.
-- **Otter (roaming river hazard).** A single lethal **otter** roams the three log
-  lanes — **River 1 → 3 → 4**, in that fixed order. Every `T_otter` frames (default
-  **256**) it enters the next lane and swims across in that lane's direction **faster
-  than the lane's logs**. When it catches up to a log ahead it **dismisses**; but a
-  frog on the **trailing edge of that log** when the otter arrives is **caught and
-  killed**. It cannot be ridden. Present from level 1. Frames: `otter_0` swimming,
-  `otter_1` on the catch (§3.5).
+- **Otter (roaming river hazard, from level 3).** A single **otter** roams the three log lanes —
+  **River 1 → 3 → 4**, in that fixed order, one lane at a time — appearing **from level 3** (the last
+  hazard to switch on). It **enters at the lane's left edge and swims the whole width to the right**, a
+  little **faster than the logs** so it overtakes them. It is **surfaced** — visible, head above water —
+  while over **open water**, and **submerged** — hidden — while a **log is over it**, so it **dives under
+  each log it overtakes and re-surfaces in the next gap**, bobbing across the lane. It leaves by
+  **swimming off the right edge**; a `T_otter`-frame timer (default **256**) then brings it up at the
+  left edge of the **next** lane. **It is lethal only while surfaced:** a frog riding a log's **near
+  edge** beside a surfaced otter is snatched (their spans overlap), while a frog on the log's **middle**
+  — or any frog while the otter is **submerged** — is safe. So the danger is a brief, in-the-open one,
+  exactly when the otter bobs up in a gap next to you. Because the otter only ever swims in water the
+  lane already has and merely **hides itself** while a log is over it, **no log is spawned, hidden, or
+  removed** — the lane's log set is untouched. It shows `otter_0` while surfaced (nothing while
+  submerged) and rears to `otter_1` only on the catch (the death pose, §3.5). It **cannot be ridden**.
 - **Median snake (from level 2).** A single **snake** patrols the median strip: one
   lethal object sweeping **left** at a slow lane speed and wrapping around the screen
   (a lone slow conveyor), cycling `snake_0/1/2`. The median is otherwise safe to stand
@@ -247,7 +255,7 @@ random):
   | diving turtle | `turtle_0/1/2` surfaced (safe) ↔ `turtle_dive_*` submerged (drowns) — §3.4 dive timer |
   | river crocodile | `croc_0` mouth closed (front safe) ↔ `croc_1` mouth open (front lethal) — §3.4 mouth timer |
   | bay crocodile | `crochead_0` head down (**safe**) ↔ `crochead_1` head up (**lethal**) — §3.4 bay-croc duration |
-  | otter | `otter_0` swimming ↔ `otter_1` on the catch (kill) — §3.4 otter |
+  | otter | `otter_0` surfaced (visible) · **hidden while submerged** ↔ `otter_1` on the catch (kill) — §3.4 |
   | frog | `frog_0…7` by **facing** (4 dirs) × **rest / hop** — set by the frog's state (§6) |
   | frog death | the 7-frame explosion `death_0 → death_5 → skull` — during `Death` mode |
   | lady-frog | the player frog recoloured cyan (§5.1) — a rest frame while riding |

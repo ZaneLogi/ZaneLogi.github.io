@@ -41,6 +41,10 @@ export class Collision {
     const cx = frog.x + HALF;                    // the frog's centre x
     if (lane.carries) {                          // river
       if (cx < 0 || cx >= SCREEN.WIDTH) { frog.riding = null; return 'drown'; }  // carried off edge
+      const otter = playfield.otter;             // the roaming otter kills while surfaced (§3.4)
+      if (otter && otter.lane === lane && otter.hits(frog.x, frog.x + SCREEN.CELL)) {
+        frog.riding = null; return 'drown';
+      }
       const m = this._under(lane, cx);
       if (m) {
         if (m === lane.diver && lane.submerged(frame)) { frog.riding = null; return 'drown'; } // dived under

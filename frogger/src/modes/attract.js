@@ -1,5 +1,6 @@
 // modes/attract.js — title + high score; Start → a fresh Play (§10). No self-playing demo.
 import { Mode } from '../mode.js';
+import { DEV } from '../constants.js';
 
 export class Attract extends Mode {
   enter() { this.game.audio.stopMusic(); }
@@ -8,7 +9,7 @@ export class Attract extends Mode {
     if (this.game.input.startPressed()) {
       this.game.score.reset();
       this.game.lives = 3;
-      this.game.level = 1;
+      this.game.level = DEV.START_LEVEL;   // 1, or the ?level= dev override (§ DEV)
       this.game.flow.to('play');
     }
   }

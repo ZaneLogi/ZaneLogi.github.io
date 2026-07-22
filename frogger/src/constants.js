@@ -29,6 +29,14 @@ export const HOP_DIR = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0]
 // that the movers (step 2) fill the field; flip on to debug row geometry.
 export const DEBUG = { ROW_GRID: false };
 
+// Dev-only start-level override (marked non-source): `?level=N` sets the starting level, clamped
+// [1, 20], default 1 — a testing aid so a given level's hazards/ramp (e.g. the level-3 otter) are
+// reachable without grinding there. Guarded so a non-browser import (a headless test) doesn't
+// touch `location`.
+const _levelParam = typeof location !== 'undefined'
+  ? parseInt(new URLSearchParams(location.search).get('level'), 10) : NaN;
+export const DEV = { START_LEVEL: Math.min(20, Math.max(1, _levelParam || 1)) };
+
 // Death = the 7-frame explosion death_0..5 → skull (§3.5); per-frame duration tunable.
 export const DEATH = { FRAME_HOLD: 8 };
 
@@ -48,6 +56,8 @@ export const TIMED = {
   LADY_LOG: 0,                           // which of the lane's logs she sits on
   LADY_WINDOW: 256,                      // frames she's aboard each T_LADY cycle before riding off
   CROC_LOG: 0,                           // which River-1 log becomes the crocodile (from L2)
+  OTTER_V: 0.8,                          // otter traversal speed (absolute px/frame) — faster than every log lane (§3.4)
+  OTTER_MIN_LEVEL: 3,                    // the otter is a level-3+ hazard (§3.3)
 };
 
 export const WRAP_L = 240;   // shared off-screen wrap length (§3.2)

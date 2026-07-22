@@ -3,6 +3,7 @@
 import { Lane } from './lane.js';
 import { Homes } from './homes.js';
 import { LadyFrog } from './ladyfrog.js';
+import { Otter } from './otter.js';
 import { LANES, ROWS, SCREEN, DEBUG, TIMED } from './constants.js';
 
 /** @typedef {import('./renderer.js').Renderer} Renderer */
@@ -16,14 +17,19 @@ export class Playfield {
     this.homes.level = level;                                      // gates the L2 bay crocodile-head
     const li = this.lanes.findIndex((l) => l.cfg.id === TIMED.LADY_LANE);   // the lady-frog rides River 4
     this.lady = new LadyFrog(this.lanes[li], ROWS.FIRST_LANE_Y + li * SCREEN.CELL);
+    const logLanes = {};                                                    // the otter roams River 1/3/4
+    for (const id of TIMED.OTTER_LANES) logLanes[id] = this.lanes.find((l) => l.cfg.id === id);
+    this.otter = new Otter(logLanes, level);                                // surfaces only from level 3 (§3.4)
   }
 
-  // §7 step 4: advance every lane's movers, walk the home-bay item, and ride the lady-frog escort.
+  // §7 step 4: advance every lane's movers, walk the home-bay item, ride the lady-frog escort, and
+  // swim the otter (after the lanes move, so it chases the current log positions).
   /** @param {number} frame  the global tick counter */
   update(frame = 0) {
     for (const lane of this.lanes) lane.advance();
     this.homes.update(frame);
     this.lady.update(frame);
+    this.otter.update();
   }
 
   /** @param {Renderer} renderer @param {number} frame  the global tick counter (§3.5 animation) */
@@ -37,6 +43,9 @@ export class Playfield {
     if (DEBUG.ROW_GRID) this._grid(renderer);
     // Each lane's movers at its row y (river 48… · median 128 · road 144…, §4 band layout).
     this.lanes.forEach((lane, i) => lane.render(renderer, ROWS.FIRST_LANE_Y + i * SCREEN.CELL, frame));
+    if (this.otter.active) {             // the roaming otter, in its current log lane (§3.4)
+      this.otter.render(renderer, ROWS.FIRST_LANE_Y + this.lanes.indexOf(this.otter.lane) * SCREEN.CELL);
+    }
     this.lady.render(renderer);          // the lady-frog on her River 4 log (§3.4)
     this.homes.render(renderer);
   }
