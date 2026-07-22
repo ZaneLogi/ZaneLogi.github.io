@@ -22,6 +22,9 @@ export class Lane {
     // from diving in unison. Non-dive lanes leave `diver` null.
     this.diver = cfg.dive ? this.movers[0] : null;
     this._divePhase = index * (TIMED.T_DIVE / 2);
+    // River crocodile (§3.4, from level 2): one River-1 log is a croc whose front tile (the mouth)
+    // is lethal while open; its back rides like a log. Absent below level 2 → plain logs.
+    this.croc = (level >= 2 && cfg.croc) ? this.movers[TIMED.CROC_LOG] : null;
   }
 
   // Whether this lane's diving group is currently submerged — the last quarter of the T_DIVE
@@ -29,6 +32,12 @@ export class Lane {
   // lanes never submerge.
   submerged(frame) {
     return !!this.diver && (frame + this._divePhase) % TIMED.T_DIVE >= TIMED.T_DIVE * 0.75;
+  }
+
+  // Whether the river crocodile's mouth is open (its front tile lethal) — the last third of the
+  // T_MOUTH cycle (§3.4). Only meaningful on a lane that has a croc.
+  mouthOpen(frame) {
+    return !!this.croc && frame % TIMED.T_MOUTH >= TIMED.T_MOUTH * 2 / 3;
   }
 
   // Seed N movers evenly along the wrap length: left edge x_i = (φ + i·P) mod L, pitch P = L/N,
@@ -67,10 +76,14 @@ export class Lane {
       left: t.left && this._frame(t.left, frame),
       right: t.right && this._frame(t.right, frame),
     };
-    // While the diving group is under, it draws its submerged frames instead (§3.4/§3.5).
+    // The diving group draws its submerged frames while under; the crocodile draws its mouth
+    // closed/open sprite in place of the log tiles (§3.4/§3.5).
     const dived = this.submerged(frame) ? { body: this._frame(this.cfg.dive, frame) } : null;
+    const crocSpec = this.croc ? { body: this.mouthOpen(frame) ? 'croc_1' : 'croc_0' } : null;
     for (const m of this.movers) {
-      const s = (m === this.diver && dived) ? dived : spec;
+      let s = spec;
+      if (m === this.diver && dived) s = dived;
+      else if (m === this.croc) s = crocSpec;
       renderer.drawObject(s, m.x, y, m.w);
       if (m.x + m.w > WRAP_L) renderer.drawObject(s, m.x - WRAP_L, y, m.w);
     }

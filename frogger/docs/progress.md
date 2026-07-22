@@ -7,32 +7,31 @@ self-contained; progress.md is free to reference the spec's sections.
 
 ## Status
 
-**Step 6b — lady-frog escort: DONE.** A cyan-recoloured player frog boards **River 4** by sitting on
-one of its logs (`LadyFrog`, on the `T_LADY` timer, aboard for `LADY_WINDOW` frames each cycle).
-Hopping onto **that log** picks her up — she leaves the river and rides on the **frog's back** (drawn
-by `Frog` via the cyan recolor); reaching **any home** while carrying her pays **+200** (on top of the
-+50 home + time bonus), and she's lost on death. `Renderer` gained a cached `recolored(key, map)` — a
-palette-remap of the whole atlas lifted from `demo/sprite_viewer.js` — plus `drawSpriteFrom`.
+**Step 6c — river-crocodile mouth: DONE.** From **level 2**, one River-1 log (`CROC_LOG`) is a
+**crocodile**: `Lane.croc` draws `croc_0` / `croc_1` on the `T_MOUTH` cycle (mouth open the last
+third, frames 80–119) and its **back rides like a log**, but riding its **front tile while the mouth
+is open** drowns (`Collision._inJaws` — the leading 16 px by lane direction, incl. the seam wrap
+copy). Below level 2 the slot is a plain log. The mouth is on the croc's **right** end (verified:
+`croc_0`↔`croc_1` differ only in cols 33–46), which leads River 1's rightward drift — so "front tile"
+= the mouth, no orientation conflict.
 
-Verified deterministically — 19 assertions (board / window / re-board lifecycle, x tracks her log,
-`recolored` caching + the green→cyan swap, pickup only on *her* log while aboard + no double-carry,
-death drops her, and delivery: home while carrying = +50 +200) + a render check (38 cyan px on her
-log / on the frog's back; absent once taken / not carrying). No console errors. Two feel values are
-tunable against a live preview: the back-sprite offset `FROG.LADY_DY = 5` and `TIMED.LADY_WINDOW = 256`.
+Verified at a forced level 2 — 12 assertions (level gate, mouth cycle, back-safe in both phases,
+front tile lethal-open / safe-closed, the level-1 slot stays a log, and a render diff on the front
+tile closed vs open); no console errors.
 
-Prior — **6a diving turtles:** one fixed group per turtle lane submerges on the `T_DIVE` cycle
-(phase-offset half a cycle apart), drawing `turtle_dive_*` while under and **drowning** a rider
-(`Collision.resolve(…, frame)` + `lane.submerged`); the river-hazard piece deferred from step 3.
+Prior sub-steps — **6b** lady-frog escort (ride-a-log pickup → ride-on-back → +200 home; reusable
+`Renderer.recolored`, two tunable feel values `FROG.LADY_DY` / `TIMED.LADY_WINDOW`). **6a** diving
+turtles (submerge cycle, drown a submerged rider).
 
-Step 6 sub-steps: **`6a dives` ✓ · `6b lady-frog` ✓ · `6c` river-croc mouth · `6d` bay croc-head ·
-`6e` median snake · `6f` otter.** (The river croc + snake appear **from level 2** — built here and
-verified by forcing the level; only the §3.3 speed/count ramp stays step 8.)
+Step 6 sub-steps: **`6a` ✓ · `6b` ✓ · `6c` river-croc mouth ✓ · `6d` bay croc-head · `6e` median
+snake · `6f` otter.** (The croc + snake appear **from level 2** — built here, verified by forcing the
+level; only the §3.3 speed/count ramp stays step 8.)
 
 Prior steps: **5** Timer + Score + HUD · **4** homes · **3** collision + carry · **0–2** scaffold /
 frog / lanes.
 
-Next up: **6c — river-crocodile mouth** (River 1, from level 2): a croc replaces a log; its back
-rides like a log but its **open mouth** (the `T_MOUTH` cycle) is lethal.
+Next up: **6d — bay croc-head** (from level 2): the bay item alternates insect / crocodile; a croc
+bay is a bobbing head (`crochead_0` safe ↔ `crochead_1` lethal) on the `T_BAYCROC` cycle.
 
 ## Steps (plan is provisional — adjusts as we build)
 
@@ -47,8 +46,8 @@ rides like a log but its **open mouth** (the `T_MOUTH` cycle) is lethal.
 | 5 | Timer + Score + HUD wiring (lives, timer bar, level) | §4.1, §6 | **done** |
 | 6a | Timed events — diving turtles (submerge cycle, drown a submerged rider) | §3.4, §3.5 | done |
 | 6b | Timed events — lady-frog escort (River 4, cyan recolor, +200 carry-home) | §3.4, §5.1 | **done** |
-| 6c | Timed events — river-crocodile mouth (River 1, from L2) | §3.4 | next |
-| 6d | Timed events — bay croc-head hazard (from L2) | §3.4 | |
+| 6c | Timed events — river-crocodile mouth (River 1, from L2) | §3.4 | done |
+| 6d | Timed events — bay croc-head hazard (from L2) | §3.4 | next |
 | 6e | Timed events — median snake (from L2) | §3.1, §3.3 | |
 | 6f | Timed events — roaming otter (log lanes 1→3→4) | §3.4 | |
 | 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | |
@@ -56,27 +55,28 @@ rides like a log but its **open mouth** (the `T_MOUTH` cycle) is lethal.
 
 *(Bonus insect was done in step 4.)*
 
-## What's real vs stubbed (after step 6b)
+## What's real vs stubbed (after step 6c)
 
 - **Real / running:** the boot pump (`main.js`), `Game` + the mode machine
   (`Mode`/`Flow`/5 modes), `Renderer` (drawSprite + clip + `fillRect` + `drawObject` +
   tinted monospace drawText + **cached `recolored` / `drawSpriteFrom`**), `Sprites` (atlas load),
   `Input` (edge-triggered), `constants.js` (the real §3/§4/§6 design data), `Attract`, the mode
   transition/timing, **`Frog` (hop/facing/lock/render + river carry + lady-on-back)**, **`Mover`**,
-  **`Lane` (seed/advance/render + `submerged` diving turtles)**, **`Playfield` (build/update/render)**,
-  **`Homes` (landing test / occupancy fill + smile render / bonus-insect walk / win check)**,
-  **`LadyFrog` (River 4 escort — board / pickup-on-her-log / carry-home +200)**, **`Collision`
-  (§7.3 safe / ride / drown / squash + carried-off-edge + home delegation + submerged-diver drown +
-  lady pickup)**, **`Timer` (countdown + time-out + continuous bar fraction)**, **`Score` (all
+  **`Lane` (seed/advance/render + `submerged` diving turtles + `mouthOpen` river croc from L2)**,
+  **`Playfield` (build/update/render)**, **`Homes` (landing test / occupancy fill + smile render /
+  bonus-insect walk / win check)**, **`LadyFrog` (River 4 escort — board / pickup-on-her-log /
+  carry-home +200)**, **`Collision` (§7.3 safe / ride / drown / squash + carried-off-edge + home
+  delegation + submerged-diver drown + lady pickup + croc-jaws drown)**, **`Timer` (countdown +
+  time-out + continuous bar fraction)**, **`Score` (all
   awards + forward-hop gate + extra life)**, **`Hud` (top score/hi + bottom lives / timer bar /
   level)**, and `Play`'s §7 steps 1 · 2 · 3 · 4 · 5 (input → frog → collision → objects → timer):
   drown / squash / home-miss / time-out → `Death`, home / pickup → score (+ time bonus + lady) +
   respawn, all-filled → `RoundClear` (+1000, level ramp). (Tile parts animate via `Lane._frame`.)
-- **Stubbed** (class shell + documented §6 API + `TODO`): the **river-croc mouth** (6c) / **bay
-  croc-head** (6d) / **median snake** (6e) / **otter** (6f) rest of §3.4 (frames are in config), the
-  §3.3 level ramp, the `RoundClear` **laugh-sweep** render and the `Death` **explosion** render
-  (step 7), the gameplay-event **sounds** (hop / plunk / squash / hurry-up / time-out — no-op
-  `Audio`, §5.2), and `Play`'s remaining tick step (audio, step 6 order).
+- **Stubbed** (class shell + documented §6 API + `TODO`): the **bay croc-head** (6d) / **median
+  snake** (6e) / **otter** (6f) rest of §3.4 (frames are in config), the §3.3 level ramp, the
+  `RoundClear` **laugh-sweep** render and the `Death` **explosion** render (step 7), the
+  gameplay-event **sounds** (hop / plunk / squash / hurry-up / time-out — no-op `Audio`, §5.2), and
+  `Play`'s remaining tick step (audio, step 6 order).
 
 ## Step-1 impl decisions
 
@@ -264,7 +264,19 @@ rides like a log but its **open mouth** (the `T_MOUTH` cycle) is lethal.
 - **Two feel values marked tunable** (measured, not eyeballed — the preview pane is closed): the
   back-sprite offset `FROG.LADY_DY` and the aboard window `TIMED.LADY_WINDOW`.
 
-## Deferred
+## Step-6c impl decisions
+
+- **The croc is a flagged `Lane` mover, not a separate entity.** It *replaces* a River-1 log, so it
+  rides the same conveyor at the same width (48) — `Lane.croc = movers[CROC_LOG]` (only when
+  `level ≥ 2 && cfg.croc`). Render and collision special-case that one mover; below level 2 it's a
+  plain log. This mirrors `diver` and keeps the croc on the deterministic conveyor for free.
+- **Mouth orientation verified against the sprite, not assumed.** `croc_0`↔`croc_1` differ only in
+  columns 33–46 → the mouth is the **right** end, which is River 1's *leading* edge (dir +1). So the
+  lethal "front tile" is `[x + w − CELL, x + w)`; `_inJaws` computes it by `dir` (so a left-drifting
+  croc would use the left tile) and checks the seam wrap copy too.
+- **Only the front tile kills, only while open.** `mouthOpen` is the last third of `T_MOUTH`
+  (frames 80–119); on the back tiles, or any time the mouth is closed, the croc **rides like a log**
+  (`ride` + carry at the lane speed). Death is just the `_inJaws && mouthOpen` corner.
 
 - **Sound** — the `Audio` service is a no-op placeholder (§5.2). The arcade
   AY-3-8910 engine + `assets/dat_sfx.js` are built later; until then RoundClear /

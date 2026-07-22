@@ -47,6 +47,7 @@ export const TIMED = {
   LADY_LANE: 'river4',                   // the lady-frog rides a log in this lane
   LADY_LOG: 0,                           // which of the lane's logs she sits on
   LADY_WINDOW: 256,                      // frames she's aboard each T_LADY cycle before riding off
+  CROC_LOG: 0,                           // which River-1 log becomes the crocodile (from L2)
 };
 
 export const WRAP_L = 240;   // shared off-screen wrap length (§3.2)

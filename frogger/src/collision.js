@@ -44,6 +44,9 @@ export class Collision {
       const m = this._under(lane, cx);
       if (m) {
         if (m === lane.diver && lane.submerged(frame)) { frog.riding = null; return 'drown'; } // dived under
+        if (m === lane.croc && lane.mouthOpen(frame) && this._inJaws(m, lane.cfg.dir, cx)) {
+          frog.riding = null; return 'drown';                                                  // the open mouth
+        }
         frog.riding = m; frog.rideDx = lane.cfg.dir * lane.cfg.v;
         // Hopping onto the lady-frog's log picks her up — she rides on the frog's back (§3.4).
         const lady = playfield.lady;
@@ -68,6 +71,16 @@ export class Collision {
       if (x >= wx && x < wx + m.w) return m;
     }
     return null;
+  }
+
+  // Is the frog's centre over the crocodile's leading front tile (the mouth) — of either the
+  // primary span or its seam wrap copy? The front is the leading CELL px by the lane's direction.
+  /** @param {import('./mover.js').Mover} m @param {number} dir @param {number} cx */
+  _inJaws(m, dir, cx) {
+    const cell = SCREEN.CELL;
+    const front = (base) => (dir > 0 ? base + m.w - cell : base);
+    const hit = (base) => cx >= front(base) && cx < front(base) + cell;
+    return hit(m.x) || hit(m.x - WRAP_L);
   }
 
   // Does the span [x0, x1) overlap any mover's span (or its wrap copy)? 1-D AABB test, used for
