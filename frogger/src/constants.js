@@ -10,7 +10,7 @@ export const TICK = { HZ: 60 };
 // mid-screen), facing up. Horizontal hops move x on the 8-offset column grid (8…200, so the
 // 16 px frog stays fully on screen); vertical hops step the row index (0…MAX_ROW), y from
 // ROWS.ANCHOR_Y — uniform 16 px, since every playfield row (lanes + both safe strips) is 16 px.
-export const FROG = { SPAWN_X: 104, HOP_FRAMES: 8, HOP_PX: 2, MIN_X: 8, MAX_X: 200 };
+export const FROG = { SPAWN_X: 104, HOP_FRAMES: 8, HOP_PX: 2, MIN_X: 8, MAX_X: 200, LADY_DY: 5 };
 
 // Frog frame ↔ (facing × rest/hop), derived from the atlas (§3.5): frog_0..7 are (rest, hop)
 // pairs in the order up, left, down, right. Rest = legs tucked; hop = legs kicked out (shown
@@ -44,7 +44,9 @@ export const TIMED = {
   T_DIVE: 240, T_MOUTH: 120, T_BAY: 256, T_BAYCROC: 120, T_LADY: 512, T_OTTER: 256,
   BAY_ORDER: [2, 0, 3, 1, 4],            // the bay-item walk order
   OTTER_LANES: ['river1', 'river3', 'river4'],  // roams the log lanes, in order
-  LADY_LANE: 'river4',
+  LADY_LANE: 'river4',                   // the lady-frog rides a log in this lane
+  LADY_LOG: 0,                           // which of the lane's logs she sits on
+  LADY_WINDOW: 256,                      // frames she's aboard each T_LADY cycle before riding off
 };
 
 export const WRAP_L = 240;   // shared off-screen wrap length (§3.2)

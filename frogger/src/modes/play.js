@@ -26,6 +26,7 @@ export class Play extends Mode {
       if (outcome === 'home' || outcome === 'pickup') {
         g.score.home();                          // +50 for the home
         if (outcome === 'pickup') g.score.bonus();                 // +200 for the bonus insect
+        if (g.frog.hasLady) { g.score.bonus(); g.frog.hasLady = false; }  // +200 escorting the lady home
         g.score.add(g.timer.bonus());            // time bonus = remaining beats × 10 (§6)
         if (g.playfield.homes.allFilled()) { g.flow.to('roundclear'); return; }
         g.frog.reset(); g.score.newFrog(); g.timer.reset();        // respawn for the next bay (no life lost)

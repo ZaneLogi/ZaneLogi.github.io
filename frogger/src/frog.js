@@ -27,6 +27,7 @@ export class Frog {
     this.destY = this.y;
     this.riding = null;           // the Mover it stands on, if any (a river object)
     this.rideDx = 0;              // that mover's per-frame drift, carried while landed (§7 step 2)
+    this.hasLady = false;         // carrying the escorted lady-frog on its back (§3.4) — lost on death
   }
 
   // Begin a hop: face `dir`, then slide one cell if the target is on the field. A hop blocked
@@ -69,9 +70,15 @@ export class Frog {
   }
 
   // frog_0..7 by facing × rest/hop: the hop frame during the slide, the rest frame landed (§3.5).
+  // When carrying the escorted lady-frog, a cyan-recoloured frog rides on the back (§3.4); the
+  // −LADY_DY back offset is a feel value, tune against the preview.
   /** @param {Renderer} renderer */
   render(renderer) {
     const frames = FROG_FRAMES[this.facing];
     renderer.drawSprite(frames[this.hopping ? 1 : 0], this.x, this.y);
+    if (this.hasLady) {
+      const cyan = renderer.recolored('cyan', renderer.sprites.FROG_RECOLOR.cyan);
+      renderer.drawSpriteFrom(cyan, FROG_FRAMES.up[0], this.x, this.y - FROG.LADY_DY);
+    }
   }
 }

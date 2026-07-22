@@ -2,7 +2,8 @@
 // constants.js, advances the lanes each tick, and is the surface Collision/Play query (§6).
 import { Lane } from './lane.js';
 import { Homes } from './homes.js';
-import { LANES, ROWS, SCREEN, DEBUG } from './constants.js';
+import { LadyFrog } from './ladyfrog.js';
+import { LANES, ROWS, SCREEN, DEBUG, TIMED } from './constants.js';
 
 /** @typedef {import('./renderer.js').Renderer} Renderer */
 
@@ -12,13 +13,16 @@ export class Playfield {
   build(level) {
     this.lanes = LANES.map((cfg, i) => new Lane(cfg, level, i));   // TODO(step 8): §3.3 level schedule
     this.homes.reset();
+    const li = this.lanes.findIndex((l) => l.cfg.id === TIMED.LADY_LANE);   // the lady-frog rides River 4
+    this.lady = new LadyFrog(this.lanes[li], ROWS.FIRST_LANE_Y + li * SCREEN.CELL);
   }
 
-  // §7 step 4: advance every lane's movers, and walk the home-bay item on its timer (§3.4).
+  // §7 step 4: advance every lane's movers, walk the home-bay item, and ride the lady-frog escort.
   /** @param {number} frame  the global tick counter */
   update(frame = 0) {
     for (const lane of this.lanes) lane.advance();
     this.homes.update(frame);
+    this.lady.update(frame);
   }
 
   /** @param {Renderer} renderer @param {number} frame  the global tick counter (§3.5 animation) */
@@ -32,6 +36,7 @@ export class Playfield {
     if (DEBUG.ROW_GRID) this._grid(renderer);
     // Each lane's movers at its row y (river 48… · median 128 · road 144…, §4 band layout).
     this.lanes.forEach((lane, i) => lane.render(renderer, ROWS.FIRST_LANE_Y + i * SCREEN.CELL, frame));
+    this.lady.render(renderer);          // the lady-frog on her River 4 log (§3.4)
     this.homes.render(renderer);
   }
 
