@@ -78,7 +78,7 @@ object type; the frog crosses ten lanes to reach the homes.
 
 | Band | Contents | Dir | Sprite(s) | Behavior |
 |---|---|:---:|---|---|
-| **Home row** | 5 bays in a hedge; a **bonus insect** or (from level 2) a **crocodile** takes one on a fixed schedule (§3.4) | — | `hedge_*`, `frog_home_0/1`, `bonus`, `crochead_0/1` | empty bay = score; divider / occupied / croc-head-up = death (§6 `Homes`) |
+| **Home row** | 5 bays in a hedge; a **bonus insect** and (from level 2) a separate **crocodile head** each take a bay on fixed schedules (§3.4) | — | `hedge_*`, `frog_home_0/1`, `bonus`, `crochead_0/1` | empty bay = score; divider / occupied / croc-head-up = death (§6 `Homes`) |
 | River 1 | **logs**; a **crocodile** replaces one from level 2 | → | `log_0/1/2`, `croc_0/1` | ride the log/croc **back**; the croc's open **mouth** kills |
 | River 2 | **turtles** (one group **dives**) | ← | `turtle_0/1/2`, `turtle_dive_*` | ride while surfaced; a **submerged** diver drowns its rider |
 | River 3 | **logs** (long) | → | `log_*` | ride; drifts right |
@@ -196,14 +196,16 @@ the conveyors:
   a `T_mouth`-frame cycle (default **120**): **open during the last third** (frames
   80–119), closed otherwise. Its **back always rides** like a log; its **front tile
   is lethal only while the mouth is open** (`croc_0` = closed, `croc_1` = open).
-- **Home-bay item (bonus insect / crocodile).** One item walks the five bays on a
-  `T_bay`-frame timer (default **256**): the target bay follows a **fixed cycle
-  order** (`2, 0, 3, 1, 4`), skipping any bay a frog already filled. It is a **bonus
-  insect** (`bonus`; land there for points) through level 1; from level 2 it
-  **alternates insect / crocodile** each step. A crocodile bay is a **bobbing head**
-  that cycles `crochead_0` (head down, **safe**) ↔ `crochead_1` (head up, **lethal**)
-  on a `T_baycroc`-frame duration (default **120**) — landing there only kills during
-  the head-up phase.
+- **Home-bay items — the bonus insect, and from level 2 the crocodile head.** Up to
+  two items occupy the home row at once, always in **different** bays and never on a
+  filled one. The **bonus insect** (`bonus`) sits in one bay and steps to the next on
+  a `T_bay`-frame timer (default **256**) through a fixed bay order (`2, 0, 3, 1, 4`),
+  skipping filled bays; landing on it fills the home **and** scores a bonus. From
+  **level 2** a **crocodile head** takes a second bay — a **bobbing head** that cycles
+  `crochead_0` (head down: an emerging sliver, the bay **safe** and fillable) ↔
+  `crochead_1` (head up: **lethal**) on a `T_baycroc`-frame cycle (default **120**),
+  reared up during its last third. Landing on the croc bay **kills while the head is
+  up**; while it is down the frog fills the home normally (no bonus).
 - **Lady-frog (river escort, River 4).** Every `T_lady` frames (default **512**) a
   **cyan lady-frog** (the player frog recoloured cyan, §5.1) boards **River 4** at its
   edge and rides along; hop onto her and carry her home for a bonus. Uncollected, she

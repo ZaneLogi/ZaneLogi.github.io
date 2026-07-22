@@ -7,31 +7,31 @@ self-contained; progress.md is free to reference the spec's sections.
 
 ## Status
 
-**Step 6c — river-crocodile mouth: DONE.** From **level 2**, one River-1 log (`CROC_LOG`) is a
-**crocodile**: `Lane.croc` draws `croc_0` / `croc_1` on the `T_MOUTH` cycle (mouth open the last
-third, frames 80–119) and its **back rides like a log**, but riding its **front tile while the mouth
-is open** drowns (`Collision._inJaws` — the leading 16 px by lane direction, incl. the seam wrap
-copy). Below level 2 the slot is a plain log. The mouth is on the croc's **right** end (verified:
-`croc_0`↔`croc_1` differ only in cols 33–46), which leads River 1's rightward drift — so "front tile"
-= the mouth, no orientation conflict.
+**Step 6d — bay crocodile head: DONE.** From **level 2** a **crocodile head** takes a home bay two
+steps ahead of the bonus insect in the walk order (so never the insect's, never a filled bay),
+bobbing `crochead_0` (head down — an emerging sliver, the bay **safe** and fillable) ↔ `crochead_1`
+(head up — **lethal**) during the last third of the `T_BAYCROC` cycle. Landing on the croc bay
+**kills while the head is up**; while it is down the frog fills the home normally. The insect (step 4)
+and the croc head **coexist** in different bays — a deliberate design choice (two independent items,
+rather than one item that swaps type by level). `architecture.md` §3.1 / §3.4 were rewritten to match;
+**the croc's level-2 gate is our deliberate choice.**
 
-Verified at a forced level 2 — 12 assertions (level gate, mouth cycle, back-safe in both phases,
-front tile lethal-open / safe-closed, the level-1 slot stays a log, and a render diff on the front
-tile closed vs open); no console errors.
+Verified at a forced level 2 — 15 assertions (level gate, the two items in different bays across the
+walk, the head-up window, and landing: croc-up → death / croc-down → home fill / insect → pickup) +
+a render diff (`crochead_0` vs `crochead_1`, both bay items drawn); no console errors.
 
-Prior sub-steps — **6b** lady-frog escort (ride-a-log pickup → ride-on-back → +200 home; reusable
-`Renderer.recolored`, two tunable feel values `FROG.LADY_DY` / `TIMED.LADY_WINDOW`). **6a** diving
-turtles (submerge cycle, drown a submerged rider).
+Prior sub-steps — **6c** river-croc mouth (L2, open jaws drown, back rides) · **6b** lady-frog escort
+· **6a** diving turtles.
 
-Step 6 sub-steps: **`6a` ✓ · `6b` ✓ · `6c` river-croc mouth ✓ · `6d` bay croc-head · `6e` median
-snake · `6f` otter.** (The croc + snake appear **from level 2** — built here, verified by forcing the
-level; only the §3.3 speed/count ramp stays step 8.)
+Step 6 sub-steps: **`6a` ✓ · `6b` ✓ · `6c` ✓ · `6d` bay croc-head ✓ · `6e` median snake · `6f`
+otter.** (The croc + snake appear **from level 2** — built here, verified by forcing the level; only
+the §3.3 speed/count ramp stays step 8.)
 
 Prior steps: **5** Timer + Score + HUD · **4** homes · **3** collision + carry · **0–2** scaffold /
 frog / lanes.
 
-Next up: **6d — bay croc-head** (from level 2): the bay item alternates insect / crocodile; a croc
-bay is a bobbing head (`crochead_0` safe ↔ `crochead_1` lethal) on the `T_BAYCROC` cycle.
+Next up: **6e — median snake** (from level 2): a snake enters the median at an edge and patrols;
+contact kills.
 
 ## Steps (plan is provisional — adjusts as we build)
 
@@ -47,15 +47,15 @@ bay is a bobbing head (`crochead_0` safe ↔ `crochead_1` lethal) on the `T_BAYC
 | 6a | Timed events — diving turtles (submerge cycle, drown a submerged rider) | §3.4, §3.5 | done |
 | 6b | Timed events — lady-frog escort (River 4, cyan recolor, +200 carry-home) | §3.4, §5.1 | **done** |
 | 6c | Timed events — river-crocodile mouth (River 1, from L2) | §3.4 | done |
-| 6d | Timed events — bay croc-head hazard (from L2) | §3.4 | next |
-| 6e | Timed events — median snake (from L2) | §3.1, §3.3 | |
+| 6d | Timed events — bay croc-head hazard (from L2) | §3.4 | done |
+| 6e | Timed events — median snake (from L2) | §3.1, §3.3 | next |
 | 6f | Timed events — roaming otter (log lanes 1→3→4) | §3.4 | |
 | 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | |
 | 8 | Level ramp | §3.3 | |
 
 *(Bonus insect was done in step 4.)*
 
-## What's real vs stubbed (after step 6c)
+## What's real vs stubbed (after step 6d)
 
 - **Real / running:** the boot pump (`main.js`), `Game` + the mode machine
   (`Mode`/`Flow`/5 modes), `Renderer` (drawSprite + clip + `fillRect` + `drawObject` +
@@ -64,7 +64,7 @@ bay is a bobbing head (`crochead_0` safe ↔ `crochead_1` lethal) on the `T_BAYC
   transition/timing, **`Frog` (hop/facing/lock/render + river carry + lady-on-back)**, **`Mover`**,
   **`Lane` (seed/advance/render + `submerged` diving turtles + `mouthOpen` river croc from L2)**,
   **`Playfield` (build/update/render)**, **`Homes` (landing test / occupancy fill + smile render /
-  bonus-insect walk / win check)**, **`LadyFrog` (River 4 escort — board / pickup-on-her-log /
+  bonus-insect walk + L2 bobbing croc-head / win check)**, **`LadyFrog` (River 4 escort — board / pickup-on-her-log /
   carry-home +200)**, **`Collision` (§7.3 safe / ride / drown / squash + carried-off-edge + home
   delegation + submerged-diver drown + lady pickup + croc-jaws drown)**, **`Timer` (countdown +
   time-out + continuous bar fraction)**, **`Score` (all
@@ -72,8 +72,8 @@ bay is a bobbing head (`crochead_0` safe ↔ `crochead_1` lethal) on the `T_BAYC
   level)**, and `Play`'s §7 steps 1 · 2 · 3 · 4 · 5 (input → frog → collision → objects → timer):
   drown / squash / home-miss / time-out → `Death`, home / pickup → score (+ time bonus + lady) +
   respawn, all-filled → `RoundClear` (+1000, level ramp). (Tile parts animate via `Lane._frame`.)
-- **Stubbed** (class shell + documented §6 API + `TODO`): the **bay croc-head** (6d) / **median
-  snake** (6e) / **otter** (6f) rest of §3.4 (frames are in config), the §3.3 level ramp, the
+- **Stubbed** (class shell + documented §6 API + `TODO`): the **median snake** (6e) / **otter** (6f)
+  rest of §3.4 (frames are in config), the §3.3 level ramp, the
   `RoundClear` **laugh-sweep** render and the `Death` **explosion** render (step 7), the
   gameplay-event **sounds** (hop / plunk / squash / hurry-up / time-out — no-op `Audio`, §5.2), and
   `Play`'s remaining tick step (audio, step 6 order).
@@ -201,9 +201,8 @@ bay is a bobbing head (`crochead_0` safe ↔ `crochead_1` lethal) on the `T_BAYC
   fires in `RoundClear.enter`) — the real data flow, cheap to wire when the event happens. The
   forward-hop `+10`, the home **time bonus** (needs `Timer`), and the HUD display of
   score / lives / timer / level are **step 5**.
-- **Deferred to their steps:** the **croc-head** bay hazard (L2-only — unreachable until the level
-  ramp, step 8; frames `crochead_0/1` are in the atlas), the **lady-frog** river escort (step 6),
-  and the `RoundClear` **laugh-sweep** render (`frog_home_1` across the bays — step 7).
+- **Deferred to their steps:** the **lady-frog** river escort (step 6b), the **bay croc-head** hazard
+  (step 6d), and the `RoundClear` **laugh-sweep** render (`frog_home_1` across the bays — step 7).
 
 ## Step-5 impl decisions
 
@@ -277,6 +276,24 @@ bay is a bobbing head (`crochead_0` safe ↔ `crochead_1` lethal) on the `T_BAYC
 - **Only the front tile kills, only while open.** `mouthOpen` is the last third of `T_MOUTH`
   (frames 80–119); on the back tiles, or any time the mouth is closed, the croc **rides like a log**
   (`ride` + carry at the lane speed). Death is just the `_inJaws && mouthOpen` corner.
+
+## Step-6d impl decisions
+
+- **Two coexisting bay items, not one that swaps type (Zane's ruling).** The bonus insect (step 4)
+  and the crocodile head are **separate** home-bay items that never share a bay, each on its own
+  schedule. The considered alternative — a single item whose type flips by level — was set aside for
+  this two-item design.
+- **The croc's level-2 gate is a deliberate choice.** It keeps early levels gentle; `Homes.level`
+  (set in `Playfield.build`) is the gate.
+- **Both items are frame-derived — no new entity.** `Homes.update` sets `crocBay = BAY_ORDER[(s + 2)
+  mod 5]` (two steps ahead of the insect, so provably never its bay — `BAY_ORDER` is a permutation)
+  and `crocLethal` = the last third of `T_BAYCROC`. `land` gains two branches: croc bay + head-up →
+  death; croc bay + head-down → a normal `home` fill (which clears the croc). No RNG, no `LadyFrog`-
+  style class.
+- **The head-up window mirrors the river croc.** Both crocodile hazards use "the last third of a
+  120-frame cycle" (`T_BAYCROC` = `T_MOUTH` = 120) for the lethal phase — one consistent timing.
+
+## Deferred
 
 - **Sound** — the `Audio` service is a no-op placeholder (§5.2). The arcade
   AY-3-8910 engine + `assets/dat_sfx.js` are built later; until then RoundClear /
