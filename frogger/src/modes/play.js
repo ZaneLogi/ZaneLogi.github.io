@@ -34,7 +34,7 @@ export class Play extends Mode {
         g.score.hop(g.frog.row);                 // +10 on a hop to a new furthest row (safe / ride)
       }
     }
-    g.playfield.update(g.frame);                 // §7 step 4: lanes advance + the bay item walks
+    g.playfield.update(g.frame, g.frog.hasLady); // §7 step 4: lanes advance + the bay item walks (lady gated on carry)
     if (g.timer.tick()) { g.flow.to('death'); return; }            // §7 step 5: countdown → time-out death
   }
 

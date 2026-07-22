@@ -53,8 +53,7 @@ export const TIMED = {
   BAY_ORDER: [2, 0, 3, 1, 4],            // the bay-item walk order
   OTTER_LANES: ['river1', 'river3', 'river4'],  // roams the log lanes, in order
   LADY_LANE: 'river4',                   // the lady-frog rides a log in this lane
-  LADY_LOG: 0,                           // which of the lane's logs she sits on
-  LADY_WINDOW: 256,                      // frames she's aboard each T_LADY cycle before riding off
+  LADY_LOG: 0,                           // which of the lane's logs she sits on (she rides it until picked up)
   CROC_LOG: 0,                           // which River-1 log becomes the crocodile (from L2)
   OTTER_V: 0.8,                          // otter traversal speed (absolute px/frame) — faster than every log lane (§3.4)
   OTTER_MIN_LEVEL: 3,                    // the otter is a level-3+ hazard (§3.3)

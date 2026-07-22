@@ -70,15 +70,15 @@ export class Frog {
   }
 
   // frog_0..7 by facing × rest/hop: the hop frame during the slide, the rest frame landed (§3.5).
-  // When carrying the escorted lady-frog, a cyan-recoloured frog rides on the back (§3.4); the
-  // −LADY_DY back offset is a feel value, tune against the preview.
+  // When carrying the escorted lady-frog, a cyan-recoloured frog rides on the back (§3.4), drawn
+  // just BELOW the frog (`+LADY_DY`, so her screen-y is greater than the frog's). Feel value, tunable.
   /** @param {Renderer} renderer */
   render(renderer) {
     const frames = FROG_FRAMES[this.facing];
     renderer.drawSprite(frames[this.hopping ? 1 : 0], this.x, this.y);
     if (this.hasLady) {
       const cyan = renderer.recolored('cyan', renderer.sprites.FROG_RECOLOR.cyan);
-      renderer.drawSpriteFrom(cyan, FROG_FRAMES.up[0], this.x, this.y - FROG.LADY_DY);
+      renderer.drawSpriteFrom(cyan, FROG_FRAMES.up[0], this.x, this.y + FROG.LADY_DY);
     }
   }
 }

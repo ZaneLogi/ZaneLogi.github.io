@@ -207,10 +207,13 @@ switch — identical on every playthrough:
   `crochead_1` (head up: **lethal**) on a `T_baycroc`-frame cycle (default **120**),
   reared up during its last third. Landing on the croc bay **kills while the head is
   up**; while it is down the frog fills the home normally (no bonus).
-- **Lady-frog (river escort, River 4).** Every `T_lady` frames (default **512**) a
-  **cyan lady-frog** (the player frog recoloured cyan, §5.1) boards **River 4** at its
-  edge and rides along; hop onto her and carry her home for a bonus. Uncollected, she
-  rides off-screen and the timer repeats.
+- **Lady-frog (river escort, River 4).** A **cyan lady-frog** (the player frog recoloured
+  cyan, §5.1) rides a **River 4** log: she boards on a `T_lady`-frame timer (default **512**) and
+  then **stays on that log, riding it continuously** (no vanish-and-return) until the player hops
+  onto the log to pick her up — she then rides on the frog's **back**, drawn **just below** the
+  frog, and reaching a home pays the bonus. **Only one lady-frog is ever in play:** while the
+  player is carrying her, no new one boards; a fresh one boards on the timer only after she has
+  been delivered or lost.
 - **Otter (roaming river hazard, from level 3).** A single **otter** roams the three log lanes —
   **River 1 → 3 → 4**, in that fixed order, one lane at a time — appearing **from level 3** (the last
   hazard to switch on). It **enters at the lane's left edge and swims the whole width to the right**, a

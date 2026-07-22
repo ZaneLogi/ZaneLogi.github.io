@@ -268,12 +268,30 @@ Next up: **step 7 — Death + RoundClear presentation** (the death explosion, th
   isn't already carrying one, it's a pickup. Gated `!frog.hasLady` so you can't double-carry.
 - **Deterministic, mostly derived.** She has only `active` / `taken` flags; her **position tracks
   her conveyor log** (`x` getter) rather than a stored coordinate, and boarding is frame-gated
-  (`frame % T_LADY == 0`, aboard for `LADY_WINDOW`). The seam wrap copy mirrors `Lane.render`.
+  (`frame % T_LADY == 0`); once aboard she rides continuously (see the fixes below). The seam wrap
+  copy mirrors `Lane.render`.
 - **Reusable `recolored(key, map)`** (lifted from `demo/sprite_viewer.js`): one palette-remapped
   copy of the whole atlas per key, cached; `drawSpriteFrom(src, name, x, y)` blits a sprite rect
   from it. Only the multi-colour frog remaps (per §5.1) — the cyan lady is `FROG_RECOLOR.cyan`.
-- **Two feel values marked tunable** (measured, not eyeballed — the preview pane is closed): the
-  back-sprite offset `FROG.LADY_DY` and the aboard window `TIMED.LADY_WINDOW`.
+- **The back-sprite offset `FROG.LADY_DY`** is the one feel value left tunable.
+
+### Step-6b fixes (2026-07-22)
+
+Three lady-frog corrections (Zane), verified deterministically:
+
+- **(1) Only one lady in play.** `LadyFrog.update(frame, frogHasLady)` no-ops while the player is
+  carrying her, so no second lady boards/shows on the river. `frogHasLady` is threaded
+  `Play` / `RoundClear` → `Playfield.update` → `LadyFrog.update`. (Pickup was already gated
+  `!frog.hasLady`; this closes the *spawn* side.)
+- **(2) Rides her log continuously — no vanish-and-return.** Dropped the `LADY_WINDOW` cutoff
+  (removed from `constants.js`) that blinked her off mid-ride; once boarded she stays aboard,
+  riding her log, until picked up (or the timer re-boards her after a delivery/loss).
+- **(3) Carried below the frog.** The back sprite draws at `y + FROG.LADY_DY` (screen-y **greater**
+  than the frog's), not `y − LADY_DY` above it.
+
+Verified: continuous ride = 1 active transition over 1200 frames (boards once, stays); one-at-a-time
+= no river lady while carrying across the `T_LADY` boundaries; below = lady y = frog y + 5. Live tick
+path + full render run clean (no console errors).
 
 ## Step-6c impl decisions
 

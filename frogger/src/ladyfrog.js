@@ -1,8 +1,9 @@
 // ladyfrog.js — the cyan lady-frog escort (§3.4, the ride-a-log / ride-on-back model). She boards
 // River 4 by sitting on one of its logs; while she's aboard the player can hop onto that log to
 // pick her up — she then rides on the frog's back (drawn by Frog) and a home landing pays +200.
-// Uncollected, she rides off with the cycle and re-boards on the T_LADY timer. She is the player
-// frog recoloured cyan (§5.1, §3.5).
+// She rides her log CONTINUOUSLY until picked up (no vanish-and-return), and only ONE lady is ever
+// in play — none boards while the player is already carrying one. She is the player frog recoloured
+// cyan (§5.1, §3.5).
 import { SCREEN, TIMED, WRAP_L, FROG_FRAMES } from './constants.js';
 
 /** @typedef {import('./lane.js').Lane} Lane */
@@ -23,12 +24,14 @@ export class LadyFrog {
   get log() { return this.lane.movers[TIMED.LADY_LOG]; }
   get x() { const m = this.log; return m ? m.x + (m.w - SCREEN.CELL) / 2 : 0; }
 
-  // Board on each T_LADY cycle; ride off after LADY_WINDOW frames (§3.4). Deterministic — the
-  // spawn is gated on the frame counter, and her position tracks her (conveyor) log.
-  update(frame) {
-    const t = frame % TIMED.T_LADY;
-    if (t === 0) { this.active = true; this.taken = false; }
-    if (t >= TIMED.LADY_WINDOW) this.active = false;
+  // Board on the T_LADY timer, then ride her log CONTINUOUSLY (no vanish-and-return) until picked
+  // up. Only one lady is ever in play: while the player carries one, none boards; a fresh one boards
+  // on the timer only after she has been delivered or lost. Deterministic — the board is frame-gated
+  // and her position tracks her (conveyor) log.
+  update(frame, frogHasLady = false) {
+    if (frogHasLady) return;                             // one at a time — no new lady while carrying (§3.4)
+    if (this.taken) { this.taken = false; this.active = false; }   // delivered / lost last cycle → clear it
+    if (frame % TIMED.T_LADY === 0) this.active = true;  // board; then rides her log until picked up
   }
 
   // While aboard (available), draw the cyan frog on her log, with a seam wrap copy like the lane.

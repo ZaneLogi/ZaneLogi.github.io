@@ -24,11 +24,11 @@ export class Playfield {
 
   // §7 step 4: advance every lane's movers, walk the home-bay item, ride the lady-frog escort, and
   // swim the otter (after the lanes move, so it chases the current log positions).
-  /** @param {number} frame  the global tick counter */
-  update(frame = 0) {
+  /** @param {number} frame  the global tick counter  @param {boolean} frogHasLady  is the player carrying the lady-frog */
+  update(frame = 0, frogHasLady = false) {
     for (const lane of this.lanes) lane.advance();
     this.homes.update(frame);
-    this.lady.update(frame);
+    this.lady.update(frame, frogHasLady);
     this.otter.update();
   }
 
