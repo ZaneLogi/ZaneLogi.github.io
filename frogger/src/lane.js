@@ -2,7 +2,7 @@
 // it carries a rider (river) or kills on contact (road) (§6, §3.2). A fixed conveyor, seeded
 // deterministically — no RNG.
 import { Mover } from './mover.js';
-import { WRAP_L, ANIM } from './constants.js';
+import { WRAP_L, ANIM, TIMED } from './constants.js';
 
 /** @typedef {import('./renderer.js').Renderer} Renderer */
 
@@ -17,6 +17,18 @@ export class Lane {
     /** @type {Mover[]} */
     this.movers = [];
     this._seed();
+    // Diving turtles (§3.4): one fixed group in a turtle lane submerges on the T_DIVE cycle. The
+    // diver is the first group; a per-lane phase (half a cycle apart) keeps the two turtle lanes
+    // from diving in unison. Non-dive lanes leave `diver` null.
+    this.diver = cfg.dive ? this.movers[0] : null;
+    this._divePhase = index * (TIMED.T_DIVE / 2);
+  }
+
+  // Whether this lane's diving group is currently submerged — the last quarter of the T_DIVE
+  // cycle, offset by the lane's dive phase (§3.4). A rider drowns while it is under; non-dive
+  // lanes never submerge.
+  submerged(frame) {
+    return !!this.diver && (frame + this._divePhase) % TIMED.T_DIVE >= TIMED.T_DIVE * 0.75;
   }
 
   // Seed N movers evenly along the wrap length: left edge x_i = (φ + i·P) mod L, pitch P = L/N,
@@ -55,9 +67,12 @@ export class Lane {
       left: t.left && this._frame(t.left, frame),
       right: t.right && this._frame(t.right, frame),
     };
+    // While the diving group is under, it draws its submerged frames instead (§3.4/§3.5).
+    const dived = this.submerged(frame) ? { body: this._frame(this.cfg.dive, frame) } : null;
     for (const m of this.movers) {
-      renderer.drawObject(spec, m.x, y, m.w);
-      if (m.x + m.w > WRAP_L) renderer.drawObject(spec, m.x - WRAP_L, y, m.w);
+      const s = (m === this.diver && dived) ? dived : spec;
+      renderer.drawObject(s, m.x, y, m.w);
+      if (m.x + m.w > WRAP_L) renderer.drawObject(s, m.x - WRAP_L, y, m.w);
     }
   }
 }

@@ -7,28 +7,27 @@ self-contained; progress.md is free to reference the spec's sections.
 
 ## Status
 
-**Step 5 — Timer + Score + HUD wiring: DONE.** `Play` now runs §7 step 5 — the per-life countdown
-ticks each frame and a **time-out** (`beats` → 0) fires `Flow.to('death')`. Reaching a home adds the
-**time bonus** (remaining beats × 10) on top of the +50 / +200 awards; each forward hop to a **new
-furthest row** scores **+10** (the furthest-row gate resets per frog via `Score.newFrog`, so a new
-frog re-earns it and never farms). The bottom HUD strip (§4.1) draws: **reserve lives** (one `blk_0`
-frog per `lives − 1`), the **timer bar** (8 px tiles, right-anchored by the TIME label and draining
-leftward — full `blk_2` green + a `blk_3→5` narrowing end tile, switching to the red `blk_6→9` set at
-the ≤ 12-beat warning), and one **level marker** (`blk_1`) per level. The single **extra life at
-20000** already flows through `Game.tick`, and `Attract` already resets score / lives / level for a
-fresh game.
+**Step 6a — diving turtles: DONE.** In each turtle lane one fixed group (the first) submerges on the
+`T_DIVE` = 240-frame cycle — under during its last quarter (§3.4); the two turtle lanes are
+phase-offset half a cycle so they never dive together. While the group is under it draws its
+`turtle_dive_*` frames (§3.5), and a frog riding it **drowns** (`Collision.resolve` now takes the
+frame and checks `lane.submerged`); the other groups in the lane stay safe. This is the river-hazard
+piece deferred from step 3.
 
-Verified deterministically — 15 assertions (Timer `fraction` / `remaining` continuity + the warning
-gate, `Score.newFrog` resetting the furthest-row gate but not the total, and through `Game.tick` →
-`Play`: time-out → Death, home +50 + time-bonus +100, forward-hop +10 with the no-farm gate) + HUD
-render via `getImageData` (2 / 1 reserve icons, the full-green vs right-drained-red bar, per-level
-markers); no console errors.
+Verified deterministically — 14 assertions (submerge windows river2 `[60,120)` / river5 `[180,240)`,
+the two lanes never under together, and collision: riding the diver rides while surfaced / drowns
+while submerged, a non-diving group stays safe during the dive) + a render diff (the diver draws a
+different, sparser sprite while under). No console errors.
 
-Prior: **step 4** — homes (landing test, occupancy fill, bonus insect, win → RoundClear). **Step 3**
-— collision + the river carry. **Steps 0–2** — scaffold, frog hop + static field, lane conveyors.
+Step 6 runs as **sub-steps, one commit each: `6a dives` (done) · `6b` lady-frog · `6c` river-croc
+mouth · `6d` bay croc-head · `6e` median snake · `6f` otter.** (The river croc + the snake appear
+**from level 2** — built here and verified by forcing the level; only the §3.3 speed/count ramp
+stays step 8.)
 
-Next up: **step 6 — timed events** (turtle dives, the river-croc mouth, the median snake, the
-lady-frog escort, the roaming otter — the §3.4 hazards on their fixed timers).
+Prior: **step 5** — Timer + Score + HUD. **Step 4** — homes. **Step 3** — collision + the river carry.
+
+Next up: **6b — lady-frog** — a cyan-recoloured frog rides River 4 on the `T_LADY` timer; ride her
+and reach a home for +200. Needs a reusable `recolor()` (the LUT-swap in `demo/sprite_viewer.js`).
 
 ## Steps (plan is provisional — adjusts as we build)
 
@@ -41,11 +40,18 @@ lady-frog escort, the roaming otter — the §3.4 hazards on their fixed timers)
 | 3 | Collision — safe / ride / drown / squash per row + the river carry | §7.3 | done |
 | 4 | Homes — bays, landing test, occupancy fill, bonus insect, win check | §3.4, §6 | done |
 | 5 | Timer + Score + HUD wiring (lives, timer bar, level) | §4.1, §6 | **done** |
-| 6 | Timed events — dives, croc mouth, bay croc-head, lady-frog, otter (bonus insect done in step 4) | §3.4 | next |
+| 6a | Timed events — diving turtles (submerge cycle, drown a submerged rider) | §3.4, §3.5 | **done** |
+| 6b | Timed events — lady-frog escort (River 4, cyan recolor, +200 carry-home) | §3.4, §5.1 | next |
+| 6c | Timed events — river-crocodile mouth (River 1, from L2) | §3.4 | |
+| 6d | Timed events — bay croc-head hazard (from L2) | §3.4 | |
+| 6e | Timed events — median snake (from L2) | §3.1, §3.3 | |
+| 6f | Timed events — roaming otter (log lanes 1→3→4) | §3.4 | |
 | 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | |
 | 8 | Level ramp | §3.3 | |
 
-## What's real vs stubbed (after step 5)
+*(Bonus insect was done in step 4.)*
+
+## What's real vs stubbed (after step 6a)
 
 - **Real / running:** the boot pump (`main.js`), `Game` + the mode machine
   (`Mode`/`Flow`/5 modes), `Renderer` (drawSprite + clip + `fillRect` + `drawObject` +
@@ -53,17 +59,18 @@ lady-frog escort, the roaming otter — the §3.4 hazards on their fixed timers)
   `constants.js` (the real §3/§4/§6 design data), `Attract`, the mode transition/timing,
   **`Frog` (hop/facing/lock/render + river carry)**, **`Mover`**, **`Lane` (seed/advance/render)**,
   **`Playfield` (build/update/render)**, **`Homes` (landing test / occupancy fill + smile render /
-  bonus-insect walk / win check)**, **`Collision` (§7.3 safe / ride / drown / squash +
-  carried-off-edge + home delegation)**, **`Timer` (countdown + time-out + continuous bar
+  bonus-insect walk / win check)**, **`Lane.submerged` + diving-turtle render (§3.4/§3.5)**,
+  **`Collision` (§7.3 safe / ride / drown / squash + carried-off-edge + home delegation + submerged
+  diver drown)**, **`Timer` (countdown + time-out + continuous bar
   fraction)**, **`Score` (all awards + forward-hop gate + extra life)**, **`Hud` (top score/hi +
   bottom lives / timer bar / level)**, and `Play`'s §7 steps 1 · 2 · 3 · 4 · 5 (input → frog →
   collision → objects → timer): drown / squash / home-miss / time-out → `Death`, home / pickup →
   score (+ time bonus) + respawn, all-filled → `RoundClear` (+1000, level ramp).
   (Tile parts animate via `Lane._frame` — turtles swim.)
-- **Stubbed** (class shell + documented §6 API + `TODO`): the turtle **dive** state + median
-  **snake** entry + the **bay croc-head** / **lady-frog** / **otter** / **river-croc mouth** rest
-  of §3.4 (frames are in config), the §3.3 level ramp, the `RoundClear` **laugh-sweep** render and
-  the `Death` **explosion** render (step 7), the gameplay-event **sounds** (hop / plunk / squash /
+- **Stubbed** (class shell + documented §6 API + `TODO`): the **lady-frog** (6b) / **river-croc
+  mouth** (6c) / **bay croc-head** (6d) / **otter** (6e) rest of §3.4 + the median **snake** entry
+  (frames are in config), the §3.3 level ramp, the `RoundClear` **laugh-sweep** render and the
+  `Death` **explosion** render (step 7), the gameplay-event **sounds** (hop / plunk / squash /
   hurry-up / time-out — no-op `Audio`, §5.2), and `Play`'s remaining tick step (audio, step 6 order).
 
 ## Step-1 impl decisions
@@ -218,6 +225,21 @@ lady-frog escort, the roaming otter — the §3.4 hazards on their fixed timers)
 - **Gameplay-event sounds stay unwired** (hurry-up, time-out, hop, plunk, squash). `Audio` is a
   no-op; these `request()` sites land with the §5.2 audio work, consistent with the other
   gameplay sounds still unwired (only the mode-transition sounds call `request` today).
+
+## Step-6a impl decisions
+
+- **The diver is the first group; the dive state is derived, not stored.** In a turtle lane
+  (`cfg.dive` set) `lane.diver = movers[0]`; `lane.submerged(frame)` is a pure function of the frame
+  counter — `(frame + phase) % T_DIVE ≥ ¾·T_DIVE` — so no per-frame state to reset or desync. The
+  per-lane `phase = index · (T_DIVE/2)` puts the two turtle lanes half a cycle apart (river2 under
+  `[60,120)`, river5 `[180,240)`), so they never submerge together.
+- **`Collision.resolve` gained the `frame`** so the river branch can drown a rider on the submerged
+  diver (`m === lane.diver && lane.submerged(frame)`). It's threaded from `Play` (`g.frame`), and
+  since collision runs in §7 step 3 against last-frame positions, the dive state it reads is the same
+  one that was rendered — consistent with the carry / drawn-position invariant.
+- **Only the diver swaps sprites.** `Lane.render` draws the normal turtle spec for every group and
+  the `cfg.dive` (`turtle_dive_*`) spec only for `diver` while `submerged` — the other groups in the
+  lane keep swimming. Non-dive lanes are unaffected (`diver` null).
 
 ## Deferred
 

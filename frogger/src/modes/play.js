@@ -19,7 +19,7 @@ export class Play extends Mode {
     if (dir) g.frog.beginHop(dir);             // §7 step 1: input → pending hop
     g.frog.update();                            // §7 step 2: advance the hop, or carry a rider
     if (!g.frog.hopping) {                       // §7 step 3: collision, only while landed…
-      const outcome = g.collision.resolve(g.frog, g.playfield);   // …against last frame's positions
+      const outcome = g.collision.resolve(g.frog, g.playfield, g.frame);   // …against last frame's positions
       if (outcome === 'drown' || outcome === 'squash' || outcome === 'death') {
         g.flow.to('death'); return;
       }

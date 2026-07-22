@@ -17,16 +17,16 @@ export class Collision {
    * - **home band** (top row): delegated to `Homes.land` — 'home' (filled a bay), 'pickup' (bay +
    *   bonus insect), or 'death'.
    * - **river** (`lane.carries`): safe *only while riding* an object; open water or being
-   *   carried off a screen edge drowns. Riding is decided by the frog's **centre** over a
-   *   mover (you must be on the log), and records the ride (`frog.riding` / `frog.rideDx`) so
-   *   §7 step 2 carries the frog next frame.
+   *   carried off a screen edge drowns, as does riding the diving turtle group while it is
+   *   **submerged** (§3.4). Riding is decided by the frog's **centre** over a mover (you must be
+   *   on the log), and records the ride (`frog.riding` / `frog.rideDx`) so §7 step 2 carries it.
    * - **road** (`lane.kills`): **any** span overlap with a vehicle squashes (contact = death,
    *   a deliberately more generous hitbox than the river's centre test — see docs §step 3).
    * - **safe strips** (start row, median) and the **home band**: always safe here; the bay
    *   landing test is Homes (step 4).
-   * @param {Frog} frog @param {Playfield} playfield
+   * @param {Frog} frog @param {Playfield} playfield @param {number} frame  the global tick counter
    */
-  resolve(frog, playfield) {
+  resolve(frog, playfield, frame = 0) {
     // The home band (top row) is Homes' business: it runs the bay landing test → home / pickup /
     // death (§6, step 4). Everything below is a lane band.
     if (frog.row === ROWS.MAX_ROW) { frog.riding = null; return playfield.homes.land(frog.x + HALF); }
@@ -42,7 +42,10 @@ export class Collision {
     if (lane.carries) {                          // river
       if (cx < 0 || cx >= SCREEN.WIDTH) { frog.riding = null; return 'drown'; }  // carried off edge
       const m = this._under(lane, cx);
-      if (m) { frog.riding = m; frog.rideDx = lane.cfg.dir * lane.cfg.v; return 'ride'; }
+      if (m) {
+        if (m === lane.diver && lane.submerged(frame)) { frog.riding = null; return 'drown'; } // dived under
+        frog.riding = m; frog.rideDx = lane.cfg.dir * lane.cfg.v; return 'ride';
+      }
       frog.riding = null; return 'drown';        // open water
     }
     frog.riding = null;                          // road
