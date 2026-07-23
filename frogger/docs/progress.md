@@ -7,26 +7,29 @@ self-contained; progress.md is free to reference the spec's sections.
 
 ## Status
 
-**Step 9 — Audio, Phase A (Layer 1 — the PSG voices): DONE.** The sound subsystem is two files under
-`src/audio/`: **`psg.js`** (Layer 1 — a tiny Web Audio "PSG": 3 square tone voices + 1 noise voice; `setFreq`
-/ `noteOn` / `noteOff` / `pluck` / `glide`; decoded params only; **zero project imports**) and
-**`sequencer.js`** (Layer 2 — the public `Audio` API + the data-driven sequencer; still the no-op stub, moved
-here from `src/audio.js`). A single **`demo/audio_test.html`** bench drives both — Section 1 (PSG) live,
-Section 2 (sequencer) wired to the stub and silent until the data lands. Dependency is one-way
-(`sequencer.js → psg.js`). Detail in *Audio impl decisions*.
+**Step 9 — Audio, Phase B (music playing): DONE.** The song engine is complete: **`assets/dat_sfx.js`** holds
+all 25 arcade songs (the theme, the two jingles, the home tunes) as decoded note-frequency / note-set / tempo
+tables + raw voice byte-streams, and **`src/audio/sequencer.js`** (Layer 2) interprets them onto the Layer-1
+PSG — `playMusic()` loops the theme, `request('level_complete')` / `request('game_over')` fire the jingles,
+`isPlaying()` gates the jingle-timed screens, `tick()` loops. **It is already integrated in-game:** the music
+request-sites were wired long ago (`Play.enter` → `playMusic`; `RoundClear` / `GameOver` → `request` +
+`isPlaying`), so with the real sequencer in place the theme now plays during Play and the jingles time the
+clear / game-over screens. The `demo/audio_test.html` bench's sequencer section is live (theme + jingle
+buttons). Detail in *Audio impl decisions*.
 
-Verified (deterministic — hearing it is a listen-test, not automatable): the PSG builds 3 tone + 1 noise
-voices, `osc.type` square, `setFreq(330)` takes effect, every voice method no-throws; the bench loads with no
-console errors, both sections + all 11 buttons render; and the game still boots after the module move
-(Attract, `Audio` resolved). Next: **Phase B** — extract the ROM note/SFX streams → `assets/dat_sfx.js`; then
-**Phase C** — the real sequencer + wiring the gameplay `request()` sites.
+Verified (deterministic — hearing it is a listen-test): the theme decodes to the right melody (A#4 / F#4 … at
+exact 0.229 s eighth-notes across all three voices), the jingles gate `isPlaying` true, driving the game into
+Play schedules the 70-note theme, and the game + bench boot clean. Next: **Phase C — SFX playing** — the short
+gameplay sounds (hop / plunk / squash / hurry-up / time-out / bonus / extra-life) are a *separate* arcade
+mechanism (a command jump table with per-effect init/continuation routines, likely procedural rather than note
+streams), so they need their own decode, then their `request()` sites wired.
 
-Prior steps: **8** level ramp (per-level speed + count schedule + L3 second diver/otter) · a **HUD-overflow**
-polish (lives/level → one icon + a digit count past 5) · **7** death explosion + RoundClear laugh-sweep · **6**
-all §3.4 timed events (6a diving turtles · 6b lady-frog · 6c river-croc mouth · 6d bay croc-head · 6e median
-snake · 6f roaming otter) · **5** Timer + Score + HUD · **4** homes · **3** collision + carry · **0–2**
-scaffold / frog / lanes. The core gameplay (1–8) is complete and the `Attract` screen is done (§8/§10 —
-minimal title, no demo); audio is the last subsystem. Per-step detail in the *impl decisions* sections below.
+Prior steps: **9A** the Layer-1 PSG voices + the `audio_test` bench · **8** level ramp (per-level speed + count
+schedule + L3 second diver/otter) · a **HUD-overflow** polish (lives/level → one icon + a digit count past 5) ·
+**7** death explosion + RoundClear laugh-sweep · **6** all §3.4 timed events (6a diving turtles · 6b lady-frog ·
+6c river-croc mouth · 6d bay croc-head · 6e median snake · 6f roaming otter) · **5** Timer + Score + HUD · **4**
+homes · **3** collision + carry · **0–2** scaffold / frog / lanes. The core gameplay (1–8) is complete and the
+`Attract` screen is done (§8/§10 — minimal title, no demo). Per-step detail in the *impl decisions* sections below.
 
 **Dev URL overrides** (`DEV`, wired into `Game` / `Attract` / `Timer`): `?level=N` [1, 20] sets the start
 level; `?lives=N` [1, 10] the start lives; `?beat=N` [1, 300] the timer's frames-per-beat (default 30 — lower
@@ -52,7 +55,7 @@ drains the countdown faster). **Lives cap:** the in-play count can pass 10 via t
 | 6f | Timed events — roaming otter (log lanes 1→3→4, gap-model, from L3) | §3.4 | done |
 | 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | done |
 | 8 | Level ramp — speed scaling + count schedule + L3 second diver / otter | §3.3 | done |
-| 9 | Audio — Phase A: Layer 1 PSG voices + sequencer scaffold + bench · Phase B: extract data · Phase C: sequencer + wiring | §5.2 | **A done** |
+| 9 | Audio — Phase A: Layer 1 PSG voices + bench · Phase B: music playing (song data + sequencer) · Phase C: SFX playing (decode + wire the gameplay effects) | §5.2 | **A·B done** |
 
 *(Bonus insect was done in step 4. HUD-overflow polish — lives/level → icon + digit count — landed between steps 8 and 9, not a numbered step.)*
 
@@ -433,7 +436,7 @@ the insect's bay.
 
 ## Audio impl decisions
 
-*(Phase A — the Layer-1 scaffold. Phases B (extract the data) and C (the real sequencer + wiring) follow.)*
+*(Phase A — the Layer-1 scaffold. Phase B — music playing: the song data + the sequencer. Phase C — SFX playing: the gameplay effects.)*
 
 - **Two files, one-way dependency — the seam made physical.** The subsystem splits along the boundary it already
   had conceptually: `src/audio/psg.js` (Layer 1, the synth) and `src/audio/sequencer.js` (Layer 2, the driver +
@@ -446,12 +449,28 @@ the insect's bay.
   looping random-sample buffer, gated the same way. `glide(from, to, secs)` schedules the descending "pew".
 - **Decoded-param API only — no register model.** Voices speak Hz + gain; the sequencer will hand them
   frequencies (note→freq baked at extract time), never AY periods or registers.
-- **One dual-section bench, not two.** `demo/audio_test.html` has a live PSG section and a stub-wired sequencer
-  section (silent until Phase B/C), each with a status line — so the same page grows with the subsystem and
-  exercises the public boundary for real.
+- **One dual-section bench, not two.** `demo/audio_test.html` has a PSG section and a sequencer section, each
+  with a status line — the same page grows with the subsystem and exercises the public boundary for real.
+
+*Phase B (music playing):*
+
+- **The extractor scrapes, the sequencer interprets.** `dat_sfx.js` carries the raw arcade data verbatim — the
+  four tables + every song's three voice byte-streams — and *all* the format logic (note-set resolution, the
+  `2^(ccc−1)` durations, the commands, the off-by-one) lives in one place, `sequencer.js`. So the data file is a
+  dumb scrape and the interpretation is testable in isolation.
+- **Schedule-ahead on the audio clock, not per-frame polling.** `sequencer.js` walks a stream and schedules its
+  note events (`setFreq` / `noteOn` / `noteOff` at computed future times) on the PSG's sample-accurate clock, so
+  playback is decoupled from the 60 Hz game loop; `tick()` only appends the theme's next loop when the current
+  schedule is nearly spent. A note's seconds = `2^(ccc−1) × tempo / 700`; tempo is song-global (voice A sets it).
+- **The off-by-one is a one-line toggle.** `FAITHFUL_PITCH` (default on) reproduces the arcade's semitone-low
+  tuning; flip it for the "written" pitches. A per-choice decision left open for a listen-test, not baked in.
+- **Music needed no new wiring.** The music `request()` sites (`Play` → `playMusic`; `RoundClear` / `GameOver` →
+  `request` + `isPlaying`) were already placed, so dropping in the real sequencer lit up the in-game music for
+  free — the remaining `request()` wiring (Phase C) is only the gameplay SFX.
 
 ## Deferred
 
-- **Sound** — the `Audio` service is a no-op placeholder (§5.2). The arcade
-  AY-3-8910 engine + `assets/dat_sfx.js` are built later; until then RoundClear /
-  GameOver fall back to their fixed §10 durations.
+- **Sound — SFX only.** The music is done (Phase B — the engine + `assets/dat_sfx.js`); what remains is
+  Phase C, the gameplay SFX (hop / plunk / squash / …), a separate arcade mechanism still to decode + wire.
+  Possible later refinements to the music (note articulation, the AY volume curve, the `FAITHFUL_PITCH`
+  choice) await a listen-test.
