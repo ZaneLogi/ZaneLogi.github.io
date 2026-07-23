@@ -30,8 +30,15 @@ Prior steps: **7** death explosion + RoundClear laugh-sweep · **6** all §3.4 t
 
 **Dev URL overrides** (`DEV`, wired into `Game` / `Attract` / `Timer`): `?level=N` [1, 20] sets the start
 level; `?lives=N` [1, 10] the start lives; `?beat=N` [1, 300] the timer's frames-per-beat (default 30 —
-lower drains the countdown faster). **Lives caps:** in play the count can pass 10 via the extra life,
-capped at `LIVES.MAX` = 99, with the HUD drawing ≤ `LIVES.HUD_MAX` = 10 reserve icons.
+lower drains the countdown faster). **Lives cap:** in play the count can pass 10 via the extra life,
+capped at `LIVES.MAX` = 99.
+
+**HUD overflow (lives + level).** Both fields draw up to `HUD.ICON_MAX` = 5 icons, then collapse to
+**one icon + a digit count** — lives `🐸 12` (frog then the reserve count, left-anchored), level `20 ⬛`
+(the level number then a marker, right-anchored to the screen edge). So each field is a fixed width for
+any count and can't overrun the other or the timer bar; the level number is now readable past level 5
+(the old marker row silently clamped at 12). Verified per-count via a draw-call capture (icon positions
++ digit placement at the boundaries) and an on-canvas pixel check.
 
 The core gameplay (steps 1–8) is complete, and the **`Attract` screen is done** — title + `HI-SCORE` +
 high score + `PRESS SPACE`, Start → a fresh game (its minimal centred-text form is exactly what §8 / §10

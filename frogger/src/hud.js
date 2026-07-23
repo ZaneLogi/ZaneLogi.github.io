@@ -1,7 +1,7 @@
 // hud.js — score / hi-score (top) + lives / timer bar / level (bottom), drawn in the monospace
 // font and the 8×8 blk_* tiles (§4.1). The bottom strip renders whenever Play / Death / RoundClear
 // show the live playfield.
-import { HUD, LIVES } from './constants.js';
+import { HUD } from './constants.js';
 
 /** @typedef {import('./game.js').Game} Game */
 /** @typedef {import('./renderer.js').Renderer} Renderer */
@@ -21,12 +21,20 @@ export class Hud {
     this._level(r, game.level);
   }
 
-  // One blk_0 frog icon per RESERVE life (lives − 1; the last life is the frog in play), left→right,
-  // capped at LIVES.HUD_MAX icons so a big stack can't overrun into the level markers (§4.1).
+  // Reserve lives (§4.1): one blk_0 frog icon per reserve life (lives − 1; the last life is the frog
+  // in play), left→right — up to HUD.ICON_MAX icons; beyond that the field collapses to one icon + the
+  // reserve count in digits (frog then number), so a big stock stays a fixed width and can't overrun
+  // the level field.
   /** @param {Renderer} r @param {number} lives */
   _lives(r, lives) {
-    const n = Math.min(lives - 1, LIVES.HUD_MAX);
-    for (let i = 0; i < n; i++) r.drawSprite('blk_0', HUD.LIVES[0] + i * HUD.LIVES_STEP, HUD.LIVES[1]);
+    const reserve = lives - 1;
+    const [x, y] = HUD.LIVES;
+    if (reserve <= HUD.ICON_MAX) {
+      for (let i = 0; i < reserve; i++) r.drawSprite('blk_0', x + i * HUD.LIVES_STEP, y);
+    } else {
+      r.drawSprite('blk_0', x, y);
+      r.drawText(String(reserve), x + HUD.TILE + 2, y, '#fff');
+    }
   }
 
   // The timer bar (§4.1): 8 px tiles, right-anchored near the TIME label and draining leftward —
@@ -51,10 +59,18 @@ export class Hud {
     r.drawText('TIME', HUD.TIME_LABEL[0], HUD.TIME_LABEL[1], '#E0E000');
   }
 
-  // One blk_1 marker per level, growing leftward from the right edge (capped so it can't overrun
-  // into the timer bar).
+  // Level (§4.1): one blk_1 marker per level, growing leftward from the right edge — up to
+  // HUD.ICON_MAX markers; beyond that the field collapses to the level number in digits + one marker
+  // (number then marker), right-anchored to the screen edge so it never grows into the timer/lives.
   /** @param {Renderer} r @param {number} level */
   _level(r, level) {
-    for (let i = 0; i < Math.min(level, 12); i++) r.drawSprite('blk_1', HUD.LEVEL_END[0] - i * HUD.LEVEL_STEP, HUD.LEVEL_END[1]);
+    const [ex, y] = HUD.LEVEL_END;
+    if (level <= HUD.ICON_MAX) {
+      for (let i = 0; i < level; i++) r.drawSprite('blk_1', ex - i * HUD.LEVEL_STEP, y);
+    } else {
+      r.drawSprite('blk_1', ex, y);
+      const s = String(level);
+      r.drawText(s, ex - 2 - s.length * HUD.TILE, y, '#fff');
+    }
   }
 }

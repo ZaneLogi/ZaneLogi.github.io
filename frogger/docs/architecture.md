@@ -317,9 +317,9 @@ The `blk_*` HUD tiles are **8×8**. Positions are provisional — finalized when
 
 | Element | Position |
 |---|---|
-| **Lives** — one `blk_0` frog icon per reserve life, **up to 10 icons** (the count can exceed that in play; the HUD caps the drawn icons) | from `(8, 240)`, left→right |
+| **Lives** — one `blk_0` frog icon per reserve life, **up to `ICON_MAX` (5) icons**; a larger reserve collapses to **one icon + the count in digits** (`🐸 12`), a fixed width | from `(0, 240)`, left→right |
 | **Timer bar** — shrinks as time drains; green normally, red in the warning phase (below) | `(8 … 184, 248)`; `TIME` label at `(188, 248)` |
-| **Level** — `blk_1` markers, one per level | right side, near `(216, 240)` |
+| **Level** — one `blk_1` marker per level, **up to `ICON_MAX` (5)**; a higher level collapses to **the level number in digits + one marker** (`20 ⬛`), right-anchored to the edge | right side, ending near `(224, 240)` |
 
 The **timer bar** is a row of 8 px tiles: full green `blk_2` for the beats remaining, its
 draining end tile stepping `blk_3` → `blk_5` (narrowing) for the sub-tile fraction; in the

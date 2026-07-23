@@ -54,9 +54,10 @@ export const SCORE = {
   HOP: 10, HOME: 50, BONUS: 200, ALL_HOMES: 1000, EXTRA_LIFE: 20000,
 };
 
-// Lives caps: the in-game count (start DEV.START_LIVES, plus the extra life at SCORE.EXTRA_LIFE) is
-// capped at MAX; the HUD draws at most HUD_MAX reserve icons (more would reach the level markers, §4.1).
-export const LIVES = { MAX: 99, HUD_MAX: 10 };
+// Lives cap: the in-game count (start DEV.START_LIVES, plus the extra life at SCORE.EXTRA_LIFE) is
+// capped at MAX. The HUD renders the reserve as up to HUD.ICON_MAX frog icons, then collapses to one
+// icon + a digit count (§4.1) — so a big stock stays a fixed width and can't overrun the level field.
+export const LIVES = { MAX: 99 };
 
 // Timed events — fixed periods, no RNG (§3.4).
 export const TIMED = {
@@ -169,6 +170,7 @@ export const ROWS = {
 export const HUD = {
   ONE_UP: [16, 1], SCORE: [16, 9], HI_LABEL: [88, 1], HI_VALUE: [88, 9],
   TILE: 8,                                  // blk_* tile width (fixed by the atlas)
+  ICON_MAX: 5,                              // lives/level: draw up to this many icons, then one icon + a digit count (§4.1)
   LIVES: [0, 240], LIVES_STEP: 8,
   TIMER_BAR: [8, 248], TIMER_W: 176, TIME_LABEL: [188, 248],
   LEVEL_END: [216, 240], LEVEL_STEP: 8,
