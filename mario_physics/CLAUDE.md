@@ -246,11 +246,15 @@ check that the data is right.
 | `actor_movements.js` | `move` fns: intent + contacts → velocity (`marioMovement`, `constantWalk`) |
 | `actor_animations.js` | `animate` fns: velocity + contacts → a state name (`marioAnimation`, `alwaysWalk`) |
 | `collision.js` | `resolveCollision`: per-axis integrate + point-sample the type's `probes` + respond; returns `contacts` |
-| `world.js` | `World`: owns the actor list (`addActor`/`removeActor`) + map; runs the pipeline and the react step; owns tile animations + block-bump hops; draws every actor |
+| `world.js` | `World`: owns the actor list (`addActor`/`removeActor`), the environment-object list (`addEnvObject`), and the map; runs the pipeline and the react step; owns tile + env-object animations + block-bump hops; draws env objects (behind) then every actor |
 | `animator.js` | `Animator`: plays a sprite-set; owns all frame-cycling. Distinct from `actor_animations.js`, which only *names* the state to show |
 | `tiles.js` | `TILES` registry + `isSolid`. Level-grid cell types — nothing to do with CHR tiles |
+| `env_types.js` | `ENV_TYPES` registry — environment-object blueprints; a third registry beside `ACTOR_TYPES`/`TILES` for solids/triggers actors are resolved *against*, never themselves run through `resolveCollision` |
+| `env_object.js` | `EnvObject`: an environment-object instance — a body at a free `(x, y)` + a per-instance animator; the environment analog of `Actor` |
 | `chr_decoder.js` | CHR bytes → pixel indices → blitted tiles (`decodeTiles`, `paintTile`). No SMB knowledge |
+| `chr_tiles.js` | the ROM's CHR decoded once — the shared `tiles` singleton (`chr_decoder` ← `chr_tiles` → `dat_tiles`), so the 8K decode happens a single time, not once per builder |
 | `sprite_frames.js` | a graphics table's rows → drawable frames. Everything SMB-specific about assembling tiles into a sprite: the 2-wide row, rows-per-table, the mirror rules |
+| `background_frames.js` | background metatiles → drawable 16×16 blocks (`buildMetatile`): the 2×2 assembler, the background analog of `sprite_frames.js` |
 | `palette.js` | the 2C02 master table; `nesRgb` / `nesHex` |
 | `assets/dat_tiles.js` | GENERATED: CHR + `FRAMES` + `GFX_TBL_OFFSETS` + `PLAYER_COLORS` + `AREA_PALETTES` |
 | `tools/build_sprite_data.py` | the generator — reads ROM + asm, writes `assets/dat_tiles.js` |

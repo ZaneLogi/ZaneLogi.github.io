@@ -1,6 +1,9 @@
 import { resolveCollision } from './collision.js';
 import { TILES } from './tiles.js';
 import { Animator } from './animator.js';
+import { EnvObject } from './env_object.js';
+
+/** @typedef {import('./env_types.js').EnvType} EnvType */
 
 const BUMP_DURATION = 0.18; // seconds for a bumped block's up-and-down hop
 const BUMP_HEIGHT = 10;     // peak rise of the hop, in pixels
@@ -9,6 +12,12 @@ export class World {
   constructor(levelMap) {
     this.levelMap = levelMap;
     this.objects = [];
+
+    // Environment objects: free-positioned solids/triggers actors are resolved
+    // AGAINST, distinct from both the actor list and the tile grid. A body + a
+    // look this step; solidity/reactions/motion come later. Never run through the
+    // actor pipeline -- resolveCollision is never called on one.
+    this.envObjects = [];
 
     // One shared animator per animated tile type, so every tile of that type
     // shimmers in sync (advanced once per update, drawn at each tile position).
@@ -32,6 +41,21 @@ export class World {
   removeActor(actor) {
     const i = this.objects.findIndex((o) => o.actor === actor);
     if (i >= 0) this.objects.splice(i, 1);
+  }
+
+  /**
+   * Place an environment object at a free (x, y) -- the creator, symmetric with
+   * addActor. Builds the instance (and its animator) from the type.
+   * @param {EnvType} def  an ENV_TYPES entry.
+   * @param {number} x      world x.
+   * @param {number} y      world y.
+   * @returns {EnvObject} the placed object, so a caller can hold onto it (a moving
+   *   platform's path, say).
+   */
+  addEnvObject(def, x, y) {
+    const obj = new EnvObject(def, x, y);
+    this.envObjects.push(obj);
+    return obj;
   }
 
   // Phase-major: every actor finishes a phase before any actor starts the next.
@@ -62,6 +86,10 @@ export class World {
       obj.actor.updateAnimationState();
       obj.animator.update(obj.actor.currentState, dt);
     }
+
+    // Environment-object animations advance on the same clock (a static object's
+    // single-frame `idle` is a no-op; an animated one, e.g. a ? block, shimmers).
+    for (const o of this.envObjects) o.animator.update(o.currentState, dt);
 
     // Tile shimmer and block-bump hops run on the same fixed clock.
     for (const id in this.tileAnimators) this.tileAnimators[id].update("loop", dt);
@@ -122,6 +150,14 @@ export class World {
           ctx.fillRect(dx, dy, TILE_SIZE, TILE_SIZE);
         }
       }
+    }
+
+    // Environment objects, drawn behind actors (a coin or ladder that must sit in
+    // front is a later per-type layer hint). Free-positioned, so world→screen
+    // straight from their own (x, y); off-screen ones draw off-canvas harmlessly.
+    for (const o of this.envObjects) {
+      const { sx, sy } = camera.worldToScreen(o.x, o.y);
+      o.animator.draw(ctx, sx, sy, false);
     }
 
     // Every actor, in spawn order — the player is not special here.

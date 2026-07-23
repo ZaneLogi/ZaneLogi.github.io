@@ -1,6 +1,7 @@
 import { Actor } from './actor.js';
 import { Animator } from './animator.js';
 import { ACTOR_TYPES } from './actor_types.js';
+import { ENV_TYPES } from './env_types.js';
 import { LevelMap } from './level_map.js';
 import { World } from './world.js';
 import { Camera } from './camera.js';
@@ -58,6 +59,12 @@ world.addActor(player, playerAnimator);
 const goomba = new Actor(ACTOR_TYPES.goomba, 400, 0);
 goomba.facing = -1; // start it walking left, into the steps
 world.addActor(goomba, new Animator(ACTOR_TYPES.goomba.sprites));
+
+// Step 1 smoke test: one environment brick, drawn from the ROM's own CHR at 1x
+// (16 px). Placed at a deliberately OFF-grid x (150) to show env objects are
+// free-positioned, not tied to the 32 px tile grid. It only renders — collision
+// arrives in step 2, so Mario passes straight through it for now.
+world.addEnvObject(ENV_TYPES.brick, 150, 300);
 
 // ----------------------
 // Input handling
