@@ -69,8 +69,42 @@ export const TIMED = {
   CROC_SLIVER: 48,                       // bay croc-head: head-down sliver (safe) frames at the start of each T_BAYCROC cycle
   CROC_OPEN: 36,                         // bay croc-head: head-up (lethal) frames after the sliver; then it disappears until the next cycle
   INSECT_SHOW: 170,                      // bonus insect: visible frames at the start of each T_BAY cycle; gone (waits) for the rest — a shorter wait (180) than the croc's (240)
-  OTTER_V: 0.8,                          // otter traversal speed (absolute px/frame) — faster than every log lane (§3.4)
+  OTTER_V: 0.8,                          // otter base traversal speed (px/frame at L1) — faster than every log lane; ramps with the board (§3.3/§3.4)
   OTTER_MIN_LEVEL: 3,                    // the otter is a level-3+ hazard (§3.3)
+};
+
+// §3.3 level ramp — how the §3.2 lane numbers change as levels advance (still no RNG):
+// - Speed: every lane accelerates by V(level) = V₁ × (1 + SPEED_PER_LEVEL·(level−1)), capped at
+//   SPEED_CAP (2×, reached ~level 11). Nothing else about speed changes. The otter rides the same
+//   factor (its OTTER_V ramps too) so it keeps overtaking the logs at every level.
+// - Count: the river thins and the road thickens on a fixed per-lane schedule (COUNT_SCHEDULE),
+//   one notch every couple of levels to floors/caps; because P = L/N, changing N re-derives the
+//   spacing and start positions for free. Only the listed lanes change; the rest keep their base n.
+// - A second diving turtle group per turtle lane switches on from DIVE_2ND_MIN_LEVEL (§3.4).
+// The timer length, lives, and the extra-life threshold do NOT ramp — rising speed and thinning
+// platforms are the whole ramp (§3.3).
+export const RAMP = {
+  SPEED_PER_LEVEL: 0.10,
+  SPEED_CAP: 2.0,
+  DIVE_2ND_MIN_LEVEL: 3,
+  // N per lane, indexed L1, L2, L3, L4, L5, L6+ (levels past 6 hold the last value). Lanes absent
+  // here keep their base n. The four representative lanes the §3.3 schedule table lists.
+  COUNT_SCHEDULE: {
+    river1: [3, 3, 3, 2, 2, 2],
+    river4: [4, 4, 3, 3, 2, 2],
+    road2:  [3, 3, 4, 4, 5, 5],
+    road5:  [2, 2, 3, 3, 3, 3],
+  },
+};
+
+// The §3.3 speed multiplier for a level (1× at level 1, +10% per level, capped at 2×).
+export const speedFactor = (level) => Math.min(RAMP.SPEED_CAP, 1 + RAMP.SPEED_PER_LEVEL * (level - 1));
+
+// The §3.3 mover count for a lane at a level: its scheduled value if the lane is in COUNT_SCHEDULE
+// (clamped to the last column past L6), else its base n.
+export const laneCount = (id, baseN, level) => {
+  const sched = RAMP.COUNT_SCHEDULE[id];
+  return sched ? sched[Math.min(Math.max(level, 1), sched.length) - 1] : baseN;
 };
 
 export const WRAP_L = 240;   // shared off-screen wrap length (§3.2)

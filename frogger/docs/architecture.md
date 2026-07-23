@@ -225,7 +225,8 @@ switch — identical on every playthrough:
 - **Otter (roaming river hazard, from level 3).** A single **otter** roams the three log lanes —
   **River 1 → 3 → 4**, in that fixed order, one lane at a time — appearing **from level 3** (the last
   hazard to switch on). It **enters at the lane's left edge and swims the whole width to the right**, a
-  little **faster than the logs** so it overtakes them. It is **surfaced** — visible, head above water —
+  little **faster than the logs** so it overtakes them — and its speed **ramps with the board** (§3.3),
+  so it stays faster than the logs at every level. It is **surfaced** — visible, head above water —
   while over **open water**, and **submerged** — hidden — while a **log is over it**, so it **dives under
   each log it overtakes and re-surfaces in the next gap**, bobbing across the lane. It leaves by
   **swimming off the right edge**; a `T_otter`-frame timer (default **256**) then brings it up at the

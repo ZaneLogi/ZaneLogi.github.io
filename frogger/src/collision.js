@@ -47,11 +47,11 @@ export class Collision {
       }
       const m = this._under(lane, cx);
       if (m) {
-        if (m === lane.diver && lane.submerged(frame)) { frog.riding = null; return 'drown'; } // dived under
+        if (lane.submerged(frame, m)) { frog.riding = null; return 'drown'; }                  // dived under
         if (m === lane.croc && lane.mouthOpen(frame) && this._inJaws(m, lane.cfg.dir, cx)) {
           frog.riding = null; return 'drown';                                                  // the open mouth
         }
-        frog.riding = m; frog.rideDx = lane.cfg.dir * lane.cfg.v;
+        frog.riding = m; frog.rideDx = lane.cfg.dir * lane.v;
         // Hopping onto the lady-frog's log picks her up — she rides on the frog's back (§3.4).
         const lady = playfield.lady;
         if (lady && lady.active && !lady.taken && !frog.hasLady && lane === lady.lane && m === lady.log) {

@@ -15,7 +15,7 @@ export class Playfield {
   // the playfield but the filled bays must persist across a life; only a new game (`Attract`) or a new
   // level (`RoundClear`) clears them, via `homes.reset()`.
   build(level) {
-    this.lanes = LANES.map((cfg, i) => new Lane(cfg, level, i));   // TODO(step 8): §3.3 level schedule
+    this.lanes = LANES.map((cfg, i) => new Lane(cfg, level, i));   // Lane applies the §3.3 ramp (speed/count) from `level`
     this.homes.level = level;                                      // gates the L2 bay crocodile-head
     const li = this.lanes.findIndex((l) => l.cfg.id === TIMED.LADY_LANE);   // the lady-frog rides River 4
     this.lady = new LadyFrog(this.lanes[li], ROWS.FIRST_LANE_Y + li * SCREEN.CELL);

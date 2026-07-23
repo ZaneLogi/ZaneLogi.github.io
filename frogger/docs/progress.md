@@ -7,27 +7,38 @@ self-contained; progress.md is free to reference the spec's sections.
 
 ## Status
 
-**Step 7 — Death explosion + RoundClear laugh-sweep: DONE.** On death, `Death` **freezes the field** and
-plays the **7-frame explosion** (`death_0..5 → skull`) at the frog's spot, then spends a life → `Play` /
-`GameOver`. On clearing all five homes, `RoundClear` runs the field on (no input) and flips the five bays
-**smile → laugh** (`frog_home_0` → `frog_home_1`) **left-to-right**, then advances the level after the hold.
-Detail in *Step-7 impl decisions*.
+**Step 8 — Level ramp (§3.3): DONE.** Each level now re-scales the board from `level`: every lane's speed
+ramps `V × (1 + 0.10·(level−1))` (capped **2×**, reached ~level 11) and its mover count follows the per-lane
+schedule (river1 / river4 **thin**, road2 / road5 **thicken**; unlisted lanes hold their base `n`) — and since
+`P = L/N`, fewer/more movers **re-derive the spacing and start positions for free**. The two hazard switch-ons
+the ramp still owed also land from **level 3**: a **second diving turtle group** per turtle lane (offset half a
+cycle so the pair never submerges together) and the **roaming otter** — whose own traversal speed ramps with the
+board too, so it keeps overtaking the logs at every level. Timer, lives, and the extra-life threshold do **not**
+ramp. Detail in *Step-8 impl decisions*.
 
-Verified: the explosion renders `death_0×8 → … → death_5×8 → skull×8` then → `Play` with a life spent; the
-laugh-sweep flips 0→5 bays then → `Play` at the next level. Both sprite sequences confirmed on screen — the
-burst→skull art, and the red-mouthed laughing frog. No console errors.
+Verified (deterministic headless + a live run): `speedFactor` = 1.0 / 1.1 / 1.2 … **2.0 at L11** (capped); the
+count schedule reads river1 `[3,3,3,2,2,2]`, river4 `[4,4,3,3,2,2]`, road2 `[3,3,4,4,5,5]`, road5 `[2,2,3,3,3,3]`,
+unscheduled lanes flat; river4's start positions re-derive as `[60,120,180,0]` (n4) → `[60,140,220]` (n3) →
+`[60,180]` (n2). A live **L5** game builds and runs **400 ticks with no error** — river/road counts thinned /
+thickened, speeds ×1.4, both turtle lanes carry 2 divers, the otter at 1.12 px/frame (still > the fastest log 0.63).
+**Level 1 is an exact no-op** (base v/n everywhere). No console errors.
 
-Prior steps: **6** all §3.4 timed events (6a diving turtles · 6b lady-frog · 6c river-croc mouth · 6d bay
-croc-head · 6e median snake · 6f roaming otter) · **5** Timer + Score + HUD · **4** homes · **3** collision
-+ carry · **0–2** scaffold / frog / lanes. Per-step detail in the *Step-N impl decisions* below.
+Prior steps: **7** death explosion + RoundClear laugh-sweep · **6** all §3.4 timed events (6a diving turtles ·
+6b lady-frog · 6c river-croc mouth · 6d bay croc-head · 6e median snake · 6f roaming otter) · **5** Timer + Score
++ HUD · **4** homes · **3** collision + carry · **0–2** scaffold / frog / lanes. Per-step detail in the
+*Step-N impl decisions* below.
 
 **Dev URL overrides** (`DEV`, wired into `Game` / `Attract` / `Timer`): `?level=N` [1, 20] sets the start
 level; `?lives=N` [1, 10] the start lives; `?beat=N` [1, 300] the timer's frames-per-beat (default 30 —
 lower drains the countdown faster). **Lives caps:** in play the count can pass 10 via the extra life,
 capped at `LIVES.MAX` = 99, with the HUD drawing ≤ `LIVES.HUD_MAX` = 10 reserve icons.
 
-Next up: **step 8 — level ramp** (§3.3): the per-level speed scaling (`V × (1 + 0.10·(level−1))`, cap 2×)
-and the count/spacing schedule. Then remaining polish: audio (§5.2) and the Attract screen.
+The core gameplay (steps 1–8) is complete, and the **`Attract` screen is done** — title + `HI-SCORE` +
+high score + `PRESS SPACE`, Start → a fresh game (its minimal centred-text form is exactly what §8 / §10
+specify: title + high-score only, no self-playing demo). **The one remaining subsystem is audio** (§5.2):
+the no-op `Audio` placeholder → the arcade AY-3-8910 PSG engine + `dat_sfx.js` + wiring the gameplay-event
+`request()` sites. It is a deferrable, mechanically-complete item — the game plays / wins / scores / times /
+ramps without it.
 
 ## Steps (plan is provisional — adjusts as we build)
 
@@ -46,12 +57,12 @@ and the count/spacing schedule. Then remaining polish: audio (§5.2) and the Att
 | 6d | Timed events — bay croc-head hazard (from L2) | §3.4 | done |
 | 6e | Timed events — median snake (from L2) | §3.4 | done |
 | 6f | Timed events — roaming otter (log lanes 1→3→4, gap-model, from L3) | §3.4 | done |
-| 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | **done** |
-| 8 | Level ramp | §3.3 | next |
+| 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | done |
+| 8 | Level ramp — speed scaling + count schedule + L3 second diver / otter | §3.3 | **done** |
 
 *(Bonus insect was done in step 4.)*
 
-## What's real vs stubbed (after step 7)
+## What's real vs stubbed (after step 8)
 
 - **Real / running:** the boot pump (`main.js`), `Game` + the mode machine
   (`Mode`/`Flow`/5 modes), `Renderer` (drawSprite + clip + `fillRect` + `drawObject` +
@@ -59,11 +70,13 @@ and the count/spacing schedule. Then remaining polish: audio (§5.2) and the Att
   `Input` (edge-triggered), `constants.js` (the real §3/§4/§6 design data), `Attract`, the mode
   transition/timing, **`Frog` (hop/facing/lock/render + river carry + lady-on-back)**, **`Mover`**,
   **`Lane` (seed/advance/render + `submerged` diving turtles + `mouthOpen` river croc from L2 + L2
-  median snake)**,
-  **`Playfield` (build/update/render)**, **`Homes` (landing test / occupancy fill + smile render /
+  median snake + the **§3.3 level ramp**: effective `v` = base × speed factor, effective `n` = the count
+  schedule, and a **second diving group** from L3)**,
+  **`Playfield` (build/update/render — `build` applies the §3.3 ramp per level)**, **`Homes` (landing test / occupancy fill + smile render /
   bonus-insect walk + L2 bobbing croc-head / win check)**, **`LadyFrog` (River 4 escort — board /
   pickup-on-her-log / carry-home +200)**, **`Otter` (roams River 1/3/4 from L3 — traverses a
-  lane left→right, submerges under logs / surfaces in gaps, lethal only while surfaced)**, **`Collision` (§7.3 safe / ride / drown / squash + carried-off-edge + home
+  lane left→right, submerges under logs / surfaces in gaps, lethal only while surfaced; its speed ramps
+  with the board so it keeps overtaking the logs)**, **`Collision` (§7.3 safe / ride / drown / squash + carried-off-edge + home
   delegation + submerged-diver drown + lady pickup + croc-jaws drown + otter contact)**, **`Timer` (countdown +
   time-out + continuous bar fraction)**, **`Score` (all
   awards + forward-hop gate + extra life)**, **`Hud` (top score/hi + bottom lives / timer bar /
@@ -73,9 +86,10 @@ and the count/spacing schedule. Then remaining polish: audio (§5.2) and the Att
   **`Death` (frozen field + `death_0..5 → skull` explosion at the frog's spot → life spend → Play /
   GameOver)** and **`RoundClear` (field runs; `frog_home_1` laugh-sweep left-to-right across the bays →
   next level)** are now real (step 7).
-- **Stubbed** (class shell + documented §6 API + `TODO`): the §3.3 level ramp (step 8), the
-  gameplay-event **sounds** (hop / plunk / squash / hurry-up / time-out — no-op `Audio`, §5.2), and
-  `Play`'s remaining tick step (audio). **All §3.4 timed events are now real.**
+- **Stubbed** (class shell + documented §6 API + `TODO`): the gameplay-event **sounds** (hop / plunk /
+  squash / hurry-up / time-out — no-op `Audio`, §5.2) and `Play`'s remaining tick step (audio). **All
+  §3.4 timed events and the §3.3 level ramp are now real** — the whole gameplay loop (steps 1–8) is done,
+  and the `Attract` title screen meets its §8 / §10 spec. **Audio (§5.2) is the sole remaining subsystem.**
 
 ## Step-1 impl decisions
 
@@ -394,6 +408,34 @@ the insect's bay.
 - **The exit still honours the jingle.** `RoundClear` advances at `timer ≥ SWEEP` **and** `!isPlaying('level_complete')`;
   with `Audio` a no-op `isPlaying` is false, so the fixed 90-frame hold governs — the §10 jingle path is
   already wired for when audio lands.
+
+## Step-8 impl decisions
+
+- **The ramp lives in `Lane`, computed once at construction from `level` — not per-frame.** `Playfield.build(level)`
+  already rebuilds every lane each level, so the `Lane` constructor derives `this.v = cfg.v × speedFactor(level)`
+  and `this.n = laneCount(cfg.id, cfg.n, level)` up front; `advance` and `_seed` read those, never the base `cfg`.
+  This keeps the ramp a pure function of `level` with no per-tick cost and no mutable ramp state to reset.
+- **The carry must read the *same* effective `v`.** `collision.js` sets `frog.rideDx = dir × lane.v` (was
+  `cfg.v`), so a rider is carried at exactly the ramped speed the lane advances at — the §7 "collide against the
+  drawn positions" invariant would break if the two used different speeds.
+- **Count schedule = the four lanes the §3.3 table lists** (`COUNT_SCHEDULE` in `constants.js`): river1 / river4
+  thin, road2 / road5 thicken; every other lane keeps its base `n`. Indexed L1…L6+ (levels past 6 hold the last
+  column). Because `P = L/N`, `_seed` re-derives the pitch and start positions from the new `n` for free — no
+  separate spacing table. (If you later want *all* river/road lanes to ramp their count, it's just more rows in
+  `COUNT_SCHEDULE`.)
+- **Second diving group → `divers` is now a list, `submerged` is per-mover.** The single `diver` field became
+  `divers: [{ m, phase }]`; `movers[0]` always dives, and from `RAMP.DIVE_2ND_MIN_LEVEL` (3) `movers[1]` joins,
+  **offset half a `T_DIVE` cycle** so the two never submerge together. `submerged(frame, mover)` looks the mover
+  up in the list (false for non-divers), so `render` and `collision` test any mover uniformly — no `m === diver`
+  special-case. The per-lane offset (`index·T_DIVE/2`) still keeps the two turtle *lanes* out of unison, so at L3
+  the four diving groups are all staggered.
+- **The otter ramps with the board (Zane's ruling).** Its `OTTER_V` (0.8) is scaled by the same `speedFactor` at
+  construction (`otter.v`), keeping the documented "faster than every log lane" invariant true at every level —
+  at the L11 cap the fastest log (river4) is 0.90 and the otter is 1.60. The alternative (a fixed absolute
+  `OTTER_V`) would let river4 logs overtake it from ~L9; ramping was chosen for consistency with §3.3 "the whole
+  board accelerates."
+- **Level 1 is an exact no-op.** `speedFactor(1) = 1` and every scheduled lane's L1 column equals its base `n`, so
+  a level-1 board is byte-identical to the pre-ramp build — the ramp only ever *adds* difficulty above L1.
 
 ## Deferred
 

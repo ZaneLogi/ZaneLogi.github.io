@@ -9,7 +9,7 @@
 // otter is snatched; while submerged (under a log) the otter is harmless and hidden. It can't be
 // ridden. From level 3 (§3.3). `otter_0` swimming; the reared `otter_1` is the catch pose (death
 // presentation, step 7). All log lanes drift right.
-import { SCREEN, TIMED, WRAP_L } from './constants.js';
+import { SCREEN, TIMED, WRAP_L, speedFactor } from './constants.js';
 
 /** @typedef {import('./lane.js').Lane} Lane */
 /** @typedef {import('./renderer.js').Renderer} Renderer */
@@ -24,6 +24,7 @@ export class Otter {
   constructor(logLanes, level = 1) {
     this.logLanes = logLanes;
     this.level = level;
+    this.v = TIMED.OTTER_V * speedFactor(level);   // §3.3: ramps with the board, so it keeps overtaking the logs
     this.state = 'idle';        // 'idle' | 'swimming'
     this.timer = TIMED.T_OTTER; // idle countdown before it enters the next lane
     this.laneIdx = -1;          // index into OTTER_LANES; advances each visit
@@ -58,7 +59,7 @@ export class Otter {
   // Swim rightward across the lane; surface over open water, submerge while a log is over the otter.
   // Once fully past the right edge the otter is gone → idle until the timer brings it up next lane.
   _swim() {
-    this.x += TIMED.OTTER_V;
+    this.x += this.v;
     if (this.x >= SCREEN.WIDTH) {
       this.active = false; this.surfaced = false; this.state = 'idle'; this.timer = TIMED.T_OTTER;
       return;
