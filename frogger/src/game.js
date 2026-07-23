@@ -3,7 +3,7 @@
 import { Renderer } from './renderer.js';
 import { Sprites } from './sprites.js';
 import { Input } from './input.js';
-import { Audio } from './audio.js';
+import { Audio } from './audio/sequencer.js';
 import { Frog } from './frog.js';
 import { Playfield } from './playfield.js';
 import { Collision } from './collision.js';

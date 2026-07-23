@@ -7,45 +7,31 @@ self-contained; progress.md is free to reference the spec's sections.
 
 ## Status
 
-**Step 8 — Level ramp (§3.3): DONE.** Each level now re-scales the board from `level`: every lane's speed
-ramps `V × (1 + 0.10·(level−1))` (capped **2×**, reached ~level 11) and its mover count follows the per-lane
-schedule (river1 / river4 **thin**, road2 / road5 **thicken**; unlisted lanes hold their base `n`) — and since
-`P = L/N`, fewer/more movers **re-derive the spacing and start positions for free**. The two hazard switch-ons
-the ramp still owed also land from **level 3**: a **second diving turtle group** per turtle lane (offset half a
-cycle so the pair never submerges together) and the **roaming otter** — whose own traversal speed ramps with the
-board too, so it keeps overtaking the logs at every level. Timer, lives, and the extra-life threshold do **not**
-ramp. Detail in *Step-8 impl decisions*.
+**Step 9 — Audio, Phase A (Layer 1 — the PSG voices): DONE.** The sound subsystem is two files under
+`src/audio/`: **`psg.js`** (Layer 1 — a tiny Web Audio "PSG": 3 square tone voices + 1 noise voice; `setFreq`
+/ `noteOn` / `noteOff` / `pluck` / `glide`; decoded params only; **zero project imports**) and
+**`sequencer.js`** (Layer 2 — the public `Audio` API + the data-driven sequencer; still the no-op stub, moved
+here from `src/audio.js`). A single **`demo/audio_test.html`** bench drives both — Section 1 (PSG) live,
+Section 2 (sequencer) wired to the stub and silent until the data lands. Dependency is one-way
+(`sequencer.js → psg.js`). Detail in *Audio impl decisions*.
 
-Verified (deterministic headless + a live run): `speedFactor` = 1.0 / 1.1 / 1.2 … **2.0 at L11** (capped); the
-count schedule reads river1 `[3,3,3,2,2,2]`, river4 `[4,4,3,3,2,2]`, road2 `[3,3,4,4,5,5]`, road5 `[2,2,3,3,3,3]`,
-unscheduled lanes flat; river4's start positions re-derive as `[60,120,180,0]` (n4) → `[60,140,220]` (n3) →
-`[60,180]` (n2). A live **L5** game builds and runs **400 ticks with no error** — river/road counts thinned /
-thickened, speeds ×1.4, both turtle lanes carry 2 divers, the otter at 1.12 px/frame (still > the fastest log 0.63).
-**Level 1 is an exact no-op** (base v/n everywhere). No console errors.
+Verified (deterministic — hearing it is a listen-test, not automatable): the PSG builds 3 tone + 1 noise
+voices, `osc.type` square, `setFreq(330)` takes effect, every voice method no-throws; the bench loads with no
+console errors, both sections + all 11 buttons render; and the game still boots after the module move
+(Attract, `Audio` resolved). Next: **Phase B** — extract the ROM note/SFX streams → `assets/dat_sfx.js`; then
+**Phase C** — the real sequencer + wiring the gameplay `request()` sites.
 
-Prior steps: **7** death explosion + RoundClear laugh-sweep · **6** all §3.4 timed events (6a diving turtles ·
-6b lady-frog · 6c river-croc mouth · 6d bay croc-head · 6e median snake · 6f roaming otter) · **5** Timer + Score
-+ HUD · **4** homes · **3** collision + carry · **0–2** scaffold / frog / lanes. Per-step detail in the
-*Step-N impl decisions* below.
+Prior steps: **8** level ramp (per-level speed + count schedule + L3 second diver/otter) · a **HUD-overflow**
+polish (lives/level → one icon + a digit count past 5) · **7** death explosion + RoundClear laugh-sweep · **6**
+all §3.4 timed events (6a diving turtles · 6b lady-frog · 6c river-croc mouth · 6d bay croc-head · 6e median
+snake · 6f roaming otter) · **5** Timer + Score + HUD · **4** homes · **3** collision + carry · **0–2**
+scaffold / frog / lanes. The core gameplay (1–8) is complete and the `Attract` screen is done (§8/§10 —
+minimal title, no demo); audio is the last subsystem. Per-step detail in the *impl decisions* sections below.
 
 **Dev URL overrides** (`DEV`, wired into `Game` / `Attract` / `Timer`): `?level=N` [1, 20] sets the start
-level; `?lives=N` [1, 10] the start lives; `?beat=N` [1, 300] the timer's frames-per-beat (default 30 —
-lower drains the countdown faster). **Lives cap:** in play the count can pass 10 via the extra life,
-capped at `LIVES.MAX` = 99.
-
-**HUD overflow (lives + level).** Both fields draw up to `HUD.ICON_MAX` = 5 icons, then collapse to
-**one icon + a digit count** — lives `🐸 12` (frog then the reserve count, left-anchored), level `20 ⬛`
-(the level number then a marker, right-anchored to the screen edge). So each field is a fixed width for
-any count and can't overrun the other or the timer bar; the level number is now readable past level 5
-(the old marker row silently clamped at 12). Verified per-count via a draw-call capture (icon positions
-+ digit placement at the boundaries) and an on-canvas pixel check.
-
-The core gameplay (steps 1–8) is complete, and the **`Attract` screen is done** — title + `HI-SCORE` +
-high score + `PRESS SPACE`, Start → a fresh game (its minimal centred-text form is exactly what §8 / §10
-specify: title + high-score only, no self-playing demo). **The one remaining subsystem is audio** (§5.2):
-the no-op `Audio` placeholder → the arcade AY-3-8910 PSG engine + `dat_sfx.js` + wiring the gameplay-event
-`request()` sites. It is a deferrable, mechanically-complete item — the game plays / wins / scores / times /
-ramps without it.
+level; `?lives=N` [1, 10] the start lives; `?beat=N` [1, 300] the timer's frames-per-beat (default 30 — lower
+drains the countdown faster). **Lives cap:** the in-play count can pass 10 via the extra life, capped at
+`LIVES.MAX` = 99; the HUD collapses lives / level to one icon + a digit count past `HUD.ICON_MAX` = 5.
 
 ## Steps (plan is provisional — adjusts as we build)
 
@@ -65,9 +51,10 @@ ramps without it.
 | 6e | Timed events — median snake (from L2) | §3.4 | done |
 | 6f | Timed events — roaming otter (log lanes 1→3→4, gap-model, from L3) | §3.4 | done |
 | 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | done |
-| 8 | Level ramp — speed scaling + count schedule + L3 second diver / otter | §3.3 | **done** |
+| 8 | Level ramp — speed scaling + count schedule + L3 second diver / otter | §3.3 | done |
+| 9 | Audio — Phase A: Layer 1 PSG voices + sequencer scaffold + bench · Phase B: extract data · Phase C: sequencer + wiring | §5.2 | **A done** |
 
-*(Bonus insect was done in step 4.)*
+*(Bonus insect was done in step 4. HUD-overflow polish — lives/level → icon + digit count — landed between steps 8 and 9, not a numbered step.)*
 
 ## What's real vs stubbed (after step 8)
 
@@ -443,6 +430,25 @@ the insect's bay.
   board accelerates."
 - **Level 1 is an exact no-op.** `speedFactor(1) = 1` and every scheduled lane's L1 column equals its base `n`, so
   a level-1 board is byte-identical to the pre-ramp build — the ramp only ever *adds* difficulty above L1.
+
+## Audio impl decisions
+
+*(Phase A — the Layer-1 scaffold. Phases B (extract the data) and C (the real sequencer + wiring) follow.)*
+
+- **Two files, one-way dependency — the seam made physical.** The subsystem splits along the boundary it already
+  had conceptually: `src/audio/psg.js` (Layer 1, the synth) and `src/audio/sequencer.js` (Layer 2, the driver +
+  public API). `sequencer.js` imports `psg.js`, never the reverse, so the boundary is a module boundary, not just
+  a comment. `psg.js` imports nothing project-specific; if it ever needs a note number or a tempo, the boundary
+  has leaked. The old `src/audio.js` stub moved to `sequencer.js` (game's `import { Audio }` updated).
+- **The PSG models the AY as always-on generators gated by gain.** Each of the 3 tone voices is a square
+  `OscillatorNode` running continuously into a `GainNode`; `noteOn` / `noteOff` / `pluck` ramp the gain (the AY
+  tone generator runs free — volume gates it; cheaper and click-free vs start/stop per note). The noise voice is a
+  looping random-sample buffer, gated the same way. `glide(from, to, secs)` schedules the descending "pew".
+- **Decoded-param API only — no register model.** Voices speak Hz + gain; the sequencer will hand them
+  frequencies (note→freq baked at extract time), never AY periods or registers.
+- **One dual-section bench, not two.** `demo/audio_test.html` has a live PSG section and a stub-wired sequencer
+  section (silent until Phase B/C), each with a status line — so the same page grows with the subsystem and
+  exercises the public boundary for real.
 
 ## Deferred
 

@@ -532,10 +532,11 @@ frogger/
   src/
     game.js  mode.js  flow.js
     frog.js  lane.js  mover.js  playfield.js  collision.js  homes.js  timer.js  score.js
-    renderer.js  sprites.js  hud.js  input.js  audio.js  constants.js
+    renderer.js  sprites.js  hud.js  input.js  constants.js
     modes/  attract.js  play.js  death.js  round_clear.js  game_over.js
+    audio/  psg.js  sequencer.js
   assets/  frogger_atlas.png  dat_sprites.js  dat_sfx.js
-  demo/    sprite_viewer.html  sprite_viewer.js  sound_test.html  sound_test.js
+  demo/    sprite_viewer.html  sprite_viewer.js  audio_test.html
   docs/    architecture.md
 ```
 
