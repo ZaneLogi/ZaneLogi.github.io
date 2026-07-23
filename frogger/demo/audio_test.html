@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frogger audio test — PSG (Layer 1) + Sequencer (Layer 2)</title>
+<style>
+  :root{
+    --surface-0:#faf9f5; --surface-1:#f1efe8; --surface-2:#fff;
+    --border:rgba(0,0,0,0.12); --border-strong:rgba(0,0,0,0.28);
+    --text-primary:#2b2b28; --text-secondary:#5f5e5a;
+    --ok:#1d9e75; --pending:#b58900;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --surface-0:#1e1e1c; --surface-1:#2a2a27; --surface-2:#333330;
+      --border:rgba(255,255,255,0.14); --border-strong:rgba(255,255,255,0.32);
+      --text-primary:#eceae2; --text-secondary:#b4b2a9; --ok:#3ac295; --pending:#d9b02a;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--surface-0);color:var(--text-primary);font-family:var(--font);line-height:1.5}
+  .wrap{max-width:640px;margin:0 auto;padding:1.75rem 1.25rem 3rem}
+  h1{font-size:20px;font-weight:500;margin:0 0 4px}
+  .sub{font-size:14px;color:var(--text-secondary);margin:0 0 1.5rem}
+  .card{background:var(--surface-1);border:0.5px solid var(--border);border-radius:10px;padding:1rem 1.1rem;margin-bottom:1.1rem}
+  .head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:2px}
+  .head h2{font-size:15px;font-weight:600;margin:0}
+  .status{font-size:12.5px;font-weight:500}
+  .status.ok{color:var(--ok)} .status.pending{color:var(--pending)}
+  .desc{font-size:13px;color:var(--text-secondary);margin:0 0 12px}
+  .row{display:flex;flex-wrap:wrap;gap:8px}
+  button{font-family:inherit;font-size:14px;color:var(--text-primary);background:var(--surface-2);
+    border:0.5px solid var(--border-strong);border-radius:8px;padding:7px 12px;cursor:pointer;transition:background .12s,transform .06s}
+  button:hover{background:var(--surface-0)} button:active{transform:scale(0.98)}
+  .log{margin-top:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;
+    color:var(--text-secondary);min-height:1.2em;white-space:pre-wrap}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.9em;
+    background:var(--surface-2);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Frogger audio test bench</h1>
+  <p class="sub">One page, both layers. Each section goes live when its layer is ready.</p>
+
+  <!-- ===================== Layer 1 : PSG ===================== -->
+  <section class="card">
+    <div class="head">
+      <h2>Layer 1 — PSG (<code>src/audio/psg.js</code>)</h2>
+      <span class="status ok" id="s1">✓ live</span>
+    </div>
+    <p class="desc">The AY voices directly: 3 square tone channels + 1 noise channel. Decoded params only (Hz + gain).</p>
+    <div class="row">
+      <button data-psg="square">square tone</button>
+      <button data-psg="noise">noise</button>
+      <button data-psg="scale">scale</button>
+      <button data-psg="chord">3-voice chord</button>
+      <button data-psg="pluck">pluck (envelope)</button>
+      <button data-psg="pew">pitch sweep — the "pew"</button>
+    </div>
+    <div class="log" id="log1">click any button (starts audio on first press)</div>
+  </section>
+
+  <!-- ===================== Layer 2 : Sequencer ===================== -->
+  <section class="card">
+    <div class="head">
+      <h2>Layer 2 — Sequencer (<code>src/audio/sequencer.js</code>)</h2>
+      <span class="status ok" id="s2">✓ live — music (theme + jingles)</span>
+    </div>
+    <p class="desc">The public sound API — the theme and the two jingles. Gameplay SFX are intentionally out of scope (music only).</p>
+    <div class="row">
+      <button data-seq="playMusic">play theme</button>
+      <button data-seq="stopMusic">stop</button>
+      <button data-seq="request:level_complete">level-complete jingle</button>
+      <button data-seq="request:game_over">game-over jingle</button>
+    </div>
+    <div class="log" id="log2">click to play</div>
+  </section>
+</div>
+
+<script type="module">
+import { PSG } from '../src/audio/psg.js';
+import { Audio } from '../src/audio/sequencer.js';
+
+const log1 = document.getElementById('log1');
+const log2 = document.getElementById('log2');
+
+// ---- Layer 1: PSG (live) ----
+let psg;
+const getPSG = () => { if (!psg) psg = new PSG(); psg.resume(); return psg; };
+
+const MAJOR = [261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88, 523.25]; // C4..C5
+const CHORD = [261.63, 329.63, 392.00];                                          // C major
+
+const psgActions = {
+  square(p){ p.tone[0].setFreq(220); p.tone[0].pluck(0.22, 0.7); },
+  noise(p){ p.noise.pluck(0.22, 0.7); },
+  scale(p){ const t0 = p.now + 0.03; MAJOR.forEach((f,i)=>{ const t=t0+i*0.18; p.tone[0].setFreq(f,t); p.tone[0].pluck(0.22,0.17,t); }); },
+  chord(p){ const t = p.now + 0.03; CHORD.forEach((f,i)=>{ p.tone[i].setFreq(f,t); p.tone[i].pluck(0.16,1.0,t); }); },
+  pluck(p){ p.tone[0].setFreq(330); p.tone[0].pluck(0.24, 0.8); },
+  pew(p){ const t = p.now + 0.03; p.tone[0].glide(1200, 120, 0.35, t); p.tone[0].noteOn(0.22, t); p.tone[0].noteOff(t + 0.4); },
+};
+
+for (const btn of document.querySelectorAll('button[data-psg]')) {
+  btn.addEventListener('click', () => {
+    const k = btn.getAttribute('data-psg');
+    try { psgActions[k](getPSG()); log1.textContent = `▶ ${k}`; }
+    catch (e) { log1.textContent = `✗ ${k}: ${e.message}`; }
+  });
+}
+
+// ---- Layer 2: Sequencer ----
+const audio = new Audio();
+requestAnimationFrame(function loop(){ audio.tick(); requestAnimationFrame(loop); });  // loops the theme
+for (const btn of document.querySelectorAll('button[data-seq]')) {
+  btn.addEventListener('click', () => {
+    const [fn, arg] = btn.getAttribute('data-seq').split(':');
+    try { (fn === 'request') ? audio.request(arg) : audio[fn](); log2.textContent = `▶ ${fn}(${arg ?? ''})`; }
+    catch (e) { log2.textContent = `✗ ${fn}: ${e.message}`; }
+  });
+}
+</script>
+</body>
+</html>
