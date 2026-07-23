@@ -7,22 +7,21 @@ self-contained; progress.md is free to reference the spec's sections.
 
 ## Status
 
-**Step 9 — Audio, Phase B (music playing): DONE.** The song engine is complete: **`assets/dat_sfx.js`** holds
-all 25 arcade songs (the theme, the two jingles, the home tunes) as decoded note-frequency / note-set / tempo
-tables + raw voice byte-streams, and **`src/audio/sequencer.js`** (Layer 2) interprets them onto the Layer-1
+**Step 9 — Audio: DONE (music only, by design).** The music engine is complete and integrated in-game:
+**`assets/dat_sfx.js`** holds all 25 arcade songs (theme, jingles, home tunes) as decoded note / note-set /
+tempo tables + raw voice streams, and **`src/audio/sequencer.js`** (Layer 2) interprets them onto the Layer-1
 PSG — `playMusic()` loops the theme, `request('level_complete')` / `request('game_over')` fire the jingles,
-`isPlaying()` gates the jingle-timed screens, `tick()` loops. **It is already integrated in-game:** the music
-request-sites were wired long ago (`Play.enter` → `playMusic`; `RoundClear` / `GameOver` → `request` +
-`isPlaying`), so with the real sequencer in place the theme now plays during Play and the jingles time the
-clear / game-over screens. The `demo/audio_test.html` bench's sequencer section is live (theme + jingle
-buttons). Detail in *Audio impl decisions*.
+`isPlaying()` gates the jingle-timed screens, `tick()` loops. The music request-sites were already wired
+(`Play.enter` → `playMusic`; `RoundClear` / `GameOver` → `request` + `isPlaying`), so the theme plays during
+Play and the jingles time the clear / game-over screens with no extra wiring. Verified deterministically: the
+theme decodes to the right melody (A#4 / F#4 … at exact 0.229 s eighth-notes across all three voices), the
+jingles gate `isPlaying` true, driving the game into Play schedules the 70-note theme; game + bench boot clean.
 
-Verified (deterministic — hearing it is a listen-test): the theme decodes to the right melody (A#4 / F#4 … at
-exact 0.229 s eighth-notes across all three voices), the jingles gate `isPlaying` true, driving the game into
-Play schedules the 70-note theme, and the game + bench boot clean. Next: **Phase C — SFX playing** — the short
-gameplay sounds (hop / plunk / squash / hurry-up / time-out / bonus / extra-life) are a *separate* arcade
-mechanism (a command jump table with per-effect init/continuation routines, likely procedural rather than note
-streams), so they need their own decode, then their `request()` sites wired.
+**The gameplay SFX are DROPPED — a deliberate scope call (Zane): the clone plays music only, no SFX.** The
+short effects (hop / plunk / squash / …) are procedural per-effect routines, and this source's disassembly is
+uneven exactly where their parameters live (mis-aligned + uncommented — the plunk decoded cleanly, the hop's
+init did not), so getting all ~10 correct is disproportionate effort for an educational clone whose goal the
+music already meets. Rationale + the door left open in *Deferred*. **The whole game (steps 0–9) is now complete.**
 
 Prior steps: **9A** the Layer-1 PSG voices + the `audio_test` bench · **8** level ramp (per-level speed + count
 schedule + L3 second diver/otter) · a **HUD-overflow** polish (lives/level → one icon + a digit count past 5) ·
@@ -55,7 +54,7 @@ drains the countdown faster). **Lives cap:** the in-play count can pass 10 via t
 | 6f | Timed events — roaming otter (log lanes 1→3→4, gap-model, from L3) | §3.4 | done |
 | 7 | Death + RoundClear presentation (explosion, laugh sweep) | §3.5, §10 | done |
 | 8 | Level ramp — speed scaling + count schedule + L3 second diver / otter | §3.3 | done |
-| 9 | Audio — Phase A: Layer 1 PSG voices + bench · Phase B: music playing (song data + sequencer) · Phase C: SFX playing (decode + wire the gameplay effects) | §5.2 | **A·B done** |
+| 9 | Audio (music only) — Phase A: PSG voices + bench · Phase B: music (song data + sequencer). Gameplay SFX **dropped** (scope — disproportionate effort, music meets the goal) | §5.2 | **done** |
 
 *(Bonus insect was done in step 4. HUD-overflow polish — lives/level → icon + digit count — landed between steps 8 and 9, not a numbered step.)*
 
@@ -436,7 +435,7 @@ the insect's bay.
 
 ## Audio impl decisions
 
-*(Phase A — the Layer-1 scaffold. Phase B — music playing: the song data + the sequencer. Phase C — SFX playing: the gameplay effects.)*
+*(Phase A — the Layer-1 scaffold. Phase B — music playing: the song data + the sequencer. Gameplay SFX were dropped — see *Deferred*.)*
 
 - **Two files, one-way dependency — the seam made physical.** The subsystem splits along the boundary it already
   had conceptually: `src/audio/psg.js` (Layer 1, the synth) and `src/audio/sequencer.js` (Layer 2, the driver +
@@ -470,7 +469,11 @@ the insect's bay.
 
 ## Deferred
 
-- **Sound — SFX only.** The music is done (Phase B — the engine + `assets/dat_sfx.js`); what remains is
-  Phase C, the gameplay SFX (hop / plunk / squash / …), a separate arcade mechanism still to decode + wire.
-  Possible later refinements to the music (note articulation, the AY volume curve, the `FAITHFUL_PITCH`
-  choice) await a listen-test.
+- **Gameplay SFX — DROPPED (deliberate scope, Zane).** Audio ships as **music only**. The SFX (hop / plunk /
+  squash / hurry-up / …) are procedural per-effect routines, and this source's disassembly is uneven exactly
+  where their parameters live — mis-aligned instruction boundaries + no field comments (the plunk decoded
+  cleanly; the hop's init did not, landing mid-instruction in a data table). Getting all ~10 correct is
+  disproportionate effort for an educational clone whose goal the music already meets, so they're out. The
+  mechanism is understood and the source is mirrored if it's ever revisited; a MAME register trace would be the
+  clean, decode-risk-free path. Optional music refinements (note articulation, the AY volume curve, the
+  `FAITHFUL_PITCH` semitone-low choice) also await a listen-test.

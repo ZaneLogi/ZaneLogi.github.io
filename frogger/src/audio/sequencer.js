@@ -92,10 +92,10 @@ export class Audio {
   }
 
   request(id) {
-    const key = REQUEST_SONG[id];
-    if (!key || !SONGS[key]) return;                       // SFX not extracted yet → no-op
+    const song = REQUEST_SONG[id];
+    if (!song || !SONGS[song]) return;   // only the jingles play; gameplay SFX are out of scope (music only)
     const p = this._ensure();
-    this._until.set(id, this._song(SONGS[key], p.now + 0.03));
+    this._until.set(id, this._song(SONGS[song], p.now + 0.03));
   }
 
   // §7 step 6. Loop the theme: when the current schedule is nearly spent, seamlessly append the next

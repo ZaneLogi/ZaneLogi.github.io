@@ -68,15 +68,14 @@
   <section class="card">
     <div class="head">
       <h2>Layer 2 — Sequencer (<code>src/audio/sequencer.js</code>)</h2>
-      <span class="status ok" id="s2">✓ live — theme + jingles (SFX pending)</span>
+      <span class="status ok" id="s2">✓ live — music (theme + jingles)</span>
     </div>
-    <p class="desc">The public sound API, now playing the real arcade streams. Theme + jingles are live; the short gameplay SFX (hop / plunk / …) aren't extracted yet, so those requests are silent.</p>
+    <p class="desc">The public sound API — the theme and the two jingles. Gameplay SFX are intentionally out of scope (music only).</p>
     <div class="row">
       <button data-seq="playMusic">play theme</button>
       <button data-seq="stopMusic">stop</button>
       <button data-seq="request:level_complete">level-complete jingle</button>
       <button data-seq="request:game_over">game-over jingle</button>
-      <button data-seq="request:hop">request('hop') — silent, pending</button>
     </div>
     <div class="log" id="log2">click to play</div>
   </section>
