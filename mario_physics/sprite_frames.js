@@ -20,13 +20,20 @@
 // feet still across the cycle. Blit the whole 16x32 block at the actor's position --
 // never trim to the ink, never centre it.
 
-import { decodeChrBase64, decodeTiles, paintTile } from './chr_decoder.js';
-import { CHR_BASE64, FRAMES } from './assets/dat_tiles.js';
+import { paintTile } from './chr_decoder.js';
+import { FRAMES } from './assets/dat_tiles.js';
+import { tiles } from './chr_tiles.js';
 
 export const FRAME_W = 16;
 export const FRAME_H = 32;
 
-const tiles = decodeTiles(decodeChrBase64(CHR_BASE64));
+/**
+ * @typedef {Object} Frame  One PlayerGraphicsTable entry (a FRAMES row).
+ * @property {number} off      PlayerGfxOffset -- selects the per-row flip rule.
+ * @property {string} size     'small' | 'big' | 'both'.
+ * @property {string} name     e.g. 'walking frame 1'.
+ * @property {number[]} tiles  eight CHR tile ids, row-major (2 wide x 4 tall).
+ */
 
 /**
  * Which rows get their RIGHT tile horizontally flipped -- ChkForPlayerAttrib.
@@ -46,6 +53,10 @@ const tiles = decodeTiles(decodeChrBase64(CHR_BASE64));
  *
  * This is NOT the facing flip. That one mirrors the whole sprite at draw time
  * (world.js passes `facing === -1`); this one is per-row, inside one frame.
+ *
+ * @param {number} gfxOffset  the frame's PlayerGfxOffset (`off`).
+ * @param {boolean} [killed]  true for the killed frame, reached via a different path.
+ * @returns {number[]} the row indices (0..3) whose right tile is mirrored.
  */
 function rightTileFlipRows(gfxOffset, killed = false) {
   if (killed) return [2, 3];
@@ -54,7 +65,13 @@ function rightTileFlipRows(gfxOffset, killed = false) {
   return [];
 }
 
-/** One FRAMES row -> a 16x32 canvas coloured by `palette` (4 NES colour indices). */
+/**
+ * One FRAMES row -> a 16x32 canvas coloured by `palette`.
+ * @param {Frame} frame       the row to compose.
+ * @param {number[]} palette  four NES colour indices (e.g. PLAYER_COLORS[0]).
+ * @param {boolean} killed    selects the killed frame's per-row flip rule.
+ * @returns {HTMLCanvasElement} the composed 16x32 frame.
+ */
 function composeFrame(frame, palette, killed) {
   const img = new ImageData(FRAME_W, FRAME_H);
   const flip = rightTileFlipRows(frame.off, killed);
@@ -73,13 +90,23 @@ function composeFrame(frame, palette, killed) {
   return cv;
 }
 
+/**
+ * Horizontally flip one 8x8 tile's pixel indices.
+ * @param {Uint8Array} px  64 pixel indices, row-major.
+ * @returns {Uint8Array} a new 64-entry array, mirrored left<->right.
+ */
 function mirrorTile(px) {
   const out = new Uint8Array(64);
   for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) out[y * 8 + x] = px[y * 8 + (7 - x)];
   return out;
 }
 
-/** A drawable with the same shape the Animator expects of a BMP-backed frame. */
+/**
+ * Wrap a composed canvas as a drawable -- the shape the Animator expects of a
+ * BMP-backed frame, so composed and BMP frames are interchangeable.
+ * @param {HTMLCanvasElement} cv  the composed frame.
+ * @returns {{draw: function}} a drawable; `draw(ctx, x, y, mirror)` blits it (mirroring on request).
+ */
 function drawable(cv) {
   return {
     draw(ctx, x, y, mirror = false) {
@@ -96,7 +123,7 @@ function drawable(cv) {
 /**
  * Build every PlayerGraphicsTable frame for one PlayerColors palette.
  * @param {number[]} palette  4 NES colour indices, e.g. PLAYER_COLORS[0] (mario).
- * @returns {Object} name -> drawable, e.g. 'small jumping', 'small player standing'.
+ * @returns {Object.<string, {draw: function}>} name -> drawable, e.g. 'small jumping'.
  */
 export function buildPlayerFrames(palette) {
   const out = {};

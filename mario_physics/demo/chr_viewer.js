@@ -1,15 +1,14 @@
 // chr_viewer.js -- browse all 512 CHR tiles with the ROM's own palettes.
 
-import { CHR_BASE64, PLAYER_COLORS, AREA_PALETTES, FRAMES } from '../assets/dat_tiles.js';
-import { decodeChrBase64, decodeTiles, paintTile, imageDataToCanvas } from '../chr_decoder.js';
+import { PLAYER_COLORS, AREA_PALETTES, FRAMES } from '../assets/dat_tiles.js';
+import { paintTile, imageDataToCanvas } from '../chr_decoder.js';
+import { tiles } from '../chr_tiles.js';
 import { nesHex } from '../palette.js';
 
 const SHEET = 128;        // 16 tiles x 8px
 const MARGIN = 22;        // room for the row/col labels
 const SPRITE_BASE = 0;    // PPU $0000
 const BG_BASE = 256;      // PPU $1000
-
-const tiles = decodeTiles(decodeChrBase64(CHR_BASE64));
 
 // PlayerColors' rows in table order. The asm comments name them; entry 0 of a
 // sprite palette is never drawn, so it is shown but not used.
