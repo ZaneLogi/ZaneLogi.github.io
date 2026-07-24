@@ -8,9 +8,11 @@
 // A metatile is stored as four tile ids in the order [upper-left, lower-left,
 // upper-right, lower-right] -- SMB's Palette{N}_MTiles format (SMBDIS.ASM
 // Palette1_MTiles: `.db $47,$47,$47,$47 ;breakable brick`, where the single
-// crosshatch tile $47 repeats 2x2). Two things differ from a sprite: there is no
-// per-row mirror, and pixel index 0 is the opaque backdrop, not transparent -- so
-// a block reads solid, with no holes showing the scene behind it.
+// crosshatch tile $47 repeats 2x2). One thing always differs from a sprite: there
+// is no per-row mirror. Pixel index 0 is the backdrop: opaque by default (a solid
+// block like the brick, no holes behind it), or transparent when `transparent` is
+// set -- which a free-floating bg-tile object needs (a coin, whose index-0 area
+// around the oval must show the scene through it, not a black box).
 
 import { paintTile } from './chr_decoder.js';
 import { tiles } from './chr_tiles.js';
@@ -34,17 +36,19 @@ function drawable(cv) {
 
 /**
  * Compose one background metatile into a 16x16 drawable.
- * @param {number[]} mtile    four background-table tile ids [UL, LL, UR, LR] -- SMB's order
- * @param {number[]} palette  four NES colour indices; entry 0 is the (opaque) backdrop
+ * @param {number[]} mtile        four background-table tile ids [UL, LL, UR, LR] -- SMB's order
+ * @param {number[]} palette      four NES colour indices; entry 0 is the backdrop
+ * @param {boolean} [transparent] true skips index-0 pixels (see-through, e.g. a coin);
+ *                                false (default) paints them opaque (a solid block).
  * @returns {{draw: function}} the same drawable contract as sprite_frames.js
  */
-export function buildMetatile(mtile, palette) {
+export function buildMetatile(mtile, palette, transparent = false) {
   const img = new ImageData(MTILE_SIZE, MTILE_SIZE);
   const [ul, ll, ur, lr] = mtile;
-  paintTile(img, tiles[BG_BASE + ul], palette, 0, 0, false);
-  paintTile(img, tiles[BG_BASE + ll], palette, 0, 8, false);
-  paintTile(img, tiles[BG_BASE + ur], palette, 8, 0, false);
-  paintTile(img, tiles[BG_BASE + lr], palette, 8, 8, false);
+  paintTile(img, tiles[BG_BASE + ul], palette, 0, 0, transparent);
+  paintTile(img, tiles[BG_BASE + ll], palette, 0, 8, transparent);
+  paintTile(img, tiles[BG_BASE + ur], palette, 8, 0, transparent);
+  paintTile(img, tiles[BG_BASE + lr], palette, 8, 8, transparent);
   const cv = document.createElement('canvas');
   cv.width = MTILE_SIZE;
   cv.height = MTILE_SIZE;

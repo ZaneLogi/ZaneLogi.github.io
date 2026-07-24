@@ -8,16 +8,41 @@ import { EnvObject } from './env_object.js';
 const BUMP_DURATION = 0.18; // seconds for a bumped block's up-and-down hop
 const BUMP_HEIGHT = 10;     // peak rise of the hop, in pixels
 
+// The actor's collision-body AABB in world space — the extent of its PROBES (its
+// ink), not the padded drawn box. Small Mario's sprite box is 16x32 but his ink is
+// the bottom ~14px (probes span y 18..32); testing the box would collect a coin his
+// sprite never touches. Falls back to the full box for an actor with no probes.
+function actorBounds(a) {
+  const p = a.probes;
+  if (!p) return { x: a.x, y: a.y, w: a.w, h: a.h };
+  const xs = [p.left.x, p.right.x, ...p.head.xs, ...p.feet.xs];
+  const ys = [p.head.y, p.feet.y, ...p.left.ys, ...p.right.ys];
+  const x0 = Math.min(...xs), y0 = Math.min(...ys);
+  return { x: a.x + x0, y: a.y + y0, w: Math.max(...xs) - x0, h: Math.max(...ys) - y0 };
+}
+
+// Body-AABB overlap of an actor and an env object — the sense phase's trigger test.
+// Uses the actor's collision body (actorBounds), so a coin is collected when Mario's
+// ink touches it, not his padded sprite box. Strict inequalities, so merely touching
+// edges does not count.
+function overlaps(a, o) {
+  const b = actorBounds(a);
+  return b.x < o.x + o.w && b.x + b.w > o.x && b.y < o.y + o.h && b.y + b.h > o.y;
+}
+
 export class World {
   constructor(levelMap) {
     this.levelMap = levelMap;
     this.objects = [];
 
     // Environment objects: free-positioned solids/triggers actors are resolved
-    // AGAINST, distinct from both the actor list and the tile grid. A body + a
-    // look this step; solidity/reactions/motion come later. Never run through the
-    // actor pipeline -- resolveCollision is never called on one.
+    // AGAINST, distinct from both the actor list and the tile grid. Solids block
+    // (collide) and can react (onBump); passable triggers fire onOverlap (a coin).
+    // Never run through the actor pipeline -- resolveCollision is never called on one.
     this.envObjects = [];
+
+    // Coins collected — bumped by a coin's onOverlap through collectCoin.
+    this.coins = 0;
 
     // One shared animator per animated tile type, so every tile of that type
     // shimmers in sync (advanced once per update, drawn at each tile position).
@@ -58,6 +83,19 @@ export class World {
     return obj;
   }
 
+  // An environment object leaves: a collected coin, a spent one-shot trigger.
+  removeEnvObject(obj) {
+    const i = this.envObjects.indexOf(obj);
+    if (i >= 0) this.envObjects.splice(i, 1);
+  }
+
+  // A coin is collected: it vanishes and the tally goes up. The affordance a coin's
+  // onOverlap calls, so the world stays the decider (like bumpTile / setTile).
+  collectCoin(coin) {
+    this.removeEnvObject(coin);
+    this.coins++;
+  }
+
   // Phase-major: every actor finishes a phase before any actor starts the next.
   // With one actor this is identical to running all four phases per actor, but it
   // is the only shape that can host actor-vs-actor work — comparing two actors is
@@ -82,7 +120,18 @@ export class World {
     // 4. react — the world responds to what was touched
     for (const obj of this.objects) this.reactToContacts(obj.actor);
 
-    // 5. present — velocity + contacts -> animation
+    // 5. sense — passable triggers the actor overlaps this tick (a coin collects
+    //    itself; a ladder would write a climb flag onto the actor). Non-blocking,
+    //    tested on final positions. Snapshot the list (a coin's onOverlap removes it)
+    //    and re-snapshot per actor, so a removed trigger cannot fire twice.
+    for (const obj of this.objects) {
+      for (const o of [...this.envObjects]) {
+        if (o.def.solid || !o.def.onOverlap) continue;
+        if (overlaps(obj.actor, o)) o.def.onOverlap(this, o, obj.actor);
+      }
+    }
+
+    // 6. present — velocity + contacts -> animation
     for (const obj of this.objects) {
       obj.actor.updateAnimationState();
       obj.animator.update(obj.actor.currentState, dt);

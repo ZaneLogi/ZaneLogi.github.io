@@ -61,6 +61,11 @@ export const ACTOR_TYPES = {
     move: marioMovement,
     animate: marioAnimation,
 
+    // Coins and other pickup triggers are the player's: this marks Mario as a
+    // collector, so an enemy overlapping a coin does not pocket it (a trigger's
+    // onOverlap reads it). SMB: coin collection lives in the player's routine.
+    collectsPickups: true,
+
     physics: {
       // Horizontal — SMB's. Top speed is a hard *clamp*, not an equilibrium:
       // one linear adder pushes toward the held direction and the clamp stops it.

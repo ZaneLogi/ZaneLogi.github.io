@@ -36,6 +36,13 @@ const BRICK_PALETTE = GROUND[3];
 // brick`). The item-carrying "brick w/ line" swaps the top row to $45.
 const BRICK = buildMetatile([0x47, 0x47, 0x47, 0x47], BRICK_PALETTE);
 
+// Overworld coin: background metatile $a5,$a7,$a6,$a8 (four distinct tiles, unlike
+// the brick's repeat) -- SMBDIS.ASM Palette1_MTiles `.db $a5, $a7, $a6, $a8 ;coin`.
+// Same GROUND palette: the gold body is pixel index 1 = $27 (234,158,34). Built
+// TRANSPARENT so the index-0 area around the oval shows the scene, not a black box.
+// Static: SMB's coin shimmer is a CHR-swap animation, deferred (needs the anim frames).
+const COIN = buildMetatile([0xa5, 0xa7, 0xa6, 0xa8], GROUND[3], true);
+
 /**
  * @typedef {Object} EnvType  An environment-object blueprint. Every facet is
  *   optional except `size` and `sprites`, and each is serviced by one phase of
@@ -44,6 +51,7 @@ const BRICK = buildMetatile([0x47, 0x47, 0x47, 0x47], BRICK_PALETTE);
  * @property {boolean} [solid]              collided against by the resolver.
  * @property {Object} sprites               a sprite-set, `{ state: { frames, fps? } }`.
  * @property {function} [onBump]            (world, self, actor) — head-bump reaction.
+ * @property {function} [onOverlap]         (world, self, actor) — passable-overlap trigger.
  */
 
 /** @type {Object.<string, EnvType>} */
@@ -62,5 +70,17 @@ export const ENV_TYPES = {
     // Head-bumped from below: hop, like the grid brick. Small Mario only bounces a
     // brick; breaking it (big Mario -> shards) needs a power state and is deferred.
     onBump: (world, self, actor) => self.bump(),
+  },
+
+  // Coin: a passable TRIGGER (not solid, so the resolver ignores it -- Mario moves
+  // through it). Overlapping collects it: onOverlap removes it and bumps the world's
+  // coin count -- but only for an actor that `collectsPickups` (the player), so an
+  // enemy walking through a coin does NOT pocket it (SMB: coins are the player's).
+  // The archetype for the sense phase; the same shape will host hazards, pickups, warps.
+  coin: {
+    size: { w: 16, h: 16 },
+    solid: false,
+    sprites: { idle: { frames: [COIN] } },
+    onOverlap: (world, self, actor) => { if (actor.def.collectsPickups) world.collectCoin(self); },
   },
 };

@@ -146,5 +146,23 @@ export const BASELINE = {
       "bumpTick": 16,
       "hopSeen": true
     }
+  },
+  "env_coin": {
+    "hash": "7e6d0cab",
+    "scalars": {
+      "coinsBefore": 0,
+      "coinsAfter": 1,
+      "collectTick": 77,
+      "envObjectsLeft": 0,
+      "finalX": 520.43
+    }
+  },
+  "env_coin_enemy": {
+    "hash": "eeba5ace",
+    "scalars": {
+      "coins": 0,
+      "coinsLeft": 1,
+      "goombaPassedCoin": true
+    }
   }
 };

@@ -25,12 +25,16 @@ finishes a phase before any actor starts the next.
    any movement has changed a velocity.
 2. **move** — `type.move(actor, intent, dt)`: intent + gravity + jump → velocity.
    Reads only *last* tick's `contacts`; never the map.
-3. **collide** — `actor.contacts = resolveCollision(actor, levelMap, dt)`:
-   integrate the velocity and resolve it against the tiles, returning a fresh
-   `contacts`.
-4. **react** — `World.reactToContacts(actor)`: the world responds to the contact
-   (e.g. a bumped tile's `onBump`).
-5. **present** — `actor.updateAnimationState()` then `animator.update(state, dt)`:
+3. **collide** — `actor.contacts = resolveCollision(actor, levelMap, envObjects, dt)`:
+   integrate the velocity and resolve it against the tiles and solid env objects,
+   returning a fresh `contacts`.
+4. **react** — `World.reactToContacts(actor)`: the world responds to a contact
+   (e.g. a bumped tile's or env object's `onBump`).
+5. **sense** — the actor's *collision body* (its probes, not the padded sprite box)
+   overlapping any *passable* env trigger fires its `onOverlap` (a coin collects
+   itself). Non-blocking, on final positions; the env analog of react, and how an
+   actor perceives a region without reading the map.
+6. **present** — `actor.updateAnimationState()` then `animator.update(state, dt)`:
    velocity + contacts → animation.
 
 Phase-major is indistinguishable from per-actor while there is one actor, and
@@ -46,7 +50,7 @@ The world also advances tile animations and block-bump hops on this same tick cl
 | control (perception → intent) | the type's `control` fn |
 | move (intent/forces → velocity) | the type's `move` fn |
 | integrate + detect + respond | collision resolver |
-| orchestration + world reaction | `World` |
+| world reaction (contacts) + sense (trigger overlaps) | `World` |
 | presentation | `Animator` |
 
 ## Invariants
@@ -251,7 +255,7 @@ check that the data is right.
 | `actor_movements.js` | `move` fns: intent + contacts → velocity (`marioMovement`, `constantWalk`) |
 | `actor_animations.js` | `animate` fns: velocity + contacts → a state name (`marioAnimation`, `alwaysWalk`) |
 | `collision.js` | `resolveCollision`: per-axis integrate + point-sample the type's `probes` against grid tiles AND solid env objects + respond; returns `contacts` |
-| `world.js` | `World`: owns the actor list (`addActor`/`removeActor`), the environment-object list (`addEnvObject`), and the map; runs the pipeline and the react step; owns tile + env-object animations + block-bump hops; draws env objects (behind) then every actor |
+| `world.js` | `World`: owns the actor list (`addActor`/`removeActor`), the environment-object list (`addEnvObject`/`removeEnvObject`, `collectCoin`, `coins`), and the map; runs the pipeline incl. the react + sense steps; owns tile + env-object animations + block-bump hops; draws env objects (behind) then every actor |
 | `animator.js` | `Animator`: plays a sprite-set; owns all frame-cycling. Distinct from `actor_animations.js`, which only *names* the state to show |
 | `tiles.js` | `TILES` registry + `isSolid`. Level-grid cell types — nothing to do with CHR tiles |
 | `env_types.js` | `ENV_TYPES` registry — environment-object blueprints; a third registry beside `ACTOR_TYPES`/`TILES` for solids/triggers actors are resolved *against*, never themselves run through `resolveCollision` |
@@ -330,12 +334,13 @@ move or the scenario measures nothing — and `bumpTick = -1` is what that looks
 Check the scenario still exercises its phase; a scalar quietly going -1 or a state
 vanishing from `statesSeen` is coverage loss wearing a passing test's clothes.
 
-Twelve scenarios cover every phase of the tick, not just the physics — `qblock_bump`
+Fourteen scenarios cover every phase of the tick, not just the physics — `qblock_bump`
 and `env_bump` exercise the **react** phase (a grid ? block spends `3` → `5`; a free env
-brick hops), `anim_states` the **present** phase, and `env_land` / `env_wall` the
-**env-solid pass** (a free 16 px block Mario lands on / stops at). A fingerprint covering
-only intent+collide would stay green while a restructure silently stopped dispatching
-block bumps.
+brick hops), `env_coin` / `env_coin_enemy` the **sense** phase (a passable coin collected
+on overlap — by the player, not an enemy), `anim_states` the **present** phase, and
+`env_land` / `env_wall` the **env-solid pass** (a free 16 px block Mario lands on / stops
+at). A fingerprint covering only intent+collide would stay green while a restructure
+silently stopped dispatching block bumps.
 
 Each scenario reduces to a hash of its full per-tick trace (catches any drift, at
 full float precision) plus a few readable scalars (which say *what* moved when it

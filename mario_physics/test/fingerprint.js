@@ -383,6 +383,56 @@ function envBump() {
   return { trace, scalars: { bumpTick, hopSeen } };
 }
 
+// 13. SENSE phase: walk through a passable coin — it collects (vanishes, coins++)
+//     and does NOT block him (passable). Exercises the new sense phase.
+function envCoin() {
+  const { world, actor } = spawn(makeLevel(16, 40), 100, 0);
+  settle(world, actor);
+  world.addEnvObject(ENV_TYPES.coin, 200, 456); // his standing body height, to his right
+  const coinsBefore = world.coins;
+  const x = [];
+  let collectTick = -1;
+  for (let f = 0; f < 300; f++) {
+    tick(world, actor, { right: true });
+    x.push(r3(actor.x));
+    if (collectTick < 0 && world.coins > coinsBefore) collectTick = f;
+  }
+  return {
+    trace: x,
+    scalars: {
+      coinsBefore,
+      coinsAfter: world.coins,
+      collectTick,
+      envObjectsLeft: world.envObjects.length,
+      finalX: r3(actor.x),
+    },
+  };
+}
+
+// 14. SENSE audience: an ENEMY walking through a coin does NOT collect it — coins
+//     are the player's (the `collectsPickups` type capability). Guards against a
+//     Goomba pocketing coins in its path.
+function envCoinEnemy() {
+  const map = new LevelMap(makeLevel(16, 20), T);
+  const world = new World(map);
+  const g = new Actor(ACTOR_TYPES.goomba, 100, 0); // default facing = right
+  world.addActor(g, new Animator(ACTOR_TYPES.goomba.sprites));
+  world.addEnvObject(ENV_TYPES.coin, 200, 456);    // in the goomba's path, at its body height
+  const x = [];
+  for (let f = 0; f < 300; f++) {
+    world.update(DT);
+    x.push(r3(g.x));
+  }
+  return {
+    trace: x,
+    scalars: {
+      coins: world.coins,                      // 0 — the enemy cannot collect
+      coinsLeft: world.envObjects.length,      // 1 — the coin is still there
+      goombaPassedCoin: Math.max(...x) >= 200, // it did walk through the coin's span
+    },
+  };
+}
+
 const SCENARIOS = {
   run_and_settle: runAndSettle,
   run_reverse_settle: runReverseSettle,
@@ -396,6 +446,8 @@ const SCENARIOS = {
   env_land: envLand,
   env_wall: envWall,
   env_bump: envBump,
+  env_coin: envCoin,
+  env_coin_enemy: envCoinEnemy,
 };
 
 /** Run every scenario; return { name: { hash, scalars } }. */

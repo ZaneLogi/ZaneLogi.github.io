@@ -67,6 +67,14 @@ world.addActor(goomba, new Animator(ACTOR_TYPES.goomba.sprites));
 world.addEnvObject(ENV_TYPES.brick, 160, 464);
 world.addEnvObject(ENV_TYPES.brick, 192, 432);
 
+// A little row of coins. Passable triggers -- they never block Mario; walk/jump
+// through one to collect it and it vanishes, world.coins goes up (tracked in state,
+// no HUD). Only the player collects (collectsPickups), so the Goomba passing through
+// leaves them. Step 4.
+world.addEnvObject(ENV_TYPES.coin, 192, 462);
+world.addEnvObject(ENV_TYPES.coin, 208, 432);
+world.addEnvObject(ENV_TYPES.coin, 224, 432);
+
 // ----------------------
 // Input handling
 // ----------------------
