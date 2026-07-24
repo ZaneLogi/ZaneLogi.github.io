@@ -139,5 +139,12 @@ export const BASELINE = {
       "stopX": 226.99,
       "rightContact": false
     }
+  },
+  "env_bump": {
+    "hash": "bc7c2802",
+    "scalars": {
+      "bumpTick": 16,
+      "hopSeen": true
+    }
   }
 };

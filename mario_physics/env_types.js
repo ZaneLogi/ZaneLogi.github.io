@@ -14,9 +14,10 @@
 //   update           self-driven motion       -- env-motion(step 5)
 //
 // Adding an environment object is a table entry that picks the facets it needs --
-// never engine code. Step 1 scaffolds presentation only: a static brick drawn
-// from the ROM's own CHR at 1x (16x16). `solid` is declared but nothing consults
-// it yet, so Mario passes through.
+// never engine code. The brick below is solid (the resolver collides actors
+// against it, step 2) and hops when head-bumped (onBump, step 3), drawn from the
+// ROM's own CHR at 1x (16x16). Still to come: onLand (springs), onOverlap
+// (ladders), update (moving platforms).
 
 import { buildMetatile } from './background_frames.js';
 import { AREA_PALETTES } from './assets/dat_tiles.js';
@@ -40,8 +41,9 @@ const BRICK = buildMetatile([0x47, 0x47, 0x47, 0x47], BRICK_PALETTE);
  *   optional except `size` and `sprites`, and each is serviced by one phase of
  *   the tick (see this file's header).
  * @property {{w: number, h: number}} size  drawn extent, in px.
- * @property {boolean} [solid]              snapped against by the resolver (step 2+).
+ * @property {boolean} [solid]              collided against by the resolver.
  * @property {Object} sprites               a sprite-set, `{ state: { frames, fps? } }`.
+ * @property {function} [onBump]            (world, self, actor) — head-bump reaction.
  */
 
 /** @type {Object.<string, EnvType>} */
@@ -51,10 +53,14 @@ export const ENV_TYPES = {
     // Mario's width, so he reads exactly one brick wide (SMB's proportion).
     size: { w: 16, h: 16 },
 
-    // Declared now; consulted by the resolver from step 2 on. Inert this step.
+    // The resolver collides actors against it.
     solid: true,
 
     // A sprite-set, same shape the Animator plays for actors and animated tiles.
     sprites: { idle: { frames: [BRICK] } },
+
+    // Head-bumped from below: hop, like the grid brick. Small Mario only bounces a
+    // brick; breaking it (big Mario -> shards) needs a power state and is deferred.
+    onBump: (world, self, actor) => self.bump(),
   },
 };

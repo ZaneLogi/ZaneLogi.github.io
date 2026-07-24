@@ -255,7 +255,7 @@ check that the data is right.
 | `animator.js` | `Animator`: plays a sprite-set; owns all frame-cycling. Distinct from `actor_animations.js`, which only *names* the state to show |
 | `tiles.js` | `TILES` registry + `isSolid`. Level-grid cell types — nothing to do with CHR tiles |
 | `env_types.js` | `ENV_TYPES` registry — environment-object blueprints; a third registry beside `ACTOR_TYPES`/`TILES` for solids/triggers actors are resolved *against*, never themselves run through `resolveCollision` |
-| `env_object.js` | `EnvObject`: an environment-object instance — a body at a free `(x, y)` + a per-instance animator; the environment analog of `Actor` |
+| `env_object.js` | `EnvObject`: an environment-object instance — a body at a free `(x, y)`, a per-instance animator, and its own per-tick `update` (animator + head-bump hop); the environment analog of `Actor` |
 | `chr_decoder.js` | CHR bytes → pixel indices → blitted tiles (`decodeTiles`, `paintTile`). No SMB knowledge |
 | `chr_tiles.js` | the ROM's CHR decoded once — the shared `tiles` singleton (`chr_decoder` ← `chr_tiles` → `dat_tiles`), so the 8K decode happens a single time, not once per builder |
 | `sprite_frames.js` | a graphics table's rows → drawable frames. Everything SMB-specific about assembling tiles into a sprite: the 2-wide row, rows-per-table, the mirror rules |
@@ -330,11 +330,12 @@ move or the scenario measures nothing — and `bumpTick = -1` is what that looks
 Check the scenario still exercises its phase; a scalar quietly going -1 or a state
 vanishing from `statesSeen` is coverage loss wearing a passing test's clothes.
 
-Eleven scenarios cover every phase of the tick, not just the physics — `qblock_bump`
-exercises the **react** phase (`TILES.onBump` → hop → `3` spends to `5`), `anim_states`
-the **present** phase, and `env_land` / `env_wall` the **env-solid pass** (a free 16 px
-block Mario lands on / stops at). A fingerprint covering only intent+collide would stay
-green while a restructure silently stopped dispatching block bumps.
+Twelve scenarios cover every phase of the tick, not just the physics — `qblock_bump`
+and `env_bump` exercise the **react** phase (a grid ? block spends `3` → `5`; a free env
+brick hops), `anim_states` the **present** phase, and `env_land` / `env_wall` the
+**env-solid pass** (a free 16 px block Mario lands on / stops at). A fingerprint covering
+only intent+collide would stay green while a restructure silently stopped dispatching
+block bumps.
 
 Each scenario reduces to a hash of its full per-tick trace (catches any drift, at
 full float precision) plus a few readable scalars (which say *what* moved when it

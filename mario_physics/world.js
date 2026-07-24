@@ -88,9 +88,9 @@ export class World {
       obj.animator.update(obj.actor.currentState, dt);
     }
 
-    // Environment-object animations advance on the same clock (a static object's
-    // single-frame `idle` is a no-op; an animated one, e.g. a ? block, shimmers).
-    for (const o of this.envObjects) o.animator.update(o.currentState, dt);
+    // Environment objects advance on the same clock: their animator plus any active
+    // head-bump hop (a static object's single-frame `idle` + idle hop is a no-op).
+    for (const o of this.envObjects) o.update(dt);
 
     // Tile shimmer and block-bump hops run on the same fixed clock.
     for (const id in this.tileAnimators) this.tileAnimators[id].update("loop", dt);
@@ -162,10 +162,11 @@ export class World {
 
     // Environment objects, drawn behind actors (a coin or ladder that must sit in
     // front is a later per-type layer hint). Free-positioned, so world→screen
-    // straight from their own (x, y); off-screen ones draw off-canvas harmlessly.
+    // straight from their own (x, y), plus the hop offset; off-screen ones draw
+    // off-canvas harmlessly.
     for (const o of this.envObjects) {
       const { sx, sy } = camera.worldToScreen(o.x, o.y);
-      o.animator.draw(ctx, sx, sy, false);
+      o.animator.draw(ctx, Math.round(sx), Math.round(sy + o.yOffset), false);
     }
 
     // Every actor, in spawn order — the player is not special here.

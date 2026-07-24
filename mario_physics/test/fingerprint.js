@@ -365,6 +365,24 @@ function envWall() {
   };
 }
 
+// 12. REACT phase for env: jump into a floating env brick from below — he bumps it
+//     (ceiling) and the brick's onBump fires (it starts hopping). The env analog of
+//     qblock_bump. The hop is presentation, so it must NOT move the physics trace.
+function envBump() {
+  const { world, actor } = spawn(makeLevel(16, 20), 200, 430);
+  const brick = world.addEnvObject(ENV_TYPES.brick, 196, 400);
+  settle(world, actor);
+  const trace = [];
+  let bumpTick = -1, hopSeen = false;
+  for (let f = 0; f < 90; f++) {
+    tick(world, actor, { jump: true });
+    trace.push(r3(actor.y));
+    if (bumpTick < 0 && actor.contacts.ceiling) bumpTick = f;
+    if (brick.bumpT >= 0) hopSeen = true;
+  }
+  return { trace, scalars: { bumpTick, hopSeen } };
+}
+
 const SCENARIOS = {
   run_and_settle: runAndSettle,
   run_reverse_settle: runReverseSettle,
@@ -377,6 +395,7 @@ const SCENARIOS = {
   goomba_walks: goombaWalks,
   env_land: envLand,
   env_wall: envWall,
+  env_bump: envBump,
 };
 
 /** Run every scenario; return { name: { hash, scalars } }. */
