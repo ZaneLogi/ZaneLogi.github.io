@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Throng — Lemming Sprite Gallery</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    font: 14px/1.5 system-ui, sans-serif;
+    background: #12141c; color: #d7dae3;
+  }
+  h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: .3px; }
+  .sub { margin: 0 0 20px; color: #8b90a0; font-size: 13px; }
+  .sub code { color: #aab; background: #1d2030; padding: 1px 5px; border-radius: 4px; }
+
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+    background: #1a1d29; border: 1px solid #262a3a; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 22px; position: sticky; top: 8px; z-index: 2;
+  }
+  .controls label { display: flex; align-items: center; gap: 8px; color: #b9bece; }
+  .controls .group { display: flex; gap: 6px; }
+  button {
+    font: inherit; color: #d7dae3; background: #262a3a;
+    border: 1px solid #333853; border-radius: 7px; padding: 6px 12px; cursor: pointer;
+  }
+  button:hover { background: #2f3448; }
+  button.on { background: #3a5bd0; border-color: #4a6be0; color: #fff; }
+  input[type=range] { accent-color: #4a6be0; }
+
+  .grid {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(var(--cell, 150px), 1fr));
+  }
+  figure {
+    margin: 0; background: #0c0e15; border: 1px solid #232838; border-radius: 10px;
+    padding: 10px 8px 8px; text-align: center;
+  }
+  .box {
+    display: flex; align-items: center; justify-content: center;
+    /* subtle checkerboard so transparent pixels read clearly */
+    background-color: #171a24;
+    background-image:
+      linear-gradient(45deg, #1e2230 25%, transparent 25%, transparent 75%, #1e2230 75%),
+      linear-gradient(45deg, #1e2230 25%, transparent 25%, transparent 75%, #1e2230 75%);
+    background-size: 12px 12px; background-position: 0 0, 6px 6px;
+    border-radius: 6px; overflow: hidden;
+  }
+  canvas { image-rendering: pixelated; display: block; }
+  figcaption { margin-top: 8px; }
+  .name { display: block; font-weight: 600; color: #e7eaf3; }
+  .meta { display: block; color: #7d8398; font-size: 12px; }
+  .err { color: #ff8080; white-space: pre-wrap; font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+  <h1>Throng — Lemming Sprite Gallery</h1>
+  <p class="sub">
+    All 28 lemming animations from <code>assets/lemmings_atlas.png</code>, driven
+    through the reusable <code>src/sprite_sheet.js</code> + <code>src/animation.js</code>
+    modules at the game's frame rate. Feet are aligned on the baseline via each
+    animation's foot anchor.
+  </p>
+
+  <div class="controls">
+    <div class="group" id="speed">
+      <button data-ms="100">Slow</button>
+      <button data-ms="58" class="on">Normal</button>
+      <button data-ms="20">Fast</button>
+    </div>
+    <button id="playPause" class="on">⏸ Pause</button>
+    <label>Zoom <input id="scale" type="range" min="2" max="7" step="1" value="4"><span id="scaleVal">4×</span></label>
+    <label><input id="anchor" type="checkbox"> Show foot anchor</label>
+  </div>
+
+  <div id="grid" class="grid"></div>
+  <div id="error" class="err"></div>
+
+  <script type="module" src="./sprite_gallery.js"></script>
+</body>
+</html>
