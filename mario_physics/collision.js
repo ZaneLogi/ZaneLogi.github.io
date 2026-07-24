@@ -27,6 +27,14 @@
 // structurally: a hit during the X pass IS a wall, a hit during the Y pass IS a
 // floor. The gate is that constraint's solution, not a behaviour, so it is
 // deliberately not ported.)
+//
+// Solid ENVIRONMENT objects are collided against in the same call, with the same
+// probe points — but snapped to the object's own FACE rather than a grid line,
+// which is what lets a free 16 px block sit off the 32 px grid. It is a SEPARATE
+// pass so the grid path stays bit-identical: with no env solids it runs no code.
+// `contacts` then names WHAT each side touched (`bumped` / `groundRef` →
+// {kind:'tile', …} | {kind:'env', obj}) so the world can react to it and, later,
+// carry a rider on a moving one.
 
 const EPS = 0.01;
 
@@ -42,24 +50,48 @@ function defaultProbes(w, h) {
   };
 }
 
+// Nearest solid env object whose rect contains any of the probe points, plus the
+// face to snap to. `points` are [x, y] pairs in world space; axis 'x' yields a
+// left/right face, 'y' a top/bottom face; `dir` +1 takes the near face in the +
+// direction (min), −1 the far face (max). Point-in-rect is half-open [o, o+size),
+// matching the grid's floor-based cell test. Linear scan — fine for a handful of
+// objects; a spatial index is a later optimisation.
+function envHit(env, points, axis, dir) {
+  let best = null; // { face, obj }
+  for (const o of env) {
+    if (!o.def.solid) continue;
+    const inside = points.some(([x, y]) => x >= o.x && x < o.x + o.w && y >= o.y && y < o.y + o.h);
+    if (!inside) continue;
+    const face = axis === 'x' ? (dir > 0 ? o.x : o.x + o.w) : (dir > 0 ? o.y : o.y + o.h);
+    if (best === null || (dir > 0 ? face < best.face : face > best.face)) best = { face, obj: o };
+  }
+  return best;
+}
+
 /**
  * Integrates the actor's velocity into its position one fixed step, resolving
- * tile collisions per axis and zeroing blocked velocity components.
+ * collisions per axis (grid tiles, then solid env objects) and zeroing blocked
+ * velocity components.
  *
- * @param {object}   actor     An Actor with x, y, vx, vy, and either `probes` or w/h.
- * @param {LevelMap} levelMap  The tile map to collide against.
- * @param {number}   dt        The fixed timestep, in seconds (1/60).
- * @returns {{ground: boolean, ceiling: boolean, left: boolean, right: boolean, bumped: object|null}}
- *          Which sides ended the step in contact with a solid tile.
+ * @param {object}   actor       An Actor with x, y, vx, vy, and either `probes` or w/h.
+ * @param {LevelMap} levelMap    The tile map to collide against.
+ * @param {object[]} envObjects  Environment objects; solid ones are collided against.
+ * @param {number}   dt          The fixed timestep, in seconds (1/60).
+ * @returns {{ground: boolean, ceiling: boolean, left: boolean, right: boolean, bumped: object|null, groundRef: object|null}}
+ *          Which sides ended the step in contact, and (bumped/groundRef) what was touched.
  */
-export function resolveCollision(actor, levelMap, dt) {
+export function resolveCollision(actor, levelMap, envObjects, dt) {
   const T = levelMap.tileSize;
   const solid = (x, y) => levelMap.isSolidAt(x, y);
+  const env = envObjects ?? [];
   const step = dt * 60; // constants are tuned for 60 FPS; keep them frame-rate independent
-  const contacts = { ground: false, ceiling: false, left: false, right: false, bumped: null };
+  const contacts = { ground: false, ceiling: false, left: false, right: false, bumped: null, groundRef: null };
   const P = actor.probes ?? defaultProbes(actor.w, actor.h);
 
   // --- HORIZONTAL: move, then resolve ---
+  // Direction is captured before resolving: the grid pass may zero the velocity, and
+  // the env pass that follows still needs to know which way the actor was going.
+  const goingRight = actor.vx > 0, goingLeft = actor.vx < 0;
   actor.x += actor.vx * step;
   if (actor.vx > 0) {
     const px = actor.x + P.right.x;
@@ -76,8 +108,20 @@ export function resolveCollision(actor, levelMap, dt) {
       contacts.left = true;
     }
   }
+  if (env.length) { // env solids, same probes, snapped to the object's own face
+    if (goingRight) {
+      const px = actor.x + P.right.x;
+      const hit = envHit(env, P.right.ys.map((y) => [px, actor.y + y]), 'x', +1);
+      if (hit) { actor.x = hit.face - P.right.x - EPS; actor.vx = 0; contacts.right = true; }
+    } else if (goingLeft) {
+      const px = actor.x + P.left.x;
+      const hit = envHit(env, P.left.ys.map((y) => [px, actor.y + y]), 'x', -1);
+      if (hit) { actor.x = hit.face - P.left.x; actor.vx = 0; contacts.left = true; }
+    }
+  }
 
   // --- VERTICAL: move, then resolve ---
+  const goingDown = actor.vy > 0, goingUp = actor.vy < 0;
   actor.y += actor.vy * step;
   if (actor.vy > 0) { // falling — supported if EITHER foot finds solid
     const py = actor.y + P.feet.y;
@@ -93,7 +137,7 @@ export function resolveCollision(actor, levelMap, dt) {
       // Name the bumped tile (from the pre-snap head position) so the world can
       // react to it — e.g. a ? block. Detection only; the resolver stays unaware
       // of what any tile does.
-      contacts.bumped = { tx: Math.floor((actor.x + hit) / T), ty: Math.floor(py / T) };
+      contacts.bumped = { kind: 'tile', tx: Math.floor((actor.x + hit) / T), ty: Math.floor(py / T) };
       actor.y = Math.floor(py / T + 1) * T - P.head.y;
       actor.vy = 0;
       contacts.ceiling = true;
@@ -102,6 +146,21 @@ export function resolveCollision(actor, levelMap, dt) {
     // vy === 0: not moving vertically, probe just below for standing ground
     const py = actor.y + P.feet.y + 1;
     if (P.feet.xs.some((x) => solid(actor.x + x, py))) contacts.ground = true;
+  }
+  if (env.length) { // env solids, vertical — name the object hit (groundRef / bumped)
+    if (goingDown) {
+      const py = actor.y + P.feet.y;
+      const hit = envHit(env, P.feet.xs.map((x) => [actor.x + x, py]), 'y', +1);
+      if (hit) { actor.y = hit.face - P.feet.y - EPS; actor.vy = 0; contacts.ground = true; contacts.groundRef = { kind: 'env', obj: hit.obj }; }
+    } else if (goingUp) {
+      const py = actor.y + P.head.y;
+      const hit = envHit(env, P.head.xs.map((x) => [actor.x + x, py]), 'y', -1);
+      if (hit) { contacts.bumped = { kind: 'env', obj: hit.obj }; actor.y = hit.face - P.head.y; actor.vy = 0; contacts.ceiling = true; }
+    } else {
+      const py = actor.y + P.feet.y + 1;
+      const hit = envHit(env, P.feet.xs.map((x) => [actor.x + x, py]), 'y', +1);
+      if (hit) { contacts.ground = true; contacts.groundRef = { kind: 'env', obj: hit.obj }; }
+    }
   }
 
   return contacts;

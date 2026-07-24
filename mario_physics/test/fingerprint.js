@@ -25,6 +25,7 @@ import { ACTOR_TYPES } from '../actor_types.js';
 import { LevelMap } from '../level_map.js';
 import { World } from '../world.js';
 import { Animator } from '../animator.js';
+import { ENV_TYPES } from '../env_types.js';
 
 const DT = 1 / 60;
 const T = 32;
@@ -326,6 +327,44 @@ function goombaWalks() {
   };
 }
 
+// 10. Env-solid vertical: fall onto a FREE-positioned env brick and rest on its
+//     top — the capability step 2 adds. groundRef should name the env object.
+//     Exercises the new env pass without touching the grid path.
+function envLand() {
+  const { world, actor } = spawn(makeLevel(24, 20), 200, 0);
+  world.addEnvObject(ENV_TYPES.brick, 200, 300); // 16x16, floating above the floor
+  const y = [];
+  let landTick = -1;
+  for (let f = 0; f < 200; f++) {
+    tick(world, actor, {});
+    y.push(r3(actor.y));
+    if (landTick < 0 && actor.contacts.ground) landTick = f;
+  }
+  return {
+    trace: y,
+    scalars: { landTick, restY: r3(actor.y), groundRefKind: actor.contacts.groundRef?.kind ?? null },
+  };
+}
+
+// 11. Env-solid horizontal: walk into a FREE-positioned env brick and stop at its
+//     left face — the horizontal half of the env pass.
+function envWall() {
+  const { world, actor } = spawn(makeLevel(16, 40), 100, 0);
+  settle(world, actor);
+  world.addEnvObject(ENV_TYPES.brick, 240, 456); // at his standing body height, to his right
+  const x = [];
+  let stopTick = -1;
+  for (let f = 0; f < 400; f++) {
+    tick(world, actor, { right: true });
+    x.push(r3(actor.x));
+    if (stopTick < 0 && actor.contacts.right) stopTick = f;
+  }
+  return {
+    trace: x,
+    scalars: { stopTick, stopX: r3(actor.x), rightContact: actor.contacts.right },
+  };
+}
+
 const SCENARIOS = {
   run_and_settle: runAndSettle,
   run_reverse_settle: runReverseSettle,
@@ -336,6 +375,8 @@ const SCENARIOS = {
   qblock_bump: qBlockBump,
   anim_states: animStates,
   goomba_walks: goombaWalks,
+  env_land: envLand,
+  env_wall: envWall,
 };
 
 /** Run every scenario; return { name: { hash, scalars } }. */

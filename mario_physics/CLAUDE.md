@@ -59,12 +59,14 @@ Rules a change must not break:
   previous tick's `contacts`*. Collision feeds back into movement through a stored
   struct read next tick — not a within-tick call.
 - **`contacts` is the single feedback channel** from collision into movement
-  (`{ ground, ceiling, left, right, bumped }`). Movement decisions (jump
+  (`{ ground, ceiling, left, right, bumped, groundRef }`). Movement decisions (jump
   eligibility, the grounded gravity skip) read it; nothing else carries collision
-  results into an actor.
+  results into an actor. `bumped` and `groundRef` also *name what was touched* —
+  `{ kind:'tile', tx, ty }` or `{ kind:'env', obj }` — so the world can react to it
+  and, later, carry a rider on a moving one.
 - **The resolver detects; the world decides.** `resolveCollision` reports what was
-  touched (including which tile was bumped) and stops motion, but runs no game
-  logic. Reactions live in `World` and in type definitions.
+  touched (which tile or env object was bumped / stood on) and stops motion, but
+  runs no game logic. Reactions live in `World` and in type definitions.
 - **Actors are world-agnostic.** An `Actor` never reads the tile map; everything
   the world permits returns through `contacts`.
 - **Presentation is derived, not driving.** Animation state is computed from
@@ -83,7 +85,10 @@ Rules a change must not break:
   which a bounding box cannot express. `size` is the drawn extent; `probes` is the
   collision geometry; they are different things and must not be conflated again. A
   type naming no probes gets box-derived ones, which reproduce the box model exactly.
-  Offsets are **actor space** — they do not scale with the tile.
+  Offsets are **actor space** — they do not scale with the tile. Solid **env objects**
+  are point-sampled by the *same* probes, snapped to the object's own face rather than
+  a grid line — a separate pass that leaves the grid path bit-identical (with none
+  present it runs no code).
 
 ## Movement model
 
@@ -245,7 +250,7 @@ check that the data is right.
 | `actor_controllers.js` | `control` fns: perception → intent (`keyboard`, `reactiveWalker`) |
 | `actor_movements.js` | `move` fns: intent + contacts → velocity (`marioMovement`, `constantWalk`) |
 | `actor_animations.js` | `animate` fns: velocity + contacts → a state name (`marioAnimation`, `alwaysWalk`) |
-| `collision.js` | `resolveCollision`: per-axis integrate + point-sample the type's `probes` + respond; returns `contacts` |
+| `collision.js` | `resolveCollision`: per-axis integrate + point-sample the type's `probes` against grid tiles AND solid env objects + respond; returns `contacts` |
 | `world.js` | `World`: owns the actor list (`addActor`/`removeActor`), the environment-object list (`addEnvObject`), and the map; runs the pipeline and the react step; owns tile + env-object animations + block-bump hops; draws env objects (behind) then every actor |
 | `animator.js` | `Animator`: plays a sprite-set; owns all frame-cycling. Distinct from `actor_animations.js`, which only *names* the state to show |
 | `tiles.js` | `TILES` registry + `isSolid`. Level-grid cell types — nothing to do with CHR tiles |
@@ -325,10 +330,11 @@ move or the scenario measures nothing — and `bumpTick = -1` is what that looks
 Check the scenario still exercises its phase; a scalar quietly going -1 or a state
 vanishing from `statesSeen` is coverage loss wearing a passing test's clothes.
 
-Nine scenarios cover every phase of the tick, not just the physics — `qblock_bump`
-exercises the **react** phase (`TILES.onBump` → hop → `3` spends to `5`) and
-`anim_states` the **present** phase. A fingerprint covering only intent+collide
-would stay green while a restructure silently stopped dispatching block bumps.
+Eleven scenarios cover every phase of the tick, not just the physics — `qblock_bump`
+exercises the **react** phase (`TILES.onBump` → hop → `3` spends to `5`), `anim_states`
+the **present** phase, and `env_land` / `env_wall` the **env-solid pass** (a free 16 px
+block Mario lands on / stops at). A fingerprint covering only intent+collide would stay
+green while a restructure silently stopped dispatching block bumps.
 
 Each scenario reduces to a hash of its full per-tick trace (catches any drift, at
 full float precision) plus a few readable scalars (which say *what* moved when it

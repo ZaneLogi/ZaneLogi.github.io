@@ -123,5 +123,21 @@ export const BASELINE = {
       "state": "walk",
       "restsOnFloor": true
     }
+  },
+  "env_land": {
+    "hash": "42f904d9",
+    "scalars": {
+      "landTick": 79,
+      "restY": 267.99,
+      "groundRefKind": "env"
+    }
+  },
+  "env_wall": {
+    "hash": "fa965377",
+    "scalars": {
+      "stopTick": 104,
+      "stopX": 226.99,
+      "rightContact": false
+    }
   }
 };

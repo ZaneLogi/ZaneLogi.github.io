@@ -73,9 +73,10 @@ export class World {
     // 2. move — the type's movement turns intent + last tick's contacts -> velocity
     for (const obj of this.objects) obj.actor.def.move(obj.actor, obj.intent, dt);
 
-    // 3. collide — integrate and resolve against the tiles -> fresh contacts
+    // 3. collide — integrate and resolve against the tiles AND solid env objects
+    //    -> fresh contacts
     for (const obj of this.objects) {
-      obj.actor.contacts = resolveCollision(obj.actor, this.levelMap, dt);
+      obj.actor.contacts = resolveCollision(obj.actor, this.levelMap, this.envObjects, dt);
     }
 
     // 4. react — the world responds to what was touched
@@ -104,8 +105,15 @@ export class World {
   reactToContacts(actor) {
     const b = actor.contacts.bumped;
     if (!b) return;
-    const id = this.levelMap.tileData[b.ty]?.[b.tx];
-    TILES[id]?.onBump?.(this, b.tx, b.ty, actor);
+    if (b.kind === 'tile') {
+      const id = this.levelMap.tileData[b.ty]?.[b.tx];
+      TILES[id]?.onBump?.(this, b.tx, b.ty, actor);
+    } else if (b.kind === 'env') {
+      // Env head-bump reaction (onBump) arrives in step 3; a solid with no reaction
+      // just blocks. (onLand, for a spring, will hang off groundRef then.) The
+      // dispatch lives here so the world stays the decider.
+      b.obj.def.onBump?.(this, b.obj, actor);
+    }
   }
 
   // Start a block's up-and-down hop (ignored if it is already hopping).

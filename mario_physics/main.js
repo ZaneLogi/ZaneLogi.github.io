@@ -60,11 +60,12 @@ const goomba = new Actor(ACTOR_TYPES.goomba, 400, 0);
 goomba.facing = -1; // start it walking left, into the steps
 world.addActor(goomba, new Animator(ACTOR_TYPES.goomba.sprites));
 
-// Step 1 smoke test: one environment brick, drawn from the ROM's own CHR at 1x
-// (16 px). Placed at a deliberately OFF-grid x (150) to show env objects are
-// free-positioned, not tied to the 32 px tile grid. It only renders — collision
-// arrives in step 2, so Mario passes straight through it for now.
-world.addEnvObject(ENV_TYPES.brick, 150, 300);
+// Bricks, drawn from the ROM's own CHR at 1x (16 px), free-positioned (off the 32 px
+// grid). As of step 2 they are SOLID: the first sits on the floor in Mario's path
+// (walk into it → stop at its left face; jump → land on its top); the second floats
+// as a head-bump target (bump from below → blocked; the onBump reaction is step 3).
+world.addEnvObject(ENV_TYPES.brick, 160, 464);
+world.addEnvObject(ENV_TYPES.brick, 192, 432);
 
 // ----------------------
 // Input handling
