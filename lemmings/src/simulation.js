@@ -39,6 +39,9 @@ export class Simulation {
     this.objectMap = objectMap;
     /** @type {Array} interactive objects in placement order (§17.2) — trap runtime */
     this.objects = objects;
+    /** @type {?import('./spawner.js').Spawner} the Chapter-13 spawner, or null for
+     * directly-placed demos. When set, step() runs frame phases 3–4 (§12.1). */
+    this.spawner = null;
     /** @type {Lemming[]} list order = spawn order; index is identity (§11.1, §12.3) */
     this.lemmings = [];
     this.frame = 0;
@@ -61,7 +64,26 @@ export class Simulation {
    * @returns {Lemming} the created lemming
    */
   addLemming(x, y, direction = 1, action = ACTION.FALLING) {
-    const lem = new Lemming(x, y, direction, action);
+    return this._append(new Lemming(x, y, direction, action));
+  }
+
+  /**
+   * Attach a Chapter-13 spawner. Once attached, step() runs the opening timeline
+   * (§13.1) and the release stream (§13.2–13.5) each frame instead of relying on
+   * direct addLemming placement.
+   * @param {import('./spawner.js').Spawner} spawner
+   * @returns {void}
+   */
+  setSpawner(spawner) { this.spawner = spawner; }
+
+  /**
+   * Append a lemming to the tail of the list (spawn order = list order, §12.3) and
+   * move the population counters: released and out both +1 (§11.3). Shared by direct
+   * placement (addLemming) and the spawner's release (§13.5).
+   * @param {Lemming} lem
+   * @returns {Lemming}
+   */
+  _append(lem) {
     lem.listIndex = this.lemmings.length;
     this.lemmings.push(lem);
     this.released += 1;
@@ -78,6 +100,16 @@ export class Simulation {
    */
   step() {
     this.frame += 1;
+
+    // Phases 3–4 (§12.1) — the spawner, when attached. Phase 3 opens the entrances
+    // at frame 35 (§13.1); phase 4 runs the release countdown and may release one
+    // lemming (§13.2–13.5). It is appended BEFORE the lemming loop so §13.5 holds:
+    // the fresh lemming is processed by phase 5 this same frame, at the list tail.
+    if (this.spawner) {
+      this.spawner.advanceTime(this.frame);
+      const spawned = this.spawner.step(this.released);
+      if (spawned) this._append(spawned);
+    }
 
     // Phase 5 — process every lemming, in strict list order (§12.3). Per-lemming
     // sub-order: particle timer → skip removed → fuse → handler → object interaction.
