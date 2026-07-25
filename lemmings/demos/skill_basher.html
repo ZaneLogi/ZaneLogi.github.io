@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Throng — Skill: Basher</title>
+<link rel="stylesheet" href="./skill.css">
+</head>
+<body>
+  <h1 id="title">Basher</h1>
+  <p class="sub" id="hint"></p>
+  <p class="nav">
+    <a href="./locomotion.html">↤ locomotion gallery</a>
+    <a href="./skill_blocker.html">Blocker</a>
+    <a href="./skill_digger.html">Digger</a>
+    <a href="./skill_builder.html">Builder</a>
+    <a href="./skill_miner.html">Miner</a>
+  </p>
+  <p class="sub">The skill auto-assigns after a beat, then re-runs on a loop. You can also
+    <strong>click a lemming</strong> to assign it (the faithful 13×13 hit box), or use the buttons.
+    The grey steel cap is in the object map, not the terrain buffer — the basher <em>stops</em> at it
+    rather than the mask sparing those pixels (§16.7).</p>
+
+  <div class="controls">
+    <div class="group" id="speed">
+      <button data-ms="100">Slow</button>
+      <button data-ms="58" class="on">Normal</button>
+      <button data-ms="20">Fast</button>
+    </div>
+    <button id="playPause" class="on">⏸ Pause</button>
+    <button id="stepBtn">⏭ Step</button>
+    <button id="assignBtn">✚ Assign</button>
+    <button id="resetBtn">↻ Reset</button>
+    <label>Zoom <input id="scale" type="range" min="2" max="5" step="1" value="3"><span id="scaleVal">3×</span></label>
+    <label><input id="triggers" type="checkbox" checked> Show triggers/field</label>
+  </div>
+
+  <div class="stagewrap"><canvas id="stage"></canvas></div>
+  <div id="hud"></div>
+  <div id="error" class="err"></div>
+
+  <script type="module">
+    import { runStage } from './skill_stage.js';
+    import { SKILL_SCENARIOS } from './skill_scenarios.js';
+    runStage(SKILL_SCENARIOS.basher);
+  </script>
+</body>
+</html>

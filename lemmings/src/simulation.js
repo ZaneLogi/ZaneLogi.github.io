@@ -12,7 +12,7 @@
 // end check (§19) are available via addLemming / counters but not driven here.
 
 import { Lemming, ACTION } from './lemming.js';
-import { HANDLERS } from './handlers.js';
+import { HANDLERS, SELF_ADVANCE } from './handlers.js';
 import { objectInteraction } from './object_interaction.js';
 import { advanceFrame } from './animation.js';
 
@@ -77,15 +77,18 @@ export class Simulation {
     for (const lem of this.lemmings) {
       if (lem.isRemoved) continue;
 
-      // §12.4 — advance the animation frame BEFORE the handler runs (§15.0). A
+      // §12.4 — advance the animation frame BEFORE the handler runs (§15.0), except
+      // for self-advancing actions (digging) that manage `frame` themselves. A
       // transition inside the handler resets frame to 0, overriding this advance.
-      const adv = advanceFrame(lem.frame, { frames: lem.frames, loop: lem.loop });
-      lem.frame = adv.frame;
-      lem.endOfAnimation = adv.endOfAnimation;
+      if (!SELF_ADVANCE.has(lem.action)) {
+        const adv = advanceFrame(lem.frame, { frames: lem.frames, loop: lem.loop });
+        lem.frame = adv.frame;
+        lem.endOfAnimation = adv.endOfAnimation;
+      }
 
       // Run the current action's handler; it returns whether to check objects.
       const handler = HANDLERS[lem.action];
-      const checkObjects = handler ? handler(lem, this.terrain) : true;
+      const checkObjects = handler ? handler(lem, this.terrain, this.objectMap) : true;
 
       // §17 — object interaction at the new position, if the handler asked and the
       // lemming is still in play.

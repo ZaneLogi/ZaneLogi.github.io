@@ -1,0 +1,42 @@
+/* lemmings/demos/skill.css — shared styling for the per-skill stage pages. */
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 24px;
+  font: 14px/1.5 system-ui, sans-serif;
+  background: #12141c; color: #d7dae3;
+}
+h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: .3px; }
+.sub { margin: 0 0 18px; color: #8b90a0; font-size: 13px; max-width: 760px; }
+.sub code { color: #aab; background: #1d2030; padding: 1px 5px; border-radius: 4px; }
+.nav { margin: 0 0 18px; font-size: 13px; }
+.nav a { color: #7f9be6; text-decoration: none; margin-right: 12px; }
+.nav a:hover { text-decoration: underline; }
+
+.controls {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  background: #1a1d29; border: 1px solid #262a3a; border-radius: 10px;
+  padding: 12px 16px; margin-bottom: 16px;
+}
+.controls label { display: flex; align-items: center; gap: 8px; color: #b9bece; }
+.controls .group { display: flex; gap: 6px; }
+button {
+  font: inherit; color: #d7dae3; background: #262a3a;
+  border: 1px solid #333853; border-radius: 7px; padding: 6px 12px; cursor: pointer;
+}
+button:hover { background: #2f3448; }
+button.on { background: #3a5bd0; border-color: #4a6be0; color: #fff; }
+button#assignBtn { background: #2f6b3a; border-color: #3f8a4a; color: #eafff0; }
+button#assignBtn:hover { background: #3a7f47; }
+input[type=range] { accent-color: #4a6be0; }
+
+.stagewrap {
+  background: #0a0c12; border: 1px solid #262a3a; border-radius: 10px;
+  padding: 12px; display: inline-block; overflow-x: auto; max-width: 100%;
+}
+canvas#stage { image-rendering: pixelated; display: block; cursor: pointer; }
+#hud {
+  margin-top: 10px; color: #9fd0a6; font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre;
+}
+.err { color: #ff8080; white-space: pre-wrap; font-family: ui-monospace, monospace; margin-top: 12px; }

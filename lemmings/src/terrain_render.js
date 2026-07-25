@@ -45,6 +45,10 @@ const DEBUG_COLORS = {
   [EFFECT.STEEL]: 'rgba(200,200,210,0.45)',
   [EFFECT.ONE_WAY_LEFT]: 'rgba(210,80,220,0.45)',
   [EFFECT.ONE_WAY_RIGHT]: 'rgba(80,210,220,0.45)',
+  // Blocker field (§4.5) — a blocker writes these; shown so its arms are visible.
+  [EFFECT.FORCE_LEFT]: 'rgba(240,180,40,0.45)',
+  [EFFECT.FORCE_RIGHT]: 'rgba(240,120,40,0.45)',
+  [EFFECT.BLOCKER]: 'rgba(240,220,120,0.30)',
 };
 
 // Overlay the object map's trigger regions onto ctx (world coordinates). Traps

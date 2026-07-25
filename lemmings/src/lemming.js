@@ -10,9 +10,9 @@ import { LEMMING_ANIMATIONS } from '../assets/animation_metadata.js';
 /**
  * A lemming action state — the string doubles as the animation base name (§9),
  * so the renderer resolves the facing variant with
- * `SpriteSheet.directional(action, direction < 0)`. Only the Phase-1 locomotion +
- * terminal states are listed; skills join in Phase 2.
- * @typedef {'walking'|'jumping'|'falling'|'splatting'|'drowning'|'vaporizing'|'exiting'} Action
+ * `SpriteSheet.directional(action, direction < 0)`.
+ * @typedef {'walking'|'jumping'|'falling'|'splatting'|'drowning'|'vaporizing'|'exiting'
+ *   |'building'|'bashing'|'mining'|'digging'|'blocking'|'shrugging'} Action
  */
 
 /**
@@ -32,6 +32,13 @@ export const ACTION = {
   DROWNING: 'drowning',
   VAPORIZING: 'vaporizing',
   EXITING: 'exiting',
+  // Phase-2 skill states.
+  BUILDING: 'building',
+  BASHING: 'bashing',
+  MINING: 'mining',
+  DIGGING: 'digging',
+  BLOCKING: 'blocking',
+  SHRUGGING: 'shrugging',
 };
 
 // frames / loop per animation, keyed by base name. Mirrored (_rtl) variants share
@@ -104,6 +111,8 @@ export class Lemming {
     this.endOfAnimation = false;
     /** @type {number} position in the lemming list — identity (set by Simulation) */
     this.listIndex = -1;
+    /** @type {number[]|null} the nine object-map cells a blocker overwrote (§4.5) */
+    this.savedMap = null;
 
     // --- derived cache (§11.2): the current animation's frame count, loop mode,
     // and foot anchor. The anchor feeds the head-bound clamp (§2.3, §15.19) and
@@ -173,16 +182,34 @@ export class Lemming {
 
   /**
    * §14.4 — entry initialisation for the new state. Most states do nothing beyond
-   * the common reset in step 3; the Phase-1 special case is Splatting. Skill entry
-   * inits (Building/Digging/Floating/Blocking/Mining) arrive in Phase 2.
+   * the common reset in step 3; these have extra entry actions.
+   *
+   * Note: Blocking's object-map field write (§4.5) is NOT here — it needs the
+   * object map, which this record does not hold. The assignment site writes the
+   * field right after this transition (blocker.js, §18.5); here we only flag the
+   * lemming as blocking.
    * @param {Action} action
    * @returns {void}
    */
   _entryInit(action) {
-    if (action === ACTION.SPLATTING) {
-      this.explosionTimer = 0;     // cancel any fuse
-      this.direction = 0;          // a splatter has no facing (§14.4)
+    switch (action) {
+      case ACTION.SPLATTING:
+        this.explosionTimer = 0;   // cancel any fuse
+        this.direction = 0;        // a splatter has no facing (§14.4)
+        break;
+      case ACTION.BUILDING:
+        this.bricksLeft = 12;      // a builder's staircase budget (§15.7)
+        break;
+      case ACTION.DIGGING:
+        this.isNewDigger = true;   // dig on the first frame (§15.10)
+        break;
+      case ACTION.MINING:
+        this.y += 1;               // entering mining nudges the lemming down 1px (§14.4)
+        break;
+      case ACTION.BLOCKING:
+        this.isBlocking = true;    // field write happens at the assignment site (§4.5)
+        break;
+      // Falling: `fallen` stays 0 — the faller-starts-at-3 variant (§20) is off.
     }
-    // Falling: `fallen` stays 0 here — the faller-starts-at-3 variant (§20) is off.
   }
 }
