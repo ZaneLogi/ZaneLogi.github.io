@@ -20,9 +20,12 @@ import { ACTION } from './lemming.js';
  * FOOT cell only — at most one effect per lemming per frame (§17.3).
  * @param {Lemming} lem
  * @param {ObjectMap} objectMap
+ * @param {Array<{animType:number, frameCount:number, startFrame:number, triggered:boolean, frame:number}>} [objects]
+ *   the interactive-object runtime list (§17.2), indexed by the trap value in the
+ *   object map. Empty/omitted on stages with no traps.
  * @returns {void}
  */
-export function objectInteraction(lem, objectMap) {
+export function objectInteraction(lem, objectMap, objects = []) {
   // §17.1 — the two probes: below (the foot) drives interaction; in-front is a
   // convenience cache consumed later by bashing/mining/assignment (Chapters 15, 18).
   const below = objectMap.read(lem.x, lem.y);
@@ -31,7 +34,18 @@ export function objectInteraction(lem, objectMap) {
 
   // §17.3 — a single decision on objectBelow.
   if (below <= 127) {
-    // 0..127 is a trap index (§4.2); traps (§17.4) arrive in Phase 2.
+    // §17.4 — 0..127 is a trap index into the interactive-object list (§4.2, §17.2).
+    // Trigger that trap if it exists and is NOT already busy: mark it triggered,
+    // start its animation, and remove the lemming (§15.19 — it dies with no death
+    // animation of its own; the trap animates instead). A trap mid-animation
+    // ignores lemmings until it re-arms (§17.5), so a second one crosses unharmed.
+    const trap = objects[below];
+    if (trap && !trap.triggered) {
+      trap.triggered = true;
+      trap.frame = trap.startFrame;   // §17.4 start-frame (Chapter-20 variant)
+      lem.isRemoved = true;           // §15.19 — the lemming dies
+      // cueSound(trap.soundId) — audio is Chapter 24 (no software counterpart here)
+    }
     return;
   }
   switch (below) {

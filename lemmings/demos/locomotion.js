@@ -40,7 +40,10 @@ async function init() {
     const terrain = new Terrain();
     const objectMap = new ObjectMap();
     scenario.build(terrain, objectMap);
-    const sim = new Simulation(terrain, objectMap);
+    // Interactive objects (§17.2) — the trap runtime a trap stage indexes; empty
+    // for every other stage. Persist across respawns so a trap keeps its state.
+    const objects = scenario.objects ? scenario.objects() : [];
+    const sim = new Simulation(terrain, objectMap, objects);
     scenario.spawn(sim);
 
     const terrainCanvas = buildTerrainCanvas(terrain, { solidColor: TERRAIN_COLOR });
@@ -182,7 +185,14 @@ function updateMeta(p) {
     stateText = '(respawning)'.padEnd(12);
   }
   const lost = p.sim.removed - p.sim.saved;
-  p.meta.textContent = `${stateText}  saved ${String(p.sim.saved).padStart(2)}  lost ${String(lost).padStart(2)}`;
+  // Trap stages append a fixed-width armed/busy tag (UI convention: pad so the line
+  // never jitters) so the §17.4 re-arm is legible in text, not just in the pixels.
+  let trapTag = '';
+  if (p.sim.objects.length) {
+    const busy = p.sim.objects.some((o) => o.triggered);
+    trapTag = '  trap ' + (busy ? 'busy ' : 'armed');
+  }
+  p.meta.textContent = `${stateText}  saved ${String(p.sim.saved).padStart(2)}  lost ${String(lost).padStart(2)}${trapTag}`;
 }
 
 function wireControls() {

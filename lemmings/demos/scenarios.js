@@ -12,6 +12,7 @@
 
 import { ACTION } from '../src/lemming.js';
 import { EFFECT } from '../src/object_map.js';
+import { makeTrap } from '../src/interactive_object.js';
 
 /** @typedef {import('../src/terrain.js').Terrain} Terrain */
 /** @typedef {import('../src/object_map.js').ObjectMap} ObjectMap */
@@ -27,6 +28,8 @@ import { EFFECT } from '../src/object_map.js';
  * @property {(terrain: Terrain, objectMap: ObjectMap) => void} build paint the stage's terrain + triggers
  * @property {(sim: Simulation) => void} spawn add the walker(s) for one run
  * @property {boolean} [showTriggers] overlay the object-map trigger regions (hazard stages)
+ * @property {() => Array<object>} [objects] the interactive-object runtime list (§17.2)
+ *   for stages with traps; each index matches a trap value painted into the object map
  */
 
 const FLOOR = 128;   // common floor top (world y); floors run down to the world bottom
@@ -142,5 +145,32 @@ const fire = {
   spawn(sim) { sim.addLemming(20, FLOOR, 1, ACTION.WALKING); },
 };
 
+/** Walk onto a TRAP trigger → killed instantly; the trap is then busy and re-arms (§17.4). */
+const trap = {
+  id: 'trap', title: 'Trap', hint: 'walk into a trap → killed; it re-arms (§17.4)',
+  showTriggers: true,
+  view: { x: 0, y: 100, w: 120, h: 60 },
+  build(terrain, objectMap) {
+    terrain.fillRect(0, FLOOR, 120, 32);
+    terrain.fillRect(6, 112, 6, 16);          // left wall (survivors bounce back)
+    terrain.fillRect(108, 112, 6, 16);        // right wall
+    // Trap #0's trigger region — painted with the object-map INDEX 0 (a trap value,
+    // §4.2), straddling the foot line y=128 so the foot probe (§4.4) samples it.
+    objectMap.paintRect(60, 124, 10, 12, 0);
+  },
+  // The interactive-object list (§17.2): objects[0] is the trap the region indexes.
+  // frameCount = its busy period (fake data — a synthetic trap owes nothing to a
+  // real one; this IS its animation length here).
+  objects: () => [makeTrap({ frameCount: 16 })],
+  spawn(sim) {
+    // A short column of walkers renders the §17.4 cadence visible: the leader trips
+    // the trap and dies; the one close behind reaches it while it is BUSY and walks
+    // over unharmed; by the time a walker returns, the trap has re-armed and kills
+    // again. (The deterministic proof of this is in locomotion_selftest.html.)
+    sim.addLemming(24, FLOOR, 1, ACTION.WALKING);
+    sim.addLemming(16, FLOOR, 1, ACTION.WALKING);
+  },
+};
+
 /** @type {Scenario[]} the gallery, in display order. */
-export const SCENARIOS = [pace, steps, hop, softFall, splat, exit, water, fire];
+export const SCENARIOS = [pace, steps, hop, softFall, splat, exit, water, fire, trap];

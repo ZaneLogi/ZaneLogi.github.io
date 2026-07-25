@@ -14,6 +14,7 @@
 import { Lemming, ACTION } from './lemming.js';
 import { HANDLERS, SELF_ADVANCE } from './handlers.js';
 import { objectInteraction } from './object_interaction.js';
+import { advanceObject } from './interactive_object.js';
 import { advanceFrame } from './animation.js';
 
 /** @typedef {import('./terrain.js').Terrain} Terrain */
@@ -29,10 +30,15 @@ export class Simulation {
   /**
    * @param {Terrain} terrain the collision-geometry pixel buffer (Chapter 3)
    * @param {ObjectMap} objectMap the trigger/steel grid (Chapter 4)
+   * @param {Array<{animType:number, frameCount:number, startFrame:number, triggered:boolean, frame:number}>} [objects]
+   *   the interactive-object runtime list (§17.2) — traps and other animated
+   *   objects the trap value in the object map indexes. Empty on stages with none.
    */
-  constructor(terrain, objectMap) {
+  constructor(terrain, objectMap, objects = []) {
     this.terrain = terrain;
     this.objectMap = objectMap;
+    /** @type {Array} interactive objects in placement order (§17.2) — trap runtime */
+    this.objects = objects;
     /** @type {Lemming[]} list order = spawn order; index is identity (§11.1, §12.3) */
     this.lemmings = [];
     this.frame = 0;
@@ -109,8 +115,9 @@ export class Simulation {
       const checkObjects = handler ? handler(lem, this.terrain, this.objectMap) : true;
 
       // §17 — object interaction at the new position, if the handler asked and the
-      // lemming is still in play.
-      if (checkObjects && !lem.isRemoved) objectInteraction(lem, this.objectMap);
+      // lemming is still in play. Passes the interactive-object list so a trap
+      // trigger (§17.4) can find and busy the trap the foot cell indexes.
+      if (checkObjects && !lem.isRemoved) objectInteraction(lem, this.objectMap, this.objects);
 
       // Reconcile counters when a lemming leaves play. Removal (§15.19) decrements
       // out and increments removed; the exit path (§15.18) also counts a save —
@@ -121,6 +128,11 @@ export class Simulation {
         if (lem.action === ACTION.EXITING) this.saved += 1;
       }
     }
+
+    // Phase 7 (§17.5) — advance every interactive object's animation. For a trap
+    // this is the re-arm: its frame advances only while triggered and clears the
+    // flag on wrap, ending the busy window opened by the §17.4 trigger above.
+    for (const obj of this.objects) advanceObject(obj);
   }
 
   /**
