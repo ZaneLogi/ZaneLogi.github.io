@@ -15,36 +15,65 @@ export class Terrain {
     this.solid = new Uint8Array(WORLD_W * WORLD_H);
   }
 
-  // §3.2 — the solidity query. Total over all integers; out of bounds is EMPTY
-  // (not blocked), which is what makes the right-edge cliff work (§2.3).
+  /**
+   * §3.2 — the solidity query: is pixel `(x, y)` solid terrain? Total over all
+   * integers; out of bounds is EMPTY (not blocked), which is what makes the
+   * right-edge cliff work (§2.3).
+   * @param {number} x
+   * @param {number} y
+   * @returns {boolean}
+   */
   hasTerrain(x, y) {
     if (x < 0 || y < 0 || x >= WORLD_W || y >= WORLD_H) return false;
     return this.solid[y * WORLD_W + x] !== 0;
   }
 
-  // §3.3 — clamped query: probe at max(y, minY). Used where a probe may reach
-  // above the top of the world; not interchangeable with hasTerrain.
+  /**
+   * §3.3 — clamped query: probe at `max(y, minY)`. Used where a probe may reach
+   * above the top of the world; not interchangeable with hasTerrain.
+   * @param {number} x
+   * @param {number} y
+   * @param {number} minY floor the probe's y at this value
+   * @returns {boolean}
+   */
   hasTerrainClamped(x, y, minY) {
     return this.hasTerrain(x, y < minY ? minY : y);
   }
 
-  // §3.4 — remove one pixel, unconditional; out-of-bounds writes discarded.
+  /**
+   * §3.4 — remove one pixel, unconditional; out-of-bounds writes discarded.
+   * @param {number} x
+   * @param {number} y
+   * @returns {void}
+   */
   removeTerrain(x, y) {
     if (x < 0 || y < 0 || x >= WORLD_W || y >= WORLD_H) return;
     this.solid[y * WORLD_W + x] = 0;
   }
 
-  // Make one pixel solid — the builder's brick (§16.5) and initial construction.
-  // Terrain is only ever added here or by a brick; never restored (§3.4).
+  /**
+   * Make one pixel solid — the builder's brick (§16.5) and initial construction.
+   * Terrain is only ever added here or by a brick; never restored (§3.4).
+   * @param {number} x
+   * @param {number} y
+   * @returns {void}
+   */
   setSolid(x, y) {
     if (x < 0 || y < 0 || x >= WORLD_W || y >= WORLD_H) return;
     this.solid[y * WORLD_W + x] = 1;
   }
 
-  // Construction convenience: fill a solid rectangle, clipped to the world.
-  // Used to assemble synthetic terrain (the real path assembles from piece
-  // masks, Ch 8 — but the buffer is a one-way funnel: it does not care how it
-  // was filled, §3.6).
+  /**
+   * Construction convenience: fill a solid rectangle, clipped to the world. Used
+   * to assemble synthetic terrain (the real path assembles from piece masks,
+   * Ch 8 — but the buffer is a one-way funnel: it does not care how it was
+   * filled, §3.6).
+   * @param {number} x top-left x
+   * @param {number} y top-left y
+   * @param {number} w width
+   * @param {number} h height
+   * @returns {void}
+   */
   fillRect(x, y, w, h) {
     const x0 = Math.max(0, x), y0 = Math.max(0, y);
     const x1 = Math.min(WORLD_W, x + w), y1 = Math.min(WORLD_H, y + h);

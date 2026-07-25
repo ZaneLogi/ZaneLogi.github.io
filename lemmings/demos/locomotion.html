@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Throng — Lemming ↔ Terrain Locomotion</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    font: 14px/1.5 system-ui, sans-serif;
+    background: #12141c; color: #d7dae3;
+  }
+  h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: .3px; }
+  .sub { margin: 0 0 20px; color: #8b90a0; font-size: 13px; max-width: 780px; }
+  .sub code { color: #aab; background: #1d2030; padding: 1px 5px; border-radius: 4px; }
+
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+    background: #1a1d29; border: 1px solid #262a3a; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 22px; position: sticky; top: 8px; z-index: 2;
+  }
+  .controls label { display: flex; align-items: center; gap: 8px; color: #b9bece; }
+  .controls .group { display: flex; gap: 6px; }
+  button {
+    font: inherit; color: #d7dae3; background: #262a3a;
+    border: 1px solid #333853; border-radius: 7px; padding: 6px 12px; cursor: pointer;
+  }
+  button:hover { background: #2f3448; }
+  button.on { background: #3a5bd0; border-color: #4a6be0; color: #fff; }
+  input[type=range] { accent-color: #4a6be0; }
+
+  .grid {
+    display: grid; gap: 16px; align-items: start;
+    grid-template-columns: repeat(auto-fill, minmax(var(--cell, 220px), 1fr));
+  }
+  figure {
+    margin: 0; background: #0c0e15; border: 1px solid #232838; border-radius: 10px;
+    padding: 10px 10px 8px; text-align: center;
+  }
+  .box {
+    display: flex; align-items: flex-end; justify-content: center;
+    background: #0a0c12; border-radius: 6px; overflow: hidden; min-height: 40px;
+  }
+  canvas { image-rendering: pixelated; display: block; }
+  figcaption { margin-top: 8px; text-align: left; }
+  .name { display: block; font-weight: 600; color: #e7eaf3; }
+  .hint { display: block; color: #7d8398; font-size: 12px; margin: 1px 0 4px; }
+  .meta { display: block; color: #9fd0a6; font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
+  .err { color: #ff8080; white-space: pre-wrap; font-family: ui-monospace, monospace; margin-top: 14px; }
+</style>
+</head>
+<body>
+  <h1>Throng — Lemming ↔ Terrain Locomotion</h1>
+  <p class="sub">
+    Each panel is one small stage driving the headless <code>src/simulation.js</code>
+    over the <code>src/terrain.js</code> collision buffer — the same engine, a
+    different tiny world. Watch a lemming walk, step, hop, fall, splat, and hit the
+    exit / water / fire triggers. The green readout is the lemming's live action state.
+  </p>
+
+  <div class="controls">
+    <div class="group" id="speed">
+      <button data-ms="100">Slow</button>
+      <button data-ms="58" class="on">Normal</button>
+      <button data-ms="20">Fast</button>
+    </div>
+    <button id="playPause" class="on">⏸ Pause</button>
+    <button id="stepBtn">⏭ Step</button>
+    <button id="resetBtn">↻ Reset</button>
+    <label>Zoom <input id="scale" type="range" min="2" max="6" step="1" value="4"><span id="scaleVal">4×</span></label>
+    <label><input id="triggers" type="checkbox" checked> Show triggers</label>
+    <label><input id="foot" type="checkbox"> Show foot</label>
+  </div>
+
+  <div id="grid" class="grid"></div>
+  <div id="error" class="err"></div>
+
+  <script type="module" src="./locomotion.js"></script>
+</body>
+</html>

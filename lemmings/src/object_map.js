@@ -36,23 +36,44 @@ export class ObjectMap {
   _cellX(x) { return Math.floor(x / CELL) + BORDER_CELLS; }
   _cellY(y) { return Math.floor(y / CELL) + BORDER_CELLS; }
 
-  // §4.1 — out-of-range read returns NONE (not an error, not a blocking value).
+  /**
+   * §4.1 — read the object-map cell containing pixel `(x, y)`. Out-of-range
+   * returns NONE (not an error, not a blocking value).
+   * @param {number} x world pixel x
+   * @param {number} y world pixel y
+   * @returns {number} a cell value (§4.2): 0–127 trap index, or an EFFECT code
+   */
   read(x, y) {
     const cx = this._cellX(x), cy = this._cellY(y);
     if (cx < 0 || cy < 0 || cx >= COLS || cy >= ROWS) return EFFECT.NONE;
     return this.cells[cy * COLS + cx];
   }
 
-  // §4.1 — out-of-range write discarded.
+  /**
+   * §4.1 — write `value` into the cell containing pixel `(x, y)`. Out-of-range
+   * write discarded.
+   * @param {number} x world pixel x
+   * @param {number} y world pixel y
+   * @param {number} value cell value (§4.2)
+   * @returns {void}
+   */
   write(x, y, value) {
     const cx = this._cellX(x), cy = this._cellY(y);
     if (cx < 0 || cy < 0 || cx >= COLS || cy >= ROWS) return;
     this.cells[cy * COLS + cx] = value;
   }
 
-  // Paint every cell a pixel rectangle touches with an effect/trap value — a
-  // trigger region or a steel area (§4.3). The value wins over whatever was
-  // there (later writes overwrite earlier, §4.3).
+  /**
+   * Paint every cell a pixel rectangle touches with an effect/trap value — a
+   * trigger region or a steel area (§4.3). The value wins over whatever was there
+   * (later writes overwrite earlier, §4.3).
+   * @param {number} x top-left x (world pixels)
+   * @param {number} y top-left y (world pixels)
+   * @param {number} w width (world pixels)
+   * @param {number} h height (world pixels)
+   * @param {number} value cell value (§4.2)
+   * @returns {void}
+   */
   paintRect(x, y, w, h, value) {
     const cx0 = Math.max(0, this._cellX(x));
     const cx1 = Math.min(COLS - 1, this._cellX(x + w - 1));
