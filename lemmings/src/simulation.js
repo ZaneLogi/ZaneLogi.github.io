@@ -73,9 +73,27 @@ export class Simulation {
   step() {
     this.frame += 1;
 
-    // Phase 5 — process every lemming, in strict list order (§12.3).
+    // Phase 5 — process every lemming, in strict list order (§12.3). Per-lemming
+    // sub-order: particle timer → skip removed → fuse → handler → object interaction.
     for (const lem of this.lemmings) {
+      // §12.3 step 1 — advance the post-explosion particle animation (runs even for
+      // the removed, exploded lemming).
+      if (lem.particleTimer > 0) lem.particleTimer -= 1;
+
+      // §12.3 step 2 — a removed lemming does nothing further.
       if (lem.isRemoved) continue;
+
+      // §12.3 step 3 — the bomber fuse: count down, and on reaching 0 transition to
+      // Ohnoing (or straight to Exploding if airborne/floating/drowning), then skip
+      // the rest of this lemming's processing this frame.
+      if (lem.explosionTimer > 0) {
+        lem.explosionTimer -= 1;
+        if (lem.explosionTimer === 0) {
+          const airborne = lem.action === ACTION.FALLING || lem.action === ACTION.FLOATING || lem.action === ACTION.DROWNING;
+          lem.transition(airborne ? ACTION.EXPLODING : ACTION.OHNOING);
+          continue;
+        }
+      }
 
       // §12.4 — advance the animation frame BEFORE the handler runs (§15.0), except
       // for self-advancing actions (digging) that manage `frame` themselves. A

@@ -10,6 +10,7 @@ import { Simulation } from '../src/simulation.js';
 import { Terrain } from '../src/terrain.js';
 import { ObjectMap } from '../src/object_map.js';
 import { SpriteSheet } from '../src/sprite_sheet.js';
+import { animationName } from '../src/lemming.js';
 import { buildTerrainCanvas, paintObjectMapDebug } from '../src/terrain_render.js';
 
 const SKY = '#0e1524';
@@ -156,7 +157,7 @@ function renderPanel(p) {
   ctx.drawImage(p.comp, 0, 0, view.w, view.h, 0, 0, view.w * s, view.h * s);
 
   for (const lem of p.sim.liveLemmings()) {
-    const name = sheet.directional(lem.action, lem.direction < 0);
+    const name = sheet.directional(animationName(lem.action), lem.direction < 0);
     const fx = (lem.x - view.x) * s;
     const fy = (lem.y - view.y) * s;
     sheet.drawFrame(ctx, name, lem.frame, fx, fy, s);

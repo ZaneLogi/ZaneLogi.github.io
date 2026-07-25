@@ -12,7 +12,8 @@ import { LEMMING_ANIMATIONS } from '../assets/animation_metadata.js';
  * so the renderer resolves the facing variant with
  * `SpriteSheet.directional(action, direction < 0)`.
  * @typedef {'walking'|'jumping'|'falling'|'splatting'|'drowning'|'vaporizing'|'exiting'
- *   |'building'|'bashing'|'mining'|'digging'|'blocking'|'shrugging'} Action
+ *   |'building'|'bashing'|'mining'|'digging'|'blocking'|'shrugging'
+ *   |'climbing'|'hoisting'|'floating'|'ohnoing'|'exploding'} Action
  */
 
 /**
@@ -39,6 +40,13 @@ export const ACTION = {
   DIGGING: 'digging',
   BLOCKING: 'blocking',
   SHRUGGING: 'shrugging',
+  // Phase-3 states: the climber's Climbing/Hoisting, the floater's Floating, and
+  // the bomber's Ohnoing/Exploding.
+  CLIMBING: 'climbing',
+  HOISTING: 'hoisting',
+  FLOATING: 'floating',
+  OHNOING: 'ohnoing',
+  EXPLODING: 'exploding',
 };
 
 // frames / loop per animation, keyed by base name. Mirrored (_rtl) variants share
@@ -48,13 +56,29 @@ export const ACTION = {
 const ANIM = new Map();
 for (const a of LEMMING_ANIMATIONS) if (!ANIM.has(a.name)) ANIM.set(a.name, a);
 
+// Action → animation base name, for the cases where they differ. Almost all action
+// names double as their animation name (§9); the exception is the Floating state,
+// which is drawn with the "umbrella" animation.
+const ANIM_ALIAS = { floating: 'umbrella' };
+
+/**
+ * The animation base name for an action (identity except where §9's animation name
+ * differs from the action name, e.g. floating → umbrella). Used by both the
+ * simulation's metadata lookup and the renderer's facing resolution.
+ * @param {Action|string} action
+ * @returns {string}
+ */
+export function animationName(action) {
+  return ANIM_ALIAS[action] || action;
+}
+
 /**
  * Animation metadata for an action (throws if none — a programming error).
  * @param {Action|string} action
  * @returns {AnimInfo}
  */
 function animInfo(action) {
-  const a = ANIM.get(action);
+  const a = ANIM.get(animationName(action));
   if (!a) throw new Error('lemming: no animation metadata for action "' + action + '"');
   return a;
 }
@@ -113,6 +137,10 @@ export class Lemming {
     this.listIndex = -1;
     /** @type {number[]|null} the nine object-map cells a blocker overwrote (§4.5) */
     this.savedMap = null;
+    /** @type {boolean} the lemming has detonated — drives the particle scatter (§15.14) */
+    this.isExploded = false;
+    /** @type {number} post-explosion particle-animation countdown (presentation, §15.14) */
+    this.particleTimer = 0;
 
     // --- derived cache (§11.2): the current animation's frame count, loop mode,
     // and foot anchor. The anchor feeds the head-bound clamp (§2.3, §15.19) and
@@ -208,6 +236,9 @@ export class Lemming {
         break;
       case ACTION.BLOCKING:
         this.isBlocking = true;    // field write happens at the assignment site (§4.5)
+        break;
+      case ACTION.FLOATING:
+        this.floatIndex = 0;       // start of the descent table (§15.4)
         break;
       // Falling: `fallen` stays 0 — the faller-starts-at-3 variant (§20) is off.
     }

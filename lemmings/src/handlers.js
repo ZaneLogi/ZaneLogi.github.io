@@ -17,7 +17,7 @@
 
 import { ACTION } from './lemming.js';
 import { EFFECT } from './object_map.js';
-import { layBrick, digOneRow, applyBashMask, applyMineMask } from './terrain_mod.js';
+import { layBrick, digOneRow, applyBashMask, applyMineMask, applyExplosionMask } from './terrain_mod.js';
 import { restoreBlockerField } from './blocker.js';
 
 /** @typedef {import('./lemming.js').Lemming} Lemming */
@@ -72,8 +72,8 @@ function walking(lem, terrain) {
     let dy = 0;
     while (dy <= 6 && Tc(lem.x, lem.y - dy - 1, -dy - 1)) dy += 1;   // measure how high it rises
     if (dy > 6) {                                            // rises more than 6px ⇒ a wall
-      // isClimber ⇒ Climbing (Phase 2); no climber in Phase 1 ⇒ turn.
-      lem.turn();
+      if (lem.isClimber) lem.transition(ACTION.CLIMBING);    // a climber scales it
+      else lem.turn();                                       // everyone else turns
       return true;
     }
     if (dy >= 3) { lem.transition(ACTION.JUMPING); lem.y -= 2; }     // a 3..6px step also starts a Jump
@@ -122,7 +122,7 @@ function jumping(lem, terrain) {
 function falling(lem, terrain) {
   const Tc = (x, y, m) => terrain.hasTerrainClamped(x, y, m);
 
-  // isFloater ⇒ deploy the umbrella after fallen>16 (Phase 2). No floater in Phase 1.
+  if (lem.fallen > 16 && lem.isFloater) { lem.transition(ACTION.FLOATING); return true; }  // deploy the umbrella
 
   let dy = 0;
   while (dy < 3 && !Tc(lem.x, lem.y, dy)) {                  // fall up to 3px this frame
@@ -373,6 +373,131 @@ function shrugging(lem) {
   return false;
 }
 
+// ─── The climber's states (§15.5–15.6) ───────────────────────────────────────
+
+/**
+ * §15.5 Climbing — a walking climber that met a wall over 6px scales it (loop, 8
+ * frames). Lower half (0–3) watches for the top → Hoisting; upper half (4–7)
+ * climbs 1px/frame, and turns to Falling (pushed 2px off) at an overhang or the
+ * top world bound.
+ * @param {Lemming} lem
+ * @param {Terrain} terrain
+ * @returns {boolean} checkObjects
+ */
+function climbing(lem, terrain) {
+  const Tc = (x, y, m) => terrain.hasTerrainClamped(x, y, m);
+  const d = lem.direction;
+  if (lem.frame <= 3) {                                   // watch for the top
+    if (!Tc(lem.x, lem.y - 7 - lem.frame, 0)) {           // no terrain where the head is rising to ⇒ top
+      lem.y = lem.y - lem.frame + 2;
+      lem.transition(ACTION.HOISTING); clampToTop(lem);
+    }
+    return true;
+  }
+  lem.y -= 1;                                             // climb one pixel
+  if (lem.y - lem.footY < HEAD_MIN_Y || Tc(lem.x - d, lem.y - 8, -8)) {  // head past top, or overhang behind
+    lem.transition(ACTION.FALLING, true);                 // → Falling, turned
+    lem.x += lem.direction * 2;                           // pushed off the wall (direction already reversed)
+  }
+  return true;
+}
+
+/**
+ * §15.6 Hoisting — the pull-up after a successful climb (once, 8 frames). Hauls up
+ * 2px/frame over frames 0–4, holds 5–6, returns to Walking at the end. Frames 5–6
+ * suppress object interaction — the one mid-animation handler that does so.
+ * @param {Lemming} lem
+ * @returns {boolean} checkObjects
+ */
+function hoisting(lem) {
+  if (lem.frame <= 4) { lem.y -= 2; clampToTop(lem); return true; }
+  if (lem.endOfAnimation) { lem.transition(ACTION.WALKING); clampToTop(lem); return true; }
+  return false;                                           // frames 5–6: no motion, no object check
+}
+
+// ─── The floater's descent (§15.4) ───────────────────────────────────────────
+
+// §15.4 — the float table drives both `y` motion and the displayed frame from a
+// fixed 16-entry profile; the index loops 8→15→8, so a floater falls a steady 2px
+// per frame indefinitely (slow enough to always survive). The `dy` column is
+// normative (the spec tabulates it exactly); `f` (the umbrella animation frame) is
+// presentation — the spec leaves it free, so this is a plausible open-then-flap.
+const FLOAT_TABLE = [
+  { dy: 3, f: 0 }, { dy: 3, f: 1 }, { dy: 3, f: 2 }, { dy: 3, f: 3 },   // opening, fast 3px drop
+  { dy: -1, f: 4 }, { dy: 0, f: 5 }, { dy: 1, f: 6 }, { dy: 1, f: 7 },  // bob up + settle, umbrella open
+  { dy: 2, f: 4 }, { dy: 2, f: 5 }, { dy: 2, f: 6 }, { dy: 2, f: 7 },   // steady 2px, umbrella flapping
+  { dy: 2, f: 4 }, { dy: 2, f: 5 }, { dy: 2, f: 6 }, { dy: 2, f: 7 },
+];
+
+/**
+ * §15.4 Floating — the floater's slow descent (loop). Self-advances: it sets its
+ * displayed frame and its `dy` from FLOAT_TABLE[floatIndex] rather than the generic
+ * frame advance. Lands (→ Walking) when it meets ground, removed if it falls out.
+ * @param {Lemming} lem
+ * @param {Terrain} terrain
+ * @returns {boolean} checkObjects
+ */
+function floating(lem, terrain) {
+  const Tc = (x, y, m) => terrain.hasTerrainClamped(x, y, m);
+  const e = FLOAT_TABLE[lem.floatIndex];
+  lem.frame = e.f;                                        // displayed frame from the table
+  let dy = e.dy;
+  lem.floatIndex += 1;
+  if (lem.floatIndex >= 16) lem.floatIndex = 8;           // after 15, loop back to 8
+
+  if (dy <= 0) {
+    lem.y += dy;                                          // rise or hold
+  } else {
+    let minY = 0;
+    while (dy > 0) {                                      // descend dy px, stopping on ground
+      if (Tc(lem.x, lem.y, minY)) { lem.transition(ACTION.WALKING); return true; }
+      lem.y += 1; dy -= 1; minY += 1;
+    }
+  }
+  if (lem.y > LEMMING_MAX_Y) { lem.isRemoved = true; return false; }
+  return true;
+}
+
+// ─── The bomber's states (§15.13–15.14) ──────────────────────────────────────
+
+/**
+ * §15.13 Ohnoing — the countdown-expiry animation (once), entered when a fuse
+ * reaches 0 on the ground. Still subject to gravity and still checks objects, so it
+ * can reach an exit or hit a trap mid-animation; becomes Exploding at the end.
+ * @param {Lemming} lem
+ * @param {Terrain} terrain
+ * @returns {boolean} checkObjects
+ */
+function ohnoing(lem, terrain) {
+  const Tc = (x, y, m) => terrain.hasTerrainClamped(x, y, m);
+  if (lem.endOfAnimation) { lem.transition(ACTION.EXPLODING); return false; }
+  let dy = 0;
+  while (dy < 3 && !Tc(lem.x, lem.y, dy)) { dy += 1; lem.y += 1; }   // still falls if unsupported
+  if (lem.y > LEMMING_MAX_Y) { lem.isRemoved = true; return false; }
+  return true;
+}
+
+/**
+ * §15.14 Exploding — the detonation (once). At the end of the animation: undo any
+ * blocker field, blow a crater unless standing on steel or in water, remove, and
+ * launch the particle scatter. Terminal.
+ * @param {Lemming} lem
+ * @param {Terrain} terrain
+ * @param {ObjectMap} objectMap
+ * @returns {boolean} checkObjects
+ */
+function exploding(lem, terrain, objectMap) {
+  if (lem.endOfAnimation) {
+    if (lem.isBlocking) { lem.isBlocking = false; restoreBlockerField(lem, objectMap); }
+    const cell = objectMap.read(lem.x, lem.y);
+    if (cell !== EFFECT.STEEL && cell !== EFFECT.WATER) applyExplosionMask(terrain, lem);   // blow a crater
+    lem.isRemoved = true;
+    lem.isExploded = true;
+    lem.particleTimer = 52;                              // particle scatter (§15.14)
+  }
+  return false;
+}
+
 /**
  * Dispatch table: action name → handler. The frame pump (§12.3) looks the current
  * action up here.
@@ -392,12 +517,17 @@ export const HANDLERS = {
   [ACTION.DIGGING]: digging,
   [ACTION.BLOCKING]: blocking,
   [ACTION.SHRUGGING]: shrugging,
+  [ACTION.CLIMBING]: climbing,
+  [ACTION.HOISTING]: hoisting,
+  [ACTION.FLOATING]: floating,
+  [ACTION.OHNOING]: ohnoing,
+  [ACTION.EXPLODING]: exploding,
 };
 
 /**
  * Actions whose handler manages its own animation frame (§12.4), so the frame pump
- * must NOT run the generic advance for them. Digging self-advances (§15.10);
- * Floating will join here in a later phase.
+ * must NOT run the generic advance for them: digging (§15.10) and floating (§15.4,
+ * which drives its frame from the float table).
  * @type {Set<string>}
  */
-export const SELF_ADVANCE = new Set([ACTION.DIGGING]);
+export const SELF_ADVANCE = new Set([ACTION.DIGGING, ACTION.FLOATING]);

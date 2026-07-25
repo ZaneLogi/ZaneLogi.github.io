@@ -17,10 +17,27 @@ import { Terrain } from '../src/terrain.js';
 import { ObjectMap } from '../src/object_map.js';
 import { SpriteSheet } from '../src/sprite_sheet.js';
 import { paintObjectMapDebug } from '../src/terrain_render.js';
+import { animationName } from '../src/lemming.js';
 import { assignSkill, cursorHitsLemming } from '../src/assignment.js';
 
 const SKY = [14, 21, 36];
 const TERR = [138, 155, 90];
+
+// All skill pages, for the shared cross-nav (built at runtime so every page links
+// to every other without hand-maintained markup).
+const SKILL_PAGES = [
+  ['blocker', 'Blocker'], ['digger', 'Digger'], ['builder', 'Builder'],
+  ['basher', 'Basher'], ['miner', 'Miner'], ['climber', 'Climber'],
+  ['floater', 'Floater'], ['bomber', 'Bomber'],
+];
+
+function buildNav(currentId) {
+  const nav = document.getElementById('nav');
+  if (!nav) return;
+  const parts = ['<a href="./locomotion.html">↤ locomotion gallery</a>'];
+  for (const [id, label] of SKILL_PAGES) if (id !== currentId) parts.push(`<a href="./skill_${id}.html">${label}</a>`);
+  nav.innerHTML = parts.join(' ');
+}
 
 /**
  * Boot a single-skill stage into the page (expects #stage, #hud, and the control
@@ -99,7 +116,7 @@ export async function runStage(scenario) {
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(bg, 0, 0, view.w, view.h, 0, 0, view.w * s, view.h * s);
     for (const lem of sim.liveLemmings()) {
-      const name = sheet.directional(lem.action, lem.direction < 0);
+      const name = sheet.directional(animationName(lem.action), lem.direction < 0);
       sheet.drawFrame(ctx, name, lem.frame, (lem.x - view.x) * s, (lem.y - view.y) * s, s);
     }
     updateHud();
@@ -154,6 +171,7 @@ export async function runStage(scenario) {
   cv.width = view.w * state.scale; cv.height = view.h * state.scale;
   document.getElementById('title').textContent = scenario.title;
   document.getElementById('hint').textContent = scenario.hint;
+  buildNav(scenario.id);
   wire();
 
   let acc = 0, last = 0;

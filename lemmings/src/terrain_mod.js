@@ -69,6 +69,20 @@ export function applyMineMask(terrain, lem, which) {
 }
 
 /**
+ * §16.4 — apply the explosion mask, centred on the lemming: the 16-wide mask sits
+ * at x−8 and the 22-tall mask at y−14, so the crater straddles and rises above
+ * where the lemming stood. Symmetric (facing does not matter). The handler gates
+ * this (no crater on steel or in water, §15.14); once called it always removes.
+ * @param {Terrain} terrain
+ * @param {Lemming} lem
+ * @returns {void}
+ */
+export function applyExplosionMask(terrain, lem) {
+  const mask = MASKS.explosion;
+  applyMask(terrain, mask.frames[0], mask.w, mask.h, lem.x - 8, lem.y - 14);
+}
+
+/**
  * §16.5 — lay one builder brick: a 6-pixel horizontal line one pixel above the
  * foot, extending forward from the foot (rightward from x, or from x−4 when facing
  * left). Fills ONLY empty pixels, so a brick merges into terrain it runs into

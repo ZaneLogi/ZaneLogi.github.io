@@ -3,22 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Throng — Skill: Digger</title>
+<title>Throng — Skill: Floater</title>
 <link rel="stylesheet" href="./skill.css">
 </head>
 <body>
-  <h1 id="title">Digger</h1>
+  <h1 id="title">Floater</h1>
   <p class="sub" id="hint"></p>
-  <p class="nav" id="nav">
-    <a href="./locomotion.html">↤ locomotion gallery</a>
-    <a href="./skill_blocker.html">Blocker</a>
-    <a href="./skill_builder.html">Builder</a>
-    <a href="./skill_basher.html">Basher</a>
-    <a href="./skill_miner.html">Miner</a>
-  </p>
-  <p class="sub">The skill auto-assigns after a beat, then re-runs on a loop. You can also
-    <strong>click a lemming</strong> to assign it (the faithful 13×13 hit box), or use the buttons.
-    Watch the terrain buffer change as it digs — the renderer reads the mutating collision geometry each frame.</p>
+  <p class="nav" id="nav"></p>
+  <p class="sub">Floater is a <em>trait</em> — it sets a permanent flag; the lemming only opens the
+    umbrella once it has fallen ~16px. The descent is a fixed 16-entry table (no arithmetic), slow
+    enough that a floater survives any fall. Assign it before the drop and watch it live where a plain
+    walker would splat.</p>
 
   <div class="controls">
     <div class="group" id="speed">
@@ -41,7 +36,7 @@
   <script type="module">
     import { runStage } from './skill_stage.js';
     import { SKILL_SCENARIOS } from './skill_scenarios.js';
-    runStage(SKILL_SCENARIOS.digger);
+    runStage(SKILL_SCENARIOS.floater);
   </script>
 </body>
 </html>

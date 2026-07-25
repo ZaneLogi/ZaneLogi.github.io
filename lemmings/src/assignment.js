@@ -18,13 +18,18 @@ import { writeBlockerField, blockerFieldOverlaps } from './blocker.js';
 /** @typedef {import('./lemming.js').Lemming} Lemming */
 /** @typedef {import('./object_map.js').ObjectMap} ObjectMap */
 
-/** The Phase-2 assignable skills. Values are also the budget keys. */
+/** The assignable skills. Values are also the budget keys. */
 export const SKILL = {
+  // State-entering skills (transition the lemming immediately).
   BLOCKER: 'blocker',
   BUILDER: 'builder',
   BASHER: 'basher',
   MINER: 'miner',
   DIGGER: 'digger',
+  // Trait / fuse skills — set a flag or light the fuse; the action is unchanged.
+  CLIMBER: 'climber',
+  FLOATER: 'floater',
+  BOMBER: 'bomber',
 };
 
 // §18.4 — the target's current action must be in this set (a work skill may be
@@ -38,6 +43,21 @@ const ALLOWED = {
   miner: new Set([A.WALKING, A.SHRUGGING, A.BUILDING, A.BASHING, A.DIGGING]),
   digger: new Set([A.WALKING, A.SHRUGGING, A.BUILDING, A.BASHING, A.MINING]),
 };
+
+// §18.4 — the trait/fuse skills instead name the actions they may NOT be assigned
+// to (they apply to almost any state).
+const FORBIDDEN = {
+  climber: new Set([A.BLOCKING, A.SPLATTING, A.EXPLODING]),
+  floater: new Set([A.BLOCKING, A.SPLATTING, A.EXPLODING]),
+  bomber: new Set([A.OHNOING, A.EXPLODING, A.VAPORIZING, A.SPLATTING]),
+};
+
+/** Whether the target's current action permits this skill (§18.4). */
+function actionAllowed(skill, action) {
+  if (ALLOWED[skill]) return ALLOWED[skill].has(action);
+  if (FORBIDDEN[skill]) return !FORBIDDEN[skill].has(action);
+  return false;
+}
 
 // Steel / one-way probes read the lemming's CACHED objectInFront / objectBelow
 // (§18.4) — the values from its most recent object interaction, not a fresh probe.
@@ -69,6 +89,9 @@ function extraPreconditionOk(skill, lem, objectMap) {
     case SKILL.BASHER: return !steelOrGrainAhead(lem);                       // no steel / one-way ahead
     case SKILL.MINER: return !steelOrGrainAhead(lem) && !steelOrGrainBelow(lem);
     case SKILL.DIGGER: return lem.objectBelow !== EFFECT.STEEL;               // no steel below
+    case SKILL.CLIMBER: return !lem.isClimber;                                // not already a climber
+    case SKILL.FLOATER: return !lem.isFloater;                                // not already a floater
+    case SKILL.BOMBER: return lem.explosionTimer === 0;                       // no fuse already lit
     default: return false;
   }
 }
@@ -88,6 +111,11 @@ function applyEffect(skill, lem, objectMap) {
     case SKILL.BASHER: lem.transition(ACTION.BASHING); break;
     case SKILL.MINER: lem.transition(ACTION.MINING); break;
     case SKILL.DIGGER: lem.transition(ACTION.DIGGING); break;
+    // Traits / fuse do NOT change the action (§18.5): the trait matters later, the
+    // fuse expires later.
+    case SKILL.CLIMBER: lem.isClimber = true; break;
+    case SKILL.FLOATER: lem.isFloater = true; break;
+    case SKILL.BOMBER: lem.explosionTimer = 79; break;
   }
 }
 
@@ -105,7 +133,7 @@ export function assignSkill(lem, skill, ctx) {
   const { objectMap, budget } = ctx;
   if (!lem || lem.isRemoved) return false;
   if (!(budget[skill] > 0)) return false;                 // §18.4 — budget > 0
-  if (!ALLOWED[skill] || !ALLOWED[skill].has(lem.action)) return false;   // §18.4 — action set
+  if (!actionAllowed(skill, lem.action)) return false;    // §18.4 — action set
   if (!extraPreconditionOk(skill, lem, objectMap)) return false;          // §18.4 / §18.6
 
   budget[skill] -= 1;                                      // §18.5 step 1 — spend the budget

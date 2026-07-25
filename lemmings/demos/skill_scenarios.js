@@ -91,5 +91,45 @@ const miner = {
   spawn(sim) { return sim.addLemming(46, 92, 1, ACTION.WALKING); },
 };
 
+/** Climber (trait): scale a tall wall a walker would otherwise turn at, then hoist
+ *  onto the ledge above (§15.5–15.6). */
+const climber = {
+  id: 'climber', title: 'Climber', skill: SKILL.CLIMBER,
+  hint: 'scales walls over 6px instead of turning, then hoists over the top (§15.5–15.6)',
+  view: { x: 0, y: 60, w: 210, h: 100 }, autoAssignAfter: 6,
+  build(terrain) {
+    terrain.fillRect(0, 130, 110, 30);          // low floor
+    terrain.fillRect(110, 72, 100, 88);         // tall block+ledge (left face is a 58px wall)
+  },
+  spawn(sim) { return sim.addLemming(30, 130, 1, ACTION.WALKING); },
+};
+
+/** Floater (trait): walk off a high ledge and survive a fall that would otherwise
+ *  splat (§15.4). */
+const floater = {
+  id: 'floater', title: 'Floater', skill: SKILL.FLOATER,
+  hint: 'descends ~2px/frame under the umbrella and survives any fall (§15.4)',
+  view: { x: 0, y: 36, w: 210, h: 128 }, autoAssignAfter: 6,
+  build(terrain) {
+    terrain.fillRect(0, 46, 44, 14);            // high pedestal (top y46)
+    terrain.fillRect(0, 150, 210, 10);          // floor ~104px below — fatal without a floater
+  },
+  spawn(sim) { return sim.addLemming(20, 46, 1, ACTION.WALKING); },
+};
+
+/** Bomber (fuse): light the 79-frame countdown; the lemming keeps walking, then
+ *  ohno's and detonates a crater (§15.13–15.14). */
+const bomber = {
+  id: 'bomber', title: 'Bomber', skill: SKILL.BOMBER,
+  hint: 'counts down 79 frames (still walking), then explodes a crater (§15.13–15.14)',
+  view: { x: 0, y: 84, w: 220, h: 76 }, autoAssignAfter: 6, loopFrames: 120,
+  build(terrain) {
+    terrain.fillRect(0, 120, 220, 40);          // floor
+    terrain.fillRect(4, 92, 6, 28);             // walls so it paces during the fuse
+    terrain.fillRect(210, 92, 6, 28);
+  },
+  spawn(sim) { return sim.addLemming(60, 120, 1, ACTION.WALKING); },
+};
+
 /** @type {Record<string, SkillScenario>} */
-export const SKILL_SCENARIOS = { digger, builder, blocker, basher, miner };
+export const SKILL_SCENARIOS = { digger, builder, blocker, basher, miner, climber, floater, bomber };
