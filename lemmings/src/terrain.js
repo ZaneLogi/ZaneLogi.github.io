@@ -13,6 +13,10 @@ export class Terrain {
     this.height = WORLD_H;
     // 0 = empty, 1 = solid. Solidity is a separate fact from colour (§3.1).
     this.solid = new Uint8Array(WORLD_W * WORLD_H);
+    // §3.7 render hint — NOT simulation state (the sim never reads it). Set whenever a
+    // pixel changes so a downstream renderer can rebuild its cached silhouette only when
+    // the buffer actually changed (builder brick, bash/mine/dig, bomber crater).
+    this.dirty = false;
   }
 
   /**
@@ -49,6 +53,7 @@ export class Terrain {
   removeTerrain(x, y) {
     if (x < 0 || y < 0 || x >= WORLD_W || y >= WORLD_H) return;
     this.solid[y * WORLD_W + x] = 0;
+    this.dirty = true;
   }
 
   /**
@@ -61,6 +66,7 @@ export class Terrain {
   setSolid(x, y) {
     if (x < 0 || y < 0 || x >= WORLD_W || y >= WORLD_H) return;
     this.solid[y * WORLD_W + x] = 1;
+    this.dirty = true;
   }
 
   /**
@@ -81,5 +87,6 @@ export class Terrain {
       const row = py * WORLD_W;
       for (let px = x0; px < x1; px++) this.solid[row + px] = 1;
     }
+    this.dirty = true;
   }
 }

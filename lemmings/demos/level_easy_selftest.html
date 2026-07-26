@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Throng — Easy Level Self-Test (walkable, no skills)</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; font: 14px/1.5 system-ui, sans-serif; background: #12141c; color: #d7dae3; }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  .sub { margin: 0 0 16px; color: #8b90a0; font-size: 13px; max-width: 760px; }
+  .sub code { color: #aab; background: #1d2030; padding: 1px 5px; border-radius: 4px; }
+  #summary { font-weight: 700; font-size: 15px; margin: 8px 0 14px; }
+  .pass { color: #6ee787; } .fail { color: #ff8080; }
+  table { border-collapse: collapse; font-family: ui-monospace, monospace; font-size: 12px; }
+  th, td { text-align: left; padding: 5px 12px; border-bottom: 1px solid #232838; }
+  th { color: #9aa0b0; font-weight: 600; }
+  td.v { color: #9fd0a6; }
+  .err { color: #ff8080; white-space: pre-wrap; font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+  <h1>Throng — Easy Level Self-Test</h1>
+  <p class="sub">
+    Headless proof (§1.6) that <code>src/level_easy.js</code> — the index.html level — is
+    completable with <b>no skills</b>: builds it, attaches the Ch 13 spawner, drives
+    <code>src/simulation.js</code> with no input, and asserts every one of the 20
+    lemmings walks the bumps entrance→exit and is saved, with no splat and no hazard,
+    ending in a win before the clock. Also the Ch 19 loop on a real level.
+  </p>
+  <div id="summary">running…</div>
+  <table id="table"><thead><tr>
+    <th>check</th><th>result</th><th>observed</th>
+  </tr></thead><tbody></tbody></table>
+  <div id="error" class="err"></div>
+
+<script type="module">
+import { Simulation } from '../src/simulation.js';
+import { Spawner } from '../src/spawner.js';
+import { buildEasyLevel } from '../src/level_easy.js';
+
+const rows = [];
+const ok = (label, pass, obs = '') => rows.push({ label, pass: !!pass, obs: String(obs) });
+
+try {
+  const { terrain, objectMap, entrance, params } = buildEasyLevel();
+  const sim = new Simulation(terrain, objectMap);
+  sim.setSpawner(new Spawner({
+    entrances: [entrance], maxLemmings: params.lemmingsCount, releaseRate: params.releaseRate,
+  }));
+  sim.configureLevel({
+    maxLemmings: params.lemmingsCount, rescueCount: params.rescueCount, timeLimitMinutes: params.timeLimit,
+    budget: {
+      climber: params.climberCount, floater: params.floaterCount, bomber: params.bomberCount,
+      blocker: params.blockerCount, builder: params.builderCount, basher: params.basherCount,
+      miner: params.minerCount, digger: params.diggerCount,
+    },
+  });
+
+  // Drive to completion with NO input at all. Track every action any lemming took, and
+  // whether any ever turned back west (a bump too tall would show up as a turnaround).
+  const actionsSeen = new Set();
+  let sawWestward = false;
+  const cap = 5200;                                   // > the 5-minute clock (5×60×17)
+  let frames = 0;
+  for (; frames < cap && !sim.finished; frames++) {
+    sim.step();
+    for (const l of sim.lemmings) {
+      if (!l.isRemoved) { actionsSeen.add(l.action); if (l.direction === -1) sawWestward = true; }
+    }
+  }
+  const r = sim.result || {};
+
+  ok('all 20 released', sim.released === 20, `released ${sim.released}`);
+  ok('level finished before the clock (not time-up)', sim.finished && r.timeUp === false, `finished ${sim.finished}, timeUp ${r.timeUp}`);
+  ok('every lemming saved (20/20) — walkable with no skills', sim.saved === 20 && sim.removed === 20, `saved ${sim.saved}, removed ${sim.removed}`);
+  ok('no splat (no drop over 60px on the path)', !actionsSeen.has('splatting'), `splatting seen: ${actionsSeen.has('splatting')}`);
+  ok('no hazard death (drown/vaporize)', !actionsSeen.has('drowning') && !actionsSeen.has('vaporizing'), `drown ${actionsSeen.has('drowning')}, vapor ${actionsSeen.has('vaporizing')}`);
+  ok('no turnaround — bumps stay under the 7px wall (§15.1)', !sawWestward, `walked west: ${sawWestward}`);
+  ok('saw the entrance drop then walking + exiting', actionsSeen.has('falling') && actionsSeen.has('walking') && actionsSeen.has('exiting'), `${[...actionsSeen].sort().join(', ')}`);
+  ok('won the level (done% ≥ target%, §19.6)', r.won === true, `done ${r.donePct} ≥ target ${r.targetPct}`);
+  ok('completed well within the frame cap', frames < cap, `finished at frame ${frames}`);
+} catch (e) {
+  rows.push({ label: 'threw', pass: false, obs: String((e && e.stack) || e) });
+}
+
+const tbody = document.querySelector('#table tbody');
+let pass = 0;
+for (const c of rows) {
+  if (c.pass) pass++;
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${c.label}</td>` +
+    `<td class="${c.pass ? 'pass' : 'fail'}">${c.pass ? 'PASS' : 'FAIL'}</td>` +
+    `<td class="v">${c.obs}</td>`;
+  tbody.appendChild(tr);
+}
+const s = document.getElementById('summary');
+s.textContent = `${pass} / ${rows.length} checks pass`;
+s.className = pass === rows.length ? 'pass' : 'fail';
+</script>
+</body>
+</html>
