@@ -18,6 +18,7 @@ import { animationName, ACTION } from './src/lemming.js';
 import { cursorHitsLemming } from './src/assignment.js';
 import { buildTerrainCanvas } from './src/terrain_render.js';
 import { buildEasyLevel } from './src/level_easy.js';
+import { burstParticles, PARTICLE_HOLD, PARTICLE_COLORS } from './src/particle_burst.js';
 import { Panel } from './panel.js';
 import { VIEWPORT_W, VIEWPORT_H, SCROLL_MAX } from './src/constants.js';
 
@@ -267,6 +268,8 @@ function render() {
     }
   }
 
+  drawExplosions(cam, s);
+
   panel.update(game.sim, game, cursorFocus());
   updateStatus();
 }
@@ -278,6 +281,26 @@ function drawEntrance(e, cam, s) {
   ctx.fillRect(x, y, 48 * s, 6 * s);                 // the trapdoor bar
   ctx.fillStyle = '#6f6a5c';
   ctx.fillRect(x + 16 * s, y + 6 * s, 16 * s, 5 * s); // the opening the lemmings drop from
+}
+
+// §21.4 explosion scatter (layer 5) — the procedural ballistic burst for every lemming that
+// has detonated (`particleTimer > 0`). These are removed lemmings, so they aren't in
+// liveLemmings(); we walk the full append-only list and use each lemming's stable list index
+// as the burst seed. Off-viewport sparks are culled. The burst self-clears when the sim's
+// particleTimer (§11.3) reaches 0.
+function drawExplosions(cam, s) {
+  const lems = game.sim.lemmings;
+  for (let seed = 0; seed < lems.length; seed++) {
+    const lem = lems[seed];
+    if (lem.particleTimer <= 0) continue;
+    const elapsed = PARTICLE_HOLD - lem.particleTimer;      // 0…51
+    for (const p of burstParticles(seed, elapsed)) {
+      const sx = (lem.x + p.dx - cam) * s, sy = (lem.y + p.dy) * s;
+      if (sx < -s || sx > cv.width || sy < -s || sy > cv.height) continue;   // cull off-screen
+      ctx.fillStyle = PARTICLE_COLORS[p.ci];
+      ctx.fillRect(sx, sy, s, s);
+    }
+  }
 }
 
 // Placeholder exit doorway (authored). The EXIT trigger straddles y = exit.y.

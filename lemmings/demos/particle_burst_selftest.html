@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Throng — Explosion Scatter Self-Test (§21.4)</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; font: 14px/1.5 system-ui, sans-serif; background: #12141c; color: #d7dae3; }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  .sub { margin: 0 0 16px; color: #8b90a0; font-size: 13px; max-width: 780px; }
+  .sub code { color: #aab; background: #1d2030; padding: 1px 5px; border-radius: 4px; }
+  #summary { font-weight: 700; font-size: 15px; margin: 8px 0 14px; }
+  .pass { color: #6ee787; } .fail { color: #ff8080; }
+  table { border-collapse: collapse; font-family: ui-monospace, monospace; font-size: 12px; }
+  th, td { text-align: left; padding: 5px 12px; border-bottom: 1px solid #232838; }
+  th { color: #9aa0b0; font-weight: 600; }
+  td.v { color: #9fd0a6; }
+  .err { color: #ff8080; white-space: pre-wrap; font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+  <h1>Throng — Explosion Scatter Self-Test</h1>
+  <p class="sub">
+    Headless proof (§1.6) that <code>src/particle_burst.js</code> — the §21.4 procedural
+    ballistic burst — is a deterministic, downstream-only effect: it is a pure function of
+    <code>(seed, elapsed)</code>, launches an upward fountain that falls under a fixed
+    gravity, thins over the hold, and stays a tight puff at frame 0.
+  </p>
+  <div id="summary">running…</div>
+  <table id="table"><thead><tr>
+    <th>check</th><th>result</th><th>observed</th>
+  </tr></thead><tbody></tbody></table>
+  <div id="error" class="err"></div>
+
+<script type="module">
+import { burstParticles, PARTICLE_COUNT, PARTICLE_HOLD, PARTICLE_GRAVITY, PARTICLE_COLORS }
+  from '../src/particle_burst.js';
+
+const rows = [];
+const ok = (label, pass, obs = '') => rows.push({ label, pass: !!pass, obs: String(obs) });
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const mean = (a) => a.reduce((s, x) => s + x, 0) / a.length;
+
+try {
+  // No particle dies before elapsed 11 (min lifetime = HOLD − 41 = 11), so bursts at
+  // elapsed 0…10 return all 80 particles in index order — letting us track a particle
+  // across frames by its output position.
+  const b0 = burstParticles(3, 0), b1 = burstParticles(3, 1), b2 = burstParticles(3, 2);
+  ok('frames 0–2 return the full count in order (no early deaths)',
+     b0.length === PARTICLE_COUNT && b1.length === PARTICLE_COUNT && b2.length === PARTICLE_COUNT,
+     `${b0.length}/${b1.length}/${b2.length} of ${PARTICLE_COUNT}`);
+
+  // Ballistic: vertical 2nd difference == gravity for every particle; horizontal 2nd diff == 0.
+  let gMax = 0, hMax = 0;
+  for (let k = 0; k < PARTICLE_COUNT; k++) {
+    gMax = Math.max(gMax, Math.abs((b2[k].dy - 2 * b1[k].dy + b0[k].dy) - PARTICLE_GRAVITY));
+    hMax = Math.max(hMax, Math.abs(b2[k].dx - 2 * b1[k].dx + b0[k].dx));
+  }
+  ok('vertical accel == g (0.206) for all particles', gMax < 1e-9, `max |Δ²dy − g| = ${gMax.toExponential(1)}`);
+  ok('horizontal velocity constant (no sideways gravity)', hMax < 1e-9, `max |Δ²dx| = ${hMax.toExponential(1)}`);
+
+  // Pure function of (seed, elapsed): same inputs → byte-identical output.
+  ok('deterministic — identical for repeated (seed, elapsed)', eq(burstParticles(3, 10), burstParticles(3, 10)), 'stable');
+  ok('distinct seeds give distinct bursts', !eq(burstParticles(1, 10), burstParticles(2, 10)), 'differ');
+
+  // Frame 0 is a tight puff, not a scatter (a small initial spread, biased just above the foot).
+  const t0 = burstParticles(5, 0);
+  const maxAbsX = Math.max(...t0.map((p) => Math.abs(p.dx)));
+  const maxAbsY = Math.max(...t0.map((p) => Math.abs(p.dy)));
+  ok('frame 0 is a tight puff (|dx| < 5, |dy| < 10)', maxAbsX < 5 && maxAbsY < 10, `max|dx| ${maxAbsX.toFixed(1)}, max|dy| ${maxAbsY.toFixed(1)}`);
+
+  // Upward fountain: a few frames in, the cloud sits above the death point (mean dy < 0).
+  const t5 = burstParticles(5, 5);
+  const meanDy5 = mean(t5.map((p) => p.dy));
+  ok('launches upward — mean dy < 0 at frame 5', meanDy5 < 0, `mean dy = ${meanDy5.toFixed(1)}`);
+
+  // Thins over the hold: fewer alive late than early, but not gone before the hold ends.
+  const nEarly = burstParticles(5, 5).length, nLate = burstParticles(5, 50).length;
+  ok('burst thins over the hold (late < early, late > 0)', nLate < nEarly && nLate > 0, `alive: f5=${nEarly}, f50=${nLate}`);
+
+  // Clears exactly at the hold: elapsed 0…51 are the burst; the caller stops at particleTimer 0.
+  ok('spans the full hold then no more (frames 0…51 valid)',
+     burstParticles(5, PARTICLE_HOLD - 1).length >= 0 && PARTICLE_HOLD === 52, `HOLD ${PARTICLE_HOLD}`);
+
+  // Colour indices are always valid.
+  let ciBad = false;
+  for (const p of burstParticles(7, 12)) if (p.ci < 0 || p.ci >= PARTICLE_COLORS.length) ciBad = true;
+  ok('colour indices in range', !ciBad, `palette ${PARTICLE_COLORS.length}`);
+
+  // Count never exceeds the cap.
+  let over = false;
+  for (let t = 0; t < PARTICLE_HOLD; t++) if (burstParticles(9, t).length > PARTICLE_COUNT) over = true;
+  ok('never exceeds PARTICLE_COUNT', !over, `cap ${PARTICLE_COUNT}`);
+} catch (e) {
+  rows.push({ label: 'threw', pass: false, obs: String((e && e.stack) || e) });
+}
+
+const tbody = document.querySelector('#table tbody');
+let pass = 0;
+for (const c of rows) {
+  if (c.pass) pass++;
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${c.label}</td>` +
+    `<td class="${c.pass ? 'pass' : 'fail'}">${c.pass ? 'PASS' : 'FAIL'}</td>` +
+    `<td class="v">${c.obs}</td>`;
+  tbody.appendChild(tr);
+}
+const s = document.getElementById('summary');
+s.textContent = `${pass} / ${rows.length} checks pass`;
+s.className = pass === rows.length ? 'pass' : 'fail';
+</script>
+</body>
+</html>
