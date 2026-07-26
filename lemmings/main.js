@@ -33,6 +33,15 @@ const MS_PER_FRAME = 58;        // §2.6 — the normal frame is 58 ms (≈17.24
 const SCROLL_SPEED = 6;         // camera world-px per animation frame
 const EDGE = 0.07;              // mouse within this fraction of an edge scrolls (§25 method — free)
 
+// §21.5 selection cursor — an authored focused reticle (the cursor is not DOS art; art is
+// free). Shown when the §18.2 hit-test finds a lemming under the cursor, else plain.
+const CURSOR_SVG =
+  "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'>" +
+  "<g fill='none' stroke='#ffe14d' stroke-width='1.6'>" +
+  "<path d='M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3'/>" +   // corner brackets
+  "<path d='M8 3v3M8 10v3M3 8h3M10 8h3'/></g></svg>";       // gapped cross-hair
+const CURSOR_FOCUSED = `url("data:image/svg+xml,${encodeURIComponent(CURSOR_SVG)}") 8 8, crosshair`;
+
 const game = {
   scale: 2,                     // integer display scale (§2.4 — free); adjustable later
   camX: 0,                      // scroll offset: world x at the viewport's left edge (§2.4)
@@ -54,6 +63,7 @@ init();
 async function init() {
   try {
     game.sheet = await SpriteSheet.load();
+    game.countdown = await loadImage(new URL('./assets/countdown.png', import.meta.url).href);
   } catch (e) {
     errEl.textContent = 'Failed to load sprites: ' + e.message;
     return;
@@ -105,6 +115,16 @@ function startLevel() {
   game.terrainCanvas = buildTerrainCanvas(level.terrain, { solidColor: TERRAIN_COLOR });
   if (panel) panel.setSelected(null);      // clear the active skill on (re)start
   hideResults();
+}
+
+/** Load an <img> and resolve when it's ready. */
+function loadImage(url) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => rej(new Error('failed to load ' + url));
+    img.src = url;
+  });
 }
 
 /** Map the level's eight *Count params to the SKILL.* budget keys the sim spends. */
@@ -203,10 +223,12 @@ function tryAssign(px, py, rightBtn) {
   if (FALLBACK.has(skill) && lem2 && lem2 !== lem1) game.sim.assign(lem2, skill);
 }
 
-// The under-cursor focus readout (§22.3): the action of Lemming1 at the cursor, or ''.
+// The under-cursor focus: find Lemming1 at the cursor (§18.2), swap the canvas cursor to
+// the focused reticle when one is there (§21.5), and return its action for the §22.3 readout.
 function cursorFocus() {
-  if (!game.cursor) return '';
+  if (!game.cursor) { cv.style.cursor = 'crosshair'; return ''; }
   const { lem1 } = hitTest(game.cursor.wx, game.cursor.wy, false);
+  cv.style.cursor = lem1 ? CURSOR_FOCUSED : 'crosshair';
   return lem1 ? lem1.action : '';
 }
 
@@ -235,6 +257,14 @@ function render() {
   for (const lem of game.sim.liveLemmings()) {
     const name = game.sheet.directional(animationName(lem.action), lem.direction < 0);
     game.sheet.drawFrame(ctx, name, lem.frame, (lem.x - cam) * s, lem.y * s, s);
+    // Countdown digit over a fused lemming (§21.3): digit from the timer, 8×8 above
+    // the head. Bins + placement from Lemmix Game.pas (2625, GetCountDownDigitBounds).
+    if (lem.explosionTimer > 0 && game.countdown) {
+      const t = lem.explosionTimer;
+      const digit = t >= 65 ? 5 : t >= 49 ? 4 : t >= 33 ? 3 : t >= 17 ? 2 : 1;
+      const top = lem.y - game.sheet.get(name).footY - 12;
+      ctx.drawImage(game.countdown, 0, (5 - digit) * 8, 8, 8, (lem.x - 1 - cam) * s, top * s, 8 * s, 8 * s);
+    }
   }
 
   panel.update(game.sim, game, cursorFocus());
