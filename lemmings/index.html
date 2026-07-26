@@ -11,7 +11,7 @@
   the skill panel + HUD are authored HTML/CSS DOM widgets, NOT decoded from the original
   panel art. The ONLY source imagery used is the lemming sprite atlas
   (assets/lemmings_atlas.png). Everything else on screen — the panel, buttons, readouts,
-  minimap, entrance/exit markers — is drawn by us. This is squarely within §1.4 (panel
+  minimap, results overlay (Ch 23), entrance/exit markers — is drawn by us. This is squarely within §1.4 (panel
   function is normative; its appearance and placement are free) and avoids depending on
   the not-yet-built Ch 7-10 asset pipeline. The panel's *behaviour* still follows the
   spec: counts are the §11.3 budgets, click-to-assign uses the §18.2 hit-test, the rate
@@ -34,7 +34,22 @@
   h1 b { color: #cfe0a6; }
   #stage { display: flex; flex-direction: column; align-items: stretch; }
   /* The viewport canvas — 320×160 logical (§2.4), scaled up. Crisp pixels. */
+  #viewport { position: relative; align-self: center; }
   #view { display: block; image-rendering: pixelcrisp; image-rendering: pixelated; background: #0e1524; cursor: crosshair; }
+  /* Results overlay (Ch 23.4) — authored DOM over the viewport; appearance free (§1.4). */
+  #results { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(8,10,18,0.82); }
+  #results[hidden] { display: none; }
+  #results .card { text-align: center; padding: 20px 30px; background: var(--panel-bg);
+    border: 1px solid #2b3040; border-radius: 8px; box-shadow: 0 10px 34px rgba(0,0,0,0.55); }
+  #results .outcome { font-size: 21px; font-weight: 700; margin-bottom: 8px; }
+  #results .outcome.win { color: #83d693; }
+  #results .outcome.lose { color: #ff9090; }
+  #results .figures { font: 13px/1.65 ui-monospace, monospace; color: #cdd2e0; margin-bottom: 16px; }
+  #results .figures b { color: #e8d48a; }
+  #results .retry { background: #2f6b3a; color: #fff; border: 1px solid #3f8f4f; border-radius: 4px;
+    padding: 8px 20px; font: 13px system-ui, sans-serif; cursor: pointer; }
+  #results .retry:hover { background: #3a8047; }
   #status {
     font: 12px/1.5 ui-monospace, monospace; color: #8b90a0; white-space: pre;
     padding: 6px 2px 0; letter-spacing: 0.2px;
@@ -78,7 +93,17 @@
 <body>
   <h1><b>Throng</b> — easy level</h1>
   <div id="stage">
-    <canvas id="view" width="640" height="320"></canvas>
+    <div id="viewport">
+      <canvas id="view" width="640" height="320"></canvas>
+      <!-- Results overlay (Ch 23.4) — filled + toggled by main.js when the level ends. -->
+      <div id="results" hidden>
+        <div class="card">
+          <div class="outcome"></div>
+          <div class="figures"></div>
+          <button class="retry">Play again</button>
+        </div>
+      </div>
+    </div>
     <div id="panel"></div>
     <div id="status">loading…</div>
   </div>

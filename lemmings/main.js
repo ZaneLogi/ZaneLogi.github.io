@@ -44,6 +44,7 @@ const cv = document.getElementById('view');
 const ctx = cv.getContext('2d');
 const statusEl = document.getElementById('status');
 const errEl = document.getElementById('error');
+const resultsEl = document.getElementById('results');
 const keys = { left: false, right: false };
 let mouseXFrac = null;          // cursor x within the canvas, 0…1, or null when outside
 let panel = null;
@@ -58,9 +59,35 @@ async function init() {
     return;
   }
 
+  // The skill panel & HUD (Ch 22). Built once; its controls route to the CURRENT sim's
+  // phase-2/8 inputs via game.sim, so a retry's fresh sim is picked up automatically.
+  panel = new Panel(document.getElementById('panel'), {
+    onRate: (d) => game.sim.requestRateChange(d),           // §13.6 (applied at phase 2)
+    onPause: () => game.sim.setPaused(!game.sim.paused),    // §12.5
+    onNuke: () => game.sim.armNuke(),                       // §19.3 (panel handles the 2-press)
+    onSelect: (key) => panel.setSelected(panel.selected === key ? null : key),  // §22.5
+    onMinimap: (worldX) => { game.camX = clampCam(worldX); },   // §2.5
+  });
+
+  startLevel();
+  applyScale();
+  wireCamera();
+  wireAssignment();
+  wireResults();
+  // Dev hook: `?debug` exposes game + panel (and the live sim) on window for console poking.
+  if (new URLSearchParams(location.search).has('debug')) {
+    window.throng = { game, panel, get sim() { return game.sim; } };
+  }
+  requestAnimationFrame(loop);   // unkillable display loop; paints one frame immediately
+}
+
+function clampCam(x) { return Math.max(0, Math.min(SCROLL_MAX, Math.round(x))); }
+
+// Build (or rebuild, on retry §23.5) the level and its simulation from frame 0 — the
+// §11.6 level-start reset. Called once at boot and again by the Results "Play again".
+function startLevel() {
   const level = buildEasyLevel();
   game.level = level;
-
   const sim = new Simulation(level.terrain, level.objectMap);
   sim.setSpawner(new Spawner({
     entrances: [level.entrance],
@@ -76,25 +103,9 @@ async function init() {
   game.sim = sim;
   game.camX = level.params.screenPosition;
   game.terrainCanvas = buildTerrainCanvas(level.terrain, { solidColor: TERRAIN_COLOR });
-
-  // The skill panel & HUD (Ch 22). Its controls route to the sim's phase-2/8 inputs.
-  panel = new Panel(document.getElementById('panel'), {
-    onRate: (d) => sim.requestRateChange(d),            // §13.6 (applied at phase 2)
-    onPause: () => sim.setPaused(!sim.paused),          // §12.5
-    onNuke: () => sim.armNuke(),                        // §19.3 (panel handles the 2-press)
-    onSelect: (key) => panel.setSelected(panel.selected === key ? null : key),  // §22.5
-    onMinimap: (worldX) => { game.camX = clampCam(worldX); },   // §2.5
-  });
-
-  applyScale();
-  wireCamera();
-  wireAssignment();
-  // Dev hook: `?debug` exposes the game + sim + panel on window for console poking.
-  if (new URLSearchParams(location.search).has('debug')) window.throng = { game, sim, panel };
-  requestAnimationFrame(loop);   // unkillable display loop; paints one frame immediately
+  if (panel) panel.setSelected(null);      // clear the active skill on (re)start
+  hideResults();
 }
-
-function clampCam(x) { return Math.max(0, Math.min(SCROLL_MAX, Math.round(x))); }
 
 /** Map the level's eight *Count params to the SKILL.* budget keys the sim spends. */
 function paramsToBudget(p) {
@@ -118,6 +129,8 @@ function loop(t) {
   last = t;
   // Step the sim at the fixed §2.6 cadence; render every animation frame.
   while (acc >= MS_PER_FRAME) { game.sim.step(); acc -= MS_PER_FRAME; }
+  // Show the results overlay once the level finishes (§19.5 → §23.4).
+  if (game.sim.finished && resultsEl.hidden) showResults(game.sim.result);
   updateCamera();
   render();
   requestAnimationFrame(loop);
@@ -257,3 +270,21 @@ function updateStatus() {
     `in ${String(sim.savedPercent()).padStart(3)}%   time ${sim.clockString().padStart(4)}   ` +
     `cam ${String(game.camX).padStart(4)}${done}`;
 }
+
+// ── Results overlay (Ch 23.4) — authored DOM over the viewport ─────────────────
+function wireResults() {
+  resultsEl.querySelector('.retry').addEventListener('click', () => startLevel());   // §23.5 retry
+}
+
+// Fill + show the overlay from the §19.6 result record when the level finishes (§23.4).
+function showResults(r) {
+  const outcome = resultsEl.querySelector('.outcome');
+  outcome.textContent = r.won ? 'You made it!' : 'Not this time';
+  outcome.className = 'outcome ' + (r.won ? 'win' : 'lose');
+  resultsEl.querySelector('.figures').innerHTML =
+    `Rescued <b>${r.donePct}%</b> &middot; needed <b>${r.targetPct}%</b><br>` +
+    `${r.saved} of ${r.lemmingsCount} saved${r.timeUp ? ' &middot; time up' : ''}`;
+  resultsEl.hidden = false;
+}
+
+function hideResults() { resultsEl.hidden = true; }
