@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Throng — Spawner (Chapter 13)</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; font: 14px/1.5 system-ui, sans-serif; background: #12141c; color: #d7dae3; }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  .sub { margin: 0 0 16px; color: #8b90a0; font-size: 13px; max-width: 760px; }
+  .sub code { color: #aab; background: #1d2030; padding: 1px 5px; border-radius: 4px; }
+  .row { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start; }
+  .panel { background: #171a24; border: 1px solid #232838; border-radius: 8px; padding: 14px 16px; }
+  .controls { display: grid; grid-template-columns: auto 1fr auto; gap: 10px 12px; align-items: center; min-width: 300px; }
+  .controls label { color: #aeb3c2; font-size: 13px; }
+  .controls .val { font-family: ui-monospace, monospace; color: #9fd0a6; min-width: 90px; font-size: 12px; }
+  input[type="range"] { width: 150px; vertical-align: middle; }
+  input[type="number"] { width: 64px; background: #10131b; color: #d7dae3; border: 1px solid #2a3040; border-radius: 4px; padding: 2px 6px; }
+  .btns { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+  button { background: #222838; color: #d7dae3; border: 1px solid #333b50; border-radius: 6px; padding: 5px 11px; cursor: pointer; font-size: 13px; }
+  button:hover { background: #2a3145; }
+  .stage { border: 1px solid #232838; border-radius: 8px; overflow-x: auto; background: #0e1524; }
+  canvas { display: block; image-rendering: pixelated; }
+  pre#hud { font: 12px/1.55 ui-monospace, monospace; white-space: pre; margin: 10px 0 0; color: #cfe0d4; }
+  #entranceCounts { font: 12px/1.5 ui-monospace, monospace; color: #e0c68a; margin-top: 6px; }
+  h2 { font-size: 15px; margin: 22px 0 6px; }
+  .pass { color: #6ee787; } .fail { color: #ff8080; }
+  table { border-collapse: collapse; font-family: ui-monospace, monospace; font-size: 12px; margin-top: 4px; }
+  th, td { text-align: left; padding: 4px 12px; border-bottom: 1px solid #232838; }
+  th { color: #9aa0b0; font-weight: 600; }
+  #checkSummary { font-weight: 700; font-size: 14px; margin: 6px 0; }
+  .err { color: #ff8080; white-space: pre-wrap; font-family: ui-monospace, monospace; }
+  .note { color: #7f8598; font-size: 12px; margin-top: 8px; max-width: 320px; }
+</style>
+</head>
+<body>
+  <h1>Throng — Spawner <span style="color:#8b90a0;font-weight:400;font-size:15px">(design_spec Chapter 13)</span></h1>
+  <p class="sub">
+    A synthetic stage — a floor between two walls plus hand-placed entrances — driving
+    <code>src/spawner.js</code> through <code>src/simulation.js</code>. Entrances open at
+    <b>frame 35</b> (§13.1); the countdown (default 20) decrements every frame from 35 on
+    (frame 35 is the first tick), so the first lemming drops at <b>frame 54</b>; thereafter one every
+    <code>(99−rate)/2+4</code> frames (§13.3), rotating among the entrances by
+    <code>released mod 4</code> (§13.4). <b>Changing any parameter restarts from frame 0.</b>
+  </p>
+
+  <div class="row">
+    <div class="panel">
+      <div class="controls">
+        <label for="entrances">Entrances</label>
+        <input type="range" id="entrances" min="1" max="6" step="1" value="3">
+        <span class="val"><b id="countVal">3</b> &nbsp;(rotation table §13.4)</span>
+
+        <label for="rate">Release rate</label>
+        <input type="range" id="rate" min="1" max="99" step="1" value="50">
+        <span class="val">rate <b id="rateVal">50</b> → interval <b id="derivedInterval">28</b></span>
+
+        <label for="intervalOverride">Override interval</label>
+        <span><input type="checkbox" id="intervalOverride"> <input type="number" id="interval" min="1" max="120" value="28" disabled></span>
+        <span class="val">synthetic (§13.3)</span>
+
+        <label for="countdown">Initial countdown</label>
+        <input type="number" id="countdown" min="1" max="120" value="20">
+        <span class="val">§13.2 (default 20)</span>
+
+        <label for="scale">Zoom</label>
+        <input type="range" id="scale" min="1" max="2" step="1" value="1">
+        <span class="val"><b id="scaleVal">1×</b></span>
+      </div>
+      <div class="btns">
+        <button id="playPause">⏸ Pause</button>
+        <button id="stepBtn">⏭ Step</button>
+        <button id="restartBtn">↺ Restart</button>
+      </div>
+      <p class="note">
+        The interval field is derived from the rate until you tick <b>Override interval</b>,
+        which replaces the formula with a fixed synthetic value. Total to release is fixed
+        at 20; the stream stops there (§13.7).
+      </p>
+    </div>
+
+    <div class="panel" style="flex:1 1 580px">
+      <div class="stage"><canvas id="view" width="560" height="160"></canvas></div>
+      <pre id="hud">building…</pre>
+      <div id="entranceCounts"></div>
+    </div>
+  </div>
+
+  <h2>Self-check — §13 invariants (headless, deterministic)</h2>
+  <div id="checkSummary">running…</div>
+  <table id="checkTable"><thead><tr><th>check</th><th>result</th></tr></thead><tbody></tbody></table>
+
+  <div id="error" class="err"></div>
+
+  <script type="module" src="./spawner.js"></script>
+</body>
+</html>

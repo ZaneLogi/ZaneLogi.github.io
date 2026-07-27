@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Throng</title>
+<!--
+  Throng — the playable front door (design_spec Ch 19 needs a level to play; this IS it).
+
+  PRESENTATION DECISION (recorded here, not in the spec — Ch 22 stays technology-neutral):
+  the skill panel + HUD are authored HTML/CSS DOM widgets, NOT decoded from the original
+  panel art. The ONLY source imagery used is the lemming sprite atlas
+  (assets/lemmings_atlas.png). Everything else on screen — the panel, buttons, readouts,
+  minimap, results overlay (Ch 23), entrance/exit markers — is drawn by us. This is squarely within §1.4 (panel
+  function is normative; its appearance and placement are free) and avoids depending on
+  the not-yet-built Ch 7-10 asset pipeline. The panel's *behaviour* still follows the
+  spec: counts are the §11.3 budgets, click-to-assign uses the §18.2 hit-test, the rate
+  obeys the §13.6 floor, the nuke is 2-press (§19.3), etc.
+
+  The level itself is src/level_easy.js — a synthetic, no-skills-needed level (the
+  placeholder level *source*, swapped for the Ch 6 importer later behind the same page).
+-->
+<style>
+  :root { color-scheme: dark; --panel-bg: #171a24; --ink: #d7dae3; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: #0b0d14; color: var(--ink);
+    font: 14px/1.4 system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    padding: 14px;
+  }
+  h1 { font-size: 15px; margin: 0; color: #9aa0b0; font-weight: 600; letter-spacing: 0.3px; }
+  h1 b { color: #cfe0a6; }
+  #stage { display: flex; flex-direction: column; align-items: stretch; }
+  /* The viewport canvas — 320×160 logical (§2.4), scaled up. Crisp pixels. */
+  #viewport { position: relative; align-self: center; }
+  #view { display: block; image-rendering: pixelcrisp; image-rendering: pixelated; background: #0e1524; cursor: crosshair; }
+  /* Results overlay (Ch 23.4) — authored DOM over the viewport; appearance free (§1.4). */
+  #results { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(8,10,18,0.82); }
+  #results[hidden] { display: none; }
+  #results .card { text-align: center; padding: 20px 30px; background: var(--panel-bg);
+    border: 1px solid #2b3040; border-radius: 8px; box-shadow: 0 10px 34px rgba(0,0,0,0.55); }
+  #results .outcome { font-size: 21px; font-weight: 700; margin-bottom: 8px; }
+  #results .outcome.win { color: #83d693; }
+  #results .outcome.lose { color: #ff9090; }
+  #results .figures { font: 13px/1.65 ui-monospace, monospace; color: #cdd2e0; margin-bottom: 16px; }
+  #results .figures b { color: #e8d48a; }
+  #results .retry { background: #2f6b3a; color: #fff; border: 1px solid #3f8f4f; border-radius: 4px;
+    padding: 8px 20px; font: 13px system-ui, sans-serif; cursor: pointer; }
+  #results .retry:hover { background: #3a8047; }
+  #status {
+    font: 12px/1.5 ui-monospace, monospace; color: #8b90a0; white-space: pre;
+    padding: 6px 2px 0; letter-spacing: 0.2px;
+  }
+  #error { color: #ff8080; white-space: pre-wrap; font-family: ui-monospace, monospace; max-width: 900px; }
+  a.tools { color: #6a7080; font-size: 12px; text-decoration: none; }
+  a.tools:hover { color: #9aa0b0; text-decoration: underline; }
+
+  /* Skill panel & HUD (Ch 22) — authored DOM; appearance/placement free (§22.1). */
+  #panel { display: flex; align-items: stretch; gap: 10px; flex-wrap: wrap;
+    background: var(--panel-bg); padding: 6px 8px; margin-top: 4px; border-radius: 5px;
+    width: 640px; max-width: 100%; }
+  .panel .grp { display: flex; align-items: center; gap: 4px; }
+  .panel .grp.skills { gap: 3px; flex-wrap: wrap; }
+  .panel button { background: #262b3a; color: #cdd2e0; border: 1px solid #363c50;
+    border-radius: 3px; cursor: pointer; font: 11px/1.1 system-ui, sans-serif; padding: 4px 7px; }
+  .panel button:hover { background: #2f3548; }
+  .panel button:disabled { opacity: 0.35; cursor: default; }
+  .panel .skill { display: flex; flex-direction: column; align-items: center; gap: 1px;
+    min-width: 46px; padding: 2px 3px; }
+  .panel .skill .n { font: 700 12px ui-monospace, monospace; color: #e8d48a; }
+  .panel .skill .lbl { font-size: 9px; color: #9aa0b0; }
+  .panel .skill.on { background: #3b4668; border-color: #6a7bb0; }
+  .panel .skill.on .lbl { color: #cfe0a6; }
+  .panel .skill.empty { opacity: 0.4; }
+  .panel .rateNums { font: 12px ui-monospace, monospace; color: #9fd0a6;
+    min-width: 44px; text-align: center; }
+  .panel .rateNums b { color: #cfe0a6; font-weight: 700; }
+  .panel .nuke { min-width: 58px; }   /* hold width across Nuke / Nuke? / Nuking */
+  .panel .nuke.pending { background: #7a2a2a; border-color: #b04040; color: #ffd0d0; }
+  .panel .nuke.armed { background: #b03030; border-color: #d05050; color: #fff; }
+  .panel .pause.on { background: #3b4668; border-color: #6a7bb0; }
+  .panel .readouts { flex-direction: column; align-items: flex-start; gap: 1px;
+    font: 11px/1.35 ui-monospace, monospace; }
+  .panel .readouts .ro .k { color: #8b90a0; margin-right: 4px; }
+  .panel .readouts .focus { color: #cfe0a6; min-height: 15px; }
+  .panel .minimap { image-rendering: pixelated; border: 1px solid #363c50;
+    align-self: center; height: 60px; cursor: pointer; }
+</style>
+</head>
+<body>
+  <h1><b>Throng</b> — easy level</h1>
+  <div id="stage">
+    <div id="viewport">
+      <canvas id="view" width="640" height="320"></canvas>
+      <!-- Results overlay (Ch 23.4) — filled + toggled by main.js when the level ends. -->
+      <div id="results" hidden>
+        <div class="card">
+          <div class="outcome"></div>
+          <div class="figures"></div>
+          <button class="retry">Play again</button>
+        </div>
+      </div>
+    </div>
+    <div id="panel"></div>
+    <div id="status">loading…</div>
+  </div>
+  <div id="error"></div>
+  <a class="tools" href="demos/">demos &amp; self-tests →</a>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Throng — Locomotion Self-Test</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; font: 14px/1.5 system-ui, sans-serif; background: #12141c; color: #d7dae3; }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  .sub { margin: 0 0 16px; color: #8b90a0; font-size: 13px; max-width: 720px; }
+  .sub code { color: #aab; background: #1d2030; padding: 1px 5px; border-radius: 4px; }
+  #summary { font-weight: 700; font-size: 15px; margin: 8px 0 14px; }
+  .pass { color: #6ee787; } .fail { color: #ff8080; }
+  table { border-collapse: collapse; font-family: ui-monospace, monospace; font-size: 12px; }
+  th, td { text-align: left; padding: 5px 12px; border-bottom: 1px solid #232838; }
+  th { color: #9aa0b0; font-weight: 600; }
+  td.v { color: #9fd0a6; }
+  .err { color: #ff8080; white-space: pre-wrap; font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+  <h1>Throng — Locomotion Self-Test</h1>
+  <p class="sub">
+    Headless conformance check (§1.6): builds each <code>scenarios.js</code> stage,
+    steps <code>src/simulation.js</code> 400 frames with no rendering, and asserts
+    the observed action states + counters. This is the deterministic verification the
+    spec relies on — no pixels involved.
+  </p>
+  <div id="summary">running…</div>
+  <table id="table"><thead><tr>
+    <th>stage</th><th>result</th><th>actions seen</th><th>saved</th><th>removed</th><th>check</th>
+  </tr></thead><tbody></tbody></table>
+
+  <h1 style="font-size:17px;margin:26px 0 4px">Trap interpreter — §17.4 / §17.5 cadence</h1>
+  <p class="sub">
+    Deterministic checks of the trap trigger + re-arm, independent of the gallery:
+    an <b>armed</b> trap kills, a <b>busy</b> trap lets the next lemming pass, its
+    flag clears exactly on the animation wrap, then it kills again. Synthetic trap
+    data (<code>frameCount: 8</code>) — the interpreter owes nothing to the real data.
+  </p>
+  <div id="trapSummary">running…</div>
+  <table id="trapTable"><thead><tr><th>check</th><th>result</th></tr></thead><tbody></tbody></table>
+
+  <div id="error" class="err"></div>
+
+<script type="module">
+import { Simulation } from '../src/simulation.js';
+import { Terrain } from '../src/terrain.js';
+import { ObjectMap } from '../src/object_map.js';
+import { makeTrap } from '../src/interactive_object.js';
+import { ACTION } from '../src/lemming.js';
+import { SCENARIOS } from './scenarios.js';
+
+// Per-stage expectation. Each returns [pass, description].
+const EXPECT = {
+  'pace':      r => [[...r.actions].every(a => a === 'walking') && r.dirs.has(1) && r.dirs.has(-1) && r.removed === 0, 'walks both ways, never leaves'],
+  'steps':     r => [r.actions.has('walking') && r.dirs.has(1) && r.dirs.has(-1) && r.minY <= 122 && r.removed === 0, 'climbs to plateau, paces'],
+  'hop':       r => [r.actions.has('jumping') && r.minY <= 123 && r.dirs.has(1) && r.dirs.has(-1) && r.removed === 0, 'hops onto the mesa (Jumping)'],
+  'soft-fall': r => [r.actions.has('falling') && r.actions.has('walking') && !r.actions.has('splatting') && r.removed >= 1 && r.saved === 0, 'falls ≤60px, survives'],
+  'splat':     r => [r.actions.has('falling') && r.actions.has('splatting') && r.removed >= 1 && r.saved === 0, 'falls >60px, splats'],
+  'exit':      r => [r.actions.has('exiting') && r.saved === 1 && r.removed === 1, 'reaches exit, saved'],
+  'water':     r => [r.actions.has('drowning') && r.removed >= 1 && r.saved === 0, 'drowns in water'],
+  'fire':      r => [r.actions.has('vaporizing') && r.removed >= 1 && r.saved === 0, 'vaporizes in fire'],
+  'trap':      r => [r.removed >= 1 && r.saved === 0, 'killed by the trap (§17.4)'],
+};
+
+function run(sc, frames = 400) {
+  const terrain = new Terrain(), objectMap = new ObjectMap();
+  sc.build(terrain, objectMap);
+  const sim = new Simulation(terrain, objectMap, sc.objects ? sc.objects() : []);
+  sc.spawn(sim);
+  const actions = new Set(), dirs = new Set();
+  let minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < frames; i++) {
+    sim.step();
+    const l = sim.lemmings[sim.lemmings.length - 1];
+    if (l) { actions.add(l.action); dirs.add(Math.sign(l.direction)); minY = Math.min(minY, l.y); maxY = Math.max(maxY, l.y); }
+  }
+  return { actions, dirs, saved: sim.saved, removed: sim.removed, minY, maxY };
+}
+
+// The §17.4/§17.5 trap cadence, checked in isolation. Each block builds a flat
+// floor with a trap #0 trigger region (x 96..111) straddling the foot line y=128.
+// Returns [label, pass] rows.
+function trapCadence() {
+  const world = () => {
+    const terrain = new Terrain(); terrain.fillRect(0, 128, 200, 32);
+    const objectMap = new ObjectMap(); objectMap.paintRect(96, 124, 16, 12, 0);
+    return { terrain, objectMap };
+  };
+  const checks = [];
+
+  // (1) armed → kills, and (2) then busy → the next lemming passes unharmed.
+  {
+    const { terrain, objectMap } = world();
+    const trap = makeTrap({ frameCount: 8 });
+    const sim = new Simulation(terrain, objectMap, [trap]);
+    const a = sim.addLemming(100, 128, 1, ACTION.WALKING);
+    sim.step();
+    checks.push(['armed → kills', a.isRemoved && trap.triggered && sim.removed === 1]);
+    const b = sim.addLemming(100, 128, 1, ACTION.WALKING);
+    sim.step();
+    checks.push(['busy → next lemming survives', !b.isRemoved && sim.removed === 1]);
+  }
+
+  // (3) re-arm in isolation: a triggered trap with NO lemmings must clear its flag
+  // exactly when the frame wraps — step frameCount(=8) times, expect it to clear
+  // on step 8 with frame back at 0.
+  {
+    const { terrain, objectMap } = world();
+    const trap = makeTrap({ frameCount: 8 });
+    const sim = new Simulation(terrain, objectMap, [trap]);
+    trap.triggered = true; trap.frame = 0;
+    let clearedAt = -1;
+    for (let i = 1; i <= 8; i++) { sim.step(); if (!trap.triggered && clearedAt < 0) clearedAt = i; }
+    checks.push(['re-arms on animation wrap (frame 8)', clearedAt === 8 && trap.frame === 0]);
+  }
+
+  // (4) a re-armed (fresh, armed) trap kills again.
+  {
+    const { terrain, objectMap } = world();
+    const trap = makeTrap({ frameCount: 8 });
+    const sim = new Simulation(terrain, objectMap, [trap]);
+    const c = sim.addLemming(100, 128, 1, ACTION.WALKING);
+    sim.step();
+    checks.push(['re-armed → kills again', c.isRemoved && sim.removed === 1]);
+  }
+
+  return checks;
+}
+
+try {
+  const tbody = document.querySelector('#table tbody');
+  let passCount = 0;
+  for (const sc of SCENARIOS) {
+    const r = run(sc);
+    const [pass, desc] = EXPECT[sc.id] ? EXPECT[sc.id](r) : [null, '(no expectation)'];
+    if (pass) passCount++;
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      `<td>${sc.id}</td>` +
+      `<td class="${pass ? 'pass' : 'fail'}">${pass ? 'PASS' : 'FAIL'}</td>` +
+      `<td class="v">${[...r.actions].sort().join(', ')}</td>` +
+      `<td class="v">${r.saved}</td><td class="v">${r.removed}</td>` +
+      `<td>${desc}</td>`;
+    tbody.appendChild(tr);
+  }
+  const all = passCount === SCENARIOS.length;
+  const s = document.getElementById('summary');
+  s.textContent = `${passCount} / ${SCENARIOS.length} stages pass`;
+  s.className = all ? 'pass' : 'fail';
+
+  // The isolated trap-cadence checks (§17.4/§17.5).
+  const ttbody = document.querySelector('#trapTable tbody');
+  const cadence = trapCadence();
+  let trapPass = 0;
+  for (const [label, ok] of cadence) {
+    if (ok) trapPass++;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${label}</td><td class="${ok ? 'pass' : 'fail'}">${ok ? 'PASS' : 'FAIL'}</td>`;
+    ttbody.appendChild(tr);
+  }
+  const ts = document.getElementById('trapSummary');
+  ts.textContent = `${trapPass} / ${cadence.length} checks pass`;
+  ts.className = trapPass === cadence.length ? 'pass' : 'fail';
+} catch (e) {
+  document.getElementById('summary').textContent = 'ERROR';
+  document.getElementById('error').textContent = String((e && e.stack) || e);
+}
+</script>
+</body>
+</html>

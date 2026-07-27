@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Throng — Explosion Scatter View (§21.4)</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 20px; font: 13px/1.5 system-ui, sans-serif; background: #0e1524; color: #d7dae3; }
+  h1 { font-size: 18px; margin: 0 0 10px; }
+  p { color: #8b90a0; max-width: 820px; }
+  canvas { image-rendering: pixelated; background: #0e1524; border: 1px solid #232838; display: block; margin-top: 10px; }
+</style>
+</head>
+<body>
+  <h1>Throng — Explosion Scatter (§21.4), procedural ballistic burst</h1>
+  <p>Two bursts (seeds 3 &amp; 11), each sampled at elapsed frames 0 · 8 · 18 · 30 · 42 · 50, drawn
+     with the exact <code>drawExplosions</code> mapping from <code>main.js</code> (scale 2, authored
+     colours). Compare to the reference-table filmstrip: fountain up → arc → rain down → thin.</p>
+  <canvas id="c" width="1240" height="440"></canvas>
+<script type="module">
+import { burstParticles, PARTICLE_COLORS } from '../src/particle_burst.js';
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+const S = 2;                          // display scale, as in main.js game.scale
+const FRAMES = [0, 8, 18, 30, 42, 50];
+const SEEDS = [3, 11];
+const PANEL_W = 200, PANEL_H = 200, PAD = 6;
+
+ctx.font = '11px ui-monospace, monospace';
+for (let r = 0; r < SEEDS.length; r++) {
+  for (let c = 0; c < FRAMES.length; c++) {
+    const ox = c * (PANEL_W + PAD) + PANEL_W / 2;      // panel centre = the death point
+    const oy = r * (PANEL_H + PAD) + PANEL_H / 2;
+    // panel frame
+    ctx.strokeStyle = '#232838';
+    ctx.strokeRect(c * (PANEL_W + PAD), r * (PANEL_H + PAD), PANEL_W, PANEL_H);
+    if (r === 0) { ctx.fillStyle = '#8b90a0'; ctx.fillText('frame ' + FRAMES[c], c * (PANEL_W + PAD) + 6, 14); }
+    // origin marker
+    ctx.fillStyle = '#2a3350'; ctx.fillRect(ox - 1, oy - 1, 2, 2);
+    // the burst — identical mapping to main.js drawExplosions (fillRect S×S per particle)
+    for (const p of burstParticles(SEEDS[r], FRAMES[c])) {
+      const sx = ox + p.dx * S, sy = oy + p.dy * S;
+      if (sx < c * (PANEL_W + PAD) || sx > (c + 1) * (PANEL_W + PAD) || sy < r * (PANEL_H + PAD) || sy > (r + 1) * (PANEL_H + PAD)) continue;
+      ctx.fillStyle = PARTICLE_COLORS[p.ci];
+      ctx.fillRect(sx, sy, S, S);
+    }
+  }
+}
+</script>
+</body>
+</html>

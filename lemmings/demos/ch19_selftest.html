@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Throng — Chapter 19 Self-Test (nuke / timer / end / scoring)</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; font: 14px/1.5 system-ui, sans-serif; background: #12141c; color: #d7dae3; }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  h2 { font-size: 15px; margin: 22px 0 4px; color: #c9cede; }
+  .sub { margin: 0 0 16px; color: #8b90a0; font-size: 13px; max-width: 760px; }
+  .sub code { color: #aab; background: #1d2030; padding: 1px 5px; border-radius: 4px; }
+  #summary { font-weight: 700; font-size: 15px; margin: 8px 0 14px; }
+  .pass { color: #6ee787; } .fail { color: #ff8080; }
+  table { border-collapse: collapse; font-family: ui-monospace, monospace; font-size: 12px; margin-bottom: 6px; }
+  th, td { text-align: left; padding: 5px 12px; border-bottom: 1px solid #232838; }
+  th { color: #9aa0b0; font-weight: 600; }
+  td.v { color: #9fd0a6; }
+  .err { color: #ff8080; white-space: pre-wrap; font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+  <h1>Throng — Chapter 19 Self-Test</h1>
+  <p class="sub">
+    Headless conformance (§1.6) for <b>nuke, timer, end conditions &amp; scoring</b>:
+    drives <code>src/simulation.js</code> with no rendering and asserts the §19 behaviour
+    — the clock (§19.1), the four end conditions (§19.2) with the one-frame lag (§12.2)
+    and the explosion hold, the staggered nuke cascade (§19.3), the release halt (§19.4),
+    and the truncating-division scoring (§19.6). Deterministic; no pixels.
+  </p>
+  <div id="summary">running…</div>
+  <table id="table"><thead><tr>
+    <th>check</th><th>result</th><th>observed</th>
+  </tr></thead><tbody></tbody></table>
+
+  <div id="error" class="err"></div>
+
+<script type="module">
+import { Simulation } from '../src/simulation.js';
+import { Terrain } from '../src/terrain.js';
+import { ObjectMap, EFFECT } from '../src/object_map.js';
+import { Spawner } from '../src/spawner.js';
+import { ACTION } from '../src/lemming.js';
+
+const checks = [];   // {label, pass, obs}
+const ok = (label, pass, obs = '') => checks.push({ label, pass: !!pass, obs: String(obs) });
+
+// ── Small builders ───────────────────────────────────────────────────────────
+const floor = (w = 200) => { const t = new Terrain(); t.fillRect(0, 128, w, 32); return t; };
+function level(cfg) {                                   // a bare sim with §19 enabled
+  const sim = new Simulation(cfg.terrain ?? floor(), cfg.objectMap ?? new ObjectMap());
+  sim.configureLevel({ maxLemmings: cfg.max, rescueCount: cfg.rescue, timeLimitMinutes: cfg.min ?? null });
+  return sim;
+}
+const drive = (sim, n) => { for (let i = 0; i < n; i++) sim.step(); };
+const driveTo = (sim, pred, cap = 400) => { for (let i = 0; i < cap && !pred(); i++) sim.step(); };
+
+// ── §19.6 scoring — truncating division ───────────────────────────────────────
+function score(saved, rescue, total) {
+  const sim = level({ max: total, rescue });
+  sim.saved = saved;
+  return sim._computeResult();
+}
+{
+  const a = score(50, 50, 100);
+  ok('§19.6 save exactly the target → win (50/100, target 50)', a.donePct === 50 && a.targetPct === 50 && a.won === true, `done ${a.donePct} ≥ target ${a.targetPct}`);
+  const b = score(49, 50, 100);
+  ok('§19.6 one short → loss by truncation (49/100)', b.donePct === 49 && b.won === false, `done ${b.donePct} < target ${b.targetPct}`);
+  const c = score(5, 5, 7);
+  ok('§19.6 odd counts, all saved → win (5/7, target 71)', c.targetPct === 71 && c.donePct === 71 && c.won === true, `target ${c.targetPct}, done ${c.donePct}`);
+  const d = score(4, 5, 7);
+  ok('§19.6 odd counts, one short → loss (4/7)', d.targetPct === 71 && d.donePct === 57 && d.won === false, `target ${d.targetPct}, done ${d.donePct}`);
+}
+
+// ── §19.1 the clock — 17 frames/second, borrow, floor ─────────────────────────
+{
+  const sim = level({ max: 20, rescue: 10, min: 5 });   // starts 5-00
+  drive(sim, 17);
+  ok('§19.1 17 frames = one second, borrow (5-00 → 4-59)', sim.clockString() === '4-59', sim.clockString());
+  drive(sim, 17);
+  ok('§19.1 another second (→ 4-58)', sim.clockString() === '4-58', sim.clockString());
+}
+
+// ── §19.2 end: time up, with the §12.2 one-frame lag ──────────────────────────
+{
+  const sim = level({ max: 20, rescue: 10, min: 0 });
+  sim.minutes = 0; sim.seconds = 3;                     // 0-03 → 51 frames to 0-00
+  drive(sim, 51);
+  ok('§19.2 clock reaches 0-00 but level not yet ended (lag, §12.2)', sim.clockString() === '0-00' && sim.finished === false, `clock ${sim.clockString()}, finished ${sim.finished}`);
+  sim.step();                                           // phase 1 of the next frame ends it
+  ok('§19.2 time-up ends the level one frame later, flag set', sim.finished === true && sim.timeUp === true && sim.result.timeUp === true, `finished ${sim.finished}, timeUp ${sim.timeUp}`);
+}
+
+// ── §19.2 end: everyone saved ─────────────────────────────────────────────────
+{
+  const om = new ObjectMap();
+  om.paintRect(88, 122, 22, 14, EFFECT.EXIT);           // straddles the foot line y=128
+  const sim = level({ terrain: floor(120), objectMap: om, max: 3, rescue: 2 });
+  sim.addLemming(95, 128, 1, ACTION.WALKING);
+  sim.addLemming(96, 128, 1, ACTION.WALKING);
+  sim.addLemming(97, 128, 1, ACTION.WALKING);
+  driveTo(sim, () => sim.finished);
+  ok('§19.2 all saved → level ends, won (3/3 ≥ target 66)', sim.finished && sim.saved === 3 && sim.result.won === true, `saved ${sim.saved}, done ${sim.result?.donePct}`);
+}
+
+// ── §12.2 one-frame lag on the all-saved condition ────────────────────────────
+{
+  const om = new ObjectMap();
+  om.paintRect(88, 122, 22, 14, EFFECT.EXIT);
+  const sim = level({ terrain: floor(120), objectMap: om, max: 3, rescue: 2 });
+  sim.addLemming(95, 128, 1, ACTION.WALKING);
+  sim.addLemming(96, 128, 1, ACTION.WALKING);
+  sim.addLemming(97, 128, 1, ACTION.WALKING);
+  driveTo(sim, () => sim.saved === 3);
+  const notYet = sim.finished === false;               // saved==max this frame, end lags
+  sim.step();
+  ok('§12.2 saved==max not ended same frame; ends next frame', notYet && sim.finished === true, `same-frame finished ${!notYet}, next-frame ${sim.finished}`);
+}
+
+// ── §19.2 end: no lemmings remain (all drown) ─────────────────────────────────
+{
+  const om = new ObjectMap();
+  om.paintRect(64, 124, 44, 12, EFFECT.WATER);
+  const sim = level({ terrain: floor(120), objectMap: om, max: 3, rescue: 2 });
+  sim.addLemming(70, 128, 1, ACTION.WALKING);
+  sim.addLemming(72, 128, 1, ACTION.WALKING);
+  sim.addLemming(74, 128, 1, ACTION.WALKING);
+  driveTo(sim, () => sim.finished);
+  ok('§19.2 all removed → level ends, lost (0 saved)', sim.finished && sim.removed === 3 && sim.saved === 0 && sim.result.won === false, `removed ${sim.removed}, done ${sim.result?.donePct}`);
+}
+
+// ── §19.2 explosion hold — end deferred until the scatter finishes ────────────
+{
+  const sim = level({ terrain: floor(120), max: 1, rescue: 1 });
+  const lem = sim.addLemming(20, 128, 1, ACTION.WALKING);
+  lem.explosionTimer = 5;                               // synthetic fuse (the mechanism, not real data)
+  driveTo(sim, () => sim.removed === 1);
+  const held = sim.particleFinishTimer > 0 && sim.finished === false;   // §19.2 hold
+  driveTo(sim, () => sim.finished, 80);
+  ok('§19.2 explosion holds the end, then releases it', held && sim.finished === true, `held ${held}, endedAfterHold ${sim.finished}`);
+}
+
+// ── §19.3 the nuke — one fuse/frame, staggered cascade, then ends ─────────────
+{
+  const sim = level({ terrain: floor(240), max: 3, rescue: 0 });
+  const l0 = sim.addLemming(40, 128, 1, ACTION.WALKING);
+  const l1 = sim.addLemming(60, 128, 1, ACTION.WALKING);
+  const l2 = sim.addLemming(80, 128, 1, ACTION.WALKING);
+  sim.armNuke();
+  ok('§19.3 arming sets the nuking flag', sim.isNuking === true, `isNuking ${sim.isNuking}`);
+  sim.step();
+  ok('§19.3 frame 1 lights only the first fuse', l0.explosionTimer === 79 && l1.explosionTimer === 0 && l2.explosionTimer === 0, `${l0.explosionTimer}/${l1.explosionTimer}/${l2.explosionTimer}`);
+  sim.step();
+  ok('§19.3 frame 2 lights the second', l0.explosionTimer === 78 && l1.explosionTimer === 79 && l2.explosionTimer === 0, `${l0.explosionTimer}/${l1.explosionTimer}/${l2.explosionTimer}`);
+  sim.step();
+  ok('§19.3 frame 3 — staggered cascade 77/78/79', l0.explosionTimer === 77 && l1.explosionTimer === 78 && l2.explosionTimer === 79, `${l0.explosionTimer}/${l1.explosionTimer}/${l2.explosionTimer}`);
+  driveTo(sim, () => sim.finished, 300);
+  ok('§19.2 nuke finishes (out==0) → level ends', sim.finished === true && sim.removed === 3 && sim.saved === 0, `removed ${sim.removed}, finished ${sim.finished}`);
+}
+
+// ── §19.4 arming the nuke halts the release stream ────────────────────────────
+{
+  const sim = new Simulation(floor(240), new ObjectMap());
+  sim.setSpawner(new Spawner({ entrances: [{ x: 20, y: 0 }], maxLemmings: 20, releaseRate: 50 }));
+  sim.configureLevel({ maxLemmings: 20, rescueCount: 10, timeLimitMinutes: null });
+  drive(sim, 70);                                       // first release is frame 54
+  const before = sim.released;
+  sim.armNuke();
+  drive(sim, 60);
+  ok('§19.4 no lemming released after the nuke is armed', before >= 1 && sim.released === before, `released before ${before}, after ${sim.released}`);
+}
+
+// ── render ────────────────────────────────────────────────────────────────────
+try {
+  const tbody = document.querySelector('#table tbody');
+  let pass = 0;
+  for (const c of checks) {
+    if (c.pass) pass++;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${c.label}</td>` +
+      `<td class="${c.pass ? 'pass' : 'fail'}">${c.pass ? 'PASS' : 'FAIL'}</td>` +
+      `<td class="v">${c.obs}</td>`;
+    tbody.appendChild(tr);
+  }
+  const s = document.getElementById('summary');
+  s.textContent = `${pass} / ${checks.length} checks pass`;
+  s.className = pass === checks.length ? 'pass' : 'fail';
+} catch (e) {
+  document.getElementById('summary').textContent = 'ERROR';
+  document.getElementById('error').textContent = String((e && e.stack) || e);
+}
+</script>
+</body>
+</html>
