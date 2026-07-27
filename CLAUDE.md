@@ -157,6 +157,25 @@ When a project has no local `CLAUDE.md`, default to:
 - Sprites are BMP files; `0xFF00FF` is the colorkey transparent color
 - Canvas resolution matches the original arcade / console where relevant
 
+## Code style — annotate function signatures for navigation
+
+**Annotate every function's parameters and return type** so VSCode's
+go-to-definition, hover, and call-hierarchy work across the whole
+codebase. The goal is cheap code traversal — a reader (or the next
+session) should be able to jump around by types without running
+anything — not ceremony.
+
+- **JS / ES6:** JSDoc on functions — a `@param {Type} name` line per
+  parameter and a `@returns {Type}`, plus `@type {Type}` on non-obvious
+  fields and locals. Plain, standard JSDoc; it's already the house style.
+- **Python:** PEP 484 type hints on every parameter and the return
+  (`def f(x: int, buf: bytes) -> list[int]:`), plus a one-line docstring
+  when the purpose isn't obvious from the name. Same payoff — hover
+  types and jump-to-definition in VSCode.
+
+Applies to new code and to functions you're already editing; don't do a
+repo-wide retrofit sweep unless asked.
+
 ## Architecture principle for retro ports
 
 A retro-game port has **two viable architectures**, and the choice is a
