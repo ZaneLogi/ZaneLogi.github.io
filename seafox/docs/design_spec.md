@@ -1089,21 +1089,40 @@ they should, with no symptom that points at the cause.
 ## 6.5 Colour assignment
 
 **Each object is baked at the specific `phase` and `flip` its creation site gives it.**
-Object colour is therefore a property of the asset, fixed before the game runs, and no
-colour decision happens at draw time.
+Object colour is therefore a property of the asset, settled before the game runs. **One
+object escapes this and is decided at draw time** — the death-burst debris, § 15.4 — and
+it is the only one.
 
-Most objects need one variant. Three cases need more:
+Most objects need one variant, and two observations explain why that holds even where an
+object's parity changes during play:
 
 - **Objects drawn as pure white** — those whose artwork contains no isolated lit pixel —
   have no colour to select, so `phase` is irrelevant to them. Several objects that move
   by odd steps fall in this group, which is why their motion is free to change parity.
-- **The depth charge** changes colour once during its life, on a single odd step near
-  the end of its arc. It bakes as **two** variants, and Chapter 13 specifies which
-  applies when.
+- **The depth charge is the sharpest instance of that**, because it looks like the
+  exception and is not. Its arc takes a single odd step near the end, so its parity does
+  change mid-life — but the arcing bitmap is a solid pair that renders white at either
+  parity, and the sinking bitmap it swaps to is only ever drawn after that step. **One
+  variant each.** The artwork is built so the parity change costs nothing, which is the
+  same trick as the group above, applied to the one object whose motion demanded it.
+
+**One case genuinely needs more:**
+
 - **The merchant vessels** are ten roster records over seven distinct bitmaps, and each
   record fixes both a spawn column parity and a palette flip. The result is ten objects
   in **four** distinct hues, which § 1.3 makes normative. They bake as ten variants;
   Chapter 12 gives the roster.
+
+**The death frames are the exception to "creation site":** they have none, and take their
+pair from the death sequence instead. `flip` is **1** for every death frame and for the
+floating score, and `phase` is the parity § 7.4.1's frame table forces — even for the
+sinking-ship frames, odd for the burst, the column and the score. One variant each, and a
+wreck's colour never depends on what died.
+
+**The effects of Chapter 15 are the other place the creation site is not the whole
+story**, because that system forces no parity of its own. The dot and the streak still
+bake per parity and their creator still picks; the debris cannot, and § 15.4 gives the
+rule for it.
 
 ## 6.6 The sprite inventory
 
@@ -1214,7 +1233,8 @@ The HUD digit font (§ 19.9) is separate from all of the above — 6 × 8 cells,
 **Normative:** the ink/colour split · the two-pass blend and its order · the
 palette-bit-and-parity colour selection · the right-only chroma extension · retaining
 `byteWidth` and using it for boxes · per-object colour assignment, and the four merchant
-hues.
+hues · the death frames' fixed flip and per-frame parity (§ 7.4.1) · the debris's
+draw-time parity choice (§ 15.4), which is the only one.
 
 **Free:** asset file format and packing · whether variants are stored separately or
 generated at load · how `tools/` is structured.
@@ -1360,13 +1380,13 @@ shows its damage path cannot be reached.
 **One frame table, shared by every type.** The first/last columns above are indices into
 it. Twelve frames, in three visual groups plus a special case:
 
-| frame | sprite | group |
-|---:|---|---|
-| 0, 1, 2 | sinking ship, three stages — **28 × 8** | a ship going down |
-| 3, 4, 5 | burst, three stages — **14 × 6** | a compact explosion |
-| 6, 7 | tall column, two stages — **14 × 13** | a water column |
-| 8, 9, 10 | **the same three sinking-ship sprites again** | a second copy |
-| 11 | **no sprite** — special-cased, § 7.3.2 | the floating score |
+| frame | sprite | X parity | group |
+|---:|---|---|---|
+| 0, 1, 2 | sinking ship, three stages — **28 × 8** | **even** | a ship going down |
+| 3, 4, 5 | burst, three stages — **14 × 6** | **odd** | a compact explosion |
+| 6, 7 | tall column, two stages — **14 × 13** | **odd** | a water column |
+| 8, 9, 10 | **the same three sinking-ship sprites again** | **even** | a second copy |
+| 11 | **no sprite** — special-cased, § 7.3.2 | **odd** | the floating score |
 
 Which type plays which:
 
@@ -1383,8 +1403,21 @@ whose animation must end on a floating score value, and frame 11 is intercepted 
 the table is consulted.
 
 Frames advance at period 4 (§ 2.7.1), and the entity is removed when the counter passes
-the last frame. **Each frame also forces the entity's X to a fixed parity**, so an
-explosion cannot change colour as it plays.
+the last frame.
+
+**Each frame forces the entity's X to the parity in the table above**, applied before the
+frame is drawn and before frame 11's interception, so the floating score is forced odd
+along with the rest. An explosion therefore cannot change colour as it plays, and a
+wreck's colour does not depend on where the thing that died happened to be.
+
+**The death sequence also fixes the palette flip, and it fixes it to 1 for every type.**
+Beginning a death replaces the entity's palette selection outright rather than merging
+into it, and nothing in the animation restores it, so a wreck is drawn in the flipped
+palette whatever the dying object's own was. A merchant and a Destroyer sink in the same
+colour despite differing in life.
+
+Both halves together make every death frame's colour a property of the frame alone.
+§ 6.5 bakes them on that basis.
 
 ### 7.4.2 The re-anchor is subtracted
 
@@ -2432,8 +2465,11 @@ Seven ticks: **+13 px across and +4 down**, ending at row 35. Five steps of pure
 horizontal travel, then the fall begins and steepens — **a thrown parabola**, the
 trajectory of something rolled off the stern of a moving ship rather than dropped.
 
-The final step's **dX of +1** is the one odd horizontal step in the game a player can
-see, because it changes the object's colour (§ 6.5).
+The final step's **dX of +1** is the one odd horizontal step in the game whose effect a
+player can see — but not on the arc itself, which renders white at either parity. It
+lands the charge on an **odd** column, and that is what fixes the hue of the sinking form
+it swaps to on the very next tick (§ 6.5, § 13.7.4). Drop the +1 and the charge sinks in
+the other colour of its pair.
 
 ### 13.7.4 Hitting the water
 
@@ -2812,26 +2848,53 @@ edges before they are reaped:
 
 ## 15.4 The four sprites
 
-| sprite | shape |
-|---|---|
-| **dot** | a single pixel |
-| **blob** | two adjacent pixels — so it renders white (§ 6.3) |
-| **spark cluster** | four pixels over four rows |
-| **streak** | a white pair followed by alternating pixels |
+| sprite | shape | flip | parity |
+|---|---|---|---|
+| **dot** | a single pixel | never | fixed by its creator (§ 15.5) |
+| **blob** | two adjacent pixels — so it renders white (§ 6.3) | never | no hue, so none applies |
+| **spark cluster** | four pixels over four rows | always | **live** — see below |
+| **streak** | a white pair followed by alternating pixels | always | fixed by its creator (§ 15.5) |
 
 These are the only artwork in the game outside the main sprite set.
 
+**Flip is not free here — it is a consequence of the sprite select.** § 15.2's mode byte
+uses one bit for both, so a sprite reachable only with that bit set is always drawn
+flipped, and the other two never are.
+
+**This system forces no parity.** The death frames do (§ 7.4.1); the effects walk of
+§ 15.3 steps, moves, clips and draws, and never touches the low bit of X. So an effect's
+parity is whatever its creator's X plus a constant offset makes it, and it survives only
+while the object's `dx` is even.
+
+That splits the four sprites three ways:
+
+- **The blob has no hue at all** — two adjacent pixels render white — so neither bit
+  reaches it.
+- **The dot and the streak bake once per parity, and the creation site picks.** Both sit
+  at odd offsets from their parents, so which variant applies depends on the parent;
+  § 15.5 gives the outcomes. Neither ever moves on an odd `dx`, so the choice holds for
+  the object's whole life.
+- **The debris bakes once per parity and the *draw* picks, on the particle's current X.**
+  Four of the twelve template records of § 15.8 carry an odd `dx`, so those particles
+  change column parity every step and change hue as they fly. **This is the only
+  draw-time colour decision in the game**, and it is the exception § 6.5 names.
+
 ## 15.5 Who creates what
 
-| creator | sprite | offset from parent | velocity | lifetime |
-|---|---|---|---|---:|
-| death burst | spark cluster | per template | radial fan, up to ±6 | 3–18 |
-| vertical torpedo | dot | X+1, Y+7 rising / Y−1 falling | none | 1 |
-| horizontal torpedo | blob | X, Y+1 | none | 1 |
-| depth charge, water entry | dot × 3 | X+3, Y | dy = −2 for all three; dx = −2, 0, +2 | **5** |
-| depth charge, sinking | blob | X+3, Y | none | 1 |
-| enemy torpedo | dot | X+7, Y+1 | none | 1 |
-| hospital ship · merchants · Destroyer | streak | Y+7, under the hull | none | 1 |
+| creator | sprite | offset from parent | velocity | lifetime | parity |
+|---|---|---|---|---:|---|
+| death burst | spark cluster | per template | radial fan, up to ±6 | 3–18 | **live** |
+| vertical torpedo | dot | X+1, Y+7 rising / Y−1 falling | none | 1 | even |
+| horizontal torpedo | blob | X, Y+1 | none | 1 | — |
+| depth charge, water entry | dot × 3 | X+3, Y | dy = −2 for all three; dx = −2, 0, +2 | **5** | even |
+| depth charge, sinking | blob | X+3, Y | none | 1 | — |
+| enemy torpedo | dot | X+7, Y+1 | none | 1 | **odd** |
+| hospital ship · merchants · Destroyer | streak | Y+7, under the hull | none | 1 | both — below |
+
+A dash is the blob, which renders white and has no parity to fix. The two dot rows land
+even because both parents sit at odd X and both offsets are odd; the enemy torpedo's is
+odd because that parent sits at even X. The splash's three velocities are all even, so
+those dots keep the parity they are born at for their whole five ticks.
 
 **Almost every effect is a one-tick stationary mark, re-created each time its parent
 updates** — which is why they track their parent exactly and need no following logic.
@@ -2843,6 +2906,10 @@ Two details that are easy to get backwards:
   ship and the merchants travel right, so their wake is placed 7 px to the **left**; the
   Destroyer travels left, so its wake is placed 29 px to the **right**. The right-travelling
   ships also suppress the mark while still too close to the left edge to subtract.
+- **A wake therefore inverts its parent's parity**, because both stern offsets are odd.
+  The hospital ship and the Destroyer travel at even X, so their wakes are odd; the
+  merchant roster spawns records at **both** parities (§ 12.5), so merchant wakes occur
+  at both. The record that spawned the ship picks the variant.
 - **Wakes are not made every tick.** Each is created once per *parent update*, and those
   parents are divided down — so a wake is a single mark for one tick in every 3 (hospital
   ship), 5 (Destroyer) or 7 (merchant).
@@ -2901,8 +2968,15 @@ right, down-right — and never the long-lived ones. Only the player, at twelve,
 whole table. That is why bigger deaths look different in kind rather than merely in
 count.
 
-All twelve carry the spark-cluster sprite. Record 8 is the only one whose mode differs;
-every other record shares one mode value.
+**Eleven carry the spark-cluster sprite; record 8 carries the blob.** Its mode byte
+selects a different one of § 15.4's four, and being a different sprite it is also the one
+record drawn unflipped. Since a type takes the first *n* records, record 8 is reached only
+at a debris count of nine or more — so the player's twelve-particle death is the only one
+that contains it, and it renders white among eleven coloured sparks.
+
+**Four records carry an odd `dx`** — 0, 1, 7 and 11, at −5, −3, −5 and −5. Those particles
+change column parity on every step, which is what makes the debris the one object whose
+colour is chosen at draw time (§ 15.4).
 
 The dying entity's own animation runs at period 4 (§ 2.7.1), independently.
 
@@ -2928,7 +3002,8 @@ record shape and the absence of any per-effect type · the mode byte's four fiel
 sprite-select/palette-flip overlap · the update order of § 15.3 · the bounds rectangle ·
 every creator in § 15.5 including the direction-dependent wake and the divided cadence ·
 the splash's upward fan · all three trail cadences and the opposite seeding · debris
-counts from the definition table.
+counts from the definition table · **this system forcing no parity**, the per-creator
+parities of § 15.5, and the debris's draw-time parity choice · record 8 being a blob.
 
 **Free:** storage layout · § 15.9's initial countdown, which is specified rather than
 inherited.

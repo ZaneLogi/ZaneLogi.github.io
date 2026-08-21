@@ -65,8 +65,14 @@ Consequences we accept:
   roster, whose per-record flag byte selects both the spawn column and the
   palette — that is what pins the ten targets to four distinct hues, so those
   bake as ten coloured variants.
-- One object changes colour during its life: the depth charge, on the single odd
-  step at the end of its arc. It bakes as two variants.
+- The depth charge takes a single odd step at the end of its arc, so its parity
+  changes during its life — and it still bakes as one variant per sprite,
+  because the arc bitmap is a solid pair that renders white either way and the
+  sinking bitmap is only drawn after the step. The odd step fixes the sinking
+  form's hue rather than changing the arc's.
+- Exactly one object's colour cannot be baked: the death-burst debris, whose
+  parity nothing fixes. Both parities ship and the draw picks on the particle's
+  current X. It is the only draw-time colour decision in the port.
 
 ### 3. Collision reads a stencil, not the picture
 
