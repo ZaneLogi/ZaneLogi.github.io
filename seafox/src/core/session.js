@@ -20,6 +20,8 @@ import { EntityList } from './entities.js';
 import { Rng } from './rng.js';
 import { capsFor } from './difficulty.js';
 import { createSpawnerState, resetRoster, KILL_QUOTA } from './spawners.js';
+import { createDemoState } from './demo.js';
+import { PLAYER_BOUNDS, DEMO_START, spawnPlayer } from './player.js';
 
 /** @type {number} § 10.3: the game begins with three and gains no more, ever. */
 export const STARTING_SPARE_SUBS = 3;
@@ -65,6 +67,72 @@ export class Session {
     this.tick = 0;
     /** @type {Object<string, number>} the caps of the current rung (Chapter 8). */
     this.caps = capsFor(this.mission);
+
+    /**
+     * **The one input seam** (§ 19.1): every source of control reaches the
+     * simulation as this pair, each axis one of -2, 0 or +2. It has exactly
+     * three writers -- the keyboard table, the analogue axes and the demo's
+     * bounce -- and only one is active at a time. Nothing downstream knows which
+     * wrote it, and that is the whole mechanism by which one engine serves both
+     * the attract demo and a played game.
+     *
+     * It lives here rather than on the entity because § 4.2 gives the entity
+     * record no velocity field: motion is decided fresh each update.
+     * @type {{vx: number, vy: number}}
+     */
+    this.input = { vx: 0, vy: 0 };
+
+    /**
+     * The player's clamps (§ 2.5). A copy, not the shared constant, because the
+     * fly-in relaxes minX to 0 and the outro raises maxX to 306 (§ 11).
+     * @type {{minX: number, maxX: number, minY: number, maxY: number}}
+     */
+    this.playerBounds = Object.assign({}, PLAYER_BOUNDS);
+
+    /**
+     * § 13.1: raised when the player spawns, and cleared by the player's OWN
+     * handler when a removal is requested. Nothing else writes it, which is why
+     * death reaches § 11.2's guard one tick after the hit.
+     * @type {boolean}
+     */
+    this.playerAlive = false;
+
+    /** @type {Object} the attract submarine's state (§ 10.5.1). */
+    this.demo = createDemoState();
+  }
+
+  /**
+   * Put the title screen into its running state: an empty list and the demo
+   * submarine at § 20.4's start position, stationary.
+   *
+   * The player is allocated first, so it takes slot 0 -- and because it is never
+   * freed during a round, the swap-with-last of § 4.6 cannot move another entity
+   * into that slot. `playerSlot` below relies on that and asserts it.
+   * @returns {void}
+   */
+  startDemo() {
+    this.mission = 0;
+    this.applyRung();
+    this.resetLists();
+    this.demo = createDemoState();
+    this.playerBounds = Object.assign({}, PLAYER_BOUNDS);
+    spawnPlayer(this, DEMO_START.x, DEMO_START.y);
+  }
+
+  /**
+   * The player's slot, or -1 when there is none.
+   *
+   * Not cached: a slot is an index (§ 4.1) and swap-with-last moves entities
+   * between them, so a stored index would be a stale handle. In practice the
+   * player is always slot 0 during a round -- it is allocated into an empty list
+   * and never freed until the outro -- and this returns that without assuming it.
+   * @returns {number}
+   */
+  get playerSlot() {
+    for (let i = 0; i < this.entities.liveCount; i++) {
+      if (this.entities.slots[i].type === 0) return i;
+    }
+    return -1;
   }
 
   /**

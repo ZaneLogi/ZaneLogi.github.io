@@ -20,6 +20,7 @@ import { Session } from '../src/core/session.js';
 import {
   runSpawners, drawDepth, SPAWNERS, MERCHANT_ROSTER, ROSTER_STATUS,
 } from '../src/core/spawners.js';
+import { tick } from '../src/core/tick.js';
 import { LADDER, capsFor } from '../src/core/difficulty.js';
 import { Rng } from '../src/core/rng.js';
 import { TYPE, TYPE_NAMES, CLASS } from '../src/core/types.js';
@@ -50,10 +51,15 @@ function run(list) {
 }
 
 /**
- * Advance a session by running only § 9.2 step 5 -- the five spawners -- and
- * record every spawn. The entity walk does not exist yet, so nothing moves and
- * nothing leaves; over the 201 ticks this oracle needs, no class reaches its cap
- * and that costs nothing.
+ * A cold-booted attract session, and every spawn it produces.
+ *
+ * This drives the WHOLE tick of § 9.2, not just its step 5, because that is what
+ * a cold boot actually runs -- and the demo's step 6 takes one generator draw per
+ * tick ahead of the next tick's spawners, so spawner-only ticking would consume
+ * the shared generator differently from the real game (§ 5.6).
+ *
+ * § 20.3's five first-spawn ticks are unaffected either way: they come from the
+ * shipped cooldowns, not from a draw. Everything draw-dependent is not.
  *
  * @param {Session} session
  * @param {number} ticks
@@ -63,14 +69,22 @@ function runTicks(session, ticks) {
   /** @type {{tick: number, type: number, slot: number}[]} */
   const log = [];
   for (let t = 1; t <= ticks; t++) {
-    session.tick = t;
     const before = session.entities.liveCount;
-    runSpawners(session);
+    tick(session);
     for (let s = before; s < session.entities.liveCount; s++) {
       log.push({ tick: t, type: session.entities.slots[s].type, slot: s });
     }
   }
   return log;
+}
+
+/**
+ * @returns {Session} a session at the cold-boot attract state
+ */
+function coldBoot() {
+  const session = new Session();
+  session.startDemo();
+  return session;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,7 +98,7 @@ function runTicks(session, ticks) {
 function oracle2(list) {
   list.section('§ 20.3 — Oracle 2, the cold-boot table');
 
-  const session = new Session();
+  const session = coldBoot();
   const log = runTicks(session, 201);
 
   /** @type {Object<number, number>} first spawn tick per type */
@@ -126,12 +140,11 @@ function oracle2(list) {
                   : log.length + ' spawns in 201 ticks, all accounted for');
 
   // § 20.6, run over the whole window rather than at the end.
-  const session2 = new Session();
+  const session2 = coldBoot();
   /** @type {string[]} */
   let violations = [];
   for (let t = 1; t <= 201 && violations.length === 0; t++) {
-    session2.tick = t;
-    runSpawners(session2);
+    tick(session2);
     violations = checkEntityInvariants(session2.entities);
   }
   list.add('the § 20.6 invariants hold on every one of the 201 ticks',
@@ -242,7 +255,7 @@ function blockedSpawns(list) {
   list.section('§ 12.2 — a blocked spawn is pending, not skipped');
 
   // Drive the Destroyer class to its title-screen cap of 3, then keep ticking.
-  const session = new Session();
+  const session = coldBoot();
   runTicks(session, 800);
   const cap = session.caps[CLASS.DESTROYER];
   const atCap = session.entities.counts[CLASS.DESTROYER];
@@ -252,8 +265,7 @@ function blockedSpawns(list) {
   // Once saturated the cooldown must sit at zero, retested every tick.
   let ticks = 0;
   while (session.spawners.cooldowns.destroyer !== 0 && ticks < 400) {
-    session.tick += 1;
-    runSpawners(session);
+    tick(session);
     ticks += 1;
   }
   list.add('a saturated class leaves its cooldown at zero, retesting every tick (§ 12.2)',
@@ -264,8 +276,7 @@ function blockedSpawns(list) {
   // makes a cap a standing population rather than a rate.
   const before = session.entities.counts[CLASS.DESTROYER];
   freeOneOfClass(session, TYPE.DESTROYER);
-  session.tick += 1;
-  runSpawners(session);
+  tick(session);
   list.add('freeing a slot lets the spawn land on the very next tick (§ 12.2)',
     session.entities.counts[CLASS.DESTROYER] === before,
     'count returned to ' + session.entities.counts[CLASS.DESTROYER] + ' immediately');
@@ -332,13 +343,12 @@ function roster(list) {
 
   // The cursor advances even when the record it lands on cannot be spawned, so
   // the roster is walked in order regardless.
-  const session = new Session();
+  const session = coldBoot();
   session.spawners.roster[0] = ROSTER_STATUS.SUNK;
   session.spawners.cooldowns.merchant = 0;
   const beforeCursor = session.spawners.rosterCursor;
   const beforeLive = session.entities.liveCount;
-  session.tick = 1;
-  runSpawners(session);
+  tick(session);
   list.add('the cursor advances on a failed attempt, and nothing spawns (§ 12.5)',
     session.spawners.rosterCursor === beforeCursor + 1 &&
     session.entities.liveCount === beforeLive + 1,   // the supply sub, tick 1
@@ -427,7 +437,7 @@ function ladder(list) {
 function regression(list) {
   list.section('Regression tripwires — derived here, NOT from design_spec');
 
-  const session = new Session();
+  const session = coldBoot();
   runTicks(session, 201);
   const hex = (v) => v.toString(16).toUpperCase().padStart(2, '0');
 
@@ -435,14 +445,18 @@ function regression(list) {
   // without asserting it would be a tripwire that never fires -- the mutation
   // run that collapsed § 12.4's two draws moved every figure below, and a
   // report-only check would have shrugged at all three.
-  list.eq('13 draws taken in the first 201 ticks', session.rng.draws, 13);
+  list.eq('213 draws taken in the first 201 ticks', session.rng.draws, 213);
   list.eq('generator state after 201 ticks',
-    hex(session.rng.s2) + ' ' + hex(session.rng.s3), 'FF 0F');
-  list.eq('8 live entities after 201 ticks', session.entities.liveCount, 8);
+    hex(session.rng.s2) + ' ' + hex(session.rng.s3), '0D 35');
+  list.eq('8 live entities after 201 ticks -- the demo submarine plus 7 spawns',
+    session.entities.liveCount, 8);
 
   list.add('what a change in the three above means',
     true,
-    'each enemy submarine costs 3 draws (mask, depth, cooldown) and each other spawn 1; ' +
-    'the demo takes no entry-side draw (§ 8.4, open item). Nothing leaves yet — the ' +
-    'entity walk arrives with Oracle 3, so the live count only grows');
+    'the demo takes one draw per tick for the horizontal torpedo (§ 10.5.1), so 201 of ' +
+    'these are step 6 and the remaining 12 are spawners — each enemy submarine costs 3 ' +
+    '(mask, depth, cooldown), every other spawn or blocked merchant reload 1, and the ' +
+    'demo takes no entry-side draw (§ 8.4, open item). These moved from 13 / FF 0F / 8 ' +
+    'when this page switched from ticking the spawners alone to running the whole tick: ' +
+    'the same five first-spawn ticks, a different generator consumption');
 }

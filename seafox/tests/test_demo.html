@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seafox — Oracle 3: the demo trajectory</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <h1>Seafox — Oracle 3: the demo submarine's trajectory</h1>
+  <nav>
+    <a href="./test_rng.html">Oracle 1 — the generator</a>
+    <a href="./test_entities.html">The entity list</a>
+    <a href="./test_spawners.html">Oracle 2 — spawn cadence</a>
+    <a href="./test_demo.html">Oracle 3 — the demo</a>
+  </nav>
+  <p class="sub">
+    design_spec § 20.4, plus the Chapter 9 walk and the Chapter 13.1 player it
+    rests on. <b>Nothing random touches the demo submarine's path</b> — it is
+    spawned at a fixed position with fixed direction seeds and moves only by the
+    bounce rule of § 10.5.1, so its trajectory is reproducible
+    <em>independently of whether Oracle 1 passes</em>. That isolation is the
+    point: it tests the divider, the clamps and the loop order and nothing else.
+    What it exists to catch is <b>the divider being dropped</b> — § 2.7 calls
+    that the single easiest thing in the specification to implement wrongly, and
+    every interval then lands very close to half its correct value, which looks
+    like a plausible game and is wrong everywhere.
+  </p>
+  <div id="checks" class="checks">running checks…</div>
+
+  <script type="module" src="./test_demo.js"></script>
+</body>
+</html>

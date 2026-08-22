@@ -427,6 +427,13 @@ velocity** — the sub stops against a wall rather than sliding along it.
 | min Y | 50 | twelve rows below the waterline — the player can never reach the surface |
 | max Y | 175 | ten rows above the HUD line |
 
+**The clamps are strict inequalities.** A step that would carry the sub *past* a bound
+is the one that clamps and zeroes the axis; a step that lands *exactly on* a bound does
+neither, and the sub carries on until the following update takes it past. The difference
+is observable and Chapter 20's demo-trajectory oracle is what pins it down — testing
+`≥` instead of `>` moves the demo's horizontal bounces to 254 / 506 / 758 against
+§ 20.4's 256 / 510 / 764.
+
 **The player's X is always even.** It spawns at 100 and every X step is ±2, so parity is
 preserved for the life of the sub. This is normative because Chapter 13 has an object
 that spawns at a fixed offset from the player and depends on the resulting parity.
@@ -1623,7 +1630,7 @@ carried page-flip bookkeeping. § 9.6.
 
 A cursor runs from 0 and is compared against the **live count** each iteration, so
 entities created during the walk are picked up by it and entities removed during it are
-handled by § 9.6.
+handled by § 9.5.
 
 ```
 cursor = 0
@@ -1650,7 +1657,7 @@ STATE_CHANGE:
 
 SETTLE:
     if e.removalRequested:  goto UPDATE                # give the handler another pass
-    if e.removalConfirmed:  free the slot (§ 9.6)      # cursor does NOT advance
+    if e.removalConfirmed:  free the slot (§ 9.5)      # cursor does NOT advance
     else:                   cursor += 1
 ```
 
