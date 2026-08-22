@@ -22,6 +22,7 @@ import { capsFor } from './difficulty.js';
 import { createSpawnerState, resetRoster, KILL_QUOTA } from './spawners.js';
 import { createDemoState } from './demo.js';
 import { createConvoyState } from './convoy.js';
+import { Stencil } from './stencil.js';
 import { PLAYER_BOUNDS, DEMO_START, spawnPlayer } from './player.js';
 
 /** @type {number} § 10.3: the game begins with three and gains no more, ever. */
@@ -44,6 +45,13 @@ export class Session {
     this.entities = new EntityList();
     /** @type {Object} spawner cooldowns and the roster. Cooldowns never reset. */
     this.spawners = createSpawnerState();
+    /**
+     * The collidable buffer of Chapter 3. **Core state**, not presentation: the
+     * renderer never reads or writes it (§ 17.1), and the colour buffer it is
+     * paired with is not core's to own (§ 1.5).
+     * @type {Stencil}
+     */
+    this.stencil = new Stencil();
 
     /** @type {number} 0 = title screen, 1-5 = the mission number (§ 10.1). */
     this.mission = 0;
@@ -120,6 +128,18 @@ export class Session {
 
     /** @type {number} § 13.2: the horizontal torpedo's 6-tick cooldown. */
     this.horizontalCooldown = 0;
+
+    /**
+     * § 16.2, § 16.3. Held as plain integers here; Chapter 16 owns the BCD
+     * representation, the burn, and the gauges. The refuel of § 16.4 already
+     * writes them, because it is a collision response and not a Ch.16 rule --
+     * and it RESTORES rather than adds, so collecting a payload with fuel
+     * remaining does not bank the surplus.
+     * @type {number}
+     */
+    this.fuel = 1200;
+    /** @type {number} one magazine shared by both weapons (§ 16.3). */
+    this.torpedoes = 30;
   }
 
   /**
@@ -205,5 +225,6 @@ export class Session {
    */
   resetLists() {
     this.entities.reset();
+    this.stencil.clear();
   }
 }

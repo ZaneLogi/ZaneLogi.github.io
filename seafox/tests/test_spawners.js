@@ -300,7 +300,7 @@ function freeOneOfClass(session, type) {
   for (let i = 0; i < session.entities.liveCount; i++) {
     if (session.entities.slots[i].type !== type) continue;
     session.entities.countRemoval(type);
-    session.entities.freeSlot(i);
+    session.entities.freeSlot(i, session.stencil);
     return true;
   }
   return false;
@@ -461,7 +461,7 @@ function regression(list) {
   list.eq('221 draws taken in the first 201 ticks', session.rng.draws, 221);
   list.eq('generator state after 201 ticks',
     hex(session.rng.s2) + ' ' + hex(session.rng.s3), 'EF 8B');
-  list.eq('16 live entities after 201 ticks', session.entities.liveCount, 16);
+  list.eq('13 live entities after 201 ticks', session.entities.liveCount, 13);
 
   list.add('what a change in the three above means',
     true,
@@ -470,7 +470,9 @@ function regression(list) {
     'costs 3 (mask, depth, cooldown), the supply submarine 1 more for its release ' +
     'countdown, and each depth charge 2. The demo takes NO entry-side draw, which the ' +
     'disassembly settles: $79DE draws a bit only on missions 1 and 2. These figures have ' +
-    'moved twice — 13 / FF 0F / 8 when the page ticked spawners alone, 213 / 0D 35 / 8 ' +
-    'once it ran the whole tick, and 221 / EF 8B / 16 now that Chapter 13 gives the ' +
-    'handlers children to create. The five first-spawn ticks never moved.');
+    'moved three times — 13 / FF 0F / 8 when the page ticked spawners alone, ' +
+    '213 / 0D 35 / 8 once it ran the whole tick, 221 / EF 8B / 16 when Chapter 13 gave ' +
+    'the handlers children to create, and 221 / EF 8B / 13 now that Chapter 14 lets ' +
+    'things destroy each other. Note the DRAWS did not move this time: collision ' +
+    'consumes no randomness. The five first-spawn ticks have never moved at all.');
 }

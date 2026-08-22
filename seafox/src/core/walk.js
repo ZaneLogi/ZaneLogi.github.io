@@ -26,6 +26,7 @@
 
 import { updateHandlerFor } from './dispatch.js';
 import { beginDeath, advanceDeath } from './definitions.js';
+import { runCollision } from './collision.js';
 
 /**
  * Walk every live entity once (§ 9.4).
@@ -71,9 +72,35 @@ export function walkEntities(session) {
       }
 
       if (run === 'update') {
+        // § 3.3: the entity's PREVIOUS footprint is cleared before it moves and
+        // its new one written after. An entity skipped by its divider is not
+        // rewritten and stays in the stencil where it is -- required, not
+        // incidental, because a skipped entity is still physically present and
+        // still collidable.
+        //
+        // Rebuilding the whole buffer at the top of a tick is the tempting
+        // shortcut and is wrong: it puts entities later in the walk at their new
+        // positions when earlier ones test against them, shifting every contact
+        // by up to a step per entity.
+        session.stencil.erase(e, cursor);
         handler(session, cursor);
-        // Chapter 14's collision for this entity belongs HERE, immediately after
-        // the handler and inside the walk -- not in a pass afterwards (§ 3.3).
+
+        // Collision runs HERE -- immediately after the entity's own handler and
+        // inside the walk, not as a pass afterwards (§ 14.1). That is what gives
+        // § 3.3 its ordering: entities earlier in the walk are already at their
+        // new positions, entities later in it are still at their previous ones.
+        //
+        // **And it runs BEFORE the subject is re-stamped, which is the only
+        // order that makes § 3.2's test mean anything.** The confirm scans the
+        // subject's own footprint for an id that is neither 0 nor its own; stamp
+        // first and every pixel of that footprint holds its own id, so the test
+        // is false by construction and nothing in the game can ever collide.
+        // Clearing first and stamping last leaves the buffer holding exactly the
+        // OTHER entities while the subject asks its question.
+        runCollision(session, cursor);
+
+        session.stencil.write(e, cursor);
+
         if (!e.stateChangePending) run = 'settle';
         else run = 'stateChange';
       }
@@ -84,15 +111,20 @@ export function walkEntities(session) {
         // Two different arrivals land here -- a transition falling due, and a
         // death animation whose frame timer has expired -- and they are told
         // apart by the flag, not by the caller.
+        // The death sequence moves the entity once (§ 7.4.2's subtracted
+        // re-anchor) and swaps its sprite on every frame, so its footprint has
+        // to follow it -- a wreck is still collidable until it is removed.
+        session.stencil.erase(e, cursor);
         if (e.stateChangePending) beginDeath(session, cursor);
         else if (e.dying) advanceDeath(session, cursor);
+        session.stencil.write(e, cursor);
         run = 'settle';
       }
 
       // SETTLE
       if (e.removalRequested) { run = 'update'; continue; }   // another pass
       if (e.removalConfirmed) {
-        el.freeSlot(cursor);              // cursor does NOT advance (§ 4.6, § 9.5)
+        el.freeSlot(cursor, session.stencil);   // cursor does NOT advance (§ 4.6, § 9.5)
       } else {
         cursor += 1;
       }

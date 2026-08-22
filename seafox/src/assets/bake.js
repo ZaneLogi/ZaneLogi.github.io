@@ -4,16 +4,22 @@
 // palette become the runtime pair of § 6.2 -- an ink silhouette and a colour
 // bitmap.
 //
-// This module imports nothing but the palette's index constants and depends on
-// no layer. `ink` is what core collision reads; `color` is what presentation
-// draws. Running it at load rather than baking into the asset file is a free
-// choice under § 6.7, and it is the cheap one: the source blocks are under 3 KB
-// and the baked pair for every variant is roughly fifteen times that.
+// This is the COLOUR half. The ink half lives in ink.js and imports nothing,
+// because `core/` needs the silhouette for the stencil (§ 3.1) while the palette
+// lives in `presentation/` -- and § 1.5's only normative rule is that `core`
+// depends on neither of the other two layers. Keeping the halves in separate
+// modules is what makes § 3.1's ink/colour split structural rather than a
+// convention: `ink` is what core collision reads, `color` is what presentation
+// draws, and neither can quietly stand in for the other.
+//
+// Running the bake at load rather than into the asset file is a free choice under
+// § 6.7, and it is the cheap one: the source blocks are under 3 KB and the baked
+// pair for every variant is roughly fifteen times that.
 
 import { COLOR } from '../presentation/palette.js';
+import { bakeInk, expandLit, decodeBase64, PIXELS_PER_BYTE, boxWidth } from './ink.js';
 
-/** Pixels packed into one source byte. Bit 7 is the palette bit, not a pixel. */
-const PIXELS_PER_BYTE = 7;
+export { boxWidth };
 
 /**
  * Hue by palette bit and absolute column parity (design_spec § 6.3).
@@ -56,28 +62,14 @@ const HUE = [
  */
 
 /**
- * Decode a base64 payload to bytes.
- * @param {string} b64
- * @returns {Uint8Array}
- */
-function decodeBase64(b64) {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-/**
- * Expand a source block to one byte per pixel: what is lit, and what hue each
- * pixel would take if it turned out to be isolated.
+ * Expand a source block to one byte per pixel: what is lit (from ink.js), and
+ * what hue each pixel would take if it turned out to be isolated.
  * @param {SpriteBlock} block
  * @returns {{lit: Uint8Array, hue: Uint8Array, width: number, rows: number}}
  */
 function expand(block) {
+  const { lit, width, rows } = expandLit(block);
   const raw = decodeBase64(block.bits);
-  const width = block.byteWidth * PIXELS_PER_BYTE;
-  const rows = block.rows;
-  const lit = new Uint8Array(width * rows);
   const hue = new Uint8Array(width * rows);
 
   for (let y = 0; y < rows; y++) {
@@ -89,10 +81,8 @@ function expand(block) {
       const paletteBit = ((b >> 7) & 1) ^ block.flip;
       for (let k = 0; k < PIXELS_PER_BYTE; k++) {
         const x = c * PIXELS_PER_BYTE + k;
-        const i = y * width + x;
-        lit[i] = (b >> k) & 1;
         // Column parity is ABSOLUTE screen parity, not position in the sprite.
-        hue[i] = HUE[paletteBit][(block.phase + x) & 1];
+        hue[y * width + x] = HUE[paletteBit][(block.phase + x) & 1];
       }
     }
   }
@@ -139,23 +129,10 @@ export function bake(block) {
     }
   }
 
-  // `ink` is the lit pixels stripped to their bounding box. The source blocks
-  // reserve blank working columns on the right; stripping them is what makes
-  // `byteWidth` worth retaining (design_spec § 6.4).
-  let minX = width, maxX = -1, minY = rows, maxY = -1;
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < width; x++) {
-      if (!lit[y * width + x]) continue;
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-    }
-  }
-  if (maxX < 0) throw new Error('sprite block has no lit pixel');
-
-  const w = maxX - minX + 1;
-  const h = maxY - minY + 1;
+  // The ink is ink.js's job -- one definition of the silhouette, shared by the
+  // stencil and the picture.
+  const inkSprite = bakeInk(block);
+  const { w, h, minX, minY } = inkSprite;
 
   // Colour reaches one column past the ink where an edge pixel is isolated,
   // and only ever to the RIGHT. Sizing `color` to the ink box would clip the
@@ -167,11 +144,10 @@ export function bake(block) {
     }
   }
 
-  const ink = new Uint8Array(w * h);
+  const ink = inkSprite.ink;
   const color = new Uint8Array(colorWidth * h);
   for (let y = 0; y < h; y++) {
     const src = (minY + y) * width + minX;
-    for (let x = 0; x < w; x++) ink[y * w + x] = lit[src + x];
     for (let x = 0; x < colorWidth; x++) color[y * colorWidth + x] = full[src + x];
   }
 
@@ -196,22 +172,6 @@ export function bakeAll(blocks) {
   const out = {};
   for (const name of Object.keys(blocks)) out[name] = bake(blocks[name]);
   return out;
-}
-
-/**
- * The collision box width in pixels, derived from the SOURCE byte width.
- *
- * Entity blocks reserve blank columns at their right edge as working space, and
- * the original sized its boxes to the ink by deriving the extent from the byte
- * width rather than the pixel width. Recomputing from the stripped bitmap gives
- * boxes that are equal or tighter -- never looser -- and a game whose weapons
- * miss slightly more often than they should (design_spec § 6.4).
- *
- * @param {Sprite} sprite
- * @returns {number} box width in pixels; extents are inclusive, so 0 is one pixel
- */
-export function boxWidth(sprite) {
-  return (sprite.byteWidth - 1) * PIXELS_PER_BYTE;
 }
 
 /**

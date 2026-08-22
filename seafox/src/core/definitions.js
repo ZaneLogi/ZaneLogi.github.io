@@ -27,12 +27,23 @@
 // Chapter 14 shows its damage path cannot be reached (§ 13.6.2).
 
 import { TYPE } from './types.js';
+import { onDolphinDestroyed } from './responses.js';
 
 /** @type {number} § 7.4: the avenger's sound field, not a sound number. */
 export const SILENT = -1;
 
 /** @type {number} § 2.7.1: death frames advance on this period, whatever the type. */
 export const DEATH_FRAME_PERIOD = 4;
+
+/** @type {number} § 7.4.1: the frame that carries no sprite, only a score value. */
+export const FLOATING_SCORE_FRAME = 11;
+
+/**
+ * @type {number} § 2.7.1: how long a merchant's floating score lingers. **This
+ * is not the death-animation rate** -- frames advance on period 4, and the 32
+ * governs only this final frame.
+ */
+export const FLOATING_SCORE_PERIOD = 32;
 
 /**
  * One row per type (§ 7.4). `reanchorX`/`reanchorY` are SUBTRACTED once when the
@@ -134,6 +145,12 @@ export function beginDeath(session, slot) {
   // def.debris particles from the twelve-record template, taking the first n.
   // Neither is ported; both are read from the row above when they are.
 
+  // **Shoot the dolphin and it retaliates** (§ 13.8.2, § 13.9). Its response is
+  // the only place in the game that creates an entity, and what it creates
+  // cannot be killed, cannot be dodged and cannot be earned. The only way to
+  // avoid it is not to shoot the dolphin.
+  if (e.type === TYPE.DOLPHIN) onDolphinDestroyed(session, slot);
+
   if (def.firstFrame === 0 && def.lastFrame === 0) {
     // No death animation -- the type simply vanishes (§ 7.4). Several of these
     // still emit debris, which is the only trace they leave.
@@ -166,6 +183,31 @@ export function advanceDeath(session, slot) {
     e.removalRequested = true;
     return;
   }
+
+  // Frame 11 is special-cased before the frame table is consulted (§ 7.4.1): a
+  // merchant's animation ends on a floating score VALUE rather than on a sprite,
+  // and which value is chosen by the same test that chose the score -- whether
+  // this kill emptied the quota (§ 7.3.2). Ten sprites exist, one per mission
+  // for each case, so the number shown always matches the number awarded.
+  //
+  // **Suspension 4 of § 10.5.2 lives here**, and it is load-bearing rather than
+  // cosmetic: on the title screen the wreck is REMOVED instead, because rule 3
+  // has suspended the write that would have chosen the value. Suspending one
+  // without the other makes a demo merchant index the table with whatever the
+  // previous occupant of its slot left behind.
+  if (e.animFrame === FLOATING_SCORE_FRAME) {
+    if (session.isTitleScreen) {
+      e.removalRequested = true;
+      return;
+    }
+    const quota = e.scratch2 === 1;
+    e.sprite = (quota ? 'scoreQuota' : 'scoreOrdinary') + session.mission;
+    e.updatePeriod = FLOATING_SCORE_PERIOD;
+    e.x = (e.x & ~1) | DEATH_FRAMES[FLOATING_SCORE_FRAME].parity;
+    e.updateCountdown = e.updatePeriod;
+    return;
+  }
+
   applyDeathFrame(e);
   e.updateCountdown = e.updatePeriod;
 }

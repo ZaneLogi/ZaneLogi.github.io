@@ -212,15 +212,35 @@ export class EntityList {
    * swap, while the slot still identifies the entity that owned it.
    *
    * @param {number} slot the slot to free
+   * @param {Object} [stencil] the Chapter 3 buffer, when one exists. Freeing
+   *   touches it twice and both are load-bearing -- see below.
    * @returns {void}
    */
-  freeSlot(slot) {
+  freeSlot(slot, stencil) {
     if (slot >= this.liveCount || slot < 0) {
       throw new Error('freeSlot(' + slot + ') outside the live prefix of ' + this.liveCount);
     }
+    // § 4.6 puts the erase FIRST, while the slot still identifies the entity
+    // that owned it.
+    if (stencil) stencil.erase(this.slots[slot], slot);
+
     this.liveCount -= 1;
     if (slot !== this.liveCount) {
-      this.slots[slot].copyFrom(this.slots[this.liveCount]);
+      const moved = this.slots[this.liveCount];
+      // The stencil stores slot + 1 (§ 3.1), so an entity that changes slots
+      // leaves a footprint carrying its OLD id. Neither the specification nor
+      // § 4.6 says so, but both halves break without this: the moved entity
+      // would read its own pixels as foreign and confirm a collision against
+      // itself, and whichever entity now holds the stale id would read those
+      // pixels as its own. Re-stamp with the new id, before the copy, while the
+      // record still describes where those pixels are.
+      if (stencil) {
+        stencil.erase(moved, this.liveCount);
+        this.slots[slot].copyFrom(moved);
+        stencil.write(this.slots[slot], slot);
+      } else {
+        this.slots[slot].copyFrom(moved);
+      }
     }
     this.slots[this.liveCount].clear();
   }

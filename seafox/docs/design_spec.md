@@ -613,11 +613,33 @@ shifting every contact by up to one step per entity. The incremental discipline
 reproduces the intended ordering, in which entities later in the walk are still at
 their previous positions.
 
+**The confirm runs between the clear and the write, and the order is not negotiable.**
+Within one entity's turn the sequence is: clear its old footprint · run its handler ·
+**run its collision** · write its new footprint. Writing before the confirm leaves every
+pixel of the subject's own footprint holding the subject's own id, so § 3.2's test —
+which asks for an id that is neither `0` nor the subject's — is false by construction and
+**nothing in the game can ever collide**. The failure is silent: the game runs, animates
+and looks correct.
+
+**A swap-with-last must carry the moved entity's footprint with it.** § 4.6 moves the
+last entity into a freed slot, and this buffer stores *slot + 1*, so that entity's
+footprint is left holding its old id. Both halves then break — the moved entity reads its
+own pixels as foreign and confirms a contact against itself, and whichever entity now
+holds the stale id reads those pixels as its own. Re-write the footprint under the new id
+as part of the swap. § 20.6's stencil invariant is what catches this.
+
 Clearing is masked by the sprite's ink, not by its bounding box. Two overlapping
 entities therefore behave as follows: the later writer owns the shared pixels in
 `stencil`, and when it moves away it clears only what it wrote — which can leave the
 earlier entity's shared pixels cleared until that entity next redraws. Chapter 14
 specifies why this is harmless for the collision test as defined.
+
+**"Clears only what it wrote" is a test on the buffer, not a figure of speech.** An
+entity clearing its footprint must write `0` only where the buffer already holds *its
+own* id. Blanking every pixel under its ink instead erases whatever else occupies the
+overlap — which is precisely the other party to a contact, removed from the buffer at the
+one moment it matters. The two entities then pass through each other while touching, and
+nothing anywhere reports a problem.
 
 ## 3.4 The palette
 

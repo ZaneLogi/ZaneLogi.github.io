@@ -193,10 +193,11 @@ function exits(list, survey) {
   list.section('§ 13.11 — every type leaves, and no class cap locks');
 
   const created = [...survey.seenTypes].filter((t) => t !== TYPE.PLAYER).sort((a, b) => a - b);
-  list.add('thirteen of the fourteen created types appear in an attract run',
-    created.length === 13,
+  list.add('all fourteen created types appear in an attract run',
+    created.length === 14,
     created.map((t) => TYPE_NAMES[t]).join(', ') +
-    ' -- the avenger is the fourteenth and has no creation site until Chapter 14');
+    ' -- the avenger joined this list when Chapter 14 landed, because the demo ' +
+    'eventually shoots a dolphin and that is its one and only creation site');
 
   // The magnetic mine is the one type that never expires on its own -- its
   // limit of 310 is beyond the drawable range and it homes rather than crosses.
