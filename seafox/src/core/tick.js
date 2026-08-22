@@ -16,6 +16,7 @@
 
 import { runSpawners } from './spawners.js';
 import { walkEntities } from './walk.js';
+import { walkEffects } from './effects.js';
 import { demoBounceHorizontal, demoBounceVertical } from './demo.js';
 import { fireVerticalTorpedo, fireHorizontalTorpedo } from './weapons.js';
 
@@ -114,8 +115,10 @@ function frame(session) {
 
   walkEntities(session);                            // 1 -- § 9.4
 
-  // 2. Walk the effects list -- Chapter 15, a separate 32-slot allocator.
-  // walkEffects(session)
+  // 2. Walk the effects list -- Chapter 15, a separate 32-slot allocator. It
+  //    runs AFTER the entity walk, which is also why § 17.2 composites effects
+  //    over entities.
+  walkEffects(session);
 
   // 3. Advance sound by EXACTLY ONE (pitch, duration) pair -- always, not one
   //    per sound and never two (§ 9.3, § 18.3).

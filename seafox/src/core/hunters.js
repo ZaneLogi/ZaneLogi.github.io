@@ -22,6 +22,7 @@
 // threat in the game into one of the quickest.
 
 import { TYPE, CLASS } from './types.js';
+import { trailDot } from './trails.js';
 
 /** Enemy submarine (§ 13.3). */
 const SUB_STEP = 2;
@@ -212,6 +213,7 @@ function launchEnemyTorpedo(session, parentSlot, player) {
   else if (player.y > e.y) e.scratch0 = 1;
   else e.scratch0 = 0;
   e.scratch1 = TORPEDO_DRIFT_PERIOD;
+  e.scratch2 = 0;                         // trail toggle, seeded to wait a tick
 
   session.entities.countSpawn(TYPE.ENEMY_TORPEDO);
   return true;
@@ -240,6 +242,12 @@ export function updateEnemyTorpedo(session, slot) {
   }
 
   e.x -= TORPEDO_STEP;
+
+  // § 15.7: a toggle, every 2nd tick -- **from the second**. Seeded opposite to
+  // the player's horizontal torpedo, so this one waits a tick before its first
+  // mark where the player's does not.
+  e.scratch2 ^= 1;
+  if (e.scratch2 === 0) trailDot(session, e.x + 7, e.y + 1);
 
   e.scratch1 -= 1;
   if (e.scratch1 <= 0) {

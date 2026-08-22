@@ -18,6 +18,7 @@
 // is explicit that the differences are per class rather than transcription noise.
 
 import { TYPE } from './types.js';
+import { wake } from './trails.js';
 import { releaseDepthCharge } from './depthcharge.js';
 
 /** Periods, from § 2.7.1. Speed is step / period, never step (§ 2.7). */
@@ -71,6 +72,7 @@ export function updateMerchant(session, slot) {
     return;
   }
   e.x += SURFACE_STEP;
+  wake(session, e, true);        // § 15.5: 7 px LEFT -- it travels right
   if (e.x > RIGHT_EXIT) e.removalRequested = true;
   e.updateCountdown = e.updatePeriod;
 }
@@ -109,6 +111,7 @@ export function updateHospitalShip(session, slot) {
     return;
   }
   e.x += SURFACE_STEP;
+  wake(session, e, true);        // § 15.5: 7 px LEFT -- it travels right
   if (e.x > RIGHT_EXIT) e.removalRequested = true;
   e.updateCountdown = e.updatePeriod;
 }
@@ -150,6 +153,7 @@ export function updateDestroyer(session, slot) {
   }
 
   e.x -= SURFACE_STEP;
+  wake(session, e, false);       // § 15.5: 29 px RIGHT -- it travels left
   // § 13.11: the left-travelling classes leave when their 16-bit X passes below
   // zero, which is what detects the crossing.
   if (e.x <= 0) {

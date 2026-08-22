@@ -14,11 +14,12 @@
 // spawning for the rest of the session, which is close to undiagnosable from
 // play. Nothing else in the game will tell you.
 //
-// The rest of § 20.6's list -- effects count, BCD nibbles, the sound queue
-// advancing by exactly one pair, the stencil holding only live slot values --
-// joins this file as those subsystems arrive.
+// The rest of § 20.6's list -- BCD nibbles and the sound queue advancing by
+// exactly one pair -- joins this file as those subsystems arrive. The stencil
+// carries its own check, in stencil.js, because it needs the buffer.
 
 import { MAX_ENTITIES } from './entities.js';
+import { MAX_EFFECTS } from './effects.js';
 import { CLASS } from './types.js';
 
 /**
@@ -54,5 +55,26 @@ export function checkEntityInvariants(el) {
  * @returns {string[]} one message per violation
  */
 export function checkSessionInvariants(session) {
-  return checkEntityInvariants(session.entities);
+  return checkEntityInvariants(session.entities).concat(checkEffectInvariants(session.effects));
+}
+
+/**
+ * § 20.6: the effects count never exceeds 32.
+ *
+ * Where the entity list would be corrupt if it overflowed, this one is merely
+ * short: § 15.1 has it drop a creation silently when full. So the check is that
+ * the bound is respected, not that nothing was ever refused.
+ * @param {import('./effects.js').EffectList} list
+ * @returns {string[]} one message per violation
+ */
+export function checkEffectInvariants(list) {
+  /** @type {string[]} */
+  const bad = [];
+  if (list.liveCount < 0 || list.liveCount > MAX_EFFECTS) {
+    bad.push('effect count out of range: ' + list.liveCount);
+  }
+  for (let i = 0; i < list.liveCount; i++) {
+    if (!list.slots[i].active) bad.push('hole in the effects array at slot ' + i);
+  }
+  return bad;
 }

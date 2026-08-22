@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seafox — effects</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <h1>Seafox — effects</h1>
+  <nav>
+    <a href="./test_rng.html">Oracle 1</a>
+    <a href="./test_entities.html">Entity list</a>
+    <a href="./test_spawners.html">Oracle 2</a>
+    <a href="./test_demo.html">Oracle 3</a>
+    <a href="./test_catalogue.html">Catalogue</a>
+    <a href="./test_collision.html">Collision</a>
+    <a href="./test_effects.html">Effects</a>
+  </nav>
+  <p class="sub">
+    design_spec Chapter 15 — the game's <b>second object system</b>, and the
+    difference is in the record. An entity holds identity and no velocity, so it
+    needs a dispatch table; an effect holds velocity and no type, so it is fully
+    self-describing and the whole walk is one loop with no dispatch behind it.
+    Two claims are tested hardest because a screenshot would never settle them:
+    that the burst template's <b>order</b> carries the design, and that this
+    system <b>forces no parity</b> — which is what leaves the debris as the one
+    object whose colour the draw decides.
+  </p>
+  <div id="checks" class="checks">running checks…</div>
+  <script type="module" src="./test_effects.js"></script>
+</body>
+</html>

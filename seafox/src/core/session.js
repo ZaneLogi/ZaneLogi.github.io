@@ -23,6 +23,7 @@ import { createSpawnerState, resetRoster, KILL_QUOTA } from './spawners.js';
 import { createDemoState } from './demo.js';
 import { createConvoyState } from './convoy.js';
 import { Stencil } from './stencil.js';
+import { EffectList } from './effects.js';
 import { PLAYER_BOUNDS, DEMO_START, spawnPlayer } from './player.js';
 
 /** @type {number} § 10.3: the game begins with three and gains no more, ever. */
@@ -52,6 +53,12 @@ export class Session {
      * @type {Stencil}
      */
     this.stencil = new Stencil();
+    /**
+     * Chapter 15's second object system -- its own 32 slots, walked after the
+     * entity list. Unlike that list, it checks its bound and drops silently.
+     * @type {EffectList}
+     */
+    this.effects = new EffectList();
 
     /** @type {number} 0 = title screen, 1-5 = the mission number (§ 10.1). */
     this.mission = 0;
@@ -219,12 +226,12 @@ export class Session {
    * permanently out of step with the array -- the same failure as collapsing
    * two-phase removal, arriving by a different route.
    *
-   * The effects list of Chapter 15 does not exist yet and joins this call when
-   * it does. The spawner cooldowns are deliberately NOT reset (§ 12.3).
+   * The spawner cooldowns are deliberately NOT reset (§ 12.3).
    * @returns {void}
    */
   resetLists() {
     this.entities.reset();
+    this.effects.reset();
     this.stencil.clear();
   }
 }

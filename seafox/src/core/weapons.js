@@ -19,6 +19,7 @@
 // than as a timer (§ 4.7). The horizontal one carries both.
 
 import { TYPE, CLASS } from './types.js';
+import { trailDot, trailBlob } from './trails.js';
 
 /** Vertical torpedo -- type 1 (§ 13.2). Step -1, period 1: the only step of 1. */
 const VERTICAL = {
@@ -103,6 +104,7 @@ export function fireHorizontalTorpedo(session) {
   e.updateCountdown = HORIZONTAL.period;
   e.scratch1 = HORIZONTAL.driftUpdates;
   e.scratch2 = 1;                         // the drift's sign, +/-1 in Y
+  e.scratch3 = 1;                         // trail toggle, seeded to mark at once
   session.entities.countSpawn(TYPE.HORIZONTAL_TORPEDO);
   session.horizontalCooldown = HORIZONTAL.cooldown;
   return true;
@@ -136,8 +138,15 @@ export function updateVerticalTorpedo(session, slot) {
   }
 
   e.y += e.scratch0;
-  // Chapter 15: one dot every 4 ticks at X+1, Y+7 rising / Y-1 falling -- the
-  // offset flips with the shot when a hospital ship reverses it.
+
+  // § 15.7: a counter, every 4th tick. The offset puts the mark BEHIND the shot,
+  // so it flips with the shot when a hospital ship reverses it (§ 13.6.2).
+  e.scratch3 += 1;
+  if (e.scratch3 >= 4) {
+    e.scratch3 = 0;
+    trailDot(session, e.x + 1, e.y + (e.scratch0 < 0 ? 7 : -1));
+  }
+
   if (e.y < VERTICAL.topExit || e.y >= VERTICAL.bottomExit) e.removalRequested = true;
   e.updateCountdown = e.updatePeriod;
 }
@@ -175,7 +184,12 @@ export function updateHorizontalTorpedo(session, slot) {
     if (e.y > HORIZONTAL.maxRow) e.y = HORIZONTAL.maxRow;
   }
 
-  // Chapter 15: a two-dot blob every other tick at X, Y+1.
+  // § 15.7: a toggle, every 2nd tick -- **from the first**, so the player's
+  // horizontal torpedo lays a mark on the very tick it is fired. The enemy's
+  // toggle is seeded to the opposite value and waits a tick.
+  e.scratch3 ^= 1;
+  if (e.scratch3 === 0) trailBlob(session, e.x, e.y + 1);
+
   if (e.x > HORIZONTAL.exitX) e.removalRequested = true;
   e.updateCountdown = e.updatePeriod;
 }

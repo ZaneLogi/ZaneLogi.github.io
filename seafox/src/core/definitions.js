@@ -28,6 +28,7 @@
 
 import { TYPE } from './types.js';
 import { onDolphinDestroyed } from './responses.js';
+import { emitBurst } from './burst.js';
 
 /** @type {number} § 7.4: the avenger's sound field, not a sound number. */
 export const SILENT = -1;
@@ -141,9 +142,13 @@ export function beginDeath(session, slot) {
 
   e.stateChangePending = false;
 
-  // Chapter 18: queue def.sound, unless it is SILENT. Chapter 15: emit
-  // def.debris particles from the twelve-record template, taking the first n.
-  // Neither is ported; both are read from the row above when they are.
+  // Chapter 18: queue def.sound, unless it is SILENT.
+
+  // § 15.8: the debris count comes from THIS row, and the type takes the first
+  // n records of the shared twelve-record template. The order is the design --
+  // a five-particle ship never reaches the long-lived records, and only the
+  // player reaches the one carrying a blob.
+  if (def.debris > 0) emitBurst(session, e, def.debris);
 
   // **Shoot the dolphin and it retaliates** (§ 13.8.2, § 13.9). Its response is
   // the only place in the game that creates an entity, and what it creates

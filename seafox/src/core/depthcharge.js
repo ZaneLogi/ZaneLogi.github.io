@@ -15,6 +15,7 @@
 // (§ 13.7.6).
 
 import { TYPE, CLASS } from './types.js';
+import { splash, bubble } from './trails.js';
 
 /** @type {number} § 13.7.3: the arc index starts here and steps down by 4. */
 const ARC_START = 28;
@@ -134,8 +135,8 @@ export function updateDepthCharge(session, slot) {
     return;
   }
 
-  if (e.scratch0 > 0) arcStep(e);
-  else sinkStep(e);
+  if (e.scratch0 > 0) arcStep(session, e);
+  else sinkStep(session, e);
 
   // § 13.7.2: the fuse test runs on EVERY tick including the arc, but the
   // release row of 31 is always above any reachable fuse depth -- the player is
@@ -147,10 +148,11 @@ export function updateDepthCharge(session, slot) {
 
 /**
  * One step of the thrown arc (§ 13.7.3), and the water entry that ends it.
+ * @param {Object} session
  * @param {Object} e an Entity
  * @returns {void}
  */
-function arcStep(e) {
+function arcStep(session, e) {
   const step = ARC[(e.scratch0 / 4) - 1];
   e.x += step.dx;
   e.y += step.dy;
@@ -160,10 +162,10 @@ function arcStep(e) {
     // § 13.7.4, once: the sprite swaps to the sinking form, three spray dots go
     // up, the splash sound is queued and the bubble counter is set to 4.
     e.sprite = 'chargeSinking';
-    // Chapter 15: three dots at X+3, Y, all dy = -2 with dx of -2, 0 and +2,
-    // lifetime 5 -- a fan thrown UPWARD, not backward. Chapter 18: the splash,
-    // queued immediately behind them, and the only sound this entity makes
-    // before it dies. Neither is ported.
+    // § 15.6: three dots thrown UPWARD, not backward. Chapter 18 queues the
+    // splash sound immediately behind them -- the only sound this entity makes
+    // before it dies.
+    splash(session, e.x + 3, e.y);
     e.animFrame = BUBBLE_PERIOD;          // the bubble counter
   }
 }
@@ -178,10 +180,11 @@ function arcStep(e) {
  * and by then neither is needed.
  *
  * From row 35 to a fuse depth of 50 is 8 ticks; to 175 it is 70.
+ * @param {Object} session
  * @param {Object} e an Entity
  * @returns {void}
  */
-function sinkStep(e) {
+function sinkStep(session, e) {
   e.y += SINK_STEP;
 
   e.animLastFrame -= 1;
@@ -193,7 +196,7 @@ function sinkStep(e) {
   e.animFrame -= 1;
   if (e.animFrame <= 0) {
     e.animFrame = BUBBLE_PERIOD;
-    // Chapter 15: a bubble -- a two-pixel blob at X+3, Y -- every 4 ticks.
+    bubble(session, e.x + 3, e.y);        // § 15.5, every 4 ticks
   }
 
   if (e.x < SINK_BOUNDS.minX || e.x > SINK_BOUNDS.maxX) e.removalRequested = true;
