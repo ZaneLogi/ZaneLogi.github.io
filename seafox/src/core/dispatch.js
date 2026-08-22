@@ -4,9 +4,10 @@
 // static table of behaviour, consulted every tick and on every contact.
 //
 // § 7.2 gives the table three columns -- update handler, collision response and
-// score. Only the update column exists here. The other two arrive when Chapter 14
-// and Chapter 16 give them readers, rather than shipping now as placeholders
-// nobody consults.
+// score. Only the update column lives HERE; the other two landed with their
+// readers and live beside them, in responses.js, because that is the only file
+// that consults either. § 7.6 leaves the arrangement free and § 7.1's binding
+// split is between this table and the DEFINITION table, which is kept.
 //
 // **Where several types name the same handler, that sharing is the design**
 // (§ 7.2) and is normative: it is what lets the seven merchant type numbers cost
@@ -34,8 +35,8 @@ import { AVENGER_HANDLERS } from './avenger.js';
 import { updateDepthCharge } from './depthcharge.js';
 
 /**
- * Update handler per type, indexed by the type byte. `null` means the type is
- * not ported yet (see the header).
+ * Update handler per type, indexed by the type byte. `null` means the type has
+ * no creation site -- § 7.5's six unused merchant slots, and nothing else.
  * @type {(Array<((session: Object, slot: number) => void)|null>)}
  */
 export const UPDATE_HANDLERS = (() => {

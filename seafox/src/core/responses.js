@@ -21,16 +21,34 @@
 //     forbidden to harm it. One is protected by its whitelist, the other by
 //     geometry.
 //
-// Not ported, each with a named site below: the BCD score award (Ch.16), the
-// debris and the death sound (Ch.15, Ch.18).
+// Not ported, with a named site below: the death sound (Ch.18). The score award
+// of § 14.5 and the debris of § 15.8 are both live.
 
 import { TYPE } from './types.js';
 import { ROSTER_STATUS } from './spawners.js';
 import { spawnAvenger } from './avenger.js';
+import { scoreFor, MISSION_SCORED } from './resources.js';
 
-/** § 16.2, § 16.3: what a resupply restores to. */
-export const FUEL_FULL = 1200;
-export const TORPEDOES_FULL = 30;
+/**
+ * The score column of § 7.2's dispatch table.
+ *
+ * **`$99` in the low byte is a SENTINEL, not a value** (§ 7.3): it means *this
+ * type scores by mission* and diverts to the merchant rule. Only the merchant
+ * slots carry it, and in binary it would be an ordinary 153 points and the rule
+ * would never fire -- which is why § 1.3 makes decimal semantics normative.
+ * @type {Object<number, number>}
+ */
+const SCORES = {
+  [TYPE.ENEMY_SUBMARINE]: 100,
+  [TYPE.MAGNETIC_MINE]: 50,
+  [TYPE.GIANT_CLAM]: 50,
+  [TYPE.DESTROYER]: 150,
+  [TYPE.DEPTH_CHARGE]: 20,
+  [TYPE.ENEMY_TORPEDO]: 50,
+  [5]: MISSION_SCORED, [6]: MISSION_SCORED, [7]: MISSION_SCORED,
+  [9]: MISSION_SCORED, [10]: MISSION_SCORED, [11]: MISSION_SCORED,
+  [12]: MISSION_SCORED,
+};
 
 /** § 13.6.2: the hospital ship's hull is rows 20-26, so a deflection lands here. */
 const DEFLECT_ROW = 27;
@@ -166,10 +184,20 @@ export function respond(session, selfSlot, otherSlot) {
  * @returns {void}
  */
 function damage(session, slot) {
-  // Chapter 16: award DISPATCH[type].score as BCD, with the $99 sentinel
-  // diverting to the merchant rule of § 7.3.1. Suspended on the title screen
-  // anyway (§ 10.5.2 rule 3), which is still the only mode that runs.
-  session.entities.slots[slot].stateChangePending = true;
+  const e = session.entities.slots[slot];
+  // § 14.5's generic outcome: award the type's score, then raise the flag that
+  // triggers its death sound, its debris and its death animation.
+  //
+  // **Scoring is suspension 3 of § 10.5.2** -- skipped entirely on the title
+  // screen, which is also what stops a demo merchant writing the floating-value
+  // index that frame 11 reads (rule 4 is its pair).
+  if (!session.isTitleScreen) {
+    const table = SCORES[e.type];
+    if (table !== undefined && table !== 0) {
+      session.resources.award(scoreFor(table, session.mission, session.killCounter === 0));
+    }
+  }
+  e.stateChangePending = true;
 }
 
 /**
@@ -217,8 +245,7 @@ function refuel(session, payload, payloadSlot) {
   // twice.
   if (payload.dying || payload.stateChangePending || payload.removalRequested) return;
 
-  session.fuel = FUEL_FULL;
-  session.torpedoes = TORPEDOES_FULL;
+  session.resources.refill();
   session.convoy.live = false;
   payload.removalRequested = true;
   // Chapter 18: sound 9. Chapter 16: redraw both gauges.

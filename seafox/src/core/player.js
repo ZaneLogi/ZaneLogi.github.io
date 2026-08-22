@@ -91,11 +91,13 @@ export function updatePlayer(session, slot) {
   }
 
   // 3. Burn fuel -- gated on BOTH the round being live and a mission running
-  //    (§ 16.2). The second gate is suspension 6 of § 10.5.2: the demo never
-  //    runs dry. Chapter 16 is not ported; the gate is written out so the
-  //    condition is not rediscovered as a single test later.
+  //    (§ 16.2). The second gate is suspension 6 of § 10.5.2: **the demo never
+  //    runs dry**, which is one of the seven rules that let an unattended demo
+  //    run forever.
   if (session.roundLive && session.mission !== 0) {
-    // burnFuel(session) -- § 16.2, 10 per 9 PLAYER UPDATES, which is 18 ticks
+    // 10 per 9 PLAYER UPDATES, which is **18 ticks** -- this call site is why
+    // the interval is in updates and not in ticks (§ 16.2).
+    session.resources.burn();
   }
 
   // 4. Move by the current velocity pair.

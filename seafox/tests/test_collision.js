@@ -15,7 +15,7 @@ import { tick } from '../src/core/tick.js';
 import { checkEntityInvariants } from '../src/core/invariants.js';
 import { boxOf, boxesOverlap } from '../src/core/collision.js';
 import { INK } from '../src/core/stencil.js';
-import { FUEL_FULL, TORPEDOES_FULL } from '../src/core/responses.js';
+import { FUEL_FULL, TORPEDOES_FULL } from '../src/core/resources.js';
 import { ROSTER_STATUS } from '../src/core/spawners.js';
 import { TYPE, TYPE_NAMES, CLASS } from '../src/core/types.js';
 
@@ -357,8 +357,8 @@ function theUnlocked(list) {
 
   // 2. The refuel -- a RESTORE, not a top-up.
   const s3 = stage();
-  s3.fuel = 300;
-  s3.torpedoes = 5;
+  s3.resources.fuel = 300;
+  s3.resources.torpedoes = 5;
   const p3 = s3.entities.slots[s3.playerSlot];
   // The payload's position lives in the SHARED convoy block, not in its record
   // (§ 16.5), and its handler writes the record from that block every tick. So
@@ -368,14 +368,14 @@ function theUnlocked(list) {
   s3.convoy.dx = 0;
   s3.convoy.dy = 0;
   place(s3, TYPE.PAYLOAD, p3.x + 2, p3.y);
-  for (let t = 0; t < 4 && s3.fuel === 300; t++) {
+  for (let t = 0; t < 4 && s3.resources.fuel === 300; t++) {
     s3.convoy.x = p3.x + 2;
     s3.convoy.y = p3.y;
     tick(s3);
   }
   list.add('reaching the payload restores fuel and torpedoes together (§ 16.4)',
-    s3.fuel === FUEL_FULL && s3.torpedoes === TORPEDOES_FULL,
-    'fuel ' + s3.fuel + ', torpedoes ' + s3.torpedoes +
+    s3.resources.fuel === FUEL_FULL && s3.resources.torpedoes === TORPEDOES_FULL,
+    'fuel ' + s3.resources.fuel + ', torpedoes ' + s3.resources.torpedoes +
     ' — a RESTORE, not an addition: collecting one with fuel remaining does not ' +
     'bank the surplus, and there is no way to exceed the starting values');
   list.add('and it does no damage in either direction (§ 14.6 row 14)',

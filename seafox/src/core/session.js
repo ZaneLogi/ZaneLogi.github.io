@@ -24,6 +24,9 @@ import { createDemoState } from './demo.js';
 import { createConvoyState } from './convoy.js';
 import { Stencil } from './stencil.js';
 import { EffectList } from './effects.js';
+import { Resources } from './resources.js';
+import { Messages } from './messages.js';
+import { PHASE } from './round.js';
 import { PLAYER_BOUNDS, DEMO_START, spawnPlayer } from './player.js';
 
 /** @type {number} § 10.3: the game begins with three and gains no more, ever. */
@@ -136,17 +139,24 @@ export class Session {
     /** @type {number} § 13.2: the horizontal torpedo's 6-tick cooldown. */
     this.horizontalCooldown = 0;
 
+    /** @type {Resources} score, fuel and the magazine (Chapter 16). */
+    this.resources = new Resources();
+    /** @type {Messages} the posted-text state (§ 19.10). */
+    this.messages = new Messages();
+
     /**
-     * § 16.2, § 16.3. Held as plain integers here; Chapter 16 owns the BCD
-     * representation, the burn, and the gauges. The refuel of § 16.4 already
-     * writes them, because it is a collision response and not a Ch.16 rule --
-     * and it RESTORES rather than adds, so collecting a payload with fuel
-     * remaining does not bank the surplus.
-     * @type {number}
+     * Which part of a round is running (Chapter 11). § 10.1's mission counter is
+     * still the mode flag; this says where inside a round the session is.
+     * @type {string}
      */
-    this.fuel = 1200;
-    /** @type {number} one magazine shared by both weapons (§ 16.3). */
-    this.torpedoes = 30;
+    this.phase = PHASE.TITLE;
+    /** @type {number} ticks left in a hold -- 33, and nothing moves during one. */
+    this.holdTicks = 0;
+    /** @type {number} § 11.4: which of the drain's twenty passes is running. */
+    this.drainPass = 0;
+    /** @type {number} ticks left in the current drain pass. */
+    this.drainTicks = 0;
+
   }
 
   /**
@@ -159,6 +169,11 @@ export class Session {
    * @returns {void}
    */
   startDemo() {
+    // § 16.1: **the high score is committed on entry to the title screen**, not
+    // when a game ends -- so a player watching the drain is still looking at the
+    // previous record, and theirs appears as the title screen comes up.
+    this.resources.commitHighScore();
+    this.phase = PHASE.TITLE;
     this.mission = 0;
     this.applyRung();
     this.resetLists();
@@ -177,6 +192,18 @@ export class Session {
    * between them, so a stored index would be a stale handle. In practice the
    * player is always slot 0 during a round -- it is allocated into an empty list
    * and never freed until the outro -- and this returns that without assuming it.
+   * @returns {number}
+   */
+  /**
+   * § 10.2: the game returns to the title screen when it ends, whether it was
+   * won or lost.
+   * @returns {void}
+   */
+  returnToTitle() {
+    this.startDemo();
+  }
+
+  /**
    * @returns {number}
    */
   get playerSlot() {

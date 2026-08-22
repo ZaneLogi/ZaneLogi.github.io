@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seafox — the round lifecycle</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <h1>Seafox — the round lifecycle</h1>
+  <nav>
+    <a href="./test_rng.html">Oracle 1</a>
+    <a href="./test_entities.html">Entity list</a>
+    <a href="./test_spawners.html">Oracle 2</a>
+    <a href="./test_demo.html">Oracle 3</a>
+    <a href="./test_catalogue.html">Catalogue</a>
+    <a href="./test_collision.html">Collision</a>
+    <a href="./test_effects.html">Effects</a>
+    <a href="./test_round.html">Round</a>
+  </nav>
+  <p class="sub">
+    design_spec Chapter 11, with Chapter 16's resources — <b>the first page that
+    runs a mission at all.</b> Everything before it exercised the attract demo,
+    where § 10.5.2 suspends scoring, the fuel burn, the quota and the floating
+    score, so several chapters' call sites fire here for the first time.
+    The sharpest thing in the chapter: § 11.2 tests three guards in a fixed order
+    and § 11.3 re-tests them in the <em>same</em> order, so <b>meeting the quota
+    on the same tick your tanks empty is a loss</b> — guard 3 ends the round, but
+    the outro reaches fuel first, and the submarine is spent.
+  </p>
+  <div id="checks" class="checks">running checks…</div>
+  <script type="module" src="./test_round.js"></script>
+</body>
+</html>

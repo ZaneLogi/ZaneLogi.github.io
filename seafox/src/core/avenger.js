@@ -8,8 +8,8 @@
 // It is created by exactly one thing: the dolphin's collision response, the one
 // place in the game that creates an entity. One per dolphin shot, with **no cap
 // anywhere** -- it sits outside the § 4.7.1 arithmetic that makes the caps sum
-// to the array. That creation site is Chapter 14's, so nothing makes one yet;
-// the handler below is complete.
+// to the array. Chapter 14 wired that one creation site up: `beginDeath` calls
+// the dolphin's response, and the response calls `spawnAvenger` below.
 //
 // **It does not steer -- it re-copies the player's Y every tick**, so it is
 // always exactly at the player's depth for its whole run. Reading it as an

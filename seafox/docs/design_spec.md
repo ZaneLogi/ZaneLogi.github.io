@@ -1954,8 +1954,13 @@ It then takes one of two paths, chosen by `replayMission`:
 2. **Draw the player's own sprite once per spare submarine**, along the HUD line,
    stepping 30 pixels between them. The icons are the player sprite, not a separate
    asset.
-3. **The launch:** erase the last icon; redraw it at the player's start position (100,
-   100); queue the launch sound; **hold**; erase it; `spareSubs -= 1`.
+3. **The launch:** **hold**; erase the last icon; redraw it at the player's start
+   position (100, 100); queue the launch sound; **hold**; erase it; `spareSubs -= 1`.
+
+   **Both holds are load-bearing and the first is easy to lose**, because it comes before
+   anything visibly happens: the sequence pauses on the full rack of icons, *then* lifts
+   one off. In the original they are the same routine called at two sites, before the
+   lift and after the tone.
 4. Clear the HUD line again — which is what removes the `SUBS` display — and draw the
    `FUEL:` and `TORP:` labels in its place.
 5. Fill both gauges from the starting values (Chapter 16).

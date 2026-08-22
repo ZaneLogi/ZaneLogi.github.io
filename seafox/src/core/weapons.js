@@ -63,8 +63,11 @@ export function fireVerticalTorpedo(session) {
   if (playerSlot === -1 || !session.playerAlive) return false;
   const player = session.entities.slots[playerSlot];
 
-  // Chapter 16: outside the demo this spends one from the shared magazine of 30,
-  // and firing on empty makes a distinct sound instead of firing.
+  // § 16.3, and suspension 2 of § 10.5.2: the ammunition path is skipped
+  // entirely on the title screen, so the demo gets free shots and no empty
+  // sound. In a mission, firing spends one from the magazine SHARED by both
+  // weapons, and firing on empty makes a distinct sound and no shot.
+  if (!session.isTitleScreen && !session.resources.spendTorpedo()) return false;
 
   const slot = session.entities.alloc(TYPE.VERTICAL_TORPEDO);
   const e = session.entities.slots[slot];
@@ -93,6 +96,7 @@ export function fireHorizontalTorpedo(session) {
   if (playerSlot === -1 || !session.playerAlive) return false;
   const player = session.entities.slots[playerSlot];
   if (player.x > HORIZONTAL.refuseBeyondX) return false;
+  if (!session.isTitleScreen && !session.resources.spendTorpedo()) return false;
 
   const slot = session.entities.alloc(TYPE.HORIZONTAL_TORPEDO);
   const e = session.entities.slots[slot];

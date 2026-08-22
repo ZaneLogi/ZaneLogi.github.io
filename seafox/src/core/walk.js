@@ -15,9 +15,9 @@
 //     handler -- not as a separate pass afterwards. That is what gives § 3.3 its
 //     ordering: entities earlier in the walk are already at their new positions
 //     when a later one tests for contact, and entities later in the walk are
-//     still at their previous ones. Chapter 14 is not ported, so the call site
-//     below is a comment rather than a call -- it is marked so the ORDER is not
-//     rediscovered later.
+//     still at their previous ones. It also runs BEFORE the subject is
+//     re-stamped into the stencil, which is the only order that makes § 3.2's
+//     test mean anything -- see the note at the call site.
 //   * **SETTLE can re-enter UPDATE.** If a request is still outstanding after the
 //     handler ran, the handler runs again: the two-phase handoff of § 4.5
 //     completing inside one tick.
