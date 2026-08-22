@@ -751,7 +751,7 @@ liveCount += 1
 ```
 
 There is **no bounds check** and no failure path. Overflow is prevented upstream, by the
-per-class caps of § 4.6 — and § 4.7 records how little margin that leaves.
+per-class caps of § 4.7 — and § 4.7.1 records how little margin that leaves.
 
 ## 4.5 Removal is two-phase
 
@@ -761,8 +761,8 @@ Removal takes two updates of the entity being removed.
    animation, leaving the screen.
 2. **Confirmed.** On its next update the entity's *own type handler* sees the request,
    clears it, sets `removalConfirmed`, and performs whatever bookkeeping its type owns —
-   above all, decrementing its class counter (§ 4.6).
-3. The walk then frees the slot (§ 4.6.1).
+   above all, decrementing its class counter (§ 4.7).
+3. The walk then frees the slot (§ 4.6).
 
 **Collapsing these two phases leaks the population caps.** Only a type's own handler
 knows which class counter to decrement, so a slot freed in the same step that requested
@@ -782,12 +782,17 @@ erase the entity's footprint from stencil
 liveCount −= 1
 if the freed slot was not the last:
     copy the entity now at liveCount into the freed slot
-    DO NOT advance the walk cursor
+DO NOT advance the walk cursor
 ```
 
-**The cursor must not advance.** The hole has been filled by the entity that was last,
-which this tick has not yet processed — advancing skips it. Every other path through the
-walk advances the cursor normally.
+**The cursor must not advance**, and that holds whether or not a swap happened — which
+is why the rule sits outside the branch above, and why § 9.4's `SETTLE` states it
+unconditionally. Where a swap happened, the hole has been filled by the entity that
+was last, which this tick has not yet processed, so advancing skips it. Where the
+freed slot **was** the last, `liveCount` has just been decremented to the cursor's own
+value, so the walk ends on its next test; advancing there instead puts the cursor one
+past a count that only shrinks, and the walk then reads cleared slots as live entities.
+Every other path through the walk advances the cursor normally.
 
 This is the remove-while-iterating idiom, and it is what keeps the array dense with no
 tombstones. It is also observable: it changes the order in which subsequent entities are

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seafox — the entity list</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <h1>Seafox — the entity list</h1>
+  <nav>
+    <a href="./test_rng.html">Oracle 1 — the generator</a>
+    <a href="./test_entities.html">The entity list</a>
+    <a href="./test_spawners.html">Oracle 2 — spawn cadence</a>
+  </nav>
+  <p class="sub">
+    design_spec Chapter 4 — thirty-two slots, a dense array, allocation by
+    append and removal by swap-with-last — plus the entity-list half of
+    § 20.6's continuously-checkable invariants.
+    Not one of the four oracles: this exists because Chapter 4 carries rules
+    whose failures are close to <b>undiagnosable from play</b>. A collapsed
+    two-phase removal silently stops a class spawning for the rest of the
+    session; a cursor that advances after a swap silently skips an entity every
+    time a slot is freed. Both are cheap to catch here and expensive to find
+    later, and neither needs a walk, a handler or a renderer to exercise.
+  </p>
+  <div id="checks" class="checks">running checks…</div>
+
+  <script type="module" src="./test_entities.js"></script>
+</body>
+</html>

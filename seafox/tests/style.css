@@ -1,0 +1,43 @@
+/* seafox/tests/style.css
+ *
+ * Shared styling for the test pages. Dark, monospace results panel, matching
+ * demos/sprites.html so the project reads as one thing.
+ */
+
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+
+body {
+  margin: 0; padding: 24px;
+  font: 14px/1.5 system-ui, sans-serif;
+  background: #0e1218; color: #d7dae3;
+}
+
+h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: .3px; }
+
+.sub { margin: 0 0 18px; color: #8b90a0; font-size: 13px; max-width: 82ch; }
+.sub code { color: #aab; background: #1a2030; padding: 1px 5px; border-radius: 4px; }
+.sub b { color: #b9bece; font-weight: 600; }
+
+.checks {
+  background: #101722; border: 1px solid #232c3a; border-radius: 10px;
+  padding: 14px 18px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.pass { color: #63d089; }
+.fail { color: #ff8080; }
+.note { color: #7d8398; }
+
+/* A section heading inside the results panel. Asserts nothing, and is excluded
+   from the pass/fail counts. */
+.head {
+  color: #e0b950;
+  font-weight: 600;
+}
+
+nav { margin: 0 0 18px; font-size: 13px; }
+nav a { color: #6ea8f0; text-decoration: none; margin-right: 14px; }
+nav a:hover { text-decoration: underline; }

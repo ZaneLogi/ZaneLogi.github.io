@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seafox — Oracle 2: spawn cadence</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <h1>Seafox — Oracle 2: cold-boot spawn cadence</h1>
+  <nav>
+    <a href="./test_rng.html">Oracle 1 — the generator</a>
+    <a href="./test_entities.html">The entity list</a>
+    <a href="./test_spawners.html">Oracle 2 — spawn cadence</a>
+  </nav>
+  <p class="sub">
+    design_spec § 20.3. The five spawn cooldowns are <b>shipped constants that
+    nothing resets</b> between rounds or missions, so the opening of the first
+    demo after a cold start is exactly determined — the first spawn of each class
+    lands on tick 1, 46, 51, 51 and 201. Cost, per § 20.3:
+    <code>the spawners, the entity list and the session state</code> — no player,
+    no collision, no rendering.
+    It also exercises the shared generator's <b>draw order</b>: the enemy
+    submarine takes two draws for its depth and one for its cooldown, and a
+    spawner that draws the wrong number of times desynchronises every later
+    spawn <em>without changing the table above</em>. That is what the § 12.4
+    distribution check is for.
+  </p>
+  <div id="checks" class="checks">running checks…</div>
+
+  <script type="module" src="./test_spawners.js"></script>
+</body>
+</html>
