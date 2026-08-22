@@ -21,13 +21,16 @@
 //     forbidden to harm it. One is protected by its whitelist, the other by
 //     geometry.
 //
-// Not ported, with a named site below: the death sound (Ch.18). The score award
-// of § 14.5 and the debris of § 15.8 are both live.
+// The score award of § 14.5, the debris of § 15.8 and the death sound of § 18.6
+// are all live. The death sound is not selected here -- raising the
+// state-change flag is what reaches it, and `beginDeath` reads it off the
+// type's own row.
 
 import { TYPE } from './types.js';
 import { ROSTER_STATUS } from './spawners.js';
 import { spawnAvenger } from './avenger.js';
 import { scoreFor, MISSION_SCORED } from './resources.js';
+import { playSound, SOUND } from './sound.js';
 
 /**
  * The score column of § 7.2's dispatch table.
@@ -88,7 +91,7 @@ export function respond(session, selfSlot, otherSlot) {
       break;
 
     case TYPE.VERTICAL_TORPEDO:
-      if (!verticalTorpedoIsHarmedBy(self, other)) harm = false;
+      if (!verticalTorpedoIsHarmedBy(session, self, other)) harm = false;
       break;
 
     case TYPE.HORIZONTAL_TORPEDO:
@@ -248,16 +251,20 @@ function refuel(session, payload, payloadSlot) {
   session.resources.refill();
   session.convoy.live = false;
   payload.removalRequested = true;
-  // Chapter 18: sound 9. Chapter 16: redraw both gauges.
+  // § 18.6, sound 9 -- which is § 18.7's splash with the durations doubled: the
+  // refuel note is the depth-charge splash, drawn out.
+  playSound(session, SOUND.REFUEL);
+  // Chapter 16: redraw both gauges.
 }
 
 /**
  * The vertical torpedo (§ 14.6 row 1).
+ * @param {Object} session
  * @param {Object} self
  * @param {Object} other
  * @returns {boolean} whether the torpedo is damaged
  */
-function verticalTorpedoIsHarmedBy(self, other) {
+function verticalTorpedoIsHarmedBy(session, self, other) {
   if (other.type === TYPE.HOSPITAL_SHIP) {
     // **The shot is reflected, not consumed** (§ 13.6.2): the vertical velocity
     // is negated, the Y snapped to just below the hull, the sprite swapped to
@@ -266,7 +273,7 @@ function verticalTorpedoIsHarmedBy(self, other) {
     self.scratch0 = -self.scratch0;
     self.y = DEFLECT_ROW;
     self.sprite = 'torpedoDescending';
-    // Chapter 18: sound 2.
+    playSound(session, SOUND.DEFLECTED);  // § 18.6, sound 2
     return false;
   }
   // **Consumed by ships and the Destroyer** -- removed silently, with no death.
@@ -291,7 +298,7 @@ function clamIsHarmedBy(session, self, other) {
     // **It has eaten the resupply.**
     self.sprite = 'shellClosed';
     session.convoy.live = false;
-    // Chapter 18: sound 8.
+    playSound(session, SOUND.CLAM_CLOSES);   // § 18.6, sound 8
     return false;
   }
   // Everything else -- the player included -- passes through. Only the player's

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seafox — Sound</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    font: 14px/1.5 system-ui, sans-serif;
+    background: #0e1218; color: #d7dae3;
+  }
+  h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: .3px; }
+  .sub { margin: 0 0 18px; color: #8b90a0; font-size: 13px; max-width: 84ch; }
+  .sub code { color: #aab; background: #1a2030; padding: 1px 5px; border-radius: 4px; }
+  .sub b { color: #b9bece; }
+
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+    background: #161c26; border: 1px solid #232c3a; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 18px; position: sticky; top: 8px; z-index: 2;
+  }
+  .controls label { display: flex; align-items: center; gap: 8px; color: #b9bece; }
+  .controls .group { display: flex; gap: 6px; }
+  .spacer { flex: 1 1 auto; }
+  button {
+    font: inherit; color: #d7dae3; background: #232c3a;
+    border: 1px solid #2f3b4e; border-radius: 7px; padding: 6px 12px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: #2c3748; }
+  button:disabled { opacity: .4; cursor: default; }
+  button.on { background: #2f6fd0; border-color: #3f83e6; color: #fff; }
+  button.arm { background: #2f8a55; border-color: #3fb06c; color: #fff; }
+  button.sounding { background: #7a4bd0; border-color: #9a6ff0; color: #fff; }
+  input[type=range] { accent-color: #2f6fd0; }
+
+  .checks {
+    background: #101722; border: 1px solid #232c3a; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 22px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+    white-space: pre-wrap;
+  }
+  .pass { color: #63d089; }
+  .fail { color: #ff8080; }
+  .note { color: #7d8398; }
+
+  h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .12em;
+    color: #7d8398; margin: 26px 0 10px; font-weight: 600;
+  }
+
+  table { border-collapse: collapse; width: 100%; max-width: 1100px; }
+  th {
+    text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+    color: #7d8398; font-weight: 600; padding: 0 10px 7px 0;
+    border-bottom: 1px solid #232c3a;
+  }
+  td { padding: 5px 10px 5px 0; border-bottom: 1px solid #171e29; vertical-align: middle; }
+  tr.playing td { background: #151d2c; }
+  .n { text-align: right; color: #7d8398; }
+  .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px; color: #93a4bd; white-space: nowrap;
+  }
+  .trig { white-space: nowrap; color: #c6cad6; }
+  .trig .ev { color: #6fb6ff; }
+  .trig .de { color: #ff9d6b; }
+  .trig .or { color: #7d8398; }
+  .btns { display: flex; gap: 5px; white-space: nowrap; }
+  .btns button { padding: 4px 10px; min-width: 54px; }
+
+  .lab {
+    display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start;
+    background: #101722; border: 1px solid #232c3a; border-radius: 10px;
+    padding: 14px 16px; max-width: 1100px;
+  }
+  .lab .col { display: flex; flex-direction: column; gap: 8px; }
+  .lab .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ring {
+    display: grid; grid-template-columns: repeat(64, 1fr); gap: 1px;
+    width: 100%; max-width: 640px; margin-top: 4px;
+  }
+  .ring i { display: block; height: 10px; background: #1b2330; border-radius: 1px; }
+  .ring i.full { background: #2f6fd0; }
+  .ring i.head { background: #63d089; }
+  .readout {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+    color: #93a4bd; white-space: pre; line-height: 1.7;
+  }
+  .err { color: #ff8080; white-space: pre-wrap; font-family: ui-monospace, monospace; }
+  .gate {
+    background: #1a2433; border: 1px solid #2f6fd0; border-radius: 10px;
+    padding: 14px 18px; margin-bottom: 18px; max-width: 84ch;
+  }
+</style>
+</head>
+<body>
+  <h1>Seafox — Sound</h1>
+  <p class="sub">
+    Chapter 18 through the real machinery: <code>src/core/sound.js</code> owns the
+    128-slot ring and hands out <b>exactly one (pitch, duration) pair per tick</b>,
+    and <code>src/presentation/speaker.js</code> sounds it. The drain below runs at
+    the port's fixed <b>30 ticks/s</b>, so a 32-pair sound occupies 32 ticks — the
+    burst-and-gap texture of § 18.3, not a continuous tone.
+    <br>
+    <b>wav</b> plays the reference render from the disassembly's
+    <code>tools/sounds.py</code>; <b>live</b> plays the same sequence through the
+    queue and the oscillator backend. They should be near-identical.
+  </p>
+
+  <div class="gate" id="gate">
+    <button id="enable" class="arm">Enable audio</button>
+    <span class="note">— a browser will not start an AudioContext without a click.</span>
+  </div>
+
+  <div class="controls">
+    <label>Volume <input id="vol" type="range" min="0" max="100" step="1" value="25"><span id="volVal" class="mono">25%</span></label>
+    <label>Cone <input id="cone" type="range" min="0" max="12000" step="500" value="6000"><span id="coneVal" class="mono">6000 Hz</span></label>
+    <div class="group" id="output">
+      <button data-out="speaker" class="on">Mission (speaker)</button>
+      <button data-out="cassette">Muted (still drains)</button>
+      <button data-out="title">Title (suppressed)</button>
+    </div>
+    <div class="spacer"></div>
+    <button id="silence">Silence + flush</button>
+  </div>
+
+  <div id="checks" class="checks">running checks…</div>
+
+  <h2>The eighteen sequences — § 18.5</h2>
+  <table>
+    <thead>
+      <tr>
+        <th class="n">#</th><th>play</th><th class="n">pairs</th>
+        <th>freq (Hz)</th><th class="n">burst</th><th class="n">occupies</th><th>trigger — § 18.6</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <h2>The queue — § 18.4</h2>
+  <p class="sub">
+    The part a WAV cannot show. Nothing is ever pre-empted: a sound queues
+    <b>behind</b> whatever is still sounding, so the audio lags the picture under
+    load. Fire several at once and watch the backlog drain one pair per tick.
+  </p>
+  <div class="lab">
+    <div class="col">
+      <div class="row">
+        <button data-burst="4,4,4">Sink 3 merchants</button>
+        <button data-burst="13">Player death</button>
+        <button data-burst="1,1,1,1,1">Torpedo ×5</button>
+        <button data-burst="15">Mission complete</button>
+      </div>
+      <div class="row">
+        <button data-burst="13,4,4,4,1">Death, then 3 ships + a shot</button>
+        <button data-burst="13,13,13,13">Flood the ring (128 pairs)</button>
+        <button data-burst="13,13,13,13,3">Overrun it (129)</button>
+      </div>
+      <div class="ring" id="ring"></div>
+      <div class="readout" id="queueOut">—</div>
+    </div>
+  </div>
+
+  <div id="error" class="err"></div>
+
+  <script type="module" src="./sound.js"></script>
+</body>
+</html>

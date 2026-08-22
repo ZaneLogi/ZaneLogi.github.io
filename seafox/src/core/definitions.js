@@ -29,6 +29,7 @@
 import { TYPE } from './types.js';
 import { onDolphinDestroyed } from './responses.js';
 import { emitBurst } from './burst.js';
+import { playSound } from './sound.js';
 
 /** @type {number} § 7.4: the avenger's sound field, not a sound number. */
 export const SILENT = -1;
@@ -142,7 +143,15 @@ export function beginDeath(session, slot) {
 
   e.stateChangePending = false;
 
-  // Chapter 18: queue def.sound, unless it is SILENT.
+  // § 18.6: **nine of the eighteen sounds are selected here and nowhere else.**
+  // They are not events -- each is the sound field of this row, so the three
+  // torpedoes share one because they share a row, and the seven merchant slots
+  // share another for the same reason. One site covers all nine.
+  //
+  // The avenger's SILENT marker is the one row with no sound, and § 13.9 makes
+  // it unreachable: nothing can destroy an avenger, so the guard below never
+  // actually fires. It is written anyway because the table says silent.
+  if (def.sound !== SILENT) playSound(session, def.sound);
 
   // § 15.8: the debris count comes from THIS row, and the type takes the first
   // n records of the shared twelve-record template. The order is the design --

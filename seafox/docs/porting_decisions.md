@@ -126,12 +126,58 @@ per tick. Queue discipline is preserved: append-only, never pre-empting, so a
 sound that arrives during a long one waits its turn and the audio lags the
 picture under load.
 
-Presentation is an `AudioWorklet` holding a one-bit cone, toggled every
-`5 × pitch + 24` CPU cycles at 1,020,484 Hz, `duration` times, then idle until
-the next pair. That reproduces both the pitches and the burst-and-gap texture,
-and it runs off-thread, so playing a sound costs no tick time.
+Presentation schedules **one band-limited square burst per pair**, on a cursor
+that advances by exactly one tick, behind a two-method backend interface
+(`burst(pitch, duration, atTime)` / `stopAll()`). Nothing blocks the simulation:
+scheduling is all the tick does, and the work happens on the audio thread.
 
-A gentle one-pole low-pass models the physical cone. Tunable, default on.
+**Not the one-bit cone, and the reasoning is the governing test.** § 18.9
+describes holding a cone state and toggling it every `5 × pitch + 24` cycles,
+and § 18.10 makes the synthesis path free. What a player can observe is pitch,
+rhythm, the burst-and-gap texture and the queue's lag — all four survive a
+band-limited square, and the physical cone low-passes the hard edges away in any
+case. The flip-flop is the device, not the mechanism.
+
+What the 1-bit path would add is the edge transients and the aliasing above the
+cone corner. That is audible only if the grit is judged to *be* the sound, so the
+backend is a seam rather than a decision: an `AudioWorklet` implementing the same
+two methods swaps in without touching the queue, the tick clock or any core code.
+
+A gentle one-pole low-pass models the physical cone — an `IIRFilterNode` carrying
+the actual one-pole difference equation rather than a two-pole biquad, so it
+matches the reference renderer the sequences were auditioned against. Tunable,
+default on at 6 kHz.
+
+Bursts are gated by starting and stopping the oscillator rather than by a gain
+envelope. The hardware's own transient is a step — the cone begins moving — so
+the click is authentic and the low-pass is what softens it; an envelope would be
+shaping something the device does not shape. Scheduling runs two ticks ahead of
+`currentTime` because ticks arrive on a rAF loop that jitters and can stall, and
+audio placed at the moment its tick arrives would inherit that jitter as audible
+unevenness.
+
+**Why this differs from the original in one respect.** The original's player
+blocked: it played a pair to completion inside the frame, so its audio *was*
+frame time and a long burst simply made the frame longer. Ours cannot stretch a
+tick, so it schedules instead. § 18.9 requires that change, and requires § 18.4's
+lag to survive it — it does, because the lag lives in the queue rather than in
+playback.
+
+**That non-blocking choice is what puts a ceiling on the tick rate: 51.5 ticks
+per second.** A burst is timed in CPU cycles, so raising the rate shortens the
+silence after a burst but never the burst itself. Above the ceiling a burst
+outlasts its tick and the next pair sounds on top of it — two voices at once,
+which one bit and one speaker cannot produce. Sequence 17, the launch tone
+(`15,200`, 19.4 ms), sets it at 1000/19.4; it is nearly double the next longest,
+and sequence 3 (`100,20`, 10.3 ms) does not follow until 97 Hz. At the chosen 30
+ticks/s the longest burst fills 58% of a tick, so there is close to 2× headroom
+and nothing else comes near.
+
+Raising the rate past 51.5 would need a monophonic guard in the backend: stop the
+sounding burst when the next one begins. That is arguably the more faithful
+model in any case, since a single cone does not fall silent and restart — it
+begins toggling at the new rate. It is a no-op at 30 ticks/s, which is why it is
+not there.
 
 ### 5. Presentation: Canvas2D first
 

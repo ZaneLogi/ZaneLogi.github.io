@@ -27,6 +27,7 @@ import { EffectList } from './effects.js';
 import { Resources } from './resources.js';
 import { Messages } from './messages.js';
 import { PHASE } from './round.js';
+import { createSoundState } from './sound.js';
 import { PLAYER_BOUNDS, DEMO_START, spawnPlayer } from './player.js';
 
 /** @type {number} § 10.3: the game begins with three and gains no more, ever. */
@@ -139,6 +140,14 @@ export class Session {
     /** @type {number} § 13.2: the horizontal torpedo's 6-tick cooldown. */
     this.horizontalCooldown = 0;
 
+    /**
+     * Chapter 18's queue and the sound preference. The queue is core state --
+     * the lag of § 18.4 is a simulation property, not a playback one -- and it
+     * runs whether or not a device is listening.
+     * @type {Object}
+     */
+    this.sound = createSoundState();
+
     /** @type {Resources} score, fuel and the magazine (Chapter 16). */
     this.resources = new Resources();
     /** @type {Messages} the posted-text state (§ 19.10). */
@@ -175,6 +184,7 @@ export class Session {
     this.resources.commitHighScore();
     this.phase = PHASE.TITLE;
     this.mission = 0;
+    this.sound.queue.flush();                       // the other flush point (§ 18.4)
     this.applyRung();
     this.resetLists();
     this.demo = createDemoState();
@@ -237,6 +247,10 @@ export class Session {
    */
   nextMission() {
     this.mission += 1;
+    // § 18.8: the title screen is silent but the demo keeps QUEUEING, so a game
+    // starting on top of a backlog would open with the demo's audio. This is one
+    // of the only two flush points (§ 18.4) -- never during play.
+    this.sound.queue.flush();
     this.applyRung();
     resetRoster(this.spawners);
     this.killCounter = KILL_QUOTA;

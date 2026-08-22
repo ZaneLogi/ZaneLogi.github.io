@@ -159,7 +159,10 @@ export class Resources {
    * @returns {boolean} whether a shot was available
    */
   spendTorpedo() {
-    if (this.torpedoes <= 0) return false;   // Chapter 18: sound 3, the empty click
+    // The empty click (§ 18.6, sound 3) is queued by the firing site in
+    // weapons.js, not here: it is an event of firing, and this class has no
+    // session to queue against.
+    if (this.torpedoes <= 0) return false;
     this.torpedoes -= 1;
     return true;
   }

@@ -106,7 +106,7 @@ export function walkEntities(session) {
       }
 
       if (run === 'stateChange') {
-        // The state-change handler: the type's death sound (Chapter 18), its
+        // The state-change handler: the type's death sound (§ 18.6), its
         // debris (Chapter 15) and the start of its death animation (§ 7.4).
         // Two different arrivals land here -- a transition falling due, and a
         // death animation whose frame timer has expired -- and they are told

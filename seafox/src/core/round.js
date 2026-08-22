@@ -27,6 +27,7 @@ import { spawnPlayer, PLAYER_BOUNDS, PLAYER_START } from './player.js';
 import { resetRoster, KILL_QUOTA } from './spawners.js';
 import { createConvoyState } from './convoy.js';
 import { STRIP, MISSION_NUMERALS } from './messages.js';
+import { playSound, SOUND } from './sound.js';
 
 /**
  * @enum {string} Where the session is. § 10.1's mission counter remains the
@@ -78,7 +79,15 @@ export function newGame(session) {
   session.gameOver = false;
   session.ranDry = false;
   session.startRequested = false;
-  // Chapter 18: flush the sound queue, and apply the stored sound preference.
+  // § 18.8: **the title screen is silent but the demo keeps queueing**, so a
+  // game starting on top of the demo's backlog would open with the demo's
+  // audio. This is one of § 18.4's two flush points -- never during play.
+  //
+  // There is no "apply the preference" step to write: `outputFor` derives
+  // suppression from the mission counter rather than storing it, so the
+  // preference the title screen set takes effect the moment the counter leaves
+  // zero. Storing it would be a second thing to keep in step.
+  session.sound.queue.flush();
   nextMission(session);
 }
 
@@ -145,6 +154,11 @@ export function advanceRound(session) {
       // numbered steps of § 11.1.1 show only the second hold; its own prose says
       // the launch holds twice, and the disassembly puts this one at $6BF6.
       if (holding(session)) return false;
+      // The icon lifts to the player's start position, and the launch tone goes
+      // out with it (§ 18.6, sound 17). One pair, 19.4 ms -- the longest single
+      // burst in the game by a factor of two, and the reason the scheduler in
+      // presentation/speaker.js has a tick-rate ceiling.
+      playSound(session, SOUND.LAUNCH);
       session.phase = PHASE.SETUP_LAUNCH;
       return false;
 
@@ -268,7 +282,9 @@ export function beginOutro(session) {
   } else if (!session.resources.dry) {
     // Mission complete.
     session.messages.post(STRIP.MISSION_COMPLETE);
-    // Chapter 18: sound 15.
+    // § 18.6, sound 15: a single pitch held 32 times -- a steady second-long
+    // tone, and the only sequence in the game that is not a contour.
+    playSound(session, SOUND.MISSION_COMPLETE);
     session.replayMission = false;
     if (session.mission >= 5) session.gameOver = true;
   } else {

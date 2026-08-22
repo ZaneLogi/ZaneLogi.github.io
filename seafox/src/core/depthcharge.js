@@ -16,6 +16,7 @@
 
 import { TYPE, CLASS } from './types.js';
 import { splash, bubble } from './trails.js';
+import { playSound, SOUND } from './sound.js';
 
 /** @type {number} § 13.7.3: the arc index starts here and steps down by 4. */
 const ARC_START = 28;
@@ -162,10 +163,12 @@ function arcStep(session, e) {
     // § 13.7.4, once: the sprite swaps to the sinking form, three spray dots go
     // up, the splash sound is queued and the bubble counter is set to 4.
     e.sprite = 'chargeSinking';
-    // § 15.6: three dots thrown UPWARD, not backward. Chapter 18 queues the
-    // splash sound immediately behind them -- the only sound this entity makes
-    // before it dies.
+    // § 15.6: three dots thrown UPWARD, not backward. The splash sound is
+    // queued immediately behind them (§ 18.6, sound 0) -- the only sound this
+    // entity makes before it dies, and note it is a different sound from the
+    // one its death emits (sound 6, from the type's row).
     splash(session, e.x + 3, e.y);
+    playSound(session, SOUND.SPLASH);
     e.animFrame = BUBBLE_PERIOD;          // the bubble counter
   }
 }

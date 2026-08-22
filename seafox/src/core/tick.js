@@ -20,6 +20,7 @@ import { walkEffects } from './effects.js';
 import { demoBounceHorizontal, demoBounceVertical } from './demo.js';
 import { fireVerticalTorpedo, fireHorizontalTorpedo } from './weapons.js';
 import { advanceRound, checkRoundGuards, PHASE } from './round.js';
+import { advanceSound } from './sound.js';
 
 /** @type {number} § 10.5.1: the horizontal torpedo fires when the low six bits are zero. */
 const AUTO_FIRE_MASK = 0x3F;
@@ -140,8 +141,9 @@ function frame(session) {
   walkEffects(session);
 
   // 3. Advance sound by EXACTLY ONE (pitch, duration) pair -- always, not one
-  //    per sound and never two (§ 9.3, § 18.3).
-  // advanceSound(session)
+  //    per sound and never two (§ 9.3, § 18.3). Runs on every tick including
+  //    silent ones: the empty ticks are what space the bursts apart.
+  advanceSound(session);
 
   // 4. Render and present -- Chapter 17, presentation. Never called from here.
 }

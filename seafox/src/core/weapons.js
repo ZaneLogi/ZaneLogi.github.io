@@ -20,6 +20,7 @@
 
 import { TYPE, CLASS } from './types.js';
 import { trailDot, trailBlob } from './trails.js';
+import { playSound, SOUND } from './sound.js';
 
 /** Vertical torpedo -- type 1 (§ 13.2). Step -1, period 1: the only step of 1. */
 const VERTICAL = {
@@ -67,7 +68,17 @@ export function fireVerticalTorpedo(session) {
   // entirely on the title screen, so the demo gets free shots and no empty
   // sound. In a mission, firing spends one from the magazine SHARED by both
   // weapons, and firing on empty makes a distinct sound and no shot.
-  if (!session.isTitleScreen && !session.resources.spendTorpedo()) return false;
+  //
+  // The empty-magazine sound is queued HERE rather than in `spendTorpedo`
+  // because § 18.6 makes it an event of the firing site, and Resources has no
+  // session to queue against -- the magazine should not have to know that
+  // running out is audible.
+  if (!session.isTitleScreen && !session.resources.spendTorpedo()) {
+    playSound(session, SOUND.EMPTY_MAGAZINE);
+    return false;
+  }
+
+  playSound(session, SOUND.TORPEDO_AWAY);   // § 18.6: either weapon, one sound
 
   const slot = session.entities.alloc(TYPE.VERTICAL_TORPEDO);
   const e = session.entities.slots[slot];
@@ -96,7 +107,12 @@ export function fireHorizontalTorpedo(session) {
   if (playerSlot === -1 || !session.playerAlive) return false;
   const player = session.entities.slots[playerSlot];
   if (player.x > HORIZONTAL.refuseBeyondX) return false;
-  if (!session.isTitleScreen && !session.resources.spendTorpedo()) return false;
+  if (!session.isTitleScreen && !session.resources.spendTorpedo()) {
+    playSound(session, SOUND.EMPTY_MAGAZINE);
+    return false;
+  }
+
+  playSound(session, SOUND.TORPEDO_AWAY);
 
   const slot = session.entities.alloc(TYPE.HORIZONTAL_TORPEDO);
   const e = session.entities.slots[slot];

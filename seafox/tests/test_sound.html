@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seafox — sound</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <h1>Seafox — sound</h1>
+  <nav>
+    <a href="./test_rng.html">Oracle 1</a>
+    <a href="./test_entities.html">Entity list</a>
+    <a href="./test_spawners.html">Oracle 2</a>
+    <a href="./test_demo.html">Oracle 3</a>
+    <a href="./test_catalogue.html">Catalogue</a>
+    <a href="./test_collision.html">Collision</a>
+    <a href="./test_effects.html">Effects</a>
+    <a href="./test_round.html">Round</a>
+    <a href="./test_sound.html">Sound</a>
+  </nav>
+  <p class="sub">
+    design_spec Chapter 18 — <b>the queue, not the tone.</b> Synthesis is free
+    (§ 18.10) and needs ears, so nothing here listens to anything: what is
+    normative and therefore testable is the pitch arithmetic, the eighteen
+    sequences, one pair per tick, and the queue's two unusual properties.
+    <b>Nothing is ever pre-empted</b> — a new sound is appended behind whatever
+    is still sounding, so the audio lags the picture under load; and with no
+    bounds test anywhere, a full ring does not drop the newest sound but either
+    overwrites unplayed pairs in place or reads as empty and discards the whole
+    backlog at once. Every one of § 18.6's seventeen assignments is driven from
+    its real call site, so a later chapter that moves one is caught here.
+  </p>
+  <div id="checks" class="checks">running checks…</div>
+  <script type="module" src="./test_sound.js"></script>
+</body>
+</html>

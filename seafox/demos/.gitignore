@@ -1,0 +1,5 @@
+# Reference WAVs rendered by the disassembly repo tools/sounds.py.
+# Derived artefacts, regenerate rather than commit:
+#   python tools/extract.py dsk/Seafox+.dsk -o build
+#   python tools/sounds.py build/FOX2_07FD.bin -o build/sound
+sound_ref/
