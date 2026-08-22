@@ -21,6 +21,7 @@ import { Rng } from './rng.js';
 import { capsFor } from './difficulty.js';
 import { createSpawnerState, resetRoster, KILL_QUOTA } from './spawners.js';
 import { createDemoState } from './demo.js';
+import { createConvoyState } from './convoy.js';
 import { PLAYER_BOUNDS, DEMO_START, spawnPlayer } from './player.js';
 
 /** @type {number} § 10.3: the game begins with three and gains no more, ever. */
@@ -99,6 +100,26 @@ export class Session {
 
     /** @type {Object} the attract submarine's state (§ 10.5.1). */
     this.demo = createDemoState();
+
+    /**
+     * The shared convoy block of § 16.5. The dolphin and the clam read the
+     * payload's position from here rather than from its record, which is what
+     * lets them derive their positions with no slot index passing between them.
+     * @type {Object}
+     */
+    this.convoy = createConvoyState();
+
+    /**
+     * Supply runs so far this mission, incremented TWICE per resupply -- once
+     * when the submarine spawns and once when it releases (§ 13.8.3). It takes
+     * the values 2, 4, 6 ... against a threshold of 3, so the first resupply of
+     * a mission is clam-free and every later one is contested.
+     * @type {number}
+     */
+    this.resupplyCount = 0;
+
+    /** @type {number} § 13.2: the horizontal torpedo's 6-tick cooldown. */
+    this.horizontalCooldown = 0;
   }
 
   /**
@@ -115,6 +136,9 @@ export class Session {
     this.applyRung();
     this.resetLists();
     this.demo = createDemoState();
+    this.convoy = createConvoyState();
+    this.resupplyCount = 0;
+    this.horizontalCooldown = 0;
     this.playerBounds = Object.assign({}, PLAYER_BOUNDS);
     spawnPlayer(this, DEMO_START.x, DEMO_START.y);
   }
@@ -162,6 +186,9 @@ export class Session {
     this.applyRung();
     resetRoster(this.spawners);
     this.killCounter = KILL_QUOTA;
+    // § 13.8.3: reset once per mission, which is what makes the clam's ramp a
+    // per-mission escalation rather than a per-session one.
+    this.resupplyCount = 0;
   }
 
   /**

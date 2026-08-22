@@ -132,12 +132,19 @@ function oracle2(list) {
       : 'submarine ' + sub + ' vs Destroyer ' + des +
         ' — they disagree, so one of them is reloading its cooldown on a blocked spawn (§ 12.2)');
 
-  // Nothing else may appear in the window: the oracle is about these five.
-  const strays = log.filter((s) => !COLD_BOOT.some((w) => w.type === s.type));
-  list.add('no class spawns that the table does not name',
+  // The oracle is about the five SPAWNERS. Everything else that appears in the
+  // window is a child created from inside an entity handler -- the submarine's
+  // mine and torpedo, the Destroyer's depth charge, the supply run's cargo, and
+  // the demo's own auto-fire -- and none of those is on a spawner (§ 12.1).
+  const CHILDREN = [TYPE.VERTICAL_TORPEDO, TYPE.HORIZONTAL_TORPEDO, TYPE.MAGNETIC_MINE,
+                    TYPE.ENEMY_TORPEDO, TYPE.DEPTH_CHARGE, TYPE.PAYLOAD,
+                    TYPE.DOLPHIN, TYPE.GIANT_CLAM];
+  const strays = log.filter((s) => !COLD_BOOT.some((w) => w.type === s.type)
+                                && CHILDREN.indexOf(s.type) === -1);
+  list.add('nothing appears that is neither on the table nor a handler-created child',
     strays.length === 0,
     strays.length ? strays.map((s) => TYPE_NAMES[s.type] + '@' + s.tick).join(', ')
-                  : log.length + ' spawns in 201 ticks, all accounted for');
+                  : log.length + ' creations in 201 ticks, all accounted for');
 
   // § 20.6, run over the whole window rather than at the end.
   const session2 = coldBoot();
@@ -349,11 +356,17 @@ function roster(list) {
   const beforeCursor = session.spawners.rosterCursor;
   const beforeLive = session.entities.liveCount;
   tick(session);
-  list.add('the cursor advances on a failed attempt, and nothing spawns (§ 12.5)',
-    session.spawners.rosterCursor === beforeCursor + 1 &&
-    session.entities.liveCount === beforeLive + 1,   // the supply sub, tick 1
+  // Count merchants rather than entities: the demo's own auto-fire and the
+  // tick-1 supply submarine also arrive on this tick, and neither is the point.
+  let merchants = 0;
+  for (let i = 0; i < session.entities.liveCount; i++) {
+    if (session.entities.slots[i].type === TYPE.MERCHANT_SHIP) merchants += 1;
+  }
+  list.add('the cursor advances on a failed attempt, and no merchant spawns (§ 12.5)',
+    session.spawners.rosterCursor === beforeCursor + 1 && merchants === 0,
     'cursor ' + beforeCursor + ' -> ' + session.spawners.rosterCursor +
-    ', no merchant among the ' + (session.entities.liveCount - beforeLive) + ' spawns');
+    ', 0 merchants among the ' + (session.entities.liveCount - beforeLive) +
+    ' creations on this tick');
   list.add('an unavailable record consumes a full interval (§ 12.5)',
     session.spawners.cooldowns.merchant >= 200,
     'cooldown reloaded to ' + session.spawners.cooldowns.merchant +
@@ -445,18 +458,19 @@ function regression(list) {
   // without asserting it would be a tripwire that never fires -- the mutation
   // run that collapsed § 12.4's two draws moved every figure below, and a
   // report-only check would have shrugged at all three.
-  list.eq('213 draws taken in the first 201 ticks', session.rng.draws, 213);
+  list.eq('221 draws taken in the first 201 ticks', session.rng.draws, 221);
   list.eq('generator state after 201 ticks',
-    hex(session.rng.s2) + ' ' + hex(session.rng.s3), '0D 35');
-  list.eq('8 live entities after 201 ticks -- the demo submarine plus 7 spawns',
-    session.entities.liveCount, 8);
+    hex(session.rng.s2) + ' ' + hex(session.rng.s3), 'EF 8B');
+  list.eq('16 live entities after 201 ticks', session.entities.liveCount, 16);
 
   list.add('what a change in the three above means',
     true,
     'the demo takes one draw per tick for the horizontal torpedo (§ 10.5.1), so 201 of ' +
-    'these are step 6 and the remaining 12 are spawners — each enemy submarine costs 3 ' +
-    '(mask, depth, cooldown), every other spawn or blocked merchant reload 1, and the ' +
-    'demo takes no entry-side draw (§ 8.4, open item). These moved from 13 / FF 0F / 8 ' +
-    'when this page switched from ticking the spawners alone to running the whole tick: ' +
-    'the same five first-spawn ticks, a different generator consumption');
+    'these are step 6; the rest are spawners and their children — each enemy submarine ' +
+    'costs 3 (mask, depth, cooldown), the supply submarine 1 more for its release ' +
+    'countdown, and each depth charge 2. The demo takes NO entry-side draw, which the ' +
+    'disassembly settles: $79DE draws a bit only on missions 1 and 2. These figures have ' +
+    'moved twice — 13 / FF 0F / 8 when the page ticked spawners alone, 213 / 0D 35 / 8 ' +
+    'once it ran the whole tick, and 221 / EF 8B / 16 now that Chapter 13 gives the ' +
+    'handlers children to create. The five first-spawn ticks never moved.');
 }

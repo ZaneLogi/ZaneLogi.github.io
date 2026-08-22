@@ -13,18 +13,25 @@
 // nothing extra, and it is why the six unused slots of § 7.5 can be kept inert
 // rather than deleted.
 //
-// SCAFFOLDING, and deliberately visible: fourteen of the fifteen created types
-// have no handler yet. A `null` here means "not ported", and walk.js treats such
-// an entity as INERT -- live, occupying its slot, but never updated and never
-// counted down. The spawners already create five of them, so this is load-bearing
-// today. tests/test_demo.js asserts exactly which types are inert, so the gap
-// stays visible instead of quietly becoming permanent.
+// Every type with a creation site now has a handler. The six that remain `null`
+// are the unused merchant slots of § 7.5 -- byte-identical to type 9 in both
+// tables and produced by nothing in the game. **Keep them.** Deleting them is
+// safe today and unsafe later: Chapter 14's shared merchant response exempts a
+// RANGE of types that stops short of 12, so a reused type 12 would be able to
+// destroy another merchant. Preserving the slots keeps that latent inconsistency
+// inert rather than turning it into a bug the first time someone reuses a number.
 //
-// It cannot overflow the array: the title-screen caps of § 8.2 bound the inert
-// population at 13 against the 32 slots of § 4.1.
+// walk.js still treats a null handler as inert, which is now unreachable in play
+// and remains as the guard that makes § 7.5's slots harmless.
 
 import { TYPE } from './types.js';
 import { updatePlayer } from './player.js';
+import { SURFACE_HANDLERS } from './surface.js';
+import { CONVOY_HANDLERS } from './convoy.js';
+import { HUNTER_HANDLERS } from './hunters.js';
+import { WEAPON_HANDLERS } from './weapons.js';
+import { AVENGER_HANDLERS } from './avenger.js';
+import { updateDepthCharge } from './depthcharge.js';
 
 /**
  * Update handler per type, indexed by the type byte. `null` means the type is
@@ -35,6 +42,11 @@ export const UPDATE_HANDLERS = (() => {
   /** @type {Array<((session: Object, slot: number) => void)|null>} */
   const table = new Array(21).fill(null);
   table[TYPE.PLAYER] = updatePlayer;
+  table[TYPE.DEPTH_CHARGE] = updateDepthCharge;
+  for (const group of [SURFACE_HANDLERS, CONVOY_HANDLERS, HUNTER_HANDLERS,
+                       WEAPON_HANDLERS, AVENGER_HANDLERS]) {
+    for (const type of Object.keys(group)) table[Number(type)] = group[type];
+  }
   return table;
 })();
 

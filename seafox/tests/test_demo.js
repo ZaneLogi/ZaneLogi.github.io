@@ -142,23 +142,21 @@ function theWalk(list) {
     player.x !== DEMO_START.x,
     'x ' + DEMO_START.x + ' -> ' + player.x + ', y ' + DEMO_START.y + ' -> ' + player.y);
 
-  // Unported types are inert. This is scaffolding and is asserted so it stays
-  // visible: an entity with no handler keeps its slot and never moves.
+  // Chapter 13 landed, so nothing on screen is inert any more. What remains
+  // unported is exactly § 7.5's six unused merchant slots, which have no
+  // creation site by design -- and the walk's null-handler branch is now the
+  // guard that keeps them harmless rather than scaffolding.
   const many = runDemo(220);
-  const inert = [];
-  for (let i = 0; i < many.session.entities.liveCount; i++) {
-    const e = many.session.entities.slots[i];
-    if (e.type !== TYPE.PLAYER) inert.push(e.type);
-  }
   const unported = unportedTypes();
-  list.add('every spawner-created type is still unported, and therefore inert',
-    inert.length > 0 && inert.every((t) => unported.indexOf(t) !== -1),
-    inert.length + ' inert entities of types ' +
-    [...new Set(inert)].sort((a, b) => a - b).map((t) => TYPE_NAMES[t]).join(', ') +
-    ' — they hold slots and never move until Chapter 13 lands');
-  list.add('the player is the only ported update handler so far (§ 7.2)',
-    unported.length === 20 && unported.indexOf(TYPE.PLAYER) === -1,
-    unported.length + ' of 21 type numbers have no update handler');
+  let inertOnScreen = 0;
+  for (let i = 0; i < many.session.entities.liveCount; i++) {
+    if (unported.indexOf(many.session.entities.slots[i].type) !== -1) inertOnScreen += 1;
+  }
+  list.add('nothing on screen is inert -- every live entity has a handler (§ 7.2)',
+    inertOnScreen === 0 && many.session.entities.liveCount > 1,
+    many.session.entities.liveCount + ' live entities, none of them inert');
+  list.eq('only § 7.5\'s six unused merchant slots lack a handler',
+    unported.join(', '), '5, 6, 7, 10, 11, 12');
 
   // Two-phase removal, driven through the real walk this time (§ 4.5, § 9.4).
   const dying = new Session();

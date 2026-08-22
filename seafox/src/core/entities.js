@@ -98,6 +98,21 @@ export class Entity {
     this.scratch2 = 0;
     /** @type {number} per-type scratch. */
     this.scratch3 = 0;
+
+    /**
+     * A unique stamp per allocation, for identity only. Nothing in the
+     * simulation reads it and no rule depends on it.
+     *
+     * It exists because slots are POOLED: a record is reused when its slot is
+     * reallocated, so holding a reference to one and watching it over time shows
+     * a single object that appears to teleport when a different entity moves in.
+     * Anything measuring an entity across ticks -- the § 2.7.2 speed checks
+     * especially -- has to be able to tell "this is still the same entity" from
+     * "this slot changed hands", and a slot index cannot do it either, because
+     * swap-with-last moves entities between slots (§ 4.6).
+     * @type {number}
+     */
+    this.serial = 0;
   }
 
   /**
@@ -129,6 +144,8 @@ export class EntityList {
     this.liveCount = 0;
     /** @type {Object<string, number>} the nine capped classes of § 4.7. */
     this.counts = EntityList.zeroCounts();
+    /** @type {number} monotonic, stamped onto each allocation. Identity only. */
+    this.serialCounter = 0;
   }
 
   /**
@@ -169,6 +186,8 @@ export class EntityList {
     e.type = type;
     e.active = true;
     e.firstUpdate = true;
+    this.serialCounter += 1;
+    e.serial = this.serialCounter;
     return slot;
   }
 
@@ -224,6 +243,25 @@ export class EntityList {
   countRemoval(type) {
     const cls = CLASS_OF_TYPE[type];
     if (cls !== null && cls !== undefined) this.counts[cls] -= 1;
+  }
+
+  /**
+   * Phase two of § 4.5, from inside a type's own update handler: clear the
+   * request, decrement this type's class counter, and mark the slot free for the
+   * walk to reclaim.
+   *
+   * **Every handler must do this and no other code may**, because only a type's
+   * own handler knows which class counter to decrement. A slot freed without it
+   * is recycled while its class still counts it as live, and that class then
+   * stops spawning for the rest of the session with no visible symptom.
+   * @param {number} slot
+   * @returns {void}
+   */
+  confirmRemoval(slot) {
+    const e = this.slots[slot];
+    e.removalRequested = false;
+    e.removalConfirmed = true;
+    this.countRemoval(e.type);
   }
 
   /**

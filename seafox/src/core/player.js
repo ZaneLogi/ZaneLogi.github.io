@@ -79,8 +79,7 @@ export function updatePlayer(session, slot) {
   //    § 11.2's guard one tick after the hit that caused it.
   if (e.removalRequested) {
     session.playerAlive = false;
-    e.removalRequested = false;
-    e.removalConfirmed = true;
+    session.entities.confirmRemoval(slot);
     return;
   }
 

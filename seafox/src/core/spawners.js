@@ -23,6 +23,7 @@
 
 import { TYPE, CLASS } from './types.js';
 import { entrySideIsRandom } from './difficulty.js';
+import { seedRelease } from './convoy.js';
 
 /** Merchant roster record states (§ 12.5). */
 export const ROSTER_STATUS = {
@@ -206,6 +207,12 @@ function spawnFixed(session, spawner) {
     e.x = fromLeft ? 0 : RIGHT_EDGE;
     e.y = drawDepth(session.rng);
     e.sprite = fromLeft ? 'enemyHullLeftToRight' : 'enemyHullRightToLeft';
+    // The direction is FIXED AT SPAWN and never changes: § 13.3 is explicit that
+    // the submarine does not steer horizontally at all. Without this the step is
+    // zero, the submarine never crosses, never reaches its exit, and its class
+    // sits at its cap for the rest of the session -- which looks exactly like the
+    // cap lock a missing exit produces (§ 13.11).
+    e.scratch0 = fromLeft ? 2 : -2;
   } else if (spawner.key === 'destroyer') {
     e.x = RIGHT_EDGE;
     e.y = SPAWN_Y.destroyer;
@@ -218,6 +225,10 @@ function spawnFixed(session, spawner) {
     e.x = 1;
     e.y = SPAWN_Y.supplySubmarine;
     e.sprite = 'supplySubmarine';
+    // One generator draw, seeding the payload-release countdown (§ 13.8.1 as
+    // corrected; $7C0D in the disassembly). § 5.6's consumer list omits this
+    // site, and draw order is normative -- see convoy.js's header.
+    seedRelease(session, slot);
   }
 }
 

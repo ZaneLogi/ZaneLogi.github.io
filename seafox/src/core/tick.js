@@ -17,6 +17,7 @@
 import { runSpawners } from './spawners.js';
 import { walkEntities } from './walk.js';
 import { demoBounceHorizontal, demoBounceVertical } from './demo.js';
+import { fireVerticalTorpedo, fireHorizontalTorpedo } from './weapons.js';
 
 /** @type {number} § 10.5.1: the horizontal torpedo fires when the low six bits are zero. */
 const AUTO_FIRE_MASK = 0x3F;
@@ -59,7 +60,7 @@ function demoTick(session) {
   //    generator draw, so deferring the creation to § 13.2 costs nothing in
   //    draw order.
   session.demo.verticalFireAttempts += 1;
-  // fireVerticalTorpedo(session)   -- § 13.2
+  fireVerticalTorpedo(session);
 
   // 5. The five spawners, in order (§ 9.2, § 12.1).
   runSpawners(session);
@@ -73,7 +74,7 @@ function demoTick(session) {
   //    decision in the game at the wrong point in the sequence (§ 5.6).
   if ((session.rng.step() & AUTO_FIRE_MASK) === 0) {
     session.demo.horizontalFireAttempts += 1;
-    // fireHorizontalTorpedo(session)   -- § 13.2
+    fireHorizontalTorpedo(session);
   }
 
   // 7. Horizontal bounce, and swap the message -- one event (§ 10.5.1).
@@ -108,6 +109,9 @@ function missionTick(session) {
  * @returns {void}
  */
 function frame(session) {
+  // § 13.2: the horizontal torpedo's cooldown, unlike the vertical's absent one.
+  if (session.horizontalCooldown > 0) session.horizontalCooldown -= 1;
+
   walkEntities(session);                            // 1 -- § 9.4
 
   // 2. Walk the effects list -- Chapter 15, a separate 32-slot allocator.

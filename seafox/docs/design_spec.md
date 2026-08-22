@@ -974,14 +974,24 @@ Eleven sites draw from the generator. They are specified in their own chapters; 
 here so that the *order* of draws — which is itself normative, because the generator is
 shared — can be checked in one place.
 
-| consumer | chapter |
-|---|---|
-| the title-screen demo's auto-fire, 1 in 64 | 10 |
-| enemy submarine variant | 12 |
-| enemy submarine shallow/deep mask, then its depth | 12 |
-| the five spawn cooldowns | 12 |
-| the Giant Clam's release delay | 13 |
-| the depth charge's arc direction and wander period | 13 |
+| consumer | chapter | drawn |
+|---|---|---|
+| the title-screen demo's auto-fire, 1 in 64 | 10 | every tick |
+| enemy submarine variant | 12 | **missions 1–2 only** |
+| enemy submarine shallow/deep mask, then its depth | 12 | every spawn |
+| the five spawn cooldowns | 12 | per reload |
+| **the supply submarine's payload-release countdown** | 13 | **every spawn** |
+| the Giant Clam's release delay | 13 | **only once the resupply counter reaches 3** |
+| the depth charge's arc direction and wander period | 13 | per drop |
+
+Three of those are conditional, and each is a place an implementation can silently
+consume the generator at a different rate:
+
+- The **entry-side draw is taken only on missions 1 and 2.** Missions 3–5 and the title
+  screen are right-only (§ 8.4) and take no draw at all.
+- The **clam's release delay draws nothing while the resupply counter is under its
+  threshold** — that branch uses a fixed 255 (§ 13.8.3).
+- The **supply submarine's release countdown** is drawn at every one of its spawns.
 
 **Draw order matters.** Two implementations that draw the same quantities in a different
 order produce different games from the same initial state. Where a chapter specifies
@@ -2111,6 +2121,12 @@ is the exception in two ways:** its interval is a fixed 1000 ticks with no rando
 and it has no population cap at all — it can be delayed but never blocked, and it is the
 only class the difficulty ladder cannot touch.
 
+**The supply submarine's 1000 is a reload value, not a period.** Its cooldown is tested
+before it is decremented, like every other spawner's, so 1000 reloads into a **1001-tick**
+gap between spawns — the same off-by-one that makes a cooldown of *n* fire on tick
+*n + 1*. Nothing else in the game exposes the difference, because every other interval
+carries a random term wider than one tick.
+
 **The first-spawn column is exact and is a cold-boot property.** Those cooldowns are
 shipped values that nothing resets between rounds or missions, so the opening sequence of
 the first demo after a cold start is fully determined. Chapter 20 uses it as an oracle.
@@ -2532,6 +2548,20 @@ Four entities, one mechanic. **None of them can harm the player** (§ 2.4.2).
 
 Step 2, period 1. Row 177, left to right, spawned by a fixed 1000-tick timer with no cap
 (§ 12.3). Its handler creates the payload and the dolphin **together**.
+
+**The release is on a countdown seeded at the submarine's own spawn: `90 + (a
+generator draw & 31)`, so 90–121 ticks, decremented once per tick.** It crosses in 153
+ticks, so the drop lands 59% to 79% of the way over — always in the right-hand half of
+the screen, with only 30–60 ticks of the parent's run left. After it, the submarine
+carries on and leaves; **neither child reads its record again**, which is what makes the
+shared block of § 16.5 necessary rather than merely convenient.
+
+The timing is load-bearing rather than decorative. The payload is released at the
+parent's X + 10 and is removed once its X falls below 23 (§ 13.8.2), and the parent
+spawns at X = 1 — so a release at spawn would put the payload below its own exit bound
+before it had moved. **That draw is a consumer § 5.6's list does not name**, and draw
+order is normative, so an implementation built from that list alone consumes the shared
+generator differently from this one for the rest of the session.
 
 ### 13.8.2 Payload and dolphin — types 14 and 15
 

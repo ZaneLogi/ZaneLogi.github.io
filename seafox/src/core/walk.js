@@ -25,6 +25,7 @@
 // The cursor does not advance after a slot is freed (§ 4.6, § 9.5).
 
 import { updateHandlerFor } from './dispatch.js';
+import { beginDeath, advanceDeath } from './definitions.js';
 
 /**
  * Walk every live entity once (§ 9.4).
@@ -78,7 +79,13 @@ export function walkEntities(session) {
       }
 
       if (run === 'stateChange') {
-        // Chapter 15: sound, debris, begin the death animation. Not ported.
+        // The state-change handler: the type's death sound (Chapter 18), its
+        // debris (Chapter 15) and the start of its death animation (§ 7.4).
+        // Two different arrivals land here -- a transition falling due, and a
+        // death animation whose frame timer has expired -- and they are told
+        // apart by the flag, not by the caller.
+        if (e.stateChangePending) beginDeath(session, cursor);
+        else if (e.dying) advanceDeath(session, cursor);
         run = 'settle';
       }
 
