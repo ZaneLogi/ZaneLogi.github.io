@@ -386,10 +386,9 @@ wrong answer about which objects can meet.
 | **50–175** | **6** | **50–180** | **the player** | — |
 | 50–175 | 5 | 50–179 | the payload | — |
 | 50–175 | 6 | 50–180 | vertical torpedo | rises |
+| 50–175 | 7 | 50–181 | the avenger | → left to right |
 | 177 | 7 | 177–183 | supply submarine | → left to right |
 | 185 | — | 185 | the HUD | — |
-
-| 50–175 | 7 | 50–181 | the avenger | → left to right |
 
 Heights are the sprite heights of § 6.6. Every entity's exit is given in § 13.11.
 
@@ -3675,9 +3674,12 @@ only on entry to the title screen (§ 16.1).
 
 ### 19.9.3 The spare-submarine icons
 
-Drawn during round setup, one per spare submarine, stepping **30 pixels** between them.
-**The icon is the player's own sprite**, not a separate asset — the same bitmap the game
-draws in the water, placed on the HUD line.
+Drawn during round setup, one per spare submarine, **beginning at screen X 56** and
+stepping **30 pixels** between them. **The icon is the player's own sprite**, not a
+separate asset — the same bitmap the game draws in the water, placed on the HUD line.
+
+X 56 is byte column 8 — the same column the fuel gauge occupies in the next state, so
+the rack and the gauge that replaces it start at the same place.
 
 The launch animation then lifts the last icon off the line and flies it to the player's
 start position (§ 11.1.1).

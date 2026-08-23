@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seafox — the screen</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    font: 14px/1.5 system-ui, sans-serif;
+    background: #0e1218; color: #d7dae3;
+  }
+  h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: .3px; }
+  .sub { margin: 0 0 18px; color: #8b90a0; font-size: 13px; max-width: 78ch; }
+  .sub code { color: #aab; background: #1a2030; padding: 1px 5px; border-radius: 4px; }
+  .sub b { color: #c3c8d6; }
+
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+    background: #161c26; border: 1px solid #232c3a; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 18px;
+  }
+  .controls label { display: flex; align-items: center; gap: 8px; color: #b9bece; }
+  .controls .group { display: flex; gap: 6px; }
+  button {
+    font: inherit; color: #d7dae3; background: #232c3a;
+    border: 1px solid #2f3b4e; border-radius: 7px; padding: 6px 12px; cursor: pointer;
+  }
+  button:hover { background: #2c3748; }
+  button.on { background: #2f6fd0; border-color: #3f83e6; color: #fff; }
+  input[type=range] { accent-color: #2f6fd0; }
+
+  .stage {
+    display: inline-block; background: #000;
+    border: 1px solid #232c3a; border-radius: 8px; padding: 8px; line-height: 0;
+  }
+  canvas { display: block; image-rendering: pixelated; }
+
+  /* A live readout reflows every tick unless each field is padded to the width
+     its domain can reach — and padding only holds in a monospace cell, with the
+     spaces preserved. */
+  .state {
+    margin-top: 14px; padding: 10px 14px;
+    background: #101722; border: 1px solid #232c3a; border-radius: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+    white-space: pre; overflow-x: auto; color: #9aa3b8;
+  }
+</style>
+</head>
+<body>
+  <h1>Seafox — the screen</h1>
+  <p class="sub">
+    design_spec Chapter 17. The core runs at 30 Hz and produces no picture; once
+    per tick the renderer reads the entity list, the effects list and the
+    session, and rebuilds <code>color</code> from them — background, the
+    waterline, entities in slot order, effects, the HUD line, then any posted
+    banner. <b>The waterline goes down before the entities</b>, so a torpedo
+    crossing the surface occludes it; <b>effects go over them</b>, because the
+    effects walk runs last. Nothing on this page is normative: the loop and the
+    controls are a harness, and the simulation cannot tell it is being watched.
+    The session cold-boots into the demo, so the opening is the same
+    deterministic run Oracles 2 and 3 assert.
+  </p>
+
+  <div class="controls">
+    <div class="group">
+      <button id="play" class="on">Pause</button>
+      <button id="step">Step</button>
+      <button id="reset">Cold boot</button>
+      <button id="sound">Sound off</button>
+    </div>
+    <label>Zoom <input id="scale" type="range" min="1" max="4" step="1" value="1"><span id="scaleVal">1×</span></label>
+  </div>
+
+  <div class="stage"><canvas id="screen"></canvas></div>
+  <div id="state" class="state">—</div>
+
+  <script type="module" src="./game.js"></script>
+</body>
+</html>

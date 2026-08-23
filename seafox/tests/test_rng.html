@@ -4,32 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Seafox — Oracle 1: the generator</title>
-<style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 24px;
-    font: 14px/1.5 system-ui, sans-serif;
-    background: #0e1218; color: #d7dae3;
-  }
-  h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: .3px; }
-  .sub { margin: 0 0 18px; color: #8b90a0; font-size: 13px; max-width: 78ch; }
-  .sub code { color: #aab; background: #1a2030; padding: 1px 5px; border-radius: 4px; }
-  .sub b { color: #b9bece; font-weight: 600; }
-
-  .checks {
-    background: #101722; border: 1px solid #232c3a; border-radius: 10px;
-    padding: 14px 18px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
-    white-space: pre-wrap;
-  }
-  .pass { color: #63d089; }
-  .fail { color: #ff8080; }
-  .note { color: #7d8398; }
-</style>
+<link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <h1>Seafox — Oracle 1: the generator</h1>
+  <nav>
+    <a href="./test_rng.html">Oracle 1</a>
+    <a href="./test_entities.html">Entity list</a>
+    <a href="./test_spawners.html">Oracle 2</a>
+    <a href="./test_demo.html">Oracle 3</a>
+    <a href="./test_catalogue.html">Catalogue</a>
+    <a href="./test_collision.html">Collision</a>
+    <a href="./test_effects.html">Effects</a>
+    <a href="./test_round.html">Round</a>
+    <a href="./test_sound.html">Sound</a>
+    <a href="./test_renderer.html">Renderer</a>
+  </nav>
   <p class="sub">
     The first oracle of design_spec § 20, and the first thing in the bring-up
     order of § 20.8 — a pure unit test on <code>src/core/rng.js</code> with no

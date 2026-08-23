@@ -294,6 +294,30 @@ visible duration in the game that no table determines.
 We specify **33 ticks**, which reproduces it at the default rate. An implementation may
 tune it without breaking anything else.
 
+### Where the spare-submarine rack starts
+
+§ 19.9.3 gave the 30-pixel step between icons but not the X the first one sits at, and
+the rack is only on screen for two holds, so it is not recoverable by watching.
+
+`$6BBB` loads `#$54` into the player block's own X field before the icon loop, and the
+loop adds `#$1E` per icon. World X 84 is screen 56 — byte column 8, the column the fuel
+gauge occupies in the next HUD state. The spec now states the 56.
+
+### The HUD erase bar
+
+Chapter 19 describes a HUD state change as drawing a blank bar over screen
+columns 0–174 — sized to stop exactly where `SCORE` begins, so the score
+survives every transition without being redrawn.
+
+That is incremental repair of a framebuffer nobody clears. Our renderer rebuilds
+`color` from state every tick, so the question the bar answers — what is still
+on the line from the last state? — cannot arise, and a state change is simply a
+different set of fields being drawn. The bar's artwork is still extracted, since
+it is a real strip on the disk; nothing draws it.
+
+The observable half is preserved exactly: `SCORE` and its six digits appear in
+all three states, and the three left-hand displays replace one another.
+
 ### The effect step countdown
 
 The original's effect-creation template carries a step-countdown field that only the

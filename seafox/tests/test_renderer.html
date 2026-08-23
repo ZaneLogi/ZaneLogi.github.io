@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seafox — renderer</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <h1>Seafox — renderer</h1>
+  <nav>
+    <a href="./test_rng.html">Oracle 1</a>
+    <a href="./test_entities.html">Entity list</a>
+    <a href="./test_spawners.html">Oracle 2</a>
+    <a href="./test_demo.html">Oracle 3</a>
+    <a href="./test_catalogue.html">Catalogue</a>
+    <a href="./test_collision.html">Collision</a>
+    <a href="./test_effects.html">Effects</a>
+    <a href="./test_round.html">Round</a>
+    <a href="./test_sound.html">Sound</a>
+    <a href="./test_renderer.html">Renderer</a>
+  </nav>
+  <p class="sub">
+    design_spec Chapter 17 — the renderer <b>reads state and the simulation
+    never draws</b>. Every check here reads the <code>color</code> buffer
+    directly, never a canvas and never a screenshot: § 20.5 makes the same
+    choice for the golden frames, because comparing the buffer keeps the test
+    independent of § 17.5's free choices. Three claims carry the most weight,
+    and none of them looks wrong in a still frame — that <b>every live entity is
+    drawn every tick</b> regardless of its divider, that the <b>waterline sits
+    beneath the entities</b> and the effects above them, and that the renderer
+    <b>never touches the stencil</b>.
+  </p>
+  <div id="checks" class="checks">running checks…</div>
+  <script type="module" src="./test_renderer.js"></script>
+</body>
+</html>
