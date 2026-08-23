@@ -18,6 +18,7 @@ import { INK } from '../src/core/stencil.js';
 import { FUEL_FULL, TORPEDOES_FULL } from '../src/core/resources.js';
 import { ROSTER_STATUS } from '../src/core/spawners.js';
 import { TYPE, TYPE_NAMES, CLASS } from '../src/core/types.js';
+import { fireVerticalTorpedo } from '../src/core/weapons.js';
 
 /** Sprite and period per type, matching each type's own creation site. */
 const SETUP = {
@@ -48,6 +49,7 @@ function run(list) {
   theBox(list);
   theConfirm(list);
   theTable(list);
+  theLauncherExemption(list);
   theUnlocked(list);
   overLongRun(list);
 }
@@ -309,6 +311,81 @@ function theTable(list) {
 // ---------------------------------------------------------------------------
 // The four behaviours Chapter 13 left waiting on collision
 // ---------------------------------------------------------------------------
+
+/**
+ * § 14.6.1 -- the launcher exemption, and the reason it has to be mutual.
+ *
+ * **The two overlap on launch.** The shot appears at the player's Y - 7 and is
+ * six rows tall, so it clears the hull by one row, and the player steps two
+ * pixels against the torpedo's one. This is not a corner case: it is what
+ * happens on the first tick the player updates while ascending, which is most
+ * of the time anyone is shooting at anything.
+ *
+ * @param {import('./harness.js').CheckList} list
+ * @returns {void}
+ */
+function theLauncherExemption(list) {
+  list.section('§ 14.6.1 — firing while ascending');
+
+  // Fire, ascend, and follow the shot. With only the player's half of the
+  // exemption the torpedo dies on the tick it is fired.
+  const s = stage();
+  s.caps[CLASS.VERTICAL_TORPEDO] = 1;
+  const p = s.entities.slots[s.playerSlot];
+  p.x = 128;
+  p.y = 120;
+  s.input.vx = 0;
+  s.input.vy = -2;
+  fireVerticalTorpedo(s);
+
+  const shot = s.entities.slots[1];
+  list.eq('the shot launches seven rows above the hull', shot.y, p.y - 7);
+  list.eq('which clears the six-row hull by exactly one row',
+    p.y - (shot.y + INK.torpedoRising.rows - 1) - 1, 1);
+
+  // **The overlap is transient inside a tick and cannot be seen from outside
+  // one**: the player moves in its own walk step and the torpedo in its own, so
+  // by the end of the tick they are apart again. Ask the box test at the moment
+  // the player has moved and the torpedo has not -- which is the state the
+  // collision sweep actually runs against.
+  const moved = { x: p.x, y: p.y - 2, type: p.type, sprite: p.sprite };
+  list.add('once the sub steps, its box overlaps its own shot',
+    boxesOverlap(boxOf(moved), boxOf(shot)),
+    'one row of clearance against a two-pixel step');
+
+  // Whether a given launch meets the hull depends on the divider phase, so the
+  // pairing is asserted directly rather than sampled from a run: hold the two
+  // together and dispatch, which is the state the sweep reaches on the first
+  // tick the player steps up into its own shot.
+  const rising = collide(TYPE.PLAYER, TYPE.VERTICAL_TORPEDO);
+  list.add('a rising shot held against the sub damages neither',
+    !damaged(rising.a) && !damaged(rising.b),
+    'both halves of the gate, dispatched both ways (§ 14.4)');
+  list.add('and the shot is not silently removed either',
+    !rising.b.removalRequested && !rising.b.removalConfirmed);
+
+  // The gate is the velocity SIGN, not the pair: a deflected shot is falling,
+  // and then both halves fall through to the damage path (§ 13.6.2).
+  const falling = stage();
+  const fp = falling.entities.slots[falling.playerSlot];
+  fp.x = 120;
+  fp.y = 100;
+  const fSlot = place(falling, TYPE.VERTICAL_TORPEDO, 120, 100);
+  const fShot = falling.entities.slots[fSlot];
+  fShot.scratch0 = 1;                         // what a hospital ship leaves behind
+  fShot.sprite = 'torpedoDescending';
+
+  let killed = false;
+  for (let t = 0; t < 6 && !killed; t++) {
+    fp.x = 120; fp.y = 100;
+    fShot.x = 120; fShot.y = 100;
+    tick(falling);
+    killed = damaged(fp);
+  }
+  list.add('a DESCENDING shot kills the sub that fired it', killed,
+    'the same test, the other sign (§ 13.6.2)');
+
+}
 
 /**
  * @param {import('./harness.js').CheckList} list

@@ -627,6 +627,17 @@ own pixels as foreign and confirms a contact against itself, and whichever entit
 holds the stale id reads those pixels as its own. Re-write the footprint under the new id
 as part of the swap. § 20.6's stencil invariant is what catches this.
 
+**A response that moves an entity must carry its footprint too.** A collision response
+runs inside whatever entity the walk is currently on (§ 14.4 dispatches both sides), so a
+handler can relocate the *other* party long after that party's own clear-and-write for
+this tick has finished — or before its turn has come at all. Its next clear then blanks
+the new position and strands the old pixels under its id, permanently. Only one response
+in the game does this — the hospital ship's deflection (§ 13.6.2), which moves the shot
+and swaps its sprite — and the rule is the same as for the swap and for § 7.4.2's death
+re-anchor: clear the old footprint first, while the record still says where those pixels
+are and which bitmap drew them, then move, then write. § 20.6's stencil invariant is what
+catches this too.
+
 Clearing is masked by the sprite's ink, not by its bounding box. Two overlapping
 entities therefore behave as follows: the later writer owns the shared pixels in
 `stencil`, and when it moves away it clears only what it wrote — which can leave the
@@ -2810,7 +2821,7 @@ and its death animation (§ 9.4, Chapter 15).
 | type | exempts — no damage in that pairing | notes |
 |---:|---|---|
 | 0 player | horizontal torpedo · supply submarine · dolphin · Giant Clam · **its own vertical torpedo while it is rising** | plus two gates ahead of the whitelist (§ 13.1). The payload diverts to the refuel path |
-| 1 vertical torpedo | — | **deflects** off the hospital ship (§ 13.6.2); consumed by ships and the Destroyer |
+| 1 vertical torpedo | **the player · another vertical torpedo — both only while this shot is rising** | **deflects** off the hospital ship (§ 13.6.2); consumed by ships and the Destroyer |
 | 2 horizontal torpedo | the player · another horizontal torpedo | cannot hit its own launcher |
 | 3 enemy submarine | Giant Clam · its own mine · its own torpedo | its children pass through it |
 | 4 magnetic mine | enemy submarine · another mine · Giant Clam | |
@@ -2824,6 +2835,24 @@ and its death animation (§ 9.4, Chapter 15).
 | 18 depth charge | Giant Clam | |
 | 19 enemy torpedo | enemy submarine · Giant Clam | |
 | 20 avenger | **everything, with no type test** | **indestructible** (§ 13.9) |
+
+### 14.6.1 The launcher exemption is mutual, and has to be
+
+Rows 0 and 1 carry the **same** gate: the player exempts its own vertical torpedo while
+that shot is rising, and the shot exempts the player on the same test. Both read the
+torpedo's own vertical velocity, and rising means negative.
+
+**Neither half is optional, because the two overlap on launch.** The shot appears at the
+player's Y − 7 and is six rows tall, so it clears the hull by exactly one row — and the
+player steps two pixels per update against the torpedo's one. On the first tick the
+player updates while ascending, the hull moves into the shot. The pair is dispatched to
+both handlers (§ 14.4), so an exemption on one side alone leaves the other side's damage
+path live: with only row 0's half, **every torpedo fired while ascending is destroyed on
+the tick it is fired**, and the weapon works only while sinking or level.
+
+The gate is on the sign rather than on identity, which is what makes § 13.6.2 work: a
+hospital ship negates that velocity, and from then on both halves fall through to the
+damage path. A deflected shot kills the player, and the player destroys it.
 
 ## 14.7 What the table shows
 
@@ -2841,7 +2870,8 @@ Reading the column as a whole gives two facts that are not visible type by type:
 **Normative:** collision running inside the walk · the box formula and its inclusive
 extents · the sweep not stopping at the first hit · the confirm of § 14.3 including the
 third-party consequence · two-sided dispatch and the skip for dying entities · the damage
-flag defaulting to harm · every row of § 14.6.
+flag defaulting to harm · every row of § 14.6 · the mutual launcher exemption of
+§ 14.6.1 and its dependence on the torpedo's velocity sign.
 
 **Free:** broad-phase implementation · whether the confirm is cached per tick or
 recomputed.

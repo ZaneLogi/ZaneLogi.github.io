@@ -91,7 +91,7 @@ export function respond(session, selfSlot, otherSlot) {
       break;
 
     case TYPE.VERTICAL_TORPEDO:
-      if (!verticalTorpedoIsHarmedBy(session, self, other)) harm = false;
+      if (!verticalTorpedoIsHarmedBy(session, self, selfSlot, other)) harm = false;
       break;
 
     case TYPE.HORIZONTAL_TORPEDO:
@@ -264,15 +264,39 @@ function refuel(session, payload, payloadSlot) {
  * @param {Object} other
  * @returns {boolean} whether the torpedo is damaged
  */
-function verticalTorpedoIsHarmedBy(session, self, other) {
+function verticalTorpedoIsHarmedBy(session, self, selfSlot, other) {
+  // **The launcher, and only while THIS shot is rising** -- the mirror of the
+  // player's own gate, tested on the same sign and against the same two types.
+  // Without it the exemption on the player's side buys nothing: the launch
+  // point clears the hull by ONE pixel and the player steps two, so the sub
+  // overlaps its own shot on the first tick it moves up, and every torpedo
+  // fired while ascending dies on the tick it is fired.
+  //
+  // A second vertical torpedo cannot exist -- the cap in flight is 1 (§ 13.2) --
+  // so that half of the test is unreachable. It is here because the source
+  // tests both, and a cap is a cheaper thing to change than a response table.
+  if (other.type === TYPE.PLAYER || other.type === TYPE.VERTICAL_TORPEDO) {
+    return self.scratch0 >= 0;
+  }
+
   if (other.type === TYPE.HOSPITAL_SHIP) {
     // **The shot is reflected, not consumed** (§ 13.6.2): the vertical velocity
     // is negated, the Y snapped to just below the hull, the sprite swapped to
     // the descending form, and a distinct sound played -- with neither party
     // damaged.
+    //
+    // **The footprint has to follow it**, and this is the one response that
+    // moves an entity. A response runs inside whatever entity the walk is
+    // currently on, so when the hospital ship is the subject the torpedo is
+    // moved long after its own erase/write cycle for this tick has finished --
+    // its next erase would clear the new position and strand the old pixels
+    // under its id forever. Erase before the move, while the record still
+    // describes where those pixels are and which sprite drew them.
+    session.stencil.erase(self, selfSlot);
     self.scratch0 = -self.scratch0;
     self.y = DEFLECT_ROW;
     self.sprite = 'torpedoDescending';
+    session.stencil.write(self, selfSlot);
     playSound(session, SOUND.DEFLECTED);  // § 18.6, sound 2
     return false;
   }
