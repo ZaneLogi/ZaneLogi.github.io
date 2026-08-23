@@ -282,7 +282,6 @@ player could in principle notice.
 | adjacent objects do not merge to white | § 2 |
 | the waterline cannot confirm a hit | § 3 |
 | an object under another no longer keeps a hole punched in it until redrawn | the hole is an artifact of erasing to test |
-| effects step on a consistent schedule from the first one created | see below |
 
 ### The round-start holds
 
@@ -318,15 +317,51 @@ it is a real strip on the disk; nothing draws it.
 The observable half is preserved exactly: `SCORE` and its six digits appear in
 all three states, and the three left-hand displays replace one another.
 
-### The effect step countdown
+### The effect step delay — where the research was wrong
 
-The original's effect-creation template carries a step-countdown field that only the
-death-burst creator ever writes, and it ships at 160. So until the first death of a
-session every effect waits 160 ticks before its first step — a one-tick trail mark
-lingers far past its lifetime and the 32 effect slots saturate — and from the first death
-onward the value is 1 permanently.
+Not a decision. A correction, recorded because the research document this port was built
+from states the opposite and someone will read it again.
 
-It is a template field one creator overwrites and never restores. We initialise the
-countdown from the same field its reload uses, so an effect's first step is timed like
-every later one. Reproducing the original here would mean reproducing an artifact whose
-only effect is that the opening seconds of a cold boot look wrong.
+**`DisassemblySeafox`'s account of the effect step countdown is wrong in two linked
+ways.** It says the creation template's `+6` field seeds a new effect's first step delay,
+that the field ships as `$A0` = 160 and is written only by the death burst, and — as a
+"corollary worth having when reimplementing" — that for a lifetime-1 object the mode
+byte's step-delay field is *dead*, being consulted only at `$6122`, "the reload after a
+completed step, which a one-step object never reaches."
+
+The instruction path says otherwise. `sub_6000` sets bit 5 of the mode byte at creation
+(`$602E`, `$6279` = `$20`), and the walk tests it **first**:
+
+```
+6056  LDA $6288,X          ; the mode byte
+6059  BIT $6279            ; the new-object bit
+605C  BEQ $6067            ; not new -> DEC the step countdown
+605E  EOR $6279            ; new -> clear the bit
+6064  JMP $60E5            ; skip countdown, lifetime and move; draw, then fall into:
+611F  LDA $6288,X
+6122  AND #$1F
+6124  STA $6289,X          ; the step countdown, from the MODE BYTE
+```
+
+So `$6122` is reached on an effect's **first** visit, not only after a completed step.
+The copied `+6` is overwritten before it is ever decremented — it is the dead field, and
+the mode byte's low five bits are the live one. The corollary is exactly inverted.
+
+The difference is visible, which is how it was caught. The vertical torpedo's mark is
+created with mode `$9F` (`$7E7C`), so its delay is 31; at one dot every four frames
+behind a shot climbing a pixel a frame that is **eight dots**, with the oldest dropping
+off as each new one appears — which is what the game shows. The 160 story predicts a
+trail growing to fill the screen, and the "dead field" story predicts a single blinking
+pixel. We shipped the second, then the first, before reading the branch at `$605C`.
+
+Every creation site's mode byte was then read directly, and they corroborate: `$0A` for
+the horizontal torpedo (≈3 blobs), `$85` for the enemy's (≈3 dots), `$82`/`$10` for the
+depth charge's splash and bubbles, `$41`/`$01` in all twelve debris templates, and — the
+one that shows the design — `$17A8,X ORA #$C0` for a ship's wake, so a wake's delay is
+its own ship's update divider and each ship holds exactly one wake mark.
+
+**The lesson, which cost three wrong answers:** this repository treats the disassembly as
+an arbiter, and an arbiter's prose is still a claim. Its *addresses* have been reliable;
+its *summaries* have not. Follow the branch before quoting the conclusion — especially a
+conclusion offered as advice to a reimplementer, which is exactly the kind that gets
+copied instead of checked.

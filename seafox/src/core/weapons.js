@@ -19,7 +19,7 @@
 // than as a timer (§ 4.7). The horizontal one carries both.
 
 import { TYPE, CLASS } from './types.js';
-import { trailDot, trailBlob } from './trails.js';
+import { trailDot, trailBlob, MARK_DELAY } from './trails.js';
 import { playSound, SOUND } from './sound.js';
 
 /** Vertical torpedo -- type 1 (§ 13.2). Step -1, period 1: the only step of 1. */
@@ -164,7 +164,7 @@ export function updateVerticalTorpedo(session, slot) {
   e.scratch3 += 1;
   if (e.scratch3 >= 4) {
     e.scratch3 = 0;
-    trailDot(session, e.x + 1, e.y + (e.scratch0 < 0 ? 7 : -1));
+    trailDot(session, e.x + 1, e.y + (e.scratch0 < 0 ? 7 : -1), MARK_DELAY.verticalDot);
   }
 
   if (e.y < VERTICAL.topExit || e.y >= VERTICAL.bottomExit) e.removalRequested = true;
@@ -208,7 +208,7 @@ export function updateHorizontalTorpedo(session, slot) {
   // horizontal torpedo lays a mark on the very tick it is fired. The enemy's
   // toggle is seeded to the opposite value and waits a tick.
   e.scratch3 ^= 1;
-  if (e.scratch3 === 0) trailBlob(session, e.x, e.y + 1);
+  if (e.scratch3 === 0) trailBlob(session, e.x, e.y + 1, MARK_DELAY.horizontalBlob);
 
   if (e.x > HORIZONTAL.exitX) e.removalRequested = true;
   e.updateCountdown = e.updatePeriod;

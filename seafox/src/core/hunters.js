@@ -22,7 +22,7 @@
 // threat in the game into one of the quickest.
 
 import { TYPE, CLASS } from './types.js';
-import { trailDot } from './trails.js';
+import { trailDot, MARK_DELAY } from './trails.js';
 
 /** Enemy submarine (§ 13.3). */
 const SUB_STEP = 2;
@@ -247,7 +247,7 @@ export function updateEnemyTorpedo(session, slot) {
   // the player's horizontal torpedo, so this one waits a tick before its first
   // mark where the player's does not.
   e.scratch2 ^= 1;
-  if (e.scratch2 === 0) trailDot(session, e.x + 7, e.y + 1);
+  if (e.scratch2 === 0) trailDot(session, e.x + 7, e.y + 1, MARK_DELAY.enemyDot);
 
   e.scratch1 -= 1;
   if (e.scratch1 <= 0) {

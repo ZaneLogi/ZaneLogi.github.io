@@ -23,6 +23,7 @@
 /** @type {number} § 15.1: the same slot count as the entity list, separately. */
 export const MAX_EFFECTS = 32;
 
+
 /**
  * The four sprites of § 15.4 -- the only artwork in the game outside the main
  * sprite set.
@@ -57,8 +58,14 @@ export const EFFECT_SPRITES = {
  * **The bounds rectangle is deliberately wider than the screen** (§ 15.3), so
  * effects drift off the edges before they are reaped rather than vanishing at
  * them.
+ *
+ * **In WORLD x**, like the entity position every effect is seeded from -- so
+ * "22 px beyond the edge" is 22 beyond § 2.3's visible span of 28-307, not 22
+ * beyond the screen's own 0-279. Writing the screen numbers here would put the
+ * right cull 6 px INSIDE the right edge, which is the one place it shows: the
+ * debris would blink out just short of the border rather than drift over it.
  */
-export const EFFECT_BOUNDS = { top: 7, bottom: 181, left: -22, right: 280 + 22 };
+export const EFFECT_BOUNDS = { top: 7, bottom: 181, left: 28 - 22, right: 307 + 22 };
 
 /** One effect. Velocity and no type -- the mirror of an entity record. */
 export class Effect {
@@ -146,18 +153,9 @@ export class EffectList {
     e.parity = spec.parity === undefined ? (spec.x & 1) : spec.parity;
     e.lifetime = spec.lifetime;
     e.stepReload = spec.stepReload === undefined ? 1 : spec.stepReload;
-    // **§ 15.9, and a deliberate difference from the original.** The countdown
-    // is initialised from the same field its reload uses, so an effect's first
-    // step is timed like every later one.
-    //
-    // The original's creation template carries a step-countdown field that only
-    // the death-burst creator ever writes, shipped at 160 -- so before the first
-    // death of a session every effect waits 160 ticks before its first step, a
-    // one-tick trail mark lingers far past its lifetime, and these 32 slots
-    // saturate. From the first death onward the value is 1 permanently. It is a
-    // template field one creator overwrites and never restores, and reproducing
-    // it means reproducing an artifact whose only effect is that the opening
-    // seconds of a cold boot look wrong. docs/porting_decisions.md records it.
+    // The countdown is set on the first WALK, not here (§ 15.9) -- the walk's
+    // first-visit branch loads it from this effect's own step delay. Anything
+    // written here is overwritten before it is ever decremented.
     e.stepCountdown = e.stepReload;
     e.justCreated = true;
     e.active = true;
@@ -207,8 +205,14 @@ export function walkEffects(session) {
     const e = list.slots[cursor];
 
     if (e.justCreated) {
-      // Straight to the draw: it appears where it was born, before moving.
+      // **The first visit skips the countdown, the lifetime AND the move, and
+      // ends by LOADING the countdown from this effect's step delay** (§ 15.9).
+      // So the delay is what decides how long a mark stands, and a lifetime of 1
+      // means "stand for `stepReload` ticks, then go" rather than "blink once".
+      // That is the whole of why a torpedo has a visible trail: 31 for the
+      // vertical shot's dot, laid every 4 ticks, is eight dots behind it.
       e.justCreated = false;
+      e.stepCountdown = e.stepReload;
       cursor += 1;
       continue;
     }

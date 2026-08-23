@@ -15,8 +15,27 @@
 // and it survives only while the effect's own dx is even. Each site therefore
 // fixes a variant, and § 15.5 records which.
 
-/** @type {number} § 15.5: every trail mark is drawn on the tick it is made and erased on the next. */
+/** @type {number} § 15.5: every trail mark takes exactly one step, and dies on it. */
 const MARK_LIFETIME = 1;
+
+/**
+ * **How long each mark STANDS before taking that one step** (§ 15.9), which is
+ * what decides how long a trail is. Each value is its creation site's own, and
+ * they differ per site -- this is not one shared number.
+ *
+ * The vertical torpedo's is the one to check a port against: 31, laid every 4
+ * ticks behind a shot climbing 1 px per tick, is **eight dots 4 px apart**, and
+ * the oldest drops off as each new one appears.
+ *
+ * @type {Object<string, number>}
+ */
+export const MARK_DELAY = {
+  verticalDot: 31,      // 8 dots
+  horizontalBlob: 10,   // ~3 blobs, 8 px apart
+  enemyDot: 5,          // ~3 dots, 6 px apart
+  splash: 2,            // the three thrown dots step almost at once
+  bubble: 16,           // ~4 bubbles behind a sinking charge
+};
 
 /**
  * A single-pixel dot (§ 15.4).
@@ -31,8 +50,8 @@ const MARK_LIFETIME = 1;
  * @param {number} y
  * @returns {void}
  */
-export function trailDot(session, x, y) {
-  session.effects.spawn({ x, y, sprite: 'dot', lifetime: MARK_LIFETIME });
+export function trailDot(session, x, y, delay) {
+  session.effects.spawn({ x, y, sprite: 'dot', lifetime: MARK_LIFETIME, stepReload: delay });
 }
 
 /**
@@ -43,8 +62,8 @@ export function trailDot(session, x, y) {
  * @param {number} y
  * @returns {void}
  */
-export function trailBlob(session, x, y) {
-  session.effects.spawn({ x, y, sprite: 'blob', lifetime: MARK_LIFETIME });
+export function trailBlob(session, x, y, delay) {
+  session.effects.spawn({ x, y, sprite: 'blob', lifetime: MARK_LIFETIME, stepReload: delay });
 }
 
 /**
@@ -55,7 +74,7 @@ export function trailBlob(session, x, y) {
  * @returns {void}
  */
 export function bubble(session, x, y) {
-  trailBlob(session, x, y);
+  trailBlob(session, x, y, MARK_DELAY.bubble);
 }
 
 /**
@@ -76,7 +95,9 @@ export function bubble(session, x, y) {
  */
 export function splash(session, x, y) {
   for (const dx of [-2, 0, 2]) {
-    session.effects.spawn({ x, y, dx, dy: -2, sprite: 'dot', lifetime: 5 });
+    session.effects.spawn({
+      x, y, dx, dy: -2, sprite: 'dot', lifetime: 5, stepReload: MARK_DELAY.splash,
+    });
   }
 }
 
@@ -115,5 +136,10 @@ export function wake(session, e, travellingRight) {
   } else {
     x = e.x + 29;
   }
-  session.effects.spawn({ x, y: e.y + 7, sprite: 'streak', lifetime: MARK_LIFETIME });
+  // **A wake's delay is its PARENT's update period**, so each ship holds exactly
+  // one wake mark: the old one expires as the ship's next update lays the next.
+  // That is why a wake never reads as a trail while a torpedo's does.
+  session.effects.spawn({
+    x, y: e.y + 7, sprite: 'streak', lifetime: MARK_LIFETIME, stepReload: e.updatePeriod,
+  });
 }

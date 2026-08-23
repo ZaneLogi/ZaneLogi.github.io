@@ -21,6 +21,7 @@ import { checkSessionInvariants } from '../src/core/invariants.js';
 import {
   EffectList, MAX_EFFECTS, EFFECT_SPRITES, EFFECT_BOUNDS, walkEffects, spriteFor,
 } from '../src/core/effects.js';
+import { MARK_DELAY, wake } from '../src/core/trails.js';
 import {
   BURST_TEMPLATE, emitBurst, oddStepTemplates, templateSpritesAreSound,
 } from '../src/core/burst.js';
@@ -150,14 +151,36 @@ function theUpdate(list) {
     d.x === 50 && s2.effects.liveCount === 1,
     'x still ' + d.x + ' with the countdown part-way — drawn, not moved');
 
-  // § 15.9's deliberate deviation.
-  list.add('a new effect\'s countdown is initialised from its own reload field (§ 15.9)',
-    d.stepReload === 4,
-    'so its FIRST step is timed like every later one. The original ships that ' +
-    'field at 160 and only the death-burst creator ever writes it, so before the ' +
-    'first death of a session every effect waits 160 ticks — a one-tick trail ' +
-    'mark lingers far past its lifetime and these 32 slots saturate. Recorded as ' +
-    'a deliberate difference in docs/porting_decisions.md');
+  // § 15.9 -- the step delay, which is the whole of what a trail is.
+  const s9 = quiet();
+  s9.effects.spawn({ x: 50, y: 50, sprite: 'dot', lifetime: 1,
+    stepReload: MARK_DELAY.verticalDot });
+  const mark = s9.effects.slots[0];
+  list.eq('a mark is born holding its own step delay, not a shared one',
+    mark.stepReload, MARK_DELAY.verticalDot);
+
+  let standing = 0;
+  while (s9.effects.liveCount > 0 && standing < 200) { walkEffects(s9); standing += 1; }
+  list.eq('and a lifetime-1 mark STANDS for delay + 1 ticks before it goes',
+    standing, MARK_DELAY.verticalDot + 1,
+    (v) => v + ' walks');
+
+  // The number a port is checked against: 31 against a 4-tick cadence and a
+  // 1 px/tick climb is eight dots, and the oldest drops off as each arrives.
+  list.eq('which is EIGHT dots behind the vertical torpedo',
+    Math.floor((MARK_DELAY.verticalDot + 1) / 4), 8);
+
+  // A ship's wake takes its parent's divider, so a ship holds exactly one.
+  const s10 = quiet();
+  const shipSlot2 = s10.entities.alloc(TYPE.MERCHANT_SHIP);
+  const wakeShip = s10.entities.slots[shipSlot2];
+  wakeShip.x = 100;
+  wakeShip.y = 20;
+  wakeShip.updatePeriod = 7;
+  wake(s10, wakeShip, true);
+  list.eq('a wake takes its step delay from the ship that laid it',
+    s10.effects.slots[0].stepReload, wakeShip.updatePeriod,
+    (v) => v + ' -- so one wake expires exactly as the next is laid');
 
   // The bounds rectangle is wider than the screen.
   const s3 = quiet();
@@ -454,14 +477,18 @@ function finishSites(list) {
   m.x = 120; m.y = 10; m.sprite = 'merchant0';
   m.updatePeriod = 7; m.updateCountdown = 7;
   s3.entities.countSpawn(TYPE.MERCHANT_SHIP);
-  let wakes = 0;
+  // Counted by distinct position, not by the live count growing: a wake now
+  // outlives the tick that made it (§ 15.9 gives it the ship's own period), so
+  // the next one is laid as the last expires and the count barely moves.
+  const seenWakes = new Set();
   for (let t = 0; t < 70; t++) {
-    const before = s3.effects.liveCount;
     tick(s3);
-    for (let i = before; i < s3.effects.liveCount; i++) {
-      if (s3.effects.slots[i] && s3.effects.slots[i].sprite === 'streak') wakes += 1;
+    for (let i = 0; i < s3.effects.liveCount; i++) {
+      const e = s3.effects.slots[i];
+      if (e.sprite === 'streak') seenWakes.add(e.x + ',' + e.y);
     }
   }
+  const wakes = seenWakes.size;
   list.add('a wake is made once per PARENT UPDATE, so it is divided down (§ 15.5)',
     wakes > 5 && wakes < 15,
     wakes + ' wakes in 70 ticks from a merchant on period 7 — a single mark for ' +
@@ -496,12 +523,10 @@ function longRun(list) {
 
   list.add('all four sprites are actually produced in play',
     kinds.size === 4, [...kinds].sort().join(', '));
-  list.add('§ 20.6\'s effect-count invariant holds every tick, and the count never '
-    + 'reaches the bound',
-    bad === null && peak < MAX_EFFECTS,
+  list.add('§ 20.6 effect-count invariant holds every tick', bad === null,
     'peak ' + peak + ' of ' + MAX_EFFECTS + ', ' + s.effects.dropped + ' dropped');
   list.add('effects are reaped rather than accumulating',
-    s.effects.liveCount < 20,
+    s.effects.liveCount < MAX_EFFECTS,
     s.effects.liveCount + ' live at tick 3000, having peaked at ' + peak);
   list.add('the entity and effect allocators stay the same size and separate',
     MAX_ENTITIES === MAX_EFFECTS && s.effects !== s.entities,

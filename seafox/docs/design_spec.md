@@ -2994,9 +2994,11 @@ even because both parents sit at odd X and both offsets are odd; the enemy torpe
 odd because that parent sits at even X. The splash's three velocities are all even, so
 those dots keep the parity they are born at for their whole five ticks.
 
-**Almost every effect is a one-tick stationary mark, re-created each time its parent
-updates** — which is why they track their parent exactly and need no following logic.
-Only the death burst and the depth charge's splash have velocity and outlive a tick.
+**Almost every effect is a stationary mark, re-created each time its parent updates** —
+which is why they track their parent exactly and need no following logic. Only the death
+burst and the depth charge's splash have velocity. The lifetimes above are counts of
+**steps**; how long a mark stands before taking its one step is its step delay, and
+§ 15.9 gives one per creation site.
 
 Two details that are easy to get backwards:
 
@@ -3022,13 +3024,23 @@ at the same moment.
 ## 15.7 The three torpedo trails
 
 All three torpedoes trail, all three through this allocator, and **no two the same way.**
-Each mark has a lifetime of 1: drawn on the tick it is made, erased on the next.
+Each mark has a lifetime of 1 — but a lifetime is a count of *steps*, and a mark stands
+for its own step delay (§ 15.9) before taking that step. That delay is what turns the
+spacing column below into a visible trail: **31 for the vertical shot, so eight dots**,
+10 for the horizontal, 5 for the enemy's.
 
 | torpedo | cadence | sprite | offset | spacing |
 |---|---|---|---|---:|
 | vertical | a counter, every 4th tick | dot | X+1, Y+7 rising / Y−1 falling | 4 px |
-| horizontal | a toggle, every 2nd tick — **from the first** | blob | X, Y+1 | 8 px |
-| enemy | a toggle, every 2nd tick — **from the second** | dot | X+7, Y+1 | 6 px |
+| horizontal | a toggle, every 2nd **update** — **from the first** | blob | X, Y+1 | 8 px |
+| enemy | a toggle, every 2nd **update** — **from the second** | dot | X+7, Y+1 | 6 px |
+
+**Both toggles flip once per update, not once per tick, and the spacing column is what
+says so.** The enemy torpedo's period is 1, so for it the two are the same thing — but
+the horizontal torpedo's period is 2, so its toggle flips every second tick and its mark
+falls every fourth. At 2 px per tick that is the 8 px given here; reading the cadence as
+ticks would halve it to 4. Where the two columns can be read against each other, the
+spacing is the one to trust: it is the observable.
 
 The two toggles are seeded to **opposite** values, so the player's horizontal torpedo
 lays its first mark on the tick it is fired and the enemy's waits a tick. Every offset
@@ -3078,20 +3090,45 @@ colour is chosen at draw time (§ 15.4).
 
 The dying entity's own animation runs at period 4 (§ 2.7.1), independently.
 
-## 15.9 The initial step countdown
+## 15.9 The step delay — and why trails are trails
 
-**Specification: a new effect's `stepCountdown` is initialised from the same field its
-reload uses** — the step-delay reload in the mode byte — so an effect's first step is
-timed like every later one.
+**A mark's lifetime is 1 STEP; its step delay is what decides how long it stands.**
+Every effect carries a delay of its own, and an effect does not take its first step —
+and a lifetime-1 mark therefore does not die — until that delay has run. The delay is
+set on the effect's **first walk**, not at creation: a new effect skips the countdown,
+the lifetime and the move on that first visit, is drawn, and ends it by loading the
+countdown from its own delay.
 
-The original does not do this. Its creation template carries a step-countdown field that
-only the death-burst creator writes, and that field ships at 160. So **before the first
-death of a session every effect waits 160 ticks before its first step** — which for a
-one-tick trail mark means it lingers far beyond its lifetime and the 32 slots saturate —
-and after the first death the value is 1 permanently. This is a template field that one
-creator overwrites and never restores, and reproducing it means reproducing an artifact
-whose only effect is that the opening seconds of a cold boot look wrong. It is recorded
-as a deliberate difference in `docs/porting_decisions.md`.
+So a trail's length is `delay ÷ cadence` marks, and each creation site chooses its own:
+
+| mark | delay | cadence | marks visible |
+|---|---:|---:|---|
+| **vertical torpedo dot** | **31** | every 4 ticks | **8 dots**, 4 px apart |
+| horizontal torpedo blob | 10 | every 4 ticks | ~3 blobs, 8 px apart |
+| enemy torpedo dot | 5 | every 2 ticks | ~3 dots, 6 px apart |
+| ship wake | **its parent's update period** | once per parent update | **exactly one** |
+| depth-charge splash | 2 | once, on entry | the fan steps almost at once |
+| depth-charge bubble | 16 | every 4 ticks | ~4 |
+| death-burst debris | 1 | once, on death | steps every tick |
+
+**The wake row is the one that shows the design.** A wake's delay is the divider of the
+ship that laid it, so a ship holds exactly one wake mark: the old one expires as the next
+parent update lays the next. That is why a wake reads as a mark under the hull while a
+torpedo's reads as a trail behind it — the same allocator, the same lifetime of 1, and a
+different delay.
+
+**The vertical torpedo is the number to check a port against.** 31 against a 4-tick
+cadence and a 1 px/tick climb is eight dots, evenly spaced, with the oldest dropping off
+as each new one appears. A port that renders one blinking dot has taken the delay from
+the wrong field; a port whose trail grows the length of the screen has taken it from the
+creation template.
+
+**The creation template's step-countdown field is dead, and looks alive.** The template
+is copied whole into each new record, and ten of the eleven creation sites never fill
+that one field — so a record is born holding whatever the last death burst left, or a
+filler byte before there has been one. It never matters: the first walk overwrites it
+from the delay above before it is ever decremented. Reading the copy and stopping there
+predicts marks that stand for the filler value, which is not what the game does.
 
 ## 15.10 Normative and free — summary
 
