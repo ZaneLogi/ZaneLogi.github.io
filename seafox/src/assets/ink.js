@@ -31,6 +31,10 @@ export const PIXELS_PER_BYTE = 7;
  * @property {number} minX       where the strip began, so the colour pass can align
  * @property {number} minY
  * @property {number} srcWidth   the unstripped width, byteWidth * 7
+ * @property {number} rows       the SOURCE block's height, retained for the
+ *                               same reason as byteWidth: § 14.2 builds both
+ *                               box extents off the stored block, not off the
+ *                               stripped bitmap
  */
 
 /**
@@ -102,7 +106,7 @@ export function bakeInk(block) {
     for (let x = 0; x < w; x++) ink[y * w + x] = lit[src + x];
   }
 
-  return { w, h, byteWidth: block.byteWidth, ink, minX, minY, srcWidth: width };
+  return { w, h, byteWidth: block.byteWidth, rows, ink, minX, minY, srcWidth: width };
 }
 
 /**

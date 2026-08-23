@@ -8,6 +8,9 @@ The disk image lives OUTSIDE this repository; pass its path.
   python tools/extract_sprites.py --dsk /path/to/image.dsk --dump   ASCII preview
   python tools/extract_sprites.py --dsk /path/to/image.dsk --check  verify only
 
+It also emits assets/digit_font.js -- the HUD digit font, which is not a block
+and is not part of the chained artwork.
+
 Nothing here is retyped from the image. Pixels, byte widths, row counts, palette
 bits and the text strips' screen positions are all READ OUT of it. The only
 transcriptions are the design spec's own tables, and they are used purely as
@@ -617,6 +620,109 @@ def verify(blocks: list[Block]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# design_spec 6.6.1 / 19.9 - the HUD digit font
+# ---------------------------------------------------------------------------
+
+# The font is NOT a block: no eight-byte header, no link, no shift slots, and it
+# does not live in any of the three chains. It is eighty raw bytes of glyph, and
+# the routine that draws it writes them straight to the screen rows -- no
+# blitter, no clip. So it is read by address rather than by walking.
+FONT_ADDR: int = 0x14F2
+FONT_GLYPHS: int = 10
+FONT_ROWS: int = 8
+
+
+def read_digit_font(data: bytes, load_addr: int) -> list[bytes]:
+    """Read the ten glyphs. Returns one bytes of FONT_ROWS per digit."""
+    off = FONT_ADDR - load_addr
+    raw = data[off:off + FONT_GLYPHS * FONT_ROWS]
+    if len(raw) != FONT_GLYPHS * FONT_ROWS:
+        raise SystemExit('the font runs past the end of %s' % GRAPHICS_FILE)
+    return [raw[d * FONT_ROWS:(d + 1) * FONT_ROWS] for d in range(FONT_GLYPHS)]
+
+
+def verify_font(glyphs: list[bytes]) -> list[str]:
+    """Check the font against design_spec 6.6.1 and 19.9. Returns failures."""
+    bad: list[str] = []
+
+    for d, g in enumerate(glyphs):
+        lit = [[(by >> k) & 1 for k in range(PIXELS_PER_BYTE)] for by in g]
+
+        # A glyph byte is seven pixels and no palette bit: the digit routine
+        # stores raw, so a set bit 7 would be a pixel-bearing palette flip the
+        # port has nowhere to put.
+        if any(by & 0x80 for by in g):
+            bad.append('digit %d: a glyph byte sets bit 7' % d)
+
+        # 6 x 8 cells (design_spec 6.6.1): six pixels of ink, then a blank
+        # seventh column, and a blank eighth row. Both blanks are the spacing --
+        # they are why consecutive digits do not touch, and why a field of them
+        # is exactly seven pixels per digit.
+        if any(row[6] for row in lit):
+            bad.append('digit %d: column 6 is not blank, so digits would touch' % d)
+        if g[FONT_ROWS - 1] != 0:
+            bad.append('digit %d: row 7 is not blank' % d)
+
+        # No isolated lit pixel anywhere in the font, so the two-pass bake of
+        # design_spec 6.3 resolves every glyph to pure white and the HUD needs
+        # no parity and no palette. Asserted rather than assumed: one isolated
+        # pixel would make a digit take a hue from the column it lands in.
+        for r, row in enumerate(lit):
+            for x in range(PIXELS_PER_BYTE):
+                if not row[x]:
+                    continue
+                left = x > 0 and row[x - 1]
+                right = x + 1 < PIXELS_PER_BYTE and row[x + 1]
+                if not left and not right:
+                    bad.append('digit %d: isolated lit pixel at row %d column %d '
+                               '-- the glyph would take a hue' % (d, r, x))
+    return bad
+
+
+FONT_HEADER: str = '''// seafox/assets/digit_font.js
+//
+// GENERATED FILE -- do not edit by hand.
+// Build:  python seafox/tools/extract_sprites.py --dsk <path to the disk image>
+//
+// The HUD digit font of design_spec 19.9, read from $14F2-$1541 of the graphics
+// file. Ten glyphs, eight bytes each, one byte per row.
+//
+// **It is not a block** (design_spec 6.6.1). Everything in sprite_blocks.js
+// carries an eight-byte header giving its width, rows, palette and position,
+// and is drawn by the general blitter. The font has none of that: the digit
+// routine indexes it by BCD nibble and stores the bytes straight to the screen
+// rows. What it shares with the blocks is the pixel format alone -- seven
+// pixels to a byte, lowest bit leftmost -- so it is shaped like a block here,
+// with byteWidth 1 and rows 8, purely so the bake of design_spec 6.3 applies to
+// it unchanged.
+//
+// The cell is 6 x 8: six pixels of ink, a blank seventh column and a blank
+// eighth row. Both blanks are the spacing between fields, which is what makes a
+// digit field exactly seven pixels per digit with nothing to add between them.
+//
+// **Every glyph is pure white**, because no glyph contains an isolated lit
+// pixel -- the extractor asserts this rather than assuming it. So the font takes
+// no hue from the column it lands on, needs no parity variant, and phase and
+// flip below are both 0 and mean nothing.
+'''
+
+
+def emit_font(glyphs: list[bytes], out_path: str) -> int:
+    """Write assets/digit_font.js. Returns the number of glyphs emitted."""
+    lines: list[str] = [FONT_HEADER, '', 'export const DIGIT_FONT = [']
+    for d, g in enumerate(glyphs):
+        lines.append('  { byteWidth: 1, rows: %d, phase: 0, flip: 0, bits: "%s" },  // %d'
+                     % (FONT_ROWS, base64.b64encode(g).decode('ascii'), d))
+    lines.append('];')
+    lines.append('')
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, 'w', encoding='utf-8', newline='\n') as f:
+        f.write('\n'.join(lines))
+    return len(glyphs)
+
+
+# ---------------------------------------------------------------------------
 # Emit
 # ---------------------------------------------------------------------------
 
@@ -753,7 +859,8 @@ def main() -> int:
           % (args.dsk, GRAPHICS_FILE, load_addr, len(data)))
 
     blocks = walk_blocks(data, load_addr)
-    failures = verify(blocks)
+    glyphs = read_digit_font(data, load_addr)
+    failures = verify(blocks) + verify_font(glyphs)
     if failures:
         print('\nThe image does not match docs/design_spec.md:', file=sys.stderr)
         for f in failures:
@@ -761,6 +868,8 @@ def main() -> int:
         return 1
     print('  every bitmap matches the spec inventory, every strip its position, '
           'every merchant its hue')
+    print('  the digit font is %d glyphs of %d rows at $%04X, every one pure white'
+          % (len(glyphs), FONT_ROWS, FONT_ADDR))
     report(blocks)
 
     if args.dump:
@@ -770,6 +879,11 @@ def main() -> int:
                      '  (pure white)' if blk.is_pure_white() else ''))
             for row in blk.ascii_rows():
                 print('    ' + row)
+        for d, g in enumerate(glyphs):
+            print('\n--- digit %d  $%04X' % (d, FONT_ADDR + d * FONT_ROWS))
+            for by in g:
+                print('    ' + ''.join('#' if (by >> k) & 1 else '.'
+                                       for k in range(PIXELS_PER_BYTE)))
 
     if args.check:
         return 0
@@ -777,6 +891,12 @@ def main() -> int:
     count = emit(blocks, out_path)
     size = os.path.getsize(out_path)
     print('  wrote %s: %d assets, %d bytes' % (os.path.relpath(out_path, here),
+                                               count, size))
+
+    font_path = os.path.join(os.path.dirname(out_path), 'digit_font.js')
+    count = emit_font(glyphs, font_path)
+    size = os.path.getsize(font_path)
+    print('  wrote %s: %d glyphs, %d bytes' % (os.path.relpath(font_path, here),
                                                count, size))
     return 0
 

@@ -105,9 +105,14 @@ export class Stencil {
     const sprite = INK[e.sprite];
     if (sprite === undefined) return;          // a type with no artwork yet
 
-    // § 2.3: the buffer is screen space, the entity's X is world space.
-    const originX = e.x - 28;
-    const originY = e.y;
+    // § 2.3: the buffer is screen space, the entity's X is world space -- and
+    // the entity's position is its BLOCK's top-left, so the bitmap's own crop
+    // offset goes back on. § 6.2's bitmaps are stripped to their ink box, which
+    // is what makes `byteWidth` worth retaining (§ 6.4); dropping the offset
+    // instead would slide the nine blocks that have one 1-2 px up or left of
+    // where the game puts them, in the picture AND in this buffer.
+    const originX = e.x - 28 + sprite.minX;
+    const originY = e.y + sprite.minY;
 
     for (let y = 0; y < sprite.h; y++) {
       const row = originY + y;
@@ -150,8 +155,8 @@ export class Stencil {
     const sprite = INK[e.sprite];
     if (sprite === undefined) return false;
     const self = slot + 1;
-    const originX = e.x - 28;
-    const originY = e.y;
+    const originX = e.x - 28 + sprite.minX;   // the crop offset, as in paint()
+    const originY = e.y + sprite.minY;
 
     for (let y = 0; y < sprite.h; y++) {
       const row = originY + y;

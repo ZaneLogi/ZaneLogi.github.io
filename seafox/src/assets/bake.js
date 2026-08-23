@@ -53,6 +53,12 @@ const HUE = [
  * @property {Uint8Array} ink     w*h bytes, 0 or 1 -- the true silhouette
  * @property {Uint8Array} color   colorWidth*h palette indices
  * @property {number} colorWidth  w, or w+1 where a chroma cell overhangs
+ * @property {number} minX        where the crop began, in source pixels. Both
+ *                                bitmaps are stripped to the ink box, so an
+ *                                object's position -- which is its BLOCK's
+ *                                top-left -- needs this back on to draw and to
+ *                                collide where the game puts it (§ 6.4)
+ * @property {number} minY
  * @property {number} phase
  * @property {number} flip
  * @property {boolean} verified
@@ -153,7 +159,7 @@ export function bake(block) {
 
   /** @type {Sprite} */
   const sprite = {
-    w, h, byteWidth: block.byteWidth, ink, color, colorWidth,
+    w, h, byteWidth: block.byteWidth, ink, color, colorWidth, minX, minY,
     phase: block.phase, flip: block.flip, verified: block.verified !== false,
     phaseLive: block.phaseLive === true,
   };

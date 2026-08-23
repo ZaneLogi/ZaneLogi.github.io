@@ -188,14 +188,23 @@ touches presentation.
 
 ### 6. Sprite assets carry their original byte width
 
-Each sprite exports as `{w, h, byteWidth, ink, color}`.
+Each sprite exports as `{w, h, byteWidth, rows, minX, minY, ink, color}`.
 
 Blocks in the original reserve at least six blank right columns as working
 space, and the box test sizes itself to the ink by deriving the extent from the
 **byte** width rather than the pixel width. We strip the padding, so boxes must
-still be computed from the stored `byteWidth` — recomputing them from the
-stripped bitmap yields tighter hitboxes and a game that feels stingier than it
-should in a way that is hard to attribute.
+still be computed from the stored `byteWidth` and `rows` — recomputing them from
+the stripped bitmap yields tighter hitboxes and a game that feels stingier than
+it should in a way that is hard to attribute.
+
+Stripping is not free in the other direction either. Nine of the sixty-nine
+blocks are blank down their left edge or across their top row, and an object's
+position is its **block's** top-left, not its ink's — so the crop offset is kept
+on the asset as `minX`/`minY` and put back by everything that places a bitmap:
+the stencil write, the confirm, and the renderer. Dropping it slides those nine
+one or two pixels up or left of where the game puts them, in the picture and in
+the collision footprint alike, and the five mission numerals are the ones that
+show: they sit at a fixed X beside the word `MISSION`.
 
 ### 7. Input: a gamepad takes the analogue stick's place
 

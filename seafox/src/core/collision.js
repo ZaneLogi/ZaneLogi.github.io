@@ -17,9 +17,16 @@ import { respond } from './responses.js';
 
 /**
  * The subject's rectangle (§ 14.2), built from its position and its sprite's
- * **stored byte width** -- not its stripped pixel width (§ 6.4).
+ * **stored block size** -- not its stripped pixel size (§ 6.4).
  *
  * **Both extents are inclusive.**
+ *
+ * Height comes off the stored `rows` for the same reason width comes off
+ * `byteWidth`: the bitmaps are stripped to their ink box, and measuring the
+ * stripped one yields boxes that are tighter than the game's. Exactly one block
+ * differs -- `sinkingShip3`, whose top row is blank -- and it is a death frame,
+ * so § 14.4 skips it before any box is built. The two agree everywhere the
+ * sweep can reach, which is why this cost nothing to get right.
  *
  * @param {Object} e an Entity
  * @returns {{left: number, right: number, top: number, bottom: number}|null}
@@ -32,7 +39,7 @@ export function boxOf(e) {
     left: e.x,
     right: e.x + boxWidth(sprite),
     top: e.y,
-    bottom: e.y + sprite.h - 1,
+    bottom: e.y + sprite.rows - 1,
   };
 }
 
