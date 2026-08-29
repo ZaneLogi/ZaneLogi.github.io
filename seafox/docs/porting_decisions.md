@@ -405,3 +405,56 @@ an arbiter, and an arbiter's prose is still a claim. Its *addresses* have been r
 its *summaries* have not. Follow the branch before quoting the conclusion — especially a
 conclusion offered as advice to a reimplementer, which is exactly the kind that gets
 copied instead of checked.
+
+### The dolphin's three rules — where our spec was thin
+
+Also not a decision, and the mirror image of the one above: there the reference was
+wrong and we followed it; here the reference was **right and complete**, and our spec
+lost two thirds of it in the compression. Recorded because the mechanism that lost them
+is structural, so it will do it again somewhere else.
+
+**What was missing.** `entry_75DC` is a four-way branch on *who touched the dolphin*, and
+`entry_8592` splices two writes into its removal handoff. Our spec carried one of the
+four arms and neither write:
+
+| the source | our spec said |
+|---|---|
+| player and payload are both harmless to it | "exempts the player" |
+| the two player torpedoes summon the avenger | "spawns the avenger **when destroyed**" |
+| anything else kills it with no retaliation | — |
+| **its removal drops the payload** — dY +4, dX 0 | — |
+
+The port implemented that row exactly, so a mine kill summoned an avenger, the escort
+could destroy its own cargo, and the resupply floated serenely on after its dolphin died.
+
+**It is not staleness.** Both facts are in the reference's first commit; nothing was
+added later. They were available the whole time.
+
+**Three causes, and the first is the one to remember.**
+
+1. **We inherited the reference's tables and dropped its prose.** Every fact our
+   § 13.8.2 / § 16.5 did carry — the globals, the release offsets, the ∓5 placement, the
+   three sites that clear the live flag — is a **table** in the reference. Both missing
+   facts are **trailing prose paragraphs** under those same headings, one of them under a
+   heading that literally counts them: *"Shoot the dolphin and three things happen."* We
+   wrote down thing one. A summary that keeps the tables looks complete, because tables
+   are what a reader checks against — and that is exactly why it isn't.
+2. **§ 14.6 had no column for what a row *does*.** It is indexed as *who exempts whom*, so
+   a branch that also creates an entity, or also skips a state clear, has nowhere to go
+   but a note — and an effect keyed to a type's **removal** rather than to a contact has
+   no row at all. The table's shape decided what could be written in it. § 14.7 now says
+   so, and § 16.5.1 is a section because it could never have been a row.
+3. **A test locked it in, with a false explanation attached.** `test_catalogue` asserted
+   that all fourteen types appear in an attract run, explaining that "the demo eventually
+   shoots a dolphin." It does not. Measured over the same 6000-tick run, the demo's only
+   dolphin death is at tick 4119, killed by a **magnetic mine** — and the avenger appeared
+   because our trigger was wrong. The assertion was on a real observation; the sentence
+   next to it was invented to explain it, and being plausible, it was never checked.
+
+**The rule this yields**, and it is not "read more carefully": when a spec section is
+condensed from a reference section, **the prose between its tables is where the
+non-tabular mechanisms live** — side effects, ordering, and anything triggered by
+something other than the event the table is indexed on. Read a heading that counts
+("three things") as a checklist with a required count. And when a test's detail string
+explains *why* a result holds, that explanation is a claim like any other: this one was
+wrong for as long as it existed, in a suite that was otherwise green.

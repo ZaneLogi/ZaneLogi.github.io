@@ -132,12 +132,24 @@ export function respond(session, selfSlot, otherSlot) {
       // It clears the shared convoy state on any contact except with the dolphin
       // -- which is what ends the convoy whether the player collected it, the
       // clam ate it, or it was destroyed (§ 16.5).
-      if (t !== TYPE.DOLPHIN) session.convoy.live = false;
+      // The dolphin branch is taken FIRST and does both things: the flag
+      // survives, and the escort cannot hurt what it is carrying.
+      if (t === TYPE.DOLPHIN) { harm = false; break; }
+      session.convoy.live = false;
       if (t === TYPE.PLAYER || t === TYPE.GIANT_CLAM) harm = false;
       break;
 
     case TYPE.DOLPHIN:
-      if (t === TYPE.PLAYER) harm = false;
+      // A four-way branch on **who touched it**, not on whether it dies
+      // (§ 13.8.2). Swimming into it is safe and so is its own cargo; the two
+      // player torpedoes summon the avenger -- and it still dies, for nothing.
+      // **Anything else kills it with no retaliation at all**: a mine, a depth
+      // charge or an enemy torpedo takes the fall-through. Keying this to the
+      // death instead would summon an avenger for those too.
+      if (t === TYPE.PLAYER || t === TYPE.PAYLOAD) harm = false;
+      else if (t === TYPE.VERTICAL_TORPEDO || t === TYPE.HORIZONTAL_TORPEDO) {
+        spawnAvenger(session);
+      }
       break;
 
     case TYPE.GIANT_CLAM:
@@ -353,18 +365,4 @@ function merchantBookkeeping(session, self) {
     // whatever the previous occupant of its slot left behind.
     self.scratch2 = session.killCounter === 0 ? 1 : 0;
   }
-}
-
-/**
- * The dolphin's damage path (§ 13.9): **the only place in the game that creates
- * an entity.** One avenger per dolphin shot, with no cap anywhere.
- *
- * Called from the death sequence rather than from `respond`, because it fires
- * when the dolphin actually dies and not merely when it is touched.
- * @param {Object} session
- * @param {number} slot the dolphin's slot
- * @returns {void}
- */
-export function onDolphinDestroyed(session, slot) {
-  spawnAvenger(session);
 }

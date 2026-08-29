@@ -27,7 +27,6 @@
 // Chapter 14 shows its damage path cannot be reached (§ 13.6.2).
 
 import { TYPE } from './types.js';
-import { onDolphinDestroyed } from './responses.js';
 import { emitBurst } from './burst.js';
 import { playSound } from './sound.js';
 
@@ -158,12 +157,6 @@ export function beginDeath(session, slot) {
   // a five-particle ship never reaches the long-lived records, and only the
   // player reaches the one carrying a blob.
   if (def.debris > 0) emitBurst(session, e, def.debris);
-
-  // **Shoot the dolphin and it retaliates** (§ 13.8.2, § 13.9). Its response is
-  // the only place in the game that creates an entity, and what it creates
-  // cannot be killed, cannot be dodged and cannot be earned. The only way to
-  // avoid it is not to shoot the dolphin.
-  if (e.type === TYPE.DOLPHIN) onDolphinDestroyed(session, slot);
 
   if (def.firstFrame === 0 && def.lastFrame === 0) {
     // No death animation -- the type simply vanishes (§ 7.4). Several of these

@@ -102,6 +102,13 @@ function surveyDemo(ticks) {
         // off a table -- and averaging them in drags the figure below 2.
         prev.x = e.x;
         prev.y = e.y;
+      } else if (e.type === TYPE.PAYLOAD && session.convoy.dy > 0) {
+        // The same carve-out, for the same reason: § 2.7.2's 2.00 is the
+        // ESCORTED payload. Once the dolphin is gone it stops drifting and
+        // plummets at 4 (§ 16.5.1) -- a different motion, not this type's
+        // speed. Positive dY is the tell: escorted, it only rises or holds.
+        prev.x = e.x;
+        prev.y = e.y;
       } else if (!e.dying) {
         // A dying entity is skipped: § 7.4.2's re-anchor moves it once, and the
         // death frames force its X parity, so its motion is not its type's.
@@ -193,11 +200,20 @@ function exits(list, survey) {
   list.section('§ 13.11 — every type leaves, and no class cap locks');
 
   const created = [...survey.seenTypes].filter((t) => t !== TYPE.PLAYER).sort((a, b) => a - b);
-  list.add('all fourteen created types appear in an attract run',
-    created.length === 14,
-    created.map((t) => TYPE_NAMES[t]).join(', ') +
-    ' -- the avenger joined this list when Chapter 14 landed, because the demo ' +
-    'eventually shoots a dolphin and that is its one and only creation site');
+  list.add('all thirteen spawnable types appear in an attract run',
+    created.length === 13 && created.indexOf(TYPE.AVENGER) === -1,
+    created.map((t) => TYPE_NAMES[t]).join(', '));
+
+  // **The avenger is absent on purpose, and this is the check that pins it.**
+  // The demo DOES lose a dolphin -- around tick 4119, to a magnetic mine -- and
+  // for a while this list held fourteen types because of it. That was the bug:
+  // § 14.6 row 15 keys the avenger to the TOUCHER, so only the two player
+  // torpedoes summon one and a mine kill draws no retaliation at all. The demo
+  // never fires at the dolphin, so a fourteenth type here means the trigger has
+  // been hung off the death again.
+  list.add('the demo never provokes an avenger — a mine kill draws no retaliation (§ 13.9)',
+    survey.seenTypes.has(TYPE.DOLPHIN) && !survey.seenTypes.has(TYPE.AVENGER),
+    'the one dolphin the demo loses is killed by a mine, not shot');
 
   // The magnetic mine is the one type that never expires on its own -- its
   // limit of 310 is beyond the drawable range and it homes rather than crosses.
@@ -376,11 +392,18 @@ function behaviours(list) {
         'it is drawn BENEATH what it carries — it does not track the payload, ' +
         'it derives from it every tick');
     }
-    // The payload climbs to the player's own ceiling and holds there.
-    for (let t = 0; t < 120; t++) tick(s5);
+    // The payload climbs to the player's own ceiling and holds there. Sampled
+    // WHILE THE CONVOY IS LIVE: once it ends, the shared block keeps whatever
+    // the departing dolphin last wrote into it (§ 16.5.1), so reading it
+    // afterwards measures the wrong thing entirely.
+    let ceiling = null;
+    for (let t = 0; t < 120 && ceiling === null; t++) {
+      tick(s5);
+      if (s5.convoy.live && s5.convoy.dy === 0) ceiling = s5.convoy.y;
+    }
     list.add('the payload climbs to row 50 — the player\'s own ceiling — and holds (§ 13.8.2)',
-      s5.convoy.y === 50 && s5.convoy.dy === 0,
-      'y=' + s5.convoy.y + ' dy=' + s5.convoy.dy +
+      ceiling === 50,
+      'levelled off at y=' + ceiling +
       ' — the part of a resupply you can actually reach is the flat run along your ceiling');
   }
 

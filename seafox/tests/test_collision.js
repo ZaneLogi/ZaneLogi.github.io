@@ -50,6 +50,7 @@ function run(list) {
   theConfirm(list);
   theTable(list);
   theLauncherExemption(list);
+  theDolphin(list);
   theUnlocked(list);
   overLongRun(list);
 }
@@ -306,6 +307,93 @@ function theTable(list) {
   list.add('an entity already flagged as dying is skipped entirely (§ 14.4)',
     before === false,
     'a wreck does not go on colliding while its animation plays');
+}
+
+/**
+ * § 14.6 row 15 and § 16.5.1 -- the dolphin, which is three rules in one row.
+ *
+ * The row is a four-way branch on **who touched it**, and two of its arms do
+ * something the exemption column cannot express: one creates an entity, and the
+ * dolphin's *removal* -- not a contact at all -- drops the payload. Every check
+ * here exists because the port once had all three wrong in the same direction:
+ * the avenger hung off the death sequence, so a mine kill retaliated; the
+ * payload was not exempt, so the escort could destroy its own cargo; and nothing
+ * dropped the payload at all.
+ *
+ * @param {import('./harness.js').CheckList} list
+ * @returns {void}
+ */
+function theDolphin(list) {
+  list.section('§ 14.6 row 15, § 16.5.1 — the dolphin: who may hurt it, and what its going costs');
+
+  /**
+   * Touch a dolphin with one type and report the outcome.
+   * @param {number} toucher
+   * @returns {{harmed: boolean, avengers: number}}
+   */
+  const touch = (toucher) => {
+    const s = stage();
+    const dSlot = place(s, TYPE.DOLPHIN, 120, 100);
+    const oSlot = place(s, toucher, 120, 100);
+    const d = s.entities.slots[dSlot];
+    const o = s.entities.slots[oSlot];
+    for (let t = 0; t < 4 && !damaged(d); t++) {
+      d.x = 120; d.y = 100; o.x = 120; o.y = 100;
+      tick(s);
+    }
+    let avengers = 0;
+    for (let i = 0; i < s.entities.liveCount; i++) {
+      if (s.entities.slots[i].type === TYPE.AVENGER) avengers++;
+    }
+    return { harmed: damaged(d), avengers };
+  };
+
+  const player = touch(TYPE.PLAYER);
+  list.add('swimming into the dolphin is safe, for both of you (§ 14.6 row 15)',
+    !player.harmed && player.avengers === 0, 'the manual says so and the code agrees');
+
+  const cargo = touch(TYPE.PAYLOAD);
+  list.add('the dolphin cannot be hurt by the payload it is carrying (§ 14.6 row 15)',
+    !cargo.harmed && cargo.avengers === 0,
+    'the pair overlap by construction -- the escort sits at payload (-5, +5)');
+
+  for (const t of [TYPE.VERTICAL_TORPEDO, TYPE.HORIZONTAL_TORPEDO]) {
+    const shot = touch(t);
+    list.add('shooting the dolphin with the ' + TYPE_NAMES[t] + ' kills it AND summons an avenger (§ 13.9)',
+      shot.harmed && shot.avengers === 1,
+      'it dies for nothing -- type 15 scores zero -- and its friends arrive');
+  }
+
+  // **The half that is easy to get wrong.** Keying the avenger to the death
+  // instead of to the toucher passes every check above and fails these.
+  for (const t of [TYPE.MAGNETIC_MINE, TYPE.DEPTH_CHARGE, TYPE.ENEMY_TORPEDO]) {
+    const other = touch(t);
+    list.add('a ' + TYPE_NAMES[t] + ' kills the dolphin with NO retaliation (§ 13.9)',
+      other.harmed && other.avengers === 0,
+      'the response falls through: it dies, and nothing comes for you');
+  }
+
+  // -- § 16.5.1: the departure drops the payload ----------------------------
+  const s = stage();
+  const conv = s.convoy;
+  conv.live = true;
+  conv.x = 150; conv.y = 50; conv.dx = 2; conv.dy = 0;   // levelled off at the ceiling
+  const pSlot = place(s, TYPE.PAYLOAD, conv.x, conv.y);
+  const dSlot = place(s, TYPE.DOLPHIN, conv.x - 5, conv.y + 5);
+  s.entities.slots[dSlot].removalRequested = true;
+  tick(s);
+  list.add('the dolphin going rewrites the payload motion: dY +4, dX 0 (§ 16.5.1)',
+    conv.dy === 4 && conv.dx === 0,
+    'dy=' + conv.dy + ' dx=' + conv.dx +
+    ' -- spliced into the standard removal handoff, so it happens however it leaves');
+
+  const payload = s.entities.slots[pSlot];
+  let ticks = 1;
+  while (ticks < 60 && !damaged(payload) && !payload.removalRequested) { tick(s); ticks++; }
+  list.add('and with dX at 0 the payload can no longer reach its exit — it explodes (§ 16.5.1)',
+    damaged(payload) && conv.x === 150,
+    'destroyed after ' + ticks + ' ticks, having never moved horizontally again -- ' +
+    'about half a second from the ceiling to row 175');
 }
 
 // ---------------------------------------------------------------------------

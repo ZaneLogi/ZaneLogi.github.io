@@ -59,6 +59,9 @@ const PAYLOAD_EXIT_X = 23;
 const PAYLOAD_DEATH_ROW = 175;
 const PAYLOAD_CEILING = 50;
 
+/** § 16.5: the dY the dolphin's departure forces on the payload -- it plummets. */
+const PAYLOAD_SINK = 4;
+
 /**
  * The shared block of § 16.5 ($8588-$858E in the original).
  *
@@ -259,6 +262,17 @@ export function updatePayload(session, slot) {
 export function updateDolphin(session, slot) {
   const e = session.entities.slots[slot];
   if (e.removalRequested) {
+    // **Its departure drops the payload** (§ 16.5). The write is spliced into
+    // the standard removal handoff, not into a death path, so it happens
+    // however the dolphin leaves -- and with dX zeroed the payload can no
+    // longer reach its own exit at X = 23, so row 175 is the only outcome left.
+    //
+    // Unconditional, as the original is: it does not test whether a payload
+    // still exists. Safe because the release re-seeds both components, so a
+    // write with no payload to receive it is overwritten before the next one
+    // moves.
+    session.convoy.dy = PAYLOAD_SINK;
+    session.convoy.dx = 0;
     session.entities.confirmRemoval(slot);
     return;
   }

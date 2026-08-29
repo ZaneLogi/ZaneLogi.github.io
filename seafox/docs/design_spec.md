@@ -2651,8 +2651,20 @@ Two exits follow from that:
 The dolphin and the clam derive their own positions from the payload's every tick
 (§ 16.5), so both follow it up.
 
-**Shoot the dolphin and it retaliates** — its collision response is the only place in the
-game that creates an entity, and what it creates is the avenger (§ 13.9).
+**Shoot the dolphin and three things happen**, and its response branches on **what
+touched it**, not on whether it dies:
+
+| toucher | outcome |
+|---|---|
+| the player · its own payload | harmless — swimming into it is safe, and the escort cannot hurt its cargo |
+| either player torpedo | **the avenger** (§ 13.9) — the only place in the game that creates an entity |
+| anything else — a mine, a depth charge, an enemy torpedo | it dies with **no retaliation** |
+
+It scores nothing in any of those cases: type 15's score bytes are both zero, so a torpedo
+spent on it buys a dead escort and, usually, an avenger.
+
+**And however it goes, it drops the payload** (§ 16.5) — including the two rows above
+that summon no avenger. That is a property of its *removal*, not of being shot.
 
 ### 13.8.3 Giant Clam — type 16
 
@@ -2686,6 +2698,13 @@ contested almost immediately.**
 It is created **only** by the dolphin's collision response — the one entity in the game
 spawned from a collision rather than a spawner — and one is created per dolphin shot,
 with **no cap anywhere** (§ 4.7.1).
+
+**The trigger is the torpedo, not the death.** The response branches on which type
+touched the dolphin (§ 14.6 row 15), so only the two player torpedoes summon an avenger.
+A dolphin killed by a mine, a depth charge or an enemy torpedo dies unanswered — it still
+drops the payload (§ 16.5.1), but nothing comes for you. Hanging the creation off the
+death sequence instead retaliates for those kills too, which is the natural mistake: the
+two coincide for the torpedoes and diverge everywhere else.
 
 Its sprite is **21 × 7 px**. It spawns at **X = 1** — off-screen left — with **its Y
 copied from the player's at that instant**, and crosses rightward. It is removed on
@@ -2857,8 +2876,8 @@ and its death animation (§ 9.4, Chapter 15).
 | 5–7, 9–12 merchants | *(shared)* | score, stamp the roster, decrement the quota — **all three suspended in the demo** (§ 10.5.2) |
 | 8 hospital ship | vertical torpedo · the ship slots | **damage path unreachable** (§ 13.6.2) |
 | 13 supply submarine | the player · payload · dolphin | its own convoy and its customer |
-| 14 payload | the player · Giant Clam | clears the shared convoy state unless the other party is the dolphin |
-| 15 dolphin | the player | **spawns the avenger** when destroyed (§ 13.9) |
+| 14 payload | the player · Giant Clam · **the dolphin** | the dolphin branch is taken first and *also* skips the convoy-state clear (§ 16.5); every other contact clears it |
+| 15 dolphin | the player · **its own payload** | **spawns the avenger on contact with either player torpedo** — keyed to the toucher, not to the death (§ 13.9). **Its removal drops the payload** (§ 16.5.1) |
 | 16 Giant Clam | everything **except** the two player torpedoes | swaps to the closed shell on contact with the payload |
 | 17 Destroyer | — | the generic handler; no behaviour of its own |
 | 18 depth charge | Giant Clam | |
@@ -2885,7 +2904,7 @@ damage path. A deflected shot kills the player, and the player destroys it.
 
 ## 14.7 What the table shows
 
-Reading the column as a whole gives two facts that are not visible type by type:
+Reading the column as a whole gives three facts that are not visible type by type:
 
 - **The Giant Clam has the narrowest damage whitelist in the game.** The enemy submarine,
   its mine, its torpedo and the depth charge all name it harmless, and the clam's own
@@ -2893,6 +2912,13 @@ Reading the column as a whole gives two facts that are not visible type by type:
   two things allowed to hurt it.
 - **The hospital ship is its exact mirror**: reachable only by the one type forbidden to
   harm it. One is protected by its whitelist, the other by geometry.
+- **The table records exemptions, and two rows do more than exempt.** Row 15 *creates* an
+  entity on two of its branches (§ 13.9) and row 14's dolphin branch *skips a state
+  clear* (§ 16.5). A row is a branch on the other party's type, not a boolean — and the
+  branch a row takes can carry an effect that the exemption column has no space for. Two
+  of those effects sit outside this chapter entirely: the dolphin's *removal* drops the
+  payload (§ 16.5.1), which no response table can show, because the trigger is not a
+  contact at all.
 
 ## 14.8 Normative and free — summary
 
@@ -3245,7 +3271,37 @@ miss vertically, so the only question is whether it arrives before the player do
 
 The payload's own collision response clears the shared "a payload exists" flag on any
 contact except with the dolphin — which is what ends the convoy whether the player
-collected it, the clam ate it, or it was destroyed.
+collected it, the clam ate it, or it was destroyed. **That same dolphin branch also makes
+the contact harmless**, so the escort can touch what it carries without either ending the
+run or destroying it.
+
+### 16.5.1 The dolphin's departure drops the payload
+
+**When the dolphin is removed, its handler rewrites the shared block before it goes:**
+
+| field | becomes | effect |
+|---|---|---|
+| payload dY | **+4** | it stops climbing and plummets at 4 px per tick |
+| payload dX | **0** | it stops drifting left entirely |
+
+Three things follow, and the third is the point:
+
+- **With dX at 0 the payload can no longer reach its own exit at X = 23**, so the
+  row-175 test of § 13.8.2 is the only outcome left: it explodes. From the ceiling at row
+  50 that is **32 ticks** — the whole window you have to reach it.
+- **This is a property of the dolphin's REMOVAL, not of its death.** The write sits in
+  the standard removal handoff — the same "requested → confirmed" branch every type has —
+  ahead of the handoff rather than on a separate death path. So it fires however the
+  dolphin leaves: shot, killed by a mine or a depth charge, or swimming off the left edge
+  once orphaned. The last of those is inert, because by then there is no payload.
+- **The write is unconditional** — it does not test whether a payload exists. An
+  implementation may not add that test: it is harmless only because a release re-seeds
+  both components (§ 13.8.2), and a conditional version would behave identically while
+  claiming a coupling the original does not have.
+
+**The clam's removal does nothing of the kind.** Its handler carries the plain handoff
+with no writes to the shared block, so killing the clam leaves the resupply untouched.
+The asymmetry is the design: the escort's life is what the cargo depends on.
 
 ## 16.6 The readouts
 

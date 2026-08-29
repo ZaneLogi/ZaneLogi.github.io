@@ -8,8 +8,12 @@
 // It is created by exactly one thing: the dolphin's collision response, the one
 // place in the game that creates an entity. One per dolphin shot, with **no cap
 // anywhere** -- it sits outside the § 4.7.1 arithmetic that makes the caps sum
-// to the array. Chapter 14 wired that one creation site up: `beginDeath` calls
-// the dolphin's response, and the response calls `spawnAvenger` below.
+// to the array.
+//
+// **Keyed to the torpedo, not to the death.** The response branches on WHO
+// touched the dolphin, so only the two player torpedoes summon one; a dolphin
+// killed by a mine or a depth charge is killed for free (§ 14.6 row 15). Hanging
+// it off the death sequence instead would retaliate for those too.
 //
 // **It does not steer -- it re-copies the player's Y every tick**, so it is
 // always exactly at the player's depth for its whole run. Reading it as an
@@ -32,7 +36,7 @@ const AVENGER_EXIT = 307;
 
 /**
  * Create the avenger. Called only from the dolphin's collision response
- * (Chapter 14), which does not exist yet.
+ * (§ 14.6 row 15), on contact with either player torpedo.
  * @param {Object} session
  * @returns {number} the new slot, or -1 if there is no player to key it to
  */
