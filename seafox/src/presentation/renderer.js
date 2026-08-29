@@ -143,8 +143,9 @@ export class Renderer {
    *   per pixel, so any X is a byte offset (§ 6.1).
    * - **no colour decisions.** Each sprite already carries the palette indices
    *   it draws in, chosen when it was baked (§ 6.5). This copies indices.
-   * - **`color`, never `ink`.** They are different shapes: the colour bitmap
-   *   can extend one pixel to the right (§ 6.3).
+   * - **`color`, never `ink`.** They share a bounding box but are filled
+   *   differently -- a chroma cell colours the gap right of an isolated pixel,
+   *   so `color` is set where `ink` is 0 (§ 6.3.1).
    *
    * @param {Object} sprite a baked sprite
    * @param {number} x screen column of the block's left edge

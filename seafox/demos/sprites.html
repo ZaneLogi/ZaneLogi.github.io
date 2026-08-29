@@ -85,7 +85,7 @@
     font-size: 10.5px; letter-spacing: .04em;
     background: #3a2e12; color: #e0b950; border: 1px solid #6a5320;
   }
-  .overhang { color: #63d089; }
+  .gapfill { color: #63d089; }
   .err { color: #ff8080; white-space: pre-wrap; font-family: ui-monospace, monospace; }
 </style>
 </head>
@@ -95,9 +95,11 @@
     Every sprite baked at load from <code>assets/sprite_blocks.js</code> through
     <code>src/assets/bake.js</code>, shown as the two representations of
     design_spec § 6.1: the <b>ink</b> silhouette that collision reads, and the
-    <b>colour</b> bitmap that reaches the screen. Colour can be one pixel wider
-    than ink, and only ever on the right — that is the chroma cell of § 6.3, and
-    it is marked <span class="overhang">green</span> in the metadata when present.
+    <b>colour</b> bitmap that reaches the screen. The two share a bounding box —
+    § 6.3.1 clips the chroma cell to each row's ink — but not their contents: an
+    isolated pixel's cell reaches into the gap on its right, so colour appears
+    where ink is 0. That count is marked <span class="gapfill">green</span> in
+    the metadata.
   </p>
 
   <div class="controls">

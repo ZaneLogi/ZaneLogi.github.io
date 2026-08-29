@@ -52,7 +52,8 @@ const HUE = [
  *                                collision box extents (design_spec § 6.4)
  * @property {Uint8Array} ink     w*h bytes, 0 or 1 -- the true silhouette
  * @property {Uint8Array} color   colorWidth*h palette indices
- * @property {number} colorWidth  w, or w+1 where a chroma cell overhangs
+ * @property {number} colorWidth  always w -- § 6.3.1 clips the chroma cell to the
+ *                                row's ink, so colour shares the ink's box
  * @property {number} minX        where the crop began, in source pixels. Both
  *                                bitmaps are stripped to the ink box, so an
  *                                object's position -- which is its BLOCK's
@@ -103,14 +104,28 @@ function expand(block) {
 export function bake(block) {
   const { lit, hue, width, rows } = expand(block);
 
-  // The colour bitmap is built over the whole source block, because a chroma
-  // cell can reach one column past the ink, and cropped afterwards.
+  // The colour bitmap is built over the whole source block and cropped
+  // afterwards, because the chroma pass needs each row's full ink span -- the
+  // clip of § 6.3.1 is against the SOURCE row, before the box is known.
   const full = new Uint8Array(width * rows);
 
-  // Pass 1 -- chroma. An isolated lit pixel takes a colour, and paints a
+  // Pass 1 -- chroma. An isolated lit pixel takes a colour and paints a
   // TWO-pixel cell: its own column and the one to its right. That cell is why
   // an every-other-pixel fill reads as solid colour rather than as stripes.
+  //
+  // **The cell is clipped to the row's ink** (§ 6.3.1): the right-hand column is
+  // written only when a lit pixel lies further right on the same row. The cell
+  // physically straddles its dot and no integer grid holds that, so a rule has
+  // to round it somewhere; rounding it wholly rightward widens the sprite by a
+  // column wherever a row's last pixel is isolated. The vertical torpedoes are
+  // the case that decides it -- their rows alternate `#.#` and `###`, which
+  // round to 4 columns against 3 and leave the shaft visibly ragged.
+  //
+  // Clipping keeps the gaps filled, which is the half of the rule that carries
+  // the picture: `#.#` still renders as three solid columns, not as two dots.
   for (let y = 0; y < rows; y++) {
+    let lastLit = -1;
+    for (let x = width - 1; x >= 0; x--) if (lit[y * width + x]) { lastLit = x; break; }
     for (let x = 0; x < width; x++) {
       const i = y * width + x;
       if (!lit[i]) continue;
@@ -118,7 +133,8 @@ export function bake(block) {
       const right = x + 1 < width && lit[i + 1];
       if (left || right) continue;
       full[i] = hue[i];
-      if (x + 1 < width && !lit[i + 1]) full[i + 1] = hue[i];
+      // `x < lastLit` implies `x + 1 < width`, so no bounds test is needed.
+      if (x < lastLit && !lit[i + 1]) full[i + 1] = hue[i];
     }
   }
 
@@ -140,15 +156,12 @@ export function bake(block) {
   const inkSprite = bakeInk(block);
   const { w, h, minX, minY } = inkSprite;
 
-  // Colour reaches one column past the ink where an edge pixel is isolated,
-  // and only ever to the RIGHT. Sizing `color` to the ink box would clip the
-  // right-hand half of that cell.
-  let colorWidth = w;
-  if (minX + w < width) {
-    for (let y = 0; y < h; y++) {
-      if (full[(minY + y) * width + minX + w]) { colorWidth = w + 1; break; }
-    }
-  }
+  // Colour shares the ink's bounding box. Pass 1 writes nothing outside the
+  // row's ink span and every lit pixel is coloured, so the two boxes coincide
+  // exactly and `colorWidth` is always `w`. It is kept as a field because the
+  // renderer and the checks index the colour bitmap with it, and because the
+  // two bitmaps stay separately-shaped ideas even where the shapes agree.
+  const colorWidth = w;
 
   const ink = inkSprite.ink;
   const color = new Uint8Array(colorWidth * h);

@@ -230,24 +230,36 @@ function oneSprite(list) {
     'lit columns ' + cols.join(',') + ', block edge ' + (c.x - 28) + ' blank');
   s.entities.freeSlot(0, s.stencil);
 
-  // Colour, not ink: the colour bitmap can be one column wider, and that
-  // column is a real pixel. Find a sprite where it is.
-  const over = Object.keys(SPRITES).filter((k) => SPRITES[k].colorWidth > SPRITES[k].w);
-  list.add('some sprites are wider in colour than in ink (§ 6.3)', over.length > 0,
-    over.length + ' of ' + Object.keys(SPRITES).length);
-  const wide = SPRITES[over[0]];
-  const w = place(s, TYPE.MERCHANT_SHIP, over[0], 128, 70);
-  r.render(s);
-  let overhang = false;
-  for (let row = 0; row < wide.h; row++) {
-    const c2 = wide.color[row * wide.colorWidth + wide.colorWidth - 1];
-    if (c2 !== COLOR.BACKGROUND &&
-        at(r.color, w.x - 28 + wide.minX + wide.colorWidth - 1, 70 + wide.minY + row) === c2) {
-      overhang = true;
+  // Colour, not ink. § 6.3.1 clips the chroma cell to each row's ink, so the two
+  // bitmaps share a bounding box -- but not their contents: a cell reaches into
+  // the gap right of an isolated pixel, and THAT is a real pixel on screen.
+  const boxed = Object.keys(SPRITES).filter((k) => SPRITES[k].colorWidth !== SPRITES[k].w);
+  list.add('colour shares the ink bounding box on every sprite (§ 6.3.1)',
+    boxed.length === 0, boxed.length ? boxed.join(', ') : Object.keys(SPRITES).length + ' checked');
+
+  // Pick a sprite that actually has a gap fill, rather than naming one: the
+  // claim is about the rule, not about a chosen sprite staying the way it is.
+  const gapOf = (sp) => {
+    for (let row = 0; row < sp.h; row++) {
+      for (let c = 0; c < sp.w; c++) {
+        if (!sp.ink[row * sp.w + c] &&
+            sp.color[row * sp.colorWidth + c] !== COLOR.BACKGROUND) return { row, c };
+      }
     }
-  }
-  list.add('the chroma cell one column past the ink reaches the screen', overhang,
-    over[0]);
+    return null;
+  };
+  const gapped = Object.keys(SPRITES).filter((k) => gapOf(SPRITES[k]));
+  list.add('some sprites carry colour where ink is 0 (§ 6.3.1)', gapped.length > 0,
+    gapped.length + ' of ' + Object.keys(SPRITES).length);
+  const wide = SPRITES[gapped[0]];
+  const g = gapOf(wide);
+  const w = place(s, TYPE.MERCHANT_SHIP, gapped[0], 128, 70);
+  r.render(s);
+  const filled =
+    at(r.color, w.x - 28 + wide.minX + g.c, 70 + wide.minY + g.row) ===
+    wide.color[g.row * wide.colorWidth + g.c];
+  list.add('a chroma cell filling a gap in the ink reaches the screen', filled,
+    gapped[0] + ' @' + g.c + ',' + g.row);
   s.entities.freeSlot(0, s.stencil);
 
   // The clip is an ordinary rectangle test, per pixel, on all four edges.

@@ -72,15 +72,14 @@ function main() {
  */
 function runChecks(baked) {
   const names = Object.keys(baked);
-  const bad = { inkHasColour: [], colourWidth: [], tightBox: [], leftBleed: [], runsWhite: [] };
-  let overhangs = 0, differ = 0, colourBytes = 0, inkBytes = 0;
+  const bad = { inkHasColour: [], colourWidth: [], tightBox: [], outsideInk: [], runsWhite: [] };
+  let gapFills = 0, differ = 0, colourBytes = 0, inkBytes = 0;
 
   for (const name of names) {
     const s = baked[name];
     inkBytes += s.ink.length;
     colourBytes += s.color.length;
-    if (s.colorWidth > s.w) overhangs++;
-    if (s.colorWidth !== s.w && s.colorWidth !== s.w + 1) bad.colourWidth.push(name);
+    if (s.colorWidth !== s.w) bad.colourWidth.push(name);
 
     // The bounding box is tight: each edge row and column carries ink.
     let top = false, bottom = false, left = false, right = false;
@@ -102,7 +101,7 @@ function runChecks(baked) {
         // § 6.1: every ink pixel has a non-zero colour.
         if (isInk && c === COLOR.BACKGROUND) bad.inkHasColour.push(name + '@' + x + ',' + y);
         // § 6.1: the converse does NOT hold, and that is why ink is stored.
-        if (!isInk && c !== COLOR.BACKGROUND) anyDiffer = true;
+        if (!isInk && c !== COLOR.BACKGROUND) { anyDiffer = true; gapFills++; }
         // § 6.3: a lit pixel with a lit neighbour is white.
         const hasNeighbour = (x > 0 && s.ink[y * s.w + x - 1]) ||
                              (x + 1 < s.w && s.ink[y * s.w + x + 1]);
@@ -110,12 +109,21 @@ function runChecks(baked) {
           bad.runsWhite.push(name + '@' + x + ',' + y);
         }
       }
-      // Colour never reaches left of the ink -- the chroma cell extends right only.
-      if (s.color[y * s.colorWidth] !== COLOR.BACKGROUND && !s.ink[y * s.w]) {
-        bad.leftBleed.push(name + '@row' + y);
+      // § 6.3.1: colour occupies exactly the row's ink span -- no column of it
+      // lies left of the first lit pixel or right of the last. Measured per row
+      // rather than per sprite, because a sprite whose widest row is flush would
+      // hide an overhang on a narrower one.
+      let inkL = -1, inkR = -1, colL = -1, colR = -1;
+      for (let x = 0; x < s.w; x++) {
+        if (s.ink[y * s.w + x]) { if (inkL < 0) inkL = x; inkR = x; }
+        if (s.color[y * s.colorWidth + x] !== COLOR.BACKGROUND) {
+          if (colL < 0) colL = x;
+          colR = x;
+        }
       }
+      if (inkL !== colL || inkR !== colR) bad.outsideInk.push(name + '@row' + y);
     }
-    if (anyDiffer || s.colorWidth > s.w) differ++;
+    if (anyDiffer) differ++;
   }
 
   const first = (a) => a.length ? a.slice(0, 3).join(', ') + (a.length > 3 ? ' …' : '') : '';
@@ -124,16 +132,17 @@ function runChecks(baked) {
       ok: !bad.inkHasColour.length, detail: first(bad.inkHasColour) },
     { label: 'a run of two or more adjacent pixels is white (§ 6.3)',
       ok: !bad.runsWhite.length, detail: first(bad.runsWhite) },
-    { label: 'colour is w or w+1 wide, never more (§ 6.3)',
+    { label: 'colour shares the ink bounding box — colorWidth === w (§ 6.3.1)',
       ok: !bad.colourWidth.length, detail: first(bad.colourWidth) },
-    { label: 'colour never reaches left of the ink (§ 6.3)',
-      ok: !bad.leftBleed.length, detail: first(bad.leftBleed) },
+    { label: 'on every row, colour spans exactly the ink — neither edge bleeds (§ 6.3.1)',
+      ok: !bad.outsideInk.length, detail: first(bad.outsideInk) },
     { label: 'every ink bounding box is tight on all four edges (§ 6.3)',
       ok: !bad.tightBox.length, detail: first(bad.tightBox) },
     { label: 'ink is NOT recoverable from colour (§ 6.1)',
       ok: differ > 0,
-      detail: differ + ' of ' + names.length + ' sprites have colour where ink is 0; ' +
-              overhangs + ' overhang by a full column' },
+      detail: differ + ' of ' + names.length + ' sprites have colour where ink is 0, ' +
+              gapFills + ' pixels in all — chroma cells filling the gap between ' +
+              'isolated pixels (§ 6.3.1)' },
     { label: 'baked size vs source',
       ok: true,
       detail: (inkBytes + colourBytes) + ' bytes baked from ' +
@@ -211,12 +220,12 @@ function makeCell(name, sprite) {
   pair.appendChild(colorBox);
 
   const cap = document.createElement('figcaption');
-  const overhang = sprite.colorWidth > sprite.w
-    ? ' <span class="overhang">+1</span>' : '';
+  const gaps = gapFillCount(sprite);
+  const gapTag = gaps ? ' <span class="gapfill">+' + gaps + ' gap</span>' : '';
   const hue = dominantHue(sprite);
   cap.innerHTML =
     '<span class="name">' + name + '</span>' +
-    '<span class="meta">' + sprite.w + '×' + sprite.h + overhang +
+    '<span class="meta">' + sprite.w + '×' + sprite.h + gapTag +
       ' · bw ' + sprite.byteWidth + ' · box ' + boxWidth(sprite) + '</span>' +
     '<span class="meta">phase ' + sprite.phase + ' · flip ' + sprite.flip +
       ' · ' + hue + '</span>' +
@@ -229,6 +238,25 @@ function makeCell(name, sprite) {
   fig.appendChild(cap);
   entries.push({ name, sprite, fig, inkBox, colorBox });
   return fig;
+}
+
+/**
+ * How many pixels carry colour but no ink -- the chroma cells of § 6.3.1
+ * reaching into the gap right of an isolated pixel. This is the whole of the
+ * difference between the two bitmaps now that they share a bounding box, so it
+ * is what the caption reports.
+ * @param {object} sprite
+ * @returns {number}
+ */
+function gapFillCount(sprite) {
+  let n = 0;
+  for (let y = 0; y < sprite.h; y++) {
+    for (let x = 0; x < sprite.w; x++) {
+      if (!sprite.ink[y * sprite.w + x] &&
+          sprite.color[y * sprite.colorWidth + x] !== COLOR.BACKGROUND) n++;
+    }
+  }
+  return n;
 }
 
 /**

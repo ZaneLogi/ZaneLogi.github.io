@@ -317,6 +317,46 @@ it is a real strip on the disk; nothing draws it.
 The observable half is preserved exactly: `SCORE` and its six digits appear in
 all three states, and the three left-hand displays replace one another.
 
+### The chroma cell is clipped to the ink, not rounded rightward
+
+A colour cell on this hardware is **two dots wide and straddles its dot**, so no integer
+grid holds it and the bake has to round it somewhere. § 6.3.1 rounds it *inward*: an
+isolated pixel colours the column to its right only when a lit pixel lies further right
+on the same row. Three rules were on the table, and each is a different way to be wrong:
+
+| rule | `#.#` renders | rendered box vs the bitmap | isolated pixel alone on its row |
+|---|---|---|---|
+| rounded wholly right | 4 solid columns | wide on 293 of 505 ink rows | 2 columns |
+| cell dropped | 2 columns and a hole | exact | 1 column |
+| **clipped to the row's ink** | **3 solid columns** | **exact** | 1 column |
+
+**We shipped rounding-right first**, and the **vertical torpedoes** are what killed it:
+their rows alternate `#.#` and `###`, rendering 4 columns against 3, and the shaft came
+out visibly ragged. `DisassemblySeafox` reaches the same verdict from its own sprite
+tool and recommends its `flat` mode — the cell dropped — for cutting sprites, having
+measured the same overhang across its 66 tiles.
+
+**We did not take `flat`, because the gaps matter more than the overhang.** Dropping the
+cell blacks out 2,908 pixels the hardware fills — measured across our 79 blocks — and
+those are not incidental: every text strip is drawn as `#.#.#.` runs, so `SUBS` stops
+being two-pixel strokes and becomes a stipple of single dots. That the hardware fills
+them is not our inference; the reference's own hardware notes say a renderer painting
+only the lit column "leaves black gaps the hardware never shows." Clipping keeps every
+one of those 2,908 fills and still lands the box exactly on the bitmap, on all 505 rows.
+
+**What it costs** is the case the other two rules split: a lit pixel standing alone on
+its row keeps one column instead of two. That is the death-burst dot and spark
+particles, and the last pixel of each strip row. Against a signal model of the composite
+path the correct answer there is closer to two — a lone pixel measures full brightness on
+its own column and about two-thirds on the next — so this is the one place the shipped
+rule under-renders rather than merely rounds.
+
+Runs of three or more are the other known simplification, in the opposite direction:
+they render as flat white, where the hardware keeps a coloured fringe at each end
+(a 3-run holds ~21% residual chroma, phase inverted). Modelling that means demodulating
+a composite signal rather than classifying patterns, which is a display-layer concern
+(§ 17.5) and not baked artwork.
+
 ### The effect step delay — where the research was wrong
 
 Not a decision. A correction, recorded because the research document this port was built
