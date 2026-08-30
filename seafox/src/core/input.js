@@ -9,17 +9,23 @@
 // which one engine serves both the title-screen demo and a played game -- the
 // demo's bounce writes the same two fields the key table does.
 //
-// **This file contains no DOM.** It reads one pending key from an injected
-// source with a single method, `read()`, which returns a key name or null and
-// clears itself. `platform/keyboard.js` supplies the real one; a headless
-// session gets a null source and runs identically.
+// **This file contains no DOM.** Both schemes reach it through an injected
+// source with a single `read()`. `platform/keyboard.js` and `platform/gamepad.js`
+// supply the real ones; a headless session gets null sources and runs identically.
 //
-// **The source is a one-key register, not a queue, and that is faithful rather
-// than lazy.** The original reads the Apple's KBD latch, which holds only the
-// most recent key until the strobe clears it -- so a flurry of presses between
-// two polls collapses to one (§ 19.4), and a key pressed during a Chapter 11
-// transition, when nothing polls, is still there for the first poll afterwards
-// (§ 19.8: deferred, not discarded). Both fall out of the single slot.
+// **The two sources are shaped differently, and that is § 19.2 rather than an
+// inconsistency.** The keyboard is LATCHED, so its source is a one-key register
+// that reports only when something happened; the gamepad is HOLD-TO-MOVE, so its
+// source is sampled fresh every tick and reports the current state, zero
+// included. Release-to-centre cannot be expressed by an event, and a persisting
+// direction cannot be expressed by a sample.
+//
+// **The keyboard's single slot is faithful rather than lazy.** The original reads
+// the Apple's KBD latch, which holds only the most recent key until the strobe
+// clears it -- so a flurry of presses between two polls collapses to one
+// (§ 19.4), and a key pressed during a Chapter 11 transition, when nothing polls,
+// is still there for the first poll afterwards (§ 19.8: deferred, not
+// discarded). Both fall out of the single slot.
 
 import { fireVerticalTorpedo, fireHorizontalTorpedo } from './weapons.js';
 
@@ -55,8 +61,13 @@ export const START_KEY = ' ';
 export const PAUSE_KEY = 'escape';
 export const SOUND_KEY = 'ctrl+s';
 
-/** § 19.3: the value `session.controller` takes when the start key is used. */
+/** § 19.3: the two values `session.controller` takes. Which input started the
+ * game decides which, and nothing changes it for the rest of the session. */
 export const SCHEME_KEYBOARD = 'keyboard';
+export const SCHEME_GAMEPAD = 'gamepad';
+
+/** @type {number} § 19.1: the seam's magnitude. Both schemes scale to this. */
+const STEP = 2;
 
 /** A source that never reports a key. The default, so core runs headless. */
 export const NULL_KEYS = { read: () => null };
@@ -76,6 +87,22 @@ export const NULL_KEYS = { read: () => null };
  * @returns {void}
  */
 export function pollInput(session) {
+  // The original's `sub_7036` is these two halves in this order, and each
+  // returns early when the other scheme is selected. Running the keyboard half
+  // first is not arbitrary: its opening entries -- pause, the sound toggle --
+  // sit ahead of every scheme test and must be live under BOTH schemes.
+  pollKeyboard(session);
+  pollGamepad(session);
+}
+
+/**
+ * The keyboard half (§ 19.4), plus the controls of § 19.6 that are not the
+ * keyboard scheme's at all and merely happen to be typed.
+ *
+ * @param {Object} session
+ * @returns {void}
+ */
+function pollKeyboard(session) {
   const key = session.keys.read();
 
   // **No key means nothing is written, and that is the latch** (§ 19.2). The
@@ -135,6 +162,53 @@ export function pollInput(session) {
 
   session.input.vx = binding.vx;
   session.input.vy = binding.vy;
+}
+
+/**
+ * The gamepad half (§ 19.5).
+ *
+ * **Unlike the keyboard half this writes the pair every tick, zero included**,
+ * because the gamepad is hold-to-move and the keyboard is latched (§ 19.2).
+ * Release-to-centre is the whole difference between the two models, and it
+ * cannot be expressed by writing only when something changed.
+ *
+ * @param {Object} session
+ * @returns {void}
+ */
+function pollGamepad(session) {
+  const pad = session.pad.read();
+  if (pad === null) return;                       // nothing connected
+
+  // § 10.5.3: the primary button starts a game, and **it is debounced -- it must
+  // be seen released first.** Without that the press that ends one game starts
+  // the next, and a pad resting with the button held never shows the demo at
+  // all. This is the one place either scheme debounces anything.
+  if (session.isTitleScreen) {
+    if (!pad.primary) session.padStartArmed = true;
+    else if (session.padStartArmed) {
+      session.startRequested = true;
+      session.controller = SCHEME_GAMEPAD;
+    }
+    return;
+  }
+
+  // § 19.3: while one scheme is selected the other's controls are inert.
+  if (session.controller !== SCHEME_GAMEPAD) return;
+
+  session.input.vx = pad.vx * STEP;
+  session.input.vy = pad.vy * STEP;
+
+  // **Level-triggered, and deliberately so.** The original tests the button
+  // every frame with no edge detection and no debounce (`LDA BUTN1 / BPL /
+  // JSR`), so holding fire re-attempts every tick -- and what paces it is the
+  // cap of one shot in flight (§ 4.7) plus the horizontal's six-tick cooldown
+  // (§ 13.2), never a timer in the input path. Edge-triggering here would make
+  // both weapons noticeably slower than the original's and than the keyboard's.
+  //
+  // **The pairing is the original's and reads backwards to a modern player**
+  // (§ 19.5): the PRIMARY button is the horizontal torpedo.
+  if (pad.secondary) fireVerticalTorpedo(session);
+  if (pad.primary) fireHorizontalTorpedo(session);
 }
 
 /**

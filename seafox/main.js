@@ -13,6 +13,7 @@
 import { Session } from './src/core/session.js';
 import { tick } from './src/core/tick.js';
 import { KeyboardSource } from './src/platform/keyboard.js';
+import { GamepadSource } from './src/platform/gamepad.js';
 import { Renderer } from './src/presentation/renderer.js';
 import { Screen } from './src/presentation/screen.js';
 import { Speaker, DEFAULT_TICK_HZ } from './src/presentation/speaker.js';
@@ -28,11 +29,14 @@ const screen = new Screen(document.getElementById('screen'), 2);
 const speaker = new Speaker({ tickHz: TICK_HZ, coneHz: 6000, volume: 0.25 });
 /** @type {KeyboardSource} */
 const keyboard = new KeyboardSource(window);
+/** @type {GamepadSource} */
+const pad = new GamepadSource();
 
 /** @type {Session} */
 const session = new Session();
 session.startDemo();
 session.keys = keyboard;
+session.pad = pad;
 session.sound.sink = (pair) => speaker.tick(pair);
 
 keyboard.attach();

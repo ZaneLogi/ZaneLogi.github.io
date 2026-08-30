@@ -15,9 +15,11 @@ import { mount } from './harness.js';
 import { Session } from '../src/core/session.js';
 import { tick } from '../src/core/tick.js';
 import {
-  pollInput, KEY_TABLE, START_KEY, PAUSE_KEY, SOUND_KEY, SCHEME_KEYBOARD,
+  pollInput, KEY_TABLE, START_KEY, PAUSE_KEY, SOUND_KEY,
+  SCHEME_KEYBOARD, SCHEME_GAMEPAD,
 } from '../src/core/input.js';
 import { nameOf, KeyboardSource } from '../src/platform/keyboard.js';
+import { GamepadSource, bucket, BUTTON, DEADZONE } from '../src/platform/gamepad.js';
 import { PHASE } from '../src/core/round.js';
 import { TYPE } from '../src/core/types.js';
 
@@ -31,6 +33,40 @@ function keys() {
     press(k) { this.key = k; },        // newest wins, exactly as the latch does
     read() { const k = this.key; this.key = null; return k; },
   };
+}
+
+/**
+ * A scripted pad source: sampled fresh each poll, never event-driven.
+ * @param {Object} [state]
+ * @returns {{read: () => ?Object, set: (s: ?Object) => void}}
+ */
+function padSource(state) {
+  return {
+    state: state || { vx: 0, vy: 0, primary: false, secondary: false },
+    set(s) {
+      this.state = s === null ? null
+        : Object.assign({ vx: 0, vy: 0, primary: false, secondary: false }, s);
+    },
+    read() { return this.state; },
+  };
+}
+
+/**
+ * A session in play under the GAMEPAD scheme -- started by the pad's own button,
+ * which is what selects the scheme (§ 19.3).
+ * @returns {Object}
+ */
+function padPlaying() {
+  const s = new Session();
+  s.startDemo();
+  s.pad = padSource();
+  s.pad.set({ primary: false });             // seen released -> armed
+  tick(s);
+  s.pad.set({ primary: true });              // now it starts
+  tick(s);
+  for (let t = 0; t < 400 && s.phase !== PHASE.PLAY; t++) tick(s);
+  s.pad.set({});                             // release everything
+  return s;
 }
 
 /**
@@ -304,13 +340,156 @@ function platformNaming(list) {
   list.eq('and reading it clears it — the strobe', src.read(), null);
 }
 
-mount('design_spec Chapter 19 — input: one seam, a latched keyboard, and a ' +
-  'one-key register that makes deferral fall out for free', (list) => {
+/**
+ * @param {import('./harness.js').CheckList} list
+ * @returns {void}
+ */
+function theGamepad(list) {
+  list.section('§ 19.5 — the gamepad: hold-to-move, and the pairing kept backwards');
+
+  // -- the bucketing, which is where the only float in the input path dies ---
+  list.eq('a centred stick buckets to 0', bucket(0.1), 0);
+  list.eq('past the deadzone one way, -1', bucket(-0.9), -1);
+  list.eq('past it the other, +1', bucket(0.9), 1);
+  list.add('the deadzone is what separates them, and nothing analogue survives it',
+    bucket(DEADZONE - 0.01) === 0 && bucket(DEADZONE + 0.01) === 1,
+    'core sees one of three integers — a fractional velocity would break ' +
+    '§ 2.7\'s step-divided speed model, and § 1.6 with it');
+
+  // A fake pad driven through the REAL source, so the standard-mapping indices
+  // are exercised rather than assumed.
+  const fakeNav = (axes, pressed) => ({
+    getGamepads: () => [{
+      axes,
+      buttons: Array.from({ length: 16 }, (v, i) => ({ pressed: pressed.indexOf(i) !== -1 })),
+    }],
+  });
+
+  const stick = new GamepadSource({ navigator: fakeNav([0.9, -0.9], []) }).read();
+  list.add('the left stick reaches core as (+1, -1) (§ 19.5)',
+    stick.vx === 1 && stick.vy === -1, '(' + stick.vx + ', ' + stick.vy + ')');
+
+  const dpad = new GamepadSource({
+    navigator: fakeNav([0, 0], [BUTTON.DPAD_LEFT, BUTTON.DPAD_DOWN]),
+  }).read();
+  list.add('a D-pad maps directly, with no deadzone in the way (§ 19.5)',
+    dpad.vx === -1 && dpad.vy === 1, '(' + dpad.vx + ', ' + dpad.vy + ')');
+
+  list.add('no pad connected reads as null, not as a centred one',
+    new GamepadSource({ navigator: { getGamepads: () => [null] } }).read() === null,
+    'so core leaves the velocity pair alone rather than zeroing it every tick');
+
+  // -- hold-to-move: the whole difference from the keyboard (§ 19.2) ---------
+  const s = padPlaying();
+  s.pad.set({ vx: 1, vy: -1 });
+  tick(s);
+  list.add('a held direction is scaled to the § 19.1 seam\'s ±2',
+    s.input.vx === 2 && s.input.vy === -2,
+    '(' + s.input.vx + ', ' + s.input.vy + ')');
+
+  s.pad.set({});                                   // release to centre
+  tick(s);
+  list.add('and RELEASING it returns to (0, 0) — hold-to-move, not latched (§ 19.2)',
+    s.input.vx === 0 && s.input.vy === 0,
+    '(' + s.input.vx + ', ' + s.input.vy + ') — the keyboard would have KEPT the ' +
+    'direction. This scheme writes every tick, zero included, and that is the ' +
+    'whole difference between the two models');
+
+  // -- the pairing the spec keeps backwards on purpose (§ 19.5) --------------
+  const sh = padPlaying();
+  sh.pad.set({ primary: true });
+  tick(sh);
+  list.add('the PRIMARY button fires the HORIZONTAL torpedo (§ 19.5)',
+    countType(sh, TYPE.HORIZONTAL_TORPEDO) === 1 && countType(sh, TYPE.VERTICAL_TORPEDO) === 0,
+    'this reads backwards to a modern player and is kept deliberately — the ' +
+    'original puts the horizontal weapon on button 0');
+
+  const sv = padPlaying();
+  sv.pad.set({ secondary: true });
+  tick(sv);
+  list.add('...and the SECONDARY button the vertical one',
+    countType(sv, TYPE.VERTICAL_TORPEDO) === 1, 'one shot away');
+
+  // **Level-triggered.** The original tests the button every frame with no edge
+  // detection (`LDA BUTN1 / BPL / JSR`), so a held button re-attempts every tick
+  // and the CAP is what paces it.
+  const sf = padPlaying();
+  sf.pad.set({ secondary: true });
+  for (let t = 0; t < 40; t++) tick(sf);
+  list.add('holding fire re-attempts every tick, and the CAP paces it (§ 4.7)',
+    countType(sf, TYPE.VERTICAL_TORPEDO) === 1,
+    'still exactly one in flight after 40 ticks of a held button — the original ' +
+    'has no edge detection and no debounce here, so edge-triggering would make ' +
+    'the weapon slower than it is');
+}
+
+/**
+ * @param {import('./harness.js').CheckList} list
+ * @returns {void}
+ */
+function padStart(list) {
+  list.section('§ 10.5.3, § 19.3 — the pad starts a game, and that start is debounced');
+
+  // **Held from the very first tick, so it is never seen released**, and it must
+  // therefore never start. Without the debounce a pad resting on its button
+  // would skip the demo entirely, and the press ending one game would start the
+  // next. This is the one place either scheme debounces anything.
+  const held = new Session();
+  held.startDemo();
+  held.pad = padSource({ primary: true });
+  for (let t = 0; t < 20; t++) tick(held);
+  list.add('a button held from the start never starts a game — it is debounced',
+    held.mission === 0 && !held.startRequested,
+    'the demo keeps running; § 10.5.3 requires the button be seen released first');
+
+  held.pad.set({ primary: false });                // release...
+  tick(held);
+  held.pad.set({ primary: true });                 // ...then press
+  tick(held);
+  list.eq('release, then press, and it starts', held.mission, 1);
+  list.eq('...selecting the GAMEPAD scheme for the session (§ 19.3)',
+    held.controller, SCHEME_GAMEPAD);
+
+  // § 19.3: the other scheme's controls are now inert.
+  const s = padPlaying();
+  s.input.vx = 0; s.input.vy = 0;
+  s.keys = keys();
+  s.keys.press('i');
+  pollInput(s);
+  list.add('under the pad, the movement KEYS are inert (§ 19.3)',
+    s.input.vx === 0 && s.input.vy === 0,
+    'the two schemes never meet — each half returns early when the other is live');
+
+  // § 19.6: pause and the sound toggle are not the keyboard SCHEME's, and stay
+  // live under the pad because they sit ahead of every scheme test.
+  const before = s.sound.enabled;
+  s.keys.press(SOUND_KEY);
+  pollInput(s);
+  list.add('...while the sound toggle still works, because § 19.6 is scheme-blind',
+    s.sound.enabled === !before,
+    'pause and sound are typed under either scheme — they are not the keyboard\'s');
+}
+
+/**
+ * @param {Object} s
+ * @param {number} type
+ * @returns {number}
+ */
+function countType(s, type) {
+  let n = 0;
+  for (let i = 0; i < s.entities.liveCount; i++) if (s.entities.slots[i].type === type) n += 1;
+  return n;
+}
+
+mount('design_spec Chapter 19 — input: one seam, two schemes that never meet, ' +
+  'a latched keyboard and a hold-to-move pad', (list) => {
   theSeam(list);
   latching(list);
   weapons(list);
   startingAGame(list);
   liveInBothSchemes(list);
   deferredNotDiscarded(list);
+  theGamepad(list);
+  padStart(list);
   platformNaming(list);
 });

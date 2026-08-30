@@ -579,13 +579,33 @@ faster than the explanation does.
 
 Two deliberate departures, recorded because both are visible and neither is drift.
 
-**The gamepad is not built.** § 19.5 is normative and describes it fully; this port ships
-§ 19.4's keyboard alone, at Zane's direction. Nothing about the seam changes when it
-arrives: `core/input.js` already returns early unless `session.controller` is the keyboard
-scheme, and § 19.3's rule that the two schemes never meet is what makes adding the second
-one additive rather than a rework. The one piece of § 19.5 already honoured is where the
-work goes — `src/platform/` exists, holds the only DOM-facing input file, and is the layer
-that will do the −1/0/+1 bucketing so no analogue magnitude reaches `core/`.
+**The gamepad landed one commit later, and the prediction held.** This section first
+recorded it as unbuilt: the keyboard shipped alone at Zane's direction, and the claim was
+that adding the second scheme would be additive rather than a rework, because § 19.3's
+"the two schemes never meet" already had `core/input.js` returning early unless
+`session.controller` matched. That turned out to be true and is worth recording as a
+result rather than a hope — the whole addition was one new `platform/` file, one
+`pollGamepad` beside the existing keyboard half, and two session fields. **Oracle 4 stayed
+green through it**, which is the useful part: the demo's frames are byte-identical, so
+nothing about the existing scheme moved.
+
+**The two sources are shaped differently, and that is § 19.2 rather than an
+inconsistency.** The keyboard is latched, so its source is an event-driven one-key
+register that reports only when something happened. The gamepad is hold-to-move, so its
+source is sampled fresh every tick and reports the current state, **zero included**.
+Release-to-centre cannot be expressed by an event, and a persisting direction cannot be
+expressed by a sample — trying to serve both from one shape is how a port ends up with a
+keyboard that needs a key-up or a stick that sticks.
+
+**The fire buttons are level-triggered, checked against the bytes rather than assumed.**
+`$717A`/`$7182` are `LDA BUTN1 / BPL / JSR` — read every frame, no edge detection and no
+debounce — so a held button re-attempts every tick and what paces it is the cap of one
+shot in flight plus the horizontal's six-tick cooldown, never anything in the input path.
+Edge-triggering would have been the natural modern instinct and would have made both
+weapons quietly slower than the original's. The one place either scheme debounces anything
+is the pad's *start* button (§ 10.5.3, `$71BC`), which must be seen released first —
+without it a pad resting on its button never shows the demo, and the press that ends one
+game starts the next.
 
 **The pause freezes at the top of the tick, not inside the input routine.** The original's
 ESC handler busy-waits on `KBD` at `$704F`, freezing the whole game mid-tick at § 9.2's

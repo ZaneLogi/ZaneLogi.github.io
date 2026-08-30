@@ -29,6 +29,7 @@ import { Messages } from './messages.js';
 import { PHASE } from './round.js';
 import { createSoundState } from './sound.js';
 import { NULL_KEYS } from './input.js';
+import { NULL_PAD } from '../platform/gamepad.js';
 import { PLAYER_BOUNDS, DEMO_START, spawnPlayer } from './player.js';
 
 /** @type {number} § 10.3: the game begins with three and gains no more, ever. */
@@ -90,6 +91,18 @@ export class Session {
      * @type {{read: () => ?string}}
      */
     this.keys = NULL_KEYS;
+    /**
+     * § 19.5: the gamepad source. Sampled every tick rather than event-driven,
+     * because that scheme is hold-to-move (§ 19.2).
+     * @type {{read: () => ?Object}}
+     */
+    this.pad = NULL_PAD;
+    /**
+     * § 10.5.3: the pad's start button must be seen RELEASED before it can
+     * start a game. Without it the press that ends one game starts the next.
+     * @type {boolean}
+     */
+    this.padStartArmed = false;
 
     /** @type {number} merchants still to sink this mission (§ 12.5, § 8.5). */
     this.killCounter = KILL_QUOTA;
