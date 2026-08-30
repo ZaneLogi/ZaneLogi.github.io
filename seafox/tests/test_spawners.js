@@ -262,12 +262,22 @@ function blockedSpawns(list) {
   list.section('§ 12.2 — a blocked spawn is pending, not skipped');
 
   // Drive the Destroyer class to its title-screen cap of 3, then keep ticking.
+  // **Run until saturated rather than for a fixed count.** A fixed 800 ticks
+  // made this hostage to the class's death rate: § 14.4 keeps wrecks collidable,
+  // so a Destroyer can be taken out by its own depth charge's re-anchored
+  // explosion, and the population reaches its cap a little later than it used
+  // to. The subject of this section is § 12.2, not how fast the belt fills.
   const session = coldBoot();
-  runTicks(session, 800);
   const cap = session.caps[CLASS.DESTROYER];
+  let filled = 0;
+  while (session.entities.counts[CLASS.DESTROYER] < cap && filled < 4000) {
+    tick(session);
+    filled += 1;
+  }
   const atCap = session.entities.counts[CLASS.DESTROYER];
   list.add('the Destroyer class saturates at its cap rather than growing',
-    atCap === cap, 'count ' + atCap + ' against a cap of ' + cap);
+    atCap === cap, 'count ' + atCap + ' against a cap of ' + cap +
+    ', reached after ' + filled + ' ticks');
 
   // Once saturated the cooldown must sit at zero, retested every tick.
   let ticks = 0;

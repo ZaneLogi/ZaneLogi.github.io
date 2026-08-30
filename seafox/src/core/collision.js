@@ -95,19 +95,24 @@ export function runCollision(session, subjectSlot) {
   for (let i = 0; i < el.liveCount; i++) {
     if (i === subjectSlot) continue;
     const candidate = el.slots[i];
-    // **KNOWN DIVERGENCE, deliberately left in place** -- see
-    // docs/porting_decisions.md, "the dying candidate". The original's sweep
-    // (`entry_18EC`) has no flag test of any kind, and only the dispatch skips,
-    // and only the side being dispatched (`sub_19AA`: `LDA $16AE,X / BIT $16A0`).
-    // So in the original a wreck stays a valid `other` until its slot is freed,
-    // which is what gives § 14.6's rows 3 and 4 their "not while dying" clause
-    // something to bite on. Here that clause is currently unreachable.
+    // **A dying CANDIDATE is not skipped**, and that is the mechanism rather
+    // than an oversight. `entry_18EC` has no flag test of any kind: it advances
+    // the cursor, skips the subject itself and terminates on the count. Only the
+    // dispatch skips, and `sub_19AA` tests `$16AE,X` -- the flags of the side it
+    // is about to run. So a wreck stops HAVING opinions while remaining a valid
+    // `other` for everything else, right up until its slot is freed.
     //
-    // Removing this filter was tried and reverted: it changes gameplay widely
-    // (wrecks carry a re-anchored, larger death sprite and begin killing their
-    // neighbours), and validating that is a piece of work in its own right
-    // rather than a one-line correction.
-    if (candidate.dying || candidate.removalConfirmed) continue;
+    // Two things depend on it, and both are invisible until it is missing:
+    //
+    //   * § 14.6's rows 3 and 4 exempt their partners *only while those are not
+    //     dying*. Filter dying candidates out and that clause is unreachable
+    //     code -- an exploding mine could never take its parent with it.
+    //   * A wreck's footprint is not its living one. The death sequence
+    //     subtracts a re-anchor and swaps in a larger frame (§ 7.4.2), so a
+    //     wreck occupies rows the entity never visited alive. That is the only
+    //     route to the hospital ship (§ 13.6.2), whose sinking animation is
+    //     otherwise dead artwork.
+    if (candidate.removalConfirmed) continue;
 
     const candidateBox = boxOf(candidate);
     if (candidateBox === null) continue;

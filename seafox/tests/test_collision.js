@@ -19,6 +19,7 @@ import { FUEL_FULL, TORPEDOES_FULL } from '../src/core/resources.js';
 import { ROSTER_STATUS } from '../src/core/spawners.js';
 import { TYPE, TYPE_NAMES, CLASS } from '../src/core/types.js';
 import { fireVerticalTorpedo } from '../src/core/weapons.js';
+import { beginDeath, DEFINITIONS } from '../src/core/definitions.js';
 
 /** Sprite and period per type, matching each type's own creation site. */
 const SETUP = {
@@ -480,12 +481,17 @@ function theDolphin(list) {
       'dy=' + k.convoy.dy + ' dx=' + k.convoy.dx + ' after ' + n + ' ticks — ' +
       (k.convoy.dy === -2 ? 'STILL RISING: the removal handoff never ran' : 'dropped'));
 
+    // **It never rises again**, which is the symptom the drop exists to prevent.
+    // Not "it descends by N": the killer leaves a wreck where the dolphin was,
+    // wrecks stay collidable (§ 14.4), and a cargo caught by one is destroyed
+    // instead of sinking. Both endings are correct and neither is a climb.
     const before = k.convoy.y;
-    for (let i = 0; i < 4 && k.entities.slots[kp].type === TYPE.PAYLOAD; i++) tick(k);
-    list.add('...and the cargo is then observably SINKING, not rising',
-      k.convoy.y > before,
-      'row ' + before + ' -> ' + k.convoy.y +
-      ' — the visible symptom of a missed drop is a payload that carries on up');
+    for (let i = 0; i < 6 && findType(k, TYPE.PAYLOAD) !== null; i++) tick(k);
+    const alive = findType(k, TYPE.PAYLOAD) !== null;
+    list.add('...and the cargo never climbs again — it sinks, or a wreck takes it',
+      k.convoy.y >= before,
+      'row ' + before + ' -> ' + k.convoy.y + (alive ? ', still falling' : ', destroyed en route') +
+      ' — a payload that carries on UP is the missed-drop symptom');
   }
 }
 
@@ -539,12 +545,46 @@ function shipsAndDyingPartners(list) {
     list.add(TYPE_NAMES[self] + ' passes through a LIVE ' + TYPE_NAMES[partner] + ' (§ 14.6)',
       !damaged(alive.a) && !damaged(alive.b), 'its own kind, unharmed');
 
-    // The other half of the rule -- that a DYING partner damages it -- is not
-    // asserted here, because this port cannot currently reach it: § 14.4 filters
-    // dying entities out of the sweep, so the clause never fires. The divergence
-    // and the ROM evidence are recorded in docs/porting_decisions.md; when the
-    // sweep is corrected, the assertion to add is `damaged(a)` after starting a
-    // real death on the partner with `beginDeath`.
+    // **The other half, and the reason § 14.4 must keep wrecks in the sweep.**
+    //
+    // Only one direction is reachable, and the asymmetry is in the death table:
+    // the mine has frames 6-7 (§ 7.4.1) so it spends time as a wreck, while the
+    // enemy submarine's row is 0/0 -- it throws seven debris particles and
+    // vanishes without ever being `dying`. So "a dying submarine damages its
+    // mine" is dead code in the original as much as here, in the same way the
+    // type-12 exemption is. Asserting it would be asserting a state the game
+    // cannot enter.
+    if (!DEFINITIONS[partner].lastFrame) {
+      list.add('a dying ' + TYPE_NAMES[partner] + ' cannot arise — its death row is 0/0',
+        true,
+        'it emits debris and vanishes, so this half of the clause is unreachable ' +
+        'by construction rather than untested');
+      continue;
+    }
+
+    // A REAL death, not a hand-set flag: setting `dying` alone leaves the
+    // animation state empty, so the walk runs off the end of the frame list and
+    // removes the entity before anything can touch it.
+    const sd = stage();
+    const aSlot = place(sd, self, 120, 100);
+    const bSlot = place(sd, partner, 120, 100);
+    const a2 = sd.entities.slots[aSlot];
+    const b2 = sd.entities.slots[bSlot];
+    beginDeath(sd, bSlot);
+    for (let t = 0; t < 12 && !damaged(a2); t++) {
+      a2.x = 120; a2.y = 100; b2.x = 120; b2.y = 100;
+      // The sweep runs for the entity the walk is ON, and the dying party's own
+      // sweep is skipped -- so the live one has to be walked for the pair to be
+      // examined at all. The mine's period is 9, which would otherwise outlast
+      // the wreck it is supposed to meet.
+      a2.updateCountdown = 1;
+      tick(sd);
+    }
+    list.add('...but a DYING ' + TYPE_NAMES[partner] + ' damages it (§ 14.6)',
+      damaged(a2),
+      'the type test passes and the dying test then fails it — an exploding ' +
+      'child takes its parent with it, which is only reachable because § 14.4 ' +
+      'leaves wrecks in the sweep');
   }
 }
 
@@ -739,6 +779,8 @@ function overLongRun(list) {
   const s = new Session();
   s.startDemo();
   const deaths = {};
+  /** Types that damaged a hospital ship while NOT dying themselves. */
+  const hospitalKilledBy = {};
   const wasDying = new Map();
   let entityBad = null;
   let stencilBad = null;
@@ -748,7 +790,19 @@ function overLongRun(list) {
     for (let i = 0; i < s.entities.liveCount; i++) {
       const e = s.entities.slots[i];
       const now = e.dying || e.stateChangePending;
-      if (now && !wasDying.get(e.serial)) deaths[e.type] = (deaths[e.type] || 0) + 1;
+      if (now && !wasDying.get(e.serial)) {
+        deaths[e.type] = (deaths[e.type] || 0) + 1;
+        if (e.type === TYPE.HOSPITAL_SHIP) {
+          // Record any LIVE overlapper; a wreck is the expected culprit.
+          const hb = boxOf(e);
+          for (let j = 0; j < s.entities.liveCount; j++) {
+            const o = s.entities.slots[j];
+            if (o === e || o.dying) continue;
+            const ob = boxOf(o);
+            if (ob && hb && boxesOverlap(hb, ob)) hospitalKilledBy[o.type] = true;
+          }
+        }
+      }
       wasDying.set(e.serial, now);
     }
     if (entityBad === null) {
@@ -772,10 +826,19 @@ function overLongRun(list) {
     'nothing can hurt the demo submarine, which is one of the seven suspensions ' +
     'that let an unattended demo run forever');
 
-  list.add('the hospital ship never dies -- its damage path is unreachable (§ 13.6.2)',
-    !deaths[TYPE.HOSPITAL_SHIP],
-    'measured over 4000 ticks rather than argued from the table: the one entity ' +
-    'that can physically reach row 20 is the one type its row exempts');
+  // **Not "never dies" -- "never dies to anything alive".** Among living entities
+  // the only one with the vertical reach is the vertical torpedo, which its row
+  // exempts. A WRECK is the exception: a death re-anchors upward and swaps in a
+  // larger frame (§ 7.4.2), so an exploding depth charge spans rows 26-38 and
+  // catches this hull's 20-27. That is the only way this ship ever sinks, and it
+  // is why § 14.4 must not filter dying entities out of the sweep.
+  const hospitalKillers = [];
+  for (const k of Object.keys(hospitalKilledBy)) hospitalKillers.push(TYPE_NAMES[k]);
+  list.add('nothing ALIVE ever damages the hospital ship (§ 13.6.2)',
+    hospitalKillers.length === 0 || hospitalKillers.every((n) => n === undefined),
+    hospitalKillers.length
+      ? 'killed by a live ' + hospitalKillers.join(', ')
+      : 'the one type with the vertical reach is the one its row exempts');
 
   list.add('§ 20.6\'s stencil invariant holds every tick',
     stencilBad === null, stencilBad || 'the buffer holds only 0 or the slot + 1 of a live entity');

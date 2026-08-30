@@ -1455,8 +1455,9 @@ Reading it as a whole:
   event, which is why the three torpedoes share one and the seven merchant slots share
   another. Chapter 18 gives the sequences.
 
-The hospital ship's row is inert: it carries a full death specification, and Chapter 14
-shows its damage path cannot be reached.
+The hospital ship's row looks inert and is not: nothing living can reach it (§ 13.6.2),
+but a wreck can, so its full death specification does get used — rarely, and only when a
+depth charge is destroyed just below one.
 
 ### 7.4.1 The death frames
 
@@ -2550,11 +2551,22 @@ vertical torpedo as harmless only while that torpedo is travelling *upward*. Onc
 bounce flips the sign, it falls through to the damage path. **Fire straight up beneath a
 hospital ship and the shot comes back and kills you.**
 
-**Its own damage path is unreachable**, and this is worth stating because the handler
-looks protective and is not. It exempts only the vertical torpedo and the unused ship
-slots, and takes damage from everything else — but nothing else can get to row 20. The
-one entity that can physically reach it is the one type forbidden from harming it. Its
-full sinking animation (§ 7.4) never plays.
+**Its own damage path is almost unreachable**, and this is worth stating because the
+handler looks protective and is not. It exempts only the vertical torpedo and the ship
+slots, and takes damage from everything else — but among *living* entities nothing else
+gets to row 20, and the one that can physically reach it is the one type forbidden from
+harming it.
+
+**The exception is a wreck, and it is the only way this ship ever sinks.** A death
+subtracts a re-anchor and swaps in a larger frame (§ 7.4.2), so a dying entity occupies
+rows its living form never visits. A depth charge is the case that reaches: released at
+row 31, its death frames are the 21 × 13 tall column re-anchored upward by 5, so an
+exploding charge spans rows 26–38 and overlaps this hull's 20–27. Type 18 is not in the
+exempt range, so it damages. **A charge destroyed just below a hospital ship sinks it**,
+and its full sinking animation (§ 7.4) — otherwise dead artwork — plays.
+
+A reachability argument that considers only living positions concludes this cannot happen;
+§ 14.4 is where the mechanism that allows it lives.
 
 **This is the difficulty curve.** The hospital ship cap is the only knob that ramps
 monotonically (§ 8.3), so each mission puts more unsinkable obstacles in the layer
@@ -2917,12 +2929,20 @@ Each call runs *that type's* response handler, and every handler's first act is 
 **the other party's type** and branch on it. This is why the responses read as
 whitelists rather than as rules about the pair.
 
-**A dying entity does not respond.** In the original the skip is per *side* rather than
-per pair — the dispatch tests the dying flag of the entity it is about to run, so a wreck
-stops having opinions while remaining a valid `other`, and the sweep itself has no flag
-test at all. **This implementation filters dying entities out of the sweep instead**,
-which is a known divergence recorded in `docs/porting_decisions.md`; its visible
-consequence is that § 14.6's rows 3 and 4 never reach their "not while dying" clause.
+**A dying entity does not respond — but it can still be responded to.** The skip is per
+*side*, not per pair: the dispatch tests the dying flag of the entity it is about to run,
+so a wreck stops having opinions while remaining a valid `other` for everything else. The
+sweep itself has no flag test of any kind.
+
+**A wreck therefore stays collidable until its slot is freed**, and that is load-bearing
+rather than incidental:
+
+- § 14.6's rows 3 and 4 exempt their partners *only while those are not dying*. That
+  clause can only ever bite if a dying entity is still swept — filter dying candidates out
+  and it becomes unreachable code.
+- **A wreck's footprint is not its live one.** The death sequence subtracts a re-anchor
+  (§ 7.4.2) and swaps in a death frame that is usually larger, so a wreck occupies rows
+  its living form never visits. § 13.6.2 turns on exactly this.
 
 ## 14.5 The damage flag defaults to harm
 
@@ -2946,7 +2966,7 @@ and its death animation (§ 9.4, Chapter 15).
 | 3 enemy submarine | Giant Clam · **its own mine and torpedo, but only while those are not dying** | its children pass through it *alive*; a child that is exploding damages it |
 | 4 magnetic mine | Giant Clam · **enemy submarine and another mine, but only while those are not dying** | the same shape from the other side |
 | 5–7, 9–12 merchants | **the ship slots — types 5 to 11** | **ships do not sink ships.** Three merchants spawn at X 0–1 on the same row within a few ticks, so without this they overlap on arrival and destroy each other. Then: score, stamp the roster, decrement the quota — **all three suspended in the demo** (§ 10.5.2) |
-| 8 hospital ship | vertical torpedo · **the ship slots — types 5 to 11** | **damage path unreachable** (§ 13.6.2) |
+| 8 hospital ship | vertical torpedo · **the ship slots — types 5 to 11** | reachable only by a **wreck** (§ 13.6.2) |
 | 13 supply submarine | the player · payload · dolphin | its own convoy and its customer |
 | 14 payload | the player · Giant Clam · **the dolphin** | the dolphin branch is taken first and *also* skips the convoy-state clear (§ 16.5); every other contact clears it |
 | 15 dolphin | the player · **its own payload** | **spawns the avenger on contact with either player torpedo** — keyed to the toucher, not to the death (§ 13.9). **Its removal drops the payload** (§ 16.5.1) |

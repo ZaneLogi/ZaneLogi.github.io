@@ -883,3 +883,47 @@ path rather than in the status table; § 14.4's skip was compressed from "the di
 side" to "the entity". Each time, the compression was reasonable and each time it dropped
 the thing that mattered. When a row defers to another row, expand it; when a table has a
 column that could be empty, ask what the ROM puts there.
+
+### The dying candidate, resolved — and the neighbouring rule it broke
+
+The entry above left this open: § 14.4 said "an entity already flagged as dying is skipped
+entirely", and the port filtered dying entities out of the sweep. The original does not.
+`entry_18EC` has **no flag test of any kind** — it advances the cursor, skips the subject
+itself, terminates on the count. Only the dispatch skips, and `sub_19AA` tests `$16AE,X`:
+the flags of the side it is about to run. **A wreck stops having opinions and stays a
+valid target** until its slot is freed.
+
+**Two things turn on it**, and both are invisible while the filter is in place. § 14.6's
+rows 3 and 4 exempt their partners *only while those are not dying* — dead code without
+swept wrecks. And a wreck's footprint is not its living one: the death sequence subtracts
+a re-anchor and swaps in a larger frame (§ 7.4.2), so it occupies rows the entity never
+visited alive.
+
+**That second point overturns a claim the spec made twice.** § 13.6.2 and § 7.4 both said
+the hospital ship's damage path is unreachable and its sinking animation never plays. The
+reachability argument behind it enumerates *living* positions, and it is sound for those —
+but a depth charge released at row 31 dies into the 21 × 13 tall column re-anchored upward
+by 5, spanning rows 26–38 against the hull's 20–27. Type 18 is not in the exempt range.
+**A charge destroyed just below a hospital ship sinks it**, and the "dead" artwork plays.
+Measured, not argued: found by instrumenting a 4000-tick demo for what overlapped the ship
+on the tick it took damage.
+
+**The half that is genuinely unreachable, and why that is not the same thing.** Rows 3 and
+4 are symmetric in the table but not in effect: the mine has death frames 6–7 so it spends
+time as a wreck, while the enemy submarine's row is 0/0 — it throws seven debris particles
+and vanishes without ever being `dying`. "A dying submarine damages its own mine" cannot
+arise, in the original as much as here. The test says so explicitly rather than leaving the
+case silently untested, which is the difference between a known-empty branch and a gap.
+
+**And the fix broke a neighbour, which is the part worth remembering.** Adding a
+`case TYPE.MERCHANT_SHIP` for "ships do not sink ships" moved merchants out of the switch's
+`default:` — where `merchantBookkeeping` had been living. The roster stamp and the quota
+decrement stopped running: ten kills and the mission never ended. Zane found it by playing,
+one commit after the change.
+
+Nothing about the bookkeeping was touched; it was orphaned by a case label. **A `default:`
+that does work is a trap**, because adding a case is normally additive and here it was
+subtractive — and the compiler, the linter and 517 passing tests all had nothing to say.
+The bookkeeping now sits on the merchant's own damage path, where `$7585` puts it, gated on
+the exemption exactly as the original gates it. It has its own regression test that plays a
+whole mission to completion.

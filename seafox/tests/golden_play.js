@@ -73,7 +73,7 @@ export const GOLDEN_PLAY = {
     fuel: 1120, torp: 29, live: 2,
   },
   4500: {
-    hash: '0x99dcbf37', lit: 1226,
+    hash: '0xc928e60c', lit: 1227,
     phase: 'setupIcons', mission: 1, subs: 2,
     fuel: 880, torp: 24, live: 0,
   },

@@ -49,6 +49,9 @@
 //   2. Ships no longer sink ships ($7572): merchants spawn three-deep at X 0-1
 //      and were destroying each other on arrival, retiring roster records that
 //      never recycle until the sea emptied.
+//   3. Wrecks are collidable again ($18EC has no flag test; only the dispatch
+//      skips, and only the side it is dispatching). A dying entity keeps a
+//      re-anchored, usually larger footprint, so this changes what meets what.
 //
 // Both were verified against the ROM and by mutation first. The early ticks
 // barely move -- nothing differs until the first merchant pile-up or clam --
@@ -79,18 +82,18 @@ export const GOLDEN = {
     hist: { 1: 456, 2: 208, 3: 627, 4: 85, 5: 541 },
   },
   1200: {
-    hash: '0xf18e583a', lit: 2580,
-    bands: [300, 357, 508, 6, 246, 71, 104, 194, 2, 4, 16, 772],
-    hist: { 1: 531, 2: 210, 3: 829, 4: 239, 5: 771 },
+    hash: '0x2a919c37', lit: 2470,
+    bands: [300, 349, 413, 17, 333, 134, 104, 0, 48, 0, 0, 772],
+    hist: { 1: 449, 2: 200, 3: 910, 4: 238, 5: 673 },
   },
   3000: {
-    hash: '0xab3c3f12', lit: 2427,
-    bands: [229, 265, 518, 97, 148, 115, 165, 11, 107, 0, 0, 772],
-    hist: { 1: 434, 2: 261, 3: 742, 4: 281, 5: 709 },
+    hash: '0xa150dc10', lit: 1921,
+    bands: [198, 236, 512, 28, 18, 0, 31, 0, 107, 4, 15, 772],
+    hist: { 1: 480, 2: 246, 3: 539, 4: 80, 5: 576 },
   },
   6000: {
-    hash: '0xc1f0ad11', lit: 2255,
-    bands: [274, 358, 508, 43, 13, 121, 48, 118, 0, 0, 0, 772],
-    hist: { 1: 477, 2: 244, 3: 790, 4: 151, 5: 593 },
+    hash: '0x8bf352fb', lit: 2484,
+    bands: [270, 370, 612, 36, 41, 265, 22, 96, 0, 0, 0, 772],
+    hist: { 1: 611, 2: 234, 3: 813, 4: 142, 5: 684 },
   },
 };
