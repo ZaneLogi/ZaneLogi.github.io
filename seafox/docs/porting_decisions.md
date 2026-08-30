@@ -609,3 +609,34 @@ code: a flurry of presses between polls collapses to one (§ 19.4), and a key pr
 a Chapter 11 transition, when nothing polls, is still there for the first poll afterwards
 (§ 19.8, deferred not discarded). A queue would have needed explicit handling for both, and
 would have got the first one wrong by default.
+
+### Oracle 4 is a regression net, not an external oracle
+
+§ 20.1 defines an oracle as something that "checks the implementation against something
+that is not a reading". Oracles 1-3 clear that bar: the generator's algebra, the cold-boot
+spawn cadence and the demo trajectory are all derived from the disassembly, so they check
+this port against the original.
+
+**Oracle 4's golden frames do not.** There is no way to capture a real frame from the 1982
+machine here, so the digests in `tests/golden_frames.js` were captured from this port.
+They check it against its own past. That is a different and lesser thing, and the file
+says so at the top rather than letting a future reader assume otherwise.
+
+It is still worth having, and the drift bug two entries above is the argument: correcting
+it moved every demo-fired shot, and the first sign was a test in another chapter failing
+for a reason it could not name. Oracle 4 would have said "tick 1200 differs, rows 0-15 and
+64-79, 257 fewer lit bytes" the moment it happened. **Verified by mutation rather than
+asserted:** reintroducing that exact bug turns the page red at ticks 1200, 3000 and 6000
+and leaves 1-300 green, which is the honest signature of a change that takes time to
+diverge.
+
+**So the page has a second half that is external.** The anchors check the frame against
+the *spec* -- § 3.4's six palette indices, § 3.5's waterline row, § 19.9's HUD row, § 2.4.1's
+empty row above it. Those would catch a renderer that has been consistently wrong since the
+day it was written, which no self-captured digest can.
+
+**And the rule that keeps it honest: a golden failure is a question, not a verdict.** Ask
+what changed and whether it was meant; regenerate only after answering. Regenerating to
+turn a page green promotes a bug to the reference, and from then on the oracle defends it.
+Regeneration is deliberately not a button -- `seafoxRegenerateGoldens()` in the console,
+sharing the checker's own digest function so the two cannot drift.

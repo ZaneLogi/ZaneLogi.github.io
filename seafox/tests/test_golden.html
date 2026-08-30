@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seafox &mdash; Oracle 4</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <h1>Seafox &mdash; Oracle 4: golden frames</h1>
+  <nav>
+    <a href="./test_rng.html">Oracle 1</a>
+    <a href="./test_entities.html">Entity list</a>
+    <a href="./test_spawners.html">Oracle 2</a>
+    <a href="./test_demo.html">Oracle 3</a>
+    <a href="./test_catalogue.html">Catalogue</a>
+    <a href="./test_collision.html">Collision</a>
+    <a href="./test_effects.html">Effects</a>
+    <a href="./test_round.html">Round</a>
+    <a href="./test_sound.html">Sound</a>
+    <a href="./test_input.html">Input</a>
+    <a href="./test_renderer.html">Renderer</a>
+    <a href="./test_golden.html">Oracle 4</a>
+  </nav>
+  <p class="sub">
+    design_spec &sect;&nbsp;20.5, the last and most expensive oracle. The game is
+    deterministic from cold boot until the first input, so a rendered frame at a
+    fixed tick is reproducible to the byte. Two halves, and they are different
+    kinds of check: <b>anchors</b> compare the frame against the
+    <i>specification</i> &mdash; the six-colour palette, the waterline row, the
+    HUD row &mdash; and would catch a renderer that has been consistently wrong
+    since it was written; <b>goldens</b> compare it against <i>this port's own
+    past</i>, and can only tell you it changed. A golden failure is a
+    <b>question</b>: ask what changed and whether it was meant, and never
+    regenerate to silence a red page &mdash; that promotes a bug to the
+    reference. To regenerate deliberately, see the header of
+    <code>golden_frames.js</code>.
+  </p>
+  <div id="checks" class="checks">running checks&hellip;</div>
+  <script type="module" src="./test_golden.js"></script>
+</body>
+</html>
