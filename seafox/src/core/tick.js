@@ -19,8 +19,9 @@ import { walkEntities } from './walk.js';
 import { walkEffects } from './effects.js';
 import { demoBounceHorizontal, demoBounceVertical } from './demo.js';
 import { fireVerticalTorpedo, fireHorizontalTorpedo } from './weapons.js';
-import { advanceRound, checkRoundGuards, PHASE } from './round.js';
+import { advanceRound, checkRoundGuards, newGame, PHASE } from './round.js';
 import { advanceSound } from './sound.js';
+import { pollInput, pollPause } from './input.js';
 
 /** @type {number} § 10.5.1: the horizontal torpedo fires when the low six bits are zero. */
 const AUTO_FIRE_MASK = 0x3F;
@@ -36,10 +37,21 @@ const AUTO_FIRE_MASK = 0x3F;
  * @returns {void}
  */
 export function tick(session) {
+  // § 19.6: a pause holds until any input. It sits ahead of the tick counter as
+  // well as ahead of the loops, because a frozen game does not age.
+  if (pollPause(session)) return;
+
   session.tick += 1;
 
   if (session.isTitleScreen) {
     demoTick(session);
+    // § 10.5.3: the exit is tested immediately after input and before anything
+    // else, so a start takes effect on the tick it is pressed. `demoTick` has
+    // already returned early, so none of the demo's own steps ran either.
+    if (session.startRequested) {
+      newGame(session);
+      return;                                       // setup draws from here on
+    }
     frame(session);                                 // § 9.2 step 9
     return;
   }
@@ -63,8 +75,10 @@ export function tick(session) {
  * @returns {void}
  */
 function demoTick(session) {
-  // 2. Poll input. Chapter 19 is not ported; the demo's own exit is step 3.
-  // pollInput(session)
+  // 2. Poll input (§ 19.8). The demo reads no MOVEMENT keys -- its own bounce
+  //    writes the pair -- but the start key, the pause and the sound toggle are
+  //    all live here, because § 19.6 puts them ahead of every mode test.
+  pollInput(session);
 
   // 3. Exit if a start was requested -- tested immediately after input and
   //    before anything else, so a start takes effect on the tick it is pressed
@@ -114,11 +128,12 @@ function missionTick(session) {
   checkRoundGuards(session);
 
   // 2. Poll input -- § 19.8, once per tick, and **only from this loop**.
-  //    Chapter 19 is not ported. The transitions of Chapter 11 deliberately poll
-  //    nothing (§ 10.6), which is what makes the outro unstoppable -- and input
-  //    during one is deferred rather than dropped, so a key pressed there takes
-  //    effect on the round's opening tick.
-  // pollInput(session)
+  //    The transitions of Chapter 11 deliberately poll nothing (§ 10.6), which
+  //    is what makes the outro unstoppable -- and input during one is deferred
+  //    rather than dropped, so a key pressed there takes effect on the round's
+  //    opening tick. That falls out of the source being a one-key register:
+  //    nothing drains it while no one is polling.
+  pollInput(session);
 
   runSpawners(session);                             // 5, shared
 }

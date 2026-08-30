@@ -28,6 +28,7 @@ import { Resources } from './resources.js';
 import { Messages } from './messages.js';
 import { PHASE } from './round.js';
 import { createSoundState } from './sound.js';
+import { NULL_KEYS } from './input.js';
 import { PLAYER_BOUNDS, DEMO_START, spawnPlayer } from './player.js';
 
 /** @type {number} § 10.3: the game begins with three and gains no more, ever. */
@@ -80,6 +81,15 @@ export class Session {
     this.startRequested = false;
     /** @type {string} which input scheme this session uses (Chapter 19). */
     this.controller = '';
+    /** @type {boolean} § 19.6: a pause holds the simulation until any input. */
+    this.paused = false;
+    /**
+     * § 19.1: the pending-key source, a one-key register with `read()`. The
+     * default reports nothing, so a headless session runs identically to a
+     * played one -- `platform/keyboard.js` supplies the real one.
+     * @type {{read: () => ?string}}
+     */
+    this.keys = NULL_KEYS;
 
     /** @type {number} merchants still to sink this mission (§ 12.5, § 8.5). */
     this.killCounter = KILL_QUOTA;

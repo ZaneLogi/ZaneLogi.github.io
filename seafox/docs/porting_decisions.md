@@ -574,3 +574,38 @@ for that. It is not evidence about a branch, and pinning a branch to it buys a t
 fails for reasons it cannot name. The entry above says a test's *explanation* is a claim
 like any other; this one adds that a test's *witness* is too, and that the witness rots
 faster than the explanation does.
+
+### Chapter 19: keyboard now, gamepad later — and where the pause lives
+
+Two deliberate departures, recorded because both are visible and neither is drift.
+
+**The gamepad is not built.** § 19.5 is normative and describes it fully; this port ships
+§ 19.4's keyboard alone, at Zane's direction. Nothing about the seam changes when it
+arrives: `core/input.js` already returns early unless `session.controller` is the keyboard
+scheme, and § 19.3's rule that the two schemes never meet is what makes adding the second
+one additive rather than a rework. The one piece of § 19.5 already honoured is where the
+work goes — `src/platform/` exists, holds the only DOM-facing input file, and is the layer
+that will do the −1/0/+1 bucketing so no analogue magnitude reaches `core/`.
+
+**The pause freezes at the top of the tick, not inside the input routine.** The original's
+ESC handler busy-waits on `KBD` at `$704F`, freezing the whole game mid-tick at § 9.2's
+step 2. A browser loop does not get to block, so `pollPause` runs ahead of everything and
+returns "stay frozen". The difference is between step 1 and step 2 of a tick in which no
+time passes, so nothing observable sits in the gap — and the tick counter deliberately does
+not advance either, because a frozen game should not age.
+
+**One thing that looked like a deviation and is not.** § 19.7 describes the sound toggle as
+two layers: a stored preference, copied to the live setting only while a mission runs. The
+port stores one field. That is not a shortcut — `outputFor` already *derives* suppression
+from the mission counter rather than storing it, so a preference set on the silent title
+screen takes effect the moment the counter leaves zero, which is the whole of what § 19.7
+asks for. Storing the second layer would be a second thing to keep in step, and § 1.4 puts
+storage layout on the free side of the line.
+
+**Why the key source is one slot and not a queue.** The Apple's `KBD` latch holds only the
+most recent key until the strobe clears it. Modelling that literally — a single-slot
+register with a clearing `read()` — buys two of the chapter's rules for free rather than as
+code: a flurry of presses between polls collapses to one (§ 19.4), and a key pressed during
+a Chapter 11 transition, when nothing polls, is still there for the first poll afterwards
+(§ 19.8, deferred not discarded). A queue would have needed explicit handling for both, and
+would have got the first one wrong by default.
