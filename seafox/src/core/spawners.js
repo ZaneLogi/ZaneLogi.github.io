@@ -100,6 +100,21 @@ const SPAWN_Y = {
 const RIGHT_EDGE = 306;
 
 /**
+ * Reload the supply submarine's cooldown to its full interval (§ 11.1.1).
+ *
+ * **The one exception to "cooldowns never reset"** (§ 12.3). It is called from
+ * the fresh-submarine path only -- never from the mission-cleared fly-in -- so
+ * the two round-start paths differ in when the next resupply arrives.
+ *
+ * @param {{cooldowns: Object<string, number>}} spawners
+ * @returns {void}
+ */
+export function reloadSupplyCooldown(spawners) {
+  spawners.cooldowns.supplySubmarine = SPAWNERS
+    .find((s) => s.key === 'supplySubmarine').base;
+}
+
+/**
  * Fresh spawner state. **Nothing resets this** -- § 12.3 makes the cooldowns
  * shipped constants that survive rounds and missions, which is exactly what
  * makes Oracle 2 an oracle. The roster is the part that does reset, per mission.
@@ -253,15 +268,12 @@ function spawnMerchant(session, record) {
 /**
  * Which side an enemy submarine enters from (§ 8.4).
  *
- * ASSUMPTION, and the one open question of this step: on the right-only rungs
- * -- missions 3-5 and the demo -- no draw is taken. § 8.4 says the choice
- * "draws one bit" on missions 1 and 2, and says nothing about whether the other
- * rungs draw and discard. It shifts the total draw count but no value Oracle 2
- * asserts, since the first-spawn table comes from shipped cooldowns. Resolve at
- * Chapter 13 against the disassembly rather than guessing twice.
- *
- * Which bit value means which side is likewise unstated; only missions 1-2 can
- * reach it.
+ * **RESOLVED against the disassembly** (this was an open assumption; § 8.4 and
+ * § 12.4 now carry it). The spawn costs THREE generator draws on missions 1-2
+ * and TWO on every other rung, in this order: side, mask, depth. On the
+ * right-only rungs the side draw is not taken at all -- the spawner does not
+ * draw and discard -- so those missions consume one fewer value per submarine.
+ * **Bit 1 set selects the left side**, clear the right.
  *
  * @param {Object} session
  * @returns {boolean} true to enter from the left at X 0

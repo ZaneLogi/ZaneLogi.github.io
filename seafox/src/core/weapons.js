@@ -97,6 +97,18 @@ export function fireVerticalTorpedo(session) {
  * @param {Object} session
  * @returns {boolean} whether a torpedo was launched
  */
+/**
+ * The horizontal torpedo's drift direction (§ 13.2) -- the player's vertical
+ * velocity halved. An arithmetic halving, so the sign survives: -2 -> -1,
+ * 0 -> 0, +2 -> +1.
+ *
+ * @param {number} velocityY the player's current Y velocity, -2 / 0 / +2
+ * @returns {number} -1, 0 or +1
+ */
+export function driftFromPlayer(velocityY) {
+  return Math.trunc(velocityY / 2);
+}
+
 export function fireHorizontalTorpedo(session) {
   if (session.horizontalCooldown > 0) return false;
   if (session.entities.counts[CLASS.HORIZONTAL_TORPEDO]
@@ -123,7 +135,12 @@ export function fireHorizontalTorpedo(session) {
   e.updatePeriod = HORIZONTAL.period;
   e.updateCountdown = HORIZONTAL.period;
   e.scratch1 = HORIZONTAL.driftUpdates;
-  e.scratch2 = 1;                         // the drift's sign, +/-1 in Y
+  // **The drift sign is INHERITED from the player, at launch** (§ 13.2): the
+  // player's current Y velocity halved, so -2/0/+2 becomes -1/0/+1, and never
+  // written again. Fire while climbing and the shot climbs with you; fire level
+  // and it runs flat. This is the only weapon in the game that reads the state
+  // of the controls at launch, and a fixed sign gives every shot the same curve.
+  e.scratch2 = driftFromPlayer(session.input.vy);
   e.scratch3 = 1;                         // trail toggle, seeded to mark at once
   session.entities.countSpawn(TYPE.HORIZONTAL_TORPEDO);
   session.horizontalCooldown = HORIZONTAL.cooldown;

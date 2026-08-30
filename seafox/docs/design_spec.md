@@ -1616,7 +1616,12 @@ apparent difficulty curve.
 
 On missions 1 and 2 the choice draws one bit from the generator — **bit 1 of the output
 byte, not bit 0.** § 5.4 establishes that bit 0 carries nothing forward, so an
-implementation that masks the low bit is not sampling the same thing.
+implementation that masks the low bit is not sampling the same thing. **Bit 1 set
+selects the left side**, clear selects the right.
+
+**Where that draw sits is normative.** It is taken *before* § 12.4's two depth draws, and
+on the right-only rungs it is **not taken at all** — the spawner does not draw and
+discard, so those missions consume one fewer value per submarine.
 
 **The two missions where the submarine can come at you from behind are exactly the two
 where it is unarmed.** From mission 3 on it always enters from the right, which is what
@@ -1637,7 +1642,8 @@ table having five entries is why the mission counter stops at 5.
 ## 8.6 Normative and free — summary
 
 **Normative:** the six rungs and all values in § 8.2 · caps limiting concurrency rather
-than rate · the fall-through to mission 3 · the entry-side rule and the bit it samples ·
+than rate · the fall-through to mission 3 · the entry-side rule, the bit it samples and
+**which value picks which side** ·
 everything in § 8.5 being mission-invariant.
 
 **Free:** how the ladder is stored — a table is preferable to six branches, and produces
@@ -2005,12 +2011,20 @@ It then takes one of two paths, chosen by `replayMission`:
 5. Fill both gauges from the starting values (Chapter 16).
 6. The player spawns at **(100, 100)**.
 
+**This path also reloads the supply submarine's countdown to a full 1000** (§ 12.3),
+immediately before the player is placed. It is the only spawner cooldown anything in the
+game ever resets, so a fresh submarine always gets the whole interval before its first
+resupply.
+
 **`spareSubs` is decremented here, at launch — not on death.** So the count shown is
 submarines *in reserve*, and the one you are flying has already been deducted.
 
 ### 11.1.2 Mission cleared — advancing to the next
 
-No HUD rebuild; fuel, torpedoes and the gauges carry over untouched.
+No HUD rebuild; fuel, torpedoes and the gauges carry over untouched — **and so does the
+supply submarine's countdown.** This path does not reload it, so a cleared mission
+inherits whatever it was left at and the next resupply can arrive almost at once. The
+asymmetry between the two paths is normative, not an oversight in the original.
 
 1. The player spawns at **X = 0** — off-screen left — with the left clamp opened from 28
    to 0 and a horizontal velocity of +2.
@@ -2129,7 +2143,8 @@ changed the game's ending (§ 1.3).
 
 ## 11.7 Normative and free — summary
 
-**Normative:** both setup paths and what each does or skips · `spareSubs` decremented at
+**Normative:** both setup paths and what each does or skips, **including the supply
+submarine's countdown being reloaded on one of them and not the other** · `spareSubs` decremented at
 launch · the spare-sub icons being the player sprite · the fly-in being live simulation ·
 the three guards **and their order** · death arriving one tick late · every outro
 setting including the exit velocity of 4 and the sinking velocity of +2 · the
@@ -2194,7 +2209,9 @@ gap between spawns — the same off-by-one that makes a cooldown of *n* fire on 
 carries a random term wider than one tick.
 
 **The first-spawn column is exact and is a cold-boot property.** Those cooldowns are
-shipped values that nothing resets between rounds or missions, so the opening sequence of
+shipped values that nothing resets between rounds or missions — **with one exception: the
+supply submarine's countdown is reloaded to a full 1000 on the fresh-submarine path of
+§ 11.1.1, and never on the mission-cleared path** — so the opening sequence of
 the first demo after a cold start is fully determined. Chapter 20 uses it as an oracle.
 A cooldown of *n* fires on tick *n + 1*, which is why the supply submarine — shipped at
 zero — spawns on tick 1.
@@ -2224,9 +2241,18 @@ The resulting distribution over a full generator period:
 **About one spawn in six appears shallower than the player can ever climb** (§ 2.5) — it
 can attack downward but the player cannot rise to meet it.
 
-**Both draws are normative, and so is their order.** An implementation that picks the
-mask and the depth from a single draw consumes one fewer value from the shared
-generator, which shifts every subsequent random decision in the game (§ 5.6).
+**The spawn costs three generator draws on missions 1–2 and two on every other rung**,
+in this order:
+
+1. the **entry side** of § 8.4 — taken *only* where the side is random, never drawn and
+   discarded;
+2. the **mask**;
+3. the **depth**.
+
+**All of them are normative, and so is the order.** An implementation that picks the mask
+and the depth from a single draw, or that draws for the side on a right-only rung,
+consumes the shared generator differently from this one and shifts every subsequent
+random decision in the game (§ 5.6).
 
 ## 12.5 The merchant roster
 
@@ -2280,7 +2306,8 @@ start of every mission, alongside the kill counter (§ 8.5).
 
 **Normative:** the spawner order · the common shape · the blocked-spawn rule of § 12.2 ·
 every value in § 12.3 including the first-spawn ticks · the supply submarine's two
-exceptions · both draws of § 12.4 and their order · the roster, its ten records and four
+exceptions · **all three draws of § 12.4, their order, and the side draw not being taken
+at all on the right-only rungs** · the roster, its ten records and four
 hues, the cursor's advance on failure, and the interval consumed by an unavailable
 record.
 
@@ -2335,11 +2362,21 @@ weapon offensive and the other defensive.**
 | cooldown | **none** — the cap alone paces it | **6 ticks** |
 | launch point | player X + 9, Y − 7 | player X + 28, Y + 3 |
 | step / period | **−1 / 1** → 1 px per tick, upward | **+4 / 2** → 2 px per tick, rightward |
-| drift | none | ±1 in Y every 5 updates = **10 ticks** |
+| drift | none | ±1 in Y every 5 updates = **10 ticks**, the sign **inherited from the player** — below |
 | bounds | removed above row 7 or at row 179 | clamped to rows 45–178; removed past X 308 |
 | fire refused when | — | player X is past 304 |
 | palette flip | no | yes |
 | trail | one dot every 4 ticks | a two-dot blob every other tick |
+
+**The horizontal torpedo inherits half the player's vertical velocity.** Its drift
+direction is the player's *current* Y velocity halved — −2, 0 or +2 becoming −1, 0 or
++1 — read **at launch** and never written again. **Fire while climbing and the shot climbs
+with you; fire level and it runs flat.** It is the only weapon in the game that reads the
+state of the controls at launch.
+
+The drift is not decorative: across a typical run the shot moves about seven rows, so an
+implementation that picks a fixed sign gives every shot the same curve and loses the
+mechanic outright.
 
 **Only the vertical torpedo can reach a target** (§ 2.4.1). The horizontal one is clamped
 to rows 45–178 and misses the lowest surface lane by five pixels; it exists to clear
@@ -2646,7 +2683,8 @@ Two exits follow from that:
 
 - If it would ever pass **row 175** it dies rather than being removed quietly — the same
   state-change path a kill uses, so it explodes.
-- It is removed when its horizontal travel carries it past **X = 23**.
+- It **drifts left at 2 px per tick** for its whole life — during the climb and along
+  the ceiling alike — and is removed when that carries it past **X = 23**.
 
 The dolphin and the clam derive their own positions from the payload's every tick
 (§ 16.5), so both follow it up.
@@ -2690,6 +2728,12 @@ on the delay is 0–15 ticks.
 Because of the double increment the counter takes the values 2, 4, 6 … against a
 threshold of 3, so **the first resupply of a mission is clam-free and every later one is
 contested almost immediately.**
+
+**Destroying a supply submarine before it releases shifts that parity.** Only the spawn
+increment happens, so the counter reaches the threshold a run earlier and **the first
+resupply you actually receive that mission arrives contested instead of free.** Nothing
+announces it, and there is no way back inside the mission — the counter is reset only at
+a mission's start.
 
 ## 13.9 The avenger — type 20
 
@@ -2778,7 +2822,8 @@ when something destroys it, or when the round ends — not by running out of scr
 
 **Normative:** every step, period, launch offset, reload, cap, bound and gate above · the
 player's six-step update order and both invulnerability gates · the torpedo asymmetries
-including the vertical's absent cooldown · the hospital ship's deflection and the
+including the vertical's absent cooldown and **the horizontal's drift sign inherited
+from the player's velocity at launch** · the hospital ship's deflection and the
 descending torpedo becoming lethal · the clam's payload-locked depth and the
 double-incremented resupply counter · the avenger's spawn condition, depth-copying and
 indestructibility.

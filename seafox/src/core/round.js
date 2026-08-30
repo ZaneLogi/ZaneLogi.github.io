@@ -24,7 +24,7 @@
 // submarine swims in, spawners and entities and all.
 
 import { spawnPlayer, PLAYER_BOUNDS, PLAYER_START } from './player.js';
-import { resetRoster, KILL_QUOTA } from './spawners.js';
+import { resetRoster, KILL_QUOTA, reloadSupplyCooldown } from './spawners.js';
 import { createConvoyState } from './convoy.js';
 import { STRIP, MISSION_NUMERALS } from './messages.js';
 import { playSound, SOUND } from './sound.js';
@@ -217,6 +217,14 @@ function finishLaunch(session) {
   // So the count shown is submarines IN RESERVE, and the one being flown has
   // already been deducted.
   session.spareSubs -= 1;
+
+  // **The one spawner cooldown anything ever resets** (§ 11.1.1, § 12.3): the
+  // fresh-submarine path reloads the supply submarine's countdown to a full
+  // 1000 immediately before the player is placed, so a new submarine always gets
+  // the whole interval before its first resupply. § 11.1.2's fly-in does NOT --
+  // a cleared mission inherits whatever the counter was left at, and the next
+  // resupply can arrive almost at once. The asymmetry is normative.
+  reloadSupplyCooldown(session.spawners);
 
   // Chapter 19: clear the HUD line again -- which is what removes the SUBS
   // display -- and draw FUEL: and TORP: in its place, then fill both gauges.

@@ -19,7 +19,7 @@ import { Session } from '../src/core/session.js';
 import { tick } from '../src/core/tick.js';
 import { checkSessionInvariants } from '../src/core/invariants.js';
 import {
-  newGame, beginOutro, PHASE, HOLD_TICKS, DRAIN_PASSES, DRAIN_PASS_TICKS,
+  newGame, nextMission, beginOutro, PHASE, HOLD_TICKS, DRAIN_PASSES, DRAIN_PASS_TICKS,
 } from '../src/core/round.js';
 import {
   Resources, scoreFor, toBcd, fromBcd, bcdIsValid, MISSION_SCORED,
@@ -77,6 +77,34 @@ function inPlay(mission = 1) {
  */
 function setup(list) {
   list.section('§ 11.1 — the two setup paths, and the three holds');
+
+  // **The one spawner cooldown anything ever resets** (§ 11.1.1, § 12.3), and the
+  // two paths differ: the fresh-submarine launch reloads it to a full 1000, the
+  // mission-cleared fly-in does not. So a new submarine always gets the whole
+  // interval before its first resupply, while a cleared mission inherits
+  // whatever the counter was left at and the next one can arrive at once.
+  {
+    const sc = new Session();
+    sc.startDemo();
+    newGame(sc);
+    sc.spawners.cooldowns.supplySubmarine = 7;     // nearly due
+    for (let t = 0; t < 200 && sc.phase !== PHASE.PLAY; t++) tick(sc);
+    list.eq('the fresh-submarine path reloads the supply countdown (§ 11.1.1)',
+      sc.spawners.cooldowns.supplySubmarine, 1000,
+      (v) => v + ' — the only spawner cooldown the game ever resets');
+
+    const sf = new Session();
+    sf.startDemo();
+    newGame(sf);
+    for (let t = 0; t < 200 && sf.phase !== PHASE.PLAY; t++) tick(sf);
+    sf.spawners.cooldowns.supplySubmarine = 7;
+    sf.killCounter = 0;
+    nextMission(sf);                               // the fly-in path
+    list.eq('...and the mission-cleared fly-in does NOT (§ 11.1.2)',
+      sf.spawners.cooldowns.supplySubmarine, 7,
+      (v) => v + ' — a cleared mission inherits it, so the next resupply can ' +
+        'arrive almost at once. The asymmetry is normative');
+  }
 
   const s = new Session();
   s.startDemo();

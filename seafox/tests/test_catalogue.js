@@ -21,6 +21,7 @@ import { DEFINITIONS, DEATH_FRAMES, DEATH_FRAME_PERIOD, SILENT, beginDeath }
   from '../src/core/definitions.js';
 import { TYPE, TYPE_NAMES, CLASS } from '../src/core/types.js';
 import { spawnAvenger } from '../src/core/avenger.js';
+import { fireHorizontalTorpedo, driftFromPlayer } from '../src/core/weapons.js';
 
 /**
  * § 2.7.2, verbatim. Per-axis pixels per tick -- the table gives one figure per
@@ -200,20 +201,25 @@ function exits(list, survey) {
   list.section('§ 13.11 — every type leaves, and no class cap locks');
 
   const created = [...survey.seenTypes].filter((t) => t !== TYPE.PLAYER).sort((a, b) => a - b);
+  const spawnable = created.filter((t) => t !== TYPE.AVENGER);
   list.add('all thirteen spawnable types appear in an attract run',
-    created.length === 13 && created.indexOf(TYPE.AVENGER) === -1,
+    spawnable.length === 13,
     created.map((t) => TYPE_NAMES[t]).join(', '));
 
-  // **The avenger is absent on purpose, and this is the check that pins it.**
-  // The demo DOES lose a dolphin -- around tick 4119, to a magnetic mine -- and
-  // for a while this list held fourteen types because of it. That was the bug:
-  // § 14.6 row 15 keys the avenger to the TOUCHER, so only the two player
-  // torpedoes summon one and a mine kill draws no retaliation at all. The demo
-  // never fires at the dolphin, so a fourteenth type here means the trigger has
-  // been hung off the death again.
-  list.add('the demo never provokes an avenger — a mine kill draws no retaliation (§ 13.9)',
-    survey.seenTypes.has(TYPE.DOLPHIN) && !survey.seenTypes.has(TYPE.AVENGER),
-    'the one dolphin the demo loses is killed by a mine, not shot');
+  // **Whether the avenger appears here is an OBSERVATION, not an invariant, and
+  // this check deliberately does not assert either way.** It once asserted the
+  // avenger was absent, on the strength of a measured demo in which the only
+  // dolphin lost was killed by a magnetic mine. That measurement was taken while
+  // the horizontal torpedo's drift sign was wrong -- it always drifted down
+  // instead of inheriting the player's velocity (§ 13.2) -- and fixing that
+  // moved every demo-fired shot, so the demo now shoots a dolphin around tick
+  // 3133 and an avenger does appear.
+  //
+  // The rule the old check was really guarding -- § 14.6 row 15 keying the
+  // avenger to the TOUCHER rather than to the death -- is tested directly and
+  // exhaustively in test_collision.js's theDolphin(), against all five toucher
+  // classes. That is the guard; a demo trajectory is not, because it moves
+  // whenever any mechanic it touches is corrected.
 
   // The magnetic mine is the one type that never expires on its own -- its
   // limit of 310 is beyond the drawable range and it homes rather than crosses.
@@ -343,6 +349,35 @@ function behaviours(list) {
       'drift stayed ' + drift + ' after the player moved to row ' + player3.y +
       ' — the mine corrects, the torpedo commits');
   }
+
+  // -- the horizontal torpedo inherits the player's velocity (§ 13.2) -------
+  // The only weapon that reads the state of the controls at launch: its drift
+  // sign is the player's CURRENT Y velocity halved, read once and never again.
+  // A fixed sign gives every shot the same curve and loses the mechanic.
+  list.eq('a horizontal torpedo fired while CLIMBING drifts up (§ 13.2)',
+    driftFromPlayer(-2), -1, (v) => 'drift ' + v);
+  list.eq('...fired LEVEL it runs flat',
+    driftFromPlayer(0), 0, (v) => 'drift ' + v);
+  list.eq('...and fired while DIVING it drifts down',
+    driftFromPlayer(2), 1, (v) => 'drift ' + v);
+
+  const sH = quietSession(3);
+  const drifts = [];
+  for (const vy of [-2, 0, 2]) {
+    const sh = quietSession(3);
+    sh.caps[CLASS.HORIZONTAL_TORPEDO] = 1;          // quietSession zeroes it
+    for (let t = 0; t < 4; t++) tick(sh);           // let the player exist
+    sh.horizontalCooldown = 0;
+    sh.input.vy = vy;
+    fireHorizontalTorpedo(sh);
+    const shot = findType(sh, TYPE.HORIZONTAL_TORPEDO);
+    drifts.push(shot ? shot.scratch2 : 'none');
+  }
+  list.add('and the launch reads that velocity off the live control pair (§ 13.2)',
+    drifts[0] === -1 && drifts[1] === 0 && drifts[2] === 1,
+    'climbing/level/diving gave ' + drifts.join(' / ') +
+    ' — fire while climbing and the shot climbs with you');
+  void sH;
 
   // -- the enemy submarine steers vertically only, and stops level (§ 13.3) --
   // Mission 3 rather than the demo, so the player holds still: the attract bounce

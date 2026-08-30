@@ -503,3 +503,74 @@ at it**, which is the same compression one level down. Two rules, both cheap:
 - **Annotate an address with its own instruction.** `JMP $60E5` means "go to the clip",
   not "go and draw". Naming a jump for its eventual effect discards every step between,
   and those steps are exactly where a port loses behaviour.
+
+### The gameplay audit — three gaps, and a test whose witness moved
+
+A pass over Chapters 12, 13, 14, 16 and 19 against the reference. Those chapters
+hold up in detail — § 13.7's depth charge is complete down to the torpedo exploding on
+a charge, § 14.3 derives that a third entity can confirm a contact, § 19's latching and
+two-layer sound toggle match `$7036-$7190` instruction for instruction. Three things
+were missing, and they share the shape the two entries above name: **the reference
+carried them in prose, our spec kept the tables.**
+
+**1. The horizontal torpedo's drift sign — a shipped behaviour bug.** § 13.2's table said
+`±1 in Y every 5 updates` and never said what picks the sign, so the port picked one:
+`scratch2 = 1`, every shot drifting down. The reference says it in a paragraph, and
+`$7993` says it in six bytes:
+
+```
+7993  LDA $7E16 / ROL / PHP / ROR / PLP / ROR / STA $17AB,Y
+```
+
+That is an arithmetic halving of **the player's live Y velocity** — −2/0/+2 to −1/0/+1 —
+read at launch and never again, and `$7F41 ADC $17AB,X` adds it to Y. Fire while climbing
+and the shot climbs with you. It is the only weapon in the game that reads the state of
+the controls at launch, and the port had every shot on the same curve.
+
+**2. The enemy submarine's draw sequence.** § 12.4 said "two generator draws"; § 8.4 said
+the entry side "draws one bit"; neither said how they order or whether the right-only
+rungs draw at all — and every draw shifts the shared stream. `$79DE-$7A46`: three draws on
+missions 1–2 (side, mask, depth), two elsewhere, because `$79E7 BNE $7A12` skips the side
+draw outright; **bit 1 set selects the left side.** `spawners.js` had carried this as an
+open `ASSUMPTION ... resolve at Chapter 13 against the disassembly`. The guess was right;
+the note is now the fact.
+
+**3. The supply submarine's countdown is reset on one round-start path only.** § 12.3 said
+the spawner cooldowns are shipped values "that nothing resets", and `session.js` said so
+too. `$6C74-$6C7D` reloads `$84B1`/`$84B2` from 1000 four instructions before placing the
+player at (100, 100) — the fresh-submarine path — and the mission-cleared fly-in at
+`$6C95` does not touch it. So a new submarine always gets the full interval; a cleared
+mission inherits whatever was left and the next resupply can arrive at once.
+
+Two smaller documentation gaps went with them: killing a supply submarine before it
+releases shifts the resupply counter's parity, so the first resupply actually received
+that mission arrives contested rather than free (the code already did this by
+construction); and the payload's 2 px/tick leftward drift was implied by § 16.5.1 but
+never stated.
+
+**The part worth keeping: fixing #1 falsified a passing test, and the test was not
+wrong about the rule.** `test_catalogue` asserted that no avenger appears in a
+6000-tick attract run, on a measurement showing the demo's only dolphin loss was to a
+magnetic mine. That measurement was taken with the drift bug in place. Correcting the
+drift moved every demo-fired shot, and the demo now shoots a dolphin around tick 3133 —
+so an avenger appears and the assertion fails.
+
+Nothing about the avenger changed. What changed is a **trajectory**, and the test had
+been using a trajectory as its witness for a **rule**. That is a hostage: an emergent
+path through 6000 ticks depends on every mechanic it touches, so any correction anywhere
+can break it, and the failure names the wrong culprit — it points at the avenger while
+the actual change is two chapters away in a torpedo.
+
+The rule it meant to guard — § 14.6 row 15 keying the avenger to the *toucher*, not the
+death — was already tested directly in `test_collision.js`'s `theDolphin()`, against all
+five toucher classes. That is the guard. The attract check now asserts only what an
+attract run is good for, **coverage** — that all thirteen spawnable types appear — and
+says in a comment that the avenger's presence is an observation it deliberately does not
+assert either way.
+
+**The rule:** assert a rule where the rule lives. A long emergent run is evidence about
+*reachability* — that a type spawns, that a class does not lock — and it is worth having
+for that. It is not evidence about a branch, and pinning a branch to it buys a test that
+fails for reasons it cannot name. The entry above says a test's *explanation* is a claim
+like any other; this one adds that a test's *witness* is too, and that the witness rots
+faster than the explanation does.
