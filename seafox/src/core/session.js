@@ -208,6 +208,12 @@ export class Session {
     this.phase = PHASE.TITLE;
     this.mission = 0;
     this.sound.queue.flush();                       // the other flush point (§ 18.4)
+    // **The title screen is a screen being rebuilt, so nothing posted survives
+    // it** (§ 19.10.3). The original repaints the whole display on the way into
+    // attract mode; here that means dropping the stack, or a MISSION banner
+    // outlives its game and is drawn over the demo -- one more each time a game
+    // ends. The palette flips are kept: they belong to the strip, not the round.
+    this.messages.clear();
     this.applyRung();
     this.resetLists();
     this.demo = createDemoState();

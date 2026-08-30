@@ -793,3 +793,47 @@ doing its job. The scripted run now asserts only that the cap is never *exceeded
 early exit is asserted where it is genuinely reachable, on a mission clear, in
 `test_round`. An oracle that encodes an accident of its own script as a rule is the same
 mistake as a test that uses a trajectory as a witness.
+
+### The overlapping mission banner, and the blind spot in the oracle that missed it
+
+Zane saw two mission titles drawn over each other at the top of the screen when a mission
+was cleared. The cause is arithmetic on a stack: **a cleared round posts two strips and
+only one was ever removed.**
+
+Setup posts `MISSION` + numeral; the outro posts `MISSION COMPLETE`. § 19.10.3 removes them
+at two different named moments — the drain's end takes `MISSION COMPLETE`, the next setup
+takes the banner underneath. `endDrain` removed only the two *direct* banners, so the
+single `erase()` at the next setup popped `MISSION COMPLETE` instead, the old `MISSION`
+banner survived, and the new one was posted on top of it. `drawMessages` blits the whole
+stack, so both drew — and a third arrived with the mission after that.
+
+**A plain pop cannot express § 19.10.3.** The section removes each strip at its own moment,
+which is not the same as removing whatever is on top; `Messages` needed an `eraseStrip` to
+say *this one*. The stack is otherwise faithful — § 19.10.1's nesting is real, and the
+winning frame legitimately carries `MISSION` and `MISSION COMPLETE` together.
+
+**A second leak, same root.** `startDemo` never touched the stack, so on game over the
+`MISSION` banner outlived its game and was drawn over the demo. It happened to stay at
+depth one, because the next setup's erase took the stale banner instead of the intended
+one — the two bugs concealed each other's depth. The title screen is a screen being
+rebuilt, so it now drops everything posted. The palette **flips** are deliberately kept:
+a flip belongs to the strip, so the banner goes on alternating colour across games.
+
+**And the honest part: Oracle 4 did not catch this, could not have, and still cannot.**
+The scripted run of the previous entry never *clears* a mission — every one of its 15
+rounds ends in a death — so it never posts `MISSION COMPLETE` and never reaches the path
+that breaks. The goldens were byte-identical before and after the fix, correctly.
+
+That is a real limit worth naming rather than papering over. The script plays badly on
+purpose: it presses a fixed figure of keys, and sinking ten merchant ships needs aim it
+does not have. Widening the oracle to cover a *won* mission would mean either scripting
+real competence or reaching past the input seam to force the quota — and forcing the quota
+is no longer a played run, which is the whole premise. So the mission-complete path is
+covered where it can be covered honestly: a direct check in `test_round` that drives
+several complete games and asserts one banner at a time, a stack that never passes two, and
+nothing posted left on the title screen.
+
+**The general lesson, and it is the one this session keeps re-teaching in new clothes:**
+an oracle's reach is the set of states its driver actually visits, which is never the set
+of states the program has. A green golden page says "the paths I walk are unchanged", not
+"the program is unchanged", and the difference is exactly where the next defect lives.

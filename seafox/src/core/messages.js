@@ -111,6 +111,40 @@ export class Messages {
     this.direct.clear();
   }
 
+  /**
+   * Erase one specific strip wherever it sits on the stack.
+   *
+   * § 19.10.3 removes each strip at a named moment rather than in a fixed order,
+   * and the plain `erase()` pop cannot express "this one" -- it takes whatever
+   * happens to be on top. `MISSION COMPLETE` is the case that needs it: it is
+   * removed at the END OF THE DRAIN, while the `MISSION` banner underneath it
+   * survives until the next round setup.
+   *
+   * @param {string} strip
+   * @returns {boolean} whether anything was removed
+   */
+  eraseStrip(strip) {
+    const i = this.stack.findIndex((m) => m.strip === strip);
+    if (i === -1) return false;
+    this.stack.splice(i, 1);
+    return true;
+  }
+
+  /**
+   * Drop everything posted, for a screen that is being rebuilt from nothing.
+   *
+   * **The palette flips are deliberately kept.** § 19.10.1 writes each strip's
+   * flip back into the strip itself, so it survives anything that merely stops
+   * showing it -- the `MISSION` banner goes on alternating colour across games,
+   * not just across the rounds of one.
+   *
+   * @returns {void}
+   */
+  clear() {
+    this.stack.length = 0;
+    this.direct.clear();
+  }
+
   /** @param {string} strip @returns {boolean} */
   isPosted(strip) {
     return this.direct.has(strip) || this.stack.some((m) => m.strip === strip);

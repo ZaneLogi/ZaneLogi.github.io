@@ -379,6 +379,15 @@ function endDrain(session) {
   session.entities.reset();
   session.effects.reset();
   session.stencil.clear();
+  // § 19.10.3: **MISSION COMPLETE is removed HERE, at the end of the drain** --
+  // not by the next setup's erase. The MISSION banner is still underneath it and
+  // must survive until that setup takes it (§ 11.1).
+  //
+  // Without this the stack gets one pop per round against two posts, so the next
+  // setup pops MISSION COMPLETE, leaves the old banner in place, and posts the
+  // new one on top of it: MISSION ONE and MISSION TWO drawn over each other on
+  // the same seven rows, one more every mission.
+  session.messages.eraseStrip(STRIP.MISSION_COMPLETE);
   session.messages.eraseDirect();
   session.playerBounds.maxX = PLAYER_BOUNDS.maxX;
 

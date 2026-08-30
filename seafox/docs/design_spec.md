@@ -3960,8 +3960,8 @@ screen.
 | strip | path | shown | removed |
 |---|---|---|---|
 | demo message A / B | stack | on each horizontal bounce of the demo submarine, alternating | by the next post |
-| `MISSION` + numeral | stack | round setup, every round (§ 11.1) | at the next round setup |
-| `MISSION COMPLETE` | stack | the outro, on a cleared mission (§ 11.3) | end of the drain |
+| `MISSION` + numeral | stack | round setup, every round (§ 11.1) | at the next round setup, **or on return to the title screen** |
+| `MISSION COMPLETE` | stack | the outro, on a cleared mission (§ 11.3) | **end of the drain**, and specifically *not* by the next setup's erase |
 | `OUT OF FUEL` | direct | **every pass** of the drain loop, while the tanks-empty flag is set | explicit erase, end of drain |
 | `GAME OVER` | direct | **every pass** of the drain loop, while the game-over flag is set | explicit erase, end of drain |
 
@@ -3973,6 +3973,19 @@ consequence of the loop's shape, not an effect.
 
 At the end of the drain both are erased **unconditionally**, whether they were ever
 shown or not.
+
+**Each removal above happens at its own named moment, and a cleared round needs two of
+them.** Setup posts the `MISSION` banner and the outro posts `MISSION COMPLETE`, so a
+round that is won puts *two* strips on the stack. If only one is removed, the survivor is
+the old `MISSION` banner and the next setup draws the new one straight over it — two
+mission titles on the same seven rows, one more with every mission. So the drain's end
+removes `MISSION COMPLETE` **specifically**, not merely the topmost entry, and the setup
+that follows removes the banner underneath it.
+
+**Returning to the title screen removes everything posted.** The title screen is a screen
+being rebuilt, not a continuation, so no banner outlives the game it belonged to. **The
+palette flips are not reset with it** — a flip belongs to the strip, so the `MISSION`
+banner goes on alternating colour across games and not merely across the rounds of one.
 
 **The winning frame carries `MISSION COMPLETE` at the top and `GAME OVER` across the
 middle simultaneously** (§ 11.6). That is the only visual difference between winning the

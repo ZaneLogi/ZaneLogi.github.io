@@ -29,6 +29,7 @@ import { STRIP } from '../src/core/messages.js';
 import { ROSTER_STATUS } from '../src/core/spawners.js';
 import { PLAYER_BOUNDS } from '../src/core/player.js';
 import { TYPE } from '../src/core/types.js';
+import { START_KEY } from '../src/core/input.js';
 
 mount('design_spec Chapter 11 — the round lifecycle, with Chapter 16', run);
 
@@ -39,6 +40,7 @@ mount('design_spec Chapter 11 — the round lifecycle, with Chapter 16', run);
 function run(list) {
   setup(list);
   guards(list);
+  banners(list);
   exitAndDrain(list);
   outro(list);
   drain(list);
@@ -238,6 +240,54 @@ function guards(list) {
  * @param {import('./harness.js').CheckList} list
  * @returns {void}
  */
+function banners(list) {
+  list.section('§ 19.10.3 — one banner at a time, across missions and across games');
+
+  const s = new Session();
+  s.startDemo();
+  let pending = null;
+  s.keys = { read: () => { const k = pending; pending = null; return k; } };
+
+  const shown = () => s.messages.stack.map((m) => m.strip).join(' + ');
+  let maxDepth = 0;
+  const banners = [];
+  let lastMission = -1;
+
+  for (let t = 1; t <= 3000; t++) {
+    pending = (s.isTitleScreen && t >= 60) ? START_KEY : null;
+    tick(s);
+    if (s.phase === PHASE.PLAY) s.killCounter = 0;      // clear each mission at once
+    maxDepth = Math.max(maxDepth, s.messages.stack.length);
+    if (s.phase === PHASE.PLAY && s.mission !== lastMission) {
+      banners.push(shown());
+      lastMission = s.mission;
+    }
+  }
+
+  // **The defect this pins.** The stack gets two posts per cleared round -- the
+  // MISSION banner at setup and MISSION COMPLETE at the outro -- so it needs two
+  // removals. With only one, the next setup pops MISSION COMPLETE, leaves the
+  // old banner in place and posts the new one on top: MISSION ONE and MISSION
+  // TWO drawn over each other on the same seven rows, one more every mission.
+  list.eq('exactly one MISSION banner is posted while a round is being played',
+    banners.every((b) => b === STRIP.MISSION) ? 'always one' : banners.join(' | '),
+    'always one');
+
+  // Two is correct and is the ceiling: the winning frame carries MISSION and
+  // MISSION COMPLETE together (§ 19.10.3), and nothing else ever stacks.
+  list.eq('the stack never grows past two, over ' + banners.length + ' rounds and several games',
+    maxDepth, 2,
+    (v) => v + ' — MISSION plus MISSION COMPLETE on the winning frame, and ' +
+      'never a third');
+
+  // And the title screen is a rebuilt screen: nothing posted outlives a game.
+  while (!s.isTitleScreen) tick(s);
+  list.eq('returning to the title leaves nothing posted',
+    s.messages.stack.length, 0,
+    (v) => v + ' — otherwise a MISSION banner outlives its game and is drawn ' +
+      'over the demo, one more each time a game ends');
+}
+
 function exitAndDrain(list) {
   list.section('§ 11.3, § 11.4 — the player leaves, and the drain can then end early');
 
