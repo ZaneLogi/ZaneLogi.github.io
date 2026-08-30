@@ -2310,14 +2310,28 @@ Status has three values: **available**, **in-flight** (set at spawn), and **sunk
 (stamped by the collision response, Chapter 14). All ten are reset to available at the
 start of every mission, alongside the kill counter (§ 8.5).
 
+**A ship that sails past returns its record to the pool.** The removal path reads the
+roster slot back off the ship and frees the record **only if it is still in-flight** — a
+sunk record carries the retired mark and is left alone. So there is a fourth transition,
+*in-flight → available on escape*, and it is the one that makes escapes survivable:
+
+- Ten records against a quota of ten with **no** way back would mean a single ship
+  crossing safely made the mission unwinnable.
+- Worse, once ten had gone by the cursor would find nothing available ever again, and
+  **no merchant would spawn for the rest of the mission** — an empty sea with a quota
+  that cannot be met.
+
+**Letting them escape costs time, and only time.** That is the whole of the penalty:
+merchant traffic thins as records sit in flight, and thickens again as they cross.
+
 ## 12.6 Normative and free — summary
 
 **Normative:** the spawner order · the common shape · the blocked-spawn rule of § 12.2 ·
 every value in § 12.3 including the first-spawn ticks · the supply submarine's two
 exceptions · **all three draws of § 12.4, their order, and the side draw not being taken
 at all on the right-only rungs** · the roster, its ten records and four
-hues, the cursor's advance on failure, and the interval consumed by an unavailable
-record.
+hues, the cursor's advance on failure, the interval consumed by an unavailable record,
+and **an escaped ship returning its record to the pool while a sunk one does not**.
 
 **Free:** how the roster and cooldowns are stored.
 

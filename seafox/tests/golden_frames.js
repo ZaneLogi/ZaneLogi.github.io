@@ -41,6 +41,20 @@
 //          a difference vertically.
 //   hist   lit bytes per palette index.
 
+// REGENERATED TWICE, both times deliberately and both times with the reason
+// established BEFORE the numbers were touched:
+//
+//   1. The payload's own response now removes it when the player collects it or
+//      the clam eats it ($75CB), instead of only clearing the convoy flag.
+//   2. Ships no longer sink ships ($7572): merchants spawn three-deep at X 0-1
+//      and were destroying each other on arrival, retiring roster records that
+//      never recycle until the sea emptied.
+//
+// Both were verified against the ROM and by mutation first. The early ticks
+// barely move -- nothing differs until the first merchant pile-up or clam --
+// and from that event on one different entity re-orders the array
+// (swap-with-last, § 4.6) and the deterministic demo diverges for good.
+
 export const GOLDEN_TICKS = [1, 2, 60, 300, 1200, 3000, 6000];
 
 export const GOLDEN = {
@@ -70,20 +84,13 @@ export const GOLDEN = {
     hist: { 1: 531, 2: 210, 3: 829, 4: 239, 5: 771 },
   },
   3000: {
-    hash: '0x80e0ac0f', lit: 2362,
-    bands: [177, 252, 518, 97, 148, 115, 165, 11, 107, 0, 0, 772],
-    hist: { 1: 394, 2: 241, 3: 739, 4: 281, 5: 707 },
+    hash: '0xab3c3f12', lit: 2427,
+    bands: [229, 265, 518, 97, 148, 115, 165, 11, 107, 0, 0, 772],
+    hist: { 1: 434, 2: 261, 3: 742, 4: 281, 5: 709 },
   },
-  // Regenerated once, deliberately: the payload's own response now removes it
-  // when the player collects it or the CLAM eats it ($75CB), instead of only
-  // clearing the convoy flag. Ticks 1-3000 are unchanged, because nothing
-  // differs until a clam takes a cargo; from that event on, one fewer entity
-  // means the array compacts differently (swap-with-last, § 4.6) and the
-  // deterministic demo diverges. The change was verified against the ROM and by
-  // mutation before this line was touched.
   6000: {
-    hash: '0x4f540589', lit: 1859,
-    bands: [1, 268, 522, 0, 0, 28, 181, 87, 0, 0, 0, 772],
-    hist: { 1: 457, 2: 188, 3: 601, 4: 79, 5: 534 },
+    hash: '0xc1f0ad11', lit: 2255,
+    bands: [274, 358, 508, 43, 13, 121, 48, 118, 0, 0, 0, 772],
+    hist: { 1: 477, 2: 244, 3: 790, 4: 151, 5: 593 },
   },
 };

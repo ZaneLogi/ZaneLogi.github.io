@@ -633,16 +633,46 @@ function wholeGame(list) {
     s.resources.highScore === s.resources.score,
     'high ' + s.resources.highScore);
 
-  // The Ch.13 consequence that only becomes observable now.
+  // **The transition that keeps a mission winnable** (§ 12.5), and the one this
+  // port had backwards. A ship you let sail past returns its record to the pool;
+  // a ship you sank does not. Without it, ten escapes exhaust the roster, the
+  // cursor finds nothing available ever again, and the sea simply empties --
+  // with a quota that can no longer be met.
+  //
+  // This check previously asserted the OPPOSITE, and called it the design. It
+  // was written from § 12.5's list of three status values, which was incomplete;
+  // $82A8-$82B4 has always had the fourth.
   const s2 = inPlay();
-  s2.spawners.roster.fill(ROSTER_STATUS.IN_FLIGHT);
   s2.spawners.cooldowns.merchant = 0;
-  for (let t = 0; t < 400; t++) tick(s2);
-  list.add('an escaped merchant makes the quota unreachable -- § 12.5 has no way back',
-    s2.killCounter === 10 &&
-    s2.spawners.roster.every((r) => r !== ROSTER_STATUS.AVAILABLE),
-    'status goes available -> in-flight at spawn -> sunk by the collision ' +
-    'response, and back to available only at the start of a mission. With a ' +
-    'quota of ten against a roster of ten, every escape costs a mission. Found ' +
-    'while porting Chapter 13; only testable now that a mission runs');
+  let sawMerchant = false;
+  let escaped = 0;
+  for (let t = 0; t < 4000; t++) {
+    tick(s2);
+    for (let i = 0; i < s2.entities.liveCount; i++) {
+      const e = s2.entities.slots[i];
+      if (e.type !== TYPE.MERCHANT_SHIP) continue;
+      sawMerchant = true;
+      if (e.removalRequested) escaped += 1;
+    }
+    s2.spawners.cooldowns.merchant = 0;          // keep the belt running
+  }
+  list.add('merchants keep coming after escapes -- the sea never empties (§ 12.5)',
+    sawMerchant && s2.spawners.roster.some((r) => r === ROSTER_STATUS.AVAILABLE),
+    escaped + ' escapes seen, and ' +
+    s2.spawners.roster.filter((r) => r === ROSTER_STATUS.AVAILABLE).length +
+    ' of 10 records are back in the pool -- an escape costs time, not the mission');
+
+  // A SUNK record must NOT come back, or the quota could never empty.
+  const s3 = inPlay();
+  s3.spawners.roster.fill(ROSTER_STATUS.SUNK);
+  s3.spawners.roster[0] = ROSTER_STATUS.IN_FLIGHT;
+  const mSlot = s3.entities.alloc(TYPE.MERCHANT_SHIP);
+  const m = s3.entities.slots[mSlot];
+  m.x = 300; m.y = 10; m.sprite = 'merchant0';
+  m.updatePeriod = 7; m.updateCountdown = 1; m.scratch3 = 0;
+  s3.entities.countSpawn(TYPE.MERCHANT_SHIP);
+  for (let t = 0; t < 60; t++) tick(s3);
+  list.eq('...but a SUNK record stays retired, or the quota could never empty',
+    s3.spawners.roster.filter((r) => r === ROSTER_STATUS.SUNK).length, 9,
+    (v) => v + ' of the 9 sunk records untouched, while the escaping one came back');
 }

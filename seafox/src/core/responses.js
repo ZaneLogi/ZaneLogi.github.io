@@ -63,6 +63,24 @@ const MERCHANTS = [5, 6, 7, 9, 10, 11, 12];
 const isMerchant = (t) => MERCHANTS.indexOf(t) !== -1;
 
 /**
+ * **The ship slots, 5 to 11 -- the range the surface classes exempt.**
+ *
+ * `entry_7572` opens `CMP #$05 / BCC damage`, `CMP #$0C / BCS damage`, so a ship
+ * is harmless to types **5 through 11**: the vestigial merchant slots, the
+ * hospital ship (8) and other merchants (9). Ships do not sink ships.
+ *
+ * **The range misses type 12**, which is itself a vestigial merchant slot -- an
+ * off-by-one in the original with no consequence, because no type 12 can ever be
+ * created (§ 7.5). It is reproduced rather than tidied: the same slot IS in the
+ * vertical torpedo's own consume list, and making the two agree would be
+ * inventing a consistency the game does not have.
+ *
+ * @param {number} t
+ * @returns {boolean}
+ */
+const isShipSlot = (t) => t >= 5 && t <= 11;
+
+/**
  * Dispatch one side of a confirmed contact: **is `selfSlot` damaged by
  * `otherSlot`?**
  *
@@ -110,14 +128,29 @@ export function respond(session, selfSlot, otherSlot) {
           t === TYPE.GIANT_CLAM) harm = false;
       break;
 
+    case 5: case 6: case 7: case 10: case 11: case 12:
+    case TYPE.MERCHANT_SHIP:
+      // **Ships do not sink ships** ($7572-$757B). Without this a merchant takes
+      // the harmful default from every other surface class -- and since three of
+      // them spawn at X 0-1 on the same row within a few ticks of each other,
+      // they overlap on arrival and sink EACH OTHER on the spot.
+      //
+      // The damage path also retires the roster record and decrements the quota
+      // (§ 12.5), so the failure is not just cosmetic: the roster fills with
+      // retired records that never recycle, the cursor eventually finds nothing
+      // available, and **no merchant spawns again for the rest of the mission**.
+      // An empty sea, with a quota that was counted down by ships killing one
+      // another.
+      if (isShipSlot(t)) harm = false;
+      break;
+
     case TYPE.HOSPITAL_SHIP:
       // It exempts the vertical torpedo and the ship slots and takes damage from
       // everything else -- but **nothing else can get to row 20**. The one entity
       // that can physically reach it is the one type forbidden from harming it,
       // so this path is unreachable and its full sinking animation never plays
       // (§ 13.6.2). The handler looks protective and is not.
-      if (t === TYPE.VERTICAL_TORPEDO || isMerchant(t) ||
-          t === TYPE.HOSPITAL_SHIP) harm = false;
+      if (t === TYPE.VERTICAL_TORPEDO || isShipSlot(t)) harm = false;
       break;
 
     case TYPE.SUPPLY_SUBMARINE:

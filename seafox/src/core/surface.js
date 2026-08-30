@@ -20,6 +20,7 @@
 import { TYPE } from './types.js';
 import { wake } from './trails.js';
 import { releaseDepthCharge } from './depthcharge.js';
+import { ROSTER_STATUS } from './spawners.js';
 
 /** Periods, from § 2.7.1. Speed is step / period, never step (§ 2.7). */
 export const SURFACE_PERIOD = { merchant: 7, hospitalShip: 3, destroyer: 5 };
@@ -50,18 +51,24 @@ const DEPTH_CHARGE_RELOAD = 10;
 export function updateMerchant(session, slot) {
   const e = session.entities.slots[slot];
   if (e.removalRequested) {
-    // The roster record is deliberately NOT returned to available here.
+    // **A ship you let sail past goes back in the pool; a ship you sank does
+    // not** (§ 12.5). The removal path reads the roster slot back off the ship
+    // and frees the record **only if it is still in-flight** -- a sunk record
+    // carries the retired mark and is left alone:
     //
-    // § 12.5 gives status exactly three values and only three transitions:
-    // available -> in-flight at spawn, in-flight -> sunk by the collision
-    // response, and all ten back to available at the start of every mission.
-    // Nothing returns a record when its ship merely leaves the screen, and
-    // "ten records, a quota of ten, ONE SPAWN EACH" says so directly.
+    //     82A8  LDY $17AA,X        ; the slot this ship carries
+    //     82AB  LDA $8345,Y
+    //     82AE  CMP #$FF / BNE     ; still in flight?
+    //     82B2  LDA #$00 / STA $8345,Y
     //
-    // The consequence is severe and appears to be the design: a merchant that
-    // crosses safely is gone for the mission, so a quota of ten against a roster
-    // of ten means **every escape makes the mission unwinnable**. Returning the
-    // record here would be inventing a fourth transition to soften that.
+    // **This is what makes escapes survivable.** Ten records against a quota of
+    // ten, with no way back, would mean a single ship crossing safely made the
+    // mission unwinnable -- and, once ten had gone by, no merchant would ever
+    // spawn again, because the cursor would find nothing available. Letting them
+    // escape costs time, and only time.
+    if (session.spawners.roster[e.scratch3] === ROSTER_STATUS.IN_FLIGHT) {
+      session.spawners.roster[e.scratch3] = ROSTER_STATUS.AVAILABLE;
+    }
     session.entities.confirmRemoval(slot);
     return;
   }
