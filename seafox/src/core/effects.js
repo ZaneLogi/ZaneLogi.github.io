@@ -59,13 +59,18 @@ export const EFFECT_SPRITES = {
  * effects drift off the edges before they are reaped rather than vanishing at
  * them.
  *
- * **In WORLD x**, like the entity position every effect is seeded from -- so
- * "22 px beyond the edge" is 22 beyond § 2.3's visible span of 28-307, not 22
- * beyond the screen's own 0-279. Writing the screen numbers here would put the
- * right cull 6 px INSIDE the right edge, which is the one place it shows: the
- * debris would blink out just short of the border rather than drift over it.
+ * **These are four literal limits, not one symmetric margin** (§ 15.3). X is in
+ * WORLD coordinates, like the entity position every effect is seeded from, and
+ * against § 2.3's visible span of 28-307 the slack is 22 px on the left but
+ * **23** on the right. Deriving both from a single margin puts the right cull a
+ * pixel inside where the game puts it, and writing the SCREEN numbers instead
+ * puts it 6 px inside -- the one place it shows, debris blinking out just short
+ * of the border rather than drifting over it.
+ *
+ * All four are inclusive: an effect survives while 6 <= x <= 330 and
+ * 7 <= y <= 181.
  */
-export const EFFECT_BOUNDS = { top: 7, bottom: 181, left: 28 - 22, right: 307 + 22 };
+export const EFFECT_BOUNDS = { top: 7, bottom: 181, left: 6, right: 330 };
 
 /** One effect. Velocity and no type -- the mirror of an entity record. */
 export class Effect {
@@ -95,8 +100,9 @@ export class Effect {
     this.lifetime = 1;
     /**
      * Set at creation: the walk tests it, clears it, and **skips straight to
-     * the draw**, so an effect appears at its spawn position before it first
-     * moves (§ 15.2).
+     * the bounds test**, so an effect appears at its spawn position before it
+     * first moves -- or, born outside the rectangle, is reaped there having
+     * never been drawn (§ 15.2, § 15.3).
      * @type {boolean}
      */
     this.justCreated = false;
@@ -183,6 +189,7 @@ export class EffectList {
 /**
  * Walk the effects list once (§ 15.3), in this exact order:
  *
+ *   if just-created:           clear the flag, and jump to the bounds test
  *   stepCountdown -= 1
  *   if not yet due:            draw and return
  *   lifetime -= 1
@@ -190,6 +197,12 @@ export class EffectList {
  *   x += dx ; y += dy
  *   if outside the bounds:     die
  *   draw, and reload stepCountdown
+ *
+ * **The first visit skips the move but NOT the clip.** A new effect joins the
+ * sequence at the bounds test, so one born outside the rectangle dies there
+ * having never been drawn -- reachable, because § 15.8 throws debris up to
+ * 27 px right of the dying entity and a Destroyer killed near the right edge
+ * loses the two records that carry that offset.
  *
  * The draw is the renderer's (§ 17.2 composites effects OVER entities, because
  * this walk runs after the entity walk); nothing here produces a picture.
@@ -205,33 +218,33 @@ export function walkEffects(session) {
     const e = list.slots[cursor];
 
     if (e.justCreated) {
-      // **The first visit skips the countdown, the lifetime AND the move, and
-      // ends by LOADING the countdown from this effect's step delay** (§ 15.9).
-      // So the delay is what decides how long a mark stands, and a lifetime of 1
-      // means "stand for `stepReload` ticks, then go" rather than "blink once".
-      // That is the whole of why a torpedo has a visible trail: 31 for the
-      // vertical shot's dot, laid every 4 ticks, is eight dots behind it.
+      // **The first visit skips the countdown, the lifetime AND the move** --
+      // but it falls into the clip and the reload below, it does not bypass
+      // them (§ 15.3). The reload is why the delay, not the lifetime, decides
+      // how long a mark stands: a lifetime of 1 means "stand for `stepReload`
+      // ticks, then go" rather than "blink once", which is the whole of why a
+      // torpedo has a visible trail -- 31 for the vertical shot's dot, laid
+      // every 4 ticks, is eight dots behind it (§ 15.9).
       e.justCreated = false;
-      e.stepCountdown = e.stepReload;
-      cursor += 1;
-      continue;
+    } else {
+      e.stepCountdown -= 1;
+      if (e.stepCountdown !== 0) {
+        cursor += 1;                      // not time to step -- drawn, not moved
+        continue;
+      }
+
+      e.lifetime -= 1;
+      if (e.lifetime <= 0) {
+        list.free(cursor);                // cursor does not advance
+        continue;
+      }
+
+      e.x += e.dx;
+      e.y += e.dy;
     }
 
-    e.stepCountdown -= 1;
-    if (e.stepCountdown !== 0) {
-      cursor += 1;                        // not time to step -- drawn, not moved
-      continue;
-    }
-
-    e.lifetime -= 1;
-    if (e.lifetime <= 0) {
-      list.free(cursor);                  // cursor does not advance
-      continue;
-    }
-
-    e.x += e.dx;
-    e.y += e.dy;
-
+    // Reached by BOTH paths: a just-created effect is clipped before it is ever
+    // drawn, and dies here if it was born outside the rectangle.
     if (e.x < EFFECT_BOUNDS.left || e.x > EFFECT_BOUNDS.right ||
         e.y < EFFECT_BOUNDS.top || e.y > EFFECT_BOUNDS.bottom) {
       list.free(cursor);

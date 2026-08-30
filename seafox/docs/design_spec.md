@@ -2962,14 +2962,18 @@ An effect is fully self-describing — *move by (dx, dy) until the lifetime runs
 which is why the effects walk is one loop with **no dispatch table and no per-type code
 anywhere behind it**.
 
+**Effects never enter the stencil.** § 3.1's cells hold an *entity's* slot and § 3.3
+maintains them inside the *entity* walk, so nothing an effect draws can be collided with
+and Chapter 14 cannot see one. A trail dot is a picture and nothing else.
+
 ## 15.2 The mode byte
 
 | field | job |
 |---|---|
 | step-delay reload | the value `stepCountdown` reloads to after each step |
-| just-created | set at creation; the walk tests it, clears it, and **skips straight to the draw**, so an effect appears at its spawn position before it first moves |
+| just-created | set at creation; the walk tests it, clears it, and **skips straight to the bounds test**, so an effect appears at its spawn position before it first moves — or, born outside the rectangle, is reaped there having never been drawn (§ 15.3) |
 | sprite select | which of the four sprites (§ 15.4) |
-| **palette flip** | **the same bit as the high bit of the sprite select** |
+| **palette flip** | **one of the two sprite-select bits, reused** — so it is not independently settable |
 
 That last overlap has a consequence: **a sprite reachable only with that bit set is
 always drawn flipped.** The spark cluster and the streak are in that position; the blob
@@ -2978,6 +2982,7 @@ and the dot are never flipped.
 ## 15.3 The update
 
 ```
+if just-created:            clear the flag, and jump to the bounds test
 stepCountdown -= 1
 if stepCountdown != 0:      draw and return          # not time to step
 lifetime -= 1
@@ -2989,15 +2994,31 @@ draw, and reload stepCountdown
 
 Dying erases the effect and compacts the array by swap-with-last, exactly as § 4.6.
 
+**The first walk skips the move but not the clip.** A just-created effect joins the
+sequence above *at the bounds test*, not at the draw — so one born outside the rectangle
+dies on its first visit and is never seen, and one born inside is drawn and reloads its
+countdown like any other. This is reachable, not a corner: § 15.8 offsets debris up to
+27 px right of the dying entity, so a Destroyer killed near the right edge simply loses
+the two records that carry that offset.
+
 **The bounds rectangle is deliberately wider than the screen**, so effects drift off the
 edges before they are reaped:
 
-| edge | limit |
-|---|---:|
-| top | row 7 |
-| bottom | row 181 |
-| left | 22 px beyond the left edge |
-| right | 22 px beyond the right edge |
+| edge | limit | in screen terms |
+|---|---:|---|
+| top | row **7** | — |
+| bottom | row **181** | — |
+| left | world X **6** | 22 px beyond the left edge |
+| right | world X **330** | 23 px beyond the right edge |
+
+All four are inclusive: an effect survives while `6 ≤ x ≤ 330` and `7 ≤ y ≤ 181`, and
+dies on the walk that first puts it outside. X is the world coordinate of § 2.3 — the
+same one the effect was seeded from — and Y is the screen row.
+
+**Take these as four numbers, not as one symmetric margin.** The slack is 22 px on the
+left and **23** on the right; § 2.3's visible span ends at 307, so deriving both sides
+from a single "22 px beyond the edge" puts the right cull one pixel inside where the
+game puts it.
 
 ## 15.4 The four sprites
 
@@ -3060,7 +3081,9 @@ Two details that are easy to get backwards:
 - **A ship's wake goes off its stern, and the stern depends on direction.** The hospital
   ship and the merchants travel right, so their wake is placed 7 px to the **left**; the
   Destroyer travels left, so its wake is placed 29 px to the **right**. The right-travelling
-  ships also suppress the mark while still too close to the left edge to subtract.
+  ships also suppress the mark while still too close to the left edge to subtract: the
+  subtraction is 16-bit and the wake is skipped outright when it would borrow — that is,
+  whenever the ship's world X is below 7.
 - **A wake therefore inverts its parent's parity**, because both stern offsets are odd.
   The hospital ship and the Destroyer travel at even X, so their wakes are odd; the
   merchant roster spawns records at **both** parities (§ 12.5), so merchant wakes occur
@@ -3151,8 +3174,8 @@ The dying entity's own animation runs at period 4 (§ 2.7.1), independently.
 Every effect carries a delay of its own, and an effect does not take its first step —
 and a lifetime-1 mark therefore does not die — until that delay has run. The delay is
 set on the effect's **first walk**, not at creation: a new effect skips the countdown,
-the lifetime and the move on that first visit, is drawn, and ends it by loading the
-countdown from its own delay.
+the lifetime and the move on that first visit, is clipped (§ 15.3), drawn, and ends it
+by loading the countdown from its own delay.
 
 So a trail's length is `delay ÷ cadence` marks, and each creation site chooses its own:
 
@@ -3189,8 +3212,9 @@ predicts marks that stand for the filler value, which is not what the game does.
 
 **Normative:** effects being a separate 32-slot allocator that drops on overflow · the
 record shape and the absence of any per-effect type · the mode byte's four fields and the
-sprite-select/palette-flip overlap · the update order of § 15.3 · the bounds rectangle ·
-every creator in § 15.5 including the direction-dependent wake and the divided cadence ·
+sprite-select/palette-flip overlap · the update order of § 15.3, **including the first
+walk's clip** · the bounds rectangle's **four literal limits** · every creator in § 15.5
+including the direction-dependent wake and the divided cadence ·
 the splash's upward fan · all three trail cadences and the opposite seeding · debris
 counts from the definition table · **this system forcing no parity**, the per-creator
 parities of § 15.5, and the debris's draw-time parity choice · record 8 being a blob.

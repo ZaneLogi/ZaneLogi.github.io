@@ -122,7 +122,7 @@ function theUpdate(list) {
   s.effects.spawn({ x: 100, y: 100, dx: 3, dy: -2, sprite: 'spark', lifetime: 4 });
   const e = s.effects.slots[0];
 
-  list.add('justCreated skips straight to the draw -- it appears where it was born (§ 15.2)',
+  list.add('justCreated skips straight to the bounds test -- it appears where it was born (§ 15.2)',
     e.justCreated === true, 'set at creation');
   walkEffects(s);
   list.add('and after that first walk it has still not moved',
@@ -193,9 +193,50 @@ function theUpdate(list) {
   }
   list.add('the bounds rectangle is deliberately WIDER than the screen (§ 15.3)',
     past,
-    'rows ' + EFFECT_BOUNDS.top + '-' + EFFECT_BOUNDS.bottom + ' and 22 px past ' +
-    'each side, so effects drift off the edges before they are reaped rather ' +
-    'than vanishing at them');
+    'rows ' + EFFECT_BOUNDS.top + '-' + EFFECT_BOUNDS.bottom + ' and world x ' +
+    EFFECT_BOUNDS.left + '-' + EFFECT_BOUNDS.right + ', so effects drift off the ' +
+    'edges before they are reaped rather than vanishing at them');
+
+  // **Four literal limits, not one symmetric margin** (§ 15.3). Against § 2.3's
+  // visible span of 28-307 the slack is 22 px left and 23 right; deriving both
+  // from one margin puts the right cull a pixel inside where the game puts it.
+  list.add('and its four limits are the literal ones, asymmetric on purpose (§ 15.3)',
+    EFFECT_BOUNDS.left === 6 && EFFECT_BOUNDS.right === 330 &&
+    EFFECT_BOUNDS.top === 7 && EFFECT_BOUNDS.bottom === 181,
+    'world x ' + EFFECT_BOUNDS.left + '-' + EFFECT_BOUNDS.right + ' -- 22 px past ' +
+    'the left edge but 23 past the right');
+
+  // Inclusive: 330 survives, 331 does not.
+  const edge = quiet();
+  edge.effects.spawn({ x: 328, y: 100, dx: 2, dy: 0, sprite: 'dot', lifetime: 9 });
+  walkEffects(edge);                        // justCreated -- clipped, not moved
+  walkEffects(edge);                        // -> 330, the last surviving column
+  const onLimit = edge.effects.liveCount === 1 && edge.effects.slots[0].x === 330;
+  walkEffects(edge);                        // -> 332, past it
+  list.add('the limits are INCLUSIVE -- world x 330 lives, past it dies (§ 15.3)',
+    onLimit && edge.effects.liveCount === 0,
+    'survived at 330' + (onLimit ? '' : ' (NO)') + ', reaped beyond it');
+
+  // **The first walk skips the move but not the clip** (§ 15.3). A debris
+  // particle born outside the rectangle -- § 15.8 throws them up to 27 px right
+  // of the dying entity -- dies on its first visit, having never been drawn.
+  const born = quiet();
+  born.effects.spawn({ x: 333, y: 100, dx: -5, dy: 0, sprite: 'spark', lifetime: 5 });
+  list.eq('an effect born OUTSIDE the rectangle is allocated as usual',
+    born.effects.liveCount, 1);
+  walkEffects(born);
+  list.add('...and the FIRST walk clips it, so it is reaped never having been drawn (§ 15.3)',
+    born.effects.liveCount === 0,
+    'a Destroyer killed near the right edge loses the two burst records at X+27');
+
+  // The same first walk keeps one born INSIDE, unmoved.
+  const inside = quiet();
+  inside.effects.spawn({ x: 330, y: 100, dx: -5, dy: 0, sprite: 'spark', lifetime: 5 });
+  walkEffects(inside);
+  list.add('while one born just inside it survives that walk, unmoved',
+    inside.effects.liveCount === 1 && inside.effects.slots[0].x === 330,
+    'x ' + (inside.effects.slots[0] ? inside.effects.slots[0].x : '-') +
+    ' -- the clip runs on the first visit, the move does not');
 }
 
 // ---------------------------------------------------------------------------

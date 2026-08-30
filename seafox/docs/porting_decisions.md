@@ -377,7 +377,8 @@ The instruction path says otherwise. `sub_6000` sets bit 5 of the mode byte at c
 6059  BIT $6279            ; the new-object bit
 605C  BEQ $6067            ; not new -> DEC the step countdown
 605E  EOR $6279            ; new -> clear the bit
-6064  JMP $60E5            ; skip countdown, lifetime and move; draw, then fall into:
+6064  JMP $60E5            ; skip countdown, lifetime and move -- into the CLIP,
+                           ; which falls through to the draw and then into:
 611F  LDA $6288,X
 6122  AND #$1F
 6124  STA $6289,X          ; the step countdown, from the MODE BYTE
@@ -458,3 +459,47 @@ something other than the event the table is indexed on. Read a heading that coun
 ("three things") as a checklist with a required count. And when a test's detail string
 explains *why* a result holds, that explanation is a claim like any other: this one was
 wrong for as long as it existed, in a suite that was otherwise green.
+
+### The effects bounds rectangle — where our spec was thin, twice
+
+The third in this sequence, and the least excusable: both defects are in § 15.3, both
+were found by re-reading bytes we had **already disassembled once**, and one of them was
+introduced by the correction two sections above.
+
+**Defect 1 — a literal re-expressed as a derivation.** `$627A-$627F` are four file
+constants no instruction writes: left **6**, right **330**, bottom 181, top 7. Our
+§ 15.3 wrote the two X limits as *"22 px beyond the left edge"* and *"22 px beyond the
+right edge"* — one margin, applied symmetrically. Against § 2.3's visible span of 28-307
+that yields 6 ✓ and **329 ✗**. The ROM's slack is 22 px on the left and **23** on the
+right, and nothing makes it symmetric; the symmetry was ours. `EFFECT_BOUNDS` took the
+spec at its word and culled effects one column early.
+
+**Defect 2 — an address described by its sequel instead of its content.** The entry above
+gets the step delay right and, in the very listing that proves it, writes:
+
+```
+6064  JMP $60E5            ; skip countdown, lifetime and move; draw, then fall into:
+```
+
+`$60E5` is not the draw. **`$60E5` is the clip** — the first of the four bounds tests —
+and it falls through to the draw at `$611C` only for an effect that passes it. So a
+just-created effect is bounds-tested before it is ever drawn, and one born outside the
+rectangle is reaped on its first visit having never appeared. Our § 15.2, § 15.3 and
+§ 15.9 all said "skips straight to the draw", and `walkEffects` had no clip on that path.
+
+It is reachable, not a corner: § 15.8 offsets debris up to 27 px right of the dying
+entity, so a Destroyer killed near the right edge should lose the two records carrying
+that offset, and did not.
+
+**The lesson, and it sharpens the one above rather than repeating it.** That entry's
+lesson was *follow the branch before quoting the conclusion*. We did follow the branch —
+and then annotated its destination with **what happens after it** rather than **what is
+at it**, which is the same compression one level down. Two rules, both cheap:
+
+- **A constant is quoted, never derived.** If the source holds a number, the spec holds
+  that number. A derivation is a second claim smuggled in beside the first, and it is the
+  one nobody re-checks — § 15.3 now carries all four limits as literals and says outright
+  that they are not a symmetric margin.
+- **Annotate an address with its own instruction.** `JMP $60E5` means "go to the clip",
+  not "go and draw". Naming a jump for its eventual effect discards every step between,
+  and those steps are exactly where a port loses behaviour.
