@@ -40,6 +40,7 @@ mount('design_spec Chapter 11 — the round lifecycle, with Chapter 16', run);
 function run(list) {
   setup(list);
   guards(list);
+  theQuota(list);
   banners(list);
   exitAndDrain(list);
   outro(list);
@@ -240,6 +241,61 @@ function guards(list) {
  * @param {import('./harness.js').CheckList} list
  * @returns {void}
  */
+function theQuota(list) {
+  list.section('§ 11.2, § 12.5 — ten merchant kills end the mission');
+
+  // **The defining case, and it was broken by a fix to a neighbouring rule.**
+  // The roster stamp and the quota decrement live on the merchant's DAMAGE path.
+  // They used to sit in the response switch's `default:`, which merchants only
+  // reached because they had no case of their own -- so giving them one (ships
+  // do not sink ships, § 14.6) silently orphaned the bookkeeping and the quota
+  // stopped counting. Ten kills, and the mission never ended.
+  const s = new Session();
+  s.startDemo();
+  newGame(s);
+  for (let t = 0; t < 400 && s.phase !== PHASE.PLAY; t++) tick(s);
+  for (const k of Object.keys(s.spawners.cooldowns)) s.spawners.cooldowns[k] = 999999;
+  s.resources.fuel = 99999;                       // stay in play for the whole run
+
+  const find = (type) => {
+    for (let i = 0; i < s.entities.liveCount; i++) {
+      if (s.entities.slots[i].type === type) return s.entities.slots[i];
+    }
+    return null;
+  };
+
+  let kills = 0;
+  for (let round = 0; round < 20 && s.phase === PHASE.PLAY; round++) {
+    s.spawners.cooldowns.merchant = 0;
+    tick(s);
+    const m = find(TYPE.MERCHANT_SHIP);
+    if (!m) continue;
+    const slot = s.entities.alloc(TYPE.VERTICAL_TORPEDO);
+    const tp = s.entities.slots[slot];
+    tp.sprite = 'torpedoRising';
+    tp.updatePeriod = 1; tp.updateCountdown = 1; tp.scratch0 = -1;
+    let n = 0;
+    while (n < 8 && !(m.stateChangePending || m.dying)) {
+      tp.x = m.x; tp.y = m.y;
+      tick(s); n += 1;
+    }
+    if (m.stateChangePending || m.dying) kills += 1;
+    for (let i = 0; i < 80 && find(TYPE.MERCHANT_SHIP) && s.phase === PHASE.PLAY; i++) tick(s);
+  }
+
+  list.eq('ten merchant kills empty the quota', s.killCounter, 0,
+    (v) => v + ' left after ' + kills + ' kills');
+  list.add('...and emptying it ends the round (§ 11.2 guard 3)',
+    s.phase !== PHASE.PLAY,
+    'phase ' + s.phase + ' — the mission is complete, which is the only way to ' +
+    'advance and the thing a silent bookkeeping failure takes away');
+  list.add('every killed record is stamped sunk, and none recycles (§ 12.5)',
+    s.spawners.roster.filter((r) => r === ROSTER_STATUS.SUNK).length >= 10 ||
+    s.killCounter === 0,
+    s.spawners.roster.join('') + ' — a sunk record must never return to the pool, ' +
+    'or the quota could be met twice over');
+}
+
 function banners(list) {
   list.section('§ 19.10.3 — one banner at a time, across missions and across games');
 

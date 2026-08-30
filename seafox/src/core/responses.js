@@ -150,7 +150,16 @@ export function respond(session, selfSlot, otherSlot) {
       // available, and **no merchant spawns again for the rest of the mission**.
       // An empty sea, with a quota that was counted down by ships killing one
       // another.
+      // **The bookkeeping is on the DAMAGE path, not the contact.** `$757D`
+      // takes the exempt branch straight to the shared exit; only `$7585`
+      // onward stamps the roster and decrements the quota. A merchant brushing
+      // another merchant must do neither.
+      //
+      // This used to live in the switch's `default:`, which merchants reached
+      // only because they had no case of their own. Giving them one silently
+      // orphaned it, and the quota stopped counting.
       if (isShipSlot(t)) harm = false;
+      else merchantBookkeeping(session, self);
       break;
 
     case TYPE.HOSPITAL_SHIP:
@@ -237,8 +246,9 @@ export function respond(session, selfSlot, otherSlot) {
       break;
 
     default:
-      // The merchant slots, which have no exemptions at all -- only bookkeeping.
-      if (isMerchant(self.type)) merchantBookkeeping(session, self);
+      // Every type that can exist has a case above. A type that reached here
+      // would take the harmful default, which is § 14.5's rule and not an
+      // oversight -- but nothing does.
       break;
   }
 
