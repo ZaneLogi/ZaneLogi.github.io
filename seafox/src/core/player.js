@@ -113,7 +113,29 @@ export function updatePlayer(session, slot) {
   //    out at 254 / 506 / 758 rather than § 20.4's 256 / 510 / 764.
   const b = session.playerBounds;
   if (e.x < b.minX) { e.x = b.minX; session.input.vx = 0; }
-  if (e.x > b.maxX) { e.x = b.maxX; session.input.vx = 0; }
+  if (e.x > b.maxX) {
+    e.x = b.maxX;
+    session.input.vx = 0;
+
+    // **The RIGHT clamp is where the player leaves the game** (§ 11.3, § 13.11),
+    // and it is suspension 7 of § 10.5.2 that keeps the demo alive at the same
+    // wall. Two gates, both from `$7D84`-`$7D98`:
+    //
+    //   * not the title screen -- the demo submarine bounces off this clamp
+    //     constantly, and without the gate it would delete itself the first
+    //     time it touched the right wall;
+    //   * the round NOT live -- § 11.3 clears that flag before opening the
+    //     clamp to 306, so this fires only during the outro. In play the
+    //     clamp is an ordinary wall.
+    //
+    // Without it the submarine drives to the opened clamp and PARKS there,
+    // visible, while the drain runs -- and § 11.4's "stop once both lists are
+    // empty" can never be satisfied, so every drain takes its full 20 passes.
+    if (!session.isTitleScreen && !session.roundLive) {
+      e.removalRequested = true;
+      return;                      // `$7D9B` skips the remaining clamps too
+    }
+  }
   if (e.y < b.minY) { e.y = b.minY; session.input.vy = 0; }
   if (e.y > b.maxY) { e.y = b.maxY; session.input.vy = 0; }
 

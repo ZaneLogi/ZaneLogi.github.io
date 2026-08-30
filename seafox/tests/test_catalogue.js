@@ -22,6 +22,7 @@ import { DEFINITIONS, DEATH_FRAMES, DEATH_FRAME_PERIOD, SILENT, beginDeath }
 import { TYPE, TYPE_NAMES, CLASS } from '../src/core/types.js';
 import { spawnAvenger } from '../src/core/avenger.js';
 import { fireHorizontalTorpedo, driftFromPlayer } from '../src/core/weapons.js';
+import { runSpawners } from '../src/core/spawners.js';
 
 /**
  * § 2.7.2, verbatim. Per-axis pixels per tick -- the table gives one figure per
@@ -627,7 +628,12 @@ function quietSession(mission) {
  */
 function forceSpawn(s, key) {
   s.spawners.cooldowns[key] = 0;
-  tick(s);
+  // **Driven directly rather than through a tick.** The tick spawns only in
+  // PLAY -- the fly-in and the drain run the frame alone (§ 11.1.2, § 11.4) --
+  // and these behaviour tests deliberately sit outside a live round so that
+  // nothing ends it half-way through a measurement. The frame still runs on
+  // every later tick, so the entity is walked normally once it exists.
+  runSpawners(s);
   s.spawners.cooldowns[key] = 999999;
 }
 

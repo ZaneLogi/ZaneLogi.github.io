@@ -63,8 +63,16 @@ export function tick(session) {
   // swim in under its own steam and be driven off the screen afterwards.
   if (!advanceRound(session)) return;
 
+  // **The fly-in and the drain run the FRAME only -- they do not spawn.** The
+  // five spawners have exactly two callers, the demo loop and the play loop
+  // (`$68B2` and `$6D05`); the fly-in (`$6CB5`) and the drain (`$6DF2`) call
+  // `sub_1542` alone, which is the entity walk, the effects walk and sound.
+  //
+  // That is what makes § 11.4's early exit reachable at all: with nothing
+  // refilling the list, the drain ends when the screen clears instead of always
+  // running its full twenty passes. Spawning here also consumes generator draws
+  // (§ 5.6), so it would shift every later random decision in the game.
   if (session.phase === PHASE.PLAY) missionTick(session);
-  else runSpawners(session);                        // fly-in and drain still spawn
 
   frame(session);
 }

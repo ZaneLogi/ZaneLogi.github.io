@@ -694,3 +694,61 @@ both green, both wrong for the same structural reason: **the setup ran through a
 whose behaviour was itself under test.** Where a check depends on state a transition
 produces, produce it by running the transition, then measure -- never by assigning the
 state beforehand and assuming the transition leaves it alone.
+
+### The audit of the chapters nobody had read against the reference
+
+Chapters 12-16 and 19 had been compared against the disassembly line by line; 9, 10, 17,
+18 and 20 had not, and their tests passing was not evidence either way. Two real bugs were
+in there, both in Chapter 10-11 territory, and both **player-visible**.
+
+**1. The submarine never left.** § 11.3 opens the right clamp to 306 and clears the
+round-live flag so the player drives off the screen; § 13.11 says the player is removed on
+reaching that clamp. `player.js` clamped and zeroed the velocity and stopped there, so the
+submarine drove to the opened clamp and **parked at the edge, visible, for the whole
+drain**. `beginOutro`'s own comment said *"clearing roundLive is what lets the player's
+handler flag itself for removal on reaching the new clamp"* — describing a mechanism that
+was not there. That is the second time in two sessions a comment written from the spec was
+mistaken for the implementation of it.
+
+The gates are `$7D84`-`$7D98`, and both matter: not the title screen (suspension 7 of
+§ 10.5.2 — the demo bounces off that same wall constantly and would delete itself), and the
+round not live (so in play the clamp is an ordinary wall).
+
+**And § 10.5.2 named the wrong clamp.** Rule 7 read "the left clamp flags the entity for
+removal", inherited from `ATTRACT.md`'s row for `$7D84`. `$7D73` clamps when X *exceeds*
+the bound — it is the **right** clamp; `$7D9E` is the left one and carries no removal.
+§ 13.11 had it right all along, so the spec disagreed with itself and the implementation
+followed neither.
+
+**2. The fly-in and the drain were spawning.** `tick.js` ran the spawners in every phase
+but PLAY, with a comment saying "fly-in and drain still spawn". They do not. The five
+spawners have exactly two callers — `$68B2` (the demo loop) and `$6D05` (the play loop) —
+while the fly-in (`$6CB5`) and the drain (`$6DF2`) call `sub_1542` alone, which is the
+entity walk, the effects walk, sound and the waterline repair. No spawners in it.
+
+Three consequences, and the second is how it was noticed: new traffic arrived while the
+player was swimming in; **§ 11.4's early exit was unreachable**, because something new
+arrived every few ticks and both lists were never empty together, so every drain ran its
+full 220 ticks instead of ending when the screen cleared; and the extra spawns consumed
+generator draws, shifting every later random decision (§ 5.6). With both fixes the drain
+now ends on pass 10 rather than 20.
+
+**What the audit found in the OTHER direction is worth recording too.** The reference's
+own period table attributes period **9** to the enemy torpedo, "while it is homing", and
+period 1 to it only after the player is dead. Its *speed* table says divider 1, 3 px/frame.
+Both cannot be true. `$80E0` is `LDA #$01 / STA $17A8,Y` immediately before `LDA #$03`
+(the step) and the `$00` trail-toggle seed of § 15.7 — that is the enemy torpedo, at
+**period 1**. `$8063` sets period `$81F5` = 9 four instructions before loading `$8125` = 25,
+the mine's reload — that is the **mine**. It is the same type-4/type-19 transposition the
+reference documents having made before, surviving in one table it did not revisit. Our
+§ 13.4 and § 13.5.3 were right, and this is the third time the disassembly's *prose* has
+been wrong where its *addresses* were sound.
+
+**Chapters 17, 18 and 20 came back clean.** § 18.4 carries the queue's no-pre-emption rule,
+the lag consequence and both overflow modes exactly. Chapter 17's one divergence is
+deliberate and already covered by § 1.3: the original *repairs* a persistent framebuffer,
+repainting the waterline ten columns at a time after the entity and effect walks, so a
+sprite crossing row 38 ORs with the line and leaves a gap that heals over four frames. We
+rebuild the buffer every tick and lay the waterline down before the entities, so it is
+occluded rather than merged — § 17.2 states that order normatively. Chapter 20 has no
+reference to audit against; it is ours.

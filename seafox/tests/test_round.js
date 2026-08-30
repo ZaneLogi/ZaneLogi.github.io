@@ -28,6 +28,7 @@ import {
 import { STRIP } from '../src/core/messages.js';
 import { ROSTER_STATUS } from '../src/core/spawners.js';
 import { PLAYER_BOUNDS } from '../src/core/player.js';
+import { TYPE } from '../src/core/types.js';
 
 mount('design_spec Chapter 11 — the round lifecycle, with Chapter 16', run);
 
@@ -38,6 +39,7 @@ mount('design_spec Chapter 11 — the round lifecycle, with Chapter 16', run);
 function run(list) {
   setup(list);
   guards(list);
+  exitAndDrain(list);
   outro(list);
   drain(list);
   resources(list);
@@ -236,6 +238,51 @@ function guards(list) {
  * @param {import('./harness.js').CheckList} list
  * @returns {void}
  */
+function exitAndDrain(list) {
+  list.section('§ 11.3, § 11.4 — the player leaves, and the drain can then end early');
+
+  const s = new Session();
+  s.startDemo();
+  newGame(s);
+  for (let t = 0; t < 400 && s.phase !== PHASE.PLAY; t++) tick(s);
+
+  const player = () => {
+    for (let i = 0; i < s.entities.liveCount; i++) {
+      if (s.entities.slots[i].type === TYPE.PLAYER) return s.entities.slots[i];
+    }
+    return null;
+  };
+
+  s.killCounter = 0;                          // clear the mission -> outro
+  let n = 0;
+  while (s.phase === PHASE.PLAY && n < 3000) { tick(s); n += 1; }
+  list.add('the outro opens the right clamp off-screen and clears roundLive (§ 11.3)',
+    s.playerBounds.maxX === 306 && !s.roundLive,
+    'maxX ' + s.playerBounds.maxX);
+
+  // **The right clamp is where the player LEAVES** (§ 13.11), and it fires only
+  // because roundLive is now false. Without it the submarine drives to the
+  // opened clamp and parks there, visible, for the whole drain.
+  let removedAt = null;
+  let m = 0;
+  while (s.phase === PHASE.DRAIN && m < 1000) {
+    tick(s); m += 1;
+    if (!player() && removedAt === null) removedAt = m;
+  }
+  list.add('the submarine reaches the opened clamp and is removed there (§ 11.3)',
+    removedAt !== null, removedAt === null
+      ? 'it never left — it parked at the clamp instead'
+      : 'gone at drain tick ' + removedAt);
+
+  // **And that is what lets § 11.4 stop early.** The drain runs the FRAME only:
+  // no spawners, so nothing refills the list and both lists reach empty.
+  list.add('so the drain ends when the screen clears, not on its 20-pass cap (§ 11.4)',
+    s.drainPass < DRAIN_PASSES,
+    'ended on pass ' + s.drainPass + ' of ' + DRAIN_PASSES + ' — with spawners ' +
+    'running during the drain, something new arrives every few ticks and the ' +
+    'early exit is unreachable');
+}
+
 function outro(list) {
   list.section('§ 11.3 — the outro, and the loss hiding in the guard order');
 

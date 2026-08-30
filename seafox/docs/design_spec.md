@@ -1923,7 +1923,7 @@ demo runs forever.
 | 4 | a merchant's death frame 11 swaps in that floating value | the wreck is removed instead — a demo merchant sinks through its earlier frames and vanishes |
 | 5 | a merchant kill decrements the quota and stamps the roster | nothing counts toward a quota that is not running |
 | 6 | fuel burns | **no drain — the demo never runs dry** |
-| 7 | the left clamp flags the entity for removal | skipped |
+| 7 | **the right clamp** flags the entity for removal (§ 11.3) | skipped — the demo bounces off that wall constantly and would delete itself |
 
 **Rules 3 and 4 are a pair, and 4 is load-bearing rather than cosmetic.** Rule 3 is what
 *writes* the floating-value index and rule 4 is what *reads* it. Suspend only the first
@@ -2028,8 +2028,10 @@ asymmetry between the two paths is normative, not an oversight in the original.
 
 1. The player spawns at **X = 0** — off-screen left — with the left clamp opened from 28
    to 0 and a horizontal velocity of +2.
-2. The simulation runs normally until the player reaches X = 100: **the submarine swims
-   in from the left edge**, in view, while spawners and entities run.
+2. The entity walk runs until the player reaches X = 100: **the submarine swims in from
+   the left edge**, in view, while everything already on screen carries on.
+   **The spawners do NOT run** — the fly-in and the drain run the frame only, so nothing
+   new arrives during either, and neither consumes a generator draw (§ 5.6).
 3. **Hold.**
 4. The left clamp is restored to 28.
 
@@ -2106,8 +2108,14 @@ repeat up to 20 times:
     stop early once the entity list and the effects list are both empty
 ```
 
-So up to **220 ticks** of ordinary simulation with no input polled (§ 10.6) — which is
-what lets the player's submarine be driven off the screen while the player watches.
+**The drain runs the frame only** — the entity walk, the effects walk and sound — with
+no spawners and no input polled (§ 10.6). Both halves matter: no input is what lets the
+submarine be driven off the screen while the player watches, and **no spawning is what
+makes the early exit reachable at all.** With the spawners running, something new arrives
+every few ticks, both lists are never empty together, and every drain takes its full 20
+passes.
+
+So up to **220 ticks**, and in practice fewer.
 Afterwards both lists are cleared, both banners erased unconditionally, and the right
 clamp restored to 280.
 
