@@ -29,6 +29,10 @@ import { SCREEN_W, SCREEN_H } from '../src/core/stencil.js';
 import { COLOR } from '../src/presentation/palette.js';
 import { HUD_ROW } from '../src/presentation/hud.js';
 import { GOLDEN, GOLDEN_TICKS } from './golden_frames.js';
+import { GOLDEN_PLAY, GOLDEN_PLAY_TICKS, PLAY_TIMELINE } from './golden_play.js';
+import { START_KEY } from '../src/core/input.js';
+import { PHASE, DRAIN_PASSES } from '../src/core/round.js';
+import { FUEL_FULL, TORPEDOES_FULL } from '../src/core/resources.js';
 
 /** @type {number} bands the digest splits the screen into, for locating a diff. */
 const BANDS = 12;
@@ -82,6 +86,180 @@ function capture() {
     digests[want] = digest(frames[want]);
   }
   return { frames, digests };
+}
+
+// ---------------------------------------------------------------------------
+// § 20.5 extended -- a SCRIPTED-INPUT run
+// ---------------------------------------------------------------------------
+//
+// **The demo goldens cannot see most of the game.** The title-screen demo never
+// starts a round, so it never touches the launch sequence, the fuel burn, an
+// out-of-fuel loss, the outro, the drain, the fresh-submarine refill or the
+// fly-in. Every bug found in the Chapter 9-20 audit lived in exactly that code,
+// and the demo goldens stayed green through all of them.
+//
+// Determinism does not stop at the first input -- it stops at an input the
+// oracle cannot reproduce. A FIXED input script is as reproducible as no input
+// at all, so the whole played game comes back into reach.
+
+/** @type {number} the tick the script first presses start on. */
+const START_AT = 60;
+/** @type {number} long enough to run the tanks dry three times and end the game. */
+const PLAY_RUN = 9000;
+
+/**
+ * The script: which key is pressed on tick `t`, or null.
+ *
+ * A repeating 240-tick figure that moves on both axes and fires both weapons,
+ * chosen only to keep the submarine busy and the magazine draining. It is
+ * arbitrary -- what matters is that it is FIXED.
+ *
+ * @param {number} t
+ * @returns {?string}
+ */
+export function scriptedKey(t) {
+  if (t < START_AT) return null;
+  switch ((t - START_AT) % 240) {
+    case 0: return 'u';        // climb
+    case 60: return 'd';       // vertical torpedo
+    case 100: return 'k';      // right
+    case 140: return 'f';      // horizontal torpedo
+    case 180: return 'm';      // dive
+    case 220: return 'd';
+    default: return null;
+  }
+}
+
+/**
+ * Run the script, capturing digests at fixed ticks and every phase transition.
+ *
+ * @returns {{digests: Object, timeline: {tick: number, phase: string}[],
+ *            frames: Object, notes: Object}}
+ */
+function captureScripted() {
+  const s = new Session();
+  s.startDemo();
+
+  let pending = null;
+  s.keys = { read: () => { const k = pending; pending = null; return k; } };
+
+  // **Restart whenever the game returns to the title.** Still fully
+  // deterministic -- it is a function of deterministic state, not of a clock or
+  // a person -- and it keeps the run inside a played round instead of spending
+  // three quarters of it replaying the demo the OTHER goldens already cover.
+  const keyFor = (t) => (s.isTitleScreen && t >= START_AT ? START_KEY : scriptedKey(t));
+
+  const r = new Renderer();
+  const digests = {};
+  const frames = {};
+  const timeline = [];
+  const notes = { maxDrainPass: 0, fuelAtPlay: [], torpAtPlay: [] };
+  let last = s.phase;
+
+  for (let t = 1; t <= PLAY_RUN; t++) {
+    pending = keyFor(t);
+    tick(s);
+
+    if (s.phase !== last) {
+      timeline.push({ tick: t, phase: s.phase });
+      // Each entry into PLAY is a round start; § 11.1.1 fills both gauges on the
+      // fresh-submarine path, so these are the numbers that were wrong before.
+      if (s.phase === PHASE.PLAY) {
+        notes.fuelAtPlay.push(s.resources.fuel);
+        notes.torpAtPlay.push(s.resources.torpedoes);
+      }
+      last = s.phase;
+    }
+    if (s.phase === PHASE.DRAIN) notes.maxDrainPass = Math.max(notes.maxDrainPass, s.drainPass);
+
+    if (GOLDEN_PLAY_TICKS.indexOf(t) !== -1) {
+      r.render(s);
+      frames[t] = r.color.slice();
+      digests[t] = Object.assign(digest(frames[t]), {
+        phase: s.phase, mission: s.mission, subs: s.spareSubs,
+        fuel: s.resources.fuel, torp: s.resources.torpedoes, live: s.entities.liveCount,
+      });
+    }
+  }
+  return { digests, timeline, frames, notes };
+}
+
+/**
+ * @param {import('./harness.js').CheckList} list
+ * @returns {void}
+ */
+function scripted(list) {
+  list.section('§ 20.5 extended — a scripted-input run, which reaches the played game');
+
+  const cap = captureScripted();
+
+  // -- anchors: things the SPEC fixes, not things the past fixed -------------
+  list.add('the script reaches a played round at all',
+    cap.timeline.some((e) => e.phase === PHASE.PLAY),
+    'phases seen: ' + [...new Set(cap.timeline.map((e) => e.phase))].join(' → '));
+
+  const reached = new Set(cap.timeline.map((e) => e.phase));
+  const wanted = [PHASE.SETUP_ICONS, PHASE.SETUP_LAUNCH, PHASE.PLAY, PHASE.DRAIN];
+  const missing = wanted.filter((p) => !reached.has(p));
+  list.add('...and passes through launch, play and the drain — the demo reaches none of these',
+    missing.length === 0,
+    missing.length ? 'never reached: ' + missing.join(', ')
+      : 'every phase the title-screen goldens are blind to');
+
+  // **§ 11.1.1 step 5**, the bug the demo goldens could not see: a fresh
+  // submarine launches with FULL gauges, not the dead one's.
+  const badFuel = cap.notes.fuelAtPlay.filter((f) => f !== FUEL_FULL && f !== null);
+  list.add('every round begins with a full tank or a carried-over one, never an empty one',
+    cap.notes.fuelAtPlay.length > 0 && !cap.notes.fuelAtPlay.some((f) => f === 0),
+    'fuel at each entry to play: ' + cap.notes.fuelAtPlay.join(', ') +
+    ' — a zero here is the cascade § 11.1.1 step 5 prevents' +
+    (badFuel.length ? ' (carried-over values are the fly-in path)' : ''));
+
+  // **§ 11.4: the cap is a ceiling, never exceeded.** Note what is NOT asserted
+  // here: that a drain ends early. Reaching the cap after a death is correct --
+  // the traffic that killed you is still crossing, and a merchant at 0.29 px a
+  // tick needs far longer than 220 ticks to leave. The early exit is asserted
+  // where it is actually reachable, on a mission clear, in test_round.
+  list.add('no drain ever runs past its ' + DRAIN_PASSES + '-pass cap (§ 11.4)',
+    cap.notes.maxDrainPass <= DRAIN_PASSES,
+    'deepest pass reached: ' + cap.notes.maxDrainPass + ' of ' + DRAIN_PASSES);
+
+  const legal = new Set(Object.values(COLOR));
+  const seen = new Set();
+  for (const t of GOLDEN_PLAY_TICKS) for (const v of cap.frames[t]) seen.add(v);
+  list.add('every byte of every played frame is a legal palette index (§ 3.4)',
+    [...seen].every((v) => legal.has(v)), 'saw ' + [...seen].sort().join(', '));
+
+  // -- the timeline, which is a golden in its own right ---------------------
+  const got = cap.timeline.map((e) => e.tick + ':' + e.phase).join(' ');
+  const want = PLAY_TIMELINE.map((e) => e.tick + ':' + e.phase).join(' ');
+  list.add('the phase timeline is identical to the golden run',
+    got === want,
+    got === want
+      ? cap.timeline.length + ' transitions, ' + cap.notes.fuelAtPlay.length + ' rounds'
+      : 'CHANGED — golden:\n      ' + want + '\n      now:\n      ' + got +
+        '\n      A shifted transition is the most legible failure this page can ' +
+        'give: it names the tick a round started, ended or drained differently');
+
+  // -- the digests ----------------------------------------------------------
+  for (const t of GOLDEN_PLAY_TICKS) {
+    const g = cap.digests[t];
+    const w = GOLDEN_PLAY[t];
+    if (!w) { list.add('tick ' + t + ' has a golden', false, 'missing'); continue; }
+    const stateOk = g.phase === w.phase && g.mission === w.mission && g.subs === w.subs &&
+      g.fuel === w.fuel && g.torp === w.torp && g.live === w.live;
+    const ok = g.hash === w.hash && stateOk;
+    list.add('tick ' + t + ' matches the golden played frame',
+      ok,
+      ok ? g.hash + '  ' + g.phase + ', mission ' + g.mission + ', subs ' + g.subs +
+        ', fuel ' + g.fuel + ', torp ' + g.torp + ', ' + g.live + ' live'
+        : (g.hash !== w.hash ? w.hash + ' -> ' + g.hash + '; ' : '') +
+          'state was ' + [w.phase, 'mission ' + w.mission, 'subs ' + w.subs,
+            'fuel ' + w.fuel, 'torp ' + w.torp, w.live + ' live'].join(', ') +
+          ' | now ' + [g.phase, 'mission ' + g.mission, 'subs ' + g.subs,
+            'fuel ' + g.fuel, 'torp ' + g.torp, g.live + ' live'].join(', ') +
+          ' — ASK WHAT CHANGED before regenerating');
+  }
 }
 
 /**
@@ -248,7 +426,51 @@ export function regenerate() {
   return text;
 }
 
-if (typeof window !== 'undefined') window.seafoxRegenerateGoldens = regenerate;
+/**
+ * Print a fresh `golden_play.js` body to the console.
+ *
+ * Same rule as above: regenerate only after reading WHY the page went red. The
+ * capture ticks are chosen here rather than in the data file, so widening the
+ * sample means editing this list and regenerating.
+ *
+ * @returns {string}
+ */
+export function regeneratePlay() {
+  const Q = String.fromCharCode(39);
+  const ticks = [1, 100, 400, 1000, 2000, 2500, 3000, 4500, 6000, 7500, 9000];
+  // The capture needs the tick list before it runs, so publish it first.
+  GOLDEN_PLAY_TICKS.length = 0;
+  for (const t of ticks) GOLDEN_PLAY_TICKS.push(t);
+  const cap = captureScripted();
+
+  const lines = ['export const GOLDEN_PLAY_TICKS = [' + ticks.join(', ') + '];', '',
+    'export const GOLDEN_PLAY = {'];
+  for (const t of ticks) {
+    const d = cap.digests[t];
+    lines.push('  ' + t + ': {');
+    lines.push('    hash: ' + Q + d.hash + Q + ', lit: ' + d.lit + ',');
+    lines.push('    phase: ' + Q + d.phase + Q + ', mission: ' + d.mission +
+      ', subs: ' + d.subs + ',');
+    lines.push('    fuel: ' + d.fuel + ', torp: ' + d.torp + ', live: ' + d.live + ',');
+    lines.push('  },');
+  }
+  lines.push('};');
+  lines.push('');
+  lines.push('export const PLAY_TIMELINE = [');
+  for (const e of cap.timeline) {
+    lines.push('  { tick: ' + e.tick + ', phase: ' + Q + e.phase + Q + ' },');
+  }
+  lines.push('];');
+  const text = lines.join(String.fromCharCode(10));
+  // eslint-disable-next-line no-console
+  console.log(text);
+  return text;
+}
+
+if (typeof window !== 'undefined') {
+  window.seafoxRegenerateGoldens = regenerate;
+  window.seafoxRegeneratePlay = regeneratePlay;
+}
 
 mount('design_spec § 20.5 — Oracle 4, golden frames. Two halves: ANCHORS check ' +
   'the frame against the spec, GOLDENS check it against this port\'s own past. ' +
@@ -257,4 +479,5 @@ mount('design_spec § 20.5 — Oracle 4, golden frames. Two halves: ANCHORS chec
   anchors(list, cap);
   goldens(list, cap);
   determinism(list, cap);
+  scripted(list);
 });

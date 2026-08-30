@@ -752,3 +752,44 @@ sprite crossing row 38 ORs with the line and leaves a gap that heals over four f
 rebuild the buffer every tick and lay the waterline down before the entities, so it is
 occluded rather than merged — § 17.2 states that order normatively. Chapter 20 has no
 reference to audit against; it is ours.
+
+### Oracle 4 extended: determinism does not end at the first input
+
+The golden frames of the previous entry capture the cold-boot demo, and the demo never
+starts a round. So they never see the launch sequence, the fuel burn, a loss, the outro,
+the drain, the fresh-submarine refill or the fly-in — and **every bug the Chapter 9-20
+audit found lived in exactly that code.** All of them were caught by reading the
+disassembly; none by the oracle. A regression net with a hole that shape is worth
+enlarging before trusting it.
+
+**The fix is to notice what determinism actually requires.** § 20.5 says the game is
+deterministic "from cold boot until the first input", which reads as a hard limit and is
+not one: determinism ends at an input that cannot be *reproduced*. A fixed script is as
+reproducible as no input at all. So a second capture presses a fixed key sequence — a
+240-tick figure that moves on both axes and fires both weapons — and restarts whenever the
+game returns to the title screen, which is still a function of deterministic state rather
+than of a clock or a person. That reaches **15 played rounds across 4 complete games** in
+9000 ticks.
+
+**The phase timeline is the part worth copying.** Alongside the frame digests it records
+every phase transition and the tick it happened on. A hash says "tick 1000 differs"; the
+timeline says "the round that used to end at 435 now ends at 460, and the drain that took
+221 ticks now takes 111". That is the difference between knowing something moved and
+knowing what moved. Each digest also carries the session state at that tick — phase,
+mission, spare submarines, fuel, torpedoes, live count — checked alongside the hash, so a
+failure reads in the game's own terms.
+
+**Verified by mutation, both ways.** Re-introducing the missing fuel refill turns five
+played ticks red with the diagnosis written out — *"fuel 1190, torp 30 | now fuel 1050,
+torp 28"* — while **every demo golden stays green**, which is the hole this closes, made
+visible. Re-introducing the spawn-in-transitions bug fails the timeline first, then eight
+digests. Neither mutation is detectable by the demo run at all.
+
+**One assertion had to be weakened, and the reason is worth keeping.** The first draft
+asserted that a drain ends before its 20-pass cap. It does — after a *mission clear*. After
+a *death* the traffic that killed you is still crossing, and a merchant at 0.29 px a tick
+needs far longer than 220 ticks to leave, so reaching the cap is correct and the cap is
+doing its job. The scripted run now asserts only that the cap is never *exceeded*; the
+early exit is asserted where it is genuinely reachable, on a mission clear, in
+`test_round`. An oracle that encodes an accident of its own script as a rule is the same
+mistake as a test that uses a trajectory as a witness.

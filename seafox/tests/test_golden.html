@@ -33,8 +33,20 @@
     past</i>, and can only tell you it changed. A golden failure is a
     <b>question</b>: ask what changed and whether it was meant, and never
     regenerate to silence a red page &mdash; that promotes a bug to the
-    reference. To regenerate deliberately, see the header of
-    <code>golden_frames.js</code>.
+    reference.
+  </p>
+  <p class="sub">
+    Two runs are captured. The <b>demo</b> run is the cold boot, deterministic
+    because nothing touches it. The <b>scripted</b> run presses a fixed sequence
+    of keys and so reaches everything the demo cannot &mdash; the launch, a
+    played round, a loss, the outro, the drain and the fresh-submarine refill:
+    15 rounds across 4 games. Every bug the Chapter&nbsp;9&ndash;20 audit found
+    lived in that code, and the demo goldens stayed green through all of them.
+    Its <b>phase timeline</b> is the most diagnostic thing on this page &mdash;
+    a shifted transition names the tick a round started, ended or drained
+    differently, which a changed hash alone never would. To regenerate
+    deliberately, see the headers of <code>golden_frames.js</code> and
+    <code>golden_play.js</code>.
   </p>
   <div id="checks" class="checks">running checks&hellip;</div>
   <script type="module" src="./test_golden.js"></script>
