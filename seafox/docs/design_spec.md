@@ -2917,7 +2917,12 @@ Each call runs *that type's* response handler, and every handler's first act is 
 **the other party's type** and branch on it. This is why the responses read as
 whitelists rather than as rules about the pair.
 
-An entity already flagged as dying is skipped entirely.
+**A dying entity does not respond.** In the original the skip is per *side* rather than
+per pair — the dispatch tests the dying flag of the entity it is about to run, so a wreck
+stops having opinions while remaining a valid `other`, and the sweep itself has no flag
+test at all. **This implementation filters dying entities out of the sweep instead**,
+which is a known divergence recorded in `docs/porting_decisions.md`; its visible
+consequence is that § 14.6's rows 3 and 4 never reach their "not while dying" clause.
 
 ## 14.5 The damage flag defaults to harm
 
@@ -2938,10 +2943,10 @@ and its death animation (§ 9.4, Chapter 15).
 | 0 player | horizontal torpedo · supply submarine · dolphin · Giant Clam · **its own vertical torpedo while it is rising** | plus two gates ahead of the whitelist (§ 13.1). The payload diverts to the refuel path |
 | 1 vertical torpedo | **the player · another vertical torpedo — both only while this shot is rising** | **deflects** off the hospital ship (§ 13.6.2); consumed by ships and the Destroyer |
 | 2 horizontal torpedo | the player · another horizontal torpedo | cannot hit its own launcher |
-| 3 enemy submarine | Giant Clam · its own mine · its own torpedo | its children pass through it |
-| 4 magnetic mine | enemy submarine · another mine · Giant Clam | |
-| 5–7, 9–12 merchants | *(shared)* | score, stamp the roster, decrement the quota — **all three suspended in the demo** (§ 10.5.2) |
-| 8 hospital ship | vertical torpedo · the ship slots | **damage path unreachable** (§ 13.6.2) |
+| 3 enemy submarine | Giant Clam · **its own mine and torpedo, but only while those are not dying** | its children pass through it *alive*; a child that is exploding damages it |
+| 4 magnetic mine | Giant Clam · **enemy submarine and another mine, but only while those are not dying** | the same shape from the other side |
+| 5–7, 9–12 merchants | **the ship slots — types 5 to 11** | **ships do not sink ships.** Three merchants spawn at X 0–1 on the same row within a few ticks, so without this they overlap on arrival and destroy each other. Then: score, stamp the roster, decrement the quota — **all three suspended in the demo** (§ 10.5.2) |
+| 8 hospital ship | vertical torpedo · **the ship slots — types 5 to 11** | **damage path unreachable** (§ 13.6.2) |
 | 13 supply submarine | the player · payload · dolphin | its own convoy and its customer |
 | 14 payload | the player · Giant Clam · **the dolphin** | the dolphin branch is taken first and *also* skips the convoy-state clear (§ 16.5); every other contact clears it |
 | 15 dolphin | the player · **its own payload** | **spawns the avenger on contact with either player torpedo** — keyed to the toucher, not to the death (§ 13.9). **Its removal drops the payload** (§ 16.5.1) |
@@ -2950,6 +2955,24 @@ and its death animation (§ 9.4, Chapter 15).
 | 18 depth charge | Giant Clam | |
 | 19 enemy torpedo | enemy submarine · Giant Clam | |
 | 20 avenger | **everything, with no type test** | **indestructible** (§ 13.9) |
+
+**Two rows carry a condition the exemption column cannot hold, and it is not the same
+condition as § 14.4's.** Rows 3 and 4 exempt their partners only while **the other party
+is not dying** — the type test comes first, then a test of that entity's dying flag. So an
+exploding mine damages the submarine that laid it, and an exploding submarine damages its
+own mine. § 14.4's rule that a dying entity is skipped applies to the **subject**; this is
+a separate test on the **candidate**, and the two are easy to conflate. The enemy torpedo
+(row 19) has no such clause, which is exactly why § 13.5.4's mine-and-torpedo pair destroy
+each other.
+
+**The two "ship slot" ranges are not the same range, and the difference is real.** The
+surface classes exempt **5 to 11**, which stops one short of type 12 — itself a vestigial
+merchant slot (§ 7.5). The vertical torpedo's own consume list enumerates **5, 6, 7, 9,
+10, 11 and 12** individually, skipping 8 because the hospital ship has its own deflect
+branch ahead of it. So type 12 is consumed by a torpedo but would not be exempt from
+another ship. It is an off-by-one in the original with no consequence, since no type 12
+can be created — **reproduce it rather than tidy it**, because making the two agree
+invents a consistency the game does not have.
 
 ### 14.6.1 The launcher exemption is mutual, and has to be
 

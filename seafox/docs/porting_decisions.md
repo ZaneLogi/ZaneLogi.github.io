@@ -837,3 +837,49 @@ nothing posted left on the title screen.
 an oracle's reach is the set of states its driver actually visits, which is never the set
 of states the program has. A green golden page says "the paths I walk are unchanged", not
 "the program is unchanged", and the difference is exactly where the next defect lives.
+
+### The spec review Zane asked for, and the three holes it found
+
+The merchant bug came from a **placeholder in a table**, so the review went looking for
+the same shape: cells that defer instead of stating, and enumerations that claim a count
+the ROM exceeds.
+
+**1. `§ 14.6`, the merchant row, read `*(shared)*` where every other row lists its
+exemptions.** That is the whole bug. A reader fills a blank exemption list with the
+default, and § 14.5's default is *harm* — so merchants, which spawn three-deep at X 0-1 on
+one row, destroyed each other on arrival. The damage path also retires the roster record
+and decrements the quota, so the sea emptied of merchants while the quota counted itself
+down. `$7572` says `CMP #$05 / BCC damage`, `CMP #$0C / BCS damage`: **ships do not sink
+ships**, types 5 to 11.
+
+**2. `§ 12.5` listed three status values and the ROM has a fourth transition.**
+`$82A8-$82B4` reads the roster slot back off a departing ship and frees the record **only
+if it is still in-flight**. A ship you let sail past returns to the pool; a ship you sank
+does not. Without it, ten escapes exhaust the roster and no merchant ever spawns again —
+and our `updateMerchant` had a confident comment explaining that this was the design,
+reasoned entirely from the incomplete spec. A test asserted it too.
+
+**3. `§ 14.4`'s "a dying entity is skipped entirely" is not what the original does, and
+this one is NOT fixed.** The sweep `entry_18EC` has no flag test of any kind; only the
+dispatch skips, and `sub_19AA` tests `$16AE,X` — the flags of the side being dispatched.
+So a wreck stops *responding* while remaining a valid `other`. That is what gives § 14.6's
+rows 3 and 4 their teeth: the enemy submarine and the mine exempt their partners **only
+while those are not dying**, a clause that can only bite if dying entities are still swept.
+
+Rows 3 and 4 now carry the clause; the sweep still filters dying candidates, so the clause
+is currently unreachable. **Removing the filter was tried and reverted**: it fails eight
+spawner assertions and several others, because wrecks carry a re-anchored and larger death
+sprite and begin killing their neighbours. Whether that cascade is faithful or an artefact
+of some other difference is a piece of work in its own right, and landing a core-mechanism
+change on inference at the end of a session is exactly the trade "scale rigor to
+reversibility" warns about. It is recorded here, in § 14.4, and in a comment at the filter
+itself rather than left silent.
+
+**The pattern worth extracting.** All three holes are the same failure in different
+clothes: **a spec that summarises a table loses the cell that had nothing quotable in
+it.** `*(shared)*` was written because the merchant's exemptions were "the same as the
+others"; the fourth status transition was written nowhere because it lives in a removal
+path rather than in the status table; § 14.4's skip was compressed from "the dispatched
+side" to "the entity". Each time, the compression was reasonable and each time it dropped
+the thing that mattered. When a row defers to another row, expand it; when a table has a
+column that could be empty, ask what the ROM puts there.

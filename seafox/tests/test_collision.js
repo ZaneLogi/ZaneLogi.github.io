@@ -49,6 +49,7 @@ function run(list) {
   theBox(list);
   theConfirm(list);
   theTable(list);
+  shipsAndDyingPartners(list);
   theLauncherExemption(list);
   theDolphin(list);
   theUnlocked(list);
@@ -504,6 +505,49 @@ function theDolphin(list) {
  * @param {import('./harness.js').CheckList} list
  * @returns {void}
  */
+/**
+ * Two conditions the exemption column of § 14.6 cannot express, both found by
+ * reading the handlers rather than the table.
+ *
+ * @param {import('./harness.js').CheckList} list
+ * @returns {void}
+ */
+function shipsAndDyingPartners(list) {
+  list.section('§ 14.6 — ships do not sink ships, and a dying partner is no partner');
+
+  // **Ships do not sink ships** ($7572). Three merchants spawn at X 0-1 on one
+  // row within a few ticks of each other, so without this they overlap on
+  // arrival and destroy each other -- retiring roster records that never
+  // recycle, until no merchant spawns again at all (§ 12.5).
+  const mm = collide(TYPE.MERCHANT_SHIP, TYPE.MERCHANT_SHIP);
+  list.add('two merchants overlapping do not sink each other (§ 14.6)',
+    !damaged(mm.a) && !damaged(mm.b),
+    'the belt spawns them on top of one another; the sea would empty otherwise');
+
+  const mh = collide(TYPE.MERCHANT_SHIP, TYPE.HOSPITAL_SHIP);
+  list.add('nor does the hospital ship sink a merchant — the range is types 5 to 11',
+    !damaged(mh.a) && !damaged(mh.b), 'both surface classes exempt the ship slots');
+
+  // **But only while alive.** Rows 3 and 4 test the OTHER party's dying flag
+  // after the type test, so a child that is exploding damages its own parent.
+  // This is not § 14.4's rule, which skips a dying SUBJECT.
+  for (const [self, partner] of [
+    [TYPE.ENEMY_SUBMARINE, TYPE.MAGNETIC_MINE],
+    [TYPE.MAGNETIC_MINE, TYPE.ENEMY_SUBMARINE],
+  ]) {
+    const alive = collide(self, partner);
+    list.add(TYPE_NAMES[self] + ' passes through a LIVE ' + TYPE_NAMES[partner] + ' (§ 14.6)',
+      !damaged(alive.a) && !damaged(alive.b), 'its own kind, unharmed');
+
+    // The other half of the rule -- that a DYING partner damages it -- is not
+    // asserted here, because this port cannot currently reach it: § 14.4 filters
+    // dying entities out of the sweep, so the clause never fires. The divergence
+    // and the ROM evidence are recorded in docs/porting_decisions.md; when the
+    // sweep is corrected, the assertion to add is `damaged(a)` after starting a
+    // real death on the partner with `beginDeath`.
+  }
+}
+
 function theLauncherExemption(list) {
   list.section('§ 14.6.1 — firing while ascending');
 

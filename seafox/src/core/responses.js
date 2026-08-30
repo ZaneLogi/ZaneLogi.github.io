@@ -118,14 +118,23 @@ export function respond(session, selfSlot, otherSlot) {
       break;
 
     case TYPE.ENEMY_SUBMARINE:
-      // Its own children pass through it.
-      if (t === TYPE.GIANT_CLAM || t === TYPE.MAGNETIC_MINE ||
-          t === TYPE.ENEMY_TORPEDO) harm = false;
+      // **Its own children pass through it -- but only while they are alive.**
+      // The clam is exempt unconditionally; the mine and the torpedo are exempt
+      // only while NOT dying, so a child that is exploding damages the submarine
+      // that launched it ($7521-$752F: the type test, then `BIT $16A0` on the
+      // OTHER party's dying bit).
+      if (t === TYPE.GIANT_CLAM) harm = false;
+      else if ((t === TYPE.MAGNETIC_MINE || t === TYPE.ENEMY_TORPEDO) &&
+               !other.dying) harm = false;
       break;
 
     case TYPE.MAGNETIC_MINE:
-      if (t === TYPE.ENEMY_SUBMARINE || t === TYPE.MAGNETIC_MINE ||
-          t === TYPE.GIANT_CLAM) harm = false;
+      // The same shape from the other side ($753C-$7551), and the same reason:
+      // a dying submarine or a dying mine is no longer a friend. Only the clam
+      // is unconditional.
+      if (t === TYPE.GIANT_CLAM) harm = false;
+      else if ((t === TYPE.ENEMY_SUBMARINE || t === TYPE.MAGNETIC_MINE) &&
+               !other.dying) harm = false;
       break;
 
     case 5: case 6: case 7: case 10: case 11: case 12:

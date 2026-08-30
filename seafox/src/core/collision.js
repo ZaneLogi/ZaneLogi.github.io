@@ -79,7 +79,11 @@ export function runCollision(session, subjectSlot) {
   const el = session.entities;
   const subject = el.slots[subjectSlot];
 
-  // § 14.4: an entity already flagged as dying is skipped entirely.
+  // § 14.4: a dying entity does not RESPOND. `sub_19AA` tests the dying bit of
+  // the entity it is dispatching -- `LDA $16AE,X / BIT $16A0 / BNE` -- so the
+  // skip is per SIDE, not per pair. Ending this sweep early is the same thing
+  // net: the other party still meets it from its own sweep, where the dying one
+  // is the candidate.
   if (subject.dying || subject.removalConfirmed) return;
 
   const subjectBox = boxOf(subject);
@@ -91,6 +95,18 @@ export function runCollision(session, subjectSlot) {
   for (let i = 0; i < el.liveCount; i++) {
     if (i === subjectSlot) continue;
     const candidate = el.slots[i];
+    // **KNOWN DIVERGENCE, deliberately left in place** -- see
+    // docs/porting_decisions.md, "the dying candidate". The original's sweep
+    // (`entry_18EC`) has no flag test of any kind, and only the dispatch skips,
+    // and only the side being dispatched (`sub_19AA`: `LDA $16AE,X / BIT $16A0`).
+    // So in the original a wreck stays a valid `other` until its slot is freed,
+    // which is what gives § 14.6's rows 3 and 4 their "not while dying" clause
+    // something to bite on. Here that clause is currently unreachable.
+    //
+    // Removing this filter was tried and reverted: it changes gameplay widely
+    // (wrecks carry a re-anchored, larger death sprite and begin killing their
+    // neighbours), and validating that is a piece of work in its own right
+    // rather than a one-line correction.
     if (candidate.dying || candidate.removalConfirmed) continue;
 
     const candidateBox = boxOf(candidate);
