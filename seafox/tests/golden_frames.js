@@ -74,9 +74,16 @@ export const GOLDEN = {
     bands: [177, 252, 518, 97, 148, 115, 165, 11, 107, 0, 0, 772],
     hist: { 1: 394, 2: 241, 3: 739, 4: 281, 5: 707 },
   },
+  // Regenerated once, deliberately: the payload's own response now removes it
+  // when the player collects it or the CLAM eats it ($75CB), instead of only
+  // clearing the convoy flag. Ticks 1-3000 are unchanged, because nothing
+  // differs until a clam takes a cargo; from that event on, one fewer entity
+  // means the array compacts differently (swap-with-last, § 4.6) and the
+  // deterministic demo diverges. The change was verified against the ROM and by
+  // mutation before this line was touched.
   6000: {
-    hash: '0x21a28fda', lit: 2024,
-    bands: [1, 266, 511, 4, 287, 44, 52, 87, 0, 0, 0, 772],
-    hist: { 1: 458, 2: 187, 3: 710, 4: 108, 5: 561 },
+    hash: '0x4f540589', lit: 1859,
+    bands: [1, 268, 522, 0, 0, 28, 181, 87, 0, 0, 0, 772],
+    hist: { 1: 457, 2: 188, 3: 601, 4: 79, 5: 534 },
   },
 };

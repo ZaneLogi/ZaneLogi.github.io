@@ -136,7 +136,20 @@ export function respond(session, selfSlot, otherSlot) {
       // survives, and the escort cannot hurt what it is carrying.
       if (t === TYPE.DOLPHIN) { harm = false; break; }
       session.convoy.live = false;
-      if (t === TYPE.PLAYER || t === TYPE.GIANT_CLAM) harm = false;
+      if (t === TYPE.PLAYER || t === TYPE.GIANT_CLAM) {
+        // **Collected or eaten, it removes ITSELF** -- no score, no death
+        // frames, no debris: it simply vanishes, as the gauges refill or the
+        // shell closes ($75CB raises the removal flag before $75D4 declines the
+        // damage). Clearing the convoy flag is NOT enough on its own.
+        //
+        // Without this the entity outlives the run it belonged to and keeps
+        // reading the shared block, so it goes on drifting after it has been
+        // taken -- floating up at the release velocity, or sinking at +4 if the
+        // dolphin had already been shot (§ 16.5.1). That is the visible symptom:
+        // a cargo that was collected or eaten and is still on screen, moving.
+        self.removalRequested = true;
+        harm = false;
+      }
       break;
 
     case TYPE.DOLPHIN:
@@ -256,9 +269,14 @@ function playerIsHarmedBy(session, other, otherSlot) {
  * @returns {void}
  */
 function refuel(session, payload, payloadSlot) {
-  // Guarded against a payload that is already dying, so it cannot be collected
-  // twice.
-  if (payload.dying || payload.stateChangePending || payload.removalRequested) return;
+  // **Guarded against a payload that is already DYING -- not against one that is
+  // merely flagged for removal.** The two are different bits in the original
+  // ($16A0 = $02 for the guard, $16A1 = $04 for the removal flag), and the
+  // distinction is load-bearing here: the payload's own response raises the
+  // removal flag on this very contact, and the sweep may run that side first
+  // (§ 14.4 dispatches both ways). Testing the removal flag as well would let
+  // the ordering decide whether the tanks actually refill.
+  if (payload.dying || payload.stateChangePending) return;
 
   session.resources.refill();
   session.convoy.live = false;

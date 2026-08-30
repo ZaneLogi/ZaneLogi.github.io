@@ -3348,7 +3348,16 @@ miss vertically, so the only question is whether it arrives before the player do
 
 The payload's own collision response clears the shared "a payload exists" flag on any
 contact except with the dolphin — which is what ends the convoy whether the player
-collected it, the clam ate it, or it was destroyed. **That same dolphin branch also makes
+collected it, the clam ate it, or it was destroyed.
+
+**Ending the convoy is not the same as removing the cargo, and being taken does both.**
+On contact with **the player or the Giant Clam** the payload also raises its own removal
+flag and vanishes — no score, no death frames, no debris — before declining the damage.
+Clearing the flag alone leaves the entity alive and still reading the shared block, so a
+cargo that has been collected or eaten goes on drifting: floating up at the release
+velocity, or sinking at 4 px per tick if the dolphin had already been shot (§ 16.5.1).
+Anything *else* that touches it takes the damaging fall-through instead and it dies
+properly, which is the one case that does play frames. **That same dolphin branch also makes
 the contact harmless**, so the escort can touch what it carries without either ending the
 run or destroying it.
 

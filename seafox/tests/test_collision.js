@@ -67,6 +67,19 @@ function run(list) {
  * @param {number} [mission]
  * @returns {Session}
  */
+/**
+ * The first live entity of `type`, or null.
+ * @param {Object} s
+ * @param {number} type
+ * @returns {?Object}
+ */
+function findType(s, type) {
+  for (let i = 0; i < s.entities.liveCount; i++) {
+    if (s.entities.slots[i].type === type) return s.entities.slots[i];
+  }
+  return null;
+}
+
 function stage(mission = 3) {
   const s = new Session();
   s.startDemo();
@@ -394,6 +407,85 @@ function theDolphin(list) {
     damaged(payload) && conv.x === 150,
     'destroyed after ' + ticks + ' ticks, having never moved horizontally again -- ' +
     'about half a second from the ceiling to row 175');
+
+  // -- taken, and therefore GONE (§ 16.5) -----------------------------------
+  //
+  // **Ending the convoy is not the same as removing the cargo**, and the payload
+  // has to do both: `$75B8` clears the shared flag, then `$75CB` raises its own
+  // removal flag before `$75D4` declines the damage. Clearing only the flag
+  // leaves the entity alive, still reading the shared block, so it goes on
+  // drifting after it has been taken -- floating up at the release velocity, or
+  // sinking at +4 if the dolphin had already been shot.
+  //
+  // The clam is the case that shows it: the player's own refuel branch removes
+  // the payload by another route, so a port missing this looks correct every
+  // time YOU collect it and wrong every time the clam gets there first.
+  for (const taker of [TYPE.GIANT_CLAM, TYPE.PLAYER]) {
+    const g = stage();
+    const gc = g.convoy;
+    gc.live = true;
+    gc.x = 150; gc.y = 120; gc.dx = 2; gc.dy = -2;   // released and rising
+    place(g, TYPE.PAYLOAD, gc.x, gc.y);
+    if (taker === TYPE.PLAYER) {
+      const pl = g.entities.slots[g.playerSlot];
+      pl.x = gc.x; pl.y = gc.y;
+    } else {
+      place(g, taker, gc.x, gc.y);
+    }
+
+    const startY = gc.y;
+    let goneAt = null;
+    for (let i = 1; i <= 20 && goneAt === null; i++) {
+      if (taker === TYPE.PLAYER) {
+        const pl = g.entities.slots[g.playerSlot];
+        pl.x = gc.x; pl.y = gc.y;
+      }
+      tick(g);
+      if (findType(g, TYPE.PAYLOAD) === null) goneAt = i;
+    }
+    list.add('the ' + TYPE_NAMES[taker] + ' taking the cargo REMOVES it, not just the convoy flag (§ 16.5)',
+      goneAt !== null && !gc.live,
+      goneAt === null
+        ? 'STILL ON SCREEN after 20 ticks, drifting to row ' + gc.y + ' from ' + startY +
+          ' — the convoy ended but the cargo did not'
+        : 'gone on tick ' + goneAt + ', having drifted ' + (gc.y - startY) + ' rows');
+  }
+
+  // -- the same thing, reached by an ACTUAL KILL -----------------------------
+  //
+  // **The check above sets `removalRequested` by hand**, which tests the drop
+  // but not the route to it: a shot sets the state-change flag, the walk turns
+  // that into a death, and only then does the removal handoff run. A drop that
+  // works when the flag is planted and not when the dolphin is shot would pass
+  // that check and fail the game -- the cargo would keep RISING as though
+  // nothing had happened.
+  //
+  // Run for both killers, because § 14.6 row 15 branches on the toucher: a
+  // torpedo also summons the avenger, a mine does not, and the drop is supposed
+  // to be indifferent to which -- it hangs off the REMOVAL, not the death.
+  for (const killer of [TYPE.VERTICAL_TORPEDO, TYPE.MAGNETIC_MINE]) {
+    const k = stage();
+    const c = k.convoy;
+    c.live = true;
+    c.x = 150; c.y = 120; c.dx = 2; c.dy = -2;        // released and still RISING
+    const kp = place(k, TYPE.PAYLOAD, c.x, c.y);
+    place(k, TYPE.DOLPHIN, c.x - 5, c.y + 5);
+    place(k, killer, c.x - 5, c.y + 5);               // right on the escort
+
+    let n = 0;
+    while (n < 20 && findType(k, TYPE.DOLPHIN) !== null) { tick(k); n += 1; }
+    list.add('a ' + TYPE_NAMES[killer] + ' kill drops the cargo for real: dY +4, dX 0 (§ 16.5.1)',
+      k.convoy.dy === 4 && k.convoy.dx === 0,
+      'dy=' + k.convoy.dy + ' dx=' + k.convoy.dx + ' after ' + n + ' ticks — ' +
+      (k.convoy.dy === -2 ? 'STILL RISING: the removal handoff never ran' : 'dropped'));
+
+    const before = k.convoy.y;
+    for (let i = 0; i < 4 && k.entities.slots[kp].type === TYPE.PAYLOAD; i++) tick(k);
+    list.add('...and the cargo is then observably SINKING, not rising',
+      k.convoy.y > before,
+      'row ' + before + ' -> ' + k.convoy.y +
+      ' — the visible symptom of a missed drop is a payload that carries on up');
+  }
 }
 
 // ---------------------------------------------------------------------------
