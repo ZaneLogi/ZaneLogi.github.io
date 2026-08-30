@@ -41,13 +41,25 @@ session.sound.sink = (pair) => speaker.tick(pair);
 
 keyboard.attach();
 
-// **The AudioContext can only start from a user gesture**, so the first key the
-// player presses does double duty: it is that gesture as well as ordinary input.
-// It costs the player no extra step, which is why there is no sound button here.
-keyboard.onKey = () => {
+/**
+ * **The AudioContext can only start from a user gesture**, which is why there is
+ * no sound button: an input the player was going to make anyway does double duty.
+ *
+ * **Gamepad input does not count as a gesture**, so a keypress alone is not
+ * enough -- a player using only a controller would get a silent game. A pointer
+ * press covers them, because focusing the page is what makes the browser expose
+ * the pad in the first place.
+ *
+ * @returns {void}
+ */
+function startAudio() {
   if (!speaker.isRunning) speaker.resume();
   keyboard.onKey = null;
-};
+  window.removeEventListener('pointerdown', startAudio);
+}
+
+keyboard.onKey = startAudio;
+window.addEventListener('pointerdown', startAudio);
 
 /** @type {number} accumulated milliseconds owed to the simulation. */
 let owed = 0;

@@ -148,13 +148,17 @@ function setup(list) {
   s2.startDemo();
   newGame(s2);
   s2.replayMission = false;
-  s2.resources.fuel = 600;
-  s2.resources.torpedoes = 7;
   s2.mission = 1;
-  s2.killCounter = 0;                     // clear it, to take the advance path
-  // Drive it round to the next mission's setup.
+  // **Spend the gauges only once the first submarine is actually flying.** Its
+  // launch takes the fresh-submarine path, which fills both gauges (§ 11.1.1
+  // step 5) -- so setting them beforehand measures nothing, and a version of
+  // this test that did so passed only while that refill was missing.
   let guard = 0;
   while (s2.phase !== PHASE.PLAY && guard++ < 2000) tick(s2);
+  s2.resources.fuel = 600;
+  s2.resources.torpedoes = 7;
+  s2.killCounter = 0;                     // clear it, to take the advance path
+  // Drive it round to the next mission's setup.
   while (s2.phase === PHASE.PLAY && guard++ < 2000) tick(s2);
   while (s2.phase === PHASE.DRAIN && guard++ < 2000) tick(s2);
   list.eq('clearing a mission takes the FLY-IN path, not the icon path (§ 11.1.2)',
@@ -377,6 +381,37 @@ function drain(list) {
  */
 function resources(list) {
   list.section('Chapter 16 — score, fuel and one shared magazine');
+
+  // **§ 11.1.1 step 5: a fresh submarine gets FULL gauges, and running dry is
+  // the case that proves it.** Without the refill a submarine inherits what the
+  // last one died with, so emptying the tanks launches the next one at zero
+  // fuel, which empties on its first burn and takes every remaining spare with
+  // it. The bug is invisible until a submarine is actually lost, which is why
+  // this drives a whole loss rather than calling the setup path directly.
+  {
+    const sd = new Session();
+    sd.startDemo();
+    newGame(sd);
+    for (let t = 0; t < 400 && sd.phase !== PHASE.PLAY; t++) tick(sd);
+    const spares = sd.spareSubs;
+
+    sd.resources.torpedoes = 7;                    // spend some, visibly
+    sd.resources.fuel = 10;                        // and run the tanks down
+    let n = 0;
+    while (sd.phase === PHASE.PLAY && n < 3000) { tick(sd); n += 1; }
+    list.add('emptying the tanks ends the round and costs a submarine (§ 16.2)',
+      sd.ranDry && sd.phase !== PHASE.PLAY, 'phase ' + sd.phase);
+
+    let m = 0;
+    while (sd.phase !== PHASE.PLAY && m < 4000) { tick(sd); m += 1; }
+    list.eq('and the NEXT submarine launches with a full tank (§ 11.1.1 step 5)',
+      sd.resources.fuel, FUEL_FULL,
+      (v) => v + ' — inheriting the dead one\'s gauges cascades: it would empty ' +
+        'on its first burn and take every remaining spare down with it');
+    list.eq('...and a full magazine, because step 5 fills BOTH gauges',
+      sd.resources.torpedoes, TORPEDOES_FULL);
+    list.eq('one spare was spent getting there', sd.spareSubs, spares - 1);
+  }
 
   // The $99 sentinel only means anything in decimal.
   list.eq('an ordinary merchant scores (m + 1) x 100 (§ 7.3.1)',

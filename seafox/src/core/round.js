@@ -218,6 +218,18 @@ function finishLaunch(session) {
   // already been deducted.
   session.spareSubs -= 1;
 
+  // § 11.1.1 step 5: **fill BOTH gauges from the starting values.** This is the
+  // fresh-submarine path only -- § 11.1.2's fly-in carries fuel and torpedoes
+  // over untouched, which is why the refill lives here and not in the
+  // `finishSetup` the two paths share.
+  //
+  // Without it a submarine inherits the gauges the previous one died with, and
+  // the failure is not subtle: run the tanks dry and the next submarine
+  // launches at zero fuel, empties on its first burn, and takes every remaining
+  // spare down with it in a cascade. ($6C5C-$6C6B fills fuel from $7E19/$7E1A
+  // and torpedoes from $7E1F, immediately before the supply reload below.)
+  session.resources.refill();
+
   // **The one spawner cooldown anything ever resets** (§ 11.1.1, § 12.3): the
   // fresh-submarine path reloads the supply submarine's countdown to a full
   // 1000 immediately before the player is placed, so a new submarine always gets

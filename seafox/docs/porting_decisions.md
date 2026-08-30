@@ -660,3 +660,37 @@ what changed and whether it was meant; regenerate only after answering. Regenera
 turn a page green promotes a bug to the reference, and from then on the oracle defends it.
 Regeneration is deliberately not a button -- `seafoxRegenerateGoldens()` in the console,
 sharing the checker's own digest function so the two cannot drift.
+
+### A spec step implemented as a comment, and a test that passed because of it
+
+Zane asked whether a fresh submarine gets a full tank after the previous one ran dry. It
+did not. § 11.1.1 step 5 says the fresh-submarine path fills **both** gauges from the
+starting values, and `$6C5C-$6C6B` does exactly that -- fuel from `$7E19`/`$7E1A`,
+torpedoes from `$7E1F` -- immediately after the spare-sub icon loop and immediately before
+the supply reload and the player placement already ported around it. Our `finishLaunch`
+called neither: `refill()` had exactly two callers, `newGame` and the resupply.
+
+**The failure was not cosmetic.** A submarine inherited whatever the previous one died
+with, so emptying the tanks launched the next one at **zero fuel**, which emptied on its
+first burn, which launched the next one at zero, and so on through every spare. One bad
+round ended the game.
+
+**And the code said it did it.** The line above `spawnPlayer` read *"clear the HUD line
+again ... then fill both gauges"* -- a comment describing step 5 in full, with nothing
+under it. The comment was written from the spec while porting the surrounding steps, and
+it then read as evidence that the step was done. A comment that narrates a spec step is
+not a record that the step exists; grep for the *call*, not the sentence.
+
+**The second half is the same lesson as the avenger, one session later.** Fixing this
+turned `test_round`'s § 11.1.2 check red -- "fuel and torpedoes carry over untouched". That
+test set fuel to 600 and torpedoes to 7 **before driving the first submarine into play**,
+so the launch it passed through legitimately refilled them; the assertion could only hold
+while the refill was missing. Nothing about § 11.1.2 changed. The test now spends the
+gauges once the submarine is actually flying, which is the state it meant to describe all
+along.
+
+Two tests were written against the buggy behaviour this session, in different chapters,
+both green, both wrong for the same structural reason: **the setup ran through a code path
+whose behaviour was itself under test.** Where a check depends on state a transition
+produces, produce it by running the transition, then measure -- never by assigning the
+state beforehand and assuming the transition leaves it alone.
