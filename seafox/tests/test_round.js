@@ -26,7 +26,7 @@ import {
   FUEL_FULL, FUEL_BURN, FUEL_BURN_UPDATES, TORPEDOES_FULL,
 } from '../src/core/resources.js';
 import { STRIP } from '../src/core/messages.js';
-import { ROSTER_STATUS } from '../src/core/spawners.js';
+import { ROSTER_STATUS, KILL_QUOTA } from '../src/core/spawners.js';
 import { PLAYER_BOUNDS } from '../src/core/player.js';
 import { TYPE } from '../src/core/types.js';
 import { START_KEY } from '../src/core/input.js';
@@ -41,6 +41,7 @@ function run(list) {
   setup(list);
   guards(list);
   theQuota(list);
+  betweenRounds(list);
   banners(list);
   exitAndDrain(list);
   outro(list);
@@ -294,6 +295,131 @@ function theQuota(list) {
     s.killCounter === 0,
     s.spawners.roster.join('') + ' — a sunk record must never return to the pool, ' +
     'or the quota could be met twice over');
+
+}
+
+/**
+ * A session in a deliberately DIRTY mid-mission state -- **the fixture the whole
+ * suite was missing.**
+ *
+ * Every oracle and both golden files construct a session and run it forward from
+ * a cold boot. Cold boot IS the state a reset produces, so any code whose job is
+ * to restore that state is a no-op in all of them: it can be deleted outright and
+ * nothing goes red. Two real bugs lived exactly there -- the title screen not
+ * resetting the roster, and the list clear not sweeping in-flight records -- and
+ * neither was a weak assertion. No test ever handed those paths a dirty session.
+ *
+ * So this hands them one: merchants actually on screen with their records in
+ * flight, two records sunk, the quota part-spent and a submarine already lost.
+ * A reset is only testable by dirtying the state first and asserting what comes
+ * back -- and, just as much, what does NOT.
+ *
+ * @returns {{session: Session, step: (topUp?: boolean) => void}}
+ */
+function dirtyMission() {
+  const session = new Session();
+  session.startDemo();
+  newGame(session);
+
+  // Hold off everything that could kill the player, so the mess is built on
+  // purpose rather than by luck, and the run is deterministic.
+  const threats = new Set([TYPE.ENEMY_SUBMARINE, TYPE.MAGNETIC_MINE, TYPE.ENEMY_TORPEDO,
+    TYPE.DEPTH_CHARGE, TYPE.AVENGER, TYPE.HOSPITAL_SHIP, TYPE.GIANT_CLAM]);
+  const step = (topUp = true) => {
+    for (let i = 0; i < session.entities.liveCount; i++) {
+      const e = session.entities.slots[i];
+      if (threats.has(e.type)) e.removalRequested = true;
+    }
+    if (topUp) session.resources.fuel = 99999;
+    tick(session);
+  };
+
+  for (let i = 0; i < 400 && session.phase !== PHASE.PLAY; i++) step();
+  for (let i = 0; i < 1200; i++) step();        // merchants arrive; records go in flight
+
+  // Two kills the mission must remember, and a quota docked to match them.
+  session.spawners.roster[8] = ROSTER_STATUS.SUNK;
+  session.spawners.roster[9] = ROSTER_STATUS.SUNK;
+  session.killCounter = KILL_QUOTA - 2;
+  session.spareSubs = 2;
+  return { session, step };
+}
+
+/** @param {Session} s @returns {number} live merchants on screen. */
+function merchantsOnScreen(s) {
+  let n = 0;
+  for (let i = 0; i < s.entities.liveCount; i++) {
+    if (s.entities.slots[i].type === TYPE.MERCHANT_SHIP) n += 1;
+  }
+  return n;
+}
+
+/**
+ * The three paths that end a round, each given the same dirty session.
+ * @param {import('./harness.js').CheckList} list
+ * @returns {void}
+ */
+function betweenRounds(list) {
+  list.section('§ 4.8, § 11.4, § 12.5 — the between-rounds paths, run against a dirty session');
+
+  // ---- the fixture is actually dirty, or everything below is vacuous --------
+  const probe = dirtyMission().session;
+  const dirtyInFlight = probe.spawners.roster.filter((r) => r === ROSTER_STATUS.IN_FLIGHT).length;
+  list.add('the fixture really is dirty before any path runs',
+    dirtyInFlight > 0 && merchantsOnScreen(probe) > 0 &&
+    probe.spawners.roster.includes(ROSTER_STATUS.SUNK) && probe.killCounter < KILL_QUOTA,
+    dirtyInFlight + ' in flight, ' + merchantsOnScreen(probe) + ' on screen, roster ' +
+    probe.spawners.roster.join('') + ', quota ' + probe.killCounter +
+    ' — a fixture that is already clean would make every check below pass for free');
+
+  // ---- 1. a death: the round restarts, the MISSION does not -----------------
+  // The narrow rule ($69AF, the tail of sub_6925) plus the three things that
+  // must survive it. A death is not a mission reset: the kills you have made,
+  // the quota they bought and the mission number all carry over. Only the
+  // records whose ships the clear destroyed go back in the pool.
+  const d = dirtyMission();
+  const beforeInFlight = d.session.spawners.roster.filter((r) => r === ROSTER_STATUS.IN_FLIGHT).length;
+  d.session.resources.fuel = 0;                  // § 11.2 guard 2: the tanks are empty
+  tick(d.session);
+  for (let i = 0; i < 4000 && d.session.phase !== PHASE.PLAY; i++) d.step(false);
+
+  list.add('a death releases every in-flight record ($69AF, the tail of sub_6925)',
+    d.session.spawners.roster.every((r) => r !== ROSTER_STATUS.IN_FLIGHT),
+    d.session.spawners.roster.join('') + ' — ' + beforeInFlight + ' were in flight; a ' +
+    'record left stranded can never spawn, so it can never be sunk, so ten kills ' +
+    'against ten records is unreachable and the mission cannot be won');
+  list.add('...and leaves both sunk records sunk, the half that must NOT move',
+    d.session.spawners.roster[8] === ROSTER_STATUS.SUNK &&
+    d.session.spawners.roster[9] === ROSTER_STATUS.SUNK,
+    'releasing those instead would let the quota be met twice over');
+  list.eq('...the quota is mission progress and survives the death',
+    d.session.killCounter, KILL_QUOTA - 2);
+  list.eq('...as does the mission number — a lost submarine is not a lost mission',
+    d.session.mission, 1);
+  list.eq('...and the entity list is empty, which is what stranded them (§ 4.8)',
+    merchantsOnScreen(d.session), 0);
+
+  // ---- 2. game over: the title screen gets a clean roster -------------------
+  const g = dirtyMission();
+  g.session.gameOver = true;
+  g.session.returnToTitle();
+  list.add('returning to the title screen resets the roster ($687B -> sub_6A18)',
+    g.session.spawners.roster.every((r) => r === ROSTER_STATUS.AVAILABLE),
+    g.session.spawners.roster.join('') + ' — sunk records included, or the demo ' +
+    'inherits a played-out mission and its merchants never come back');
+  list.eq('...the cursor with it, seeded one past the last record (§ 12.5)',
+    g.session.spawners.rosterCursor, g.session.spawners.roster.length);
+  list.eq('...and the kill counter, the third write sub_6A18 makes',
+    g.session.killCounter, KILL_QUOTA);
+
+  // ---- 3. mission cleared: the same full reset, by the other caller ---------
+  const n = dirtyMission();
+  nextMission(n.session);
+  list.add('advancing a mission resets the roster ($69F9 -> sub_6A18)',
+    n.session.spawners.roster.every((r) => r === ROSTER_STATUS.AVAILABLE),
+    n.session.spawners.roster.join('') + ' — the new mission gets all ten targets back');
+  list.eq('...with its own fresh quota', n.session.killCounter, KILL_QUOTA);
+  list.eq('...and the mission counter moved exactly once (§ 10.4)', n.session.mission, 2);
 }
 
 function banners(list) {

@@ -41,7 +41,7 @@
 //          a difference vertically.
 //   hist   lit bytes per palette index.
 
-// REGENERATED TWICE, both times deliberately and both times with the reason
+// REGENERATED FOUR TIMES, every time deliberately and every time with the reason
 // established BEFORE the numbers were touched:
 //
 //   1. The payload's own response now removes it when the player collects it or
@@ -52,8 +52,16 @@
 //   3. Wrecks are collidable again ($18EC has no flag test; only the dispatch
 //      skips, and only the side it is dispatching). A dying entity keeps a
 //      re-anchored, usually larger footprint, so this changes what meets what.
+//   4. The roster cursor wraps the way $7B2E-$7B3D does rather than by modulo:
+//      eleven attempts to the cycle, record 0 named twice in a row, and the
+//      cursor seeded at 10. The doubled attempt finds record 0 in flight and
+//      spends both an interval and a generator draw, so merchant cadence AND
+//      the shared draw order shift from the second attempt onward. Measured
+//      before regenerating: record 1 moves from tick 412 to 620 -- exactly one
+//      interval -- and the wrap at 3411 is followed by two intervals of
+//      silence where there was one.
 //
-// Both were verified against the ROM and by mutation first. The early ticks
+// Each was verified against the ROM and by mutation first. The early ticks
 // barely move -- nothing differs until the first merchant pile-up or clam --
 // and from that event on one different entity re-orders the array
 // (swap-with-last, § 4.6) and the deterministic demo diverges for good.
@@ -82,18 +90,18 @@ export const GOLDEN = {
     hist: { 1: 372, 2: 198, 3: 714, 4: 96, 5: 524 },
   },
   1200: {
-    hash: '0x7ad3ea3b', lit: 2327,
-    bands: [300, 360, 514, 16, 8, 28, 135, 104, 42, 0, 48, 772],
-    hist: { 1: 531, 2: 211, 3: 735, 4: 180, 5: 670 },
+    hash: '0x349e7374', lit: 2294,
+    bands: [300, 360, 514, 17, 199, 28, 104, 0, 0, 0, 0, 772],
+    hist: { 1: 531, 2: 207, 3: 763, 4: 180, 5: 613 },
   },
   3000: {
-    hash: '0xa26c3e80', lit: 2007,
-    bands: [194, 303, 281, 0, 196, 79, 72, 6, 104, 0, 0, 772],
-    hist: { 1: 288, 2: 169, 3: 870, 4: 143, 5: 537 },
+    hash: '0xd7bc9ab2', lit: 2022,
+    bands: [190, 217, 384, 0, 146, 18, 31, 135, 129, 0, 0, 772],
+    hist: { 1: 377, 2: 242, 3: 723, 4: 107, 5: 573 },
   },
   6000: {
-    hash: '0x418d7b6e', lit: 2362,
-    bands: [195, 349, 601, 8, 219, 99, 32, 87, 0, 0, 0, 772],
-    hist: { 1: 543, 2: 262, 3: 731, 4: 129, 5: 697 },
+    hash: '0x6646134f', lit: 1857,
+    bands: [193, 324, 396, 14, 22, 1, 48, 87, 0, 0, 0, 772],
+    hist: { 1: 390, 2: 251, 3: 590, 4: 72, 5: 554 },
   },
 };

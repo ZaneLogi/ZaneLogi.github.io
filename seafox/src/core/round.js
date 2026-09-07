@@ -116,9 +116,7 @@ export function beginSetup(session) {
   session.messages.erase();
   session.messages.post(STRIP.MISSION, MISSION_NUMERALS[session.mission]);
 
-  session.entities.reset();
-  session.effects.reset();
-  session.stencil.clear();
+  session.resetLists();          // § 4.8's joint reset, sub_6925 -- sweep included
   session.convoy = createConvoyState();
   session.playerBounds = Object.assign({}, PLAYER_BOUNDS);
   session.input.vx = 0;
@@ -376,9 +374,10 @@ function drainTick(session) {
  * @returns {void}
  */
 function endDrain(session) {
-  session.entities.reset();
-  session.effects.reset();
-  session.stencil.clear();
+  // $6E0D -- the drain's own call to `sub_6925`, reached once the effect list has
+  // emptied. The sweep inside it is what stops a death stranding the roster
+  // records of whichever merchants were on screen (§ 12.5).
+  session.resetLists();
   // § 19.10.3: **MISSION COMPLETE is removed HERE, at the end of the drain** --
   // not by the next setup's erase. The MISSION banner is still underneath it and
   // must survive until that setup takes it (§ 11.1).

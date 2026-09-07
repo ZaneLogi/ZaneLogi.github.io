@@ -19,6 +19,7 @@ import { checkEntityInvariants } from '../src/core/invariants.js';
 import { Session } from '../src/core/session.js';
 import {
   runSpawners, drawDepth, SPAWNERS, MERCHANT_ROSTER, ROSTER_STATUS,
+  resetRoster, createSpawnerState,
 } from '../src/core/spawners.js';
 import { tick } from '../src/core/tick.js';
 import { LADDER, capsFor } from '../src/core/difficulty.js';
@@ -372,8 +373,11 @@ function roster(list) {
   for (let i = 0; i < session.entities.liveCount; i++) {
     if (session.entities.slots[i].type === TYPE.MERCHANT_SHIP) merchants += 1;
   }
+  // The advance wraps to 0 from the seed of 10 rather than reaching 11, so the
+  // expected value is the construct's, not `+ 1` unconditionally.
+  const expectCursor = beforeCursor === MERCHANT_ROSTER.length ? 0 : beforeCursor + 1;
   list.add('the cursor advances on a failed attempt, and no merchant spawns (§ 12.5)',
-    session.spawners.rosterCursor === beforeCursor + 1 && merchants === 0,
+    session.spawners.rosterCursor === expectCursor && merchants === 0,
     'cursor ' + beforeCursor + ' -> ' + session.spawners.rosterCursor +
     ', 0 merchants among the ' + (session.entities.liveCount - beforeLive) +
     ' creations on this tick');
@@ -381,6 +385,27 @@ function roster(list) {
     session.spawners.cooldowns.merchant >= 200,
     'cooldown reloaded to ' + session.spawners.cooldowns.merchant +
     ' — which is why merchant traffic thins out late in a mission with no rule saying so');
+
+  // § 12.5: the wrap is NOT a modulo. $7B39's `LDA #$00` reloads the value in
+  // use as well as the stored cursor, so the attempt that reads the cursor at 10
+  // names record 0 -- and the next one names it again. Driving the cursor
+  // directly is the only way to see the sequence: a live session's caps and
+  // intervals decide WHEN attempts happen, and this is about WHICH record each
+  // one takes.
+  const walked = [];
+  const cur = { roster: MERCHANT_ROSTER.map(() => ROSTER_STATUS.AVAILABLE), rosterCursor: 0 };
+  resetRoster(cur);
+  for (let i = 0; i < 13; i++) {
+    let record = cur.rosterCursor;
+    cur.rosterCursor += 1;
+    if (record === MERCHANT_ROSTER.length) { record = 0; cur.rosterCursor = 0; }
+    walked.push(record);
+  }
+  list.eq('the roster cycle is eleven attempts with record 0 doubled (§ 12.5)',
+    walked.join(''), '0012345678900');
+
+  list.eq('the cursor is seeded one past the last record, not at 0 (§ 12.5)',
+    createSpawnerState().rosterCursor, MERCHANT_ROSTER.length);
 }
 
 // ---------------------------------------------------------------------------

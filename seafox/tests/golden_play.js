@@ -33,6 +33,15 @@
 //                 the most diagnostic thing on the page: a shifted transition
 //                 names the tick a round started, ended or drained differently,
 //                 which a changed hash alone never would.
+//
+// REGENERATED ONCE, and the shape of the change was the argument for it: the
+// list clear now sweeps in-flight roster records free ($69AF, the tail of
+// sub_6925), so a merchant that was on screen when the submarine died can spawn
+// again instead of being stranded. Exactly one captured tick moved -- 1000, in
+// the DRAIN phase, where the sweep fires -- with every state field identical and
+// `live` 2 -> 3: one merchant that had been lost to the mission. The timeline
+// did not shift, and golden_frames.js did not move at all, which is right,
+// because the title demo never ends a round and so never reaches the sweep.
 
 export const GOLDEN_PLAY_TICKS = [1, 100, 400, 1000, 2000, 2500, 3000, 4500, 6000, 7500, 9000];
 
@@ -53,7 +62,7 @@ export const GOLDEN_PLAY = {
     fuel: 1050, torp: 28, live: 5,
   },
   1000: {
-    hash: '0x4704addc', lit: 1638,
+    hash: '0xb85bea1d', lit: 1638,
     phase: 'drain', mission: 1, subs: 1,
     fuel: 1120, torp: 29, live: 3,
   },
@@ -63,12 +72,12 @@ export const GOLDEN_PLAY = {
     fuel: 1150, torp: 29, live: 5,
   },
   2500: {
-    hash: '0xaada679f', lit: 1737,
+    hash: '0xc257367e', lit: 1609,
     phase: 'drain', mission: 1, subs: 2,
-    fuel: 950, torp: 27, live: 4,
+    fuel: 950, torp: 27, live: 3,
   },
   3000: {
-    hash: '0xc71b6cc4', lit: 1513,
+    hash: '0x2b3adb39', lit: 1510,
     phase: 'drain', mission: 1, subs: 1,
     fuel: 1120, torp: 29, live: 2,
   },
@@ -83,12 +92,12 @@ export const GOLDEN_PLAY = {
     fuel: 1190, torp: 30, live: 2,
   },
   7500: {
-    hash: '0x1a4c10a9', lit: 2155,
+    hash: '0x177eb8dc', lit: 2161,
     phase: 'drain', mission: 1, subs: 0,
     fuel: 830, torp: 24, live: 5,
   },
   9000: {
-    hash: '0xd901be55', lit: 1843,
+    hash: '0xbb6a3adb', lit: 1838,
     phase: 'play', mission: 1, subs: 0,
     fuel: 1100, torp: 27, live: 6,
   },

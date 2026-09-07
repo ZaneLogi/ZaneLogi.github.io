@@ -1002,3 +1002,133 @@ identical and a single byte moves from one colour to another — the enemy torpe
 tick later, so it sits on the opposite column parity and takes the other artifact hue.
 A frame that changed by one pixel's colour is the signature of a timing shift rather than
 a drawing error, and the later frames' band redistribution says the same thing at scale.
+
+### The wrap that is not a modulo, and eleven attempts to the cycle
+
+The merchant roster's cursor looked like the most ordinary thing in Chapter 12 — walk ten
+records, wrap at ten — and § 12.5 wrote it down that way, as `cursor = (cursor + 1) mod
+10`. The port implemented the specification faithfully. Both were wrong, and the shape of
+the mistake is the interesting part.
+
+```
+7B2E  LDA $8340      ; A = the cursor
+7B31  INC $8340      ; the STORED cursor moves; A still holds the value just read
+7B34  CMP $8341      ; so the test is on the OLD value, against 10
+7B37  BNE $7B3E
+7B39  LDA #$00       ; reloads the ACCUMULATOR as well as the cursor
+7B3B  STA $8340
+```
+
+The cursor is allowed to *reach* 10, and the attempt that reads it there is redirected to
+record 0 rather than skipped — `$7B39` reloads the value in use, not just the stored one.
+So the cycle is **eleven attempts long and names record 0 twice in a row**:
+`0,0,1,2,…,9`. `$6A20/$6A23` then seeds the cursor with 10 rather than 0, from the same
+byte that supplies the quota, so every mission opens on that doubled pair.
+
+**The doubled attempt is not free, and that is why this is content rather than plumbing.**
+It finds record 0 already in flight, falls into the reload, and spends both a full
+interval and a generator draw. So the construct sets merchant cadence *and* the shared
+draw order (§ 5.6) — a modulo desynchronises the LFSR from the second merchant attempt of
+the first mission onward.
+
+**What said the change was the predicted one.** Measured before the goldens were touched:
+record 1 moved from tick 412 to tick 620, exactly one interval, and the wrap at 3411 was
+followed by two intervals of silence where there had been one. Every spawn stayed at
+X = 0 or 1. Better still, the scripted-play timeline — 15 rounds across 4 games, every
+phase transition — came back **byte-identical**, and the captured `fuel`, `torp`, `subs`
+and `mission` at every sampled tick were unchanged; only frame hashes and live-entity
+counts moved. A cadence fix that left the state machine untouched is exactly the
+signature to expect, and the pair is worth being able to tell apart: had the timeline
+moved, the same red page would have meant something far worse.
+
+**The general shape, and it is the third time.** A table cell that deferred instead of
+stating; a guard that covered one clause of the branch it fronted; now a one-line
+addressing idiom whose *shape* is the behaviour. Each read as complete, and each was
+paraphrased into the specification at a level of abstraction that quietly dropped the
+part that mattered. `LDA / INC / CMP` against the pre-increment value is not
+`(x + 1) mod n`, and the difference is a whole spawn interval every eleven attempts.
+When a source construct is transcribed as a *formula*, check what the formula rounds off.
+
+### The reset the title screen also runs, and why only a played game could show it
+
+The roster reset was wired to the mission path alone. It belongs on the attract path too,
+and the original says so plainly — the routine that puts the game into attract mode is the
+one that calls it:
+
+```
+6821  ...
+682E  STA $71C1        ; = 0: this IS the "am I the title screen?" byte
+...
+687B  JSR sub_6A18     ; the same reset the mission path uses
+```
+
+`sub_6A18` makes four writes — resupply count, roster cursor, every record's status, kill
+counter — and our `startDemo` was making one of them. So a title screen entered after a
+game inherited that mission's roster, and since a **sunk** record is never recycled by
+design, the demo's merchant traffic thinned to whichever few records happened to survive
+and never recovered. Caught in a headless run that kept spawning `3 6 7 8` and nothing
+else, long after every other record had been retired.
+
+**What is worth keeping is why the test suite could not see it.** Every golden and every
+oracle starts from a cold boot, where the roster is already fresh — `createSpawnerState`
+hands out ten available records, so the missing reset is a no-op and the frames are
+identical with or without it. Confirmed after the fix: all four golden ticks and the
+whole scripted-play run were unchanged. The bug needs a roster that has been *played
+dirty first*, and nothing in the suite handed one to the title screen.
+
+That is a general gap, not a one-off. A reset is invisible to any test whose starting
+state already looks reset, so **a reset is only tested by dirtying the state first and
+asserting it comes back** — which is what the new check in `test_round.js` does, and what
+the cold-boot oracles structurally cannot. Two of this chapter's bugs have now been in
+code that runs *between* rounds rather than during one; that region is thin on coverage
+precisely because the fixtures all start there.
+
+### The sweep that makes a death survivable, and the third way to strand a record
+
+§ 12.5 is careful about one thing: a merchant that sails past returns its record to the
+pool, because ten records against a quota of ten would otherwise let a single escape make
+a mission unwinnable. The port had that. It did not have the other half.
+
+Clearing the entity list destroys the merchants on screen **without running their removal
+handler** — and that handler is the only thing that frees a roster record. So every
+merchant in flight when the submarine died kept its record forever: unable to spawn,
+therefore unable to be sunk, therefore permanently subtracted from a quota that needs all
+ten. The cap is 3, so a single death could cost three of them, and dying is not an edge
+case.
+
+The original closes it at the tail of the list clear itself:
+
+```
+69AF  LDA $8341 / ASL A x3      ; the roster length
+69B6  DEY x4 / BMI done
+69BC  LDA $8345,Y / CMP #$FF    ; in flight?
+69C3  LDA #$00 -> $8345,Y       ; -> free
+```
+
+`sub_6925` zeroes both live counts and all nine class counters and *then* does this, from
+both of its callers — `$6E0D` at the end of the drain and `$691A` on the way to attract
+mode. **Putting it inside the clear rather than beside it is the design.** Our three
+clear sites had each grown their own copy of the entity/effect/stencil trio; they now
+call one routine, the way the original has one.
+
+**Two halves, and only one of them moves.** In-flight is released; sunk stays sunk.
+Sweeping sunk records too would look like the same correction and would let the quota be
+met twice over — the same trap as widening the payload's dying guard, and it is why the
+regression test asserts a planted sunk record survives the death rather than only counting
+what was freed.
+
+**The source's loop bound is wrong, and reproducing it would be the mistake.** `$69AF`
+scales by 8 — the entity stride — where the roster's is 4, so it walks twenty slots over
+ten records, past the two unaddressable ones and into `entry_8373`'s own bytes. They read
+`16 F0 16 9D AB 16 A3 16`; none is `$FF`, so nothing is ever written and the bug has never
+fired. Porting it would mean modelling code as data to reproduce an effect that does not
+exist. The governing test settles it: the player cannot observe it, so there is nothing
+there to be faithful to.
+
+**What said the change was exactly this and nothing else.** Of eighteen captured goldens,
+one moved: played tick 1000, in the DRAIN phase, with `phase`, `mission`, `subs`, `fuel`
+and `torp` all identical and `live` 2 -> 3 — one merchant that used to be lost to the
+mission. The phase timeline did not shift, and the seven demo goldens did not move at
+all, which is the right answer rather than a lucky one: the title demo never ends a round,
+so it never reaches the sweep. A fix to the death path that moved a demo frame would have
+meant something else was going on.

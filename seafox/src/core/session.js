@@ -19,7 +19,7 @@
 import { EntityList } from './entities.js';
 import { Rng } from './rng.js';
 import { capsFor } from './difficulty.js';
-import { createSpawnerState, resetRoster, KILL_QUOTA } from './spawners.js';
+import { createSpawnerState, resetRoster, releaseInFlight, KILL_QUOTA } from './spawners.js';
 import { createDemoState } from './demo.js';
 import { createConvoyState } from './convoy.js';
 import { Stencil } from './stencil.js';
@@ -218,6 +218,25 @@ export class Session {
     this.resetLists();
     this.demo = createDemoState();
     this.convoy = createConvoyState();
+    // **The attract entry resets the roster, exactly as a new mission does.**
+    // `sub_6821` is the routine that puts the game into attract mode -- $682E
+    // stores 0 into $71C1, the byte every "is this the title screen?" test reads
+    // -- and thirteen instructions later, at $687B, it calls `sub_6A18`: the same
+    // reset the mission path uses. So all four of that routine's writes belong
+    // here, not just the resupply count:
+    //
+    //     6A1D  STA $84B0        ; resupply count = 0   (below)
+    //     6A23  STA $8340        ; roster cursor = 10   } resetRoster
+    //     6A29  ... $8345,Y = 0  ; every record free    }
+    //     6A26  STA $8342        ; kill counter = 10
+    //
+    // Without it the title screen inherits the finished mission's roster, whose
+    // records are mostly retired -- and a retired record is never recycled, so
+    // the demo's merchant traffic thins to whichever few records happened to
+    // survive and never recovers. Only a game that had actually been played
+    // could show it, which is why it outlived the cold-boot oracles.
+    resetRoster(this.spawners);
+    this.killCounter = KILL_QUOTA;
     this.resupplyCount = 0;
     this.horizontalCooldown = 0;
     this.playerBounds = Object.assign({}, PLAYER_BOUNDS);
@@ -303,5 +322,12 @@ export class Session {
     this.entities.reset();
     this.effects.reset();
     this.stencil.clear();
+    // **The roster sweep is part of the clear, not a separate step** -- $69AF is
+    // the tail of `sub_6925`, after it has zeroed both live counts and every
+    // class counter. It belongs here for the same reason those do: clearing the
+    // list destroys entities without running their removal handlers, and a
+    // merchant's handler is what returns its roster record to the pool. Leave
+    // the two apart and a death strands every record that was in flight.
+    releaseInFlight(this.spawners);
   }
 }

@@ -2289,27 +2289,45 @@ identical in both bitmap and flag — genuinely the same vessel twice. Records 2
 share a bitmap at different parity, as do 4 and 9, and appear as different-coloured
 ships. **This is what § 1.3 makes normative:** without colour the ten collapse to seven.
 
-Spawning walks a cursor:
+Spawning walks a cursor, and **it is not a modulo** — the wrap has a shape that shows:
 
 ```
-record = cursor ; cursor = (cursor + 1) mod 10
+record = cursor ; cursor = cursor + 1
+if record == 10:                            # one PAST the last record
+    record = 0 ; cursor = 0                 # this attempt names record 0
 if record.status != available:
     reload the cooldown and return          # the interval is consumed, nothing spawns
 record.status = in-flight
 ... spawn it
 ```
 
-Two consequences:
+The cursor is allowed to reach 10, and the attempt that reads it there is redirected to
+record 0 rather than skipped. **The cycle is therefore eleven attempts long and names
+record 0 twice in a row** — `0,0,1,2,…,9` — because the wrap reloads the value in use as
+well as the stored cursor. The cursor is also **seeded with 10, not 0**, at every mission
+reset (§ 8.5), from the same byte that supplies the quota, so every mission opens on that
+doubled pair.
+
+Three consequences:
 
 - **The cursor advances even on a failed attempt**, so the roster is walked in order
   regardless of which records are still available.
 - **A busy or sunk record consumes a full interval.** Late in a mission, with most of the
   roster sunk, merchant traffic thins out on its own — the last few targets arrive
   further apart with no rule saying so.
+- **The doubled attempt is one of those.** The second attempt of a mission finds record 0
+  already in flight and spends a whole interval on it, so the second merchant is one
+  interval later than a modulo would put it, and one interval is burned at every wrap
+  thereafter. It also takes a generator draw, so the shape is **load-bearing for draw
+  order** (§ 5.6), not only for cadence.
 
 Status has three values: **available**, **in-flight** (set at spawn), and **sunk**
 (stamped by the collision response, Chapter 14). All ten are reset to available at the
-start of every mission, alongside the kill counter (§ 8.5).
+start of every mission, alongside the cursor and the kill counter (§ 8.5) — one routine
+writes all three, and **entry to the title screen calls it too**. The attract demo is
+therefore not a continuation of the game that just ended: it gets a clean roster, or it
+would inherit that mission's retired records and never recycle them, and its merchant
+traffic would thin to the few survivors and stay thin.
 
 **A ship that sails past returns its record to the pool.** The removal path reads the
 roster slot back off the ship and frees the record **only if it is still in-flight** — a
@@ -2325,13 +2343,25 @@ sunk record carries the retired mark and is left alone. So there is a fourth tra
 **Letting them escape costs time, and only time.** That is the whole of the penalty:
 merchant traffic thins as records sit in flight, and thickens again as they cross.
 
+**And losing a submarine costs nothing at all, for the same reason.** Clearing the entity
+list destroys the merchants on screen *without* running the removal path above, so the
+records they carry would stay in flight for the rest of the mission. The clear therefore
+ends by sweeping every in-flight record back to available, leaving sunk ones alone — the
+death's counterpart to the escape rule, and load-bearing for the same reason: ten records
+against a quota of ten means a single stranded record makes the mission unwinnable. The
+sweep is part of the list clear, not of either reset, so it runs on every path that
+empties the list (§ 4.8, § 11.4).
+
 ## 12.6 Normative and free — summary
 
 **Normative:** the spawner order · the common shape · the blocked-spawn rule of § 12.2 ·
 every value in § 12.3 including the first-spawn ticks · the supply submarine's two
 exceptions · **all three draws of § 12.4, their order, and the side draw not being taken
 at all on the right-only rungs** · the roster, its ten records and four
-hues, the cursor's advance on failure, the interval consumed by an unavailable record,
+hues, the cursor's advance on failure, **the eleven-attempt cycle with its doubled
+record 0 and the cursor's seed of 10**, the interval consumed by an unavailable record,
+**the reset happening on entry to the title screen as well as at a mission start**,
+**the list clear sweeping in-flight records free while leaving sunk ones sunk**,
 and **an escaped ship returning its record to the pool while a sunk one does not**.
 
 **Free:** how the roster and cooldowns are stored.

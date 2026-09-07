@@ -127,7 +127,7 @@ export function createSpawnerState() {
   return {
     cooldowns,
     roster: MERCHANT_ROSTER.map(() => ROSTER_STATUS.AVAILABLE),
-    rosterCursor: 0,
+    rosterCursor: MERCHANT_ROSTER.length,
   };
 }
 
@@ -139,7 +139,44 @@ export function createSpawnerState() {
  */
 export function resetRoster(state) {
   for (let i = 0; i < state.roster.length; i++) state.roster[i] = ROSTER_STATUS.AVAILABLE;
-  state.rosterCursor = 0;
+  // **Seeded with the roster LENGTH, not zero** -- $6A20/$6A23 is `LDA $8341 /
+  // STA $8340`, the same byte that supplies the quota. The cursor therefore
+  // starts one past the end, on the value that trips the wrap below, so every
+  // mission opens on the doubled record-0 pair.
+  state.rosterCursor = MERCHANT_ROSTER.length;
+}
+
+/**
+ * Release every **in-flight** record back to the pool, leaving sunk ones alone
+ * (§ 12.5). This is the tail of the list clear, not a reset of its own:
+ *
+ *     69AF  LDA $8341 / ASL A x3      ; the roster length
+ *     69B6  DEY x4 / BMI done
+ *     69BC  LDA $8345,Y / CMP #$FF    ; in flight?
+ *     69C3  LDA #$00 -> $8345,Y       ; -> free
+ *
+ * **It is what makes a death survivable, exactly as the escape path makes a
+ * crossing survivable.** Clearing the entity list destroys the merchants on
+ * screen without running their removal handler, so the records they carry would
+ * otherwise stay in-flight for the rest of the mission -- unable to spawn, and
+ * therefore unable to be sunk. Ten records against a quota of ten means even one
+ * stranded record makes the mission unwinnable.
+ *
+ * **The source's loop bound is wrong and is deliberately not reproduced.**
+ * `$69AF` scales the count by 8 -- the ENTITY stride -- where the roster's is 4,
+ * so it walks twenty slots over ten records and runs past the end into the two
+ * unaddressable records and then into `entry_8373`'s own bytes. Those read
+ * `16 F0 16 9D AB 16 A3 16`; none is `$FF`, so nothing is ever written and the
+ * bug has never fired. Porting it would mean modelling code as data to reproduce
+ * an effect that does not exist -- the clam's uninitialised Y again (§ 13.8.3).
+ *
+ * @param {{roster: number[]}} state
+ * @returns {void}
+ */
+export function releaseInFlight(state) {
+  for (let i = 0; i < state.roster.length; i++) {
+    if (state.roster[i] === ROSTER_STATUS.IN_FLIGHT) state.roster[i] = ROSTER_STATUS.AVAILABLE;
+  }
 }
 
 /**
@@ -175,8 +212,30 @@ function runOne(session, spawner) {
   if (spawner.key === 'merchant') {
     // § 12.5: the cursor advances even on a failed attempt, so the roster is
     // walked in order regardless of which records are still available.
-    const record = state.rosterCursor;
-    state.rosterCursor = (state.rosterCursor + 1) % MERCHANT_ROSTER.length;
+    // $7B2E-$7B3D. **This is not a modulo**, and the difference is observable:
+    //
+    //     7B2E  LDA $8340      ; A = the cursor
+    //     7B31  INC $8340      ; the STORED cursor moves; A still holds the old value
+    //     7B34  CMP $8341      ; so the test is on the value just read, against 10
+    //     7B37  BNE $7B3E
+    //     7B39  LDA #$00       ; reloads the ACCUMULATOR as well as the cursor
+    //     7B3B  STA $8340
+    //
+    // The cursor is allowed to reach 10, and the attempt that reads it there is
+    // redirected to record 0 -- so the cycle is **eleven attempts long and names
+    // record 0 twice in a row**: 0,0,1,2,...,9. A modulo gives ten attempts and
+    // one record 0, which loses the doubled attempt.
+    //
+    // That attempt is not free. It finds record 0 in flight, falls into the
+    // reload below, and **consumes both a full interval and a generator draw**
+    // -- so the shape here sets merchant cadence and the shared draw order
+    // (§ 5.6) for the rest of the mission, not just which vessel is next.
+    let record = state.rosterCursor;
+    state.rosterCursor += 1;
+    if (record === MERCHANT_ROSTER.length) {
+      record = 0;
+      state.rosterCursor = 0;
+    }
     if (state.roster[record] !== ROSTER_STATUS.AVAILABLE) {
       // A busy or sunk record consumes a full interval. Late in a mission this
       // is why merchant traffic thins out on its own, with no rule saying so.
