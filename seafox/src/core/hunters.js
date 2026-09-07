@@ -32,7 +32,8 @@ const SUB_EXIT = 308;
 /** Magnetic mine (§ 13.4). */
 const MINE_STEP = 2;
 export const MINE_PERIOD = 9;             // NOT 1 -- see the header
-const MINE_RELOAD = 25;
+const MINE_FIRST_LAY = 40;                // seeded at the submarine's spawn
+const MINE_RELOAD = 25;                   // and NOT the same number (§ 13.3)
 const MINE_EXIT = 310;
 
 /** Enemy torpedo (§ 13.5). */
@@ -68,7 +69,11 @@ export function updateEnemySubmarine(session, slot) {
   if (e.firstUpdate) {
     e.firstUpdate = false;
     e.scratch1 = SUB_VERTICAL_RELOAD;
-    e.scratch2 = MINE_RELOAD;
+    // **The first lay and the reload are different numbers** (§ 13.3): a fresh
+    // submarine waits 40 before its first mine and 25 between the rest. Seeding
+    // both from the reload puts the first mine fifteen ticks early, which shows
+    // up as submarines arriving already dangerous.
+    e.scratch2 = MINE_FIRST_LAY;
     e.scratch3 = TORPEDO_FIRST_SHOT;      // so it shoots almost at once
     e.updateCountdown = e.updatePeriod;
     return;
@@ -93,12 +98,22 @@ export function updateEnemySubmarine(session, slot) {
       // else: level -- do nothing. It stops dead rather than oscillating.
     }
 
-    // The mine has NO GATE: a bare timer, laid without aiming.
-    e.scratch2 -= 1;
-    if (e.scratch2 <= 0 && launchMine(session, slot)) e.scratch2 = MINE_RELOAD;
+    // **Both countdowns are tested BEFORE they are decremented** (§ 13.3), and
+    // that is not a detail: the acting tick is the one that finds the counter
+    // already at zero, so a reload of N buys N decrements *plus* the tick it
+    // acts on. The observable interval is N + 1. Decrementing first instead
+    // loses a tick from every gap in the game's two most frequent threats.
+    //
+    // A blocked attempt leaves the counter at zero rather than reloading it, so
+    // it retries every tick until the cap frees a slot -- § 12.2's "a blocked
+    // spawn is pending, not skipped", applied to a child rather than a spawner.
 
-    if (e.scratch3 > 0) e.scratch3 -= 1;
-    if (e.scratch3 === 0 && launchEnemyTorpedo(session, slot, player)) {
+    // The mine has NO GATE beyond the cap: a bare timer, laid without aiming.
+    if (e.scratch2 !== 0) e.scratch2 -= 1;
+    else if (launchMine(session, slot)) e.scratch2 = MINE_RELOAD;
+
+    if (e.scratch3 !== 0) e.scratch3 -= 1;
+    else if (launchEnemyTorpedo(session, slot, player)) {
       e.scratch3 = TORPEDO_RELOAD;
     }
   }

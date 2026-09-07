@@ -471,7 +471,7 @@ function regression(list) {
   list.eq('221 draws taken in the first 201 ticks', session.rng.draws, 221);
   list.eq('generator state after 201 ticks',
     hex(session.rng.s2) + ' ' + hex(session.rng.s3), 'EF 8B');
-  list.eq('13 live entities after 201 ticks', session.entities.liveCount, 13);
+  list.eq('12 live entities after 201 ticks', session.entities.liveCount, 12);
 
   list.add('what a change in the three above means',
     true,
@@ -482,7 +482,12 @@ function regression(list) {
     'disassembly settles: $79DE draws a bit only on missions 1 and 2. These figures have ' +
     'moved three times — 13 / FF 0F / 8 when the page ticked spawners alone, ' +
     '213 / 0D 35 / 8 once it ran the whole tick, 221 / EF 8B / 16 when Chapter 13 gave ' +
-    'the handlers children to create, and 221 / EF 8B / 13 now that Chapter 14 lets ' +
-    'things destroy each other. Note the DRAWS did not move this time: collision ' +
-    'consumes no randomness. The five first-spawn ticks have never moved at all.');
+    'the handlers children to create, 221 / EF 8B / 13 once Chapter 14 let ' +
+    'things destroy each other, and 221 / EF 8B / 12 now the mine waits 40 for its ' +
+    'first lay rather than 25 and its gate counts the laying tick — one fewer mine ' +
+    'has been dropped by tick 201. Note the DRAWS have not moved for either of the ' +
+    'last two: collision consumes no randomness, and neither does a bare timer. That ' +
+    'is the check that says a cadence change stayed local instead of shifting every ' +
+    'later random decision in the session (§ 5.6). The five first-spawn ticks have ' +
+    'never moved at all.');
 }

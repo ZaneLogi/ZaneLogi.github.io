@@ -2436,10 +2436,32 @@ Lethal on contact, worth 100.
 
 It is also a launcher, and its two children are the game's whole projectile threat:
 
-| child | first shot | reload | launch point | gate |
+| child | seed | reload | launch point | gate |
 |---|---:|---:|---|---|
-| **magnetic mine**, type 4 | — | 25 ticks | parent X **+ 30** — the *stern* of a 35 px hull steering left | **none: a bare timer** |
-| **enemy torpedo**, type 19 | ~5 ticks | 80 ticks | parent X **− 8**, Y **+ 3** — ahead of the bow, on the centreline | § 13.5 |
+| **magnetic mine**, type 4 | 40 | 25 | parent X **+ 30** — the *stern* of a 35 px hull steering left | **none: a bare timer** |
+| **enemy torpedo**, type 19 | 5 | 80 | parent X **− 8**, Y **+ 3** — ahead of the bow, on the centreline | § 13.5 |
+
+**Both counters are seeded when the submarine spawns, and the seed is not the reload.**
+A fresh submarine waits **40** ticks for its first mine and **25** between the rest.
+Seeding both from the reload makes every submarine arrive already dangerous.
+
+**And both counters are tested before they are decremented**, which puts the observable
+interval one above the number in the table. The acting tick is the one that finds the
+counter already at zero, so a reload of N spends N ticks decrementing and acts on the
+next. Resolved:
+
+| | first, counting the spawn tick as 0 | thereafter |
+|---|---:|---:|
+| magnetic mine | tick **41** | every **26** |
+| enemy torpedo | tick **6** | every **81** |
+
+A blocked attempt — the class is at its cap — leaves the counter at zero instead of
+reloading it, so it retries every tick until a slot frees. That is § 12.2's "a blocked
+spawn is pending, not skipped", applied to a launcher rather than a spawner.
+
+Neither counter draws from the generator, so getting these cadences wrong shifts *when*
+things appear without shifting *what* the generator hands out afterwards. The § 20.3
+tripwire on draws and generator state is what distinguishes the two kinds of error.
 
 Both are capped by the difficulty ladder, and the ladder is what introduces them:
 torpedoes on mission 3, mines on mission 4, both on mission 5 (§ 8.3).

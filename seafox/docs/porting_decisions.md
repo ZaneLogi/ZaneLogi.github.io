@@ -959,3 +959,46 @@ the sweep live the dispatch order would decide whether the tanks refill, and col
 resupply would kill the player about half the time. The regression test carries the
 control pair for exactly that reason — a live payload that refuels and does not harm,
 beside a dead one that harms and does not refuel.
+
+### Two launcher cadences, and the off-by-one hiding in a gate's shape
+
+The enemy submarine's two countdowns were both a tick fast, and its mine started fifteen
+ticks early on top of that. Three corrections, but really one idea and one missing
+constant.
+
+**The constant.** The mine's countdown is seeded at the submarine's spawn with **40** and
+reloaded with **25**; we had seeded it with the reload. A submarine's first mine is meant
+to give you time — it arrives 41 ticks in, not 26 — and seeding both from one number
+makes every submarine dangerous the moment it appears.
+
+**The idea, which is the part worth keeping.** Both gates *test before they decrement*:
+the acting tick is the one that finds the counter already at zero, so a reload of N buys
+N decrements **plus** the tick it acts on. The observable interval is N + 1. We
+decremented first, which loses exactly one tick from every gap — 25 instead of 26, 80
+instead of 81.
+
+That is invisible in every way a test usually looks. It is 4% on the mine and 1% on the
+torpedo, it never accumulates into a wrong state, and it is the same *shape* of code
+either way. It only shows up if you measure the interval and compare it against a number
+derived from the source, which is what the re-read supplied.
+
+**A one-line source construct can be a behavioural specification.** `LDA / BEQ act / DEC`
+and `DEC / BEQ act` look interchangeable and are not; the difference is the tick the
+counter spends at zero. Deciding this one was plumbing — the shape the hardware happened
+to encourage — is exactly the misreading the governing test warns about in the other
+direction: it *is* observable, so it is content.
+
+**What said the change stayed local.** § 20.3's tripwire asserts generator draws and
+state alongside the entity count, and only the count moved: 221 / `EF 8B` unchanged, 13
+live entities down to 12 — one fewer mine laid by tick 201, which is precisely what a
+later first lay and a longer interval predict. Neither counter draws from the generator,
+so a cadence error shifts *when* things appear without shifting *what* the generator
+hands out afterwards. Had the draws moved, the same red page would have meant something
+far worse, and the two are worth being able to tell apart.
+
+**The demo goldens moved and were regenerated; the scripted-play goldens did not.** The
+demo is the run with mines in it. Tick 60 is the one worth reading: the lit count is
+identical and a single byte moves from one colour to another — the enemy torpedo fires a
+tick later, so it sits on the opposite column parity and takes the other artifact hue.
+A frame that changed by one pixel's colour is the signature of a timing shift rather than
+a drawing error, and the later frames' band redistribution says the same thing at scale.
