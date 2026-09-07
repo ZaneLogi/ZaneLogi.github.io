@@ -297,6 +297,23 @@ function playerIsHarmedBy(session, other, otherSlot) {
   const t = other.type;
 
   if (t === TYPE.PAYLOAD) {
+    // **The dying test gates the REFUEL, not the CONTACT** -- and reading it the
+    // other way round is the easy mistake, because every other entry in this
+    // whitelist is about the contact.
+    //
+    // A wreck skips the refill and keeps the harmful default, so **a payload you
+    // destroyed yourself is lethal for as long as its death animation runs**.
+    // Shoot your own resupply, swim through the debris, and it costs a
+    // submarine. Only you are hurt: the payload's own side of the two-sided
+    // dispatch is already dropped by the dying test at the top of `respond`.
+    //
+    // **Dying, not merely flagged for removal.** They are different states, and
+    // the distinction is load-bearing: the payload's own response raises the
+    // removal flag on this very contact, and the sweep may run that side first
+    // (§ 14.4 dispatches both ways). Testing removal here would let the
+    // ordering decide whether the tanks refill -- and would make collecting a
+    // payload lethal half the time.
+    if (other.dying || other.stateChangePending) return true;
     refuel(session, other, otherSlot);
     return false;
   }
@@ -321,15 +338,8 @@ function playerIsHarmedBy(session, other, otherSlot) {
  * @returns {void}
  */
 function refuel(session, payload, payloadSlot) {
-  // **Guarded against a payload that is already DYING -- not against one that is
-  // merely flagged for removal.** The two are different bits in the original
-  // ($16A0 = $02 for the guard, $16A1 = $04 for the removal flag), and the
-  // distinction is load-bearing here: the payload's own response raises the
-  // removal flag on this very contact, and the sweep may run that side first
-  // (§ 14.4 dispatches both ways). Testing the removal flag as well would let
-  // the ordering decide whether the tanks actually refill.
-  if (payload.dying || payload.stateChangePending) return;
-
+  // Reached only for a LIVE payload -- its caller keeps the dying test, because
+  // there the same branch also decides whether the contact hurts.
   session.resources.refill();
   session.convoy.live = false;
   payload.removalRequested = true;

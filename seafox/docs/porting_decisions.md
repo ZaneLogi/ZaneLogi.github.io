@@ -927,3 +927,35 @@ subtractive — and the compiler, the linter and 517 passing tests all had nothi
 The bookkeeping now sits on the merchant's own damage path, where `$7585` puts it, gated on
 the exemption exactly as the original gates it. It has its own regression test that plays a
 whole mission to completion.
+
+### The wreck of a resupply, and a guard that answered two questions
+
+Re-reading the supply chain against the source turned up a branch our § 16.4 had
+collapsed. The player's handler tests the payload's dying bit and, when it is set, jumps
+**past** the store that clears the damage flag — reaching the shared damage path with the
+flag still set. The test gates the **refuel**, not the **contact**.
+
+So a payload the player destroyed is not inert debris: it is lethal for as long as its
+death animation runs. Shoot your own resupply, swim through the wreckage, and it costs a
+submarine. Only the player is hurt — the payload's own side of the two-sided dispatch is
+dropped by the dying test every response already runs.
+
+Our port had the guard inside `refuel`, which is the natural place for it if you read it
+as answering one question. It answers two, and only one of them belongs there: *may this
+payload be collected?* is the refuel's business, *does running into this thing hurt?* is
+the contact's. Collapsing them cost the hazard entirely and made destroying your own
+resupply free.
+
+**The general shape is worth naming, because this is the second time it has bitten.** The
+merchant bug was a table cell that deferred instead of stating; this is a *guard* that
+looks like it covers a whole branch and covers one clause of it. Both read as complete.
+When a single test sits in front of several effects, ask which of them it was written
+for — the answer is rarely all of them.
+
+**And the direction of the fix matters as much as the fix.** Widening the guard from
+*dying* to *also flagged for removal* would look like the same correction and be a worse
+bug: the payload raises its own removal flag on this very contact, so with both sides of
+the sweep live the dispatch order would decide whether the tanks refill, and collecting a
+resupply would kill the player about half the time. The regression test carries the
+control pair for exactly that reason — a live payload that refuels and does not harm,
+beside a dead one that harms and does not refuel.

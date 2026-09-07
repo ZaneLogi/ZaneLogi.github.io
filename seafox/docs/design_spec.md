@@ -3385,8 +3385,25 @@ and 30. It is a *restore*, not an addition: collecting a payload with fuel remai
 does not bank the surplus, and there is no way to exceed the starting values.
 
 The exchange also queues a distinct sound, redraws both gauges, and does no damage in
-either direction. It is guarded against a payload that is already dying, so a payload
-cannot be collected twice.
+either direction.
+
+**The guard against a dying payload gates the refuel, not the contact — and the
+difference is a submarine.** A payload that is already dying cannot be collected twice,
+which is what the guard is for; but it does *not* stop being an object the player has
+run into. The contact keeps the harmful default of § 14.5, so **a payload the player
+destroyed is lethal for as long as its death animation runs**. Shoot your own resupply
+and swim through the debris and it costs a life.
+
+Only the player is hurt by it. The payload's own side of the two-sided dispatch is
+dropped by the dying test of § 14.4, so the wreck takes no further damage and the
+exchange is one-way.
+
+An implementation that reads the guard as covering the whole contact loses a real
+hazard and makes destroying your own resupply free. An implementation that widens it
+from *dying* to *flagged for removal* makes the opposite error, and a worse one: the
+payload raises its own removal flag on this very contact, so with both sides swept
+(§ 14.4) the dispatch order would decide whether the tanks refill — and collecting a
+payload would kill the player about half the time.
 
 ## 16.5 The convoy is one object in four records
 

@@ -722,6 +722,35 @@ function theUnlocked(list) {
   list.add('and it does no damage in either direction (§ 14.6 row 14)',
     !damaged(p3), 'the payload diverts to the refuel path');
 
+  // 2b. **The wreck of a payload is lethal**, and the pair above is the control
+  // for it. The dying test gates the REFUEL, not the CONTACT: a payload the
+  // player destroyed skips the refill and keeps § 14.5's harmful default, so
+  // swimming through your own debris costs a submarine.
+  //
+  // Reading that guard as covering the whole contact passes every check above
+  // and fails these -- which is exactly how the port had it.
+  const s3b = stage();
+  s3b.resources.fuel = 300;
+  const p3b = s3b.entities.slots[s3b.playerSlot];
+  s3b.convoy.live = true;
+  s3b.convoy.dx = 0;
+  s3b.convoy.dy = 0;
+  const wreck = s3b.entities.slots[place(s3b, TYPE.PAYLOAD, p3b.x + 2, p3b.y)];
+  wreck.stateChangePending = true;                 // destroyed, mid-death
+  for (let t = 0; t < 4 && !damaged(p3b); t++) {
+    s3b.convoy.x = p3b.x + 2;
+    s3b.convoy.y = p3b.y;
+    tick(s3b);
+  }
+  list.add('a payload you DESTROYED is lethal to swim through (§ 16.4)',
+    damaged(p3b),
+    'the guard gates the refuel, not the contact — the wreck keeps § 14.5\'s ' +
+    'harmful default');
+  list.add('and it does not refuel you on the way (§ 16.4)',
+    s3b.resources.fuel === 300,
+    'fuel ' + s3b.resources.fuel + ' — unchanged, which is the half the guard ' +
+    'IS for: a payload cannot be collected twice');
+
   // 3. The clam eats the resupply.
   const s4 = stage();
   s4.convoy.live = true;
