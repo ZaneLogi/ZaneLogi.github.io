@@ -1681,6 +1681,14 @@ Steps 2, 5 and 9 are common; everything else belongs to one mode. The demo's ext
 steps stand in for a player, and the mission's exit guards have no demo counterpart
 because a keypress is the demo's only exit.
 
+**Step 1 is an exit, not a test: a guard that fires ends the tick where it stands**, and
+steps 2, 5 and 9 do not run. Each of the three leaves the play loop outright, so the tick
+a round ends on polls nothing, spawns nothing and draws no frame — the outro that follows
+is what advances the screen next. This is not bookkeeping. The outro writes the exit
+velocity (§ 11.3), so a poll after it hands the pair straight back to whatever the player
+is holding, and no later transition polls again to correct it — one stale key would then
+steer the entire exit.
+
 **The spawner order is normative** — enemy submarine, hospital ship, merchant, supply
 submarine, Destroyer — because they draw from one shared generator (§ 5.6).
 
@@ -2059,8 +2067,14 @@ The loop of § 9.2. **Three guards are tested at the top of every tick, in this 
 | 2 | both fuel bytes are zero | **out of fuel** |
 | 3 | the kill counter is zero | **mission complete** |
 
-Any one of them ends the round. **The order is normative** because § 11.3 re-tests them
-in the same order and awards a different outcome depending on which it finds first.
+Any one of them ends the round, **and ends the tick with it** — the poll, the spawners
+and the frame of § 9.2 are all skipped on the tick a guard fires. **The order is
+normative** because § 11.3 re-tests them in the same order and awards a different outcome
+depending on which it finds first.
+
+Skipping the spawners matters beyond the picture: they draw from the shared generator
+(§ 5.6), so a spawner run on a round's last tick shifts every later random decision in
+the game.
 
 Note guard 1's phrasing: nothing that kills the player writes that flag directly. A
 lethal contact raises an ordinary removal request, and the player's own handler clears

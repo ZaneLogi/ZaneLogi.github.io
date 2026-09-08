@@ -72,7 +72,11 @@ export function tick(session) {
   // refilling the list, the drain ends when the screen clears instead of always
   // running its full twenty passes. Spawning here also consumes generator draws
   // (§ 5.6), so it would shift every later random decision in the game.
-  if (session.phase === PHASE.PLAY) missionTick(session);
+  // **A guard that fires ends the tick outright** -- no poll, no spawners, and
+  // no frame. Each of the three exits the play loop with a `JMP loc_6D1A`
+  // ($6CE3 / $6CF7 / $6CFF), so everything below `loc_6D02` is skipped on the
+  // tick the round ends; the outro that follows is what draws the screen next.
+  if (session.phase === PHASE.PLAY && !missionTick(session)) return;
 
   frame(session);
 }
@@ -126,24 +130,32 @@ function demoTick(session) {
  * § 9.2's mission column, steps 1 and 2. Chapter 11's transitions are
  * handled ahead of this, in `advanceRound`.
  * @param {Object} session
- * @returns {void}
+ * @returns {boolean} whether the round survived the guards -- false ends the tick
  */
 function missionTick(session) {
   // 1. The three exit guards, IN ORDER (§ 11.2): dead, out of fuel, quota met.
   //    The order is normative because § 11.3 re-tests them in the same order and
   //    awards a different outcome depending on which it finds first -- meeting
   //    the quota on the same tick the tanks empty classifies as out of fuel.
-  checkRoundGuards(session);
+  //
+  //    **A guard that fires returns immediately, and steps 2 and 5 do not run.**
+  //    The outro has just written the exit velocity, and polling after it would
+  //    hand the pair straight back to whatever the player happens to be holding
+  //    -- then the drain never polls again, so that one stale key steers the
+  //    whole exit. A held `h` drives the submarine off to the LEFT for twenty
+  //    passes; a centred pad, or `j`, parks it mid-screen and it never leaves at
+  //    all. This return is what § 10.6 means by the outro being unstoppable.
+  if (checkRoundGuards(session)) return false;
 
   // 2. Poll input -- § 19.8, once per tick, and **only from this loop**.
-  //    The transitions of Chapter 11 deliberately poll nothing (§ 10.6), which
-  //    is what makes the outro unstoppable -- and input during one is deferred
-  //    rather than dropped, so a key pressed there takes effect on the round's
-  //    opening tick. That falls out of the source being a one-key register:
-  //    nothing drains it while no one is polling.
+  //    The transitions of Chapter 11 deliberately poll nothing (§ 10.6), and
+  //    input during one is deferred rather than dropped, so a key pressed there
+  //    takes effect on the round's opening tick. That falls out of the source
+  //    being a one-key register: nothing drains it while no one is polling.
   pollInput(session);
 
   runSpawners(session);                             // 5, shared
+  return true;
 }
 
 /**

@@ -29,7 +29,7 @@ import { STRIP } from '../src/core/messages.js';
 import { ROSTER_STATUS, KILL_QUOTA } from '../src/core/spawners.js';
 import { PLAYER_BOUNDS } from '../src/core/player.js';
 import { TYPE } from '../src/core/types.js';
-import { START_KEY } from '../src/core/input.js';
+import { START_KEY, SCHEME_KEYBOARD } from '../src/core/input.js';
 
 mount('design_spec Chapter 11 — the round lifecycle, with Chapter 16', run);
 
@@ -513,6 +513,46 @@ function exitAndDrain(list) {
     'ended on pass ' + s.drainPass + ' of ' + DRAIN_PASSES + ' — with spawners ' +
     'running during the drain, something new arrives every few ticks and the ' +
     'early exit is unreachable');
+
+  // ---- and none of it depends on what the player is holding ----------------
+  //
+  // **A guard that fires ends the tick, steps 2 and 5 included** ($6CE3 /
+  // $6CF7 / $6CFF each `JMP loc_6D1A`, out of the loop and past the poll). Poll
+  // after the outro has written the exit velocity and the pair goes straight
+  // back to the held key -- and the drain never polls again, so that one stale
+  // key steers the whole exit. This is invisible unless a controller is
+  // actually selected: with none, the scheme gate in `pollKeyboard` returns
+  // before the key table and every held key looks harmless.
+  const exits = [];
+  for (const held of [null, 'h', 'j', 'y', ',']) {
+    const e = new Session();
+    e.startDemo();
+    newGame(e);
+    e.controller = SCHEME_KEYBOARD;                 // the gate the old test missed
+    e.keys = { read: () => held };
+    for (let t = 0; t < 400 && e.phase !== PHASE.PLAY; t++) tick(e);
+    tick(e);
+    e.killCounter = 0;                              // clear the mission mid-hold
+    tick(e);                                        // the tick the guard fires on
+    const exitVx = e.input.vx;                      // read BEFORE the clamp zeroes it
+
+    let gone = null;
+    for (let t = 0; t < 600 && gone === null; t++) {
+      tick(e);
+      let live = false;
+      for (let i = 0; i < e.entities.liveCount; i++) {
+        if (e.entities.slots[i].type === TYPE.PLAYER) live = true;
+      }
+      if (!live) gone = t;
+    }
+    exits.push((held || 'nothing') + ':vx' + exitVx + (gone === null ? ' PARKED' : ' left'));
+  }
+  list.eq('the exit is unstoppable whatever key is held as the round ends (§ 10.6)',
+    exits.join(' '),
+    'nothing:vx4 left h:vx4 left j:vx4 left y:vx4 left ,:vx4 left',
+    (v) => v + ' — a held `h` drives the submarine LEFT for twenty passes and ' +
+      '`j` parks it mid-screen, because the poll after the guards hands the ' +
+      'exit velocity back to the keyboard');
 }
 
 function outro(list) {
