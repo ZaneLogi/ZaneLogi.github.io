@@ -89,6 +89,17 @@ function at(buf, x, y) {
   return buf[y * SCREEN_W + x];
 }
 
+/**
+ * Pixels painted on rows 0-6, the band every top-line banner shares (§ 19.10.2).
+ * @param {Uint8Array} buf
+ * @returns {number}
+ */
+function topLine(buf) {
+  let n = 0;
+  for (let i = 0; i < 7 * SCREEN_W; i++) if (buf[i] !== COLOR.BACKGROUND) n++;
+  return n;
+}
+
 /** @param {Uint8Array} buf @returns {number} how many pixels are not background. */
 function painted(buf) {
   let n = 0;
@@ -507,21 +518,29 @@ function bannersAndMessages(list) {
   const r = new Renderer();
   const s = quiet();
 
-  // Nesting: posting a second does not remove the first, so both draw.
+  // Every strip posted since the last erase draws, so a group posted together
+  // shows together.
   s.messages.post(STRIP.MISSION, 'stripOne');
   r.render(s);
   const banner = painted(r.color);
   s.messages.post(STRIP.DEMO_A);
   r.render(s);
-  list.add('a nested post draws both strips', painted(r.color) > banner);
-  s.messages.erase();
+  list.add('a second post draws alongside the first', painted(r.color) > banner);
+
+  // ...and erasing takes ALL of it, not the most recent entry (§ 19.10.1). The
+  // stack records what is on screen; it does not layer messages.
+  s.messages.eraseAll();
   r.render(s);
-  list.eq('erasing takes the most recent', painted(r.color), banner);
+  list.eq('erasing DRAINS the stack, so the top line goes empty', topLine(r.color), 0,
+    (v) => v + ' pixels left on rows 0-6 — a pop would have left the MISSION ' +
+      'banner behind for the next post to draw straight over');
 
   // Each post flips that strip's palette permanently, so a strip alternates
   // between two colours for the life of the session.
+  s.messages.post(STRIP.MISSION, 'stripOne');
+  r.render(s);
   const first = hueOf(r.color);
-  s.messages.erase();
+  s.messages.eraseAll();
   s.messages.post(STRIP.MISSION, 'stripOne');
   r.render(s);
   const second = hueOf(r.color);

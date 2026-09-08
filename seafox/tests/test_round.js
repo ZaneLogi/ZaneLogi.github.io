@@ -446,21 +446,21 @@ function banners(list) {
     }
   }
 
-  // **The defect this pins.** The stack gets two posts per cleared round -- the
-  // MISSION banner at setup and MISSION COMPLETE at the outro -- so it needs two
-  // removals. With only one, the next setup pops MISSION COMPLETE, leaves the
-  // old banner in place and posts the new one on top: MISSION ONE and MISSION
-  // TWO drawn over each other on the same seven rows, one more every mission.
+  // **The defect this pins.** Every top-line post is preceded by an erase, and
+  // the erase drains the stack (§ 19.10.1) -- so a cleared round's two posts,
+  // the MISSION banner at setup and MISSION COMPLETE at the outro, never coexist.
+  // Let either one survive the other and the two titles are drawn over each
+  // other on the same seven rows, one more every mission.
   list.eq('exactly one MISSION banner is posted while a round is being played',
     banners.every((b) => b === STRIP.MISSION) ? 'always one' : banners.join(' | '),
     'always one');
 
-  // Two is correct and is the ceiling: the winning frame carries MISSION and
-  // MISSION COMPLETE together (§ 19.10.3), and nothing else ever stacks.
-  list.eq('the stack never grows past two, over ' + banners.length + ' rounds and several games',
-    maxDepth, 2,
-    (v) => v + ' — MISSION plus MISSION COMPLETE on the winning frame, and ' +
-      'never a third');
+  // One is the ceiling: the top line carries a single message at a time.
+  list.eq('the stack never holds more than one strip, over ' + banners.length +
+    ' rounds and several games',
+    maxDepth, 1,
+    (v) => v + ' — the erase before each post drains what was there, so MISSION ' +
+      'COMPLETE replaces the mission banner rather than covering it');
 
   // And the title screen is a rebuilt screen: nothing posted outlives a game.
   while (!s.isTitleScreen) tick(s);
@@ -611,6 +611,44 @@ function drain(list) {
     ran + ' ticks, against a cap of ' + (DRAIN_PASSES * DRAIN_PASS_TICKS) +
     ' — ordinary simulation with no input polled, which is what lets the ' +
     'submarine be driven off the screen while the player watches');
+
+  // **The reported bug: MISSION COMPLETE landing on top of MISSION ONE.** The two
+  // strips share rows 0-6 and MISSION COMPLETE is the wider of them, so with
+  // index 0 transparent the old banner reads through the gaps in the new one
+  // unless the outro erases first (§ 19.10.1).
+  {
+    const clear = inPlay();
+    clear.killCounter = 0;
+    beginOutro(clear);
+    list.add('the outro ERASES the mission banner before posting MISSION COMPLETE',
+      clear.messages.isPosted(STRIP.MISSION_COMPLETE) &&
+      !clear.messages.isPosted(STRIP.MISSION),
+      'the top line carries one message at a time — leaving MISSION ONE posted ' +
+      'under the wider MISSION COMPLETE smears the two titles together for the ' +
+      'whole drain');
+    list.eq('...and nothing else is left on the stack with it',
+      clear.messages.stack.length, 1);
+
+    // It stays up for the WHOLE drain -- the end of the drain erases only the two
+    // direct banners (§ 19.10.3), and the setup that follows is what takes it.
+    let g = 0;
+    let heldThroughout = true;
+    while (clear.phase === PHASE.DRAIN && g++ < 600) {
+      tick(clear);
+      if (clear.phase === PHASE.DRAIN &&
+          !clear.messages.isPosted(STRIP.MISSION_COMPLETE)) heldThroughout = false;
+    }
+    list.add('MISSION COMPLETE stays up for every tick of the drain (§ 19.10.3)',
+      heldThroughout,
+      'the end of the drain erases the two DIRECT banners only — nothing there ' +
+      'touches the stack');
+    list.add('and the setup that follows replaces it with the new banner, alone',
+      clear.messages.isPosted(STRIP.MISSION) &&
+      !clear.messages.isPosted(STRIP.MISSION_COMPLETE) &&
+      clear.messages.stack.length === 1,
+      'one strip on the stack, carrying the word and its numeral — the stack does ' +
+      'not grow by a banner every mission');
+  }
 
   // § 11.6: the winning frame carries BOTH banners.
   const win = inPlay(5);

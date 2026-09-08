@@ -9,9 +9,18 @@
 // banners unconditionally.
 //
 // **The message stack** -- the demo messages, the `MISSION` banner and
-// `MISSION COMPLETE`. Posting pushes and draws; erasing pops the top entry and
-// undraws it. Messages NEST: posting a second does not remove the first, and
-// erasing removes the most recent. Erasing an empty stack does nothing.
+// `MISSION COMPLETE`. Posting pushes and draws; **erasing DRAINS the stack**,
+// undrawing every strip on it rather than the most recent one. The stack is a
+// record of what is on screen -- which blocks to undraw, and how many -- not a
+// way of layering messages. Erasing an empty stack does nothing.
+//
+// **So the top line carries one message at a time, and every site that posts to
+// it erases first.** A group that belongs together is posted as consecutive
+// strips and comes off in one erase: the `MISSION` banner and its numeral are
+// two posts and one removal. This is what keeps `MISSION COMPLETE` off the top
+// of `MISSION ONE` -- the two cover the same seven rows, and index 0 is
+// transparent, so an un-erased banner shows through the gaps in the one over it
+// (§ 19.10.1).
 //
 // **Each post also flips that strip's palette, permanently.** The flip is
 // written back into the strip itself, so the *next* post starts from the flipped
@@ -80,11 +89,17 @@ export class Messages {
   }
 
   /**
-   * Pop the most recent stack entry. Erasing an empty stack does nothing.
-   * @returns {Object|null} what was removed
+   * Erase the posted messages: **the whole stack, not its top entry**.
+   *
+   * The strips on it are what is currently on the top line, and the caller is
+   * about to replace all of it. Erasing an empty stack does nothing.
+   *
+   * @returns {number} how many strips were removed
    */
-  erase() {
-    return this.stack.length ? this.stack.pop() : null;
+  eraseAll() {
+    const n = this.stack.length;
+    this.stack.length = 0;
+    return n;
   }
 
   /**
@@ -109,25 +124,6 @@ export class Messages {
    */
   eraseDirect() {
     this.direct.clear();
-  }
-
-  /**
-   * Erase one specific strip wherever it sits on the stack.
-   *
-   * § 19.10.3 removes each strip at a named moment rather than in a fixed order,
-   * and the plain `erase()` pop cannot express "this one" -- it takes whatever
-   * happens to be on top. `MISSION COMPLETE` is the case that needs it: it is
-   * removed at the END OF THE DRAIN, while the `MISSION` banner underneath it
-   * survives until the next round setup.
-   *
-   * @param {string} strip
-   * @returns {boolean} whether anything was removed
-   */
-  eraseStrip(strip) {
-    const i = this.stack.findIndex((m) => m.strip === strip);
-    if (i === -1) return false;
-    this.stack.splice(i, 1);
-    return true;
   }
 
   /**

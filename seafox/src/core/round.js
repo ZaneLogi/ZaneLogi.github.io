@@ -107,13 +107,13 @@ export function nextMission(session) {
 }
 
 /**
- * § 11.1: setup always erases whatever message is posted and posts the mission
+ * § 11.1: setup always erases whatever messages are posted and posts the mission
  * banner, then forks on `replayMission`.
  * @param {Object} session
  * @returns {void}
  */
 export function beginSetup(session) {
-  session.messages.erase();
+  session.messages.eraseAll();
   session.messages.post(STRIP.MISSION, MISSION_NUMERALS[session.mission]);
 
   session.resetLists();          // § 4.8's joint reset, sub_6925 -- sweep included
@@ -298,7 +298,13 @@ export function beginOutro(session) {
   if (!session.playerAlive) {
     lifeLost(session);
   } else if (!session.resources.dry) {
-    // Mission complete.
+    // Mission complete. **The erase comes first, and it is not housekeeping.**
+    // The mission banner and its numeral are still posted on rows 0-6, and
+    // MISSION COMPLETE is wider than both and covers the same rows -- so with
+    // index 0 transparent (§ 17.3) the old banner reads straight through the
+    // gaps in the new one. Skip this and the top line is a smear of two
+    // overlapping titles for the whole drain (§ 19.10.1).
+    session.messages.eraseAll();
     session.messages.post(STRIP.MISSION_COMPLETE);
     // § 18.6, sound 15: a single pitch held 32 times -- a steady second-long
     // tone, and the only sequence in the game that is not a contour.
@@ -368,8 +374,9 @@ function drainTick(session) {
 }
 
 /**
- * The drain is over: both lists cleared, both banners erased unconditionally,
- * and the right clamp restored (§ 11.4). Then § 10.4 decides what happens next.
+ * The drain is over: both lists cleared, the two DIRECT banners erased
+ * unconditionally, and the right clamp restored (§ 11.4). Then § 10.4 decides
+ * what happens next.
  * @param {Object} session
  * @returns {void}
  */
@@ -378,15 +385,9 @@ function endDrain(session) {
   // emptied. The sweep inside it is what stops a death stranding the roster
   // records of whichever merchants were on screen (§ 12.5).
   session.resetLists();
-  // § 19.10.3: **MISSION COMPLETE is removed HERE, at the end of the drain** --
-  // not by the next setup's erase. The MISSION banner is still underneath it and
-  // must survive until that setup takes it (§ 11.1).
-  //
-  // Without this the stack gets one pop per round against two posts, so the next
-  // setup pops MISSION COMPLETE, leaves the old banner in place, and posts the
-  // new one on top of it: MISSION ONE and MISSION TWO drawn over each other on
-  // the same seven rows, one more every mission.
-  session.messages.eraseStrip(STRIP.MISSION_COMPLETE);
+  // § 19.10.3: **only the two DIRECT banners are erased here.** MISSION COMPLETE
+  // is on the stack and stays up -- it is the last thing the player sees before
+  // the next round builds itself, and the next setup's erase is what takes it.
   session.messages.eraseDirect();
   session.playerBounds.maxX = PLAYER_BOUNDS.maxX;
 

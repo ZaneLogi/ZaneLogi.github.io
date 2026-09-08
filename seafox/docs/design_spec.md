@@ -2084,7 +2084,7 @@ Then it classifies the round, testing in the same order as § 11.2:
 | state | outcome |
 |---|---|
 | **dead** | life lost |
-| **alive, fuel remaining** | **mission complete** — post the banner, queue the completion sound; **if this was mission 5, set `gameOver`** |
+| **alive, fuel remaining** | **mission complete** — erase the mission banner, post `MISSION COMPLETE` in its place, queue the completion sound; **if this was mission 5, set `gameOver`** |
 | **alive, tanks empty** | set `ranDry`; **vertical velocity becomes +2**, so the submarine *sinks as it drifts off* rather than leaving level — then fall through to life lost |
 
 **Life lost** sets `replayMission`, and **if `spareSubs` is now zero, sets `gameOver`.**
@@ -2117,8 +2117,9 @@ every few ticks, both lists are never empty together, and every drain takes its 
 passes.
 
 So up to **220 ticks**, and in practice fewer.
-Afterwards both lists are cleared, both banners erased unconditionally, and the right
-clamp restored to 280.
+Afterwards both lists are cleared, **the two direct-blit banners** erased unconditionally
+(§ 19.10.3 — `MISSION COMPLETE` is on the stack and stays up), and the right clamp
+restored to 280.
 
 ## 11.5 Win and loss, complete
 
@@ -4058,9 +4059,16 @@ strip uses determines both how it is removed and whether it changes colour.
 **The message stack** — used by the demo messages, the `MISSION` banner and
 `MISSION COMPLETE`.
 
-Posting pushes a strip onto a stack and draws it; erasing pops the top entry and undraws
-it. Messages nest: posting a second does not remove the first, and erasing removes the
-most recent. Erasing an empty stack does nothing.
+Posting pushes a strip onto a stack and draws it. **Erasing drains the stack: it undraws
+every strip on it, not merely the most recent, and leaves it empty.** The stack is there
+so the erase knows *which* blocks to undraw and *how many* — it is a record of what is on
+screen, not a way of layering messages. Erasing an empty stack does nothing.
+
+**So the top line carries one message at a time**, and everything posted since the last
+erase belongs to it. A group that belongs together is posted as consecutive strips and
+comes off in a single erase: the `MISSION` banner and its numeral are two posts and one
+removal. **Every site that posts a top-line strip erases first** — round setup, the
+outro's `MISSION COMPLETE`, and each swap of the demo messages.
 
 **Each post also flips that strip's palette, permanently.** The flip is written back into
 the strip itself, so the *next* post starts from the flipped value and flips again — a
@@ -4094,9 +4102,9 @@ screen.
 
 | strip | path | shown | removed |
 |---|---|---|---|
-| demo message A / B | stack | on each horizontal bounce of the demo submarine, alternating | by the next post |
-| `MISSION` + numeral | stack | round setup, every round (§ 11.1) | at the next round setup, **or on return to the title screen** |
-| `MISSION COMPLETE` | stack | the outro, on a cleared mission (§ 11.3) | **end of the drain**, and specifically *not* by the next setup's erase |
+| demo message A / B | stack | on each horizontal bounce of the demo submarine, alternating | by the erase that precedes the next post |
+| `MISSION` + numeral | stack | round setup, every round (§ 11.1) | by the next erase: the following round setup, **the outro's `MISSION COMPLETE`**, or return to the title screen |
+| `MISSION COMPLETE` | stack | the outro, on a cleared mission (§ 11.3), **after erasing the mission banner** | the next round setup's erase — it stays up for the whole drain |
 | `OUT OF FUEL` | direct | **every pass** of the drain loop, while the tanks-empty flag is set | explicit erase, end of drain |
 | `GAME OVER` | direct | **every pass** of the drain loop, while the game-over flag is set | explicit erase, end of drain |
 
@@ -4109,13 +4117,14 @@ consequence of the loop's shape, not an effect.
 At the end of the drain both are erased **unconditionally**, whether they were ever
 shown or not.
 
-**Each removal above happens at its own named moment, and a cleared round needs two of
-them.** Setup posts the `MISSION` banner and the outro posts `MISSION COMPLETE`, so a
-round that is won puts *two* strips on the stack. If only one is removed, the survivor is
-the old `MISSION` banner and the next setup draws the new one straight over it — two
-mission titles on the same seven rows, one more with every mission. So the drain's end
-removes `MISSION COMPLETE` **specifically**, not merely the topmost entry, and the setup
-that follows removes the banner underneath it.
+**A cleared round is the case that proves the erase has to drain the stack, and that the
+outro has to erase before it posts.** Setup puts the `MISSION` banner and its numeral on
+rows 0 – 6; the outro then posts `MISSION COMPLETE`, which is wider than both and covers
+the same seven rows. Nothing composites cleanly there — index 0 is transparent (§ 17.3),
+so a banner underneath shows through the gaps in the one on top. The outro's erase is not
+housekeeping: it is the only reason the completion banner is legible. Without it the two
+titles read as one smear of overlapping letters for the whole drain, and the stack grows
+by a banner every mission.
 
 **Returning to the title screen removes everything posted.** The title screen is a screen
 being rebuilt, not a continuation, so no banner outlives the game it belonged to. **The
